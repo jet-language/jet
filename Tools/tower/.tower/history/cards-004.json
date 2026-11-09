@@ -84763,6 +84763,199 @@
       "completedAt": "2026-11-05T22:13:54.741Z",
       "questions": [],
       "retiredAt": "2026-11-08T22:17:16.091Z"
+    },
+    {
+      "id": "c0wgdsj2",
+      "num": 6574,
+      "title": "Char :Debug interpolation prints the raw char instead of its quoted, escaped form",
+      "body": "Reported by JetpackModel. \"{c:Debug}\" on a Char interpolates the raw char: a newline Char prints Char(<newline>) where Char('\\n') is expected. JetRuntime already has rt_text_push_rust_debug_char (TextDebugChar.jet), but the :Debug interpolation lowering for Char never calls it. Proof: Jetpack PackageModel test 'locked fact values keep Rust tuple debug spelling' passes on o0, o1 and o2, plus a golden or case with a Char :Debug of a quote, a backslash, a newline and a non-ASCII char.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Char :Debug interpolation prints the quoted, escaped form on o0, o1 and o2, proven by a golden covering a quote, a backslash, a newline and a non-ASCII char, and the Jetpack PackageModel test 'locked fact values keep Rust tuple debug spelling' passes",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 5b2e1e2499 (CoreOwnership): golden text/char_debug passes o0/o1/o2 and covers ' and \" quotes, backslash, \\n \\t \\r, and é 中 😀 alone and in a list; PackageModel 'locked fact values keep Rust tuple debug spelling' passes default tier and AOT; golden census loses 0 rows vs base (2 tooling/service_* timeouts reproduce on unmodified fc112473dc)",
+          "at": "2026-11-05T22:52:53.342Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:49:57.839Z",
+      "updated": "2026-11-05T22:52:54.700Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-05T22:52:54.700Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T02:31:28.938Z"
+    },
+    {
+      "id": "c0vvaake",
+      "num": 6579,
+      "title": "Comptime ICE: compiler value FieldInfo lacks member index (JetSema Comptime/Reflection.jet:809)",
+      "body": "Found by JetpackEngine on dev 91177176da; the base compiler hits it too. It breaks the cases root_build_can_emit_structured_program_diagnostics and program_info_uses_qualified_collision_free. Reflection exposes FieldInfo without the index member that comptime code reads. Fix at the reflection producer so FieldInfo carries its declared index on every tier, and un-known-fail both cases.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Fixed in dev e28b53d5bc (JetpackEngine): FieldInfo.index ICE fixed at the Reflection producer, plus TypeInfo identity module::Type, inherent impl methods, reaches_panic reads Panic, IR host routing for struct-laid reflection records, b.error codes via the E3530 row. s1 9d350534acf11809: build_entry/root_build_can_emit_structured_program_diagnostics and program_info_uses_qualified_collision_free_type_function_and_method_identities ERROR->PASS; build_entry PASS 54->56; A/B cases fact_reads/ reflect/ semindex/ and ui reflect/derive unchanged"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The comptime reflection producer fills FieldInfo.index, and build_entry cases that read it pass on the default tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e28b53d5bc (JetpackEngine): s1 9d350534acf11809, build_entry/root_build_can_emit_structured_program_diagnostics and program_info_uses_qualified_collision_free_type_function_and_method_identities ERROR->PASS; build_entry PASS 54->56; A/B reflect/derive unchanged",
+          "at": "2026-11-05T23:23:46.245Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T22:36:00.140Z",
+      "updated": "2026-11-05T23:23:47.257Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-05T23:23:47.257Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T02:31:28.938Z"
+    },
+    {
+      "id": "c0ug03od",
+      "num": 6584,
+      "title": "Moving a handle field out of an aggregate (^x.f) does not transfer ownership",
+      "body": "Reported by JetpackStore. Expressions like close(^outer.owner), ^verified.lease.release() and lease: ^parts.lease consume a field. The consumer's drop is a no-op, and the fd or flock closes only when the source aggregate drops. Repro: struct Outer{owner: Holder{lock: FileLock}}; close(^outer.owner) leaves the fd open until outer's scope ends. Closing the whole value works. Hits Jetpack Store leases (LeaseSnapshot.jet:243: the owner lock dies with prepared). Related: #6581 (a clone:false handle in a struct double-drops). Fix: a partial move transfers drop responsibility to the consumer, and the source aggregate skips that field's drop on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "partial dev 8a6d501edc (JetpackStore): store fd-leak fix; case PASS o0/o1/o2+aot, ui A/B identical; full fixed-point chain not yet run. Owner now JetpackEngine (handoff ~/jetlanes/handoff/JetpackStore.md)"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A partial move (close(^outer.owner), lease: ^parts.lease) transfers drop responsibility to the consumer and the source skips that field's drop, on every tier",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8a6d501edc (JetpackStore): partial-move drop transfer; its case passes on o0/o1/o2 and aot; ui A/B identical",
+          "at": "2026-11-06T02:17:49.609Z"
+        },
+        {
+          "n": 2,
+          "text": "chain full reaches a fixed point with the fix",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "JetpackEngine: chain full on 72ab7396ff (contains 8a6d501edc) + Jetpack commits FIXED_POINT s2==s3, jet 5b11e0f0df4bbf1a",
+          "at": "2026-11-06T02:17:50.347Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T23:19:56.137Z",
+      "updated": "2026-11-06T02:17:51.390Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T02:17:51.390Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T02:31:28.938Z"
+    },
+    {
+      "id": "c006v2ot",
+      "num": 6585,
+      "title": "jet debug: a breakpoint on a loop's next line slides to the following statement, and stepping never stops on a next line",
+      "body": "Found by CoreOwnership at 30a20432b1 (#6576). On the native O0 image under LLDB, break N where line N is a loop 'next' statement binds to the next statement, and step/next never stop on a 'next' line. The line table likely gives the 'next' jump no is_stmt row of its own. Proof: a tests/cases/debug row that breaks on a 'next' line, stops there, and steps onto it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A breakpoint on a next line stops on that line, and stepping lands on it",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3f3805fcf1 (CoreOwnership): break/next/break-value start their own line-table row; chain full FIXED_POINT; new case debug/next_line_takes_a_breakpoint PASS (break on a next line stops there, n steps onto it); cases debug/ 14 PASS, the 4 canvas FAILs belong to #6582",
+          "at": "2026-11-06T02:13:22.890Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T01:37:04.722Z",
+      "updated": "2026-11-06T02:13:24.201Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T02:13:24.201Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T02:31:28.938Z"
     }
   ]
 }
