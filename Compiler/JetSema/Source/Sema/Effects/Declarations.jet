@@ -2,9 +2,10 @@
 //
 // A root that has declared leaves (`Log.Audit: effect`, or a Prelude leaf such
 // as `FS.Read`) is closed below it: every leaf written in an effect row, a
-// callback type or a trait method row must resolve to one declared name. A
-// root with no declared leaves stays open. Every module except the canonical
-// Prelude effect module is validated, and every module contributes leaves.
+// callback type, a trait method row or a module's or type's `#FX(…)` cap must
+// resolve to one declared name. A root with no declared leaves stays open.
+// Every module except the canonical Prelude effect module is validated, and
+// every module contributes leaves.
 use jet_foundation.[
     EFFECT_VOCABULARY_LEAVES,
     OWNED_TRAITS,
@@ -12,6 +13,7 @@ use jet_foundation.[
     EffectRowEntry,
     Func,
     Item,
+    ModuleCap,
     Span,
     Stmt,
     TextEdit,
@@ -213,6 +215,15 @@ sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, di
     sema_effect_leaf_check_statements(leaves, function.body, diagnostics)
 }
 
+sema_effect_leaf_check_cap: fn(leaves: [SemaEffectLeaf], cap: ModuleCap?, diagnostics: &[Diagnostic]) {
+    written: cap ?? return
+    loop entry in written.entries {
+        name := entry.name
+        if name.starts_with("!") -> name = name.slice(1, name.len())
+        sema_effect_leaf_check_name(leaves, name, entry.span, diagnostics)
+    }
+}
+
 sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
@@ -221,6 +232,7 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
             }
             .Func(function) -> sema_effect_leaf_check_function(leaves, function, diagnostics)
             .Struct(definition) -> {
+                sema_effect_leaf_check_cap(leaves, definition.cap, diagnostics)
                 loop field in definition.fields -> sema_effect_leaf_check_type(leaves, field.ty, diagnostics)
                 loop function in definition.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
                 loop implementation in definition.trait_impls {
@@ -228,6 +240,7 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
                 }
             }
             .Enum(definition) -> {
+                sema_effect_leaf_check_cap(leaves, definition.cap, diagnostics)
                 loop variant in definition.variants {
                     if variant.payload == {
                         .Single(ty, _) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
@@ -257,6 +270,7 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
             }
             .Test(test) -> sema_effect_leaf_check_statements(leaves, test.body, diagnostics)
             .CodeModule(code_module) -> {
+                sema_effect_leaf_check_cap(leaves, code_module.cap, diagnostics)
                 if code_module.body == .Val(body) -> sema_effect_leaf_check_items(leaves, body, diagnostics)
             }
             .GenericModule(generic_module) -> sema_effect_leaf_check_items(leaves, generic_module.body, diagnostics)
