@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96677,
+    "rev": 96679,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93507,6 +93507,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "D-CLI-SETTINGS-HOME1 posted for the owner after a CLEAN adversarial review (sol-reviewer, 2026-11-09): the flat commands: keys are added as A. It is a home-format vote only, not an implementation receipt. D-SCRIPT-LINE-HELPERS1 and D-RUN-TIER1 came back NOT CLEAN (a0_042 already promotes plain jet run, and the helper size claim loses to Perl) and go back to ScriptLead."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Owner ruling 2026-11-08 (Q24 A): one registry. Every CLI command flag row gets a key <command>.<flag>, readable from package.jet settings and the user settings file; precedence flag, then package, then user (the JET_BUILD_OPTIONS mechanism). Destructive flags are marked not persistable and setting one is refused with a registered diagnostic. ScriptLead builds it."
@@ -93536,7 +93541,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-08T18:51:47.482Z",
+      "updated": "2026-11-09T17:30:08.208Z",
       "updatedBy": "Main"
     },
     {
@@ -188289,6 +188294,196 @@
       "created": "2026-11-09T13:30:57.594Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-09"
+    },
+    {
+      "id": "D-CLI-SETTINGS-HOME1",
+      "cardId": "c015yc5v",
+      "group": "other",
+      "title": "Remember command flags in a separate commands block with flat registry keys",
+      "situation": "The owner ruling recorded on #6606 requires one flag registry and command.flag keys. Explicit flags win over package values, which win over user values. Destructive flags cannot be remembered. The package already declares typed program settings in settings:. This vote chooses a separate commands: block, nested command maps, or mixed entries in settings:. All examples below are proposals, not features proven by the seed accepting a manifest.",
+      "gist": "Should remembered command flags use flat registry keys in their own commands: block?",
+      "lesson": "A program setting declares a typed value for the program. A command setting supplies a default for jet itself. Keeping them apart need not require nested maps.",
+      "explainer": "The recorded ruling is #6606's 2026-11-08 log, Q24 A. It settles registry keys, precedence and destructive-flag refusal, not every rule in this proposal. Build profiles and command defaults must feed the same option resolver, including pins and existing value checks. A separate block is organization, not a second settings engine.",
+      "story": "Ada wants jet fmt to check instead of writing. She keeps the program's cache_slots declaration and adds one remembered flag. Her own color preference goes in the user file. Each option below represents those same values.",
+      "inWild": "# npm .npmrc: tool settings, separate from package.json program config\nsave-exact=true\n\n# git: sectioned keys, not a section for every command\n[pull]\n    rebase = true\n\n# Cargo.toml: checked-in compiler profile\n[profile.dev]\nopt-level = 1\n\n# .cargo/config.toml: local/user tool defaults\n[build]\njobs = 4",
+      "detail": "Settled scope: use one registry, command.flag keys, and explicit flag > package > user. Reject destructive defaults with a registered diagnostic. Source: Tools/tower/.tower/tower.json, card #6606, log dated 2026-11-08. Operand refusal and the rules below are proposed common terms, not quotations from Q24.\n\nProposed file: $XDG_CONFIG_HOME/jet/settings.jet, falling back to $HOME/.config/jet/settings.jet when XDG_CONFIG_HOME is absent or empty. Reject relative XDG_CONFIG_HOME. Missing files supply no values; unreadable or malformed present files fail with their location. Read data only: configuration must not execute code. No system file, include chain or environment-value layer is added.\n\nProposed package lookup: use an explicitly selected workspace member, otherwise the nearest package.jet above the working directory. Do not merge ancestor package files. Apply that same rule to -e and stdin source; outside a package only user values apply. Dependencies cannot contribute command defaults. Relative path values resolve against their declaring file, not a later invocation's directory.\n\nEach registry row owns its value parser, allowed values, repeat behavior and persistence classification. Do not reduce durations, integers and enumerated build options to unchecked strings. Repeated lists replace lower layers; [] clears a list. false is a value, not absence. Duplicate normalized keys fail. Short flags share their long flag's key; global flags get keys only on commands accepting them.\n\nRemembered build flags occupy the existing flag layer below explicit flags and above profiles and build code. A build pin still rejects a conflicting default. The resolver must retain origin information, not inject text into argv. Unknown keys, wrong values and forbidden persistence fail before command effects, naming file and line. An explicit override cannot hide invalid stored configuration.\n\nPersistence is not authority. Operands, help/version actions, destructive confirmations and authority-expanding or safety-disabling overrides must not become ambient grants. Classify no_sign as security-sensitive, not a harmless example. Existing authority and gate policy still applies. This classification extends the common proposal beyond Q24's destructive-flag exclusion and needs approval with this vote.\n\nA package default can affect compiled behavior: run.optimize and run.bounds are not merely display preferences. Both forms must resolve once through the existing option and authority rules. --verbose should show effective keys, winning origins and overridden sources, redacting secrets. No claim is made that these reports exist today.\n\nSeed a0_042 probes: typed settings compile; a mixed fmt.check entry fails because it lacks a type and default. Both commands: shapes were accepted by a trivial run, but that proves no flag was applied. A user commands: file did not make fmt check; it still rewrote an unformatted scratch file. Implementation proof must compare the command's actual effect.\n\nI8 review: A and B keep program declarations separate. C can also use one resolver, so sharing a block is not itself an I8 violation. None may create independent profile/CLI validation or bypass pins. Beginners use defaults; experts inspect the origin and explicitly override through existing flags.\n\nSources: https://doc.rust-lang.org/cargo/reference/config.html and https://doc.rust-lang.org/cargo/reference/profiles.html. Cargo merges ancestor config and arrays, supports environment and --config overrides, and allows profiles in Cargo.toml and config. Jet's replacement lists and two file scopes are simpler but less flexible.\n\nSources: https://docs.npmjs.com/cli/v11/configuring-npm/npmrc/ and https://git-scm.com/docs/git-config. npm has project, user, global and builtin files plus environment settings. Git has system, global, local, worktree and command scopes, origin reports, conditional includes and protected configuration. Neither promises a one-to-one key for every CLI flag.\n\nSources: https://docs.deno.com/runtime/fundamentals/configuration/ and https://docs.deno.com/runtime/reference/deno_json/#permissions. Deno combines tool fields and tasks in deno.json. Tasks preserve whole commands; named permission sets require -P selection. They are stronger for named workflows and explicit grants, but are not ambient per-command defaults. Jet should not copy them as a second meaning for the same setting.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Flat registry keys in commands:",
+          "detail": "Add commands: in package.jet and the user file. Its quoted keys are the exact dotted registry keys. settings: remains typed program declarations. This is the added option.",
+          "technical": "One map parser resolves each full key against the registry. No nested-versus-flat aliases are accepted. Migrate every consumer of overlapping defaults into the same resolver; build profiles remain a lower layer, not a second engine.",
+          "code": "// package.jet\nname: \"shop\"\nsettings: { cache_slots: Int = 1 }\ncommands: { \"fmt.check\": true }\n\n// user settings.jet\ncommands: { \"test.color\": \"always\" }"
+        },
+        {
+          "key": "B",
+          "name": "Nested command maps in commands:",
+          "detail": "Add commands: with a map for each command word. The user file has the same structure. This is the original option A.",
+          "technical": "Flatten only this chosen structure into registry keys, then use the shared resolver. A subcommand/flag name collision must be rejected by the registry before shipping. Do not also accept flat keys as aliases.",
+          "code": "// package.jet\nname: \"shop\"\nsettings: { cache_slots: Int = 1 }\ncommands: { fmt: { check: true } }\n\n// user settings.jet\ncommands: { test: { color: \"always\" } }"
+        },
+        {
+          "key": "C",
+          "name": "Dotted command keys beside typed settings",
+          "detail": "Keep one settings: block. Typed declarations describe program values; quoted dotted entries supply CLI defaults. This is the original option B. It avoids a new top-level field but mixes two entry forms.",
+          "technical": "Distinguish entries by declared shape, not by banning a program setting named fmt. Typed settings remain visible to $build.settings; command keys do not. Both forms still use the same command resolver as A.",
+          "code": "// package.jet\nname: \"shop\"\nsettings: {\n    cache_slots: Int = 1,\n    \"fmt.check\": true,\n}\n\n// user settings.jet\nsettings: { \"test.color\": \"always\" }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Separate config and manifest roles, but profiles can appear in both. Config tables are not simply one per command. Ancestor merging and --config exceed this proposal's scope. Sources are in detail.",
+          "code": "[profile.dev]\nopt-level = 1"
+        },
+        {
+          "lang": "npm",
+          "note": ".npmrc supplies typed supported tool keys at several scopes; package.json config supplies script values separately. Not every flag is a durable setting.",
+          "code": "save-exact=true"
+        },
+        {
+          "lang": "git",
+          "note": "Sectioned configuration has explicit scopes and origin reporting. Protected configuration prevents some repository values becoming security policy. Sections are not universally commands.",
+          "code": "git config get --show-origin pull.rebase"
+        },
+        {
+          "lang": "Deno",
+          "note": "Tool fields and named tasks share deno.json. Permission sets are selected explicitly with -P. Tasks can express pipelines but do not directly change plain fmt defaults.",
+          "code": "{\"tasks\":{\"check-format\":\"deno fmt --check\"}}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps program declarations separate and writes the registry key unchanged. It avoids nested command collisions without inventing another resolver.",
+        "gains": [
+          "Exact registry keys work in both files.",
+          "Program declarations keep their existing shape."
+        ],
+        "losses": [
+          {
+            "loss": "One new manifest field.",
+            "mitigation": "Accept only commands: for CLI defaults; keep one registry and resolver."
+          },
+          {
+            "loss": "Ambient defaults can surprise scripts and CI.",
+            "mitigation": "Report origins, isolate test homes, and reject ambient authority or destructive confirmations."
+          },
+          {
+            "loss": "Fewer scopes than Cargo or git.",
+            "mitigation": "Keep lookup deterministic; use existing profiles for named build choices."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B groups commands well, but nests keys and can collide with subcommand names."
+          },
+          {
+            "key": "C",
+            "reason": "C avoids a field, but mixes declarations and defaults in the same block."
+          }
+        ],
+        "tradeoff": "One extra block buys clear ownership, not extra settings semantics. The persistence classifications are part of this proposal."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: G4BallotReview. Added flat keys in commands:, corrected peer comparisons, and separated the recorded ruling from proposed persistence rules. Seed acceptance is not proof of applied defaults; implementation and security classification still need proof."
+      },
+      "checkInstructions": "Validate this payload with Tools/agent/ballots/Validate.jet from the dev tree. Before implementation closes #6606, prove precedence, pins, forbidden grants, lists, discovery, origin reports and isolated homes through actual command effects.",
+      "surface": {
+        "gist": "Should remembered flags use flat registry keys in their own commands: block?",
+        "lesson": "Program settings declare typed values for your code. Command settings supply defaults for jet. This vote chooses their written home, not another settings engine.",
+        "trio": {
+          "current": {
+            "note": "Typed declarations work. A commands: block being accepted does not prove a flag was applied.",
+            "code": "settings: { cache_slots: Int = 1 }"
+          },
+          "wild": {
+            "lang": "Cargo",
+            "note": "Cargo separates tool configuration from package declarations, but allows compiler profiles in both.",
+            "code": "# Cargo.toml\n[profile.dev]\nopt-level = 1"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Flat commands:",
+            "gist": "Write exact registry keys in a separate block.",
+            "gains": [
+              "One key spelling; separate program declarations."
+            ],
+            "losses": [
+              "One new manifest field."
+            ],
+            "proposed": {
+              "code": "commands: { \"fmt.check\": true }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Nested commands:",
+            "gist": "Group defaults by command word.",
+            "gains": [
+              "Related flags sit together."
+            ],
+            "losses": [
+              "More nesting; subcommand names can collide."
+            ],
+            "proposed": {
+              "code": "commands: { fmt: { check: true } }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Mixed settings:",
+            "gist": "Put quoted command keys beside typed declarations.",
+            "gains": [
+              "No new top-level field."
+            ],
+            "losses": [
+              "Two entry forms share a block."
+            ],
+            "proposed": {
+              "code": "settings: { cache_slots: Int = 1, \"fmt.check\": true }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A writes the registry key unchanged and keeps program declarations separate. All forms must use the same resolver.",
+          "gains": [
+            "One registry key spelling in both files."
+          ],
+          "losses": [
+            {
+              "loss": "One extra field.",
+              "mitigation": "Use only commands: for CLI defaults."
+            },
+            {
+              "loss": "Ambient defaults can surprise scripts.",
+              "mitigation": "Show origins and reject remembered destructive confirmations or authority grants."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Readable groups cost nesting and possible name collisions."
+            },
+            {
+              "key": "C",
+              "reason": "Fewer fields, but two kinds of entry share settings:."
+            }
+          ],
+          "tradeoff": "Clear ownership costs one block. Neither file may bypass build pins or authority policy."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T17:29:54.576Z"
     }
   ],
   "questions": [
@@ -191398,6 +191593,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T17:30:08.208Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015yc5v",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T17:29:54.576Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CLI-SETTINGS-HOME1",
+      "note": "Remember command flags in a separate commands block with flat registry keys"
+    },
     {
       "at": "2026-11-09T17:24:24.417Z",
       "by": "Main",
