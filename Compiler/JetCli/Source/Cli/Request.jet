@@ -977,6 +977,8 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         stamp = found.build_stamp.copy()
         contributions = found.build_contributions.copy()
     }
+    // `jet -e`'s entry file shows the value of its last statement.
+    eval_entry: jet_cli_kept_entry(snapshot.entry_path, "eval")
     JetDriverCompileRequest{
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
@@ -987,6 +989,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         trace_sink: None,
         compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
+        eval_entry: eval_entry,
         tests_optional: mode == JetDriverCompileMode.Test && (cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None || cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None),
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
