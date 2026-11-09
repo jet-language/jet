@@ -6,7 +6,7 @@ package: {
     authority: { allow: [Env, FS, Net, Time] }
 }
 
-#[Target(Web), HTML(Path{"browser_surface.html"})]
+#[Target(Web), HTML(Path{"BrowserSurface.html"})]
 use browser: core.web.browser
 
 report_surface: fn() {
@@ -45,7 +45,7 @@ report_external: fn(config: BrowserTestConfig, case: BrowserTestCase, server: Br
         .Ok(started_server) -> browser.server_stop(started_server)
         .Err(_) -> {}
     }
-    _generated: browser.generate_source("surface_generated", "/browser_surface.html", "build/browser_surface_generated.jet")
+    _generated: browser.generate_source("surface_generated", "/BrowserSurface.html", "build/browser_surface_generated.jet")
     _fixture: browser.begin_named(config, "surface", "chromium", 0, "Examples/Apps/Web/BrowserSurface.jet", 1, 1)
     _server_url: browser.server_url(server)
     _server_logs: browser.server_logs(server)
@@ -137,7 +137,7 @@ browser_session: fn(endpoint: String, page_url: String) {
     _fill_label: labeled_input.fill("Ada")
     _fill_placeholder: placeholder_input.fill("Grace")
     _press: labeled_input.press("Enter")
-    _set_files: page.get_by_label("Attachment").set_files("Examples/Apps/Web/browser_surface.html")
+    _set_files: page.get_by_label("Attachment").set_files("Examples/Apps/Web/BrowserSurface.html")
     _resolve: test_id.resolve()
 
     _cookie_set: page.set_cookie("surface", "ready", "localhost")
@@ -170,5 +170,5 @@ run: fn() {
     report_surface()
     endpoint: input.first() ?? return
     if endpoint.is_empty() -> return
-    browser_session(endpoint, "http://127.0.0.1:8080/browser_surface.html")
+    browser_session(endpoint, "http://127.0.0.1:8080/BrowserSurface.html")
 }

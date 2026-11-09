@@ -7084,14 +7084,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Examples",
-      "file": "Examples/Systems/Process/OSCpuTime.jet",
+      "file": "Examples/Systems/Process/OSCPUTime.jet",
       "line": 34,
       "column": 5,
       "reason": "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel"
     },
     {
       "package": "Examples",
-      "file": "Examples/Systems/Process/OSIds.jet",
+      "file": "Examples/Systems/Process/OSIDs.jet",
       "line": 17,
       "column": 5,
       "reason": "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel"
@@ -11317,8 +11317,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
-| Examples | Examples/Systems/Process/OSCpuTime.jet | 34:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
-| Examples | Examples/Systems/Process/OSIds.jet | 17:5 | "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel" |
+| Examples | Examples/Systems/Process/OSCPUTime.jet | 34:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
+| Examples | Examples/Systems/Process/OSIDs.jet | 17:5 | "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel" |
 | Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/OSScheduling.jet | 26:5 | "posix set_scheduling: the out-of-range priority never reaches the kernel" |

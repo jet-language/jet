@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A small 2D game as one Jet package: a window with a fixed-timestep loop and interpolation, keyboard and gamepad input, sprite atlas loading and drawing, a simple physics step (AABB), sound effects and one music track with a sample-accurate audio callback, a scene graph with parenting, a save file, a pause menu, and a headless test that replays 600 frames deterministically. Start from Examples/Apps/Game/**, Examples/Apps/UI/**, Examples/Interop/FFI/FFI.jet and Cbind/, Examples/Systems/Files/Files.jet. If a raylib bridge exists, use it; otherwise record the bridge cost.
+A small 2D game as one Jet package: a window with a fixed-timestep loop and interpolation, keyboard and gamepad input, sprite atlas loading and drawing, a simple physics step (AABB), sound effects and one music track with a sample-accurate audio callback, a scene graph with parenting, a save file, a pause menu, and a headless test that replays 600 frames deterministically. Start from Examples/Apps/Game/**, Examples/Apps/UI/**, Examples/Interop/FFI/FFI.jet and CBind/, Examples/Systems/Files/Files.jet. If a raylib bridge exists, use it; otherwise record the bridge cost.
 
 ## Answer these
 

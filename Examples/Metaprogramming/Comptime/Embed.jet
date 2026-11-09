@@ -2,13 +2,13 @@
 // time — the file is never opened at runtime. A `comptime require` then
 // validates the embedded text while compiling (the sanctioned proc-macro
 // use case): if it fails, you get a compile error, not a runtime surprise.
-MOTD: comptime { embed_file("motd.txt") }
+MOTD: comptime { embed_file("MOTD.txt") }
 
 OK: comptime { check_nonempty(MOTD) }
 
 // `embed_bytes` is the binary-safe sibling: it bakes raw bytes in as a `[U8]`,
 // with no UTF-8 requirement, so it works for images, fonts, or any blob.
-LOGO: comptime { embed_bytes("logo.bin") }
+LOGO: comptime { embed_bytes("Logo.bin") }
 
 SIZE: comptime { byte_count(LOGO) }
 
@@ -17,14 +17,14 @@ FIFTH: comptime { LOGO[5] }
 LOGO_OK: comptime { nonempty(LOGO) }
 
 check_nonempty: fn(s: String) -> Bool {
-    assert((s.len() > 0), "motd.txt must not be empty")
+    assert((s.len() > 0), "MOTD.txt must not be empty")
     return true
 }
 
 byte_count: fn(bytes: [U8]) -> Int { bytes.len() }
 
 nonempty: fn(bytes: [U8]) -> Bool {
-    assert((bytes.len() > 0), "logo.bin must not be empty")
+    assert((bytes.len() > 0), "Logo.bin must not be empty")
     return true
 }
 

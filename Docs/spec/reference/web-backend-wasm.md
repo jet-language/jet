@@ -118,8 +118,8 @@ Each file is named here so documentation review cannot silently omit a new examp
 - `WebCompute.jet`
 - `WebComputeWebGPU.jet`
 - `WebHello.jet`
-- `WebWasmCallback.jet`
-- `WebWasmIntExport.jet`
+- `WebWASMCallback.jet`
+- `WebWASMIntExport.jet`
 
 Each example's golden sits beside its source in `Examples/Apps/Web/`: a
 `.out` file, a browser `.web.out` or `.harness.out` file, or a `.case`

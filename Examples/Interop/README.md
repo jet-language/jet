@@ -11,7 +11,7 @@ Run a lesson from the repository root, for example `jet run Examples/Interop/<Le
 ## FFI
 
 - [Callbacks](FFI/Callbacks/)
-- [Cbind](FFI/Cbind/)
+- [CBind](FFI/CBind/)
 - [FFI](FFI/FFI.jet) — The safe way to call native code is a typed binding: `extern rust` names a crate and gives each imported function a Jet signature, so every call is…
 - [InlineC](FFI/InlineC.jet)
 - [NativeC](FFI/NativeC/) — A C library binds through `#Import c.<lib>`: each symbol gets a Jet signature, so signed, unsigned, float, Bool, String and write-back `&` arguments cross…
@@ -25,7 +25,7 @@ Run a lesson from the repository root, for example `jet run Examples/Interop/<Le
 - [Lua](Languages/Lua/)
 - [Octave](Languages/Octave/)
 - [Perl](Languages/Perl/)
-- [Php](Languages/Php/)
+- [PHP](Languages/PHP/)
 - [PowerShell](Languages/PowerShell/)
 - [Python](Languages/Python/)
 - [R](Languages/R/)
@@ -34,8 +34,8 @@ Run a lesson from the repository root, for example `jet run Examples/Interop/<Le
 ## Polyglot
 
 - [PolyglotAda](Polyglot/PolyglotAda/) — Run `jet inspect bind ada geodesy.ads --pkg geodesy`, then `jet run run.jet`.
-- [PolyglotCom](Polyglot/PolyglotCom/) — Windows-only COM example.
-- [PolyglotDart](Polyglot/PolyglotDart/) — Run `jet inspect bind dart callbacks.dart --jet run.jet --pkg callbacks`, then `dart run host.dart` from the generated project.
+- [PolyglotCOM](Polyglot/PolyglotCOM/) — Windows-only COM example.
+- [PolyglotDart](Polyglot/PolyglotDart/) — Run `jet inspect bind dart callbacks.dart --jet run.jet --pkg callbacks`, then `dart run Host.dart` from the generated project.
 - [PolyglotDotNet](Polyglot/PolyglotDotNet/) — Run `jet inspect bind cs Counter.cs --pkg counter`, then `jet run run.jet`.
 - [PolyglotFortran](Polyglot/PolyglotFortran/) — Run `jet inspect bind fortran matrix.f90 --pkg matrix`, then `jet run run.jet`.
 - [PolyglotGo](Polyglot/PolyglotGo/) — Run `jet inspect bind go handles.go --pkg handles`, then `jet run run.jet`.

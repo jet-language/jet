@@ -5,8 +5,8 @@ copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
 copy: {root}/Examples/Apps/Web/WebApp.harness.out expected-harness.out
 # The app's assets root is relative to the server's working directory; the
 # original ran from the repository root.
-mkdir: Examples/Apps/Web/public
-copy: {root}/Examples/Apps/Web/public/app.css Examples/Apps/Web/public/app.css
+mkdir: Examples/Apps/Web/Public
+copy: {root}/Examples/Apps/Web/Public/App.css Examples/Apps/Web/Public/App.css
 capture: expectedPage = text file.split("\n\n--- facts_json ---\n", 0) expected-harness.out
 capture: expectedFacts = text file.split("\n\n--- facts_json ---\n", 1) expected-harness.out
 spawn server: jet run {root}/Examples/Apps/Web/WebApp.jet
@@ -39,7 +39,7 @@ file: action.http !~ "server function input is missing" # Original negative pred
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=GET
-env: S6_WEB_PATH=/assets/app.css
+env: S6_WEB_PATH=/assets/App.css
 env: S6_WEB_RESPONSE={work}/asset.http
 exit: 0
 file: asset.http ^= "HTTP/1.1 200" # Original starts_with.

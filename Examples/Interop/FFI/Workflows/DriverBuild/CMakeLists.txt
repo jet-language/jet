@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(jet_driver_full_build LANGUAGES C CXX)
 
-add_library(driver_support STATIC native/support.cpp)
-add_executable(driver_app native/main.c)
+add_library(driver_support STATIC Native/Support.cpp)
+add_executable(driver_app Native/Main.c)
 target_link_libraries(driver_app PRIVATE driver_support)
 
 # This action is intentionally opaque to the Jet compiler.  The imported plan
@@ -10,8 +10,8 @@ target_link_libraries(driver_app PRIVATE driver_support)
 # that a compilation database proves the complete graph.
 add_custom_command(
     OUTPUT generated/native-action.txt
-    COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/unsupported/native_action.sh" "${CMAKE_CURRENT_BINARY_DIR}/generated/native-action.txt"
-    DEPENDS unsupported/native_action.sh
+    COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/Unsupported/NativeAction.sh" "${CMAKE_CURRENT_BINARY_DIR}/generated/native-action.txt"
+    DEPENDS Unsupported/NativeAction.sh
     VERBATIM
 )
 add_custom_target(native_action ALL DEPENDS generated/native-action.txt)

@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Learn the FFI story (Docs/spec/architecture.md "Adding an FFI bridge", Examples/Interop/FFI/FFI.jet, Cbind/, InlineC.jet, Examples/Interop/Languages/**). Then bridge, as a library author would: one C library with a handle-based API (SQLite is already bridged; pick zlib or libpng or FFmpeg's libavformat if installed), one header via `jet inspect bind cpp`, and one Rust crate via the extern rust bridge (note the sandbox rule). Read a file through each bridge from a Jet program and free everything.
+Learn the FFI story (Docs/spec/architecture.md "Adding an FFI bridge", Examples/Interop/FFI/FFI.jet, CBind/, InlineC.jet, Examples/Interop/Languages/**). Then bridge, as a library author would: one C library with a handle-based API (SQLite is already bridged; pick zlib or libpng or FFmpeg's libavformat if installed), one header via `jet inspect bind cpp`, and one Rust crate via the extern rust bridge (note the sandbox rule). Read a file through each bridge from a Jet program and free everything.
 
 ## Answer these
 

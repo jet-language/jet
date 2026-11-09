@@ -13,11 +13,11 @@ jet_library(rules_jet
     LOADABLE
 )
 
-add_executable(game native/game.cpp native/rules_bridge.cpp)
+add_executable(game Native/Game.cpp Native/RulesBridge.cpp)
 target_link_libraries(game PRIVATE rules_jet)
-target_include_directories(game PRIVATE native "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(game PRIVATE Native "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Keep an unchanged native baseline to demonstrate that the caller's source
 # contract is not rewritten by the guest route.
-add_executable(game_native native/game.cpp native/rules.cpp)
-target_include_directories(game_native PRIVATE native)
+add_executable(game_native Native/Game.cpp Native/Rules.cpp)
+target_include_directories(game_native PRIVATE Native)

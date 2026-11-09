@@ -72,7 +72,7 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [CSV](Formats/CSV.jet)
 - [CSVShapes](Formats/CSVShapes.jet) — CSV shape edges: quoted delimiters, embedded newlines and doubled quotes stay inside one field; ragged rows, unterminated quotes, missing columns and…
 - [CSVTyped](Formats/CSVTyped.jet)
-- [EncodingEetf](Formats/EncodingEetf.jet) — Standalone Erlang External Term Format (version 131): the one-way JSON view and the typed codec.
+- [EncodingEETF](Formats/EncodingEETF.jet) — Standalone Erlang External Term Format (version 131): the one-way JSON view and the typed codec.
 - [EncodingXMLProjection](Formats/EncodingXMLProjection.jet) — Typed decode + focused tree helpers.
 - [EncodingXMLStream](Formats/EncodingXMLStream.jet)
 - [TOML](Formats/TOML.jet) — core.encoding.toml — full TOML 1.0: `[table]` headers, arrays, typed scalars.

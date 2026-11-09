@@ -189,7 +189,7 @@ runs each with `jet run` and compares stdout byte for byte.
 
 ## Related executable contracts
 
-- [`Modules/Jetpack/executable-lease-recovery.md`](Modules/Jetpack/executable-lease-recovery.md)
+- [`Modules/Jetpack/ExecutableLeaseRecovery.md`](Modules/Jetpack/ExecutableLeaseRecovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
 - [`Compiler/JetTestKit/Source/Golden.jet`](../Compiler/JetTestKit/Source/Golden.jet)
   is the source of truth for the golden layout.

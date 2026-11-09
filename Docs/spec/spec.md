@@ -3603,7 +3603,7 @@ not expose PHP exception text or source paths.
 or cancellation replaces the affected workers; `close(pool)` consumes the
 pool handle. Binding lint, C compilation, and archiving use bounded diagnostics
 and the descriptor/provenance record. See
-[`Examples/Interop/Languages/Php`](../../Examples/Interop/Languages/Php). (D-FFI-PHP1)
+[`Examples/Interop/Languages/PHP`](../../Examples/Interop/Languages/PHP). (D-FFI-PHP1)
 
 ### R
 
@@ -3672,7 +3672,7 @@ EXCEPINFO become `ComError` variants without vendor text. Calls carry
 **Evidence.** Provenance hashes the extracted type-library schema and generated
 surface. A released file-backed binding may omit the original `.tlb`, but when
 the input remains available its bytes must match the recorded hash. See
-[`Examples/Interop/Polyglot/PolyglotCom`](../../Examples/Interop/Polyglot/PolyglotCom). (D-FFI-COM1)
+[`Examples/Interop/Polyglot/PolyglotCOM`](../../Examples/Interop/Polyglot/PolyglotCOM). (D-FFI-COM1)
 
 ### Data-schema binders
 

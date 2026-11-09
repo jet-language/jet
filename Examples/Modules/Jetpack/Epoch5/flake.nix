@@ -5,7 +5,7 @@
   };
   outputs = inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      imports = [ ./parts/dev.nix ];
+      imports = [ ./Parts/Dev.nix ];
       systems = [ "x86_64-linux" ];
       perSystem = { pkgs, ... }: {
         packages.default = pkgs.hello;

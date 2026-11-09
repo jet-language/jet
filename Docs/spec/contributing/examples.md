@@ -13,7 +13,7 @@ editorial link, or generated artifact. Name streams, readers, and events as the
 1. Put the short path first. Teach the safe default, such as `para_map` /
    `task`, streaming readers, or `ui.mount`.
 2. Put expert control beside it. Keep the long manual form in a sibling
-   `*_expert.jet` file with a one-line header naming it as the expert variant.
+   `<Name>Expert.jet` file with a one-line header naming it as the expert variant.
 3. Match both execution lenses. For a runnable example, prove both commands:
 
    ```sh
@@ -30,6 +30,26 @@ editorial link, or generated artifact. Name streams, readers, and events as the
 The short example should make the common operation obvious. The expert
 variant should expose control that a reader can choose deliberately, not a
 second mechanism with a different meaning.
+
+## Name examples in TitleCase
+
+Every directory and file under `Examples/` is TitleCase, and an initialism is
+spelled in capitals: `HTTPServer.jet`, `OSIDs.jet`, `WebWASMCallback.jet`,
+`Fixtures/TLS/CustomRootCA.cert.pem`. Suffixes after the stem are lowercase,
+so a golden stream follows its program (`Foo.jet`, `Foo.out`, `Foo.err.out`),
+and a data file a program opens by name follows the rule like any other file.
+Three kinds of name follow a tool instead:
+
+- role files keep their fixed names (`run.jet`, `package.jet`,
+  `workspace.jet`, `module.jet`, ...), and `src/` keeps its stock spelling;
+- a `.jet` file inside a project is a module, so its name is snake_case, and
+  so is a directory module (a folder holding `module.jet`);
+- a file whose spelling a tool requires, such as a foreign source named for
+  its library (`ops.lua`), a C header named for `#Import c.<lib>`, or
+  `go.mod`, is listed with the code that requires it.
+
+`tests/guards/example_names.jet` enforces the rule; its `EXAMPLE_NAME_KEPT`
+table is the list of tool-required names, each with its citation.
 
 ## Keep every consumer aligned
 
