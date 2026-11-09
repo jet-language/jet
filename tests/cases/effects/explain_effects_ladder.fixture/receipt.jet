@@ -1,0 +1,18 @@
+#FX(!Exec)
+use fs: core.files
+
+#FX(FS.Read, IO)
+Render: trait {
+    render: fn(self) -> String
+}
+
+#FX(FS.Read)
+Receipt: struct {
+    total: Int
+}
+
+impl Receipt.Render {
+    render: fn(self) -> String { fs.read("receipt.txt") ?? "{self.total}" }
+}
+
+note: fn() -> String { "thanks" }

@@ -2044,9 +2044,11 @@ inferred rows unchanged.
 
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
-type's and module caps, the package `authority` rows, and `run`, each with the
-`file:line` that writes it, then what the site reaches and the call chain to
-each effect. `--caps` lists every module cap under a path.
+caps of the trait the method implements and of its type, the inline module
+caps, the file-head cap, the caps where the file's module is declared, the
+package `authority` rows, and `run`, each with the `file:line` that writes
+it, then what the site reaches and the call chain to each effect. `--caps`
+lists every file-head, module, type and trait cap under a path.
 
 ### Higher-order and trait effects
 

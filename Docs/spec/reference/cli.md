@@ -1243,20 +1243,23 @@ where its module is declared hold; a `#!` script is checked on its own. The
 first line names the site and its function; then comes one line per rung:
 the `#FX(…)` blocks and lambdas that hold the line (`block`, `function`), the
 enclosing function's `-[…]>` row, a `comptime` rung for the Mem-only rule,
-each module cap (`module`), the package `authority` rows (`package`), and
-`run` (everything else allowed; `--deny` wins). A rung that writes nothing
-prints `(none written)`; each written rung names the `file:line` that writes
-it. The last line, `reaches:`, lists each effect the site reaches with the
-first call that reaches it and where the site makes that call. No site means
-the entry `jet run` picks; a file alone means its `run` function and module.
-A line past the end is a usage error, and `:0` gets the `jet explain marker`
-refusal. `--caps` lists every module cap written under a file, a directory,
-or (with no target) the project root, as `file:line  #FX(…)  module`. A
-program that fails its check still gets its ladder on stdout, under the
-errors on stderr. `--json` prints one `jet.status/v1` line with action
-`explain.effects`: `site`, `rungs` (`rung`, `written`, `text`, `site`) and
-`reaches` (`effect`, `chain`, `site`), or `scope` and `caps` (`file`, `line`,
-`cap`, `module`).
+the cap of the trait a method implements (`trait`) and of its type (`type`),
+each inline module cap (`module`), the file-head cap (`file`), the caps where
+the file's module is declared (`module`), the package `authority` rows
+(`package`), and `run` (everything else allowed; `--deny` wins). A rung that
+writes nothing prints `(none written)`; each written rung names the
+`file:line` that writes it. The last line, `reaches:`, lists each effect the
+site reaches with the first call that reaches it and where the site makes
+that call. No site means the entry `jet run` picks; a file alone means its
+`run` function and module. A line past the end is a usage error, and `:0`
+gets the `jet explain marker` refusal. `--caps` lists every file-head,
+module, type and trait cap written under a file, a directory, or (with no
+target) the project root, as `file:line  #FX(…)  module pricing` (`file`,
+`type Receipt`, `trait Shape`). A program that fails its check still gets
+its ladder on stdout, under the errors on stderr. `--json` prints one
+`jet.status/v1` line with action `explain.effects`: `site`, `rungs` (`rung`,
+`written`, `text`, `site`) and `reaches` (`effect`, `chain`, `site`), or
+`scope` and `caps` (`file`, `line`, `cap`, `kind`, `name`).
 
 `jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
 and its expected output `Examples/<area>/<name>.out` beside it.

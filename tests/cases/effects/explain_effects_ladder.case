@@ -1,9 +1,10 @@
 # `jet explain effects <file>:<line>` prints every cap in force at a site,
-# nearest first (block, function, module, package, run), each written rung
-# with the line that writes it, then what the site reaches and the first call
-# that reaches it. A module file is explained under the package's entry, so
-# the cap written where `pricing: module` is declared holds; `--caps` lists
-# every module cap under the project.
+# nearest first (block, function, trait, type, module, file head, package,
+# run), each written rung with the line that writes it, then what the site
+# reaches and the first call that reaches it. A module file is explained
+# under the package's entry, so the cap written where `pricing: module` is
+# declared holds; `--caps` lists every file-head, module, type and trait cap
+# under the project.
 fixture: explain_effects_ladder.fixture
 env: NO_COLOR=1
 step: jet check main.jet
@@ -24,9 +25,21 @@ stdout: ~ "effects at pricing.jet:3, in `rates`, nearest first" # a module file 
 stdout: ~ "  function  (none written)  pricing.jet:3" # no row is written on `rates`
 stdout: ~ "  module    #FX(!Net)       main.jet:1" # the cap written where pricing is declared
 stdout: ~ "reaches: FS.Read (pricing.jet:3)" # `rates` reads the file itself
+step method: jet explain effects receipt.jet:15
+exit: 0
+stdout: ~ "effects at receipt.jet:15, in `render`, nearest first" # a trait method of a capped type
+stdout: ~ "  function  (none written)    receipt.jet:15" # no row is written on `render`
+stdout: ~ "  trait     #FX(FS.Read, IO)  receipt.jet:4" # the cap of the trait it implements
+stdout: ~ "  type      #FX(FS.Read)      receipt.jet:9" # then its type's cap
+stdout: ~ "  file      #FX(!Exec)        receipt.jet:1" # then the file-head cap
+stdout: ~ "  module    (none written)" # `receipt: module` is declared with no cap
+stdout: ~ "reaches: FS.Read (receipt.jet:15)" # `render` reads the file itself
 step caps: jet explain effects --caps
 exit: 0
-stdout: ~ "main.jet:1  #FX(!Net)  pricing" # the one module cap in the project
+stdout: ~ "main.jet:1  #FX(!Net)  module pricing" # the module cap where pricing is declared
+stdout: ~ "receipt.jet:1  #FX(!Exec)  file" # the file-head cap
+stdout: ~ "receipt.jet:4  #FX(FS.Read, IO)  trait Render" # the trait cap
+stdout: ~ "receipt.jet:9  #FX(FS.Read)  type Receipt" # the type cap
 step json: jet explain effects --json main.jet:6
 exit: 0
 stdout: ~ "\"explain.effects\"" # one jet.status/v1 line
@@ -34,7 +47,7 @@ stdout: ~ "\"rung\":\"block\"" # the rungs ride as objects
 stdout: ~ "\"effect\":\"FS.Read\"" # and so do the reaches
 step past: jet explain effects main.jet:99
 exit: 2
-stderr: ~ "Line 99 is past the end of `main.jet`, which has 12 lines" # a line past the end is a usage error
+stderr: ~ "Line 99 is past the end of `main.jet`, which has 14 lines" # a line past the end is a usage error
 step zero: jet explain effects main.jet:0
 exit: 2
 stderr: ~ "Marker line must be a positive number" # `:0` gets the marker refusal
