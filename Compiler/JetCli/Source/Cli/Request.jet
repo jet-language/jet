@@ -8,9 +8,9 @@
 use {
     cli_files: core.files
     cli_sys: core.sys
-    // The Core sources this jet was built with, for a compile with no
-    // toolchain tree (jet_cli_core_sources).
-    core.devtools.[toolchain_core_source]
+    // The Core sources and assets this jet was built with, for a compile with
+    // no toolchain tree (jet_cli_core_sources).
+    core.devtools.[toolchain_core_asset, toolchain_core_source]
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
@@ -933,7 +933,7 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
         }
     } else {
         // Each row's file is its repository path, so a Core file's comptime
-        // inputs (`Core/<dir>/<asset>`) resolve among the built-in sources too.
+        // inputs (`Core/<dir>/<asset>`) resolve among the built-in assets.
         loop row in CORE_SOURCE_OWNED_ROWS {
             core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
         }
@@ -957,7 +957,8 @@ impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
 }
 
 // The read of one Core row from the sources built into jet, by its
-// repository path (`Core/App/App.jet`).
+// repository path (`Core/App/App.jet`), and of an asset a Core file embeds
+// (`Core/Ui/XkbTables/keysym_values.bin`) from the assets built into it.
 JetCLIBuiltinCoreSourceReader: struct {}
 
 impl JetCLIBuiltinCoreSourceReader.JetDriverCoreSourceReader {
@@ -965,7 +966,8 @@ impl JetCLIBuiltinCoreSourceReader.JetDriverCoreSourceReader {
         toolchain_core_source(file)
     }
     read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
-        text: toolchain_core_source(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source built into this jet"})
+        if toolchain_core_asset(file) == .Val(bytes) -> return Ok(bytes)
+        text: toolchain_core_source(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source or asset built into this jet"})
         Ok(text.bytes())
     }
 }

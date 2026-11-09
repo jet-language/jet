@@ -607,9 +607,14 @@ toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
 `JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
 input, so a checkout's own Core wins; with neither, `jet` compiles against the
 Core sources built into it ([`Core/EmbeddedSources.jet`](../../../Core/EmbeddedSources.jet),
-see [Environment variables](environment.md)); the Core row table and the canonical effect source are generated
+see [Environment variables](environment.md)). A Core file's `embed_bytes` and
+`embed_file` read the named file beside it in the toolchain tree, or, with no
+tree, the copy of it built into `jet`: every file a Core source embeds is a
+Core asset that `Core/EmbeddedSources.jet` embeds too. The Core row table and
+the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `jet Tools/agent/CoreSourceRows.jet`, which
+by `jet Tools/agent/CoreSourceRows.jet` (which also lists the Core assets in
+`Core/EmbeddedSources.jet`), which
 `jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 

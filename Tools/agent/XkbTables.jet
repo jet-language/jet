@@ -1,16 +1,17 @@
 #!/usr/bin/env jet
-// Generates Core/Ui/XkbTables.jet, the keysym and Compose tables behind
-// core.ui.xkb: every keysym name with its value, the Unicode scalar of each
-// keysym outside the Latin-1 and Unicode keysym ranges, and the en_US.UTF-8
-// Compose table as a trie built the way libxkbcommon's Compose parser
-// builds it.
+// Generates Core/Ui/XkbTables.jet and its data files in Core/Ui/XkbTables/,
+// the keysym and Compose tables behind core.ui.xkb: every keysym name with
+// its value, the Unicode scalar of each keysym outside the Latin-1 and
+// Unicode keysym ranges, and the en_US.UTF-8 Compose table as a trie built
+// the way libxkbcommon's Compose parser builds it. XkbTables.jet embeds each
+// data file at build time (`embed_file`/`embed_bytes`).
 // Inputs, both vendored and listed in tests/data/xkb/SHA256SUMS:
 //   tests/data/xkb/xkbcommon-keysyms.h  (libxkbcommon 1.13.2 keysym names, values
 //                                        and their U+ scalars)
 //   tests/data/xkb/Compose              (libX11 1.8.13 en_US.UTF-8 Compose)
 // Usage (from the repository root):
-//   jet Tools/agent/XkbTables.jet           rewrite the table
-//   jet Tools/agent/XkbTables.jet --check   fail when the table is stale
+//   jet Tools/agent/XkbTables.jet           rewrite the tables
+//   jet Tools/agent/XkbTables.jet --check   fail when a table is stale
 use {
     crypto: core.crypto
     files: core.files
@@ -22,12 +23,18 @@ KEYSYMS_PATH: "tests/data/xkb/xkbcommon-keysyms.h"
 COMPOSE_PATH: "tests/data/xkb/Compose"
 SUMS_PATH: "tests/data/xkb/SHA256SUMS"
 TARGET_PATH: "Core/Ui/XkbTables.jet"
+DATA_DIRECTORY: "Core/Ui/XkbTables"
 DEFINE_PREFIX: "#define XKB_KEY_"
-HEX_DIGITS: "0123456789ABCDEF"
 
 #Error
 TableError: struct {
     message: String
+}
+
+// One generated file: its repository path and bytes.
+TableFile: struct {
+    path: String
+    bytes: [U8]
 }
 
 Keysym: struct {
@@ -238,20 +245,12 @@ push_be: fn(&out: [U8], value: Int, width: Int) {
     loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
 }
 
-byte_literal: fn(bytes: [U8]) -> String {
-    digits: HEX_DIGITS.bytes()
-    out := [U8]{}
-    loop byte in bytes {
-        value: Int.from_u8(byte)
-        out.push(U8{92})
-        out.push(U8{120})
-        out.push(digits[value >> 4])
-        out.push(digits[value.bit_and(15)])
-    }
-    String.from_bytes_lossy(out)
+// The XkbTables.jet line that embeds the data file `name` of DATA_DIRECTORY.
+embed_line: fn(constant: String, builtin: String, name: String) -> String {
+    "{constant}: comptime {{ {builtin}(\"XkbTables/{name}\") }}"
 }
 
-render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: String) -> String TableError! {
+render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: String) -> [TableFile] TableError! {
     names := [String]{}
     values := [U8]{}
     scalars := [Int: Int]{}
@@ -270,7 +269,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         push_be(text_rows, value, 4)
         push_be(text_rows, scalars.get(value) ?? 0, 3)
     }
-    name_text: names.join("\\n")
+    name_text: names.join("\n")
     // Breadth-first, each node's children contiguous and sorted by keysym.
     order := nodes[0].children.copy()
     order.sort_by((at: Int) -> nodes[at].keysym)
@@ -309,17 +308,19 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         "// and the libX11 1.8.13 en_US.UTF-8 Compose table tests/data/xkb/Compose",
         "// (sha256 {compose_sha}).",
         "// Regenerate: jet Tools/agent/XkbTables.jet",
-        "// Compiler-private data part of core.ui.xkb. Integers are big-endian.",
+        "// Compiler-private data part of core.ui.xkb; each table is a generated file",
+        "// in XkbTables/ beside this one, embedded when the program is built.",
+        "// Integers are big-endian.",
         "",
         "// {keysyms.len()} keysym names, newline-separated, in header order.",
-        "XKB_KEYSYM_NAMES: \"{name_text}\"",
+        embed_line("XKB_KEYSYM_NAMES", "embed_file", "keysym_names.txt"),
         "",
         "// The keysym of each name, in the same order: [keysym:4].",
-        "XKB_KEYSYM_VALUES: [U8]{{\"{byte_literal(values)}\"}}",
+        embed_line("XKB_KEYSYM_VALUES", "embed_bytes", "keysym_values.bin"),
         "",
         "// {text_keys.len()} keysyms outside the Latin-1 and Unicode keysym ranges that",
         "// type a Unicode scalar, sorted by keysym: [keysym:4, scalar:3].",
-        "XKB_KEYSYM_SCALARS: [U8]{{\"{byte_literal(text_rows)}\"}}",
+        embed_line("XKB_KEYSYM_SCALARS", "embed_bytes", "keysym_scalars.bin"),
         "",
         "// The en_US.UTF-8 Compose trie, {order.len()} nodes breadth-first; the first",
         "// XKB_COMPOSE_ROOTS rows are the root's children. Each node's children are",
@@ -328,11 +329,18 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         "// count is 0x8000 plus its text length and ref the text's offset in",
         "// XKB_COMPOSE_TEXT (UTF-8).",
         "XKB_COMPOSE_ROOTS: {roots}",
-        "XKB_COMPOSE_NODES: [U8]{{\"{byte_literal(compose_rows)}\"}}",
-        "XKB_COMPOSE_TEXT: [U8]{{\"{byte_literal(pool)}\"}}",
+        embed_line("XKB_COMPOSE_NODES", "embed_bytes", "compose_nodes.bin"),
+        embed_line("XKB_COMPOSE_TEXT", "embed_bytes", "compose_text.bin"),
         "",
     }
-    Ok(lines.join("\n"))
+    Ok([TableFile]{
+        TableFile{path: TARGET_PATH, bytes: lines.join("\n").bytes()},
+        TableFile{path: "{DATA_DIRECTORY}/keysym_names.txt", bytes: name_text.bytes()},
+        TableFile{path: "{DATA_DIRECTORY}/keysym_values.bin", bytes: values},
+        TableFile{path: "{DATA_DIRECTORY}/keysym_scalars.bin", bytes: text_rows},
+        TableFile{path: "{DATA_DIRECTORY}/compose_nodes.bin", bytes: compose_rows},
+        TableFile{path: "{DATA_DIRECTORY}/compose_text.bin", bytes: pool},
+    })
 }
 
 // The digest SHA256SUMS records for `name`, or an error naming the gap.
@@ -352,7 +360,7 @@ read_pinned: fn(path: String, sums: String) -[FS]> String TableError! {
     String.from_bytes(bytes) ?? return Err(fail("{path} is not UTF-8"))
 }
 
-generated_text: fn() -[FS]> String TableError! {
+generated_files: fn() -[FS]> [TableFile] TableError! {
     sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
     keysyms: parse_keysyms(read_pinned(KEYSYMS_PATH, sums))
     names := [String: Int]{}
@@ -368,14 +376,19 @@ generated_text: fn() -[FS]> String TableError! {
 table_main: fn(args: [String]) -[FS]> String TableError! {
     check: args.len() == 1 && args[0] == "--check"
     if args.len() > 1 || (args.len() == 1 && !check) -> return Err(fail("usage: XkbTables.jet [--check]"))
-    text: generated_text()
+    outputs: generated_files()
     if check {
-        current: files.read(TARGET_PATH) ?? return Err(fail("cannot read {TARGET_PATH}: {err}"))
-        if current != text -> return Err(fail("{TARGET_PATH} is stale; run jet Tools/agent/XkbTables.jet"))
-        return Ok("xkb-tables: {TARGET_PATH} is current")
+        loop output in outputs {
+            current: files.read_bytes(output.path) ?? return Err(fail("cannot read {output.path}: {err}"))
+            if current != output.bytes -> return Err(fail("{output.path} is stale; run jet Tools/agent/XkbTables.jet"))
+        }
+        return Ok("xkb-tables: {TARGET_PATH} and {DATA_DIRECTORY}/ are current")
     }
-    files.write(TARGET_PATH, text) ?? return Err(fail("cannot write {TARGET_PATH}: {err}"))
-    Ok("xkb-tables: wrote {TARGET_PATH}")
+    files.create_dir_all(DATA_DIRECTORY) ?? return Err(fail("cannot create {DATA_DIRECTORY}: {err}"))
+    loop output in outputs {
+        files.write_bytes(output.path, output.bytes) ?? return Err(fail("cannot write {output.path}: {err}"))
+    }
+    Ok("xkb-tables: wrote {TARGET_PATH} and {DATA_DIRECTORY}/")
 }
 
 run: fn() {
@@ -418,5 +431,5 @@ run: fn() {
 }
 
 #Test("the checked-in table matches the vendored inputs") {
-    assert_eq(table_main([String]{"--check"}) ?? err.message, "xkb-tables: {TARGET_PATH} is current")
+    assert_eq(table_main([String]{"--check"}) ?? err.message, "xkb-tables: {TARGET_PATH} and {DATA_DIRECTORY}/ are current")
 }
