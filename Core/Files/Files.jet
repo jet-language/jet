@@ -17,6 +17,7 @@ use {
     process: core.process
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
+    access_codes.[access_check, advice_code]
 }
 // core.files — one filesystem surface.
 //
@@ -140,6 +141,20 @@ RenameIfExists: enum {
     Replace
     Refuse
     Swap
+}
+
+/// How a program will read an open file, so the system can plan its caching
+/// (`FileReader.advise`). `Sequential` reads ahead further, `Random` stops
+/// reading ahead, `WillNeed` starts reading the file into memory now,
+/// `DontNeed` drops its cached pages, `NoReuse` marks the data as read once,
+/// and `Normal` restores the default.
+Advice: enum {
+    Normal
+    Sequential
+    Random
+    WillNeed
+    DontNeed
+    NoReuse
 }
 
 /// A file's identity, its device plus its file number.
@@ -298,6 +313,13 @@ FileReader: struct {
     read_line: fn(&self) -[FS.Read]> String? IOError! {
         __reader_read_line(self)
     }
+
+    /// Tell the system how the file will be read (posix_fadvise over the
+    /// whole file). Advice only plans caching: reads return the same bytes
+    /// whatever it says, and a pipe or a system without advice accepts any.
+    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+        core.files.__reader_advise(self, advice_code(advice))
+    }
 }
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
@@ -318,6 +340,14 @@ FileWriter: struct {
     /// path again. Windows keeps only the read-only flag.
     set_mode: fn(self, mode: Int) IOError! -[FS.Write]> {
         core.files.__writer_set_mode(self, mode)
+    }
+
+    /// Reserve disk space for the first `size` bytes (posix_fallocate), so
+    /// later writes there cannot fail for lack of space. A shorter file grows
+    /// to `size`, the new bytes zero; a longer one keeps its length.
+    /// `IOError.Unsupported` reports a file system that cannot reserve.
+    allocate: fn(self, size: Int) IOError! -[FS.Write]> {
+        core.files.__writer_allocate(self, size)
     }
 }
 
@@ -967,6 +997,43 @@ space: fn(path: String | Path) -[FS.Read]> DiskSpace IOError! {
     files8_preflight("FS.Read", .Read, text)
     row: core.files.__space(text)
     Ok(DiskSpace{total: row[0], free: row[1], available: row[2]})
+}
+
+
+/// Whether this program may read `path` now, judged with its effective user
+/// and groups as `open` judges them (faccessat with AT_EACCESS). A missing
+/// path, or one that cannot be checked, is false, never an error. The answer
+/// can change before the next call, so a program that must read the file
+/// opens it and handles that error instead.
+can_read: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 4) }
+
+/// Whether this program may write `path` now; `can_read` explains the check.
+can_write: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 2) }
+
+/// Whether this program may execute `path` now (search it, for a directory);
+/// `can_read` explains the check.
+can_execute: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 1) }
+
+// The access check and advice numbers behind can_read and advise: not part
+// of the files surface.
+priv access_codes: module {
+    // faccessat's mode bits: R_OK 4, W_OK 2, X_OK 1.
+    access_check: fn(path: String | Path, mode: Int) -> Bool Never! {
+        if read_probe_fault() -> return false
+        if core.files.__access_raw(path_text(path), mode) == { .Ok(_) -> true else -> false }
+    }
+
+    // posix_fadvise's advice numbers on Linux.
+    advice_code: fn(advice: Advice) -> Int Never! {
+        if advice == {
+            .Normal -> 0
+            .Random -> 1
+            .Sequential -> 2
+            .WillNeed -> 3
+            .DontNeed -> 4
+            .NoReuse -> 5
+        }
+    }
 }
 
 

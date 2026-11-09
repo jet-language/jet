@@ -35,10 +35,12 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [CompressZstdStream](Files/CompressZstdStream.jet)
 - [DirEntry](Files/DirEntry.jet) — fs.list_dir returns [DirEntry] ({name, path, is_dir}).
 - [Files](Files/Files.jet)
+- [FilesAccess](Files/FilesAccess.jet) — `files.can_read`, `can_write` and `can_execute` ask whether this program may use a path now, judged with its effective ids; a missing path is false.
 - [FilesDepth](Files/FilesDepth.jet) — Std-backed filesystem depth beyond read/write/list_dir.
 - [FilesProjection](Files/FilesProjection.jet) — Temporary paths make directory, mode, append, and rename operations explicit.
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
+- [FilesReserve](Files/FilesReserve.jet) — `writer.allocate(size)` reserves disk space for a file (posix_fallocate) and `reader.advise(advice)` tells the system how the file will be read (posix_fadvise).
 - [FilesSetMode](Files/FilesSetMode.jet) — `files.set_mode` replaces a path's permission bits and `files.stat` reads them back; a missing path is a typed `IOError`.
 - [FilesSpace](Files/FilesSpace.jet) — `files.space` reports a file system's total, free and available bytes (statvfs) and `df`'s used percent; a missing path is a typed `IOError`.
 - [FilesStatLinks](Files/FilesStatLinks.jet)
@@ -54,6 +56,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 
 - [EnvOverlay](Process/EnvOverlay.jet)
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
+- [OSMknod](Process/OSMknod.jet) — `core.sys.mknod` makes a character or block device file under `#Unsafe`; only a privileged process may.
 - [OSProcessControl](Process/OSProcessControl.jet)
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)

@@ -1,0 +1,11 @@
+// core-conformance: core.files.can_execute
+use api: core.files
+
+run: fn() {
+    scratch: api.temp_dir("can-execute") ?? panic("temp dir: {err}")
+    note: api.join(scratch.path, "note.txt")
+    api.write(note, "note") ?? panic("write: {err}")
+    api.set_mode(note, 0o644) ?? panic("set_mode: {err}")
+    print(api.can_execute(scratch.path))
+    print(!api.can_execute(note))
+}

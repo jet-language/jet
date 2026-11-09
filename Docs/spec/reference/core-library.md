@@ -906,6 +906,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
 | `space(path)` | `DiskSpace !IOError` | The room on the file system holding `path` (statvfs), in bytes: `total`, `free`, and `available` (what an unprivileged program may fill). `used()` is `total - free`; `used_percent()` is `df`'s figure, used over used plus available, 0.0 to 100.0. |
+| `can_read(path)` / `can_write(path)` / `can_execute(path)` | `Bool` | May this program read, write or run (search, for a directory) `path` now, judged with its effective user and groups (faccessat, AT_EACCESS). A missing or unreadable path is `false`. The answer can change before the next call, so code that must open the file handles the open's error instead. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
 | `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
 | `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
@@ -1109,6 +1110,8 @@ count_lines: fn(path: String) -> Int IOError! {
 | `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
 | `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
 | `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
+| `writer.allocate(size)` | `!IOError` | Reserve disk space for the first `size` bytes (posix_fallocate); a shorter file grows to `size` with zero bytes. A file system that cannot reserve is `IOError.Unsupported`. |
+| `reader.advise(advice)` | `!IOError` | Tell the system how the file will be read (posix_fadvise): `Advice.Normal`, `Sequential`, `Random`, `WillNeed`, `DontNeed` or `NoReuse`. It plans caching only; a pipe accepts any advice. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(handle)` consumes the handle.
@@ -2195,6 +2198,7 @@ whether the call goes through the module alias or a direct import:
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
 | `pipe()` / `close_fd(fd)` | `[Int] !IOError -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
+| `mknod(path, mode, kind, major, minor)` | `!IOError -[FS, Env]>` | Create a `DeviceKind.Character` or `.Block` device file for `major`:`minor` (0..4095 and 0..1048575); only a privileged process may. |
 | `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
 `on_interrupt(handler)` (`Unit -[Env]>`) registers a `fn()` handler for SIGINT.

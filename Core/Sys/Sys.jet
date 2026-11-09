@@ -774,6 +774,29 @@ on_interrupt: fn(handler: fn()) Never! -[Env]> {
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
+/// The kind of device file `mknod` makes: a character device reads and
+/// writes a byte stream (a terminal, /dev/null), a block device reads and
+/// writes whole blocks (a disk).
+DeviceKind: enum { Character Block }
+
+/// Make the device file `path` for device `major`:`minor` with permission
+/// bits `mode` (0o0..0o7777, before the umask). Only a privileged process
+/// may make a device file; others get an `IOError`. A FIFO is
+/// `mkfifo`, a regular file `files.create`.
+#Unsafe("posix mknod: the caller owns `path` and grants every process that may open it access to the device it names") mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) IOError! -[FS, Env]> {
+    if has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
+    if mode < 0 || mode > 4095 -> return Err(syscall_input(.Resolve, Val(path), "mode {mode} is outside 0o0..0o7777"))
+    if major < 0 || major > 4095 -> return Err(syscall_input(.Resolve, Val(path), "major {major} is outside 0..4095"))
+    if minor < 0 || minor > 1048575 -> return Err(syscall_input(.Resolve, Val(path), "minor {minor} is outside 0..1048575"))
+    // Linux's dev_t: minor's low 8 bits, then major's 12, then minor's top 12.
+    dev: minor % 256 + major * 256 + (minor /% 256) * 1048576
+    file_type: if kind == {
+        .Character -> 8192
+        .Block -> 24576
+    }
+    call_unit(core.sys.__mknod(path, mode + file_type, dev), "mknod", .Resolve, Val(path))
+}
+
 #Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fork: fn() -[Env, Exec]> Int IOError! {
     call_value(core.sys.__fork(), "fork", .Resolve, None)
 }

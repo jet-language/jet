@@ -216,10 +216,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Compiler": 748,
     "Core": 191,
     "Docs": 8,
-    "Examples": 36,
+    "Examples": 37,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 424
+    "tests": 425
   },
   "regions": [
     {
@@ -6217,14 +6217,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 533,
+      "line": 563,
       "column": 1,
       "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 539,
+      "line": 569,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
@@ -7032,6 +7032,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 7,
       "column": 5,
       "reason": "the local cell is live for this raw read"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/OSMknod.jet",
+      "line": 29,
+      "column": 5,
+      "reason": "make a device file in the temporary directory and remove it"
     },
     {
       "package": "Examples",
@@ -9541,6 +9548,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/mknod.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe device-file creation with a major number out of range"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/sys/pipe.jet",
       "line": 5,
       "column": 5,
@@ -10194,7 +10208,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | 748 |
 | Core | 191 |
 | Docs | 8 |
-| Examples | 36 |
+| Examples | 37 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
@@ -11060,8 +11074,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 533:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/Files/Files.jet | 539:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 563:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| Core | Core/Files/Files.jet | 569:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11177,6 +11191,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
+| Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/ProcessExitCleanup.jet | 23:5 | "the exit callback has no captured state" |
 | Examples | Examples/Systems/Process/ProcessExitUnmapped.jet | 21:13 | "this child reports a Jet defect status on purpose" |
@@ -11535,6 +11550,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/initgroups.jet | 5:5 | "probe initgroups with a stable missing user" |
 | tests | tests/conformance/corpus/core/sys/kill.jet | 5:5 | "check the process group without sending a signal" |
 | tests | tests/conformance/corpus/core/sys/mkfifo.jet | 5:5 | "probe FIFO creation with an empty path" |
+| tests | tests/conformance/corpus/core/sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
 | tests | tests/conformance/corpus/core/sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
 | tests | tests/conformance/corpus/core/sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
 | tests | tests/conformance/corpus/core/sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |
