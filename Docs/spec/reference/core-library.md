@@ -2218,6 +2218,7 @@ whether the call goes through the module alias or a direct import:
 | `fork()` / `setsid()` | `Int !IOError -[Env, Exec]>` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
 | `wait()` / `waitpid(pid, options)` | `Int !IOError -[Env, Time.Wait]>` | Reap a child or selected child. |
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
+| `#Unsafe reset_signal(number)` | `!IOError -[Env]>` | Restore a signal's default action (SIG_DFL), the fault signals included, so the signal raised next takes it; a supervisor re-raising its child's signal uses it before `kill`. |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
 | `pipe()` / `close_fd(fd)` | `[Int] !IOError -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
@@ -3960,6 +3961,7 @@ sendability rules. The implementation is in
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
 | `current_task() -> String` | text | Identify the running task. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
+| `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that
@@ -4057,6 +4059,7 @@ or golden file. The public source is
 | `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. The `expect(value).snapshot()` builtin is `assert(snap("<file>_<line>", "{value}"))`. |
 | `golden(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare `value` with the file `name`. A missing, unreadable, or differing file returns `false` and records the reason (with a bounded unified diff for a difference). The next failing `assert` or `assert_eq` on that thread reports the recorded reason as its stop message and the path and diff as its locals; a passing helper call clears it. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) a missing or differing file is written, parent folders included, and the check passes. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
+| `skip(reason: String)` | — | Mark the running `#Test` skipped, like Go's `t.Skip`: `skipped: <reason>` joins its output and it reports skipped, as a first `.skip { }` member makes it. The body goes on, so return after it. Outside a running test nothing happens. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
 | `corpus(glob: String) -[FS]> [String]` | contents | Read each readable regular file directly inside the directory `glob` (the parameter keeps its historical name; it is not a pattern), ordered by full path; an absent directory gives `[]`. |
 | `corpus_entries(root: String, suffix: String) -[FS]> [CorpusEntry]` | entries | List the regular files below `root`, at any depth, whose names end in `suffix`, ordered by `id`. `CorpusEntry{id, path}`: `id` is the path below `root` without `suffix` (`basics/hello` for `<root>/basics/hello.jet`). Names starting with `.` are skipped, folders included; an absent root gives `[]`. |

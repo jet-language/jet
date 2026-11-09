@@ -114,6 +114,12 @@ host_task_id: fn() -> String {
     task_trace(paused, cancel)
 }
 
+/// Joins the scheduler's carrier and timer threads, the safe step before a
+/// raw exec or fork that needs a single-threaded process. False, with nothing
+/// stopped, while a task or a timer is still pending. The threads start again
+/// on the next task or timer.
+quiesce: fn() -[Exec]> Bool Never! { core.tasks.__quiesce() }
+
 task_trace: fn(paused: Bool, cancel: Bool) -> String Never! {
     "paused={paused},cancel={cancel}"
 }

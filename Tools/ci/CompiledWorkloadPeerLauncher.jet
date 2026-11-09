@@ -40,10 +40,6 @@ CONTRACT: "compiled-workload-peer-isolation-v1"
 EXIT_UNSUPPORTED: 78
 LAUNCHER_NAME: "compiled-workload-peer-launcher"
 
-// glibc `signal`, used only to restore the default disposition (SIG_DFL = 0)
-// before the launcher re-raises a signal on itself.
-#Import(c) libc_signal: fn(signal: I64, handler: I64) -> I64 = "signal"
-
 NetworkPolicy: enum {
     Disabled
     LoopbackOnly
@@ -600,8 +596,8 @@ sweep_namespace: fn(signal: Int) LaunchError! -[FS, Env]> {
 // Ends this process with the default action of `signal`. Returns only when
 // the signal did not end the process.
 raise_default: fn(signal: Int) -[Env, Time]> {
-    #Unsafe("libc signal + posix kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal") {
-        _: libc_signal(I64{signal}, I64{0})
+    #Unsafe("posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal") {
+        sys.reset_signal(signal).drop("a failed reset leaves the re-raise to the caller's fallback")
         sys.kill(sys.pid(), signal).drop("a failed re-raise falls through to the caller's fallback")
     }
     time.sleep(100ms)

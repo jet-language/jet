@@ -961,6 +961,13 @@ DeviceKind: enum { Character Block }
     call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
 }
 
+/// Restores signal `number`'s default action (SIG_DFL), so the signal raised
+/// next takes it: a supervisor re-raising its child's signal on itself. Any
+/// signal number, the fault signals too.
+#Unsafe("posix signal reset: the caller owns the process signal disposition it resets") reset_signal: fn(number: Int) IOError! -[Env]> {
+    call_unit(core.sys.__reset_signal(number), "reset_signal", .Write, None)
+}
+
 #Unsafe("posix initgroups: the caller changes supplementary groups deliberately") initgroups: fn(user: String, group: Int) IOError! -[Env]> {
     if is_unix() && has_nul(user) -> return Err(syscall_input(.Write, None, "username contains NUL"))
     call_unit(core.sys.__initgroups(user, group), "initgroups", .Write, None)

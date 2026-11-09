@@ -1,0 +1,9 @@
+// core-conformance: core.sys.reset_signal
+use os: core.sys
+
+run: fn() {
+    #Unsafe("restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0") {
+        print(os.reset_signal(10) ? ok -> true ! error -> false)
+        print(os.reset_signal(0) ? ok -> false ! error -> true)
+    }
+}

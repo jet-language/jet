@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 40,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 427
+    "tests": 428
   },
   "regions": [
     {
@@ -1193,7 +1193,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
       "line": 1608,
       "column": 9,
-      "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit"
+      "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
     {
       "package": "Compiler",
@@ -6707,14 +6707,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1355,
+      "line": 1363,
       "column": 5,
       "reason": "the caller bounded this byte position by the String storage length"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1376,
+      "line": 1384,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -7211,16 +7211,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 591,
+      "line": 587,
       "column": 9,
       "reason": "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command"
     },
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 603,
+      "line": 599,
       "column": 5,
-      "reason": "libc signal + posix kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal"
+      "reason": "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal"
     },
     {
       "package": "Tools",
@@ -9583,6 +9583,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/reset_signal.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/sys/set_scheduling.jet",
       "line": 5,
       "column": 5,
@@ -11251,8 +11258,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 335:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 591:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 603:5 | "libc signal + posix kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 121:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
@@ -11590,6 +11597,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/mkfifo.jet | 5:5 | "probe FIFO creation with an empty path" |
 | tests | tests/conformance/corpus/core/sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
 | tests | tests/conformance/corpus/core/sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
+| tests | tests/conformance/corpus/core/sys/reset_signal.jet | 5:5 | "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0" |
 | tests | tests/conformance/corpus/core/sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
 | tests | tests/conformance/corpus/core/sys/set_wall_clock.jet | 8:5 | "a time before 1970 is refused before it reaches the kernel, so the clock never changes" |
 | tests | tests/conformance/corpus/core/sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |

@@ -180,6 +180,14 @@ fixture: fn(name: String) -[FS]> String Never! {
     ""
 }
 
+/// Marks the running #Test skipped, like Go's t.Skip: `skipped: <reason>`
+/// joins the test's output and the test reports skipped, as a first
+/// `.skip { }` member makes it. The test body goes on (return after it).
+/// Outside a running test nothing happens.
+skip: fn(reason: String) Never! {
+    core.testing.__skip("skipped: {reason}")
+}
+
 temp_dir: fn(prefix: String) -[FS]> String Never! {
     facts: __temp_facts()
     safe: testing_ascii_name(prefix, false)

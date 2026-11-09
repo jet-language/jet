@@ -3076,9 +3076,10 @@ version, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`,
 (D-OSFACTS1).
 POSIX process and session control requires an audited `#Unsafe("...")` region
 and a host-OS target gate. The gated set includes `fork`, `setuid`, `setgid`,
-`setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`, `waitpid`, `pipe`,
-`close_fd`, `mkfifo`, `mknod`, `umask`, `getpriority`, `setpriority`, `set_scheduling`,
-`set_wall_clock`, `utime`, `atexit`, and `stop`. `scheduling`,
+`setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `reset_signal`, `wait`,
+`waitpid`, `pipe`, `close_fd`, `mkfifo`, `mknod`, `umask`, `getpriority`,
+`setpriority`, `set_scheduling`, `set_wall_clock`, `utime`, `atexit`, and
+`stop`. `scheduling`,
 `round_robin_interval` and `cpu_time` read a process's CPU policy and time
 without the gate.
 
