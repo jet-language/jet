@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1442,
+  "total": 1435,
   "counts": {
     "Compiler": 748,
-    "Core": 197,
+    "Core": 190,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -1191,14 +1191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1609,
+      "line": 1671,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2016,
+      "line": 2078,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
@@ -1940,16 +1940,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 161,
+      "line": 169,
       "column": 5,
       "reason": "the serve entry runs once, on the image's only thread, before it serves"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 207,
-      "column": 5,
-      "reason": "the serve entry installed this runtime export, whose System V signature takes these five words"
     },
     {
       "package": "Compiler",
@@ -2976,7 +2969,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostPipe.jet",
-      "line": 163,
+      "line": 165,
       "column": 13,
       "reason": "the FD72 lock protects this initialized refill-buffer byte"
     },
@@ -3529,77 +3522,77 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 46,
+      "line": 48,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 62,
+      "line": 64,
       "column": 5,
       "reason": "an idempotent flag: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 77,
+      "line": 79,
       "column": 5,
       "reason": "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 118,
+      "line": 120,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 123,
+      "line": 125,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 185,
+      "line": 187,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 251,
+      "line": 264,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 254,
+      "line": 268,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 257,
+      "line": 271,
       "column": 5,
       "reason": "entry is the loader/object's checked executable System V void(void) address, not a closure header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 263,
+      "line": 277,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 286,
+      "line": 300,
       "column": 5,
       "reason": "the entry has returned and drained its workers; only the main thread runs here"
     },
@@ -4334,7 +4327,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Shared.jet",
-      "line": 445,
+      "line": 453,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -4642,147 +4635,147 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 81,
+      "line": 82,
       "column": 5,
       "reason": "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 91,
+      "line": 92,
       "column": 5,
       "reason": "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 98,
+      "line": 99,
       "column": 5,
       "reason": "gettid identifies this thread without reading its inherited GS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 144,
+      "line": 145,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 210,
+      "line": 211,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 304,
+      "line": 305,
       "column": 9,
       "reason": "the registry owns this live closure header whose code accepts header and one I64 value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 400,
+      "line": 401,
       "column": 5,
       "reason": "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 408,
+      "line": 409,
       "column": 5,
       "reason": "the caller transferred a System V I64->I64 code address and one argument to this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 423,
+      "line": 424,
       "column": 5,
       "reason": "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 485,
+      "line": 486,
       "column": 5,
       "reason": "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 537,
+      "line": 538,
       "column": 5,
       "reason": "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 575,
+      "line": 576,
       "column": 5,
       "reason": "the startup hands these over once, before the init arrays and any other thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 588,
+      "line": 586,
       "column": 5,
-      "reason": "musl's pthread functions take words: a pthread_t, a pthread_attr_t the caller owns, the handle's live pthread_t word, jet_rt_thread_entry and its start record"
+      "reason": "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 630,
+      "line": 618,
       "column": 5,
-      "reason": "rt_sigprocmask reads and writes the owned masks record; pthread_create writes the pthread_t into the live handle and hands jet_rt_thread_entry the start record, which the thread frees"
+      "reason": "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 669,
+      "line": 654,
       "column": 9,
       "reason": "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 829,
+      "line": 815,
       "column": 5,
       "reason": "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 863,
+      "line": 849,
       "column": 9,
       "reason": "kill(getpid(), SIGKILL) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 881,
+      "line": 867,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 904,
+      "line": 890,
       "column": 13,
       "reason": "tgkill names a live registered thread of this process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 942,
+      "line": 928,
       "column": 9,
       "reason": "a credential system call takes word arguments and retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 954,
+      "line": 940,
       "column": 13,
       "reason": "written under the registry mutex, before any handler can run"
     },
@@ -4844,29 +4837,36 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Trap.jet",
+      "line": 148,
+      "column": 5,
+      "reason": "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 445,
+      "line": 59,
       "column": 5,
       "reason": "a web page's module runs on one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 491,
+      "line": 71,
       "column": 5,
       "reason": "only an attached web build records, on its one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 501,
+      "line": 81,
       "column": 5,
       "reason": "a web page's module runs on one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 710,
+      "line": 109,
       "column": 9,
       "reason": "written under the host lock"
     },
@@ -4908,7 +4908,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/VaultTestHooks.jet",
-      "line": 182,
+      "line": 184,
       "column": 5,
       "reason": "written under the vault test backup mutex"
     },
@@ -6651,105 +6651,105 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 902,
+      "line": 932,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 916,
+      "line": 946,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 930,
+      "line": 960,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 934,
+      "line": 964,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 938,
+      "line": 968,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 944,
+      "line": 974,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 950,
+      "line": 980,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 954,
+      "line": 984,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 979,
+      "line": 1009,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 986,
+      "line": 1016,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1164,
+      "line": 1194,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1168,
+      "line": 1198,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1172,
+      "line": 1202,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1179,
+      "line": 1209,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1183,
+      "line": 1213,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -6780,55 +6780,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 130,
       "column": 5,
       "reason": "Core TUI samples the same stdout terminal fact consumed by terminal style/progress"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Tui/Tui.jet",
-      "line": 656,
-      "column": 5,
-      "reason": "Core TUI test: normalized style words and explicit absent UI slots"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 174,
-      "column": 5,
-      "reason": "Core UI text input: the provider sets the explicitly requested IME slot"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 210,
-      "column": 5,
-      "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 215,
-      "column": 5,
-      "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 226,
-      "column": 5,
-      "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 243,
-      "column": 5,
-      "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 270,
-      "column": 5,
-      "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
     },
     {
       "package": "Core",
@@ -10325,13 +10276,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 748 |
-| Core | 197 |
+| Core | 190 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 432 |
-| **total** | **1442** |
+| **total** | **1435** |
 
 ### Regions
 
@@ -10475,8 +10426,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2347:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2355:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2363:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1609:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2016:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1671:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2078:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10582,8 +10533,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 115:13 | "the owned readable file lends its descriptor; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 14:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 113:13 | "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 161:5 | "the serve entry runs once, on the image's only thread, before it serves" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 207:5 | "the serve entry installed this runtime export, whose System V signature takes these five words" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 169:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 23:5 | "runtime-init runs before any other thread exists" |
@@ -10730,7 +10680,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 451:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 526:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 534:5 | "cpuid and xgetbv only report processor identification and the OS-enabled state" |
-| Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 163:13 | "the FD72 lock protects this initialized refill-buffer byte" |
+| Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 165:13 | "the FD72 lock protects this initialized refill-buffer byte" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 7:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 96:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 159:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
@@ -10809,17 +10759,17 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 22:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/LogicalEnvironment.jet | 79:5 | "host argument registration is single-threaded and precedes user code" |
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 23:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 46:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 62:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 77:5 | "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 118:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 123:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 185:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 251:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 254:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 257:5 | "entry is the loader/object's checked executable System V void(void) address, not a closure header" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 263:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 286:5 | "the entry has returned and drained its workers; only the main thread runs here" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 48:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 64:5 | "an idempotent flag: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 79:5 | "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 120:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 125:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 187:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 264:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 268:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 271:5 | "entry is the loader/object's checked executable System V void(void) address, not a closure header" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 277:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 300:5 | "the entry has returned and drained its workers; only the main thread runs here" |
 | Compiler | Compiler/JetRuntime/Source/MemRegistry.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 23:5 | "address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span" |
 | Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 26:5 | "address exclusively owns one aligned writable allocator or Fixed metadata word" |
@@ -10924,7 +10874,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 246:5 | "cpuid only reports processor identification" |
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 269:9 | "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 58:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
-| Compiler | Compiler/JetRuntime/Source/Shared.jet | 445:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Shared.jet | 453:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 17:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 23:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 12:5 | "borrows an aligned live synchronization word" |
@@ -10968,27 +10918,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 151:5 | "item0 lends the C-ABI tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 81:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 91:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 98:5 | "gettid identifies this thread without reading its inherited GS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 144:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 210:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 304:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 400:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 408:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 423:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 485:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 537:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 575:5 | "the startup hands these over once, before the init arrays and any other thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 588:5 | "musl's pthread functions take words: a pthread_t, a pthread_attr_t the caller owns, the handle's live pthread_t word, jet_rt_thread_entry and its start record" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 630:5 | "rt_sigprocmask reads and writes the owned masks record; pthread_create writes the pthread_t into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 669:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 829:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 863:9 | "kill(getpid(), SIGKILL) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 881:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 904:13 | "tgkill names a live registered thread of this process" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 942:9 | "a credential system call takes word arguments and retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 954:13 | "written under the registry mutex, before any handler can run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 82:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 92:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 99:5 | "gettid identifies this thread without reading its inherited GS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 145:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 211:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 305:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 401:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 409:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 424:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 486:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 538:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 576:5 | "the startup hands these over once, before the init arrays and any other thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 586:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 618:5 | "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 654:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 815:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 849:9 | "kill(getpid(), SIGKILL) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 867:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 890:13 | "tgkill names a live registered thread of this process" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 928:9 | "a credential system call takes word arguments and retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 940:13 | "written under the registry mutex, before any handler can run" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 3:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 6:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
@@ -10997,16 +10947,17 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 26:5 | "address is one writable byte in the allocated debug-text buffer; value is a byte" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 89:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 445:5 | "a web page's module runs on one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 491:5 | "only an attached web build records, on its one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 501:5 | "a web page's module runs on one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 710:9 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 148:5 | "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 59:5 | "a web page's module runs on one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 71:5 | "only an attached web build records, on its one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 81:5 | "a web page's module runs on one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 109:9 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 5:5 | "address borrows an initialized native UI carrier or E4 header word" |
 | Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 10:5 | "address exclusively owns one writable native UI carrier word" |
 | Compiler | Compiler/JetRuntime/Source/Unicode.jet | 145:5 | "some is the caller's writable aligned Option&lt;Int&gt; payload slot, written only on success" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 22:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 27:5 | "written under the TLS registry mutex" |
-| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 182:5 | "written under the vault test backup mutex" |
+| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 184:5 | "written under the vault test backup mutex" |
 | Compiler | Compiler/JetRuntime/Source/World.jet | 76:5 | "registered provider code remains live at this world/lease boundary; output lends one writable word" |
 | Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 500:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 4:5 | "borrows an initialized aligned word in a live XML carrier or optional input" |
@@ -11255,32 +11206,25 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Sys/Sys.jet | 747:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
 | Core | Core/Sys/Sys.jet | 757:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
 | Core | Core/Sys/Sys.jet | 763:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 902:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 916:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 930:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 934:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 938:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 944:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 950:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 954:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 979:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 986:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1164:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1168:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1172:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 1179:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 1183:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 932:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 946:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 960:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 964:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 968:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 974:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 980:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 984:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1009:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1016:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1194:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1198:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1202:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1209:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1213:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1388:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
-| Core | Core/Tui/Tui.jet | 656:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
-| Core | Core/Ui/Ui.jet | 174:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
-| Core | Core/Ui/Ui.jet | 210:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 215:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 226:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/Ui/Ui.jet | 243:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/Ui/Ui.jet | 270:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
 | Core | Core/Vendor/Sqlite3/Fixture/run.jet | 19:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
@@ -11917,7 +11861,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
 {"file":"Core/Testing/Testing.jet","function":"testing_owned_text","proof":"__bytes_into_text at testing.jet:376 requires valid UTF-8. The only callers are testing_unified_diff(:503) and testing_ascii_name(:517). Diff output appends complete String bytes or scalar-aligned prefixes chosen by testing_boundary(:362-366,423-424,450-451); marker fragments are ASCII. Name output(:508-515) appends only ASCII alphanumerics, hyphen or underscore. Each exact owned list is copied into a String with no mutation between construction and transfer; arbitrary caller bytes cannot reach this local helper."},
 {"file":"Core/Tui/Tui.jet","function":"capability_env_bytes","proof":"__cap_env_bytes at tui.jet:101 borrows a String name and returns an owned optional byte list. Its provider Ui.rs:514-515 obtains var_os and consumes OsString into encoded bytes; no borrowed environment storage is returned and source does not assume UTF-8 (capability_text uses checked String.from_bytes at :112). Arbitrary names cannot manufacture a native pointer or invalidate returned storage."},
 {"file":"Core/Tui/Tui.jet","function":"capability_stdout_terminal","proof":"The gate at tui.jet:126-127 invokes __stdout_terminal with no caller-supplied values and returns only a copied Bool host terminal fact at :129. It lends no memory, descriptor ownership or callback to the caller; host terminal presence or absence cannot change the typed result's validity."},
-{"file":"Core/Tui/Tui.jet","function":"normalized_style_test_node","proof":"The local test helper at tui.jet:651-655 calls __node_transfer with initialized text/dimensions, fixed kind/role, an empty child list, explicitly absent accessibility slots and present style slots. Its sole caller(:659-663) obtains StyleWords from style_words(:416-421), whose three flags are bounded bits 1/2/4 and whose colors are normalized by color_words. No arbitrary numeric representation or uninitialized optional slot is passed; the returned retained UINode owns its payload."},
   {"file":"Core/Encoding/Cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches Dyn's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
   {"file":"Core/Encoding/Cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private Dyn.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
   {"file":"Core/Encoding/CborStream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 copies stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only that exact copy becomes the retained key; arbitrary wire bytes cannot reach this transfer."},
@@ -11952,12 +11895,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/XmlEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) copies valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
   {"file":"Core/Encoding/Yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
   {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:1365 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
-  {"file":"Core/Ui/Ui.jet","function":"tui_backend","proof":"__tui_backend at ui.jet:132 has no arguments and allocates JetTuiBackend through Ui.rs:1860-1861,1572-1591. The provider owns a fresh Arc<Mutex<State>> with initialized capability facts, absent frames/focus, zero counters and an empty grid. It performs no current-host scope dereference and exports no borrow of constructor-local storage; arbitrary safe callers cannot supply a forged native backing pointer."},
-  {"file":"Core/Ui/Ui.jet","function":"null_backend","proof":"__null_backend at ui.jet:137 has no caller-selected fields and calls JetNullBackend::new (Ui.rs:1856-1857,1346-1356). That constructor owns a new Arc<Mutex<State>> containing initialized absent frame/event/focus slots and an empty command list; it neither accesses scoped host pointers nor returns references into temporary storage. The returned carrier keeps its allocation alive independently of the caller frame."},
-  {"file":"Core/Ui/Ui.jet","function":"node_accessibility","proof":"ui.jet:148 calls __accessibility_transfer with typed UINode/UIAccessibility and the explicit present=true flag. Ui.rs:302-308 only assign Some(metadata) to the owning node then return that node; no discriminant reinterpretation, unchecked index, callback invocation or current-host access occurs. Caller metadata remains an initialized typed record and the result owns its Strings/lists rather than borrowing source storage."},
-  {"file":"Core/Ui/Ui.jet","function":"node_shortcut","proof":"ui.jet:165 passes initialized typed node/shortcut with present=true to __shortcut_transfer. Its provider Ui.rs:311-317 only stores the typed shortcut in the node's Option and returns the owning node, with no scoped-host dispatch or raw address access. Any valid typed shortcut therefore preserves layout/lifetimes, and no native registry borrow escapes."},
-  {"file":"Core/Ui/Ui.jet","function":"transfer_node","proof":"__node_transfer trusts numeric role/kind/absence/style representations (Ui.rs:1938-1985). ui.jet:173-184 derives role solely as -1 or0..3 and kind solely as0..4 from typed enums. :185-192 couples color presence to initialized text, fixes all six absent-slot bits to63, and marks style absent with zero initialized words. Native :1987-2002 own the copied label/color and typed children, never dereferencing caller addresses. Width/height are stored floats, not memory lengths; invalid geometry cannot cause an unchecked allocation transfer here."},
-  {"file":"Core/Ui/Ui.jet","function":"text_input","proof":"A public core.ui export that takes only a String and a UIIMEMode. core.ui.__text_input dispatches to jet_ui_text_input (JetRuntime UiTransfers.jet:90-107), which refuses an IME word outside the two variants (:91), zero-fills a freshly allocated node (:92-97), stores a clone of the borrowed String rather than the caller's buffer (:98) and returns that owned UINode. Any String and either IME mode is a valid input, and no caller memory is retained."},
   {"file":"Core/Vendor/Sqlite3/Fixture/run.jet","function":"run","proof":"The no-argument fixture supplies only fixed SQL and an in-memory database name. Exclusive U64 out-slots start at zero; successful sqlite3_open_v2 and sqlite3_prepare_v2 checks dominate all database/statement uses. SQLite owns the resulting handles; the fixture never forges an address, lends a callback, or exposes a handle to callers. It steps the statement before reading column zero, finalizes it once before closing the database once, and uses neither afterward. Borrowed String storage remains live for each synchronous call; any failed operation stops before further handle use."},
   {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."}
