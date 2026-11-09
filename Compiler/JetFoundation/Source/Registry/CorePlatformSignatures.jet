@@ -253,6 +253,13 @@ core.sys __family_os - String
 core.sys __pid_os - Int
 core.sys __sync_os - Unit
 core.sys __close_fd_os Int Unit
+core.sys __fd_close_raw Int Unit
+core.sys __fd_read_at_raw Int,Int,Int Result<[u8],IOError>
+core.sys __fd_size_raw|__fd_duplicate_raw|__shared_create_raw Int Result<Int,IOError>
+core.sys __shared_write_raw Int,Int,[u8] Result<Unit,IOError>
+core.sys __shared_write_pixels_raw Int,Int,[u8],Int,Int,Int,Int,Int,Int Result<Unit,IOError>
+core.sys __shared_read_raw Int,Int,Int Result<[u8],IOError>
+core.sys __shared_fill_raw Int,Int,Int,Int Result<Unit,IOError>
 core.sys __atexit_os fn(;Unit) Unit
 core.sys __interrupt_os fn(;Unit) Unit
 core.process __signal_arm Int Result<Unit,String>
@@ -477,6 +484,9 @@ core.net unix_read|__unix_read &UnixStream Result<String,NetError>
 core.net unix_write &UnixStream,String Result<Unit,NetError>
 core.net unix_read_bytes &UnixStream,Int Result<[u8],NetError>
 core.net unix_write_all_bytes|__unix_write_all_bytes &UnixStream,[u8] Result<Unit,NetError>
+core.net __unix_send_fds_raw &UnixStream,[u8],[Int] Result<Unit,NetError>
+core.net __unix_receive_fds_raw &UnixStream,Int Result<[u8],NetError>
+core.net __unix_wait_raw &UnixStream,Int Result<Int,NetError>
 core.net unix_shutdown|__unix_shutdown &UnixStream,NetShutdown Result<Unit,NetError>
 core.net unix_close|__unix_close &UnixStream Result<Unit,NetError>
 core.net dns_a|dns_aaaa String,Int Result<[IPAddr],NetError>
