@@ -1516,6 +1516,25 @@ pager_lookup: fn(p: &Pager, pgno: Int) -> Int Never! {
     cache.pcache_fetch_finish(p.pcache, pgno, s)
 }
 
+// sqlite3PagerDirectReadOk: page pgno can be read straight from the
+// database file (SQLITE_DIRECT_OVERFLOW_READ): the file is open, no page
+// is dirty and the log has no frame of it.
+pager_direct_read_ok: fn(p: &Pager, pgno: Int) -[DB]> Bool Never! {
+    if !file.file_is_open(p.fd) -> return false
+    if cache.pcache_is_dirty(p.pcache) -> return false
+    if p.wal.open {
+        frame := 0
+        _: wal.wal_find_frame(p.wal, p.fd, pgno, frame)
+        return frame == 0
+    }
+    true
+}
+
+// sqlite3OsRead of the database file (sqlite3PagerFile's direct reads).
+pager_read_direct: fn(p: &Pager, buf: &[U8], amt: Int, offset: Int) -[DB]> Int Never! {
+    file.file_read(p.fd, buf, amt, offset)
+}
+
 // sqlite3PagerUnrefNotNull.
 pager_unref_not_null: fn(p: &Pager, s: Int) Never! { cache.pcache_release(p.pcache, s) }
 

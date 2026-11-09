@@ -8,7 +8,7 @@
 use {
     math: core.math
     base: __core_db_base
-    __core_db_base.[Mem, SQLError, MEM_NULL, MEM_STR, MEM_INT, MEM_REAL, MEM_BLOB, MEM_INT_REAL, MEM_ZERO]
+    __core_db_base.[Mem, SQLError, MEM_NULL, MEM_STR, MEM_INT, MEM_REAL, MEM_BLOB, MEM_INT_REAL, MEM_ZERO, KEYINFO_ORDER_DESC, KEYINFO_ORDER_BIGNULL]
     util: __core_db_util
     __core_db_util.[get_varint32, varint_len, put_varint, lower_byte]
 }
@@ -313,45 +313,359 @@ compare_ints: fn(x: Int, y: Int) -> Int Never! {
     0
 }
 
-// The text encoding, collations and sort directions of an index's columns
-// (KeyInfo enc, aColl and aSortFlags).
+// A KeyInfo.aColl entry that is 0: BINARY, which sqlite3KeyInfoOfIndex
+// leaves unset and the record comparisons do by memcmp.
+COLL_NONE: -1
+
+// The text encoding, key and total column counts, sort flags and
+// collations (COLL_NONE for a null aColl entry) of an index (KeyInfo).
 KeyInfo: struct {
     enc: Int
+    n_key_field: Int
+    n_all_field: Int
+    sort_flags: [Int]
     colls: [Int]
-    desc: [Bool]
 }
 
-// A search key (UnpackedRecord): the values to compare and the result when
-// every one of them equals the record's prefix (`default_rc`, which seeks
-// use to land before or after a run of equal prefixes).
-SearchKey: struct {
-    values: [Mem]
+// A search key (UnpackedRecord): the values to compare (mem, of which
+// n_field count) and the result when every one of them equals the record's
+// prefix (default_rc). r1 and r2 are the results when the record sorts
+// before or after the key on the first field, u_i or u_z the first value
+// for the fast comparisons; err_code becomes CORRUPT on a corrupt record
+// and eq_seen true once a comparison found its fields equal.
+UnpackedRecord: struct {
+    key_info: KeyInfo
+    mem: [Mem]
+    u_i: Int
+    u_z: [U8]
+    n_field: Int
     default_rc: Int
+    err_code: Int
+    r1: Int
+    r2: Int
+    eq_seen: Bool
 }
 
-// Compare the record `rec` with a search key (sqlite3VdbeRecordCompare):
-// negative when the record sorts first. Only the key's fields are
-// compared.
-compare_record: fn(rec: [U8], key: SearchKey, info: KeyInfo) -> Int SQLError! {
-    size: get_varint32(rec, 0)
-    if size.value < size.len || size.value > rec.len() -> return Err(base.corrupt())
-    at := size.len
-    body := size.value
-    loop i in 0..<key.values.len() {
-        if at >= size.value -> return Ok(key.default_rc)
-        t: get_varint32(rec, at)
-        at += t.len
+// sqlite3VdbeAllocUnpackedRecord: room for n_key_field + 1 values.
+unpacked_record_alloc: fn(info: KeyInfo) -> UnpackedRecord Never! {
+    mem := [Mem]{}
+    loop _ in 0..<info.n_key_field + 1 -> mem.push(base.mem_null())
+    UnpackedRecord{key_info: info, mem: mem, u_i: 0, u_z: [U8]{}, n_field: info.n_key_field + 1, default_rc: 0, err_code: 0, r1: 0, r2: 0, eq_seen: false}
+}
+
+// buf[at], 0 past the end: C reads records in place, where the bytes
+// past a corrupt record's end are the page's or the buffer's padding.
+key_byte: fn(buf: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= buf.len() -> return 0
+    Int.from_u8(buf[at])
+}
+
+// getVarint32 at buf[at], reading zero bytes past the end.
+key_varint: fn(buf: [U8], at: Int) -> util.Varint Never! {
+    if at + 9 <= buf.len() -> return get_varint32(buf, at)
+    tail := [U8]{}
+    loop i in 0..<9 -> tail.push(U8{key_byte(buf, at + i)})
+    get_varint32(tail, 0)
+}
+
+// The `n`-byte big-endian signed integer at buf[at].
+key_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
+    value := key_byte(buf, at)
+    if value >= 128 -> value -= 256
+    loop i in 1..<n -> value = (value << 8).bit_or(key_byte(buf, at + i))
+    value
+}
+
+// buf[at..<at + n], zero-padded past the end.
+key_slice: fn(buf: [U8], at: Int, n: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop i in 0..<n -> out.push(U8{key_byte(buf, at + i)})
+    out
+}
+
+// sqlite3VdbeRecordUnpack: the fields of the n_key-byte record `key` into
+// p.mem, at most p.n_field of them; n_field becomes the count read.
+record_unpack: fn(info: KeyInfo, n_key: Int, key: [U8], p: &UnpackedRecord) Never! {
+    p.default_rc = 0
+    hdr: key_varint(key, 0)
+    sz_hdr: hdr.value
+    idx := hdr.len
+    d := sz_hdr
+    u := 0
+    loop idx < sz_hdr && d <= n_key {
+        t: key_varint(key, idx)
+        idx += t.len
         n: serial_len(t.value)
-        if body + n > rec.len() -> return Err(base.corrupt())
-        coll: if i < info.colls.len() -> info.colls[i] else -> COLL_BINARY
-        c := mem_compare(serial_get(rec, body, t.value, info.enc), key.values[i], coll)
-        body += n
-        if c != 0 {
-            if i < info.desc.len() && info.desc[i] -> c = 0 - c
-            return Ok(c)
+        m := serial_get(key_slice(key, d, n), 0, t.value, info.enc)
+        m.enc = info.enc
+        if u < p.mem.len() {
+            p.mem[u] = m
+        } else {
+            p.mem.push(m)
+        }
+        d += n
+        u += 1
+        if u >= p.n_field -> break
+    }
+    if d > n_key && u > 0 -> p.mem[u - 1] = base.mem_null()
+    p.n_field = u
+}
+
+// vdbeRecordDecodeInt: the integer of serial type t (1..6, 8 or 9) at
+// buf[at].
+decode_int: fn(t: Int, buf: [U8], at: Int) -> Int Never! {
+    if t <= 1 -> return key_signed(buf, at, 1)
+    if t <= 4 -> return key_signed(buf, at, t)
+    if t == 5 -> return key_signed(buf, at, 6)
+    if t == 6 -> return key_signed(buf, at, 8)
+    t - 8
+}
+
+// The REAL of serial type 7 at buf[at].
+decode_real: fn(buf: [U8], at: Int) -> Float Never! { math.from_bits(key_signed(buf, at, 8)) }
+
+// memcmp of buf[at..<at + n] with z[..<n].
+key_memcmp: fn(buf: [U8], at: Int, z: [U8], n: Int) -> Int Never! {
+    loop i in 0..<n {
+        x: key_byte(buf, at + i)
+        y: Int.from_u8(z[i])
+        if x != y -> return x - y
+    }
+    0
+}
+
+// The sort flags and collation of key column i.
+sort_flags_of: fn(info: KeyInfo, i: Int) -> Int Never! {
+    if i < info.sort_flags.len() -> info.sort_flags[i] else -> 0
+}
+
+coll_of: fn(info: KeyInfo, i: Int) -> Int Never! {
+    if i < info.colls.len() -> info.colls[i] else -> COLL_NONE
+}
+
+// sqlite3VdbeRecordCompareWithSkip: compare the n_key1-byte record at
+// buf[at] with p, negative when the record sorts first; with skip the
+// first fields are known equal. A corrupt record sets p.err_code and
+// compares 0.
+record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord, skip: Bool) -> Int Never! {
+    d1 := 0
+    i := 0
+    sz_hdr1 := 0
+    idx1 := 0
+    if skip {
+        s1 := key_byte(buf, at + 1)
+        if s1 < 128 {
+            idx1 = 2
+        } else {
+            v: key_varint(buf, at + 1)
+            s1 = v.value
+            idx1 = 1 + v.len
+        }
+        sz_hdr1 = key_byte(buf, at)
+        d1 = sz_hdr1 + serial_len(s1)
+        i = 1
+    } else {
+        sz_hdr1 = key_byte(buf, at)
+        if sz_hdr1 < 128 {
+            idx1 = 1
+        } else {
+            v: key_varint(buf, at)
+            sz_hdr1 = v.value
+            idx1 = v.len
+        }
+        d1 = sz_hdr1
+    }
+    if d1 > n_key1 {
+        p.err_code = base.CORRUPT
+        return 0
+    }
+    loop {
+        rhs: p.mem[i]
+        rc := 0
+        serial_type := 0
+        if rhs.flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 {
+            serial_type = key_byte(buf, at + idx1)
+            if serial_type >= 10 {
+                rc = if serial_type == 10 -> -1 else -> 1
+            } else if serial_type == 0 {
+                rc = -1
+            } else if serial_type == 7 {
+                rc = 0 - int_float_compare(rhs.i, decode_real(buf, at + d1))
+            } else {
+                rc = compare_ints(decode_int(serial_type, buf, at + d1), rhs.i)
+            }
+        } else if rhs.flags.bit_and(MEM_REAL) != 0 {
+            serial_type = key_byte(buf, at + idx1)
+            if serial_type >= 10 {
+                rc = if serial_type == 10 -> -1 else -> 1
+            } else if serial_type == 0 {
+                rc = -1
+            } else if serial_type == 7 {
+                r: decode_real(buf, at + d1)
+                if r < rhs.r {
+                    rc = -1
+                } else if r > rhs.r {
+                    rc = 1
+                }
+            } else {
+                rc = int_float_compare(decode_int(serial_type, buf, at + d1), rhs.r)
+            }
+        } else if rhs.flags.bit_and(MEM_STR) != 0 {
+            serial_type = key_varint(buf, at + idx1).value
+            if serial_type < 12 {
+                rc = -1
+            } else if serial_type.bit_and(1) == 0 {
+                rc = 1
+            } else {
+                n: (serial_type - 12) /% 2
+                if d1 + n > n_key1 || p.key_info.n_all_field <= i {
+                    p.err_code = base.CORRUPT
+                    return 0
+                }
+                coll: coll_of(p.key_info, i)
+                if coll != COLL_NONE {
+                    mem1: base.mem_text(key_slice(buf, at + d1, n), p.key_info.enc)
+                    rc = compare_mem_string(mem1, rhs, coll)
+                } else {
+                    n_cmp: if n < rhs.z.len() -> n else -> rhs.z.len()
+                    rc = key_memcmp(buf, at + d1, rhs.z, n_cmp)
+                    if rc == 0 -> rc = n - rhs.z.len()
+                }
+            }
+        } else if rhs.flags.bit_and(MEM_BLOB) != 0 {
+            serial_type = key_varint(buf, at + idx1).value
+            if serial_type < 12 || serial_type.bit_and(1) != 0 {
+                rc = -1
+            } else {
+                n: (serial_type - 12) /% 2
+                if d1 + n > n_key1 {
+                    p.err_code = base.CORRUPT
+                    return 0
+                }
+                if rhs.flags.bit_and(MEM_ZERO) != 0 {
+                    if !all_zero(key_slice(buf, at + d1, n)) {
+                        rc = 1
+                    } else {
+                        rc = n - rhs.i
+                    }
+                } else {
+                    n_cmp: if n < rhs.z.len() -> n else -> rhs.z.len()
+                    rc = key_memcmp(buf, at + d1, rhs.z, n_cmp)
+                    if rc == 0 -> rc = n - rhs.z.len()
+                }
+            }
+        } else {
+            serial_type = key_byte(buf, at + idx1)
+            rc = if serial_type != 0 && serial_type != 10 -> 1 else -> 0
+        }
+        if rc != 0 {
+            sort_flags: sort_flags_of(p.key_info, i)
+            if sort_flags != 0 {
+                nulls: if serial_type == 0 || rhs.flags.bit_and(MEM_NULL) != 0 -> 1 else -> 0
+                if sort_flags.bit_and(KEYINFO_ORDER_BIGNULL) == 0 || sort_flags.bit_and(KEYINFO_ORDER_DESC) != nulls -> rc = 0 - rc
+            }
+            return rc
+        }
+        i += 1
+        if i == p.n_field -> break
+        d1 += serial_len(serial_type)
+        if d1 > n_key1 -> break
+        idx1 += varint_len(serial_type)
+        if idx1 >= sz_hdr1 {
+            p.err_code = base.CORRUPT
+            return 0
         }
     }
-    Ok(key.default_rc)
+    p.eq_seen = true
+    p.default_rc
+}
+
+// sqlite3VdbeRecordCompare.
+record_compare: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+    record_compare_with_skip(n_key1, buf, at, p, false)
+}
+
+// vdbeRecordCompareInt: the first field of p is an integer and the
+// record's header size fits in one byte.
+record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+    body: at + key_byte(buf, at).bit_and(63)
+    serial_type: key_byte(buf, at + 1)
+    if serial_type == 0 || serial_type == 7 || serial_type > 9 -> return record_compare(n_key1, buf, at, p)
+    lhs: decode_int(serial_type, buf, body)
+    v: p.u_i
+    if v > lhs -> return p.r1
+    if v < lhs -> return p.r2
+    if p.n_field > 1 -> return record_compare_with_skip(n_key1, buf, at, p, true)
+    p.eq_seen = true
+    p.default_rc
+}
+
+// vdbeRecordCompareString: the first field of p is a text compared BINARY
+// and the record's header size fits in one byte.
+record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+    serial_type := key_byte(buf, at + 1)
+    if serial_type >= 128 {
+        // (signed char)aKey1[1] < 0: the serial type is a longer varint.
+        serial_type = key_varint(buf, at + 1).value
+        if serial_type < 12 -> return p.r1
+    }
+    if serial_type < 12 -> return p.r1
+    if serial_type.bit_and(1) == 0 -> return p.r2
+    sz_hdr: key_byte(buf, at)
+    n_str: (serial_type - 12) /% 2
+    if sz_hdr + n_str > n_key1 {
+        p.err_code = base.CORRUPT
+        return 0
+    }
+    n: p.u_z.len()
+    n_cmp: if n < n_str -> n else -> n_str
+    res := key_memcmp(buf, at + sz_hdr, p.u_z, n_cmp)
+    if res > 0 -> return p.r2
+    if res < 0 -> return p.r1
+    res = n_str - n
+    if res > 0 -> return p.r2
+    if res < 0 -> return p.r1
+    if p.n_field > 1 -> return record_compare_with_skip(n_key1, buf, at, p, true)
+    p.eq_seen = true
+    p.default_rc
+}
+
+// The comparisons sqlite3VdbeFindCompare chooses among.
+COMPARE_GENERIC: 0
+COMPARE_INT: 1
+COMPARE_STRING: 2
+
+// sqlite3VdbeFindCompare: the comparison for p, setting r1, r2 and the
+// cached first value it uses.
+find_compare: fn(p: &UnpackedRecord) -> Int Never! {
+    if p.key_info.n_all_field <= 13 {
+        flags: p.mem[0].flags
+        sf: sort_flags_of(p.key_info, 0)
+        if sf != 0 {
+            if sf.bit_and(KEYINFO_ORDER_BIGNULL) != 0 -> return COMPARE_GENERIC
+            p.r1 = 1
+            p.r2 = -1
+        } else {
+            p.r1 = -1
+            p.r2 = 1
+        }
+        if flags.bit_and(MEM_INT) != 0 {
+            p.u_i = p.mem[0].i
+            return COMPARE_INT
+        }
+        if flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL).bit_or(MEM_NULL).bit_or(MEM_BLOB)) == 0 && coll_of(p.key_info, 0) == COLL_NONE {
+            p.u_z = p.mem[0].z
+            return COMPARE_STRING
+        }
+    }
+    COMPARE_GENERIC
+}
+
+// Run the comparison `kind` find_compare chose.
+compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+    if kind == COMPARE_INT -> return record_compare_int(n_key1, buf, at, p)
+    if kind == COMPARE_STRING -> return record_compare_string(n_key1, buf, at, p)
+    record_compare(n_key1, buf, at, p)
 }
 
 #Test("records round-trip every storage class and integer width") {
@@ -411,4 +725,73 @@ compare_record: fn(rec: [U8], key: SearchKey, info: KeyInfo) -> Int SQLError! {
     le_a: base.mem_text(util.translate("Ab".bytes(), base.UTF8, base.UTF16LE), base.UTF16LE)
     le_b: base.mem_text(util.translate("aB".bytes(), base.UTF8, base.UTF16LE), base.UTF16LE)
     assert(mem_compare(le_a, le_b, COLL_NOCASE) == 0 && mem_compare(le_a, le_b, COLL_BINARY) < 0)
+}
+
+#Test("record comparisons follow sqlite3VdbeRecordCompare and its fast paths") {
+    vals := [Mem]{base.mem_int(5), base.mem_text("abc".bytes(), base.UTF8), base.mem_int(1)}
+    rec: make_record(vals, 4)
+    n: rec.len()
+    asc: KeyInfo{enc: base.UTF8, n_key_field: 2, n_all_field: 3, sort_flags: [Int]{0, 0, 0}, colls: [Int]{COLL_NONE, COLL_NONE, COLL_NONE}}
+    // A record unpacked compares equal to itself.
+    p := unpacked_record_alloc(asc)
+    record_unpack(asc, n, rec, p)
+    assert_eq(p.n_field, 3)
+    assert_eq(record_compare(n, rec, 0, p), 0)
+    assert(p.eq_seen)
+    // The integer fast path agrees with the general comparison.
+    p.n_field = 1
+    p.mem[0] = base.mem_int(4)
+    k_int: find_compare(p)
+    assert_eq(k_int, COMPARE_INT)
+    assert(compare_by(k_int, n, rec, 0, p) > 0 && record_compare(n, rec, 0, p) > 0)
+    p.mem[0] = base.mem_int(6)
+    k_int6: find_compare(p)
+    assert(compare_by(k_int6, n, rec, 0, p) < 0 && record_compare(n, rec, 0, p) < 0)
+    // An equal prefix answers default_rc.
+    p.mem[0] = base.mem_int(5)
+    p.default_rc = -1
+    k_eq: find_compare(p)
+    assert_eq(compare_by(k_eq, n, rec, 0, p), -1)
+    p.default_rc = 0
+    // A NULL key sorts before every value.
+    p.mem[0] = base.mem_null()
+    assert(record_compare(n, rec, 0, p) > 0)
+    // DESC inverts the order; BIGNULL takes the general comparison.
+    desc: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 1, sort_flags: [Int]{KEYINFO_ORDER_DESC}, colls: [Int]{COLL_NONE}}
+    d := unpacked_record_alloc(desc)
+    d.n_field = 1
+    d.mem[0] = base.mem_int(4)
+    k_desc: find_compare(d)
+    assert_eq(k_desc, COMPARE_INT)
+    assert(compare_by(k_desc, n, rec, 0, d) < 0 && record_compare(n, rec, 0, d) < 0)
+    big: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 1, sort_flags: [Int]{KEYINFO_ORDER_BIGNULL}, colls: [Int]{COLL_NONE}}
+    g := unpacked_record_alloc(big)
+    g.n_field = 1
+    g.mem[0] = base.mem_null()
+    assert_eq(find_compare(g), COMPARE_GENERIC)
+    assert(record_compare(n, rec, 0, g) < 0)
+    // The string fast path, on a record whose first field is text.
+    svals := [Mem]{base.mem_text("abc".bytes(), base.UTF8), base.mem_int(7)}
+    srec: make_record(svals, 4)
+    sn: srec.len()
+    s := unpacked_record_alloc(asc)
+    s.n_field = 1
+    s.mem[0] = base.mem_text("abd".bytes(), base.UTF8)
+    k_str: find_compare(s)
+    assert_eq(k_str, COMPARE_STRING)
+    assert(compare_by(k_str, sn, srec, 0, s) < 0 && record_compare(sn, srec, 0, s) < 0)
+    s.mem[0] = base.mem_text("ab".bytes(), base.UTF8)
+    k_short: find_compare(s)
+    assert(compare_by(k_short, sn, srec, 0, s) > 0 && record_compare(sn, srec, 0, s) > 0)
+    // A text key sorts after the integer of the first record.
+    s.mem[0] = base.mem_text("abc".bytes(), base.UTF8)
+    k_txt: find_compare(s)
+    assert(compare_by(k_txt, n, rec, 0, s) < 0)
+    // A NOCASE column compares through the general path.
+    nocase: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 2, sort_flags: [Int]{0, 0}, colls: [Int]{COLL_NOCASE, COLL_NONE}}
+    c := unpacked_record_alloc(nocase)
+    c.n_field = 1
+    c.mem[0] = base.mem_text("ABC".bytes(), base.UTF8)
+    assert_eq(find_compare(c), COMPARE_GENERIC)
+    assert_eq(record_compare(sn, srec, 0, c), 0)
 }

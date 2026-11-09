@@ -116,12 +116,10 @@ OE_SET_DFLT: 9
 OE_CASCADE: 10
 OE_DEFAULT: 11
 
-// Sort orders (sqliteInt.h SQLITE_SO_*) and KeyInfo.aSortFlags bits.
+// Sort orders (sqliteInt.h SQLITE_SO_*).
 SO_ASC: 0
 SO_DESC: 1
 SO_UNDEFINED: -1
-KEYINFO_ORDER_DESC: 1
-KEYINFO_ORDER_BIGNULL: 2
 
 // ExprList_item.fg.eEName (sqliteInt.h ENAME_*).
 ENAME_NAME: 0
@@ -1030,7 +1028,7 @@ expr_list_set_sort_order: fn(a: &AST, list: Int, order0: Int, nulls: Int) Never!
     a.lists[list].items[i].sort_flags = order
     if nulls != SO_UNDEFINED {
         a.lists[list].items[i].nulls = true
-        if order != nulls -> a.lists[list].items[i].sort_flags = order.bit_or(KEYINFO_ORDER_BIGNULL)
+        if order != nulls -> a.lists[list].items[i].sort_flags = order.bit_or(base.KEYINFO_ORDER_BIGNULL)
     }
 }
 
