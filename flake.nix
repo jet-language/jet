@@ -117,6 +117,7 @@
 
         # `jet` / `jetpack` in the dev shell: run the admitted native binaries
         # named by $JET / $JETPACK from anywhere, with the runtime tools on PATH.
+        # Without $JET, `jet` runs the installed release that `jet-use` picked.
         mkJetDevBin =
           name: variable:
           pkgs.writeShellScriptBin name ''
@@ -125,8 +126,17 @@
             export PATH="${jetRuntimePath}:$PATH"
             ${jetRustHelperHook}
             ${jetRuntimeLibraryHook}
+            if [ -z "$bin" ] && [ "${name}" = jet ]; then
+              release="$(readlink -f "''${JET_SEEDS:-$HOME/.local/share/jet-seeds}/current" 2>/dev/null || true)"
+              if [ -n "$release" ] && [ -x "$release/jet" ] && [ -f "$release/IDENTITY" ]; then
+                bin="$release/jet"
+                JET_COMPILER_IDENTITY="$(cat "$release/IDENTITY")"
+                export JET_COMPILER_IDENTITY
+                ulimit -s unlimited 2>/dev/null || ulimit -s 1048576 2>/dev/null || true
+              fi
+            fi
             if [ -z "$bin" ] || [ ! -x "$bin" ]; then
-              echo "${name}: ${variable} must name the admitted native ${name} binary" >&2
+              echo "${name}: set ${variable} to the admitted native ${name} binary, or install a release with jet-use" >&2
               exit 1
             fi
             exec "$bin" "$@"
