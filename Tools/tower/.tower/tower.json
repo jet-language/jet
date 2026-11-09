@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6748,
-    "rev": 96613,
+    "nextNum": 6749,
+    "rev": 96620,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100045,6 +100045,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Owner rulings 2026-11-09 on licenses: (1) The Jet translation of mbedtls is a derivative of Apache-2.0 code. Keep it for now under Apache-2.0, with its headers and mbedtls's NOTICE; later the crypto and TLS get rewritten from scratch, keeping the same module boundaries, so they can be MIT. (2) Test vectors: commit only public-domain NIST CAVP vectors. Fetch Wycheproof at test time, pinned by SHA-256. No Apache-2.0 vector files go in the repository."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Batch b6d landed on dev (0073f4fc47): TlsLead-5r 6bbde9ccfc (AES in every mode, CMAC, KW/KWP, GCM, CCM, ChaCha20-Poly1305; all applicable mbedtls 3.6.7 and Wycheproof vectors pass; bitsliced AES and carry-less GHASH) and 7r 449b255bc5 (bignum, 9090/0 mbedtls vectors). c2 and c4 are partial; 9r2 to 17 are in b7."
         },
         {
@@ -100114,6 +100119,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T15:47:19.685Z"
+        },
+        {
+          "n": 8,
+          "text": "Every file translated from mbedtls carries an SPDX Apache-2.0 header naming its mbedtls origin, the repository carries mbedtls's license and NOTICE text beside them, and a guard refuses a translated file without the header (owner license ruling).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:49:45.563Z"
+        },
+        {
+          "n": 9,
+          "text": "Vector sources follow the owner ruling: committed vectors are public-domain NIST CAVP only; Wycheproof is fetched at test time, pinned by SHA-256 and cached outside the repository; no Apache-2.0 vector file is in the repository.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:49:46.496Z"
         }
       ],
       "refs": [],
@@ -100128,9 +100151,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-09T15:59:11.496Z",
+      "updated": "2026-11-09T16:49:46.496Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 9
     },
     {
       "id": "c0ajhpeh",
@@ -102560,6 +102583,56 @@
       "updated": "2026-11-09T16:04:14.978Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0miof6j",
+      "num": 6748,
+      "title": "MIT crypto and TLS: rewrite core.crypto and core.net.tls from the specifications, with the same module boundaries, replacing the Apache-2.0 mbedtls translation",
+      "body": "Owner ruling 2026-11-09: keep the mbedtls translation (#6694) for now, then rewrite it from scratch, preserving the module boundaries, so that it can be MIT. Work from the RFCs, FIPS and SP 800 documents, never from mbedtls or another non-MIT source. Starts after G1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:50:00.823Z"
+        },
+        {
+          "n": 2,
+          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:50:01.672Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T16:49:47.742Z",
+      "updated": "2026-11-09T16:50:01.672Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -191085,6 +191158,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:50:01.672Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0miof6j",
+      "note": "#2 The rewrite passes the same vectors (NIST CAVP plus the fetc"
+    },
+    {
+      "at": "2026-11-09T16:50:00.823Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0miof6j",
+      "note": "#1 core.crypto and core.net.tls contain no file derived from mb"
+    },
+    {
+      "at": "2026-11-09T16:49:59.987Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T16:49:47.742Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0miof6j",
+      "note": "MIT crypto and TLS: rewrite core.crypto and core.net.tls from the specifications, with the same module boundaries, replacing the Apache-2.0 mbedtls translation"
+    },
+    {
+      "at": "2026-11-09T16:49:46.497Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bnp1zw",
+      "note": "#9 Vector sources follow the owner ruling: committed vectors ar"
+    },
+    {
+      "at": "2026-11-09T16:49:45.563Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bnp1zw",
+      "note": "#8 Every file translated from mbedtls carries an SPDX Apache-2."
+    },
+    {
+      "at": "2026-11-09T16:49:44.637Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T16:45:08.863Z",
       "by": "Main",
