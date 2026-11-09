@@ -180,7 +180,7 @@ cli_test_image_index: fn(project: String) -[FS, Env, Exec, Time.Wait]> String {
     out: cli_test_image_jetpack(project, [String]{"image", "server", "--push", "http://127.0.0.1:9/demo/server:1"}).env("PATH", empty_path).run() ?? panic("run jetpack image --push")
     assert_eq(out.code, 2)
     assert(out.errors.contains("OCI registry adapter could not start"), out.errors)
-    assert(out.errors.contains("couldn't publish image"), out.errors)
+    assert(out.errors.contains("Couldn't publish image"), out.errors)
     files.remove_all(project).drop("scratch cleanup is best-effort")
     files.remove_all(empty_path).drop("scratch cleanup is best-effort")
 }

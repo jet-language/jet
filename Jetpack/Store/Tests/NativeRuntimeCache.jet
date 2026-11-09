@@ -35,10 +35,10 @@ StoreRuntimeTestVariant: struct {
 // The runtime and Core blocks reference each other, so the split puts both
 // into the one `jet_runtime` crate and the program imports only that crate.
 #Test("native runtime split puts runtime and core into one crate") {
-    generated: "#![allow(warnings)]\n{STORE_RUNTIME_BEGIN}runtime_item: fn() {{ core_item() }}\n{STORE_RUNTIME_END}{STORE_RUNTIME_CORE_BEGIN}core_item: fn() {{}}\n{STORE_RUNTIME_CORE_END}main: fn() {{ runtime_item() }}\n"
+    generated: "#![allow(warnings)]\n{STORE_RUNTIME_BEGIN}fn runtime_item() {{ core_item() }}\n{STORE_RUNTIME_END}{STORE_RUNTIME_CORE_BEGIN}fn core_item() {{}}\n{STORE_RUNTIME_CORE_END}fn main() {{ runtime_item() }}\n"
     found: store_runtime_split_generated(generated) ? parsed -> parsed ! error -> panic("valid runtime markers")
     split: found ?? panic("a marked program splits")
-    assert_eq(split.runtime, "runtime_item: fn() {{ core_item() }}\ncore_item: fn() {{}}\n")
+    assert_eq(split.runtime, "fn runtime_item() {{ core_item() }}\nfn core_item() {{}}\n")
     assert_eq(split.program, "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\nfn main() {{ runtime_item() }}\n")
 }
 

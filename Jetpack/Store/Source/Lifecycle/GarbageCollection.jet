@@ -85,14 +85,14 @@ store_clean_locks: fn(roots: HangarRoots) -[FS, Env, Time]> CleanLocks StoreErro
 store_live_roots_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
     cwd: files.cwd()
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
-    store_live_roots_from_graph(verification, roots, cwd, graph)
+    store_live_roots_from_graph(roots, cwd, graph)
 }
 
 // Rust `live_roots_from_graph`: lock and lifecycle roots expanded through
 // the closure graph.
-store_live_roots_from_graph: fn(verification: &StoreVerification, roots: HangarRoots, start: String, graph: ClosureGraph) -[FS, Env, Time]> LiveRoots StoreError! {
+store_live_roots_from_graph: fn(roots: HangarRoots, start: String, graph: ClosureGraph) -[FS, Env, Time]> LiveRoots StoreError! {
     live := store_lock_roots_from(start)
-    lifecycle: store_lifecycle_protected_targets_unlocked(verification, roots)
+    lifecycle: store_lifecycle_protected_targets_unlocked(roots, graph)
     targets := live.output_hashes
     record_ids := graph.records.keys().to_list()
     record_ids.sort()
@@ -418,7 +418,7 @@ store_clean_plan_unlocked: fn(verification: &StoreVerification, roots: HangarRoo
     loop object in malformed -> store_gc_add(retired, object.id)
     graph: if retired.len() == 0 -> store_lifecycle_closure_graph_unlocked(verification, roots) else -> store_lifecycle_closure_graph_unlocked_ignoring(verification, roots, retired)
     cwd: files.cwd()
-    live: store_live_roots_from_graph(verification, roots, cwd, graph)
+    live: store_live_roots_from_graph(roots, cwd, graph)
     report := store_gc_sweep_scratch(store, false)
     report.quarantined_objects = malformed.len()
     now: store_now_secs()
@@ -463,7 +463,7 @@ store_clean_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -
     quarantined: store_quarantine_malformed_objects(verification, roots, malformed)
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     cwd: files.cwd()
-    live: store_live_roots_from_graph(verification, roots, cwd, graph)
+    live: store_live_roots_from_graph(roots, cwd, graph)
     report := store_gc_sweep_scratch(store, true)
     report.quarantined_objects = quarantined
     now: store_now_secs()
