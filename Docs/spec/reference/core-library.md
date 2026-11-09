@@ -2999,6 +2999,7 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B); ambiguous scalars are narrow. |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
+| `text.is_blank(value)` / `is_graphic(value)` / `is_punctuation(value)` | `Bool` | Unicode forms of C `iswblank`, `iswgraph` and `iswpunct`: every scalar is a tab or a space separator (Zs); every scalar is visible (not whitespace, a control or a separator); every scalar is graphic and neither a letter, a digit, a combining mark nor a format character, so symbols such as `$` and `€` count. Empty text is false. |
 | `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
@@ -3480,6 +3481,7 @@ rules; the caller's resolved package edition selects the policy.
 | `base64.encode_url(bytes)` / `decode_url(text)` | `String` / `[U8] !Base64Error` | Encode or decode URL-safe unpadded base64. |
 | `base64.b64encode` / `b64decode` / `standard_b64encode` / `standard_b64decode` | varies | Compatibility aliases for standard operations. |
 | `base64.encodebytes` / `decodebytes` / `b2a_base64` / `a2b_base64` | varies | Byte-wrapped or line-wrapped base64 forms. |
+| `base64.l64a(value: Int) -> String !Base64Error` / `a64l(text: String) -> Int !Base64Error` | text / integer | POSIX radix-64 text of a 32-bit value (C `l64a` and `a64l`): at most six characters from `./0-9A-Za-z`, least significant digit first, and 0 is empty text. A value outside 0 through 4294967295, a seventh character or a character outside the alphabet is an error. |
 
 ### `core.encoding.binary` — checked binary packing
 
@@ -3507,6 +3509,7 @@ portable grammar. The source is
 | `unpack(fmt: String, data: [U8]) -> [Int] !BinaryError` | values | Decode one record and reject short or malformed input. |
 | `iter_unpack(fmt: String, data: [U8]) -> [[Int]] !BinaryError` | rows | Decode repeated records. |
 | `sign_extend(n: Int, bits: Int) -> Int` | integer | Sign-extend a fixed-width integer. |
+| `byteswap(data: [U8], width: Int) -> [U8] !BinaryError` | bytes | Reverse the byte order of each `width`-byte item; width 2 is C `swab`. A width other than 2, 4 or 8 is `Range`; a length that is not a multiple of the width is `Buffer`. |
 
 `BinaryError` distinguishes range, format, value, and buffer failures. Use the
 consuming `Reader` for a cursor over an existing byte buffer; use this module
@@ -4538,6 +4541,7 @@ including for empty text. This is a separate operation from the module function
 | `capitalize(text)`, `title(text)`, `capwords(text)`, `swapcase(text)` | text | Apply case transformations. |
 | `lower(text)`, `upper(text)` | text | Apply ASCII case conversion. |
 | `is_digit(text)`, `is_alnum(text)`, `is_space(text)` | Boolean | Test text categories. |
+| `is_blank(text)`, `is_graphic(text)`, `is_punctuation(text)`, `is_hex_digit(text)` | Boolean | ASCII forms of C `isblank`, `isgraph`, `ispunct` and `isxdigit`: space or tab; `!` through `~`; visible and neither a letter nor a digit; `0-9`, `a-f`, `A-F`. Empty text is false. |
 | `is_lower(text)`, `is_upper(text)`, `is_title(text)`, `is_ascii(text)` | Boolean | Test ASCII case or character properties. |
 | `is_identifier(text: String) -> Bool` | Boolean | Test an ASCII identifier spelling. |
 | `find_from(text, needle, start)`, `rfind_from(text, needle, end)` | index | Search from a byte position. |

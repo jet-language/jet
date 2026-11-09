@@ -488,6 +488,52 @@ is_space: fn(text: String) -> Bool Never! {
     true
 }
 
+/// Every byte is an ASCII space or tab, as C `isblank`. Empty text is false.
+is_blank: fn(text: String) -> Bool Never! {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n: b
+        if n != 32 && n != 9 -> return false
+    }
+    true
+}
+
+/// Every byte is visible ASCII, `!` through `~`, as C `isgraph`. Empty text is false.
+is_graphic: fn(text: String) -> Bool Never! {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n: b
+        if n < 33 || n > 126 -> return false
+    }
+    true
+}
+
+/// Every byte is visible ASCII that is neither a letter nor a digit, as C
+/// `ispunct`: symbols such as `$`, `+` and `~` count. Empty text is false.
+is_punctuation: fn(text: String) -> Bool Never! {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n: b
+        if n < 33 || n > 126 -> return false
+        if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> return false
+    }
+    true
+}
+
+/// Every byte is a hexadecimal digit, `0-9`, `a-f` or `A-F`, as C `isxdigit`.
+/// Empty text is false.
+is_hex_digit: fn(text: String) -> Bool Never! {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n: b
+        digit: n >= 48 && n <= 57
+        lower: n >= 97 && n <= 102
+        upper: n >= 65 && n <= 70
+        if !digit && !lower && !upper -> return false
+    }
+    true
+}
+
 is_lower: fn(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {

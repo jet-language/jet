@@ -1,0 +1,32 @@
+// Character classes: core.text.parse tests ASCII as C's ctype.h does in the C
+// locale, and core.text tests Unicode scalars as wctype.h does. Every test
+// asks whether all of the text is in the class, so empty text is false.
+use {
+    text: core.text
+    parse: core.text.parse
+}
+
+// A class is a function value; C names one with a wctype_t instead.
+count_in: fn(words: [String], class: fn(String) -> Bool) -> Int {
+    count := 0
+    loop word in words {
+        if class(word) -> count += 1
+    }
+    count
+}
+
+run: fn() {
+    print("ASCII blank: {parse.is_blank(" \t")} {parse.is_blank(" \n")}")
+    print("ASCII graphic: {parse.is_graphic("a!~")} {parse.is_graphic("a b")}")
+    print("ASCII punctuation: {parse.is_punctuation("$+~")} {parse.is_punctuation("a!")}")
+    print("ASCII hex digit: {parse.is_hex_digit("0fA9")} {parse.is_hex_digit("0x1f")}")
+    // U+3000 IDEOGRAPHIC SPACE is a space separator (Zs); a newline is not blank.
+    print("Unicode blank: {text.is_blank("\t　")} {text.is_blank("\n")}")
+    print("Unicode graphic: {text.is_graphic("é€!")} {text.is_graphic("é €")}")
+    // Symbols count as punctuation, as in C; letters, digits and marks do not.
+    print("Unicode punctuation: {text.is_punctuation("«€»!")} {text.is_punctuation("é!")}")
+    print("empty: {parse.is_blank("")} {text.is_graphic("")}")
+    words: [String]{"jet", "€", "42", "«»", "naïve"}
+    print("alphabetic words: {count_in(words, word -> text.is_alphabetic(word))}")
+    print("punctuation words: {count_in(words, word -> text.is_punctuation(word))}")
+}

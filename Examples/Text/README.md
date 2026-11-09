@@ -8,6 +8,7 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 
 - [ASCIICase](ASCIICase.jet) — ASCII case conversion preserves non-ASCII characters.
 - [ByteLiterals](ByteLiterals.jet) — Byte text uses the existing `[U8]{"…"}` typed literal.
+- [CharacterClasses](CharacterClasses.jet) — Blank, graphic, punctuation and hex-digit tests: ASCII in `core.text.parse`, Unicode in `core.text`; a class is a function value.
 - [CharsValue](CharsValue.jet) — `text.chars()` used as a value is a `[Char]` of the string's characters, one per Unicode scalar value, not per byte.
 - [CutLast](CutLast.jet) — Terminal-boundary string splitting, paired with the existing first-boundary `split_once` operation.
 - [FormatSelectors](FormatSelectors.jet)

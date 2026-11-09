@@ -1,0 +1,24 @@
+// Two small byte codes from C: byteswap reverses the byte order of each
+// fixed-width item (width 2 is C's `swab`), and l64a/a64l write a 32-bit value
+// as POSIX radix-64 text. Both reject input C would silently truncate.
+use {
+    binary: core.encoding.binary
+    base64: core.encoding.base64
+}
+
+run: fn() {
+    // Two big-endian 16-bit samples, 0x0102 and 0x0304, read as little endian.
+    print(binary.byteswap([U8]{1, 2, 3, 4}, 2) ?? [U8]{})
+    print(binary.byteswap([U8]{1, 2, 3, 4, 5, 6, 7, 8}, 4) ?? [U8]{})
+    print("odd length is Buffer: {binary.byteswap([U8]{1, 2, 3}, 2) == .Err(.Buffer)}")
+    print("width 3 is Range: {binary.byteswap([U8]{1, 2, 3}, 3) == .Err(.Range)}")
+
+    loop value in [0, 1, 64, 12345, 4294967295] {
+        text: base64.l64a(value) ?? "?"
+        back: base64.a64l(text) ?? -1
+        print("{value} -> \"{text}\" -> {back}")
+    }
+    if base64.l64a(4294967296) == .Err(err) -> print("{err}")
+    if base64.a64l("zzzzzz") == .Err(err) -> print("{err}")
+    if base64.a64l("a!") == .Err(err) -> print("{err}")
+}
