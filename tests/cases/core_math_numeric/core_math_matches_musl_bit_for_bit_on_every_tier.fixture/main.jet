@@ -1,8 +1,9 @@
 // Every corpus row is a call of one core.math function: its argument words,
 // then musl 1.2.5's result words, as hex binary64 bits (an Int argument or
-// result is a two's-complement word). The program prints one line per
-// function with the rows it checked and how many results differ from musl's
-// bits, plus the first differing rows.
+// result is a two's-complement word). A row after a `#mpfr` line is where
+// musl is not correctly rounded: its comment gives musl's word, and the row
+// holds MPFR's. The program prints one line per function with the rows it
+// checked and how many results differ, plus the first differing rows.
 use {
     math: core.math
 }
@@ -119,14 +120,27 @@ nan_bits_are_exact: fn() -> Bool {
     math.to_bits(infinity - infinity) == -2251799813685248
 }
 
+// Whether the comment line at `at` is `#mpfr`.
+marks_mpfr: fn(raw: [U8], at: Int) -> Bool {
+    mark: "#mpfr\n".bytes()
+    if at + mark.len() > raw.len() -> return false
+    loop i in 0..<mark.len() {
+        if raw[at + i] != mark[i] -> return false
+    }
+    true
+}
+
 check: fn(name: String, corpus: String, exact_nan: Bool) {
     raw: corpus.bytes()
     at := 0
     rows := 0
     wrong := 0
+    against_mpfr := 0
+    mpfr := false
     count: arity(name)
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
+            if marks_mpfr(raw, at) -> mpfr = true
             loop raw[at] != (U8{10}) -> at = at + 1
             at = at + 1
             next
@@ -145,6 +159,9 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
         }
         got: evaluate(name, arguments)
         rows = rows + 1
+        source: if mpfr -> "mpfr" else -> "musl"
+        if mpfr -> against_mpfr = against_mpfr + 1
+        mpfr = false
         same := got.len() == want.len()
         loop i in 0..<want.len() {
             if same && got[i] != want[i] && (exact_nan || !is_nan_word(got[i]) || !is_nan_word(want[i])) -> same = false
@@ -158,11 +175,15 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
                 loop word in got -> gotten.push(hex_word(word))
                 wanted := [String]{}
                 loop word in want -> wanted.push(hex_word(word))
-                print("{name}({shown.join(", ")}) = {gotten.join(" ")}, musl {wanted.join(" ")}")
+                print("{name}({shown.join(", ")}) = {gotten.join(" ")}, {source} {wanted.join(" ")}")
             }
         }
     }
-    print("{name}: {rows} rows, {wrong} differ from musl")
+    if against_mpfr > 0 {
+        print("{name}: {rows} rows, {wrong} differ from musl, or from MPFR on the {against_mpfr} where musl is not correctly rounded")
+    } else {
+        print("{name}: {rows} rows, {wrong} differ from musl")
+    }
 }
 
 run: fn() {

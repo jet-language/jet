@@ -1,7 +1,9 @@
 # The runtime computes core.math with musl 1.2.5's algorithms in Jet: every
 # corpus row (special values, signed zeros, infinities, NaNs, subnormals,
 # libc-test vectors and seeded random inputs) returns musl's exact result
-# bits on O0, O1, O2 and the web build.
+# bits on O0, O1, O2 and the web build, except where musl is not correctly
+# rounded: the 3 fma rows of musl's signed-zero defect (a negative product
+# that rounds to zero plus +0 is -0 in IEEE 754, +0 in musl) give MPFR's -0.
 fixture: core_math_matches_musl_bit_for_bit_on_every_tier.fixture
 env: NO_COLOR=1
 step o0: jet run -O0 main.jet

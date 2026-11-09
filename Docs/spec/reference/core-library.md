@@ -2659,7 +2659,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
 | `math.degrees(x)` / `math.radians(x)` | `Float` | Convert between degrees and radians. |
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
-| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once, the same bits on every tier. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
+| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once (IEEE 754 `fusedMultiplyAdd`), the same bits on every tier. A nonzero exact result that rounds to zero keeps its sign, so `fma(2^-1074, -0.5, 0.0)` is `-0.0`, where musl's C fma gives `+0.0`. Native x86-64 code runs one `vfmadd213sd` when the CPU has FMA3 (probed at a module's first fma) and the soft fma otherwise, with the same bits either way. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |

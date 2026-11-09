@@ -623,6 +623,49 @@ x64_ucomisd: fn(code: &[U8], left: Int, right: Int) Never! { x64_sse(code, 0x66,
 // ucomiss left, right (0F 2E /r): the single-precision ucomisd.
 x64_ucomiss: fn(code: &[U8], left: Int, right: Int) Never! { x64_sse(code, 0, false, 0x2e, left, right) }
 
+// The three-byte VEX prefix (C4) of a 128-bit 66 0F 38 opcode: `reg` and
+// `rm` are ModRM.reg and ModRM.rm (or its base), extended by ~R and ~B,
+// `source` is the extra source register in ~vvvv, and `wide` sets VEX.W.
+x64_vex_66_0f38: fn(code: &[U8], wide: Bool, reg: Int, source: Int, rm: Int) Never! {
+    x64_byte(code, 0xc4)
+    // ~X is always 1: no index register.
+    first := 0x42
+    if reg < 8 -> first = first.bit_or(0x80)
+    if rm < 8 -> first = first.bit_or(0x20)
+    x64_byte(code, first)
+    second := (((15 - source) << 3)).bit_or(1)
+    if wide -> second = second.bit_or(0x80)
+    x64_byte(code, second)
+}
+
+// vfmadd213sd dst, source, rm (VEX.LIG.66.0F38.W1 A9 /r): dst = source * dst
+// + rm rounded once (FMA3).
+x64_vfmadd213sd: fn(code: &[U8], dst: Int, source: Int, rm: Int) Never! {
+    x64_vex_66_0f38(code, true, dst, source, rm)
+    x64_byte(code, 0xa9)
+    x64_modrm_reg(code, dst, rm)
+}
+
+// The same with the addend at [base + disp].
+x64_vfmadd213sd_mem: fn(code: &[U8], dst: Int, source: Int, base: Int, disp: Int) Never! {
+    x64_vex_66_0f38(code, true, dst, source, base)
+    x64_byte(code, 0xa9)
+    x64_modrm_mem(code, dst, base, disp)
+}
+
+// cpuid (0F A2): leaf eax, subleaf ecx into eax, ebx, ecx, edx.
+x64_cpuid: fn(code: &[U8]) Never! {
+    x64_byte(code, 0x0f)
+    x64_byte(code, 0xa2)
+}
+
+// xgetbv (0F 01 D0): extended control register ecx into edx:eax.
+x64_xgetbv: fn(code: &[U8]) Never! {
+    x64_byte(code, 0x0f)
+    x64_byte(code, 0x01)
+    x64_byte(code, 0xd0)
+}
+
 // cvtsi2sd xmm, r64 (F2 REX.W 0F 2A /r)
 x64_cvtsi2sd: fn(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(code, 0xf2, true, 0x2a, xmm, src) }
 

@@ -262,8 +262,9 @@ libm_fma_significand: fn(x: Float) -> I64 {
     ix.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT) << I64{1}
 }
 
-// fma.c: the generic C fma, which x86_64 musl uses without __FMA__. The
-// 128-bit product is fma.c mul(); both significands are below 2^54.
+// fma.c: the generic C fma, which x86_64 musl uses without __FMA__, except
+// for a zero z. The 128-bit product is fma.c mul(); both significands are
+// below 2^54.
 libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     // ZEROINFNAN = 0x7ff-0x3ff-52-1
     zero_inf_nan: I64{971}
@@ -277,7 +278,11 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
         return product + z
     }
     if (ze >= zero_inf_nan) {
-        if (ze > zero_inf_nan) -> return x * y + z
+        // A zero z leaves the exact product, rounded once, with its own sign
+        // when it underflows to zero: fma(2^-1074, -0.5, +0) is -0 (IEEE 754
+        // fusedMultiplyAdd, MPFR, FMA3). musl's x * y + z rounds that product
+        // to -0 and then gives -0 + +0 = +0.
+        if (ze > zero_inf_nan) -> return x * y
         return z
     }
     xm: libm_fma_significand(x)

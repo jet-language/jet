@@ -34,6 +34,9 @@ IRX64Tables: struct {
     file_rows: [String:Int]
     debug_types: [X64DebugType]
     type_debug: [Int]
+    // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
+    // ir_x64_fma), -1 when no function calls jet_std_math_fma.
+    fma: Int
 }
 
 // The module moves in and comes back in `program`, so the object writer
@@ -141,7 +144,7 @@ ir_x64_debug_type: fn(ty: IRType) -> X64DebugType Never! {
 }
 
 ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}, fma: -1}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words; a text row is bytes.
         align: if m.data_relocs.get(row) != None -> 8 else -> 1
@@ -164,6 +167,11 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
             if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
                 _ := ir_x64_add_text(tables, m.names[f.a[at]])
                 ir_x64_static_int(tables, m.names[f.a[at]])
+            }
+            if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {
+                tables.fma = tables.data.len()
+                tables.lengths.push(1)
+                tables.data.push(X64Data{id: X64DataID{value: tables.fma}, bytes: [U8]{U8{0}}, align: 1, relocs: [X64DataReloc]{}})
             }
         }
     }

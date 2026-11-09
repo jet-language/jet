@@ -51,6 +51,7 @@ use {
         X64_R8,
         X64_R9,
         X64_RAX,
+        X64_RBX,
         X64_RBP,
         X64_RCX,
         X64_RDI,
@@ -71,6 +72,7 @@ use {
         x64_call_rel32,
         x64_cmov_rr,
         x64_cond_invert,
+        x64_cpuid,
         x64_cqo,
         x64_cvtsd2ss,
         x64_cvtsi2sd,
@@ -128,6 +130,9 @@ use {
         x64_ud2,
         x64_vector_load,
         x64_vector_store,
+        x64_vfmadd213sd,
+        x64_vfmadd213sd_mem,
+        x64_xgetbv,
     ]
 }
 
@@ -153,6 +158,11 @@ IRX64ColdKind: enum {
     // jet_rt_block_release(left): its Bool compared with 1, so a fused
     // branch reads E as true, and into `dst`, then back.
     Release
+    // fma (ir_x64_fma) with r11 holding its cell's byte: when 0, the CPU
+    // probe written to the cell (data row `text`), then back to the hot
+    // path's start (offset `right`); else the runtime call of CallRuntime
+    // instruction `left`, then back to `resume`.
+    Fma
 }
 
 IRX64Cold: struct {
@@ -941,6 +951,37 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
                 ir_x64_jump_to(e, cold.resume)
             }
+            .Fma -> {
+                x64_test_rr(e.code, X64_R11, X64_R11)
+                soft: x64_jcc_rel32(e.code, X64Cond.NE)
+                // cpuid leaf 1 clobbers rbx, a slot register.
+                x64_push(e.code, X64_RBX)
+                x64_mov_ri(e.code, X64_RAX, 1)
+                x64_mov_ri(e.code, X64_RCX, 0)
+                x64_cpuid(e.code)
+                x64_pop(e.code, X64_RBX)
+                x64_mov_ri(e.code, X64_R11, 2)
+                // ecx: FMA (bit 12), OSXSAVE (27) and AVX (28), and only
+                // with OSXSAVE may xgetbv run.
+                x64_alu_ri(e.code, X64Alu.And, X64_RCX, 0x18001000)
+                x64_alu_ri(e.code, X64Alu.Cmp, X64_RCX, 0x18001000)
+                without := [Int]{x64_jcc_rel32(e.code, X64Cond.NE)}
+                // XCR0: the OS saves the SSE (bit 1) and AVX (bit 2) state.
+                x64_mov_ri(e.code, X64_RCX, 0)
+                x64_xgetbv(e.code)
+                x64_alu_ri(e.code, X64Alu.And, X64_RAX, 6)
+                x64_alu_ri(e.code, X64Alu.Cmp, X64_RAX, 6)
+                without.push(x64_jcc_rel32(e.code, X64Cond.NE))
+                x64_mov_ri(e.code, X64_R11, 1)
+                loop site in without -> ir_x64_land(e, site)
+                ir_x64_lea_data(e, X64_RAX, cold.text)
+                x64_store_u8(e.code, X64_RAX, 0, X64_R11)
+                ir_x64_jump_to(e, cold.right)
+                ir_x64_land(e, soft)
+                at: cold.left
+                ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
+                ir_x64_jump_to(e, cold.resume)
+            }
         }
     }
 }
@@ -1199,6 +1240,49 @@ ir_x64_checked_fixed: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
     cold.resume = e.code.len()
     cold.symbol = symbol
     cold.left = at
+    e.colds.push(cold)
+    true
+}
+
+// fma(a, b, c) of Floats (jet_std_math_fma) rounded once: one vfmadd213sd
+// when the CPU has FMA3, else the runtime's soft fma (Libm.jet libm_fma),
+// with the same bits either way. The module's cell (IRX64Tables.fma) caches
+// the probe the first call makes: 0 not yet, 1 FMA3, 2 none (threads that
+// race to probe store the same byte). A NaN result takes the runtime call
+// too: Core keeps NaN payloads observable (math.to_bits, get_payload), and
+// the soft fma's choice of NaN (a's, else b's, else inf * 0's, else c's) is
+// not the hardware's. The x86-64 baseline stays SSE2: no FMA3 instruction
+// runs without the probe. False when the call is not of that shape.
+ir_x64_fma: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int) -> Bool Never! {
+    dst: f.dst[at]
+    if f.c[at] != 3 || dst < 0 || tables.fma < 0 || ir_x64_type(m, f, dst).kind != .Float -> return false
+    loop index in 0..<3 {
+        if ir_x64_type(m, f, f.args[f.b[at] + index]).kind != .Float -> return false
+    }
+    start: e.code.len()
+    ir_x64_lea_data(e, X64_R11, tables.fma)
+    x64_load_u8(e.code, X64_R11, X64_R11, 0)
+    x64_alu_ri(e.code, X64Alu.Cmp, X64_R11, 1)
+    sites := [Int]{x64_jcc_rel32(e.code, X64Cond.NE)}
+    // xmm0 = b * a + c: the scratch keeps a, b and c for the runtime call.
+    ir_x64_load_xmm(e, m, f, al, f.args[f.b[at]], 0)
+    factor: ir_x64_use_xmm(e, m, f, al, f.args[f.b[at] + 1], 1)
+    addend: f.args[f.b[at] + 2]
+    if al.xmms[addend] >= 0 {
+        x64_vfmadd213sd(e.code, 0, factor, al.xmms[addend])
+    } else {
+        x64_vfmadd213sd_mem(e.code, 0, factor, X64_RBP, al.homes[addend])
+    }
+    // ucomisd is unordered for a NaN alone.
+    x64_ucomisd(e.code, 0, 0)
+    sites.push(x64_jcc_rel32(e.code, X64Cond.P))
+    ir_x64_store_xmm(e, m, f, al, dst, 0)
+    cold := ir_x64_cold(IRX64ColdKind.Fma, sites)
+    cold.resume = e.code.len()
+    cold.symbol = "jet_std_math_fma"
+    cold.left = at
+    cold.right = start
+    cold.text = tables.fma
     e.colds.push(cold)
     true
 }
@@ -2825,6 +2909,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                 leaf && symbol == "jet_rt_block_release" -> ir_x64_block_release(e, m, f, al, at, f.args[f.b[at]])
                 f.c[at] == 1 && dst < 0 && symbol == "jet_rt_block_retain" -> ir_x64_block_retain(e, m, f, al, f.args[f.b[at]])
                 (symbol == "jet_int_checked_fixed" || symbol == "jet_int_native_i64_at") && ir_x64_checked_fixed(e, m, f, al, at, symbol) -> {}
+                symbol == "jet_std_math_fma" && ir_x64_fma(e, m, f, al, tables, at) -> {}
                 entry != "" -> ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 else -> ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
             }
@@ -4322,6 +4407,98 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     code := [U8]{}
     x64_float_op_mem(code, X64FloatOp.Sub, false, 10, X64_RBP, -280)
     assert_eq(code, [U8]{242, 68, 15, 92, 149, 232, 254, 255, 255})
+}
+
+// Where the conditional jump at `at` (rel32 or relaxed to rel8) lands.
+ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
+    if code[at] == 0x0f {
+        rel := 0
+        loop k in 0..<4 -> rel = rel.bit_or(Int.from_u8(code[at + 2 + k]) << (8 * k))
+        if rel >= 2147483648 -> rel -= 4294967296
+        return at + 6 + rel
+    }
+    rel: Int.from_u8(code[at + 1])
+    at + 2 + (if rel >= 128 -> rel - 256 else -> rel)
+}
+
+// fused(a, b, c) = jet_std_math_fma(a, b, c) of Floats. vfmadd213sd xmm0,
+// xmm1, xmm2 is C4, E2 (R X B set, map 0F38), F1 (W1, vvvv 1, 66), A9 and
+// ModRM 11 000 010; with xmm9 and xmm10 the inverted R X B is 110 and vvvv
+// 9. The module gets a one-byte probe cell, read on the hot path and
+// written by the slow path; both the cell's jne and the NaN's jp land on
+// that slow path's `test r11, r11`, which probes cpuid and xgetbv and keeps
+// the code's one call of the soft fma. A module with no fma has no cell.
+#Test("A Float fma is one vfmadd213sd behind an FMA3 probe, with the soft fma as its slow path") {
+    fused := [U8]{}
+    x64_vfmadd213sd(fused, 0, 1, 2)
+    assert_eq(fused, [U8]{0xc4, 0xe2, 0xf1, 0xa9, 0xc2})
+    high := [U8]{}
+    x64_vfmadd213sd(high, 0, 9, 10)
+    assert_eq(high, [U8]{0xc4, 0xc2, 0xb1, 0xa9, 0xc2})
+    home := [U8]{}
+    x64_vfmadd213sd_mem(home, 0, 1, X64_RBP, -24)
+    assert_eq(home, [U8]{0xc4, 0xe2, 0xf1, 0xa9, 0x45, 0xe8})
+    probe := [U8]{}
+    x64_cpuid(probe)
+    x64_xgetbv(probe)
+    assert_eq(probe, [U8]{0x0f, 0xa2, 0x0f, 0x01, 0xd0})
+    loop calls in [false, true] {
+        m := ir_module_new()
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        f := ir_function_new("fused", "test:fma.jet::fused", "", "fma.jet", 1)
+        a: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
+        b: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "b"), 1)
+        c: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
+        f.result = float
+        result: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        if calls {
+            operands: ir_args(f, [Int]{a, b, c})
+            _ := ir_emit(f, IROp.CallRuntime, result, ir_intern_name(m, "jet_std_math_fma"), operands, 3, 2)
+        } else {
+            _ := ir_emit(f, IROp.Add, result, a, b, -1, 2)
+        }
+        _ := ir_emit(f, IROp.Return, -1, result, -1, -1, 2)
+        m.functions.push(f)
+        tables: ir_x64_tables(m)
+        if !calls {
+            assert_eq(tables.fma, -1)
+            next
+        }
+        assert(tables.fma >= 0)
+        assert_eq(tables.data[tables.fma].bytes, [U8]{U8{0}})
+        compiled: ir_x64_compile_function(m, tables, 0)
+        code: compiled.function.code
+        cells := 0
+        soft := 0
+        loop reloc in compiled.function.relocs {
+            if reloc.target == {
+                .Data(id) -> {
+                    if id.value == tables.fma -> cells += 1
+                }
+                .Runtime(symbol) -> {
+                    if symbol == "jet_std_math_fma" -> soft += 1
+                }
+                .Function(_) -> {}
+            }
+        }
+        assert_eq(cells, 2)
+        assert_eq(soft, 1)
+        // cmp r11, 1, then the jne.
+        known: ir_x64_code_find(code, [U8]{0x49, 0x83, 0xfb, 0x01}, 0)
+        assert(known >= 0)
+        // The vfmadd213sd (its addend a register, or a disp8 or disp32
+        // home) just before ucomisd xmm0, xmm0, then the jp.
+        nan: ir_x64_code_find(code, [U8]{0x66, 0x0f, 0x2e, 0xc0}, known)
+        assert(nan > known)
+        assert((code[nan - 5] == 0xc4 && code[nan - 2] == 0xa9) || (code[nan - 6] == 0xc4 && code[nan - 3] == 0xa9) || (code[nan - 9] == 0xc4 && code[nan - 6] == 0xa9))
+        assert((code[known + 4] == 0x0f && code[known + 5] == 0x85) || code[known + 4] == 0x75)
+        assert((code[nan + 4] == 0x0f && code[nan + 5] == 0x8a) || code[nan + 4] == 0x7a)
+        slow: ir_x64_test_jcc_target(code, known + 4)
+        assert_eq(ir_x64_test_jcc_target(code, nan + 4), slow)
+        assert_eq(ir_x64_code_find(code, [U8]{0x4d, 0x85, 0xdb}, 0), slow)
+        assert(ir_x64_code_find(code, [U8]{0x0f, 0xa2}, slow) > slow)
+        assert(ir_x64_code_find(code, [U8]{0x0f, 0x01, 0xd0}, slow) > slow)
+    }
 }
 
 // early(data): the word at data, returned at once when it is 0, else data
