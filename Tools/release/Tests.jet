@@ -712,18 +712,20 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(parse_admit_args([String]{"a", "b", "--summary"}).errors, [String]{"one commit, not a and b", "--summary needs a value"})
 }
 
-#Test("the shards of the sides at once split the slot memory cap and the threads instead of each claiming the whole room") {
+#Test("the kit processes the slot runs at once split its memory cap and threads instead of each claiming the whole room") {
     plain: parse_admit_args([String]{"abc"})
-    assert_eq(shard_pool(plain, 4, 1, "16G", ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 4, 1, "", ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 1, 1, "24G", ""), [String]{"--memory=24G"})
-    assert_eq(shard_pool(plain, 16, 1, "8G", ""), [String]{"--memory=1G"})
-    assert_eq(shard_pool(plain, 4, 2, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
-    assert_eq(shard_pool(plain, 4, 1, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
-    assert_eq(shard_pool(plain, 16, 2, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
+    assert_eq(plain.shards, 8)
+    assert_eq(shard_pool(plain, 4, "16G", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 4, "", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 1, "24G", ""), [String]{"--memory=24G"})
+    assert_eq(shard_pool(plain, 16, "8G", ""), [String]{"--memory=1G"})
+    // The release slot under the default --shards 8.
+    assert_eq(shard_pool(plain, 8, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 16, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
     three: parse_admit_args([String]{"abc", "--jobs", "3"})
-    assert_eq(shard_pool(three, 4, 1, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
-    assert_eq(shard_pool(three, 4, 2, "64G", ""), [String]{"--memory=8G", "--jobs=1"})
+    assert_eq(shard_pool(three, 4, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(three, 8, "64G", ""), [String]{"--memory=8G", "--jobs=3"})
 }
 
 #Test("a CPU list counts its CPUs") {
@@ -871,6 +873,63 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     merged: merged_rows(rows, [SuiteRow]{kit_row("tests/cases/b/z.case", "-", "PASS")}, [String]{"tests/cases/b/z.case"})
     assert_eq(row_ids(merged), [String]{"tests/cases/a/x.case", "tests/cases/a/y.case", "tests/cases/b/z.case"})
     assert_eq(merged[2].status, "PASS")
+}
+
+#Test("a ledger names its row IDs and owns a project by its directory and a file entry by its stem") {
+    known: ledger_ids("# id\tcard\treason\n\ntests/golden/a\t#1\twhy\ntests/ui/b.jet\t#2\twhy\ntests/cases/c.case\t#3\twhy\nshort\tline\n")
+    assert_eq(known.len(), 3)
+    assert(ledger_owns(known, "tests/golden/a/run.jet"))
+    assert(ledger_owns(known, "tests/golden/a.jet"))
+    assert(ledger_owns(known, "tests/ui/b.jet"))
+    assert(ledger_owns(known, "tests/cases/c.case"))
+    assert(!ledger_owns(known, "tests/golden/ab.jet"))
+    assert(!ledger_owns(known, "tests/cases/c"))
+}
+
+#Test("the release column runs the rows that can differ from s2's, each ID once, and never an opt-in row") {
+    rows: [SuiteRow]{
+        kit_row("tests/ui/fail/x.jet", "o0", "FAIL"),
+        kit_row("tests/ui/known/x.jet", "o0", "KNOWN-FAILING"),
+        kit_row("tests/ui/fixed/x.jet", "o0", "UNEXPECTED-PASS"),
+        kit_row("tests/ui/ledger/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/edited/x.jet", "o0", "PASS"),
+        kit_row("tests/cases/p/x.case", "-", "PASS"),
+        kit_row("tests/cases/q/help.case", "-", "PASS"),
+        kit_row("tests/cases/r/core.case", "-", "PASS"),
+        kit_row("tests/ui/tiers/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/tiers/x.jet", "o1", "FAIL"),
+        kit_row("tests/ui/fail/x.jet", "o1", "FAIL"),
+        kit_row("tests/ui/same/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/host/x.jet", "o0", "SKIP-HOST"),
+        kit_row("tests/cases/opt/run.case", "-", "OPT-IN"),
+    }
+    paths: [String]{"tests/ui/edited/x.jet", "tests/cases/p/fixtures/main.jet", "tests/cli/help.txt", "tests/cases/opt/fixture.jet", "Compiler/JetCli/Source/Cli/Main.jet"}
+    sources: [String: String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n", "tests/ui/same/x.jet": "run: fn() {{}}\n"}
+    picks: release_picks(rows, ReleaseRule{every: false, paths: paths, known: ledger_ids("tests/ui/ledger/x\t#1\twhy\n"), sources: sources})
+    assert_eq((loop pick in picks -> "{pick.id} {pick.reason}"), [String]{
+        "tests/ui/fail/x.jet failing on s2",
+        "tests/ui/known/x.jet failing on s2",
+        "tests/ui/fixed/x.jet known-failing",
+        "tests/ui/ledger/x.jet known-failing",
+        "tests/ui/edited/x.jet changed",
+        "tests/cases/p/x.case changed",
+        "tests/cases/q/help.case naming a changed file",
+        "tests/cases/r/core.case reading the checkout",
+        "tests/ui/tiers/x.jet failing on s2",
+    })
+    every: release_picks(rows, ReleaseRule{every: true, paths: [String]{}, known: [String: Bool]{}, sources: [String: String]{}})
+    assert_eq(every.len(), 11)
+    assert(!(loop pick in every -> pick.id.copy()).contains("tests/cases/opt/run.case"))
+}
+
+#Test("the release column counts a row it did not run as passing only where s2 passes it, skips it on this host or leaves it opt-in") {
+    ran: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "PASS")}
+    candidate: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("b.jet", "o1", "PASS"), kit_row("c.jet", "o0", "PASS"), kit_row("d.jet", "o0", "SKIP-HOST"), kit_row("e.jet", "o0", "OPT-IN"), kit_row("f.jet", "o0", "FAIL")}
+    column: judged_release(ran, candidate)
+    assert_eq(row_ids(column), [String]{"a.jet", "b.jet", "c.jet", "d.jet", "e.jet"})
+    result: compare_suites(column, candidate, [SuiteRow]{}, [Disposition]{})
+    assert_eq(result.gained.len(), 1)
+    assert_eq(lost_ids(result).len(), 0)
 }
 
 #Test("a dispositioned lost row is tracked by its card, not untracked") {
