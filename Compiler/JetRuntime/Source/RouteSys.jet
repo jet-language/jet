@@ -449,6 +449,45 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     host_sample_out(result, available, value, errno)
 }
 
+// getresuid (118), or getresgid (120) when `group` is 1: (true, real,
+// effective, saved, errno), each ID the kernel's u32.
+#Export(c) jet_sys_resid_raw: fn(group: I64, available: I64, real: I64, effective: I64, saved: I64, errno: I64) {
+    native: jet_int_owned_to_i64(group)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    ids: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(ids, I64{16})
+    result: host_call(if (native == I64{1}) -> I64{120} else -> I64{118}, ids, wrapping(ids + I64{4}), wrapping(ids + I64{8}))
+    real_id: net_load_uint(ids, I64{4})
+    effective_id: net_load_uint(wrapping(ids + I64{4}), I64{4})
+    saved_id: net_load_uint(wrapping(ids + I64{8}), I64{4})
+    jet_rt_free(ids, I64{16}, I64{8})
+    #Unsafe("the caller lends the tuple's Bool byte and four Int words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(real, jet_int_owned_from_i64(real_id))
+        os_store_i64(effective, jet_int_owned_from_i64(effective_id))
+        os_store_i64(saved, jet_int_owned_from_i64(saved_id))
+        os_store_i64(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
+    }
+}
+
+// setresuid (117), or setresgid (119) when `group` is 1, on every thread
+// (Thread.jet thread_setxid), as musl's __setxid runs it: (true, 0, errno).
+// An ID of -1 (u32 4294967295) leaves that one unchanged; Core passes -1 or
+// an ID in 0..4294967294.
+#Export(c) jet_sys_set_resid_raw: fn(group: I64, real: I64, effective: I64, saved: I64, available: I64, value: I64, errno: I64) {
+    native_group: jet_int_owned_to_i64(group)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_real: jet_int_owned_to_i64(real)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_effective: jet_int_owned_to_i64(effective)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_saved: jet_int_owned_to_i64(saved)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    number: if (native_group == I64{1}) -> I64{119} else -> I64{117}
+    mask: I64{4294967295}
+    host_sample_out(thread_setxid(number, native_real.bit_and(mask), native_effective.bit_and(mask), native_saved.bit_and(mask)), available, value, errno)
+}
+
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
 // three loads, each a 16-bit binary fraction; the doubles cross as their raw
 // f64 bits in the Float out slots. A host without sysinfo (the web) has no
