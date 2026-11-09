@@ -1663,6 +1663,25 @@ ascii_text: fn(bytes: &&[U8]) -> String Never! {
     out
 }
 
+// The quoted text opening at `open` when every byte before its closing quote
+// is printable ASCII other than a backslash: one copy and no UTF-8 pass.
+// None for any other text, or when `open` is not a quote.
+plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
+    if open < 0 || open >= bytes.len() || bytes[open] != (U8{34}) -> return None
+    at := open + 1
+    loop at < bytes.len() {
+        n: Int.from_u8(bytes[at])
+        if n == 34 {
+            #Unsafe("every byte before the closing quote is printable ASCII, so it is whole UTF-8") {
+                return Val(encoding.__bytes_into_text(bytes[open + 1..<at]))
+            }
+        }
+        if n == 92 || n < 32 || n > 126 -> return None
+        at += 1
+    }
+    None
+}
+
 // Rust's shipped stream writer used binary64 Display, not Jet's Debug-style
 // Float display. Re-spell the existing shortest digits without another kernel.
 wire_float: fn(value: Float) -> String Never! {

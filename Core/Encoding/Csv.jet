@@ -735,15 +735,23 @@ writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) 
     Ok(CSVWriter{output: target.move(), limits: limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false, buffer: [U8]{0, 0}})
 }
 
+// A record that takes its fields, not a copy of them.
+__csv_row: fn(line: Int, fields: &&[String]) -> CSVRow Never! { CSVRow{line: line, fields: fields.move()} }
+
 CSVReader: struct {
     input: FileReader
     limits: EncodingLimits
     delimiter: Int
+    // One entry per byte value: 1 for each byte that ends a run of plain
+    // field bytes (a quote, CR, LF, the delimiter, any byte from 128).
+    priv stops: [U8]
     header: Bool
     skip_blank: Bool
     field: [U8]
     fields: [String]
     fields_heap: Int
+    // The last record's field count: a new record's fields start with room for that many.
+    record_width: Int
     allocation: stream.AllocationBudget
     quoted: Bool
     after_quote: Bool
@@ -859,13 +867,16 @@ CSVReader: struct {
         self.field.push(byte)
     }
 
-    finish_field: fn(&self) EncodingError! {
+    // Room for one more field, once `fields` is full.
+    __grow_fields: fn(&self) EncodingError! {
         capacity: mem.__list_capacity<String>(self.fields)
-        if self.fields.len() == capacity {
-            grown: if capacity < 4 -> 4 else -> capacity * 2
-            additional: grown - self.fields.len()
-            if !stream.reserve<String>(self.allocation, self.fields, additional) -> return Err(self.capacity_error())
-        }
+        grown: if capacity == 0 && self.record_width > 4 -> self.record_width else if capacity < 4 -> 4 else -> capacity * 2
+        additional: grown - self.fields.len()
+        if !stream.reserve<String>(self.allocation, self.fields, additional) -> return Err(self.capacity_error())
+    }
+
+    finish_field: fn(&self) EncodingError! {
+        if self.fields.len() == mem.__list_capacity<String>(self.fields) -> self.__grow_fields() ?? return Err(err)
         self.fields_heap += mem.__list_capacity<U8>(self.field)
         text := ""
         #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
@@ -877,6 +888,11 @@ CSVReader: struct {
 
     finish_record: fn(&self) -> CSVRow? EncodingError! {
         self.finish_field() ?? return Err(err)
+        self.__end_record()
+    }
+
+    // The record whose last field is already in `fields`.
+    __end_record: fn(&self) -> CSVRow? EncodingError! {
         number: self.record
         line: self.record_line
         content: self.record_has_content
@@ -884,6 +900,7 @@ CSVReader: struct {
         self.record_line = self.parser_line
         self.record_has_content = false
         self.ended_record = true
+        self.record_width = self.fields.len()
         if (self.header && number == 1) || (self.skip_blank && !content) {
             loop self.fields.len() > 0 -> _: self.fields.pop()
             self.allocation.release(self.fields_heap)
@@ -891,11 +908,11 @@ CSVReader: struct {
             return Ok(None)
         }
         heap: mem.__list_capacity<String>(self.fields) * mem.__type_size<String>() + self.fields_heap
-        fields: self.fields.copy()
+        row: __csv_row(line, self.fields.move())
         self.fields = [String]{}
         self.fields_heap = 0
         self.allocation.release(heap)
-        Ok(Val(CSVRow{line: line, fields: fields.move()}))
+        Ok(Val(row))
     }
 
     push: fn(&self, character: Int) -> CSVRow? EncodingError! {
@@ -981,16 +998,18 @@ CSVReader: struct {
 
     // The bytes of unquoted fields waiting in the buffer, and the delimiters
     // between them, taken as `byte`, `character` and `push` would take them
-    // one at a time. It stops before any byte that could start a quote, end
-    // the record, make the field grow, or reach a limit; `character` and
-    // `push` take that one.
-    take_plain: fn(&self) EncodingError! {
+    // one at a time. It stops before any byte that could start a quote, make
+    // the field grow, or reach a limit; `character` and `push` take that one.
+    // A whole ASCII field that starts at an empty field and ends at the
+    // delimiter or LF inside the buffer becomes its text in one copy, and its
+    // LF ends the record here.
+    __take_plain: fn(&self) -> CSVRow? EncodingError! {
         loop !self.quoted && !self.pending_cr && self.buffered < self.buffer.len() {
             room := self.buffer.len() - self.buffered
             if self.limits.max_total_bytes == .Val(limit) {
                 room = min(room, limit - self.total)
             }
-            if room <= 0 -> return
+            if room <= 0 -> return Ok(None)
             b: self.buffer[self.buffered]
             if b < 128 && Int.from_u8(b) == self.delimiter {
                 self.buffered += 1
@@ -1005,15 +1024,52 @@ CSVReader: struct {
                 self.finish_field() ?? return Err(err)
                 next
             }
+            if self.field.len() == 0 {
+                start: self.buffered
+                scan: start + min(room, self.limits.max_item_bytes + 1)
+                end := start
+                loop end < scan && self.stops[Int.from_u8(self.buffer[end])] == 0 -> end += 1
+                taken: end - start
+                if taken > 0 && end < start + room && taken <= self.limits.max_item_bytes {
+                    t: self.buffer[end]
+                    lf: t == 10
+                    if lf || Int.from_u8(t) == self.delimiter {
+                        if self.fields.len() == mem.__list_capacity<String>(self.fields) -> self.__grow_fields() ?? return Err(err)
+                        if !self.allocation.charge(taken) -> return Err(self.capacity_error())
+                        self.fields_heap += taken
+                        #Unsafe("every byte of the field is below 128, so it is whole UTF-8") {
+                            self.fields.push(encoding.__bytes_into_text(self.buffer[start..<end]))
+                        }
+                        self.buffered = end + 1
+                        self.total += taken + 1
+                        self.offset += taken + 1
+                        self.saw_input = true
+                        self.ended_record = false
+                        self.record_has_content = true
+                        self.char0 = t
+                        self.char_width = 1
+                        if lf {
+                            self.line += 1
+                            self.column = 1
+                            self.parser_line += 1
+                            self.parser_column = 0
+                            return self.__end_record()
+                        }
+                        self.column += taken + 1
+                        self.parser_column += taken + 1
+                        next
+                    }
+                }
+            }
             count: min(room, min(mem.__list_capacity<U8>(self.field), self.limits.max_item_bytes) - self.field.len())
             taken := 0
             loop taken < count {
                 c: self.buffer[self.buffered + taken]
-                if c >= 128 || c == 34 || c == 13 || c == 10 || Int.from_u8(c) == self.delimiter -> break
+                if self.stops[Int.from_u8(c)] != 0 -> break
                 self.field.push(c)
                 taken += 1
             }
-            if taken == 0 -> return
+            if taken == 0 -> return Ok(None)
             self.buffered += taken
             self.total += taken
             self.offset += taken
@@ -1025,12 +1081,17 @@ CSVReader: struct {
             self.char0 = self.buffer[self.buffered - 1]
             self.char_width = 1
         }
+        Ok(None)
     }
 
     next_inner: fn(&self) -[IO]> CSVRow? EncodingError! {
         if self.eof -> return Ok(None)
         loop {
-            self.take_plain() ?? return Err(err)
+            plain: if self.__take_plain() == {
+                .Ok(record) -> record
+                .Err(error) -> { return Err(error) }
+            }
+            if plain != None -> return Ok(Val(plain))
             character: if self.character() == {
                 .Ok(value) -> value
                 .Err(error) -> { return Err(error) }
@@ -1076,7 +1137,9 @@ reader: fn(source: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, 
     if raw.len() != width || n == 34 || n == 13 || n == 10 -> return Err(unsupported_error(EncodingFormat.CSV, 0, reason))
     code := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
     loop i in 1..<width -> code = (code << 6).bit_or((Int.from_u8(raw[i]).bit_and(63)))
-    Ok(CSVReader{input: source.move(), limits: limits, delimiter: code, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
+    stops := [U8]{}
+    loop b in 0..<256 -> stops.push(if b >= 128 || b == 34 || b == 13 || b == 10 || b == code -> U8{1} else -> U8{0})
+    Ok(CSVReader{input: source.move(), limits: limits, delimiter: code, stops: stops, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, record_width: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
 }
 
 #Test("typed CSV whole records preserve blank rows, doubled quotes and Unicode columns") {
