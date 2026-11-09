@@ -2040,7 +2040,10 @@ impl Square.Shape {
 }
 ```
 
-Every implementation must fit the bound or E0742 is reported. A dynamic call
+Every implementation must fit the bound or E0742 is reported. An impl method
+that writes no row takes the trait's bound as its ceiling, so
+`area: fn(self) -> Int { … }` is pure here; this holds for the Prelude's
+`CheckedText.check` and `encode_hole` too. A dynamic call
 uses the trait's declared bound because its concrete implementation is unknown
 at the call site. An unannotated method is inferred per implementation under
 static dispatch; a dynamic-dispatch call that needs a bound receives the

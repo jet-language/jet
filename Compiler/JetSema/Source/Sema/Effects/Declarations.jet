@@ -312,12 +312,18 @@ sema_effect_trait_bound_set: fn(bounds: &[SemaEffectTraitBound], trait_name: Str
 }
 
 // The trait-method effect ceilings one module declares. The operator
-// hooks are pure; a trait method bounds its impls when it is pure or writes a
-// closed row of known effects. An un-annotated method leaves each impl free.
+// hooks and the CheckedText methods are pure; a trait method bounds its impls
+// when it is pure or writes a closed row of known effects. An un-annotated
+// method leaves each impl free. An impl method that writes no row takes the
+// trait's bound as its ceiling.
 sema_effect_trait_bounds: fn(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
     loop owned in OWNED_TRAITS {
         if owned.contract == .Operator(hook, _) -> bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: hook, bound: [String]{}})
+        if owned.contract == .CheckedText {
+            bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: "check", bound: [String]{}})
+            bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: "encode_hole", bound: [String]{}})
+        }
     }
     loop item in items {
         if item == {

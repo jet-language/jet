@@ -267,9 +267,11 @@ sema_owned_plain_param: fn(method: Func, ty: Type) -> Bool Never! {
     param.name != "self" && param.convention == AccessConvention.Read && !param.variadic && param.default == None && param.public_label == None && type_identity_equal(param.ty, ty)
 }
 
-// A pure method with the empty effect row `-[]>`.
+// A pure method: the empty effect row `-[]>`, or no row at all, which takes
+// the trait's `-[]>` as its ceiling (the effect check holds the body to it,
+// E0742).
 sema_owned_pure: fn(method: Func) -> Bool Never! {
-    if !method.is_pure -> return false
+    if !method.is_pure -> return method.declared_effects == None && method.effect_via == None
     effects: method.declared_effects ?? return false
     effects.len() == 0
 }

@@ -1349,7 +1349,9 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !function.declaration.is_pure {
+    // No written row takes CheckedText's `-[]>`; the effect check holds the
+    // body to it (E0742).
+    if !sema_owned_pure(function.declaration) {
         diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
