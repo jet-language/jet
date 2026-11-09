@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97300,
+    "rev": 97325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59539,33 +59539,6 @@
           "at": "2026-11-04T17:47:19.716Z"
         },
         {
-          "n": 4,
-          "text": "(was #2110 c1) One receipt record shape exists with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:54.140Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #2110 c2) A development act writes a receipt without the caller asking for one [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:54.758Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #2110 c3) A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:55.424Z"
-        },
-        {
           "n": 7,
           "text": "(was #2110 c4) Tier parity (I9): the receipt is written by shared Prelude code, not re-encoded per engine [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
@@ -59590,11 +59563,12 @@
       "parentId": "c0dp5efn",
       "needsAcceptance": false,
       "created": "2026-10-19T20:12:55.137Z",
-      "updated": "2026-11-09T19:22:15.291Z",
+      "updated": "2026-11-09T19:27:50.766Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
-      ]
+      ],
+      "criteriaLastN": 7
     },
     {
       "id": "c0qe89cl",
@@ -69164,7 +69138,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -69198,15 +69172,6 @@
           "verifiedBy": null,
           "evidence": "980b5d3680 (jet test --grade=generated --iterations --seed). Proof vb5 (dev 7f0b3d03ed, s1 jet f3b0ef65fd735e3c): tests/cases/testing_tiers/generated_grade_shrinks_a_planted_reverse_bug.case PASS (planted reverse bug at length 3 reported with a shrunk input).",
           "at": "2026-11-06T18:42:19.648Z"
-        },
-        {
-          "n": 2,
-          "text": "A coverage-guided fuzz run of a parameterized `#Test` finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` runs replay.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T11:57:26.439Z"
         },
         {
           "n": 3,
@@ -69262,11 +69227,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:26.439Z",
-      "updated": "2026-11-06T19:59:01.186Z",
+      "updated": "2026-11-09T19:27:40.244Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
-      ]
+      ],
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-09T19:27:40.244Z"
     },
     {
       "id": "c0efae83",
@@ -71957,6 +71924,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:49:06.633Z"
+        },
+        {
+          "n": 11,
+          "text": "A coverage-guided fuzz run of a parameterized `#Test` finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` runs replay. (was #6015 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:36.476Z"
         }
       ],
       "refs": [
@@ -71970,12 +71946,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:25:50.855Z",
-      "updated": "2026-11-07T02:57:42.735Z",
+      "updated": "2026-11-09T19:27:36.476Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0slmlyv",
@@ -81679,7 +81655,7 @@
     {
       "id": "c0ozzmvc",
       "num": 6386,
-      "title": "Developer tools on the self-hosted toolchain: JetDevserver, JetLSP, JetSemIndex, console, live view, notebooks, hot reload, flash watch and the embeddable engine",
+      "title": "Developer tools on the self-hosted toolchain: console attach, live view, flash watch, the embeddable engine and the devtools panels",
       "body": "Found by ToolsJet-2 while fixing #6346 (dev 03c64ad0c4). None of these is a member of Compiler/package.jet, so nothing builds them, and each fails `jet check` on its own Source:\n- JetDevserver: 1594 errors in 40 files (E0003 1077 of mixed stale syntax, E-ERR-PROPAGATE 211, E0914 81, E0048 75, E0372 44, E0373 31, E0114 20, other 55).\n- JetLSP: 1690 errors, most through its dependency jet_devserver, about 100 in its own Source (E1001 about 40, Navigation E0003 25); its Tests hold about 1700 untranslated Rust-isms (.expect, .unwrap, OSPath.from, std.*).\n- JetSemIndex: SemIndex/Entry.jet calls check_file_with_effect_facts, check_file_with_overlays, check_file_with_overlays_and_import_root, build_index and build_symbol_db, which exist nowhere in Compiler/; it uses a Rust-style OSPath.to_string_lossy; Docs/* import the Core-private core.files.runtime.kernel_path_components (E1001 x4).\n- jet_cli_commands (Compiler/JetCli/Commands): needs pkg_fetch, PackageFetchOptions, StoreVerification and publication_emit_cyclonedx from Jetpack/Publication and Jetpack/Store, which are not packages. Its 6 test files moved to Compiler/JetCli/Commands/Tests in #6346.\nNo mechanical migration covers any of them. For each package, first decide whether it is live (what should build or call it: jet lsp, jet dev, the semantic index, the package commands) or retired residue under I9/D-EXEC2; then port it as a compiler member, or delete it, in one cutover.",
       "kind": "bug",
       "track": "sidequest",
@@ -81694,6 +81670,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). One card per stream: Canvas rows moved to #6618, notebook to #6619, hot reload to #6625, LSP to #4917, debugger to #6730. The JetDevserver port is #5931 and SemIndex is #6630."
+        },
         {
           "at": "2026-11-07",
           "by": "Main",
@@ -81879,42 +81860,6 @@
           "at": "2026-11-04T23:34:02.429Z"
         },
         {
-          "n": 76,
-          "text": "(was #2463 c2) Recorded histories retain per-sequence write transitions and watch-aware forward/reverse navigation; live watch changes refresh baselines Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:04.670Z"
-        },
-        {
-          "n": 77,
-          "text": "(was #2463 c3) Replay navigation uses indexed retained events without re-executing the source/model Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:06.702Z"
-        },
-        {
-          "n": 78,
-          "text": "(was #2463 c4) Transactional fix source checks unchanged inputs, checked candidate bundle and checkpoint type/layout/authority before installation Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:08.840Z"
-        },
-        {
-          "n": 79,
-          "text": "(was #2463 c5) Unsupported, stale, empty-history and invalid-watch cases have explicit source diagnostics, proven by tests/cases debug rows on the native and DAP routes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:29.551Z"
-        },
-        {
           "n": 85,
           "text": "(was #2486 c1) The live world inspector runs through the actual native host with typed scene projection, property/action routing, paused-frame evaluation and draw stepping, proven by a tests/cases row.",
           "status": "open",
@@ -81949,15 +81894,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T02:57:37.926Z"
-        },
-        {
-          "n": 89,
-          "text": "(was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejection still fail closed [precut audit: failing on 9c7ddf1359: C:debug/canvas_debug_session_replays_one_source_bound_session FAIL exit 1; expected 0; C:debug/canvas_debug_stop_requires_matching_source_revision_and_tier FAIL exit 1; expected 0]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:34:43.574Z"
         },
         {
           "n": 112,
@@ -82067,7 +82003,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T20:11:53.653Z",
-      "updated": "2026-11-09T19:27:12.984Z",
+      "updated": "2026-11-09T19:27:34.794Z",
       "updatedBy": "Main",
       "criteriaLastN": 124
     },
@@ -88616,7 +88552,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "frozen",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -88624,7 +88560,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Frozen (D-G5-8): every part is covered by a ratified decision. Properties: #Test parameters, built under #6015 (done). Fuzzing: grade: generated (D-TEST-MUTFUZZ1=A, #6060). Benchmarks: the .measure member and jet test --measure (D-CLAIM-BENCH1=A; Examples/Tooling/Performance/Bench.jet). The fuzz: and bench: #Test parameters would be second spellings."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -88647,7 +88589,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:08.007Z",
-      "updated": "2026-11-07T03:29:59.311Z",
+      "updated": "2026-11-09T19:27:43.244Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -94992,6 +94934,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T12:38:49.030Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #2110 c1) One receipt record shape exists with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:44.869Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #2110 c2) A development act writes a receipt without the caller asking for one [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:47.450Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #2110 c3) A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c6)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:49.820Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #2110 c4) Tier parity (I9): the receipt is written by shared Prelude code, not re-encoded per engine [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c7)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:52.240Z"
         }
       ],
       "refs": [],
@@ -95002,9 +94980,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T01:04:02.406Z",
-      "updated": "2026-11-07T12:38:49.030Z",
+      "updated": "2026-11-09T19:27:52.240Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 6
     },
     {
       "id": "c0y05z3o",
@@ -102060,7 +102038,7 @@
     {
       "id": "c06vkd04",
       "num": 6730,
-      "title": "jet debug shows wrong, missing or garbage locals, and its readouts and docs are wrong",
+      "title": "jet debug: right locals, debug info for optimized builds, and the debugger contract on the self-hosted toolchain",
       "body": "Release a0_041, jet debug Examples/Tooling/Debugging/Debug.jet: the first stop at Debug.jet:24 ('a: 5 <- here') prints 'locals:  a = 4262344   s = <unavailable>'. The local's stack slot is read before the binding runs, so uninitialized memory is shown as a Jet value. A local whose binding hasn't run must show as not yet bound (or be omitted), at every tier; the DWARF location ranges should start after the store. Also: the comments in Examples/Tooling/Debugging/Debug.jet and DebugNative.jet still talk about 'the generated Rust' and 'raw Rust file:line', which is stale since the native backend.",
       "kind": "bug",
       "track": "epoch",
@@ -102216,6 +102194,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:27:12.005Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #2463 c2) Recorded histories retain per-sequence write transitions and watch-aware forward/reverse navigation; live watch changes refresh baselines Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c76)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:15.792Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #2463 c3) Replay navigation uses indexed retained events without re-executing the source/model Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c77)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:18.742Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #2463 c4) Transactional fix source checks unchanged inputs, checked candidate bundle and checkpoint type/layout/authority before installation Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c78)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:21.370Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #2463 c5) Unsupported, stale, empty-history and invalid-watch cases have explicit source diagnostics, proven by tests/cases debug rows on the native and DAP routes. (was #6386 c79)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:24.473Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejection still fail closed [precut audit: failing on 9c7ddf1359: C:debug/canvas_debug_session_replays_one_source_bound_session FAIL exit 1; expected 0; C:debug/canvas_debug_stop_requires_matching_source_revision_and_tier FAIL exit 1; expected 0] (was #6386 c89)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:27:27.993Z"
         }
       ],
       "refs": [],
@@ -102226,9 +102249,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-09T19:27:12.005Z",
+      "updated": "2026-11-09T19:27:31.421Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 20
     },
     {
       "id": "c0x3vq4p",
@@ -191386,6 +191409,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T19:27:52.240Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ycgz3f",
+      "note": "#6 (was #2110 c4) Tier parity (I9): the receipt is written by s"
+    },
+    {
+      "at": "2026-11-09T19:27:50.766Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c07glrub",
+      "note": "#6: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6629: one receipt card (D-G5-9).; was [open]: (was #2110 c3) A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act [precut audit: no dev test, golden, case or snapshot proves this"
+    },
+    {
+      "at": "2026-11-09T19:27:49.820Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ycgz3f",
+      "note": "#5 (was #2110 c3) A receipt names its inputs by content address"
+    },
+    {
+      "at": "2026-11-09T19:27:48.399Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c07glrub",
+      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6629: one receipt card (D-G5-9).; was [open]: (was #2110 c2) A development act writes a receipt without the caller asking for one [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-09T19:27:47.450Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ycgz3f",
+      "note": "#4 (was #2110 c2) A development act writes a receipt without th"
+    },
+    {
+      "at": "2026-11-09T19:27:45.894Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c07glrub",
+      "note": "#4: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6629: one receipt card (D-G5-9).; was [open]: (was #2110 c1) One receipt record shape exists with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree [precut audit: no dev test, golden, ca"
+    },
+    {
+      "at": "2026-11-09T19:27:44.869Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ycgz3f",
+      "note": "#3 (was #2110 c1) One receipt record shape exists with act, loc"
+    },
+    {
+      "at": "2026-11-09T19:27:43.244Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0odfeu7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T19:27:41.339Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0odfeu7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:27:40.244Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jfu2us",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T19:27:37.621Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0jfu2us",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6060: coverage-guided fuzzing is D-TEST-MUTFUZZ1's stream (D-G5-8).; was [open]: A coverage-guided fuzz run of a parameterized `#Test` finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` run"
+    },
+    {
+      "at": "2026-11-09T19:27:36.476Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fvnyiq",
+      "note": "#11 A coverage-guided fuzz run of a parameterized `#Test` finds "
+    },
+    {
+      "at": "2026-11-09T19:27:34.794Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:27:33.572Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:27:31.422Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:27:29.382Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#89: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6730: one debugger card (D-G5-7).; was [open]: (was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejectio"
+    },
+    {
+      "at": "2026-11-09T19:27:27.994Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#20 (was #3064 c1) A rejected unsupported continuation leaves th"
+    },
+    {
+      "at": "2026-11-09T19:27:25.893Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#79: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6730: one debugger card (D-G5-7).; was [open]: (was #2463 c5) Unsupported, stale, empty-history and invalid-watch cases have explicit source diagnostics, proven by tests/cases debug rows on the native and DAP routes."
+    },
+    {
+      "at": "2026-11-09T19:27:24.473Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#19 (was #2463 c5) Unsupported, stale, empty-history and invalid"
+    },
+    {
+      "at": "2026-11-09T19:27:22.608Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#78: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6730: one debugger card (D-G5-7).; was [open]: (was #2463 c4) Transactional fix source checks unchanged inputs, checked candidate bundle and checkpoint type/layout/authority before installation Proof: a tests/cases debug row on the native and DAP "
+    },
+    {
+      "at": "2026-11-09T19:27:21.370Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#18 (was #2463 c4) Transactional fix source checks unchanged inp"
+    },
+    {
+      "at": "2026-11-09T19:27:19.802Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#77: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6730: one debugger card (D-G5-7).; was [open]: (was #2463 c3) Replay navigation uses indexed retained events without re-executing the source/model Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7dd"
+    },
+    {
+      "at": "2026-11-09T19:27:18.742Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#17 (was #2463 c3) Replay navigation uses indexed retained event"
+    },
+    {
+      "at": "2026-11-09T19:27:17.003Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#76: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6730: one debugger card (D-G5-7).; was [open]: (was #2463 c2) Recorded histories retain per-sequence write transitions and watch-aware forward/reverse navigation; live watch changes refresh baselines Proof: a tests/cases debug row on the native an"
+    },
+    {
+      "at": "2026-11-09T19:27:15.793Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#16 (was #2463 c2) Recorded histories retain per-sequence write "
+    },
     {
       "at": "2026-11-09T19:27:12.984Z",
       "by": "Main",
