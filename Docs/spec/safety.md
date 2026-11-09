@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1419,
+  "total": 1421,
   "counts": {
     "Compiler": 748,
-    "Core": 187,
+    "Core": 189,
     "Docs": 8,
     "Examples": 36,
     "Jetpack": 9,
@@ -1191,14 +1191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1612,
+      "line": 1600,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2016,
+      "line": 2007,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
@@ -2850,35 +2850,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
-      "line": 217,
+      "line": 223,
       "column": 5,
       "reason": "socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0) takes no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
-      "line": 232,
+      "line": 238,
       "column": 5,
       "reason": "ioctl(SIOCGIFINDEX) reads and writes exactly the owned 40-byte ifreq; close releases the descriptor opened here"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
-      "line": 292,
+      "line": 298,
       "column": 5,
       "reason": "open(2) reads the owned NUL-terminated path; O_RDONLY|O_CLOEXEC retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
-      "line": 307,
+      "line": 313,
       "column": 5,
       "reason": "close(2) releases the descriptor lk_open opened"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
-      "line": 321,
+      "line": 327,
       "column": 9,
       "reason": "read(2) fills at most LK_READ bytes of the reader's owned buffer"
     },
@@ -5426,14 +5426,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 463,
+      "line": 471,
       "column": 5,
       "reason": "the testkit stops its own step child at the resident-memory guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 649,
+      "line": 657,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -5454,7 +5454,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet",
-      "line": 29,
+      "line": 30,
       "column": 9,
       "reason": "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)"
     },
@@ -5464,6 +5464,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 113,
       "column": 5,
       "reason": "auth PASETO v4.public verification uses the fixed Ed25519 primitive"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Cipher.jet",
+      "line": 77,
+      "column": 5,
+      "reason": "Core cipher workspace reserves its complete operation-owned word capacity before filling"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Cipher.jet",
+      "line": 93,
+      "column": 5,
+      "reason": "Core cipher output reserves its exact public output width before filling"
     },
     {
       "package": "Core",
@@ -10164,13 +10178,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 748 |
-| Core | 187 |
+| Core | 189 |
 | Docs | 8 |
 | Examples | 36 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
-| **total** | **1419** |
+| **total** | **1421** |
 
 ### Regions
 
@@ -10314,8 +10328,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2340:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2348:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2356:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1612:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2016:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1600:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2007:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10551,11 +10565,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 50:5 | "value lends IP24; data owns length initialized native U8 elements; output receives ownership" |
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 83:5 | "bytes lends width initialized little-endian bytes (width&lt;=8)" |
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 93:5 | "bytes owns width writable little-endian bytes (width&lt;=8)" |
-| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 217:5 | "socket(AF_UNIX, SOCK_DGRAM&#124;SOCK_CLOEXEC, 0) takes no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 232:5 | "ioctl(SIOCGIFINDEX) reads and writes exactly the owned 40-byte ifreq; close releases the descriptor opened here" |
-| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 292:5 | "open(2) reads the owned NUL-terminated path; O_RDONLY&#124;O_CLOEXEC retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 307:5 | "close(2) releases the descriptor lk_open opened" |
-| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 321:9 | "read(2) fills at most LK_READ bytes of the reader's owned buffer" |
+| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 223:5 | "socket(AF_UNIX, SOCK_DGRAM&#124;SOCK_CLOEXEC, 0) takes no pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 238:5 | "ioctl(SIOCGIFINDEX) reads and writes exactly the owned 40-byte ifreq; close releases the descriptor opened here" |
+| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 298:5 | "open(2) reads the owned NUL-terminated path; O_RDONLY&#124;O_CLOEXEC retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 313:5 | "close(2) releases the descriptor lk_open opened" |
+| Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 327:9 | "read(2) fills at most LK_READ bytes of the reader's owned buffer" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 42:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 82:5 | "the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 113:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
@@ -10919,12 +10933,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
 | Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 56:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 463:5 | "the testkit stops its own step child at the resident-memory guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 649:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 471:5 | "the testkit stops its own step child at the resident-memory guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 657:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
-| Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 29:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
+| Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
+| Core | Core/Crypto/Cipher.jet | 77:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
+| Core | Core/Crypto/Cipher.jet | 93:5 | "Core cipher output reserves its exact public output width before filling" |
 | Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
 | Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
 | Core | Core/Crypto/Crypto.jet | 297:5 | "vault key import: construct the typed recipient unlock request" |
