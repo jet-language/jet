@@ -721,8 +721,10 @@ compiler_build: fn(setup: SuiteSetup, builder: String, output: String, trace: St
     Ok(receipt)
 }
 
-// Moves the built `jet` and `jet.o` from `output` into `directory` and links
-// the runtime `pack` beside them.
+// Moves the built `jet` and `jet.o` from `output` into `directory` and copies
+// the runtime `pack` beside them. A copy, not a link: a build step that runs
+// the stage's jet mounts its folder read-only in the sandbox, where a link
+// to a pack outside that folder resolves to nothing.
 stage_move: fn(output: String, directory: String, pack: String) Err! {
     files.create_dir_all(directory) ?? return Err("couldn't create `{directory}`: {err}")
     loop name in ([String]{"jet", "jet.o"}) {
@@ -730,7 +732,7 @@ stage_move: fn(output: String, directory: String, pack: String) Err! {
         if name == "jet.o" && !files.is_file(from) -> next
         files.rename(from, files.join(directory, name)) ?? return Err("couldn't move `{from}`: {err}")
     }
-    files.symlink(pack, files.join(directory, "jet-runtime")) ?? return Err("couldn't link the runtime pack `{pack}`: {err}")
+    files.copy_dir(pack, files.join(directory, "jet-runtime")) ?? return Err("couldn't copy the runtime pack `{pack}`: {err}")
     files.remove_all(output) ?? return Err("couldn't clear `{output}`: {err}")
 }
 
