@@ -4000,8 +4000,8 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
 | `const_bool(value: Bool, ignored: Bool) -> Bool` | Boolean | Select the first Boolean in a constant-evaluation expression. |
 | `not_bool(value: Bool) -> Bool` | Boolean | Negate a Boolean. |
-| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values; a NaN argument is the result. Prelude names: no import. |
-| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
+| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values, by `compare` (a Float by IEEE 754 totalOrder). Prelude names: no import. |
+| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds by `compare` (a Float by IEEE 754 totalOrder); reversed bounds are accepted. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
 `SourceLocation` is the record `$here` and a `$caller` parameter default

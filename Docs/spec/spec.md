@@ -352,9 +352,11 @@ prelude aliases for that file, so use the qualified Core call instead
 functions over one ordered type `T: Comparable`: Int and the sized integers,
 Float and F32, Decimal, Duration, Instant, String, Char, or a type that
 implements Comparable. `min` and `max` take two or more arguments and return
-the first least or greatest one. A NaN argument is the result of all three,
-since NaN orders against nothing; `core.math.min_float` and `max_float` are the
-Float pair that skips a NaN operand. `clamp` accepts reversed bounds, so
+the first least or greatest one. All three order by `compare`, so a Float
+follows IEEE 754 totalOrder (-NaN < -inf < ... < -0.0 < +0.0 < ... < +inf <
+NaN): `max(Float.NAN, 1.0)` is NaN and `min(Float.NAN, 1.0)` is `1.0`;
+`core.math.min_float` and `max_float` are the Float pair that skips a NaN
+operand. `clamp` accepts reversed bounds, so
 `clamp(x, 10, 0)` clamps to `0..=10`. They are ordinary Core generics
 (`core.prelude`), so they evaluate at compile time (`LIMIT: max(4, CORES)`).
 

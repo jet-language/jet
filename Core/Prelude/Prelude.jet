@@ -41,61 +41,36 @@ not_bool: fn(value: Bool) -> Bool Never! {
 
 // `min`, `max` and `clamp` are prelude names (no import) over any one ordered
 // type: Int and the sized integers, Float/F32, Decimal, Duration, Instant,
-// String, Char, or a type that implements Comparable. Among equal values the
-// first argument wins. A NaN argument is the result: it orders against
-// nothing, so no other value is the least or the greatest. Only an unordered
-// pair (neither `a < b` nor `b <= a`) pays for finding which side is NaN, so
-// ordered values cost one or two compares per argument.
+// String, Char, or a type that implements Comparable. They order by
+// `compare`, so Floats follow IEEE 754 totalOrder (-NaN < -inf < ... < -0.0 <
+// +0.0 < ... < +inf < NaN). Among equal values the first argument wins.
 min: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
     best := a
-    if b < a {
-        best = b
-    } else if !(a <= b) {
-        return if a <= a -> b else -> a
-    }
+    if b.compare(best) == .Less -> best = b
     loop value in rest {
-        if value < best {
-            best = value
-        } else if !(best <= value) {
-            return if best <= best -> value else -> best
-        }
+        if value.compare(best) == .Less -> best = value
     }
     best
 }
 
 max: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
     best := a
-    if a < b {
-        best = b
-    } else if !(b <= a) {
-        return if a <= a -> b else -> a
-    }
+    if b.compare(best) == .Greater -> best = b
     loop value in rest {
-        if best < value {
-            best = value
-        } else if !(value <= best) {
-            return if best <= best -> value else -> best
-        }
+        if value.compare(best) == .Greater -> best = value
     }
     best
 }
 
 // Reversed bounds are accepted: `clamp(x, 10, 0)` clamps to `0..=10`.
 clamp: fn<T: Comparable>(x: T, lo: T, hi: T) -> T Never! {
-    if hi < lo {
-        if hi <= x {
-            if x <= lo -> return x
-            return lo
-        }
-        if x < hi -> return hi
+    if hi.compare(lo) == .Less {
+        if x.compare(hi) == .Less -> return hi
+        if x.compare(lo) == .Greater -> return lo
         return x
     }
-    if !(lo <= hi) -> return if lo <= lo -> hi else -> lo
-    if lo <= x {
-        if x <= hi -> return x
-        return hi
-    }
-    if x < lo -> return lo
+    if x.compare(lo) == .Less -> return lo
+    if x.compare(hi) == .Greater -> return hi
     x
 }
 

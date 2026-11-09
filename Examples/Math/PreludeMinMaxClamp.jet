@@ -1,7 +1,8 @@
 // `min`, `max` and `clamp` are prelude names over one ordered type, with no
-// import. `min`/`max` take two or more arguments; a NaN argument is the
-// result; `clamp` accepts reversed bounds. `math.min_float`/`max_float` are
-// the NaN-skipping Float pair (see min_max_nan.jet).
+// import. `min`/`max` take two or more arguments; `clamp` accepts reversed
+// bounds. All three order by `compare`, so a Float follows IEEE 754
+// totalOrder: NaN sorts above +inf. `math.min_float`/`max_float` are the
+// NaN-skipping Float pair (see min_max_nan.jet).
 
 #Comparable
 Version: struct {
@@ -35,8 +36,8 @@ run: fn() {
     print(clamp(-5, 0, 10))
     print(clamp(5, 10, 0))
     print(clamp(Float{0.25}, Float{0.0}, Float{1.0}))
-    print(min(Float{1.0}, Float.NAN, Float{0.5}).is_nan())
+    print(min(Float{1.0}, Float.NAN, Float{0.5}))
     print(max(Float.NAN, Float{1.0}).is_nan())
-    print(clamp(Float.NAN, Float{0.0}, Float{1.0}).is_nan())
-    print(clamp(Float{0.5}, Float.NAN, Float{1.0}).is_nan())
+    print(clamp(Float.NAN, Float{0.0}, Float{1.0}) == Float{1.0})
+    print(clamp(Float{0.5}, Float.NAN, Float{1.0}) == Float{1.0})
 }
