@@ -5175,8 +5175,19 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, program, scopes)
     distinct_rhs := sema_expr_distinct_facts(rhs.ty, environment, program, scopes)
     if distinct_lhs != None || distinct_rhs != None {
+        before: diagnostics.len()
         distinct := sema_expr_check_distinct_binary(op, lhs, rhs, span, line, distinct_lhs, distinct_rhs, scopes, diagnostics)
         if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, program, diagnostics)
+        if diagnostics.len() != before -> return None
+        // `<=>`, `<`, `<=`, `>` and `>=` between one distinct type take the
+        // comparability rule: a `#Comparable` distinct orders as its base
+        // does, and any other one reports E0109.
+        comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, program, diagnostics)
+        if comparison.handled {
+            compared: comparison.value ?? return None
+            return sema_expr_expected(compared, expected, environment, program, diagnostics)
+        }
+        diagnostics.push(sema_expr_op_mismatch(op, lhs.ty, rhs.ty, span))
         return None
     }
     // An exact number (`Decimal`, `Fraction`, `Complex`) mixed with a plain

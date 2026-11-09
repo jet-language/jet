@@ -81,11 +81,13 @@ is_nan_word: fn(word: Int) -> Bool {
     magnitude > 9218868437227405312
 }
 
-// The binary32 value whose exact widening is x.
+// The binary32 value whose exact widening is x. A whole-number word (the n
+// of pown, rootn and compoundn) can read as a finite Float beyond the F32
+// range, where the checked `F32{x}` would stop; that one is an infinity.
 narrow: fn(x: Float) -> F32 {
     if math.is_nan(x) -> return F32{0.0} / F32{0.0}
-    if (x == math.INFINITY) -> return F32{1.0} / F32{0.0}
-    if (x == -math.INFINITY) -> return F32{-1.0} / F32{0.0}
+    if (x > Float{3.4028234663852886e38}) -> return F32{1.0} / F32{0.0}
+    if (x < Float{-3.4028234663852886e38}) -> return F32{-1.0} / F32{0.0}
     F32{x}
 }
 
