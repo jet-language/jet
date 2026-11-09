@@ -4,21 +4,21 @@
 // writes dirty pages back at commit, and plays the journal back to roll a
 // transaction, a savepoint or a hot journal left by a crash back.
 //
-// This is the rollback-journal pager, the build with SQLITE_OMIT_WAL
-// (pagerUseWal is 0); the WAL paths come with wal.c. The vendored build has
-// no memory-mapped I/O in use (DEFAULT_MMAP_SIZE 0), so pages are always
-// read through getPageNormal, or getPageError while the pager is in the
-// error state. There is no backup (pBackup is 0), no SQLITE_ENABLE_ATOMIC_
-// WRITE and no batch-atomic writes, and no sqlite3_log consumer, so the
-// recovery notice of pager_playback is not logged.
+// pagerUseWal is p.wal.open: the write-ahead log of Wal.jet. The vendored
+// build has no memory-mapped I/O in use (DEFAULT_MMAP_SIZE 0), so pages are
+// always read through getPageNormal, or getPageError while the pager is in
+// the error state. There is no backup (pBackup is 0), no SQLITE_ENABLE_
+// ATOMIC_WRITE and no batch-atomic writes, and no sqlite3_log consumer, so
+// the recovery notice of pager_playback is not logged.
 //
 // A page handle is a slot of pcache.pages (C's PgHdr pointer); NO_PAGE is
 // the null pointer. The btree's xReiniter callback cannot be called from
 // here: pager_playback_one_page marks the page's extra space reset (its
 // isInit is cleared) and, when the btree holds a reference, queues the
 // slot on `reinit` for the btree to parse again (pageReinit, btree.c).
-// The busy handler is the connection's BusyHandler data, which the pager
-// invokes as sqlite3InvokeBusyHandler does with sqliteDefaultBusyCallback.
+// The busy handler is the connection's wal.BusyHandler data, which the
+// pager and the log invoke as sqlite3InvokeBusyHandler does with
+// sqliteDefaultBusyCallback.
 
 use {
     base: __core_db_base
@@ -26,6 +26,7 @@ use {
     os: __core_db_os
     file: __core_db_file
     cache: __core_db_pcache
+    wal: __core_db_wal
 }
 
 // Pager.eState (pager.c).
@@ -39,9 +40,6 @@ PAGER_ERROR: 6
 
 // Pager.eLock before the lock state is known.
 UNKNOWN_LOCK: 5
-
-// The largest sector size the pager honours.
-MAX_SECTOR_SIZE: 65536
 
 // Pager.doNotSpill bits.
 SPILLFLAG_OFF: 1
@@ -101,18 +99,6 @@ STMT_SPILL: 65536
 // aJournalMagic: the first 8 bytes of every journal header.
 JOURNAL_MAGIC: [U8]{217, 213, 5, 249, 32, 161, 99, 215}
 
-// sqliteDefaultBusyCallback's delay schedule in milliseconds and the
-// running totals of it (main.c).
-BUSY_DELAYS: [Int]{1, 2, 5, 10, 15, 20, 25, 25, 25, 50, 50, 100}
-BUSY_TOTALS: [Int]{0, 1, 3, 8, 18, 33, 53, 78, 103, 128, 178, 228}
-
-// sqlite3.busyHandler with the default handler of sqlite3_busy_timeout:
-// timeout is db->busyTimeout (0 means no handler), n_busy is nBusy.
-BusyHandler: struct {
-    timeout: Int
-    n_busy: Int
-}
-
 // One open savepoint (pager.c PagerSavepoint).
 PagerSavepoint: struct {
     // iOffset and iHdrOffset.
@@ -126,6 +112,8 @@ PagerSavepoint: struct {
     sub_rec: Int
     // bTruncateOnRelease.
     truncate_on_release: Bool
+    // aWalData: the log's state when the savepoint opened.
+    wal_data: [Int]
 }
 
 // pager.c Pager.
@@ -185,7 +173,9 @@ Pager: struct {
     // zFilename and zJournal.
     filename: String
     journal: String?
-    busy: BusyHandler
+    // zWal.
+    wal_name: String
+    busy: wal.BusyHandler
     // aStat.
     stat: [Int]
     // pTmpSpace: pageSize + 8 bytes.
@@ -193,6 +183,8 @@ Pager: struct {
     pcache: cache.PCache
     // Pages xReiniter would have re-parsed while the btree held them.
     reinit: [Int]
+    // pWal.
+    wal: wal.Wal
 }
 
 // n zero bytes.
@@ -216,34 +208,7 @@ c_string: fn(b: [U8]) -> [U8] Never! {
 
 // A pager before sqlite3PagerOpen (the zeroed allocation).
 pager_closed: fn() -> Pager Never! {
-    Pager{exclusive_mode: false, journal_mode: JOURNALMODE_DELETE, use_journal: false, no_sync: false, full_sync: false, extra_sync: false, sync_flags: 0, wal_sync_flags: 0, temp_file: false, no_lock: false, read_only: false, mem_db: false, mem_vfs: false, state: PAGER_OPEN, lock: os.LOCK_NONE, change_count_done: false, set_super: false, do_not_spill: 0, subj_in_memory: false, has_held_shared_lock: false, db_size: 0, db_orig_size: 0, db_file_size: 0, db_hint_size: 0, err_code: base.OK, n_rec: 0, cksum_init: 0, n_sub_rec: 0, in_journal: cache.bitvec_none(), fd: file.file_closed(), jfd: file.file_closed(), sjfd: file.file_closed(), journal_off: 0, journal_hdr: 0, savepoints: [PagerSavepoint]{}, data_version: 0, db_file_vers: zeros(16), n_extra: 0, n_reserve: 0, vfs_flags: 0, sector_size: 0, mx_pgno: 0, lck_pgno: 0, page_size: 0, journal_size_limit: 0, filename: "", journal: None, busy: BusyHandler{timeout: 0, n_busy: 0}, stat: [Int]{0, 0, 0, 0}, tmp: [U8]{}, pcache: cache.pcache_unopened(), reinit: [Int]{}}
-}
-
-// sqlite3InvokeBusyHandler with sqliteDefaultBusyCallback (the HAVE_USLEEP
-// schedule): true to retry the lock.
-busy_invoke: fn(b: &BusyHandler) -[DB]> Bool Never! {
-    if b.timeout <= 0 || b.n_busy < 0 -> return false
-    count: b.n_busy
-    n: BUSY_DELAYS.len()
-    delay := 0
-    prior := 0
-    if count < n {
-        delay = BUSY_DELAYS[count]
-        prior = BUSY_TOTALS[count]
-    } else {
-        delay = BUSY_DELAYS[n - 1]
-        prior = BUSY_TOTALS[n - 1] + delay * (count - (n - 1))
-    }
-    if prior + delay > b.timeout {
-        delay = b.timeout - prior
-        if delay <= 0 {
-            b.n_busy = -1
-            return false
-        }
-    }
-    _: os.os_sleep(delay * 1000)
-    b.n_busy += 1
-    true
+    Pager{exclusive_mode: false, journal_mode: JOURNALMODE_DELETE, use_journal: false, no_sync: false, full_sync: false, extra_sync: false, sync_flags: 0, wal_sync_flags: 0, temp_file: false, no_lock: false, read_only: false, mem_db: false, mem_vfs: false, state: PAGER_OPEN, lock: os.LOCK_NONE, change_count_done: false, set_super: false, do_not_spill: 0, subj_in_memory: false, has_held_shared_lock: false, db_size: 0, db_orig_size: 0, db_file_size: 0, db_hint_size: 0, err_code: base.OK, n_rec: 0, cksum_init: 0, n_sub_rec: 0, in_journal: cache.bitvec_none(), fd: file.file_closed(), jfd: file.file_closed(), sjfd: file.file_closed(), journal_off: 0, journal_hdr: 0, savepoints: [PagerSavepoint]{}, data_version: 0, db_file_vers: zeros(16), n_extra: 0, n_reserve: 0, vfs_flags: 0, sector_size: 0, mx_pgno: 0, lck_pgno: 0, page_size: 0, journal_size_limit: 0, filename: "", journal: None, wal_name: "", busy: wal.BusyHandler{timeout: 0, n_busy: 0}, stat: [Int]{0, 0, 0, 0}, tmp: [U8]{}, pcache: cache.pcache_unopened(), reinit: [Int]{}, wal: wal.wal_closed()}
 }
 
 // subjRequiresPage: whether an open savepoint lacks page s's original image.
@@ -420,7 +385,7 @@ read_journal_hdr: fn(p: &Pager, is_hot: Bool, journal_size: Int, n_rec: &Int, db
         rc = read32bits(p.jfd, hdr_off + 24, page)
         if rc != base.OK -> return rc
         if page == 0 -> page = p.page_size
-        if page < 512 || sector < 32 || page > MAX_PAGE_SIZE || sector > MAX_SECTOR_SIZE || (page - 1).bit_and(page) != 0 || (sector - 1).bit_and(sector) != 0 -> return base.DONE
+        if page < 512 || sector < 32 || page > MAX_PAGE_SIZE || sector > file.MAX_SECTOR_SIZE || (page - 1).bit_and(page) != 0 || (sector - 1).bit_and(sector) != 0 -> return base.DONE
         rc = pager_set_pagesize(p, page, -1)
         p.sector_size = sector
     }
@@ -482,7 +447,10 @@ add_to_savepoint_bitvecs: fn(p: &Pager, pgno: Int) Never! {
 pager_unlock: fn(p: &Pager) Never! -[DB]> {
     p.in_journal = cache.bitvec_none()
     release_all_savepoints(p)
-    if !p.exclusive_mode {
+    if p.wal.open {
+        wal.wal_end_read_transaction(p.wal, p.fd)
+        p.state = PAGER_OPEN
+    } else if !p.exclusive_mode {
         dc: if file.file_is_open(p.fd) -> file.file_device_characteristics(p.fd) else -> 0
         if dc.bit_and(os.IOCAP_UNDELETABLE_WHEN_OPEN) == 0 || p.journal_mode.bit_and(5) != 1 -> file.file_close(p.jfd)
         rc: pager_unlock_db(p, os.LOCK_NONE)
@@ -558,11 +526,13 @@ pager_end_transaction: fn(p: &Pager, has_super: Bool, commit: Bool) -[DB]> Int N
         cache.pcache_truncate(p.pcache, n)
     }
     rc2 := base.OK
-    if rc == base.OK && commit && p.db_file_size > p.db_size {
+    if p.wal.open {
+        rc2 = wal.wal_end_write_transaction(p.wal, p.fd)
+    } else if rc == base.OK && commit && p.db_file_size > p.db_size {
         n: p.db_size
         rc = pager_truncate(p, n)
     }
-    if !p.exclusive_mode -> rc2 = pager_unlock_db(p, os.LOCK_SHARED)
+    if !p.exclusive_mode && (!p.wal.open || wal.wal_exclusive_mode(p.wal, p.fd, 0) != 0) -> rc2 = pager_unlock_db(p, os.LOCK_SHARED)
     p.state = PAGER_READER
     p.set_super = false
     if rc == base.OK -> rc2 else -> rc
@@ -628,7 +598,7 @@ pager_playback_one_page: fn(p: &Pager, offset: &Int, done: &cache.Bitvec, is_mai
     }
     cache.bitvec_set(done, pgno)
     if pgno == 1 && p.n_reserve != Int.from_u8(p.tmp[20]) -> p.n_reserve = Int.from_u8(p.tmp[20])
-    s := pager_lookup(p, pgno)
+    s := if p.wal.open -> cache.NO_PAGE else -> pager_lookup(p, pgno)
     synced: if is_main -> p.no_sync || offset <= p.journal_hdr else -> s == cache.NO_PAGE || p.pcache.pages[s].flags.bit_and(cache.PGHDR_NEED_SYNC) == 0
     if file.file_is_open(p.fd) && (p.state >= PAGER_WRITER_DBMOD || p.state == PAGER_OPEN) && synced {
         rc = file.file_write(p.fd, p.tmp, ps, (pgno - 1) * ps)
@@ -718,20 +688,12 @@ pager_truncate: fn(p: &Pager, n_page: Int) -[DB]> Int Never! {
     rc
 }
 
-// sqlite3SectorSize.
-sector_size_of: fn(f: &file.SQLFile) -> Int Never! {
-    r: file.file_sector_size(f)
-    if r < 32 -> return 512
-    if r > MAX_SECTOR_SIZE -> return MAX_SECTOR_SIZE
-    r
-}
-
 // setSectorSize.
 set_sector_size: fn(p: &Pager) Never! {
     if p.temp_file || file.file_device_characteristics(p.fd).bit_and(os.IOCAP_POWERSAFE_OVERWRITE) != 0 {
         p.sector_size = 512
     } else {
-        p.sector_size = sector_size_of(p.fd)
+        p.sector_size = file.sector_size_of(p.fd)
     }
 }
 
@@ -807,8 +769,18 @@ pager_playback: fn(p: &Pager, is_hot: Bool) -[DB]> Int Never! {
 read_db_page: fn(p: &Pager, s: Int) -[DB]> Int Never! {
     pgno: p.pcache.pages[s].pgno
     ps: p.page_size
-    rc := file.file_read(p.fd, p.pcache.pages[s].data, ps, (pgno - 1) * ps)
-    if rc == base.IOERR_SHORT_READ -> rc = base.OK
+    frame := 0
+    rc := base.OK
+    if p.wal.open {
+        rc = wal.wal_find_frame(p.wal, p.fd, pgno, frame)
+        if rc != base.OK -> return rc
+    }
+    if frame != 0 {
+        rc = wal.wal_read_frame(p.wal, frame, ps, p.pcache.pages[s].data)
+    } else {
+        rc = file.file_read(p.fd, p.pcache.pages[s].data, ps, (pgno - 1) * ps)
+        if rc == base.IOERR_SHORT_READ -> rc = base.OK
+    }
     if pgno == 1 {
         if rc != base.OK {
             loop i in 0..<16 -> p.db_file_vers[i] = U8{255}
@@ -828,10 +800,72 @@ pager_write_changecounter: fn(p: &Pager, s: Int) Never! {
     util.put4(p.pcache.pages[s].data, 96, VERSION_NUMBER)
 }
 
-// pagerPagecount: the database size in pages from the file size.
+// pagerUndoCallback: page pgno of a rolled-back WAL transaction leaves the
+// cache, or is read again when it is in use.
+pager_undo_callback: fn(p: &Pager, pgno: Int) -[DB]> Int Never! {
+    rc := base.OK
+    s: pager_lookup(p, pgno)
+    if s != cache.NO_PAGE {
+        if cache.pcache_page_refcount(p.pcache, s) == 1 {
+            cache.pcache_drop(p.pcache, s)
+        } else {
+            rc = read_db_page(p, s)
+            if rc == base.OK -> pager_reinit(p, s)
+            pager_unref_not_null(p, s)
+        }
+    }
+    rc
+}
+
+// pagerRollbackWal: drop or reload every page the transaction wrote to
+// the log or changed in the cache.
+pager_rollback_wal: fn(p: &Pager) -[DB]> Int Never! {
+    p.db_size = p.db_orig_size
+    undone := [Int]{}
+    rc := wal.wal_undo(p.wal, p.fd, undone)
+    loop pgno in undone {
+        if rc != base.OK -> break
+        rc = pager_undo_callback(p, pgno)
+    }
+    dirty := [Int]{}
+    loop s in cache.pcache_dirty_list(p.pcache) -> dirty.push(p.pcache.pages[s].pgno)
+    loop pgno in dirty {
+        if rc != base.OK -> break
+        rc = pager_undo_callback(p, pgno)
+    }
+    rc
+}
+
+// pagerWalFrames: log the pages of `list` (slots sorted by page number); a
+// commit leaves out the pages past n_truncate.
+pager_wal_frames: fn(p: &Pager, all: [Int], n_truncate: Int, is_commit: Bool) -[DB]> Int Never! {
+    list := [Int]{}
+    loop s in all {
+        if !is_commit || p.pcache.pages[s].pgno <= n_truncate -> list.push(s)
+    }
+    n_list: if is_commit -> list.len() else -> 1
+    p.stat[PAGER_STAT_WRITE] = p.stat[PAGER_STAT_WRITE] + n_list
+    if list.len() > 0 && p.pcache.pages[list[0]].pgno == 1 -> pager_write_changecounter(p, list[0])
+    ps: p.page_size
+    sync: p.wal_sync_flags
+    wal.wal_frames(p.wal, p.fd, p.pcache, ps, list, n_truncate, is_commit, sync)
+}
+
+// pagerBeginReadTransaction: a read transaction on the log; a changed
+// snapshot empties the cache.
+pager_begin_read_transaction: fn(p: &Pager) -[DB]> Int Never! {
+    wal.wal_end_read_transaction(p.wal, p.fd)
+    changed := false
+    rc: wal.wal_begin_read_transaction(p.wal, p.fd, changed)
+    if rc != base.OK || changed -> pager_reset(p)
+    rc
+}
+
+// pagerPagecount: the database size in pages from the log's snapshot, or
+// else from the file size.
 pager_pagecount: fn(p: &Pager, n: &Int) -[DB]> Int Never! {
-    n_page := 0
-    if file.file_is_open(p.fd) {
+    n_page := wal.wal_dbsize(p.wal)
+    if n_page == 0 && file.file_is_open(p.fd) {
         sz := 0
         rc: file.file_size(p.fd, sz)
         if rc != base.OK -> return rc
@@ -840,6 +874,28 @@ pager_pagecount: fn(p: &Pager, n: &Int) -[DB]> Int Never! {
     if n_page > p.mx_pgno -> p.mx_pgno = n_page
     n = n_page
     base.OK
+}
+
+// pagerOpenWalIfPresent: open the log when a -wal file exists beside a
+// database that is not empty, else delete it; without one the pager
+// leaves WAL mode.
+pager_open_wal_if_present: fn(p: &Pager) -[DB]> Int Never! {
+    rc := base.OK
+    if p.temp_file -> return rc
+    if file.file_exists(p.wal_name) {
+        n_page := 0
+        rc = pager_pagecount(p, n_page)
+        if rc != base.OK -> return rc
+        if n_page == 0 {
+            rc = file.file_delete(p.wal_name, false)
+        } else {
+            opened := false
+            rc = pager_open_wal(p, opened)
+        }
+    } else if p.journal_mode == JOURNALMODE_WAL {
+        p.journal_mode = JOURNALMODE_DELETE
+    }
+    rc
 }
 
 // pagerPlaybackSavepoint: roll back to savepoint `index`, or the whole
@@ -852,9 +908,10 @@ pager_playback_savepoint: fn(p: &Pager, index: Int) -[DB]> Int Never! {
     done := if has -> cache.bitvec_create(p.savepoints[index].n_orig) else -> cache.bitvec_none()
     p.db_size = if has -> p.savepoints[index].n_orig else -> p.db_orig_size
     p.change_count_done = p.temp_file
+    if !has && p.wal.open -> return pager_rollback_wal(p)
     sz_j: p.journal_off
     rc := base.OK
-    if has {
+    if has && !p.wal.open {
         hdr_off: if sp_hdr_offset != 0 -> sp_hdr_offset else -> sz_j
         p.journal_off = sp_offset
         loop rc == base.OK && p.journal_off < hdr_off {
@@ -880,6 +937,7 @@ pager_playback_savepoint: fn(p: &Pager, index: Int) -[DB]> Int Never! {
     }
     if has {
         offset := sp_sub_rec * (4 + p.page_size)
+        if p.wal.open -> rc = wal.wal_savepoint_undo(p.wal, p.fd, p.savepoints[index].wal_data)
         ii := sp_sub_rec
         loop rc == base.OK && ii < p.n_sub_rec {
             rc = pager_playback_one_page(p, offset, done, false, true)
@@ -935,7 +993,7 @@ pager_opentemp: fn(p: &Pager) -[DB]> Int Never! {
 }
 
 // sqlite3PagerSetBusyHandler: the connection's busy handler state.
-pager_set_busy_handler: fn(p: &Pager, busy: BusyHandler) Never! { p.busy = busy }
+pager_set_busy_handler: fn(p: &Pager, busy: wal.BusyHandler) Never! { p.busy = busy }
 
 // sqlite3PagerSetPagesize: change the page size while no page is in use;
 // page_size gets the size in effect. n_reserve < 0 keeps the reserve.
@@ -986,7 +1044,7 @@ pager_wait_on_lock: fn(p: &Pager, lock_type: Int) -[DB]> Int Never! {
     rc := base.OK
     loop {
         rc = pager_lock_db(p, lock_type)
-        if rc != base.BUSY || !busy_invoke(p.busy) -> break
+        if rc != base.BUSY || !wal.busy_invoke(p.busy) -> break
     }
     rc
 }
@@ -1014,9 +1072,14 @@ database_is_unmoved: fn(p: &Pager) -[DB]> Int Never! {
     base.OK
 }
 
-// sqlite3PagerClose.
-pager_close: fn(p: &Pager) Never! -[DB]> {
+// sqlite3PagerClose. checkpoint is false for a connection with
+// SQLITE_NoCkptOnClose: the log is then closed without a checkpoint.
+pager_close: fn(p: &Pager, checkpoint: Bool) Never! -[DB]> {
     p.exclusive_mode = false
+    ckpt: checkpoint && database_is_unmoved(p) == base.OK
+    sync: p.wal_sync_flags
+    ps: p.page_size
+    _: wal.wal_close(p.wal, p.fd, sync, ps, ckpt, p.tmp)
     pager_reset(p)
     if p.mem_db {
         pager_unlock(p)
@@ -1149,8 +1212,13 @@ pager_stress: fn(p: &Pager, s: Int) -[DB]> Int Never! {
     if p.do_not_spill != 0 && (p.do_not_spill.bit_and(SPILLFLAG_ROLLBACK.bit_or(SPILLFLAG_OFF)) != 0 || flags.bit_and(cache.PGHDR_NEED_SYNC) != 0) -> return base.OK
     p.stat[PAGER_STAT_SPILL] = p.stat[PAGER_STAT_SPILL] + 1
     rc := base.OK
-    if flags.bit_and(cache.PGHDR_NEED_SYNC) != 0 || p.state == PAGER_WRITER_CACHEMOD -> rc = sync_journal(p, true)
-    if rc == base.OK -> rc = pager_write_pagelist(p, [Int]{s})
+    if p.wal.open {
+        rc = subjournal_page_if_required(p, s)
+        if rc == base.OK -> rc = pager_wal_frames(p, [Int]{s}, 0, false)
+    } else {
+        if flags.bit_and(cache.PGHDR_NEED_SYNC) != 0 || p.state == PAGER_WRITER_CACHEMOD -> rc = sync_journal(p, true)
+        if rc == base.OK -> rc = pager_write_pagelist(p, [Int]{s})
+    }
     if rc == base.OK -> cache.pcache_make_clean(p.pcache, s)
     pager_error(p, rc)
 }
@@ -1170,9 +1238,9 @@ pager_flush: fn(p: &Pager) -[DB]> Int Never! {
 
 // sqlite3PagerOpen. The URI parameters the C pager reads from the file
 // name (sqlite3_uri_boolean "nolock" and "immutable", and the VFS's
-// "psow") arrive decoded from sqlite3ParseUri. n_extra is the btree's
-// per-page extra space.
-pager_open: fn(p: &Pager, path: String?, n_extra: Int, flags: Int, vfs_flags_in: Int, psow: Bool, nolock: Bool, immutable: Bool) -[DB]> Int Never! {
+// "psow" and "readonly_shm") arrive decoded from sqlite3ParseUri. n_extra
+// is the btree's per-page extra space.
+pager_open: fn(p: &Pager, path: String?, n_extra: Int, flags: Int, vfs_flags_in: Int, psow: Bool, nolock: Bool, immutable: Bool, readonly_shm: Bool{false}) -[DB]> Int Never! {
     p = pager_closed()
     vfs_flags := vfs_flags_in
     use_journal: flags.bit_and(PAGER_OMIT_JOURNAL) == 0
@@ -1190,7 +1258,10 @@ pager_open: fn(p: &Pager, path: String?, n_extra: Int, flags: Int, vfs_flags_in:
         pathname = full.path
     }
     p.filename = pathname
-    if pathname.count_bytes() > 0 -> p.journal = Val("{pathname}-journal")
+    if pathname.count_bytes() > 0 {
+        p.journal = Val("{pathname}-journal")
+        p.wal_name = "{pathname}-wal"
+    }
     p.vfs_flags = vfs_flags
     rc := base.OK
     temp_file := false
@@ -1199,7 +1270,7 @@ pager_open: fn(p: &Pager, path: String?, n_extra: Int, flags: Int, vfs_flags_in:
     page_dflt := DEFAULT_PAGE_SIZE
     act_like_temp := name.count_bytes() == 0
     if !act_like_temp {
-        rc = file.file_open(p.fd, p.filename, vfs_flags, psow)
+        rc = file.file_open(p.fd, p.filename, vfs_flags, psow, None, readonly_shm)
         fout: p.fd.os.flags
         mem_jm = fout.bit_and(os.OPEN_MEMORY) != 0
         p.mem_vfs = mem_jm
@@ -1335,15 +1406,15 @@ shared_lock_open: fn(p: &Pager) -[DB]> Int Never! {
         }
         if vers != p.db_file_vers -> pager_reset(p)
     }
-    // pagerOpenWalIfPresent is SQLITE_OK without WAL.
-    base.OK
+    pager_open_wal_if_present(p)
 }
 
 // sqlite3PagerSharedLock: begin a read transaction, rolling back a hot
 // journal first.
 pager_shared_lock: fn(p: &Pager) -[DB]> Int Never! {
     rc := base.OK
-    if p.state == PAGER_OPEN -> rc = shared_lock_open(p)
+    if !p.wal.open && p.state == PAGER_OPEN -> rc = shared_lock_open(p)
+    if rc == base.OK && p.wal.open -> rc = pager_begin_read_transaction(p)
     if !p.temp_file && p.state == PAGER_OPEN && rc == base.OK {
         n := 0
         rc = pager_pagecount(p, n)
@@ -1464,7 +1535,7 @@ pager_unref_page_one: fn(p: &Pager, s: Int) Never! -[DB]> {
 pager_open_journal: fn(p: &Pager) -[DB]> Int Never! {
     if p.err_code != base.OK -> return p.err_code
     rc := base.OK
-    if p.journal_mode != JOURNALMODE_OFF {
+    if !p.wal.open && p.journal_mode != JOURNALMODE_OFF {
         p.in_journal = cache.bitvec_create(p.db_size)
         if !file.file_is_open(p.jfd) {
             if p.journal_mode == JOURNALMODE_MEMORY {
@@ -1509,8 +1580,17 @@ pager_begin: fn(p: &Pager, ex_flag: Bool, subj_in_memory: Bool) -[DB]> Int Never
     p.subj_in_memory = subj_in_memory
     rc := base.OK
     if p.state == PAGER_READER {
-        rc = pager_lock_db(p, os.LOCK_RESERVED)
-        if rc == base.OK && ex_flag -> rc = pager_wait_on_lock(p, os.LOCK_EXCLUSIVE)
+        if p.wal.open {
+            if p.exclusive_mode && wal.wal_exclusive_mode(p.wal, p.fd, -1) != 0 {
+                rc = pager_lock_db(p, os.LOCK_EXCLUSIVE)
+                if rc != base.OK -> return rc
+                _: wal.wal_exclusive_mode(p.wal, p.fd, 1)
+            }
+            rc = wal.wal_begin_write_transaction(p.wal, p.fd)
+        } else {
+            rc = pager_lock_db(p, os.LOCK_RESERVED)
+            if rc == base.OK && ex_flag -> rc = pager_wait_on_lock(p, os.LOCK_EXCLUSIVE)
+        }
         if rc == base.OK {
             p.state = PAGER_WRITER_LOCKED
             p.db_hint_size = p.db_size
@@ -1665,7 +1745,7 @@ pager_sync: fn(p: &Pager) -[DB]> Int Never! {
 // sqlite3PagerExclusiveLock.
 pager_exclusive_lock: fn(p: &Pager) -[DB]> Int Never! {
     rc := p.err_code
-    if rc == base.OK -> rc = pager_wait_on_lock(p, os.LOCK_EXCLUSIVE)
+    if rc == base.OK && !p.wal.open -> rc = pager_wait_on_lock(p, os.LOCK_EXCLUSIVE)
     rc
 }
 
@@ -1675,7 +1755,21 @@ pager_commit_phase_one: fn(p: &Pager, super: String?, no_sync: Bool) -[DB]> Int 
     if p.err_code != base.OK -> return p.err_code
     if p.state < PAGER_WRITER_CACHEMOD -> return base.OK
     rc := base.OK
-    if pager_flush_on_commit(p, true) {
+    if pager_flush_on_commit(p, true) && p.wal.open {
+        list := cache.pcache_dirty_list(p.pcache)
+        page_one := cache.NO_PAGE
+        if list.len() == 0 {
+            // The commit flag needs a frame: log page 1.
+            rc = pager_get(p, 1, page_one, 0)
+            list = [Int]{page_one}
+        }
+        if rc == base.OK {
+            n: p.db_size
+            rc = pager_wal_frames(p, list, n, true)
+        }
+        pager_unref(p, page_one)
+        if rc == base.OK -> cache.pcache_clean_all(p.pcache)
+    } else if pager_flush_on_commit(p, true) {
         rc = pager_incr_changecounter(p)
         if rc == base.OK -> rc = write_super_journal(p, super)
         if rc == base.OK -> rc = sync_journal(p, false)
@@ -1692,7 +1786,7 @@ pager_commit_phase_one: fn(p: &Pager, super: String?, no_sync: Bool) -[DB]> Int 
         }
         if rc == base.OK && !no_sync -> rc = pager_sync(p)
     }
-    if rc == base.OK -> p.state = PAGER_WRITER_FINISHED
+    if rc == base.OK && !p.wal.open -> p.state = PAGER_WRITER_FINISHED
     rc
 }
 
@@ -1714,7 +1808,12 @@ pager_rollback: fn(p: &Pager) -[DB]> Int Never! {
     if p.state == PAGER_ERROR -> return p.err_code
     if p.state <= PAGER_READER -> return base.OK
     rc := base.OK
-    if !file.file_is_open(p.jfd) || p.state == PAGER_WRITER_LOCKED {
+    if p.wal.open {
+        rc = pager_savepoint(p, base.SAVEPOINT_ROLLBACK, -1)
+        super: p.set_super
+        rc2: pager_end_transaction(p, super, false)
+        if rc == base.OK -> rc = rc2
+    } else if !file.file_is_open(p.jfd) || p.state == PAGER_WRITER_LOCKED {
         e_state: p.state
         rc = pager_end_transaction(p, false, false)
         if !p.mem_db && e_state > PAGER_WRITER_LOCKED {
@@ -1753,7 +1852,8 @@ pager_open_savepoint: fn(p: &Pager, n: Int) Never! {
     if n <= p.savepoints.len() || !p.use_journal -> return
     loop p.savepoints.len() < n {
         offset: if file.file_is_open(p.jfd) && p.journal_off > 0 -> p.journal_off else -> p.sector_size
-        p.savepoints.push(PagerSavepoint{offset: offset, hdr_offset: 0, in_savepoint: cache.bitvec_create(p.db_size), n_orig: p.db_size, sub_rec: p.n_sub_rec, truncate_on_release: true})
+        wal_data: if p.wal.open -> wal.wal_savepoint(p.wal) else -> [Int]{0, 0, 0, 0}
+        p.savepoints.push(PagerSavepoint{offset: offset, hdr_offset: 0, in_savepoint: cache.bitvec_create(p.db_size), n_orig: p.db_size, sub_rec: p.n_sub_rec, truncate_on_release: true, wal_data: wal_data})
     }
 }
 
@@ -1775,7 +1875,7 @@ pager_savepoint: fn(p: &Pager, op: Int, i: Int) -[DB]> Int Never! {
         }
     } else {
         loop p.savepoints.len() > n_new -> _: p.savepoints.pop()
-        if file.file_is_open(p.jfd) -> rc = pager_playback_savepoint(p, n_new - 1)
+        if p.wal.open || file.file_is_open(p.jfd) -> rc = pager_playback_savepoint(p, n_new - 1)
     }
     rc
 }
@@ -1842,7 +1942,7 @@ pager_rekey: fn(p: &Pager, s: Int, pgno: Int, flags: Int) Never! {
 
 // sqlite3PagerLockingMode: set (mode >= 0) and return the locking mode.
 pager_locking_mode: fn(p: &Pager, mode: Int) -> Int Never! {
-    if mode >= 0 && !p.temp_file -> p.exclusive_mode = mode == LOCKINGMODE_EXCLUSIVE
+    if mode >= 0 && !p.temp_file && !wal.wal_heap_memory(p.wal) -> p.exclusive_mode = mode == LOCKINGMODE_EXCLUSIVE
     if p.exclusive_mode -> LOCKINGMODE_EXCLUSIVE else -> LOCKINGMODE_NORMAL
 }
 
@@ -1890,7 +1990,10 @@ pager_ok_to_change_journal_mode: fn(p: Pager) -> Bool Never! {
 
 // sqlite3PagerJournalSizeLimit: set (limit >= -1) and return the limit.
 pager_journal_size_limit: fn(p: &Pager, limit: Int) -> Int Never! {
-    if limit >= -1 -> p.journal_size_limit = limit
+    if limit >= -1 {
+        p.journal_size_limit = limit
+        wal.wal_limit(p.wal, limit)
+    }
     p.journal_size_limit
 }
 
@@ -1901,3 +2004,81 @@ pager_clear_cache: fn(p: &Pager) Never! {
 
 // sqlite3PagerDataVersion.
 pager_data_version: fn(p: Pager) -> Int Never! { p.data_version }
+
+// sqlite3PagerCheckpoint: n_log and n_ckpt get the log's frame count and
+// the frames checkpointed. Without an open log it does nothing; opening the
+// log of an empty database just switched to WAL (sqlite3_exec of "PRAGMA
+// table_list") is the connection's step before it calls this.
+pager_checkpoint: fn(p: &Pager, mode: Int, n_log: &Int, n_ckpt: &Int) -[DB]> Int Never! {
+    if !p.wal.open -> return base.OK
+    sync: p.wal_sync_flags
+    ps: p.page_size
+    wal.wal_checkpoint(p.wal, p.fd, mode, p.busy, mode != wal.CHECKPOINT_PASSIVE, sync, ps, p.tmp, n_log, n_ckpt)
+}
+
+// sqlite3PagerWalCallback.
+pager_wal_callback: fn(p: &Pager) -> Int Never! { wal.wal_callback(p.wal) }
+
+// sqlite3PagerWalSupported: the unix VFS has the shared-memory methods, so
+// only a pager without locking cannot use a log.
+pager_wal_supported: fn(p: Pager) -> Bool Never! { !p.no_lock }
+
+// pagerExclusiveLock: an EXCLUSIVE lock, releasing the PENDING lock a
+// failed attempt leaves.
+pager_exclusive_lock_db: fn(p: &Pager) -[DB]> Int Never! {
+    orig: p.lock
+    rc: pager_lock_db(p, os.LOCK_EXCLUSIVE)
+    if rc != base.OK -> _: pager_unlock_db(p, orig)
+    rc
+}
+
+// pagerOpenWal: open the log. In exclusive locking mode the wal-index is
+// kept in heap memory, under an EXCLUSIVE lock taken first.
+pager_open_wal_log: fn(p: &Pager) -[DB]> Int Never! {
+    rc := base.OK
+    if p.exclusive_mode -> rc = pager_exclusive_lock_db(p)
+    if rc == base.OK {
+        name: p.wal_name
+        no_shm: p.exclusive_mode
+        limit: p.journal_size_limit
+        rc = wal.wal_open(p.wal, p.fd, name, no_shm, limit)
+    }
+    rc
+}
+
+// sqlite3PagerOpenWal: open the log of a database file; is_open is set when
+// there is nothing to do (a temporary file, or the log is open).
+pager_open_wal: fn(p: &Pager, is_open: &Bool) -[DB]> Int Never! {
+    if p.temp_file || p.wal.open {
+        is_open = true
+        return base.OK
+    }
+    if !pager_wal_supported(p) -> return base.CANTOPEN
+    file.file_close(p.jfd)
+    rc: pager_open_wal_log(p)
+    if rc == base.OK {
+        p.journal_mode = JOURNALMODE_WAL
+        p.state = PAGER_OPEN
+    }
+    rc
+}
+
+// sqlite3PagerCloseWal: checkpoint and close the log before the pager
+// leaves WAL mode. The EXCLUSIVE lock this takes is kept.
+pager_close_wal: fn(p: &Pager) -[DB]> Int Never! {
+    rc := base.OK
+    if !p.wal.open {
+        rc = pager_lock_db(p, os.LOCK_SHARED)
+        if rc == base.OK && file.file_exists(p.wal_name) -> rc = pager_open_wal_log(p)
+    }
+    if rc == base.OK && p.wal.open {
+        rc = pager_exclusive_lock_db(p)
+        if rc == base.OK {
+            sync: p.wal_sync_flags
+            ps: p.page_size
+            rc = wal.wal_close(p.wal, p.fd, sync, ps, true, p.tmp)
+            if rc != base.OK && !p.exclusive_mode -> _: pager_unlock_db(p, os.LOCK_SHARED)
+        }
+    }
+    rc
+}

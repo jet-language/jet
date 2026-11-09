@@ -19,6 +19,10 @@ use {
 // of a journal with no spill limit (sqlite3JournalOpen with nSpill < 0).
 MEMJOURNAL_CHUNK: 1016
 
+// pager.c MAX_SECTOR_SIZE: the largest sector size the pager and the log
+// honour.
+MAX_SECTOR_SIZE: 65536
+
 // An open or closed sqlite3_file.
 SQLFile: struct {
     // The unix VFS file, when this is not an in-memory journal.
@@ -53,10 +57,10 @@ file_rc: fn(r: () base.SQLError!) -> Int Never! {
 }
 
 // sqlite3OsOpen. The flags xOpen settled on are f.os.flags.
-file_open: fn(f: &SQLFile, path: String?, flags: Int, psow: Bool{true}, modeof: String?{None}) -[DB]> Int Never! {
+file_open: fn(f: &SQLFile, path: String?, flags: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> Int Never! {
     f.mem = false
     f.data = [U8]{}
-    opened: os.os_open(path, flags, psow, modeof) ?? {
+    opened: os.os_open(path, flags, psow, modeof, readonly_shm) ?? {
         f.os = os.os_closed_file()
         return err.code
     }
@@ -209,6 +213,15 @@ file_sector_size: fn(f: &SQLFile) -> Int Never! {
     os.os_sector_size(f.os)
 }
 
+// sqlite3SectorSize (pager.c): the sector size clamped to 512 below 32
+// and to MAX_SECTOR_SIZE above it.
+sector_size_of: fn(f: &SQLFile) -> Int Never! {
+    r: file_sector_size(f)
+    if r < 32 -> return 512
+    if r > MAX_SECTOR_SIZE -> return MAX_SECTOR_SIZE
+    r
+}
+
 // sqlite3OsDeviceCharacteristics.
 file_device_characteristics: fn(f: &SQLFile) -> Int Never! {
     if f.mem || !os.os_is_open(f.os) -> return 0
@@ -236,6 +249,45 @@ file_delete: fn(path: String, dir_sync: Bool) -[DB]> Int Never! {
 // sqlite3OsAccess(SQLITE_ACCESS_EXISTS).
 file_exists: fn(path: String) -[DB]> Bool Never! {
     os.os_access(path, os.ACCESS_EXISTS)
+}
+
+// sqlite3OsFileControlHint(SQLITE_FCNTL_PERSIST_WAL) asking for the
+// setting: whether the -wal file outlives the last connection.
+file_persist_wal: fn(f: &SQLFile) -> Bool Never! {
+    if f.mem || !os.os_is_open(f.os) -> return false
+    os.os_persist_wal(f.os, -1) != 0
+}
+
+// sqlite3OsShmMap of wal-index region `region`, `sz_region` bytes; mapped
+// tells whether it exists. An in-memory journal has no xShmMap; the pager
+// never opens a log on one.
+file_shm_map: fn(f: &SQLFile, region: Int, sz_region: Int, extend: Bool, mapped: &Bool) -[DB]> Int Never! {
+    mapped = false
+    if f.mem -> return base.IOERR_SHMMAP
+    os.os_shm_map(f.os, region, sz_region, extend, mapped)
+}
+
+// Read n bytes of the shared memory at `offset` into buf[at..] (a load
+// from the mapping sqlite3OsShmMap returns).
+file_shm_read: fn(f: &SQLFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
+    os.os_shm_read(f.os, offset, buf, at, n)
+}
+
+// Write data[at..<at+n] to the shared memory at `offset` (a store into the
+// mapping).
+file_shm_write: fn(f: &SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
+    os.os_shm_write(f.os, offset, data, at, n)
+}
+
+// sqlite3OsShmLock.
+file_shm_lock: fn(f: &SQLFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
+    os.os_shm_lock(f.os, ofst, n, flags)
+}
+
+// sqlite3OsShmUnmap.
+file_shm_unmap: fn(f: &SQLFile, delete: Bool) Never! -[DB]> {
+    if f.mem -> return
+    os.os_shm_unmap(f.os, delete)
 }
 
 #Test("an in-memory journal appends, rewrites its header and truncates") {

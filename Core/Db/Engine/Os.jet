@@ -17,7 +17,11 @@
 //   locks.
 // - No memory map: PRAGMA mmap_size stores its limit (SQLITE_FCNTL_MMAP_SIZE)
 //   and every read and write goes through pread64/pwrite64, which is
-//   SQLite's own path when mmap_size is 0, the vendored default.
+//   SQLite's own path when mmap_size is 0, the vendored default. The -shm
+//   file is not mapped either: the wal-index reads and writes it with
+//   pread64/pwrite64 (os_shm_read and os_shm_write), which see the same
+//   kernel pages as C SQLite's MAP_SHARED mapping, and the shared-memory
+//   node is per connection, its locks the same OFD locks (DBShm).
 // - unixTempFileDir has no environment leaf, so it skips SQLITE_TMPDIR and
 //   TMPDIR and searches sqlite3_temp_directory, /var/tmp, /usr/tmp, /tmp
 //   and ".".
@@ -178,11 +182,15 @@ DBFile: struct {
     mmap_size_max: Int
     // The SQLITE_OPEN_* flags the open settled on (xOpen's *pOutFlags).
     flags: Int
+    // sqlite3_uri_boolean(zPath, "readonly_shm", 0).
+    readonly_shm: Bool
+    // unixFile.pShm: this connection's shared-memory (-shm) file.
+    shm: DBShm
 }
 
 // A file that is not open (memset to zero, pMethods 0).
 os_closed_file: fn() -> DBFile Never! {
-    DBFile{path: "", fd: -1, lock: LOCK_NONE, ctrl: 0, last_errno: 0, chunk: 0, sector_size: 0, device: 0, inode: -1, mmap_size_max: 0, flags: 0}
+    DBFile{path: "", fd: -1, lock: LOCK_NONE, ctrl: 0, last_errno: 0, chunk: 0, sector_size: 0, device: 0, inode: -1, mmap_size_max: 0, flags: 0, readonly_shm: false, shm: os_shm_closed()}
 }
 
 // pager.c isOpen(): the file has io methods.
@@ -209,11 +217,12 @@ os_file_lock: fn(fd: Int, kind: Int, start: Int, len: Int) -[DB]> Int Never! {
 }
 
 // sqlite3OsOpen (os.c) and unixOpen with fillInUnixFile. `path` None asks
-// for a temporary file. `psow` is sqlite3_uri_boolean(zFilename, "psow", 1)
-// and `modeof` the "modeof" URI parameter, both of which the caller reads
-// from the URI filename. The temporary-file name uses `temp_dir`
-// (sqlite3_temp_directory) first.
-os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None}) -[DB]> DBFile SQLError! {
+// for a temporary file. `psow` is sqlite3_uri_boolean(zFilename, "psow", 1),
+// `modeof` the "modeof" URI parameter and `readonly_shm` the
+// "readonly_shm" URI boolean, all of which the caller reads from the URI
+// filename. The temporary-file name uses `temp_dir` (sqlite3_temp_directory)
+// first.
+os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> DBFile SQLError! {
     flags := flags_in.bit_and(OPEN_VFS_MASK)
     e_type: flags.bit_and(OPEN_TYPE_MASK)
     is_exclusive: flags.bit_and(OPEN_EXCLUSIVE) != 0
@@ -300,6 +309,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
     file.path = path ?? ""
     file.ctrl = ctrl
     file.flags = flags
+    file.readonly_shm = readonly_shm
     if !no_lock {
         // findInodeInfo: the inode the file was opened on.
         inode: core.db.__vfs_fd_inode(fd)
@@ -739,6 +749,206 @@ os_full_pathname: fn(path: String) -[DB]> FullPath SQLError! {
     if p.rc != base.OK || p.out.len() < 2 -> return Err(base.fail(base.CANTOPEN))
     full: String.from_bytes(p.out) ?? return Err(base.fail(base.CANTOPEN))
     Ok(FullPath{path: full, symlink: p.symlinks > 0})
+}
+
+// The shared-memory locks (sqlite3.h SQLITE_SHM_NLOCK and the xShmLock
+// flags) and their bytes in the -shm file (os_unix.c UNIX_SHM_BASE, the
+// first lock byte, and UNIX_SHM_DMS, the dead-man switch).
+SHM_NLOCK: 8
+SHM_UNLOCK: 1
+SHM_LOCK: 2
+SHM_SHARED: 4
+SHM_EXCLUSIVE: 8
+SHM_BASE: 120
+SHM_DMS: 128
+// unixShmMap's page size for growing the -shm file.
+SHM_EXTEND_PAGE: 4096
+
+// The shared memory of one connection (os_unix.c struct unixShm with the
+// unixShmNode it points at). The node is per connection here, not per
+// inode: its locks are open-file-description locks on its own descriptor,
+// which conflict with every other descriptor, in this process or another,
+// so the node's aLock counts and mutex are not needed. The regions are not
+// memory-mapped: the wal-index reads and writes them with os_shm_read and
+// os_shm_write (pread and pwrite on the -shm file, which share the kernel
+// page cache that C SQLite's MAP_SHARED mappings use; each call is a full
+// memory barrier, which is all unixShmBarrier provides).
+DBShm: struct {
+    // pShm != 0.
+    open: Bool
+    // unixShmNode.hShm and zFilename.
+    fd: Int
+    path: String
+    // unixShmNode.isReadonly and isUnlocked.
+    readonly: Bool
+    unlocked: Bool
+    // unixShmNode.nRegion: regions known to lie inside the file.
+    n_region: Int
+    sz_region: Int
+    // unixShm.sharedMask and exclMask.
+    shared_mask: Int
+    excl_mask: Int
+}
+
+// No shared memory (pShm 0).
+os_shm_closed: fn() -> DBShm Never! {
+    DBShm{open: false, fd: -1, path: "", readonly: false, unlocked: false, n_region: 0, sz_region: 0, shared_mask: 0, excl_mask: 0}
+}
+
+// unixShmSystemLock: one record lock (F_UNLCK, F_RDLCK or F_WRLCK) on
+// bytes [ofst, ofst+n) of the -shm file; BUSY when it cannot be taken.
+os_shm_system_lock: fn(file: &DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
+    if file.shm.fd < 0 -> return base.OK
+    if os_file_lock(file.shm.fd, kind, ofst, n) < 0 -> return base.BUSY
+    base.OK
+}
+
+// unixLockSharedMemory: take the dead-man-switch read lock. When no other
+// connection holds it the -shm content is stale: a read-write connection
+// write-locks the DMS byte and truncates the file to 3 bytes first, and a
+// read-only one is left unlocked and answers READONLY_CANTINIT. A DMS
+// write lock held elsewhere (another connection initialising) is BUSY.
+os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
+    got: core.db.__vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
+    rc := base.OK
+    if got < 0 {
+        rc = base.IOERR_LOCK
+    } else if got == OS_F_UNLCK {
+        if file.shm.readonly {
+            file.shm.unlocked = true
+            rc = base.READONLY_CANTINIT
+        } else {
+            rc = os_shm_system_lock(file, OS_F_WRLCK, SHM_DMS, 1)
+            if rc == base.OK && core.db.__vfs_truncate(file.shm.fd, 3) < 0 -> rc = base.IOERR_SHMOPEN
+        }
+    } else if got == OS_F_WRLCK {
+        rc = base.BUSY
+    }
+    if rc == base.OK -> rc = os_shm_system_lock(file, OS_F_RDLCK, SHM_DMS, 1)
+    rc
+}
+
+// unixOpenSharedMemory: open "<database>-shm" with the database's
+// permissions (read-write unless the readonly_shm URI parameter is set,
+// falling back to read-only) and take the DMS lock. READONLY_CANTINIT
+// leaves the shared memory open but unlocked.
+os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
+    mode: core.db.__vfs_mode(file.path)
+    if mode < 0 -> return base.IOERR_FSTAT
+    name: "{file.path}-shm"
+    fd := -1
+    readonly := false
+    if !file.readonly_shm -> fd = core.db.__vfs_open(name, OS_O_RDWR.bit_or(OS_O_CREAT).bit_or(OS_O_NOFOLLOW), mode)
+    if fd < 0 {
+        fd = core.db.__vfs_open(name, OS_O_RDONLY.bit_or(OS_O_NOFOLLOW), mode)
+        if fd < 0 -> return base.CANTOPEN
+        readonly = true
+    }
+    // robustFchown: a root process gives the -shm file its database's owner.
+    _: core.db.__vfs_chown_like(fd, file.path)
+    file.shm = DBShm{open: true, fd: fd, path: name, readonly: readonly, unlocked: false, n_region: 0, sz_region: 0, shared_mask: 0, excl_mask: 0}
+    rc: os_shm_lock_dms(file)
+    if rc != base.OK && rc != base.READONLY_CANTINIT {
+        // shm_open_err: unixShmPurge.
+        _: core.db.__vfs_close(fd)
+        file.shm = os_shm_closed()
+    }
+    rc
+}
+
+// sqlite3OsShmMap: unixShmMap. Make wal-index region `region` (of
+// `sz_region` bytes) available, opening the shared memory on first use.
+// `mapped` reports whether the region lies inside the -shm file; with
+// `extend` the file grows to hold it, one byte at the end of each 4096-byte
+// page. A read-only -shm file answers READONLY.
+os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped: &Bool) -[DB]> Int Never! {
+    mapped = false
+    if !file.shm.open {
+        rc: os_shm_open(file)
+        if rc != base.OK -> return rc
+    }
+    if file.shm.unlocked {
+        rc: os_shm_lock_dms(file)
+        if rc != base.OK -> return rc
+        file.shm.unlocked = false
+    }
+    rc := base.OK
+    n_req: region + 1
+    if file.shm.n_region < n_req {
+        n_byte: n_req * sz_region
+        file.shm.sz_region = sz_region
+        size: core.db.__vfs_size(file.shm.fd)
+        if size < 0 -> return base.IOERR_SHMSIZE
+        if size < n_byte && !extend {
+            if file.shm.readonly -> return base.READONLY
+            return base.OK
+        }
+        if size < n_byte {
+            zero: [U8]{U8{0}}
+            loop pg in (size /% SHM_EXTEND_PAGE)..<(n_byte /% SHM_EXTEND_PAGE) {
+                if core.db.__vfs_write(file.shm.fd, pg * SHM_EXTEND_PAGE + SHM_EXTEND_PAGE - 1, zero, 0, 1) != 1 -> return base.IOERR_SHMSIZE
+            }
+        }
+        file.shm.n_region = n_req
+    }
+    mapped = file.shm.n_region > region
+    if file.shm.readonly && rc == base.OK -> rc = base.READONLY
+    rc
+}
+
+// Read `n` bytes of the shared memory at byte `offset` into buf[at..].
+// What lies past the end of the file reads as zero.
+os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
+    got: core.db.__vfs_read(file.shm.fd, offset, buf, at, n)
+    if got < 0 -> return base.IOERR_SHMMAP
+    loop i in got..<n -> buf[at + i] = U8{0}
+    base.OK
+}
+
+// Write data[at..<at+n] to the shared memory at byte `offset`.
+os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
+    if core.db.__vfs_write(file.shm.fd, offset, data, at, n) != n -> return base.IOERR_SHMMAP
+    base.OK
+}
+
+// sqlite3OsShmLock: unixShmLock of `n` locks from slot `ofst`, `flags` one
+// of LOCK|SHARED, LOCK|EXCLUSIVE, UNLOCK|SHARED and UNLOCK|EXCLUSIVE. A
+// shared lock already held is kept; an exclusive lock is BUSY while this
+// connection holds one of the slots shared (the aLock check).
+os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
+    if !file.shm.open -> return base.IOERR_SHMLOCK
+    mask: (1 << (ofst + n)) - (1 << ofst)
+    held: file.shm.excl_mask.bit_or(file.shm.shared_mask)
+    unlock: flags.bit_and(SHM_UNLOCK) != 0
+    work: (unlock && held.bit_and(mask) != 0) || (flags == SHM_SHARED.bit_or(SHM_LOCK) && file.shm.shared_mask.bit_and(mask) == 0) || flags == SHM_EXCLUSIVE.bit_or(SHM_LOCK)
+    if !work -> return base.OK
+    keep: mask.bit_xor(65535)
+    if unlock {
+        rc: os_shm_system_lock(file, OS_F_UNLCK, ofst + SHM_BASE, n)
+        if rc == base.OK {
+            file.shm.shared_mask = file.shm.shared_mask.bit_and(keep)
+            file.shm.excl_mask = file.shm.excl_mask.bit_and(keep)
+        }
+        return rc
+    }
+    if flags.bit_and(SHM_SHARED) != 0 {
+        rc: os_shm_system_lock(file, OS_F_RDLCK, ofst + SHM_BASE, n)
+        if rc == base.OK -> file.shm.shared_mask = file.shm.shared_mask.bit_or(mask)
+        return rc
+    }
+    if file.shm.shared_mask.bit_and(mask) != 0 -> return base.BUSY
+    rc: os_shm_system_lock(file, OS_F_WRLCK, ofst + SHM_BASE, n)
+    if rc == base.OK -> file.shm.excl_mask = file.shm.excl_mask.bit_or(mask)
+    rc
+}
+
+// sqlite3OsShmUnmap: unixShmUnmap. Close this connection's shared memory,
+// which drops its locks, and with `delete` unlink the -shm file.
+os_shm_unmap: fn(file: &DBFile, delete: Bool) Never! -[DB]> {
+    if !file.shm.open -> return
+    if delete && file.shm.fd >= 0 -> _: core.db.__vfs_unlink(file.shm.path)
+    if file.shm.fd >= 0 -> _: core.db.__vfs_close(file.shm.fd)
+    file.shm = os_shm_closed()
 }
 
 // sqlite3OsRandomness: unixRandomness, `n` bytes from the system's random
