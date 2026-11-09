@@ -2239,7 +2239,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
-    effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}
+    effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.copy()}
     unsafe_gate := TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
         reason: func.unsafe_reason ?? ""

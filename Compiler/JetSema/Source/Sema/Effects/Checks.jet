@@ -238,6 +238,8 @@ SemaEffectNode: struct {
     dispatches: [TEffectSpan]
     // The functions this body takes as values (TEffectFacts.value_edges).
     value_edges: [String]{[String]{}}
+    // The module state this body writes (TEffectFacts.module_writes).
+    module_writes: [TEffectSpan]{[TEffectSpan]{}}
     // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
@@ -875,6 +877,41 @@ sema_effect_pure_diagnostic: fn(node: SemaEffectNode, reached: [String]) -> Diag
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
 
+// A pure function that writes module state (`path` is the function alone) or
+// reaches a function that does (`path` runs from the pure function to it).
+// The report points at the write.
+sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> Diagnostic {
+    node: nodes[path[0]]
+    writer: nodes[path[path.len() - 1]]
+    write: writer.module_writes[0]
+    chain: loop step in path -> nodes[step].chain_name
+    if path.len() == 1 {
+        diagnostic: sema_error("E3401", write.span, "`{node.name}` writes module state `{write.name}`", "module state outlives the call, so a later call sees the write, but `{node.name}` declares `-[]>`", "pass the state in and return the new value, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+        return diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+    }
+    diagnostic: sema_error("E3401", write.span, "`{node.name}` reaches a write of module state `{write.name}`", "{chain.join(" → ")} writes `{write.name}`, which outlives the call — the whole call chain must be pure inside `{node.name}`", "move the write out of `{writer.chain_name}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+    diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+}
+
+// The call path from `index` to the first function reached depth-first that
+// writes module state, `index` first; empty when none does.
+sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    if nodes[index].module_writes.len() > 0 -> return [Int]{index}
+    calls: nodes[index].call_edges.len()
+    loop position in 0..<(calls + nodes[index].value_edges.len()) {
+        edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        tail: sema_effect_state_writer_path(nodes, node_by_key, target, seen)
+        if tail.len() == 0 -> next
+        path := [Int]{index}
+        loop step in tail -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
 // A module or type cap as one checked function meets it. `site` names where
 // the cap is written (`run.jet:1`) when it isn't in the function's own file;
 // a cap in the function's file is labeled in the report.
@@ -1277,6 +1314,8 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     }
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
     loop edge in function.effects.value_edges -> sema_effect_set_add(node.value_edges, edge)
+    // copy: the node keeps the writes; the function keeps its effect facts.
+    node.module_writes = function.effects.module_writes.copy()
     if function.effects.maximal {
         node.maximal = true
         node.maximal_span = Val(function.source_span)
@@ -2403,7 +2442,7 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
 }
 
 sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges, module_writes: node.module_writes}
 }
 
 // Rust `e1264`: the span is the first entry of the declared effect row, or
@@ -3010,6 +3049,17 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         callback_diagnostics := [Diagnostic]{}
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
+    }
+    // A pure function may not write module state, itself or through any
+    // function it calls or takes as a value.
+    loop node_index in 0..<nodes.len() {
+        if !nodes[node_index].is_pure -> next
+        seen := (loop _ in nodes -> false)
+        path: sema_effect_state_writer_path(nodes, calls.node_by_key, node_index, seen)
+        if path.len() == 0 -> next
+        state_diagnostics := [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
+        // The report points at the write, which may be in another module.
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]

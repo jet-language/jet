@@ -1,0 +1,16 @@
+# A function declared pure (`-[]>`) may not write module state: a `shared`
+# holder's field, a `#Persist` binding, or either one through a function it
+# calls. A pure function's own locals stay free to change, and a function
+# whose row is inferred writes module state as before.
+fixture: pure_fn_cannot_write_module_state/input
+env: NO_COLOR=1
+step: jet check writes.jet
+exit: 1
+stderr: count "Error [" = 3 # bump, pin and relay; inc's row is inferred
+stderr: ~ "`bump` writes module state `HITS`"
+stderr: ~ "`pin` writes module state `pinned`"
+stderr: ~ "`relay` reaches a write of module state `pinned`"
+stderr: ~ "Call chain: relay → inc"
+step: jet run ok.jet
+exit: 0
+stdout: = "6\n1\n2\n"

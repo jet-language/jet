@@ -202,6 +202,7 @@ sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, i
     ownership := sema_ownership_check_method_call(state, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     result: if method == "replace" -> inner else -> Type.Named{name: "Unit"}
+    sema_scope_record_module_write(receiver, span, environment, scopes, context)
     sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, scopes, context, diagnostics)
 }
 

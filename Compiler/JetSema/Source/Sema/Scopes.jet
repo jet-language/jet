@@ -34,6 +34,7 @@ use jet_foundation.[
     TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
     TTypedGoal,
+    TEffectSpan,
     TIndexProof,
     TFailureCarrier,
     TGenericParam,
@@ -669,6 +670,9 @@ SemaCheckContext: struct {
     failure_repair: SemaFailureRepair?
     // The enclosing named callable, for the return verdicts.
     function_name: String
+    // The module state this body writes (sema_scope_record_module_write),
+    // which a pure function may not reach (E3401).
+    module_writes: [TEffectSpan]{[TEffectSpan]{}}
     // E0408/E0409: a fallback with no failure report to name (`??` on an
     // optional, or a pure pattern miss) denies `err` with this code.
     fallback_err_denial: String?
@@ -1163,6 +1167,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lending_view_parameter_keys: source.lending_view_parameter_keys.copy(),
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
+        module_writes: source.module_writes.copy(),
         http_routes: source.http_routes.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
@@ -1248,6 +1253,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
 // SemaCheckContext field must be added here and in the rollback.
 SemaCheckContextMark: struct {
     call_facts: Int
+    module_writes: Int
     call_return_views: Int
     local_view_provenance: Int
     name_references: Int
@@ -1282,6 +1288,7 @@ sema_check_context_mark: fn(context: &SemaCheckContext) -> SemaCheckContextMark 
 sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark Never! {
     SemaCheckContextMark{
         call_facts: context.call_facts.len(),
+        module_writes: context.module_writes.len(),
         call_return_views: context.call_return_views.len(),
         local_view_provenance: context.local_view_provenance.len(),
         name_references: context.name_references.len(),
@@ -1391,6 +1398,7 @@ sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 // inside the rows its statement appended) and every other field is restored.
 sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
+    loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
     loop context.call_return_views.len() > mark.call_return_views -> _ := context.call_return_views.pop()
     loop context.local_view_provenance.len() > mark.local_view_provenance -> _ := context.local_view_provenance.pop()
     loop context.name_references.len() > mark.name_references -> _ := context.name_references.pop()
@@ -2213,6 +2221,25 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
     row := table.bindings[index].copy()
     if sema_scope_binding_is_light(table, index) -> row.symbol.ty = sema_scope_binding_type(environment, table, index)
     row
+}
+
+// A write through `place` whose root is a module-level binding (`STATE` in
+// `STATE.rows[0].count`) writes module state: it is recorded in
+// `context.module_writes`. A write to a local records nothing.
+sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
+    name: sema_scope_place_root(place) ?? return
+    index: sema_scope_resolve_index(scopes, name) ?? return
+    if sema_scope_binding_symbol(environment, scopes, index).kind != SymbolKind.Constant -> return
+    context.module_writes.push(TEffectSpan{name: name, span: span})
+}
+
+sema_scope_place_root: fn(place: Expr) -> String? Never! {
+    if place == {
+        .Ident(name, _, _) -> return Val(name)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> return sema_scope_place_root(base)
+        .Paren(inner, _, _) | .Place(inner, _, _, _) -> return sema_scope_place_root(inner)
+        else -> return None
+    }
 }
 
 // A false return leaves the old binding visible; this prevents a duplicate

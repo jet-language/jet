@@ -46,6 +46,7 @@ use jet_foundation.[
     TComptimeValue,
     TARGET_OS_ALL,
     TDestructureBinding,
+    TEffectSpan,
     TFailureCarrier,
     TForInMethod,
     TGenericParam,
@@ -5467,6 +5468,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
                 diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name}: shared Count{{value: 0}}`, written `{name}.value += 1`) or mark it `#Persist`; code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
                 return None
             }
+            context.module_writes.push(TEffectSpan{name: name, span: name_span})
             return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
