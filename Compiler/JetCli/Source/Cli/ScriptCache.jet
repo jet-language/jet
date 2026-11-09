@@ -42,8 +42,9 @@ use {
         JetDriverVerbOutput,
         schema_cache_dir,
     ]
-    jet_foundation.[BuildOptionLayer, BuildOptions, build_options_key]
-    jet_lexer.[TOKEN_SEMI, lex]
+    jet_foundation.[BuildOptionLayer, BuildOptions, Expr, Stmt, build_options_key, expr_span]
+    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_EOF, TOKEN_LINE_COMMENT, TOKEN_SEMI, lex]
+    jet_parser.[parse_source]
 }
 
 // Names the kept-program records; a new layout is a new name.
@@ -241,10 +242,91 @@ jet_cli_script_cache_dir: fn() -> String? {
 }
 
 // The entry file `jet -e CODE` runs: CODE as the body of `run: fn`, its
-// statements on lines of their own (jet_cli_eval_lines), kept as the `eval`
-// entry file of its source (jet_cli_entry_file).
+// statements on lines of their own (jet_cli_eval_lines), the value of its
+// last statement shown (jet_cli_eval_source), kept as the `eval` entry file of
+// its source (jet_cli_entry_file).
 jet_cli_eval_file: fn(code: String) -> String? {
-    jet_cli_entry_file("eval", "run: fn() {{\n{jet_cli_eval_lines(code)}\n}}\n")
+    jet_cli_entry_file("eval", jet_cli_eval_source(jet_cli_eval_lines(code)))
+}
+
+// The opening of the `run: fn` an `-e` body goes in.
+JET_CLI_EVAL_HEAD: "run: fn() {{\n"
+
+// The `run: fn` whose body is `lines`. When its last statement is an
+// expression with a value (any expression but an `if` without `else`), that
+// expression is wrapped in `__jet_eval_show` (JetSema Calls/Direct.jet
+// sema_call_check_eval_show), which shows the value: nothing for a unit value,
+// one line per item of a List or an Iter, and as `print` shows it otherwise.
+// Code that does not parse runs as written, so the compile reports it.
+jet_cli_eval_source: fn(lines: String) -> String Never! {
+    plain: "{JET_CLI_EVAL_HEAD}{lines}\n}}\n"
+    parsed: parse_source(plain.bytes())
+    if jet_cli_errors(parsed.diagnostics).len() > 0 -> return plain
+    body := [Stmt]{}
+    loop item in parsed.program.items {
+        if item == .Func(function) {
+            if function.name == "run" -> body = function.body.copy()
+        }
+    }
+    if body.len() == 0 -> return plain
+    last: body[body.len() - 1]
+    value: if last == {
+        .Expr(expr) -> expr
+        else -> return plain
+    }
+    if jet_cli_eval_valueless(value) -> return plain
+    start: jet_cli_eval_expr_start(value) - JET_CLI_EVAL_HEAD.count_bytes()
+    end: jet_cli_eval_code_end(lines)
+    bytes: lines.bytes()
+    if start < 0 || end <= start || end > bytes.len() -> return plain
+    head: String.from_bytes(bytes[0..<start]) ?? return plain
+    shown: String.from_bytes(bytes[start..<end]) ?? return plain
+    tail: String.from_bytes(bytes[end..<bytes.len()]) ?? return plain
+    // The wrapper takes lines of its own, so a problem the value has is
+    // reported on the line the code wrote, as it wrote it.
+    "{JET_CLI_EVAL_HEAD}{head}__jet_eval_show(\n{shown}\n){tail}\n}}\n"
+}
+
+// An `if` without `else`: a statement, which leaves no value to show.
+jet_cli_eval_valueless: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .If(_, _, _, _, else_value, _, _) -> if else_value == {
+            .NoElse(_, _) -> true
+            else -> false
+        }
+        else -> false
+    }
+}
+
+// The first byte of `expr`: a postfix form (a method call, a field, an index,
+// `?`, `??`) and a binary operation start where their left operand starts.
+jet_cli_eval_expr_start: fn(expr: Expr) -> Int Never! {
+    if expr == {
+        .MethodCall(receiver, _, _, _, _, _, _) -> jet_cli_eval_expr_start(receiver)
+        .Range(first, _, _, _, _) -> jet_cli_eval_expr_start(first)
+        .OptMethodCall(receiver, _, _, _, _, _, _) -> jet_cli_eval_expr_start(receiver)
+        .Field(base, _, _, _) -> jet_cli_eval_expr_start(base)
+        .OptField(base, _, _, _, _, _) -> jet_cli_eval_expr_start(base)
+        .Index(base, _, _, _, _) -> jet_cli_eval_expr_start(base)
+        .Slice(base, _, _, _, _, _) -> jet_cli_eval_expr_start(base)
+        .Try(value, _, _, _, _) -> jet_cli_eval_expr_start(value)
+        .OrFallback(value, _, _, _, _) -> jet_cli_eval_expr_start(value)
+        .Binary(_, left, _, _, _) -> jet_cli_eval_expr_start(left)
+        .CompareChain(operands, _, _, _, _) -> if operands.len() > 0 -> jet_cli_eval_expr_start(operands[0]) else -> expr_span(expr).start
+        .Pipe(head, _, _, _) -> jet_cli_eval_expr_start(head)
+        .CallValue(callee, _, _, _) -> jet_cli_eval_expr_start(callee)
+        else -> expr_span(expr).start
+    }
+}
+
+// The end of the last token of `lines` that is code, not a comment.
+jet_cli_eval_code_end: fn(lines: String) -> Int Never! {
+    end := 0
+    loop token in lex(lines.bytes()).tokens {
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
+        end = token.span.end
+    }
+    end
 }
 
 // The entry file that holds `source`, a program given on the command line

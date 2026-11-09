@@ -170,6 +170,8 @@ BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     // String: decomposition and parsing.
     {receiver: BuiltinMethodReceiver.String, name: "split", parameters: [Type]{Type.String}, result: Type.Apply{name: "Iter", args: [Type]{Type.String}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Split}},
     {receiver: BuiltinMethodReceiver.String, name: "rsplit", parameters: [Type]{Type.String}, result: Type.Apply{name: "Iter", args: [Type]{Type.String}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "rsplit"}}},
+    // The fields between runs of whitespace: perl's `split ' '`, awk's fields.
+    {receiver: BuiltinMethodReceiver.String, name: "words", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "words"}}},
     {receiver: BuiltinMethodReceiver.String, name: "lines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
     {receiver: BuiltinMethodReceiver.String, name: "splitlines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
     {receiver: BuiltinMethodReceiver.String, name: "chars", parameters: [Type]{}, result: Type.List{element: Type.Char}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Chars}},

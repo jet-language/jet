@@ -920,6 +920,8 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                 }
                 if !lone_string -> sema_core_note_usage(used, spans, "core.text.fmt::interpolation", Val(call.name_span))
             }
+            // The value `jet -e` shows prints as `print` prints a value.
+            if call.name == "__jet_eval_show" -> sema_core_note_usage(used, spans, "core.text.fmt::interpolation", Val(call.name_span))
             // A `debug(value)` trace interpolates the value's Debug form
             // and writes it through the shared `core.term.eprint` row, so it
             // reaches that row's Prelude part without a `core.term` import.

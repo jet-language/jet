@@ -309,6 +309,7 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
         "channel" -> sema_call_check_channel(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "freeze" -> sema_call_check_freeze(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "print" -> sema_call_check_ambient_print(call, environment, program, scopes, state, tail_store, context, diagnostics)
+        "__jet_eval_show" -> sema_call_check_eval_show(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "input" -> sema_call_check_ambient_input(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "panic" -> sema_call_check_ambient_panic(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "assert" -> sema_call_check_ambient_assert(call, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -566,6 +567,57 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
     }
     loop statement in prints -> body.push(statement)
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
+}
+
+// `jet -e CODE` shows the value its last statement leaves: the CLI wraps that
+// statement in `__jet_eval_show` (JetCli ScriptCache.jet jet_cli_eval_source).
+// A unit value shows nothing, each item of a List or an Iter prints on a line
+// of its own, as a `loop` over it pulls them, and any other value prints as
+// `print` shows it, under `print`'s display rule (E0112).
+sema_call_check_eval_show: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != 1 {
+        diagnostics.push(sema_error("E0104", call.name_span, "`__jet_eval_show` expects 1 argument, got {call.args.len()}", "it shows the one value the code of `jet -e` ends in", "pass the one value to show"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    checked: sema_check_expression(call.args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    unit: Type.Named{name: "Unit"}
+    if checked.ty == unit -> return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+    span: expr_span(call.args[0].expr)
+    item_type: sema_call_eval_show_item(checked.ty)
+    shown_type: item_type ?? checked.ty
+    if !sema_call_ambient_printable(shown_type, environment, program) {
+        diagnostics.push(sema_call_ambient_print_refusal(shown_type, span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if !sema_call_ambient_record_io("print", unit, call.name_span, environment, program, scopes, context, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    item: item_type ?? {
+        shown: sema_call_eval_show_text(checked, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: shown}, span))}
+    }
+    local: checked_generated_local("__jet_eval_item_{call.name_span.start}", span, item)
+    read: sema_tree_node(item, TExprKind.Local{local: local}, span)
+    shown: sema_call_eval_show_text(read, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    line: TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: shown}, span), span: span}
+    by_value: sema_stmt_for_in_consumes_collection(checked.ty, item) && (sema_stmt_for_in_by_value(checked.ty, item) || sema_stmt_for_in_is_list(checked.ty))
+    walk: TStmt.ForIn{label: None, variable: local, variable_two: None, source: checked.copy(), collection: checked, step: None, method_kind: None, columnar: false, by_value: by_value, source_stable: false, body: [TStmt]{line}, span: span}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: [TStmt]{walk}}, span))}
+}
+
+// The item type of a value `jet -e` shows one item per line: a List's element
+// or an Iter's item; None for any other value.
+sema_call_eval_show_item: fn(ty: Type) -> Type? Never! {
+    if ty == {
+        .List(element) -> Val(element)
+        .Apply(name, args) -> if name == "Iter" && args.len() == 1 -> Val(args[0]) else -> None
+        else -> None
+    }
+}
+
+// A shown value as `print` passes it on: a Measurement through its
+// `__measurement_show` text, any other value as it is.
+sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? Never! {
+    if value.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> return sema_expression_measurement_source_call("__measurement_show", [TExpr]{value}, Type.String, value.span, environment, program)
+    Val(value)
 }
 
 // `input(prompt?)` reads one line: `Result<String, IOError>`. It calls the

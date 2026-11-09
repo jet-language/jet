@@ -684,7 +684,12 @@ kernel runs it with jet.
 
 `jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
 prints 3. A `;` between statements stands for the line break a file would
-have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a
+have (`jet -e 'name := 1; print(name)'`). When the last statement is an
+expression, its value is shown, as `node -p` shows it: `jet -e '1 + 2'` prints
+3, a List or an Iter prints one item per line (`jet -e '"a b".words()'` prints
+`a` and `b`), and a unit value (`print(…)`, an `if` without `else`) prints
+nothing more. A value that has no display is refused with E0112, as `print`
+refuses it. CODE is checked as a file is, so a
 misspelled name is refused before anything runs. The file that holds it is
 kept under the kept programs' directory (`eval/`, named by the content hash),
 and the rest runs as `jet <that file> [args...]`, so the same code reruns its
