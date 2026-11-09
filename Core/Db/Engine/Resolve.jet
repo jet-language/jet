@@ -1483,6 +1483,8 @@ impl ResolveTestGen.Gen {
     select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
     eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
     vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
+    vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
+    vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
 }
 
 resolve_test_col: fn(name: String, not_null: Int) -> conn.Column Never! {

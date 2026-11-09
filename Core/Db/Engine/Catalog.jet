@@ -640,6 +640,29 @@ primary_key_index: fn(db: conn.Conn, t: Int) -> Int Never! {
     i
 }
 
+// sqlite3AllocateIndexObject: a new index slot of n_col columns (the last
+// one the rowid's, outside the key), every entry zero.
+allocate_index_object: fn(db: &conn.Conn, n_col: Int) -> Int Never! {
+    ix: conn.index_alloc(db)
+    ai_column := [Int]{}
+    sort_order := [Int]{}
+    coll := [[U8]]{}
+    loop _ in 0..<n_col {
+        ai_column.push(0)
+        sort_order.push(0)
+        coll.push([U8]{})
+    }
+    ai_row_log_est := [Int]{}
+    loop _ in 0..<(n_col + 1) -> ai_row_log_est.push(0)
+    db.indexes[ix].ai_column = ai_column
+    db.indexes[ix].sort_order = sort_order
+    db.indexes[ix].coll = coll
+    db.indexes[ix].ai_row_log_est = ai_row_log_est
+    db.indexes[ix].n_column = n_col
+    db.indexes[ix].n_key_col = n_col - 1
+    ix
+}
+
 // sqlite3TableColumnToIndex: the first place of table column i_col in
 // index ix, or -1.
 table_column_to_index: fn(db: conn.Conn, ix: Int, i_col: Int) -> Int Never! {

@@ -741,6 +741,72 @@ vtable_release: fn(db: &Conn, s: Int) Never! {
     db.vtable_free.push(s)
 }
 
+// sqlite3_index_constraint.op (SQLITE_INDEX_CONSTRAINT_*) and
+// sqlite3_index_info.idxFlags (SQLITE_INDEX_SCAN_UNIQUE).
+INDEX_CONSTRAINT_EQ: 2
+INDEX_CONSTRAINT_GT: 4
+INDEX_CONSTRAINT_LE: 8
+INDEX_CONSTRAINT_LT: 16
+INDEX_CONSTRAINT_GE: 32
+INDEX_CONSTRAINT_MATCH: 64
+INDEX_CONSTRAINT_LIKE: 65
+INDEX_CONSTRAINT_GLOB: 66
+INDEX_CONSTRAINT_REGEXP: 67
+INDEX_CONSTRAINT_NE: 68
+INDEX_CONSTRAINT_ISNOT: 69
+INDEX_CONSTRAINT_ISNOTNULL: 70
+INDEX_CONSTRAINT_ISNULL: 71
+INDEX_CONSTRAINT_IS: 72
+INDEX_CONSTRAINT_LIMIT: 73
+INDEX_CONSTRAINT_OFFSET: 74
+INDEX_CONSTRAINT_FUNCTION: 150
+INDEX_SCAN_UNIQUE: 1
+
+// struct sqlite3_index_constraint.
+IndexConstraint: struct {
+    i_column: Int
+    op: Int
+    usable: Bool
+    i_term_offset: Int
+}
+
+// struct sqlite3_index_orderby.
+IndexOrderBy: struct {
+    i_column: Int
+    desc: Bool
+}
+
+// struct sqlite3_index_constraint_usage.
+IndexConstraintUsage: struct {
+    argv_index: Int
+    omit: Bool
+}
+
+// struct sqlite3_index_info, with where.c's HiddenIndexInfo: the collating
+// sequence name of each constraint (colls), its right-hand value when it
+// has a constant one (rhs, has_rhs), the DISTINCT handling sqlite3_vtab_
+// distinct reports, the IN constraints that may be handled all at once
+// (m_in) and those xBestIndex asked to be (m_handle_in).
+IndexInfo: struct {
+    constraints: [IndexConstraint]
+    order_by: [IndexOrderBy]
+    usage: [IndexConstraintUsage]
+    idx_num: Int
+    idx_str: [U8]?
+    need_to_free_idx_str: Bool
+    order_by_consumed: Bool
+    estimated_cost: Float
+    estimated_rows: Int
+    idx_flags: Int
+    col_used: Int
+    colls: [[U8]]
+    rhs: [base.Mem]
+    has_rhs: [Bool]
+    e_distinct: Int
+    m_in: Int
+    m_handle_in: Int
+}
+
 // ---------------------------------------------------------------------------
 // The virtual machine's objects (vdbeInt.h).
 

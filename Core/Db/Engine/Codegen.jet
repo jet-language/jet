@@ -373,6 +373,14 @@ Gen: trait {
     // a virtual table: the function its module's xFindFunction overloads
     // def with, or def.
     vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never!
+    // vtabBestIndex's xBestIndex call (where.c) for virtual table t:
+    // info's outputs filled in, with the result code and the module's
+    // error message (zErrMsg), if any.
+    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never!
+    // xFindFunction of virtual table t's module for function `name` of
+    // n_arg arguments (isAuxiliaryVtabOperator): its result, 0 when the
+    // module has none.
+    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never!
 }
 
 // A walker's callbacks (struct Walker's xExprCallback, xSelectCallback,
@@ -1107,6 +1115,8 @@ impl CodegenTestGen.Gen {
     select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
     eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
     vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
+    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
+    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
 }
 
 #Test("temporary registers and ranges are reused as expr.c reuses them") {
