@@ -289,6 +289,9 @@ Connection: struct {
     priv held_text: String
     priv held_at: Int
     priv held_repeats: Int
+    // The evdev codes of the keys down whose press the frame took: their
+    // releases are the frame's too.
+    priv frame_keys: [Int]
     priv events: [UIEvent]
     priv failure: UIError?
 }
@@ -358,7 +361,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
     look: frame.FrameLook{
         title: title.copy(), active: true, square: false, maximized: false, coarse: false,
-        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, icon: [U8]{}, icon_side: 0,
+        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing, icon: [U8]{}, icon_side: 0,
     }
     c := Connection{
         stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
@@ -383,7 +386,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
         corner_cover: [U8]{}, corner_scale: 0, xbgr: false, abgr: false,
         modifiers: 0, keymap: [xkb.Keymap]{}, repeat: xkb.Repeat{rate: REPEAT_RATE, delay: REPEAT_DELAY},
-        held: -1, held_key: Key.Unknown, held_text: "", held_at: 0, held_repeats: 0,
+        held: -1, held_key: Key.Unknown, held_text: "", held_at: 0, held_repeats: 0, frame_keys: [Int]{},
         events: [UIEvent]{}, failure: None,
     }
     c.registry = new_id(c)
@@ -1196,21 +1199,13 @@ keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env, Time]> {
     if opcode == 2 {
         c.modifiers = 0
         c.held = -1
+        c.frame_keys = [Int]{}
+        set_focus(c, frame.FrameButton.Nothing)
         c.events.push(UIEvent.Focus(false))
     }
     if opcode == 3 {
         note_input(c, u32_at(body, 4))
-        code: u32_at(body, 8)
-        state: u32_at(body, 12)
-        pressed: press(c, code, state)
-        if state == KEY_PRESSED {
-            c.events.push(UIEvent.KeyDown(pressed.key))
-            if pressed.text != "" -> c.events.push(UIEvent.Text(pressed.text))
-            hold(c, code, pressed.key, pressed.text)
-        } else {
-            c.events.push(UIEvent.KeyUp(pressed.key))
-            if code == c.held -> c.held = -1
-        }
+        key_event(c, u32_at(body, 0), u32_at(body, 8), u32_at(body, 12))
     }
     if opcode == 4 {
         // modifiers: serial, depressed, latched, locked, group.
@@ -1247,6 +1242,27 @@ load_keymap: fn(&c: Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
     }
     map: xkb.keymap(bytes) ?? return
     c.keymap.push(map)
+}
+
+// wl_keyboard.key: a press or release of evdev key `code` (its `state`)
+// with its serial. A press the frame takes, and that key's release, reach
+// no program.
+key_event: fn(&c: Connection, serial: Int, code: Int, state: Int) -[Time]> {
+    pressed: press(c, code, state)
+    if state != KEY_PRESSED {
+        if release_frame_key(c, code) -> return
+        c.events.push(UIEvent.KeyUp(pressed.key))
+        if code == c.held -> c.held = -1
+        return
+    }
+    if frame_key(c, serial, pressed.key) {
+        c.held = -1
+        c.frame_keys.push(code)
+        return
+    }
+    c.events.push(UIEvent.KeyDown(pressed.key))
+    if pressed.text != "" -> c.events.push(UIEvent.Text(pressed.text))
+    hold(c, code, pressed.key, pressed.text)
 }
 
 // A key press or release (wl_keyboard.key's `state`) through the keymap,
@@ -2004,6 +2020,91 @@ set_hover: fn(&c: Connection, button: frame.FrameButton) {
     if c.look.hover == button -> return
     c.look.hover = button
     c.chrome_stale = true
+}
+
+// ---- the frame's keys --------------------------------------------------
+
+// A key press the frame takes, given its wl_keyboard.key serial. F6 moves
+// the keyboard focus between the content and the frame's buttons, and
+// Alt+Space opens the window menu. While a button has the focus every key
+// is the frame's: Tab and Shift+Tab step across the buttons, Enter or
+// Space works the focused one, Shift+F10 opens the window menu under it,
+// and Escape or F6 gives the focus back to the content. With Jet's frame
+// not showing, no key is the frame's.
+frame_key: fn(&c: Connection, serial: Int, key: Key) -> Bool {
+    if c.chrome == 0 || header_height(c) == 0 {
+        set_focus(c, frame.FrameButton.Nothing)
+        return false
+    }
+    focus: c.look.focus
+    function: function_key(key)
+    if function == 6 {
+        next: if focus == .Nothing -> frame.next_control(focus, 1) else -> frame.FrameButton.Nothing
+        set_focus(c, next)
+        return true
+    }
+    // Alt is mask 8 in the US table's reading.
+    if space(key) && held_modifier(c, "Alt", 8) {
+        window_menu(c, serial)
+        return true
+    }
+    if focus == .Nothing -> return false
+    // Shift is mask 1.
+    shifted: held_modifier(c, "Shift", 1)
+    step: if shifted -> -1 else -> 1
+    if {
+        key == .Tab -> set_focus(c, frame.next_control(focus, step))
+        key == .Enter || space(key) -> act(c, focus)
+        function == 10 && shifted -> window_menu(c, serial)
+        key == .Escape -> set_focus(c, frame.FrameButton.Nothing)
+        else -> {}
+    }
+    true
+}
+
+// A key went up: true when its press was the frame's, which the release
+// then is too.
+release_frame_key: fn(&c: Connection, code: Int) -> Bool {
+    loop at in 0..<c.frame_keys.len() {
+        if c.frame_keys[at] == code {
+            _: c.frame_keys.remove(at)
+            return true
+        }
+    }
+    false
+}
+
+// The button with the keyboard focus rings; `Nothing` gives the focus to
+// the content.
+set_focus: fn(&c: Connection, button: frame.FrameButton) {
+    if c.look.focus == button -> return
+    c.look.focus = button
+    c.chrome_stale = true
+}
+
+// The compositor's window menu, under the focused button or else the
+// title's start, at the header's foot (content surface coordinates).
+window_menu: fn(&c: Connection, serial: Int) {
+    x: if c.look.focus == .Nothing -> frame.ICON_X else -> frame.button_centre(c.look.focus, c.logical_width, c.look)
+    request(c, c.toplevel, 4, words([Int]{c.seat, serial, x, 0}))
+}
+
+// Whether modifier `name` is held: by the keymap, else by `mask` of the
+// compositor's modifier state.
+held_modifier: fn(c: Connection, name: String, mask: Int) -> Bool {
+    if c.keymap.len() > 0 -> return c.keymap[0].active(name)
+    c.modifiers.bit_and(mask) != 0
+}
+
+// The n of F`n`, else 0.
+function_key: fn(key: Key) -> Int {
+    if key == .F(n) -> return n
+    0
+}
+
+space: fn(key: Key) -> Bool {
+    if key == .Char(ch) -> return ch == ' '
+    false
 }
 
 // The cursor shape over a spot of the frame: an edge's resize arrow, else

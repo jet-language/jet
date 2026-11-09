@@ -4283,14 +4283,21 @@ A resize is acknowledged only by the commit of a frame drawn at the new size,
 so the compositor never shows a stretched or cropped frame.
 
 Jet draws the window's frame itself: a title bar with the icon from
-`set_icon` (Jet's mark until one is set), the title, and minimize, maximize
+`set_icon` (Jet's mark until one is set), the title centred on the window
+(shifted only as far as it must to clear the icon and the buttons, and cut
+with an ellipsis when even that space is too narrow), and minimize, maximize
 and close buttons, rounded corners and a soft shadow, on a `wl_subsurface`
 below the program's pixels. Frames stay the content: `open`'s size is the
 content's, while the compositor configures the whole window, so one
 configured 640 x 400 units draws 640 x 354. The title bar moves the
 window, a double press on it maximizes, the secondary button opens the
 compositor's window menu, and its edges and corners resize it; on a touch
-screen the buttons spread to 46-unit targets. A maximized or tiled window
+screen the buttons spread to 46-unit targets. From the keyboard, F6 moves
+the focus between the program and the frame's buttons, which show a
+focus ring; Tab and Shift+Tab step across them, Enter or Space works the
+focused one, Shift+F10 opens the window menu under it and Alt+Space under
+the title, and Escape gives the keys back to the program. The keys the
+frame takes never reach the program. A maximized or tiled window
 has square corners and no shadow, and a fullscreen one no frame. When the
 compositor draws frames itself (`zxdg_decoration_manager_v1` answers
 server-side) or offers no `wl_subcompositor`, its frame shows instead and

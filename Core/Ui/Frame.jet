@@ -16,10 +16,10 @@ use {
 // in linear light like the title text.
 //
 // The look is the Unified frame of the #6701 mockups in the light theme: a
-// header with the app's icon and the title on the left and three round
-// buttons on the right, rounded corners, and a wide soft shadow over a
-// tight contact one. Its measures stay private until the owner decides the
-// frame's style.
+// header with the app's icon on the left, the title centred where it fits,
+// three round buttons on the right, rounded corners, and a wide soft
+// shadow over a tight contact one. Its measures stay private until the
+// owner decides the frame's style.
 //
 // Coordinates: logical units have the window's top-left corner (the
 // header's) at 0, 0; pixels are logical units times the scale, given in
@@ -47,6 +47,12 @@ BUTTON_STEP_COARSE: 46
 ICON_SIZE: 22
 ICON_X: 14
 TITLE_GAP: 10
+// The keyboard focus ring: a solid line this wide, this far outside the
+// focused button's disc.
+FOCUS_GAP: 2
+FOCUS_LINE: 2
+// `button_index` of no button.
+NO_BUTTON: -1
 // The smallest window: the icon and the spread-out buttons across, and the
 // shadow kit's box down.
 MIN_WIDTH: 176
@@ -109,8 +115,9 @@ FrameSpot: enum {
 // What the header shows. `square` drops the rounded corners and the
 // shadow (a maximized, tiled or fullscreen window); `maximized` picks the
 // restore glyph. `coarse` spreads the buttons for a finger: the latest
-// press on the frame was a touch. `icon` is `icon_side` square RGBA rows,
-// empty for Jet's own mark.
+// press on the frame was a touch. `focus` is the button with the keyboard
+// focus, ringed (`Nothing` while the content has it). `icon` is
+// `icon_side` square RGBA rows, empty for Jet's own mark.
 FrameLook: struct {
     title: String
     active: Bool
@@ -119,6 +126,7 @@ FrameLook: struct {
     coarse: Bool
     hover: FrameButton
     pressed: FrameButton
+    focus: FrameButton
     icon: [U8]
     icon_side: Int
 }
@@ -222,6 +230,40 @@ button_of: fn(k: Int) -> FrameButton {
     if k == 0 -> return FrameButton.Close
     if k == 1 -> return FrameButton.Maximize
     FrameButton.Minimize
+}
+
+// Where `which` sits from the right, as `button_of` counts; -1 for none.
+button_index: fn(which: FrameButton) -> Int {
+    if which == {
+        .Close -> 0
+        .Maximize -> 1
+        .Minimize -> 2
+        .Nothing -> NO_BUTTON
+    }
+}
+
+// The centre of `which`'s disc on a `width`-unit window, in logical units
+// from the window's left edge.
+button_centre: fn(which: FrameButton, width: Int, look: FrameLook) -> Int {
+    width - button_inset(look) - max_int(button_index(which), 0) * button_step(look)
+}
+
+// Keyboard focus across the buttons in reading order (minimize, maximize,
+// close): the next one `step` 1 on, or with `step` -1 back, wrapping. From
+// `Nothing` it enters at the first, or going back at the last.
+next_control: fn(current: FrameButton, step: Int) -> FrameButton {
+    if current == .Nothing -> return if step < 0 -> FrameButton.Close else -> FrameButton.Minimize
+    // Reading order is button_of's from the right, reversed.
+    at: 2 - button_index(current)
+    button_of(2 - (at + step + 3) %% 3)
+}
+
+// The title's left edge in a `window`-wide header when the space between
+// `start` and `end` is free for it and it is `advance` wide: centred on the
+// window when it fits there, else shifted only as far as it must to stay
+// inside that space.
+title_left: fn(window: Float, start: Float, end: Float, advance: Float) -> Float {
+    fmax(fmin((window - advance) / 2.0, end - advance), start)
 }
 
 // ---- the shadow kit ----------------------------------------------------
@@ -368,15 +410,19 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     } else {
         jet_mark(p, pixels, width, height, look, Float{ICON_X}, icon_y, Float{ICON_SIZE}, s)
     }
-    // The title runs from after the icon to a gap before the minimize
-    // button's hit region, and is clipped there.
+    // The title has the space from after the icon to a gap before the
+    // minimize button's hit region, and is clipped there. It is centred on
+    // the window when it fits so, else shifted only as far as that space
+    // needs (adaptive centring).
     title_x: Float{ICON_X + ICON_SIZE + TITLE_GAP}
     title_end: logical_width - Float{button_inset(look) + TITLE_GAP} - Float{button_step(look)} * 2.5
     size: s * 14.5
     room: fmax(title_end - title_x, 0.0) * s
     shown: fit_title(p, look.title, size, room)
-    left: math.round(title_x * s)
-    clip: UIRect{x: left, y: 0, width: math.round(room), height: height}
+    start: math.round(title_x * s)
+    advance: p.bold.layout(shown, size).advance
+    left: math.round(title_left(Float{width}, Float{start}, Float{start} + room, advance))
+    clip: UIRect{x: start, y: 0, width: math.round(room), height: height}
     baseline: math.round((Float{HEADER} / 2.0 + Float{5.075}) * s)
     _: font.draw_text(pixels, width, height, width * 4, p.cache, p.bold, shown, size, left, baseline, ink, clip)
     loop k in 0..<3 {
@@ -394,6 +440,8 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
         if !look.active && !lit -> fill = with_alpha(fill, alpha_of(fill) /% 2)
         paint(pixels, width, height, disc_mask(cx, cy, Float{BUTTON_RADIUS} * s, 0.0), fill)
         button_glyph(pixels, width, height, look, which, cx, cy, s, glyph)
+        // The focus ring is the title's ink: 3:1 and more on the header.
+        if look.focus == which -> paint(pixels, width, height, disc_mask(cx, cy, Float{BUTTON_RADIUS + FOCUS_GAP + FOCUS_LINE} * s, Float{FOCUS_LINE} * s), ink)
     }
     pixels
 }
@@ -737,7 +785,7 @@ linear: fn(channel: Int) -> Float {
 
 // A look for the tests: active, rounded, nothing hovered, Jet's mark.
 plain_look: fn(title: String) -> FrameLook {
-    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
 }
 
 #Test("frame spots: content, title, button regions, edges and corners") {
@@ -762,7 +810,7 @@ plain_look: fn(title: String) -> FrameLook {
     assert_eq(spot(399.0, 303.0, 400, 300, look), FrameSpot.Edge(EDGE_BOTTOM + EDGE_RIGHT))
     assert_eq(spot(-20.0, 150.0, 400, 300, look), FrameSpot.Outside)
     // A maximized or tiled window has no grips outside it.
-    tiled: FrameLook{title: "", active: true, square: true, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    tiled: FrameLook{title: "", active: true, square: true, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
     assert_eq(spot(-3.0, 150.0, 400, 300, tiled), FrameSpot.Outside)
     assert_eq(spot(200.0, -1.0, 400, 300, tiled), FrameSpot.Outside)
     assert_eq(spot(399.5, 0.5, 400, 300, tiled), FrameSpot.Button(FrameButton.Close))
@@ -782,7 +830,7 @@ plain_look: fn(title: String) -> FrameLook {
     }
     // For a finger every region holds a 44 x 44 square, at the smallest
     // window too, and the minimize region stays clear of the icon.
-    finger: FrameLook{title: "", active: true, square: false, maximized: false, coarse: true, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    finger: FrameLook{title: "", active: true, square: false, maximized: false, coarse: true, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
     touch_offsets: [Float]{-22.0, 21.5}
     touch_rows: [Float]{1.0, 44.5}
     loop width in widths {
@@ -861,7 +909,7 @@ plain_look: fn(title: String) -> FrameLook {
 
 #Test("the header is opaque but for its rounded corners, and draws alike every time") {
     p := painter()
-    look: FrameLook{title: "A window with a long title", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Close, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    look: FrameLook{title: "A window with a long title", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Close, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
     bar: header(p, look, 300, 120)
     assert_eq(bar.len(), 300 * 46 * 4)
     assert(Int.from_u8(bar[3]) < 255, "the top-left corner is rounded")
@@ -872,7 +920,7 @@ plain_look: fn(title: String) -> FrameLook {
     assert(Int.from_u8(bar[close + 2]) > 200 && Int.from_u8(bar[close + 1]) < 120, "the hovered close button is red")
     // Nothing moves: the same look draws the same bytes.
     assert_eq(header(p, look, 300, 120), bar)
-    square: header(p, FrameLook{title: "", active: false, square: true, maximized: true, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}, 200, 240)
+    square: header(p, FrameLook{title: "", active: false, square: true, maximized: true, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}, 200, 240)
     assert_eq(square.len(), 200 * 92 * 4)
     assert_eq(square[3], U8{255})
     // An app's icon is drawn in place of Jet's mark: a red icon makes the
@@ -884,7 +932,7 @@ plain_look: fn(title: String) -> FrameLook {
         red.push(U8{30})
         red.push(U8{255})
     }
-    iconic: header(p, FrameLook{title: "", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: red, icon_side: 8}, 300, 120)
+    iconic: header(p, FrameLook{title: "", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: red, icon_side: 8}, 300, 120)
     at: (23 * 300 + 25) * 4
     assert_eq([U8]{iconic[at], iconic[at + 1], iconic[at + 2], iconic[at + 3]}, [U8]{U8{30}, U8{30}, U8{220}, U8{255}})
 }
@@ -917,6 +965,57 @@ plain_look: fn(title: String) -> FrameLook {
     }
     assert(contrast(WHITE, CLOSE_HOVER) >= 3.0, "the hovered close glyph shows")
     assert(contrast(WHITE, CLOSE_PRESS) >= 3.0, "the pressed close glyph shows")
+}
+
+#Test("the title is centred on the window, shifted only to clear the icon and buttons") {
+    // A 400-unit window has the space from 46 to 276 for its title.
+    assert_eq(title_left(400.0, 46.0, 276.0, 50.0), Float{175.0})
+    // Too wide to centre: it moves left just enough to clear the buttons.
+    assert_eq(title_left(400.0, 46.0, 276.0, 200.0), Float{76.0})
+    // A narrow window's title starts after the icon.
+    assert_eq(title_left(200.0, 46.0, 76.0, 30.0), Float{46.0})
+    // The header draws it there: its first inked column is the centred
+    // title's.
+    p := painter()
+    bar: header(p, plain_look("Notes"), 400, 120)
+    advance: p.bold.layout("Notes", Float{14.5}).advance
+    first := -1
+    loop col in 46..<276 {
+        loop row in 10..<36 {
+            // Blue byte of B, G, R, A: the header's is 0xF1, the ink's 0x21.
+            if first < 0 && Int.from_u8(bar[(row * 400 + col) * 4]) < 160 -> first = col
+        }
+    }
+    centred: math.round((400.0 - advance) / 2.0)
+    assert(first >= centred - 1 && first <= centred + 3, "the short title is centred, first ink at {first}, centre start {centred}")
+}
+
+#Test("keyboard focus steps through the buttons in reading order and rings the focused one") {
+    assert_eq(next_control(FrameButton.Nothing, 1), FrameButton.Minimize)
+    assert_eq(next_control(FrameButton.Nothing, -1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Minimize, 1), FrameButton.Maximize)
+    assert_eq(next_control(FrameButton.Maximize, 1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Close, 1), FrameButton.Minimize)
+    assert_eq(next_control(FrameButton.Minimize, -1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Close, -1), FrameButton.Maximize)
+    look: plain_look("")
+    assert_eq(button_centre(FrameButton.Close, 300, look), 276)
+    assert_eq(button_centre(FrameButton.Minimize, 300, look), 204)
+    // On a 300-unit window the close disc is centred at (276, 23), radius
+    // 14; the ring runs from 16 to 18 out, so (293, 23) is on it.
+    p := painter()
+    plain: header(p, look, 300, 120)
+    focused := plain_look("")
+    focused.focus = FrameButton.Close
+    ringed: header(p, focused, 300, 120)
+    on_ring: (23 * 300 + 293) * 4
+    assert_eq(plain[on_ring + 2], U8{0xED})
+    assert(Int.from_u8(ringed[on_ring + 2]) < 0x60, "the ring is drawn in the title's ink")
+    // Mid-gap, 14.5 out, the header shows untouched.
+    in_gap: (23 * 300 + 290) * 4
+    assert_eq(ringed[in_gap + 2], plain[in_gap + 2])
+    assert_eq(plain[in_gap + 2], U8{0xED})
+    assert(contrast(TEXT_ACTIVE, HEADER_ACTIVE) >= 3.0 && contrast(TEXT_INACTIVE, HEADER_INACTIVE) >= 3.0, "the ring shows focused or not")
 }
 
 #Test("content corners are covered inside the arc only") {
