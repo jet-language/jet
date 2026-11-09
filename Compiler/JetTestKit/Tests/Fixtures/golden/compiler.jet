@@ -24,15 +24,11 @@ fail: fn(text: String, code: Int) -[Exec, IO]> Never {
     process.exit(code)
 }
 
-// The runtime's process exit, status unchanged: `process.exit` gives any
-// program's 101 the user-error status 1 (S36), and only jet ends with 101.
-#Import(c) ice_exit: fn(code: I64) = "jet_rt_process_exit"
-
 run: fn() {
     args: process.args()
     if switch("JET_TESTKIT_ICE") == "1" {
-        #Unsafe("the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2)") {
-            ice_exit(I64{101})
+        #Unsafe("the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)") {
+            process.exit_unmapped(101)
         }
     }
     if switch("JET_TESTKIT_WARNING") == "1" -> say("Warning [jet.BranchArmTable]: unjoined task at function boundary\n")

@@ -211,15 +211,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1408,
+  "total": 1411,
   "counts": {
     "Compiler": 740,
-    "Core": 186,
+    "Core": 187,
     "Docs": 8,
-    "Examples": 35,
+    "Examples": 36,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 423
+    "tests": 424
   },
   "regions": [
     {
@@ -2955,49 +2955,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 102,
+      "line": 96,
       "column": 5,
       "reason": "the caller lends the C-ABI tuple's Bool byte and two writable Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 184,
+      "line": 178,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 204,
+      "line": 198,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 220,
+      "line": 214,
       "column": 5,
       "reason": "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 234,
+      "line": 228,
       "column": 5,
       "reason": "some lends a writable C-ABI Option success word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 244,
+      "line": 238,
       "column": 5,
       "reason": "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 256,
+      "line": 250,
       "column": 5,
       "reason": "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots"
     },
@@ -4152,14 +4152,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTesting.jet",
-      "line": 84,
+      "line": 91,
       "column": 13,
       "reason": "written under the host lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTesting.jet",
-      "line": 93,
+      "line": 100,
       "column": 9,
       "reason": "written under the host lock"
     },
@@ -5363,7 +5363,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Assets/no_nix.jet",
-      "line": 59,
+      "line": 56,
       "column": 9,
       "reason": "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)"
     },
@@ -5398,9 +5398,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet",
-      "line": 33,
+      "line": 29,
       "column": 9,
-      "reason": "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2)"
+      "reason": "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)"
     },
     {
       "package": "Core",
@@ -6468,6 +6468,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
+      "file": "Core/Process/Process.jet",
+      "line": 182,
+      "column": 1,
+      "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
+    },
+    {
+      "package": "Core",
       "file": "Core/Service/Service.jet",
       "line": 1427,
       "column": 5,
@@ -6965,6 +6972,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Examples",
+      "file": "Examples/Systems/Process/ProcessExitUnmapped.jet",
+      "line": 21,
+      "column": 13,
+      "reason": "this child reports a Jet defect status on purpose"
+    },
+    {
+      "package": "Examples",
       "file": "Examples/Systems/Process/SystemPrivilegedEntry.jet",
       "line": 10,
       "column": 5,
@@ -7277,6 +7291,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 11,
       "column": 5,
       "reason": "fixed RFC interop vectors"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/control_and_data/explicit_exit_unmapped_keeps_101_on_every_tier.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "this case reports a Jet defect status on purpose"
     },
     {
       "package": "tests",
@@ -10087,13 +10108,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 740 |
-| Core | 186 |
+| Core | 187 |
 | Docs | 8 |
-| Examples | 35 |
+| Examples | 36 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 423 |
-| **total** | **1408** |
+| tests | 424 |
+| **total** | **1411** |
 
 ### Regions
 
@@ -10489,13 +10510,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 534:5 | "cpuid and xgetbv only report processor identification and the OS-enabled state" |
 | Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 163:13 | "the FD72 lock protects this initialized refill-buffer byte" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 7:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 102:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 184:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 204:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 220:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 234:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 244:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 256:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 96:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 178:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 198:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 214:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 228:5 | "some lends a writable C-ABI Option success word" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 238:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 250:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 13:9 | "the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 55:13 | "accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 62:13 | "private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer" |
@@ -10660,8 +10681,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 332:13 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 343:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 351:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
-| Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 84:13 | "written under the host lock" |
-| Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 93:9 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 91:13 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 100:9 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 4:5 | "borrows an initialized aligned word in a live scalar/reflection carrier" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 7:5 | "owns a writable aligned word in a native scalar/reflection carrier" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 59:9 | "an idempotent install: every writer stores the same code address" |
@@ -10833,12 +10854,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
-| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 59:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
+| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 56:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 463:5 | "the testkit stops its own step child at the resident-memory guard" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 649:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
-| Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 33:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2)" |
+| Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 29:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
 | Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
@@ -10991,6 +11012,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/Tls.jet | 1623:5 | "the packed copy lives until the matching free below; the runtime copies it into the journal during the call" |
 | Core | Core/Net/Tls.jet | 1634:5 | "the packed request lives until the matching free below; the served address points into the run's loaded journal, copied out before return" |
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 423:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 592:5 | "posix getpgid: inspect a process group" |
@@ -11062,6 +11084,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/ProcessExitCleanup.jet | 23:5 | "the exit callback has no captured state" |
+| Examples | Examples/Systems/Process/ProcessExitUnmapped.jet | 21:13 | "this child reports a Jet defect status on purpose" |
 | Examples | Examples/Systems/Process/SystemPrivilegedEntry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
 | Examples | Examples/Systems/Process/SystemProjection.jet | 21:5 | "the clock file was created above in this test-owned directory" |
 | Examples | Examples/Systems/Process/SystemProjection.jet | 27:5 | "fork and reap both children before returning" |
@@ -11107,6 +11130,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/comptime_core_pure_parity/crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers.fixture/main.jet | 8:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o1/run.jet | 11:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o2/run.jet | 11:5 | "fixed RFC interop vectors" |
+| tests | tests/cases/control_and_data/explicit_exit_unmapped_keeps_101_on_every_tier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
 | tests | tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
 | tests | tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet | 9:5 | "fixed Argon2id parallel-lane known-answer vector" |
 | tests | tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |

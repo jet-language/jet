@@ -9,8 +9,9 @@
 // The CoreLib audit (#4619) then requires every raw operation in `Core/**` to
 // sit inside an audited gate, and every safe abstraction (a plain fn that
 // opens an `#Unsafe` block) to carry a reviewer's proof in the safety.md
-// registry. Generated FFI bindings (`.jet/bindings`) are not user-written and
-// never move the baseline.
+// registry. A `.jet` directory holds Jet's own project state (generated FFI
+// bindings, build output, staged test projects), never user-written source, so
+// it never moves the baseline.
 //
 // The scanner works on UTF-8 bytes. Positions and columns match the source
 // text: a column counts Unicode scalars, as the baseline rows always have.
@@ -34,7 +35,7 @@ DATA_END: "-->"
 ABSTRACTIONS_BEGIN: "<!-- unsafe-abstractions:begin -->"
 ABSTRACTIONS_END: "<!-- unsafe-abstractions:end -->"
 CORELIB_DIRECTORY: "Core"
-SKIP_DIRECTORIES: [".agent-worktrees", ".cache", ".claude", ".git", ".tmp", "build", "node_modules", "result", "target"]
+SKIP_DIRECTORIES: [".agent-worktrees", ".cache", ".claude", ".git", ".jet", ".tmp", "build", "node_modules", "result", "target"]
 
 // Raw operations, spelled as the CoreLib reaches them: postfix dereference
 // `p.*`, address-based pointer construction, volatile access, and the POSIX
@@ -668,9 +669,6 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
 // ---------------------------------------------------------------------------
 // Tree walk
 
-// A `.jet` part directly followed by a `bindings` part marks generated FFI.
-is_generated_ffi: fn(relative: String) -> Bool { "/{relative}/".contains("/.jet/bindings/") }
-
 // User-written `.jet` files under `base`, as sorted paths relative to it.
 jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS]> {
     directory: if relative == "" -> base else -> files.join(base, relative)
@@ -683,9 +681,9 @@ jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS
         if files.is_symlink(path) -> next
         child: if relative == "" -> name.copy() else -> "{relative}/{name}"
         if files.is_dir(path) {
-            if SKIP_DIRECTORIES.contains(name) || is_generated_ffi("{child}/placeholder") -> next
+            if SKIP_DIRECTORIES.contains(name) -> next
             jet_files(base, child, out) ?? return Err(err)
-        } else if files.is_file(path) && name.ends_with(".jet") && !is_generated_ffi(child) {
+        } else if files.is_file(path) && name.ends_with(".jet") {
             out.push(child)
         }
     }
@@ -1449,12 +1447,6 @@ audited: fn(text: String) -> CoreLibScan {
     assert_eq(regions.len(), 1)
     assert_eq(regions[0].line, 2)
     assert_eq(regions[0].column, 1)
-}
-
-#Test("generated FFI paths are recognised by their .jet/bindings parts") {
-    assert(is_generated_ffi("pkg/.jet/bindings/c.jet"))
-    assert(!is_generated_ffi("pkg/.jet/cache/c.jet"))
-    assert(!is_generated_ffi("bindings/.jet"))
 }
 
 #Test("CoreLib raw operations need a gate and safe abstractions are reported") {

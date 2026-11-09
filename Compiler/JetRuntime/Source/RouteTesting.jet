@@ -5,6 +5,13 @@
 #Export(c) jet_testing_record_failure: fn(message: I64, detail: I64) { jet_rt_testing_record_failure(message, detail) }
 #Export(c) jet_testing_clear_failure: fn() { jet_rt_testing_clear_failure() }
 
+// testing.skip: `line` (Core's `skipped: <reason>`) joins the running unit's
+// captured output and the unit is skipped whole, as a first `.skip { }` member
+// skips it. With no running unit (no capture) nothing happens.
+#Export(c) jet_testing_skip: fn(line: I64) {
+    if jet_rt_test_capture_print(line) -> jet_rt_test_skip_scope(true)
+}
+
 testing_flag: fn(value: Bool) -> I64 { if value -> I64{1} else -> I64{0} }
 
 testing_has_nul: fn(text: I64) -> Bool {
