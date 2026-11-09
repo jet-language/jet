@@ -273,7 +273,10 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
                 sema_effect_leaf_check_cap(leaves, code_module.cap, diagnostics)
                 if code_module.body == .Val(body) -> sema_effect_leaf_check_items(leaves, body, diagnostics)
             }
-            .GenericModule(generic_module) -> sema_effect_leaf_check_items(leaves, generic_module.body, diagnostics)
+            .GenericModule(generic_module) -> {
+                sema_effect_leaf_check_cap(leaves, generic_module.cap, diagnostics)
+                sema_effect_leaf_check_items(leaves, generic_module.body, diagnostics)
+            }
             else -> {}
         }
     }

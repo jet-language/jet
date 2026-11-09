@@ -966,15 +966,19 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
-// Each `#FX(…)` cap on a module, struct or enum declared in `items`, nested
-// modules included, names known effects; a positive `Panic` is rejected as in
-// a row (E0749). Reported once per cap, where it is written.
+// Each `#FX(…)` cap on a module, generic module, struct or enum declared in
+// `items`, nested modules included, names known effects; a positive `Panic` is
+// rejected as in a row (E0749). Reported once per cap, where it is written.
 sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
                 if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
                 if definition.body == .Val(body) -> sema_effect_module_cap_names(body, diagnostics)
+            }
+            .GenericModule(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+                sema_effect_module_cap_names(definition.body, diagnostics)
             }
             .Struct(definition) -> {
                 if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)

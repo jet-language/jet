@@ -1,0 +1,15 @@
+// A generic module whose functions keep inside its cap runs, and the cap
+// survives `jet fmt`.
+#FX(IO, !FS)
+tally: module<T>(start: Int) {
+    bump: fn(value: T) -> Int {
+        print("bump")
+        start + 1
+    }
+}
+
+counter: tally<Int>(1)
+
+run: fn() {
+    print(counter.bump(0))
+}

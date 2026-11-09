@@ -447,6 +447,11 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_caps(inner.copy(), cap))
                 capped.push(Item.CodeModule{value: updated})
             }
+            .GenericModule(definition) -> {
+                updated := definition
+                updated.body = parser_module_body_caps(definition.body, cap)
+                capped.push(Item.GenericModule{value: updated})
+            }
             else -> capped.push(item.copy())
         }
     }
@@ -669,7 +674,17 @@ parser_parse_generic_module_after_name: fn(state: &JetParserState, modifiers: Pa
         if state.position == before -> parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after the generic module body")
-    Item.GenericModule{value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span)}}
+    // An `#FX(…)` above the template caps every function of each instance,
+    // as it does a code module's.
+    generic := GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span), markers: modifiers.markers.copy()}
+    loop marker in modifiers.markers {
+        if marker.name != MARKER_FX -> next
+        cap: parser_module_fx_cap(state, marker, name_head.name) ?? break
+        generic.body = parser_module_body_caps(generic.body.copy(), cap)
+        generic.cap = Val(cap)
+        break
+    }
+    Item.GenericModule{value: generic}
 }
 
 parser_parse_module_alias_after_name: fn(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
