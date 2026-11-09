@@ -885,6 +885,11 @@ EAI_SYSTEM preserves the errno musl would leave; other failures carry musl's
 `gai_strerror` text prefixed as Rust's lookup does. Every socket wait is a
 poller readiness wait on the calling task, so a lookup starts no thread and
 blocks no carrier, and a cancel or deadline ends it without abandoned state.
+Replies are checked as Go's resolver checks them, not as musl does. A UDP
+packet that does not answer the question asked (by id, QR bit, and the one
+question's name, type and class) is ignored, and the wait goes on. Such a TCP
+answer fails its query. A malformed answer is EAI_FAIL, though the addresses
+read before the fault stand. Query ids come from getrandom.
 
 Native socket waits share one epoll worker and scheduler ParkSlots. Kernel
 events carry monotonically allocated IDs, resolved under the poller mutex;

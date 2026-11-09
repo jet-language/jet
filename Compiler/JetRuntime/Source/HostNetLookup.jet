@@ -12,6 +12,11 @@
 // nsswitch.conf and never rotates nameservers, and it reads both files with
 // plain system calls. Every socket wait is a poller readiness wait on the
 // calling task, so no lookup blocks a carrier.
+// Replies are checked as Go's dnsPacketRoundTrip and dnsStreamRoundTrip
+// check them (lk_reply_for): a UDP packet that does not answer the question
+// asked is ignored and the wait goes on, and such a TCP answer fails its
+// query. A malformed answer is a non-recoverable failure, though the
+// addresses read before the fault stand. Query ids are random.
 
 LK_ADDRESSES: I64{48}
 LK_ROW: I64{56}
@@ -55,8 +60,8 @@ LK_BYTES: I64{528}
 // Queries10832 for res_msend: two 280-byte queries0, two 4800-byte
 // answers560, two 288-byte TCP frames10160 (length prefix and query), then
 // two-word arrays: query lengths10736, answer lengths10752 (0 none, -1 TCP
-// pending), TCP FD72 states10768, TCP bytes sent10784, TCP bytes
-// received10800, TCP length prefixes10816.
+// pending, DQ_INVALID an invalid TCP answer), TCP FD72 states10768, TCP bytes
+// sent10784, TCP bytes received10800, TCP length prefixes10816.
 DQ_ANSWER: I64{560}
 DQ_FRAME: I64{10160}
 DQ_QLEN: I64{10736}
@@ -66,6 +71,7 @@ DQ_SENT: I64{10784}
 DQ_RECEIVED: I64{10800}
 DQ_PREFIX: I64{10816}
 DQ_BYTES: I64{10832}
+DQ_INVALID: I64{-2}
 
 lk_space: fn(c: I64) -> Bool { c == I64{32} || (c >= I64{9} && c <= I64{13}) }
 lk_digit: fn(c: I64) -> Bool { c >= I64{48} && c <= I64{57} }
@@ -498,12 +504,21 @@ lk_mkquery: fn(name: I64, kind: I64, query: I64) -> I64 {
     }
     rt_text_put(wrapping(wrapping(query + at) + I64{1}), kind)
     rt_text_put(wrapping(wrapping(query + at) + I64{3}), I64{1})
-    // musl's id: the realtime clock's nanoseconds, folded.
-    clock: jet_rt_alloc(I64{16}, I64{8})
-    sync_clock_read(I64{0}, clock)
-    nanoseconds: net_word(clock, I64{8})
-    jet_rt_free(clock, I64{16}, I64{8})
-    id: (nanoseconds + nanoseconds /% I64{65536}).bit_and(I64{65535})
+    // Go's id: random (the kernel's getrandom), so an off-path sender cannot
+    // guess it; musl's realtime-clock nanoseconds only when that fails.
+    id := I64{0}
+    random: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(random, I64{8})
+    if (rt_crypto_entropy_fill(random, I64{2}) == I64{0}) {
+        id = net_load_uint(random, I64{2})
+    } else {
+        clock: jet_rt_alloc(I64{16}, I64{8})
+        sync_clock_read(I64{0}, clock)
+        nanoseconds: net_word(clock, I64{8})
+        jet_rt_free(clock, I64{16}, I64{8})
+        id = (nanoseconds + nanoseconds /% I64{65536}).bit_and(I64{65535})
+    }
+    jet_rt_free(random, I64{8}, I64{8})
     rt_text_put(query, id >> I64{8})
     rt_text_put(wrapping(query + I64{1}), id.bit_and(I64{255}))
     size
@@ -589,6 +604,29 @@ dq_answer: fn(queries: I64, index: I64) -> I64 { wrapping(wrapping(queries + DQ_
 dq_get: fn(queries: I64, base: I64, index: I64) -> I64 { net_word(queries, base + index * I64{8}) }
 dq_set: fn(queries: I64, base: I64, index: I64, value: I64) { net_put(queries, base + index * I64{8}, value) }
 
+// Go's checkResponse: `reply` (length bytes) answers `query` (qlength bytes)
+// when it is at least a header long, has the QR bit and the query's id, and
+// holds exactly one question, the query's own: the same name ignoring ASCII
+// case (label lengths stay below 'A'), then the same type and class.
+lk_reply_for: fn(reply: I64, length: I64, query: I64, qlength: I64) -> Bool {
+    if (length < I64{12} || length < qlength) -> return false
+    if (rt_text_byte(wrapping(reply + I64{2})).bit_and(I64{128}) == I64{0}) -> return false
+    if (rt_text_byte(reply) != rt_text_byte(query) || rt_text_byte(wrapping(reply + I64{1})) != rt_text_byte(wrapping(query + I64{1}))) -> return false
+    if (rt_text_byte(wrapping(reply + I64{4})) != I64{0} || rt_text_byte(wrapping(reply + I64{5})) != I64{1}) -> return false
+    at := I64{12}
+    loop at < qlength {
+        left := rt_text_byte(wrapping(reply + at))
+        right := rt_text_byte(wrapping(query + at))
+        if (at < qlength - I64{4}) {
+            if (left >= I64{65} && left <= I64{90}) -> left += I64{32}
+            if (right >= I64{65} && right <= I64{90}) -> right += I64{32}
+        }
+        if (left != right) -> return false
+        at += I64{1}
+    }
+    true
+}
+
 // res_msend's start_tcp: the length-prefixed query sent with the SYN where
 // TCP Fast Open allows, else a nonblocking connect; the send pass writes what
 // is left. A stream that cannot start leaves the answer pending (-1).
@@ -654,8 +692,9 @@ lk_tcp_send: fn(look: I64, queries: I64, index: I64, stream: I64) -> Bool {
     true
 }
 // Reads what the stream has of the length-prefixed answer, committing it
-// once complete; false for an error, end of stream, an answer under 13
-// bytes or one neither NOERROR nor NXDOMAIN (musl's `goto out`).
+// once complete; false for an error or end of stream (musl's `goto out`).
+// As in Go's dnsStreamRoundTrip, an answer shorter than a header or not the
+// reply to this query fails the query (lk_tcp_invalid); any rcode stands.
 lk_tcp_receive: fn(look: I64, queries: I64, index: I64, stream: I64) -> Bool {
     prefix: wrapping(wrapping(queries + DQ_PREFIX) + index * I64{8})
     answer: dq_answer(queries, index)
@@ -671,15 +710,23 @@ lk_tcp_receive: fn(look: I64, queries: I64, index: I64, stream: I64) -> Bool {
         dq_set(queries, DQ_RECEIVED, index, total)
         if (total < I64{2}) -> next
         length: rt_text_byte(prefix) * I64{256} + rt_text_byte(wrapping(prefix + I64{1}))
-        if (length < I64{13}) -> return false
+        if (length < I64{12}) -> return lk_tcp_invalid(queries, index, stream)
         if (total < length + I64{2} && total < LK_ANSWER + I64{2}) -> next
-        code: rt_text_byte(wrapping(answer + I64{3})).bit_and(I64{15})
-        if (code != I64{0} && code != I64{3}) -> return false
+        kept: if (length > LK_ANSWER) -> LK_ANSWER else -> length
+        if !lk_reply_for(answer, kept, dq_query(queries, index), dq_get(queries, DQ_QLEN, index)) -> return lk_tcp_invalid(queries, index, stream)
         dq_set(queries, DQ_ALEN, index, length)
         jet_fd_drop_raw(stream)
         dq_set(queries, DQ_TCP, index, I64{0})
         return true
     }
+}
+// Go's errInvalidDNSResponse: the query is done, with no answer (DQ_INVALID),
+// and its stream is closed; the other query goes on.
+lk_tcp_invalid: fn(queries: I64, index: I64, stream: I64) -> Bool {
+    dq_set(queries, DQ_ALEN, index, DQ_INVALID)
+    jet_fd_drop_raw(stream)
+    dq_set(queries, DQ_TCP, index, I64{0})
+    true
 }
 
 // musl __res_msend_rc: every query to every nameserver over one UDP socket,
@@ -764,7 +811,7 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
     outcome := I64{0}
     loop t2 - t0 < timeout {
         answered := I64{0}
-        loop answered < count && dq_get(queries, DQ_ALEN, answered) > (I64{0}) -> answered += I64{1}
+        loop answered < count && (dq_get(queries, DQ_ALEN, answered) > (I64{0}) || dq_get(queries, DQ_ALEN, answered) == DQ_INVALID) -> answered += I64{1}
         if (answered == count) -> break
         if (t2 - t1 >= retry) {
             i := I64{0}
@@ -815,13 +862,13 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
             if (received < I64{0}) -> break
             truncated: received > LK_ANSWER
             length: if truncated -> LK_ANSWER else -> received
-            // Ignore non-identifiable packets and replies from elsewhere.
-            if (length < I64{4}) -> next
+            // Ignore replies from elsewhere and packets that answer none of
+            // the questions: Go treats them as possible forgeries and waits on.
             server := I64{0}
             loop server < nns && !lk_same_address(wrapping(servers + server * LK_ROW), from) -> server += I64{1}
             if (server == nns) -> next
             index := head
-            loop index < count && (rt_text_byte(buffer) != rt_text_byte(dq_query(queries, index)) || rt_text_byte(wrapping(buffer + I64{1})) != rt_text_byte(wrapping(dq_query(queries, index) + I64{1}))) -> index += I64{1}
+            loop index < count && !lk_reply_for(buffer, length, dq_query(queries, index), dq_get(queries, DQ_QLEN, index)) -> index += I64{1}
             if (index == count) -> next
             if (dq_get(queries, DQ_ALEN, index) != I64{0}) -> next
             code: rt_text_byte(wrapping(buffer + I64{3})).bit_and(I64{15})
@@ -883,7 +930,7 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
             jet_fd_drop_raw(stream)
             dq_set(queries, DQ_TCP, i, I64{0})
         }
-        if (dq_get(queries, DQ_ALEN, i) < I64{0}) -> dq_set(queries, DQ_ALEN, i, I64{0})
+        if (dq_get(queries, DQ_ALEN, i) == I64{-1}) -> dq_set(queries, DQ_ALEN, i, I64{0})
         i += I64{1}
     }
     jet_fd_drop_raw(socket)
@@ -909,38 +956,66 @@ lk_record: fn(look: I64, kind: I64, data: I64, size: I64, wanted: I64) -> I64 {
     net_put(look, LK_COUNT, count + I64{1})
     I64{0}
 }
-// musl __dns_parse: skips the questions, then hands each answer record to
-// lk_record; a malformed packet ends the walk.
-lk_parse: fn(look: I64, packet: I64, length: I64, wanted: I64) {
-    if (length < I64{12}) -> return
-    if (rt_text_byte(wrapping(packet + I64{3})).bit_and(I64{15}) != I64{0}) -> return
+// One encoded name from `at`: the offset past it, or -1 when it runs past
+// `length`, has a reserved label type, is longer than 255 bytes, or ends in
+// a compression pointer that does not point back before the name (so no
+// chain of them can loop).
+lk_skip_name: fn(packet: I64, at: I64, length: I64) -> I64 {
+    p := at
+    total := I64{0}
+    loop p < length {
+        size: rt_text_byte(wrapping(packet + p))
+        if (size == I64{0}) -> return p + I64{1}
+        if (size >= I64{192}) {
+            if (p + I64{2} > length) -> return I64{-1}
+            target: (size - I64{192}) * I64{256} + rt_text_byte(wrapping(wrapping(packet + p) + I64{1}))
+            if (target >= at) -> return I64{-1}
+            return p + I64{2}
+        }
+        if (size >= I64{64}) -> return I64{-1}
+        total += size + I64{1}
+        if (total > I64{255}) -> return I64{-1}
+        p += size + I64{1}
+    }
+    I64{-1}
+}
+// musl __dns_parse with each name checked (lk_skip_name) and full 16-bit
+// record types: skips the questions, then hands each answer record to
+// lk_record. False for a malformed packet: a name, record header or record
+// data running past the end, or an A/AAAA record of the wrong size. The
+// records before the fault stand, as Go's goLookupIPCNAMEOrder keeps them.
+lk_parse: fn(look: I64, packet: I64, length: I64, wanted: I64) -> Bool {
+    if (length < I64{12}) -> return false
+    if (rt_text_byte(wrapping(packet + I64{3})).bit_and(I64{15}) != I64{0}) -> return true
     at := I64{12}
     questions := rt_text_byte(wrapping(packet + I64{4})) * I64{256} + rt_text_byte(wrapping(packet + I64{5}))
     answers := rt_text_byte(wrapping(packet + I64{6})) * I64{256} + rt_text_byte(wrapping(packet + I64{7}))
     loop questions > (I64{0}) {
         questions -= I64{1}
-        loop at < length && rt_text_byte(wrapping(packet + at)) >= (I64{1}) && rt_text_byte(wrapping(packet + at)) <= (I64{127}) -> at += I64{1}
-        if (at > length - I64{6}) -> return
-        at = at + (if (rt_text_byte(wrapping(packet + at)) != I64{0}) -> I64{6} else -> I64{5})
+        at = lk_skip_name(packet, at, length)
+        if (at < I64{0} || at + I64{4} > length) -> return false
+        at += I64{4}
     }
     loop answers > (I64{0}) {
         answers -= I64{1}
-        loop at < length && rt_text_byte(wrapping(packet + at)) >= (I64{1}) && rt_text_byte(wrapping(packet + at)) <= (I64{127}) -> at += I64{1}
-        if (at > length - I64{12}) -> return
-        at = at + (if (rt_text_byte(wrapping(packet + at)) != I64{0}) -> I64{2} else -> I64{1})
+        at = lk_skip_name(packet, at, length)
+        if (at < I64{0} || at + I64{10} > length) -> return false
         record: wrapping(packet + at)
+        kind: rt_text_byte(record) * I64{256} + rt_text_byte(wrapping(record + I64{1}))
         size: rt_text_byte(wrapping(record + I64{8})) * I64{256} + rt_text_byte(wrapping(record + I64{9}))
-        if (size + I64{10} > length - at) -> return
-        if (lk_record(look, rt_text_byte(wrapping(record + I64{1})), wrapping(record + I64{10}), size, wanted) < I64{0}) -> return
+        if (size + I64{10} > length - at) -> return false
+        if (lk_record(look, kind, wrapping(record + I64{10}), size, wanted) < I64{0}) -> return false
         at += I64{10} + size
     }
+    true
 }
 
 // One query's outcome by its answer: 0 for NOERROR (its records are the
 // answer, maybe none), else an EAI code: no answer or SERVFAIL LK_AGAIN,
-// NXDOMAIN LK_NONAME, any other rcode LK_FAIL.
+// NXDOMAIN LK_NONAME, an invalid TCP answer or any other rcode LK_FAIL.
 lk_outcome: fn(queries: I64, index: I64) -> I64 {
-    if (dq_get(queries, DQ_ALEN, index) < I64{4}) -> return LK_AGAIN
+    if (dq_get(queries, DQ_ALEN, index) == DQ_INVALID) -> return LK_FAIL
+    if (dq_get(queries, DQ_ALEN, index) < I64{12}) -> return LK_AGAIN
     code: rt_text_byte(wrapping(dq_answer(queries, index) + I64{3})).bit_and(I64{15})
     if (code == I64{0}) -> return I64{0}
     if (code == I64{2}) -> return LK_AGAIN
@@ -964,7 +1039,8 @@ lk_rank: fn(code: I64) -> I64 {
 // addresses either answers, so an A answer stands when the AAAA query times
 // out or fails, as an AAAA answer does when the A query does. With no
 // address, the failure lk_rank puts first (LK_NODATA when both answered with
-// none), LK_NONAME for a name no query can encode, or a failure to send.
+// none, LK_FAIL for a malformed answer), LK_NONAME for a name no query can
+// encode, or a failure to send.
 lk_dns: fn(look: I64, name: I64) -> I64 {
     queries: jet_rt_alloc(DQ_BYTES, I64{8})
     thread_zero(queries, DQ_BYTES)
@@ -995,7 +1071,9 @@ lk_dns: fn(look: I64, name: I64) -> I64 {
         outcome: lk_outcome(queries, i)
         if (outcome == I64{0}) {
             length: dq_get(queries, DQ_ALEN, i)
-            lk_parse(look, dq_answer(queries, i), if (length > LK_ANSWER) -> LK_ANSWER else -> length, if (i == I64{0}) -> I64{1} else -> I64{28})
+            // Go's errCannotUnmarshalDNSMessage; an answer longer than the
+            // buffer is cut short here, not malformed.
+            if (!lk_parse(look, dq_answer(queries, i), if (length > LK_ANSWER) -> LK_ANSWER else -> length, if (i == I64{0}) -> I64{1} else -> I64{28}) && length <= LK_ANSWER && lk_rank(LK_FAIL) > lk_rank(failure)) -> failure = LK_FAIL
         } else if (lk_rank(outcome) > lk_rank(failure)) {
             failure = outcome
         }

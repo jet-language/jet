@@ -3,13 +3,15 @@
 // inside a network and mount namespace whose /etc/resolv.conf and
 // /etc/hosts are this fixture's (inside.sh). Each line is a name and its
 // addresses in the resolver's order, or its error. A query for STOP over
-// each transport ends that server.
+// each transport ends that server. With the argument `hostile` it resolves
+// HOSTILE instead: names whose server sends forged or malformed packets.
 package: {
     name: "system_resolver"
-    authority: { allow: [IO, Mem.Alloc, Net, Time, Time.Wait] }
+    authority: { allow: [IO, Mem.Alloc, Net, Time, Time.Wait, Exec.Args] }
 }
 
 use net: core.net
+use process: core.process
 
 STOP: "stop.server"
 
@@ -20,6 +22,16 @@ NAMES: [String]{
     "half.test", "halfslow.test", "halfv6.test",
     "host", "svc", "late", "empty", "gone", "x.y", "hidden.onion",
     "v4order.test", "prefix.test", "scope.test", "policy.test"
+}
+
+// One name per fault. Forged UDP packets (each the honest reply with one
+// fault, sent ahead of it, with 6.6.6.x addresses), then malformed answers,
+// then faulty TCP answers to a truncated UDP one. Every AAAA question gets
+// an empty answer, so no NXDOMAIN outranks the fault.
+HOSTILE: [String]{
+    "wrongid.evil.", "notreply.evil.", "short.evil.", "wrongname.evil.", "wrongtype.evil.", "twoquestions.evil.", "MixedCase.evil.", "onlyforged.evil.",
+    "overrun.evil.", "badsize.evil.", "pastend.evil.", "ptrloop.evil.", "label.evil.", "reservedlabel.evil.", "type257.evil.",
+    "tcpwrongid.evil.", "tcpwrongname.evil.", "tcpshort.evil."
 }
 
 // A resource record: its type (1 A, 28 AAAA, 5 CNAME) and RDATA.
@@ -112,7 +124,103 @@ zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
     if name == "prefix.test" -> return answer([Record]{v4(127, 255, 0, 1), v4(127, 0, 0, 2), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 7})})
     if name == "scope.test" -> return answer([Record]{v4(192, 0, 2, 7), v4(127, 0, 0, 7), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 8})})
     if name == "policy.test" -> return answer([Record]{v6([Int]{0xfec0, 0, 0, 0, 0, 0, 0, 1}), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 5})})
+    if name.ends_with(".evil") {
+        if kind != 1 -> return answer([Record]{})
+        if name == "onlyforged.evil" -> return SILENT
+        if name.starts_with("tcp") && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
+        return answer([Record]{v4(10, 3, 0, honest(name))})
+    }
     failure(3)
+}
+
+// A hostile name's honest address: 10.3.0.N for the Nth HOSTILE name.
+honest: fn(name: String) -> Int {
+    at := 1
+    loop candidate in HOSTILE {
+        if candidate.to_lower() == ("{name}.") -> return at
+        at += 1
+    }
+    0
+}
+
+join: fn(parts: [[U8]]) -> [U8] {
+    out := [U8]{}
+    loop part in parts {
+        loop b in part -> out.push(b)
+    }
+    out
+}
+
+with_byte: fn(bytes: [U8], at: Int, value: Int) -> [U8] {
+    out := bytes.copy()
+    out[at] = byte(value)
+    out
+}
+
+bumped: fn(bytes: [U8], at: Int) -> [U8] { with_byte(bytes, at, Int.from_u8(bytes[at]) + 1) }
+
+// The question's name bytes (12 up to `end`) in lowercase.
+lowered: fn(bytes: [U8], end: Int) -> [U8] {
+    out := bytes.copy()
+    loop i in 12..<end {
+        c: Int.from_u8(out[i])
+        if c >= 65 && c <= 90 -> out[i] = byte(c + 32)
+    }
+    out
+}
+
+// A record's type, class IN, TTL 60, RDLENGTH and RDATA; `rr` puts the
+// question's name (a pointer to offset 12) in front.
+rest: fn(kind: Int, data: [U8]) -> [U8] {
+    join([[U8]]{[U8]{byte(kind /% 256), byte(kind % 256), 0, 1, 0, 0, 0, 60, byte(data.len() /% 256), byte(data.len() % 256)}, data.copy()})
+}
+rr: fn(kind: Int, data: [U8]) -> [U8] { join([[U8]]{[U8]{0xc0, 0x0c}, rest(kind, data)}) }
+
+// A NOERROR reply claiming `count` answer records, followed by `body`.
+raw_answer: fn(query: [U8], asked: Question, count: Int, body: [U8]) -> [U8] {
+    join([[U8]]{with_byte(encode(query, asked, answer([Record]{})), 7, count), body.copy()})
+}
+
+// The reply as if the question were for other.evil.
+renamed: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
+    other: join([[U8]]{slice(query, 0, 12), wire_name("other.evil"), slice(query, asked.end - 4, asked.end)})
+    encode(other, Question{name: "other.evil", kind: asked.kind, end: other.len()}, reply)
+}
+
+// The forged UDP packets sent ahead of the reply to an A question.
+forgeries: fn(query: [U8], asked: Question) -> [[U8]] {
+    out := [[U8]]{}
+    if asked.kind != 1 -> return out
+    name: asked.name
+    all: name == "onlyforged.evil"
+    if all || name == "wrongid.evil" -> out.push(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 1)})), 1))
+    if all || name == "notreply.evil" -> out.push(with_byte(encode(query, asked, answer([Record]{v4(6, 6, 6, 2)})), 2, Int.from_u8(query[2]) % 2))
+    if all || name == "short.evil" -> out.push(slice(encode(query, asked, answer([Record]{v4(6, 6, 6, 3)})), 0, 11))
+    if all || name == "wrongname.evil" -> out.push(renamed(query, asked, answer([Record]{v4(6, 6, 6, 4)})))
+    if all || name == "wrongtype.evil" -> out.push(encode(with_byte(query, asked.end - 3, 28), asked, answer([Record]{v4(6, 6, 6, 5)})))
+    if all || name == "twoquestions.evil" {
+        packet: encode(query, asked, answer([Record]{v4(6, 6, 6, 6)}))
+        out.push(join([[U8]]{with_byte(slice(packet, 0, asked.end), 5, 2), slice(query, 12, asked.end), slice(packet, asked.end, packet.len())}))
+    }
+    out
+}
+
+// The packet a hostile name's A question gets instead of the zone's reply.
+broken: fn(query: [U8], asked: Question, tcp: Bool) -> [U8]? {
+    if asked.kind != 1 -> return None
+    name: asked.name
+    if name == "mixedcase.evil" -> return Val(lowered(encode(query, asked, answer([Record]{v4(10, 3, 0, 7)})), asked.end))
+    if name == "overrun.evil" -> return Val(raw_answer(query, asked, 2, join([[U8]]{rr(1, [U8]{10, 3, 0, 9}), [U8]{0xc0, 0x0c, 0, 1}})))
+    if name == "badsize.evil" -> return Val(raw_answer(query, asked, 1, rr(1, [U8]{10, 3, 0, 10, 0})))
+    if name == "pastend.evil" -> return Val(raw_answer(query, asked, 1, [U8]{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 200, 6, 6, 6, 11}))
+    if name == "ptrloop.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0xc0, byte(asked.end)}, rest(1, [U8]{6, 6, 6, 12})})))
+    if name == "label.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{4, 99, 97, 102, 0xe9, 0xc0, 0x0c}, rest(1, [U8]{10, 3, 0, 13})})))
+    if name == "reservedlabel.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0x41, 0xc0, 0x0c}, rest(1, [U8]{6, 6, 6, 14})})))
+    if name == "type257.evil" -> return Val(raw_answer(query, asked, 2, join([[U8]]{rr(257, [U8]{6, 6, 6, 15}), rr(1, [U8]{10, 3, 0, 15})})))
+    if tcp && name == "tcpwrongid.evil" -> return Val(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 16)})), 1))
+    if tcp && name == "tcpwrongname.evil" -> return Val(renamed(query, asked, answer([Record]{v4(6, 6, 6, 17)})))
+    if tcp && name == "tcpshort.evil" -> return Val(slice(encode(query, asked, answer([Record]{v4(10, 3, 0, 18)})), 0, 5))
+    None
 }
 
 // The query's question: its lowercase name, type, and the offset past it.
@@ -166,8 +274,11 @@ udp_serve: fn(server: UDPSocket) {
         count: (seen.get(key) ?? 0) + 1
         seen[key] = count
         reply: zone(asked.name, asked.kind, false, count)
+        loop packet in forgeries(query, asked) {
+            _: net.udp_send_bytes_to(server, packet.copy(), net.udp_packet_addr(request)) ?? 0
+        }
         if reply.rcode < 0 -> next
-        _: net.udp_send_bytes_to(server, encode(query, asked, reply), net.udp_packet_addr(request)) ?? 0
+        _: net.udp_send_bytes_to(server, broken(query, asked, false) ?? encode(query, asked, reply), net.udp_packet_addr(request)) ?? 0
     }
 }
 
@@ -188,7 +299,7 @@ tcp_answer: fn(stream: &TCPStream) -> Bool {
             if asked.name == STOP -> return false
             reply: zone(asked.name, asked.kind, true, 1)
             if reply.rcode < 0 -> return true
-            net.tcp_write_all_bytes(stream, framed(encode(query, asked, reply))) ?? return true
+            net.tcp_write_all_bytes(stream, framed(broken(query, asked, true) ?? encode(query, asked, reply))) ?? return true
         }
     }
 }
@@ -230,14 +341,20 @@ show: fn(name: String) {
 }
 
 run: fn() {
+    arguments: process.args()
+    hostile: arguments.len() == 1 && arguments[0] == "hostile"
     udp: net.udp_bind("127.0.0.1:53") ?? panic("bind UDP 127.0.0.1:53")
     listener: net.tcp_listen("127.0.0.1:53") ?? panic("listen on TCP 127.0.0.1:53")
     udp_server: task udp_serve(udp)
     tcp_server: task tcp_serve(listener)
-    loop name in NAMES -> show(name)
-    if net.dns_a("slow.test", 300) == {
-        .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
-        .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+    if hostile {
+        loop name in HOSTILE -> show(name)
+    } else {
+        loop name in NAMES -> show(name)
+        if net.dns_a("slow.test", 300) == {
+            .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
+            .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+        }
     }
     client: net.udp_bind("127.0.0.1:0") ?? panic("bind the stopping client")
     _: net.udp_send_bytes_to(client, query_for(STOP), net.socket_addr_parse("127.0.0.1:53") ?? panic("server address")) ?? panic("stop UDP")

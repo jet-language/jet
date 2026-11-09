@@ -1,0 +1,30 @@
+# Hostile DNS packets, one name each (main.jet HOSTILE), against the system
+# resolver as Go's checkResponse and dnsmessage parser treat them.
+# - A UDP packet that is not a reply to the question asked is ignored and the
+#   wait goes on, so the honest reply after it wins: a wrong id, the QR bit
+#   clear, under 12 bytes, another name, another type, or two questions.
+#   The question's name is compared ignoring ASCII case.
+# - With only forged packets, the lookup times out (Try again).
+# - A malformed answer fails the name with Non-recoverable error (Go's
+#   errCannotUnmarshalDNSMessage): an A record of the wrong size, record data
+#   past the end, a compression pointer that does not point back, or a
+#   reserved label type. The addresses before the fault stand.
+# - Names are walked label by label, so a label byte of 0x80 or more is data,
+#   and record types are 16 bits, so type 257 is not A.
+# - A TCP answer to a truncated reply that does not match the question, or is
+#   shorter than a header, fails the query (Go's errInvalidDNSResponse).
+# Differences from musl: musl matches a UDP reply by id alone and keeps
+# packets of 4 or more bytes. It takes any TCP answer, and gives up the whole
+# exchange when one is under 13 bytes. It skips names by scanning for a byte
+# outside 1..127, and it reads only a record type's low byte.
+requires: os-name:linux
+requires: tool:sh+unshare+ip+mount
+requires: probe unshare --user --map-root-user --net --mount true # unprivileged user namespaces are enabled
+fixture: system_resolver_follows_go_against_a_local_dns_server.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step build: jet build main.jet
+exit: 0
+step resolve: unshare --user --map-root-user --net --mount sh inside.sh hostile
+exit: 0
+stdout: = system_resolver_ignores_forged_dns_replies_and_fails_malformed_ones.out
