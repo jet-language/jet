@@ -1959,8 +1959,9 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 next
             }
             operator: parser_bump(state)
-            // Bare `?` propagation is retired; only
-            // `x?)` and the context frame `x?(note)` remain.
+            // Bare `?` propagation is retired; only a value's
+            // `x?)` and the context frame `x?(note)` remain. A call
+            // propagates by itself, so `call()?)` is the bare form too.
             if parser_current_kind(state) == TOKEN_LPAREN {
                 parser_bump(state)
                 note: parser_parse_expression(state, 1, depth + 1)
@@ -1969,7 +1970,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 expression = ParsedExpr{expr: Expr.Try{value: expression.expr, span: note_span, conversion: TryConvert.NoConversion, context: Val(note.expr), id: parser_node_id(state)}, span: note_span}
                 next
             }
-            if parser_current_kind(state) != TOKEN_RPAREN {
+            if parser_current_kind(state) != TOKEN_RPAREN || parser_expression_is_call(expression.expr) {
                 parser_add_fatal_code(state, "E-ERR-PROPAGATE", operator.span, "A bare `?` has no meaning.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame.")
                 break
             }
@@ -1980,6 +1981,13 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
         break
     }
     expression
+}
+
+parser_expression_is_call: fn(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> true
+        else -> false
+    }
 }
 
 // Rust `ptr_from_addr`: the tail of `alias.Ptr<T>.from_addr(addr)`, with the

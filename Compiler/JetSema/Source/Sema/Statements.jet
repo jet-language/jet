@@ -4743,15 +4743,19 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                 }
                 generic_names := (loop parameter in nominal.generic_params -> parameter.name)
                 arguments := sema_pattern_subject_args(ty)
-                owner_package := ""
-                if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+                // A struct hoisted from an inline module keeps its `priv`
+                // fields to that module (sema_expression_field_visible).
+                inline_module := Span?{None}
+                if nominal.source == .SourceAST(item) {
+                    if item == .Struct(declared) -> inline_module = declared.inline_module
+                }
                 loop selected_field in selected {
                     field_type := Type?{None}
                     loop field in nominal.fields {
                         if field.symbol.name == selected_field.name {
                             if field.computed -> plain_fields = false
                             if {
-                                sema_registration_visible(field.symbol.visibility, environment.module_identity, environment.package_identity, nominal.symbol.module_name, owner_package) -> {
+                                sema_expression_field_visible(field.symbol.visibility == 2, field.symbol.visibility == 1, nominal.symbol.module_name, inline_module, selected_field.span, context.compiler_generated, environment, program) -> {
                                     field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
                                     context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
                                 }

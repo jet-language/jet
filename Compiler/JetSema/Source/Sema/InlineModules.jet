@@ -1434,7 +1434,11 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     }
     loop inner in lifted {
         if inner == {
-            .Struct(definition) -> hoist.declarations.push(Item.Struct{value: sema_inline_rewrite_struct(visible, definition, module_alias)})
+            .Struct(definition) -> {
+                hoisted := sema_inline_rewrite_struct(visible, definition, module_alias)
+                hoisted.inline_module = Val(code_module.span)
+                hoist.declarations.push(Item.Struct{value: hoisted})
+            }
             .Enum(definition) -> hoist.declarations.push(Item.Enum{value: sema_inline_rewrite_enum(visible, definition, module_alias)})
             .Trait(definition) -> hoist.declarations.push(Item.Trait{value: sema_inline_rewrite_trait(visible, definition)})
             .Tag(definition) -> {

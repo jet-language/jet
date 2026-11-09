@@ -2346,15 +2346,17 @@ sema_scope_declaration_is: fn(environment: SemaScopeEnvironment, program: SemaPr
     found == kind
 }
 
-// A struct declaration's type parameters and fields, without its methods.
+// A struct declaration's type parameters and fields, without its methods, and
+// the inline module that declared it (StructDef.inline_module).
 SemaScopeStructShape: struct {
     type_params: [TypeParam]
     fields: [Field]
+    inline_module: Span?
 }
 
 sema_scope_item_struct: fn(item: Item) -> SemaScopeStructShape? {
     // copy: the shape is the caller's own; the declaration stays in the program.
-    if item == .Struct(definition) -> return Val(SemaScopeStructShape{type_params: definition.type_params.copy(), fields: definition.fields.copy()})
+    if item == .Struct(definition) -> return Val(SemaScopeStructShape{type_params: definition.type_params.copy(), fields: definition.fields.copy(), inline_module: definition.inline_module})
     None
 }
 

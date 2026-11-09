@@ -346,15 +346,22 @@ sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program:
 }
 
 // Whether code in the checked module may read or write a field declared in
-// `owner_module`: a `priv` field belongs to its type's module.
-sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_module: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+// `owner_module`: a `priv` field belongs to its type's module. A struct hoisted
+// from an inline module keeps that module's span (`inline_module`), so a use
+// at `use_span` elsewhere in the same file is refused too; the inline module's
+// own functions, methods and child modules lie inside it. The spans of one
+// module's source segments never overlap. Compiler-generated bodies (derives,
+// codecs) belong to the type.
+sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_module: String, inline_module: Span?, use_span: Span, generated: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if is_pub -> return true
     owner_package := ""
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, owner_module) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
     }
     visibility: if is_package_pub -> 1 else -> 0
-    sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_module, owner_package)
+    if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return false
+    declared: inline_module ?? return true
+    generated || (use_span.start >= declared.start && use_span.end <= declared.end)
 }
 
 sema_expression_private_field_error: fn(member: String, span: Span) -> Diagnostic Never! {
@@ -436,7 +443,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                 names: loop param in struct_def.type_params -> param.name
                 loop field in struct_def.fields {
                     if field.name == member {
-                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, environment, program) {
+                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, span, context.compiler_generated, environment, program) {
                             diagnostics.push(sema_expression_private_field_error(member, Span{start: span.end - member.len(), end: span.end}))
                             return None
                         }
