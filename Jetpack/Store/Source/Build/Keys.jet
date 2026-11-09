@@ -170,6 +170,23 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     w.finish()
 }
 
+// Rust `complete_recipe_fingerprint`: a stable fingerprint over every
+// action key of the plan, the complete recipe identity for Hangar
+// `CacheIdentity.recipe_fingerprint` (E4-JP2). Every action belongs to the
+// plan, so the Rust unknown-action error has no Jet counterpart.
+build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! {
+    keys := [String]{}
+    loop action in plan.actions -> keys.push(build_canonical_action_key(plan, action, [ActionInputSnapshot]{}))
+    keys.sort()
+    bytes := "jet.plan-fingerprint.v1".bytes()
+    bytes.push(U8{0})
+    loop key in keys {
+        loop byte in key.bytes() -> bytes.push(byte)
+        bytes.push(U8{0})
+    }
+    "plan-sha256:{crypto.sha256(bytes).hex()}"
+}
+
 // Rust `allowlisted_env`: the whole env map when the allowlist is empty.
 build_allowlisted_env: fn(action: HermeticBuildAction) -> [String: String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env

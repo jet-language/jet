@@ -3,7 +3,9 @@
 use hostile_net: core.net
 
 recipe_hostile_rows: fn() -> [[String]] {
-    root: sys.get("JET_REPO_ROOT") ?? "."
+    // Claims run inside an assembled scratch project, so the repository is
+    // named by JET_TOOLCHAIN_ROOT, never the working directory.
+    root: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
     corpus: files.read(files.join(root, "tests/fixtures/build_sandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
     rows := [[String]]{}
     ids := [String]{}
@@ -106,7 +108,8 @@ recipe_hostile_matrix: fn(windows: Bool) {
     if windows && !sys.is_windows() -> return
     if !windows && !sys.is_unix() -> return
     rows: recipe_hostile_rows()
-    shell: if windows -> recipe_sandbox_test_cmd() else -> process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")
+    // A realized tool is a regular file, never a link: name the shell's target.
+    shell: if windows -> recipe_sandbox_test_cmd() else -> files.canonicalize(process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")) ?? panic("resolve the hostile corpus shell")
     loop row in rows {
         id: row[0]
         base: recipe_test_scratch("hostile-{id}")

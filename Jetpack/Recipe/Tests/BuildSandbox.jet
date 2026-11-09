@@ -33,6 +33,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 // Ported from build_sandbox.rs:209-249. No unavailable-backend success alternative.
 #Test("build hook does not inherit host credentials") {
     if sys.is_windows() -> return
+    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
     base: recipe_test_scratch("clean-env")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     secret_name: "JET_TEST_SECRET_DO_NOT_LEAK"
@@ -53,6 +54,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 // Ported from build_sandbox.rs:252-307. Every original backend receipt predicate retained.
 #Test("native Linux recipe blocks host escape and records backend receipt") {
     if !sys.is_linux() -> return
+    _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("native-linux")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     host_marker: "{base}-host-escape"
@@ -190,6 +192,7 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 // Ported from build_sandbox.rs:904-958. Keep the executor failure, not validation failure.
 #Test("failed recipe preserves previous output and removes partial stage") {
     if sys.is_windows() -> return
+    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
     base: recipe_test_scratch("rollback")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     files.create_dir_all(ctx.output_root) ?? panic("output")
