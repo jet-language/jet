@@ -101,7 +101,7 @@ priv internal: module {
 }
 
 #Test("UI shortcut bindings preserve action bytes and absent node identity") {
-    key: core.ui.host.shortcut(" A ", core.ui.host.UIShortcutModifiers{}) ?? panic("valid shortcut rejected")
+    key: core.ui.host.shortcut(" A ", UIShortcutModifiers{bits: 0}) ?? panic("valid shortcut rejected")
     bound: binding(key, " ") ?? panic("space action rejected")
     assert(bound.action == " " && bound.node == None && bound.shortcut == key)
     if binding(key, "") == .Err(error) {

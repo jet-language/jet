@@ -3112,14 +3112,10 @@ impl Scanner {
     lexer := ByteLexer.new(1024)
     lexer.push(bytes[0..<bytes.len()]) ?? panic("push")
     lexer.finish_input() ?? panic("finish")
-    if lexer.next_token() == {
-        .Val(token) -> {
-            assert_eq(token.text, "🙂")
-            assert_eq(token.scalar_bytes, [Int]{4})
-            assert_eq(token.raw_bytes, [U8]{0x3d, 0xd8, 0x42, 0xde})
-        }
-        else -> panic("UTF16 supplementary text did not produce a token")
-    }
+    token: lexer.next_token() ?? panic("UTF16 supplementary text did not produce a token")
+    assert_eq(token.text, "🙂")
+    assert_eq(token.scalar_bytes, [Int]{4})
+    assert_eq(token.raw_bytes, [U8]{0x3d, 0xd8, 0x42, 0xde})
 }
 
 #Test("XML repeated child projections retain insertion order and append every value") {

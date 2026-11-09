@@ -214,12 +214,11 @@ is_blank: fn(text: String) -> Bool Never! {
 
 #Test("JSONL text cursor skips blank records and retains record order") {
     cr: String.from_bytes([U8]{13}) ?? panic("CR text")
-    cursor := reader("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
+    cursor := records("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
     first: cursor.next() ?? panic("first record")
-    if first == .Val(row) -> assert_eq(json.to_string(row) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
-    second: cursor.next() ?? panic("second record")
-    assert_eq(second, Val(Dyn.Int(3)))
-    assert_eq(cursor.next() ?? panic("EOF"), None)
+    assert_eq(json.to_string(first) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}")
+    assert((cursor.next() ?? panic("second record")) == stream.typed_number("3"))
+    if cursor.next() == { .None -> {} else -> panic("the cursor ends after the last record") }
     assert_eq(count_rows("\t{cr}\n{{\"z\":1}}{cr}\n \n3"), 2)
 }
 
@@ -240,9 +239,9 @@ is_blank: fn(text: String) -> Bool Never! {
     assert_eq(count_rows(cr), 1)
     assert_eq(count_rows(" \t{cr}"), 1)
     assert_eq(count_rows("1\n{cr}"), 2)
-    cursor := reader("1{cr}")
-    assert_eq(cursor.next() ?? panic("JSON value with trailing whitespace"), Val(Dyn.Int(1)))
-    assert_eq(cursor.next() ?? panic("EOF"), None)
+    cursor := records("1{cr}")
+    assert((cursor.next() ?? panic("JSON value with trailing whitespace")) == stream.typed_number("1"))
+    if cursor.next() == { .None -> {} else -> panic("the cursor ends after the CR record") }
     if parse(cr) == .Err(error) {
         assert_eq(error.byte_offset, 1)
         assert_eq(error.line, Val(1))

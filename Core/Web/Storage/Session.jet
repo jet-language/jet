@@ -1,4 +1,7 @@
-use core: core
+use {
+    core: core
+    local_storage: core.web.storage.local
+}
 
 // The shipped process-default store is separate from local storage. Web is
 // registered-unsupported, not a tab store.
@@ -62,12 +65,12 @@ test_helper_effects: fn() Never! -[Browser]> {
 
 #Test("session clear removes all session entries without clearing local") {
     key: "Core.web.storage.clear"
-    core.web.storage.local.set(key, "local")
+    local_storage.set(key, "local")
     set(key, "session")
     set("", "empty key")
     clear()
     assert_eq(get(key), None)
     assert_eq(get(""), None)
-    assert_eq(core.web.storage.local.get(key), Val("local"))
-    core.web.storage.local.remove(key)
+    assert_eq(local_storage.get(key), Val("local"))
+    local_storage.remove(key)
 }

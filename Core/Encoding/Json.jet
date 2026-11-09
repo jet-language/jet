@@ -159,7 +159,7 @@ coerce_tree: fn(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never!
 #Test("lenient JSON preserves ordered shape and coercion traversal") {
     lines := [String]{}
     value: parse("{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\"]}}") ?? panic("JSON")
-    actual: coerce_tree(value, "", (line: String) -> { lines.push(line) })
+    actual: coerce_tree(value, "", (line: String) -> { lines.push(line.copy()) })
     assert_eq(to_string(actual) ?? panic("encode coerced tree"), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
     assert_eq(lines.len(), 4)
     assert(lines[0].contains("field \"port\" string → number"))
@@ -1917,16 +1917,16 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     controls: String.from_bytes(bytes) ?? panic("C0 text")
     wire: to_string(controls) ?? panic("C0 encode")
     assert(wire.contains("\\u001f"))
-    assert_eq(parse(wire) ?? panic("C0 decode"), Dyn.Text(controls))
+    assert((parse(wire) ?? panic("C0 decode")) == Dyn.Text(controls))
 }
 
 // #4602: strict parse keeps every number, whole or not, as its exact
 // `Dyn.Number` lexeme until a typed read range-checks it.
 #Test("strict JSON keeps each number as its exact lexeme") {
-    assert_eq(parse("42") ?? panic("integer JSON"), stream.typed_number("42"))
-    assert_eq(parse("1.5") ?? panic("fractional JSON"), stream.typed_number("1.5"))
-    assert_eq(parse("1e2") ?? panic("exponent JSON"), stream.typed_number("1e2"))
-    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), stream.typed_number("-2E-1"))
+    assert((parse("42") ?? panic("integer JSON")) == stream.typed_number("42"))
+    assert((parse("1.5") ?? panic("fractional JSON")) == stream.typed_number("1.5"))
+    assert((parse("1e2") ?? panic("exponent JSON")) == stream.typed_number("1e2"))
+    assert((parse("-2E-1") ?? panic("signed exponent JSON")) == stream.typed_number("-2E-1"))
 }
 
 #Test("JSON object patch returns ordered Object backing") {

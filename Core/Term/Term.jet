@@ -699,9 +699,8 @@ stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
 }
 
 #Test("negative byte take fails before reading stdin") {
-    result: __take_bytes(-1)
-    if result == {
+    if __take_bytes(-1) == {
         .Err(_) -> {}
-        .Ok(_) -> assert(false)
+        .Ok(_) -> panic("a negative take must fail")
     }
 }

@@ -605,20 +605,22 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
         source: open_directory(source_path) ?? panic("hold source")
         initial: process.cmd(["sh", "-c", "cat marker.txt; cat /proc/self/fd/199/source.txt"])
             .cwd("/missing-lexical-process-directory")
-        in_destination: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
-        with_source: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
-        assert(compiler_with_process_directory(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) ?? panic("first slot"), source, 198, false) == .Err(.InvalidInput(_)))
-        close(destination)
-        close(source)
-        rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
-        rename(source_path, join(root, "moved-source")) ?? panic("rename source")
-        create_dir_all(destination_path) ?? panic("replacement destination")
-        create_dir_all(source_path) ?? panic("replacement source")
-        write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
-        write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
-        receipt: with_source.run() ?? panic("run held directories")
-        assert(receipt.success)
-        assert(receipt.output == "held destination\nheld source\n")
+        #Unsafe("this test owns both held directories and child descriptor slots 198 and 199 until the child runs") {
+            in_destination: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
+            with_source: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
+            assert(compiler_with_process_directory(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) ?? panic("first slot"), source, 198, false) == .Err(.InvalidInput(_)))
+            close(destination)
+            close(source)
+            rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
+            rename(source_path, join(root, "moved-source")) ?? panic("rename source")
+            create_dir_all(destination_path) ?? panic("replacement destination")
+            create_dir_all(source_path) ?? panic("replacement source")
+            write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
+            write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
+            receipt: with_source.run() ?? panic("run held directories")
+            assert(receipt.success)
+            assert(receipt.output == "held destination\nheld source\n")
+        }
         remove_all(root) ?? panic("cleanup")
     }
 }
@@ -626,6 +628,7 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
 #Test("the reader and writer descriptor rows name the open descriptor and flush the writer first") {
     if sys.name() == "linux" {
         root: mktemp("descriptor-rows-test")
+        create_dir_all(root) ?? panic("descriptor rows root")
         input_path: join(root, "input.txt")
         output_path: join(root, "output.txt")
         write(input_path, "input\n") ?? panic("input")
@@ -638,8 +641,8 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
         // The kernel's link is the canonical path, which a symlinked TMPDIR changes.
         assert((read_link("/proc/self/fd/{reader_fd}") ?? panic("reader link")).ends_with("/input.txt"))
         assert((read_link("/proc/self/fd/{writer_fd}") ?? panic("writer link")).ends_with("/output.txt"))
-        assert(read(output_path) == .Ok("buffered\n"))
-        assert(core.files.__reader_fd(reader) == .Ok(reader_fd))
+        assert_eq(read(output_path) ?? panic("read output"), "buffered\n")
+        assert_eq(core.files.__reader_fd(reader) ?? panic("reader descriptor again"), reader_fd)
         close(reader)
         close(writer)
         remove_all(root) ?? panic("cleanup")
@@ -2485,11 +2488,15 @@ cd: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 #Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
     root: mktemp("whole-file-source-policy")
+    create_dir_all(root) ?? panic("whole-file policy root")
     path: join(root, "data")
     write_bytes(path, [U8]{255}) ?? panic("write invalid UTF-8")
     if read(path) == {
         .Err(.InvalidInput(context)) -> {
-            assert_eq(context.operation, .Read)
+            if context.operation == {
+                .Read -> {}
+                else -> panic("invalid UTF-8 is a Read failure")
+            }
             assert_eq(context.resource, Val(path))
             assert_eq(context.os_code, None)
             assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
@@ -2638,10 +2645,10 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 #Test("file read_line trims every trailing CR/LF including unterminated final CR") {
     final := [U8]{108, 97, 115, 116, 13}
     trim_file_line(final)
-    assert_eq(String.from_bytes(final), Val("last"))
+    assert_eq(String.from_bytes(final) ?? panic("trimmed UTF-8"), "last")
     repeated := [U8]{120, 13, 13, 10}
     trim_file_line(repeated)
-    assert_eq(String.from_bytes(repeated), Val("x"))
+    assert_eq(String.from_bytes(repeated) ?? panic("trimmed UTF-8"), "x")
 }
 
 #Test("filesystem u32 policy preserves chown and permission boundaries") {
@@ -2655,15 +2662,15 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 }
 
 #Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
-    directory: core.files.temp_dir("walk_source").expect("temporary walk directory")
+    directory: core.files.temp_dir("walk_source") ?? panic("temporary walk directory")
     child: join(directory.path, "nested")
-    create_dir_all(child).expect("nested directory")
-    write(join(directory.path, "visible"), "root").expect("root file")
-    write(join(directory.path, "hidden"), "hidden").expect("ignored file")
-    write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
-    write(join(child, "visible"), "nested").expect("nested file")
-    write(join(child, "hidden"), "hidden").expect("inherited ignored file")
-    rows: walk(directory.path, Val(".gitignore")).list().expect("walk")
+    create_dir_all(child) ?? panic("nested directory")
+    write(join(directory.path, "visible"), "root") ?? panic("root file")
+    write(join(directory.path, "hidden"), "hidden") ?? panic("ignored file")
+    write(join(directory.path, ".gitignore"), "hidden\n") ?? panic("root rules")
+    write(join(child, "visible"), "nested") ?? panic("nested file")
+    write(join(child, "hidden"), "hidden") ?? panic("inherited ignored file")
+    rows: walk(directory.path, Val(".gitignore")).list() ?? panic("walk")
     assert_eq(rows.len(), 3)
     assert_eq(rows[0].relative, "nested")
     assert_eq(rows[0].depth, 0)
@@ -2672,7 +2679,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert_eq(rows[1].depth, 1)
     assert_eq(rows[2].relative, "visible")
     assert_eq(rows[2].depth, 0)
-    files: walk_files(directory.path, Val(".gitignore")).list().expect("walk files")
+    files: walk_files(directory.path, Val(".gitignore")).list() ?? panic("walk files")
     assert_eq(files.len(), 2)
     loop entry in files -> assert(!entry.is_dir)
 }
@@ -2685,7 +2692,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 }
 
 #Test("walk rejects regular-file roots with the native cause") {
-    file: temp_file("walk_root").expect("temporary walk root")
+    file: temp_file("walk_root") ?? panic("temporary walk root")
     if walk(file.path, None).list() == {
         .Ok(_) -> assert(false)
         .Err(error) -> {
@@ -2743,28 +2750,33 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 
 #Test("entries error projection retains source operation and top-level resource") {
     context: IOContext{operation: .Write, resource: Val("source"), os_code: Val(17), cause: Val("existing destination")}
-    assert_eq(walk_error(.Write, 6, Val(17), Val("existing destination"), "source"), IOError.AlreadyExists(context))
-    assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
-        IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
+    projected: walk_error(.Write, 6, Val(17), Val("existing destination"), "source")
+    expected: IOError.AlreadyExists(context)
+    assert_eq("{projected:Debug}", "{expected:Debug}")
+    unsupported: walk_error(.Read, 7, None, Val("unsupported"), "pattern")
+    unsupported_expected: IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")})
+    assert_eq("{unsupported:Debug}", "{unsupported_expected:Debug}")
 }
 
 
 // #4750: every path metadata probe takes the FS.Read checkpoint. Setup uses
 // only FS.Write, so each schedule selects exactly the probe under test; the
-// injected branch prints a marker a captured `jet test` run can find.
-metadata_fault_fixture: fn(prefix: String) -[FS]> (dir: String, file: String, link: String)? Never! {
+// injected branch prints a marker a captured `jet test` run can find. The
+// fixture returns its TempDir so the directory outlives the fixture call.
+metadata_fault_fixture: fn(prefix: String) -[FS]> (root: TempDir, dir: String, file: String, link: String)? Never! {
     root: temp_dir(prefix) ?? return None
     file: join(root.path, "file")
     write(file, "x") ?? return None
     link: join(root.path, "link")
     symlink(file, link) ?? return None
-    Val((dir: root.path.copy(), file: file, link: link))
+    dir: root.path.copy()
+    Val((root: root, dir: dir, file: file, link: link))
 }
 
 metadata_fault_seen: fn(probe: String, error: IOError) {
     if error == {
         .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
-        else -> assert(false)
+        else -> panic("{probe} expected the injected FS.Read fault, got {error:Debug}")
     }
     print("files fault observed: {probe}")
 }

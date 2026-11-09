@@ -89,20 +89,25 @@ __reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional
     if additional == 0 || requested <= old -> return
     growth: requested - old
     if !allocation.charge(growth) {
-        values = [T]{}
+        // `values = [T]{}` would empty the list in place and keep its buffer;
+        // returning the buffer's heap charge drops the buffer itself.
+        released: [T]{}
+        values = released
         allocation.release(old)
         return Err(.Heap)
     }
     if !mem.__list_reserve_exact<T>(values, additional) {
         allocation.release(growth)
         actual: mem.__list_capacity<T>(values) * mem.__type_size<T>()
-        values = [T]{}
+        released: [T]{}
+        values = released
         allocation.release(actual)
         return Err(.Allocation)
     }
     actual: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     if actual < old || (actual > requested && !allocation.charge(actual - requested)) {
-        values = [T]{}
+        released: [T]{}
+        values = released
         allocation.release(requested)
         return Err(.Heap)
     }

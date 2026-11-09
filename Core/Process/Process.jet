@@ -640,6 +640,6 @@ trim_pipe_line: fn(bytes: &[U8]) Never! {
     crlf := [U8]{120, 13, 13, 10}
     trim_pipe_line(crlf)
     assert_eq(crlf, [U8]{120, 13})
-    assert_eq(pipe_line([U8]{10}) ?? panic("empty line"), Val(""))
-    assert_eq(pipe_line([U8]{}) ?? panic("EOF"), None)
+    if pipe_line([U8]{10}) == .Ok(line) -> assert_eq(line, Val("")) else -> panic("empty line")
+    if pipe_line([U8]{}) == .Ok(end) -> assert_eq(end, None) else -> panic("EOF")
 }

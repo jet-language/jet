@@ -704,7 +704,8 @@ priv internal: module {
 }
 
 #Test("UI previews keep their viewport and registries reject unusable names") {
-    assert(phone() == UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2})
+    viewport: phone()
+    assert(viewport.device == .Phone && viewport.width == 390 && viewport.height == 844 && viewport.scale == 2)
     assert(preview("card", () -> text("card")).viewport == desktop())
     lab: playground("lab", () -> text("lab"), viewport: tablet())
     assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())

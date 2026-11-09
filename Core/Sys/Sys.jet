@@ -224,8 +224,8 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 #Test("environment names enumerate in key order, odd counts and runs included") {
     entries := [(name: [U8], value: [U8])]{}
     loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) -> entries.push((name: name.bytes(), value: "v".bytes()))
-    assert_eq(entry_names(entries), Ok([String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"}))
-    assert_eq(entry_names([(name: [U8], value: [U8])]{}), Ok([String]{}))
+    assert_eq(entry_names(entries) ?? panic("Unicode names enumerate"), [String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"})
+    assert_eq(entry_names([(name: [U8], value: [U8])]{}) ?? panic("no names enumerate"), [String]{})
 }
 
 #Test("logical environment replacement and removal retain one last spelling") {
@@ -234,7 +234,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     replace_entry(entries, "JET_ENV_B".bytes(), "other".bytes())
     replace_entry(entries, "JET_ENV_A".bytes(), "".bytes())
     assert_eq(entries.len(), 2)
-    assert_eq(String.from_bytes(entries[0].name), Ok("JET_ENV_B"))
+    assert_eq(String.from_bytes(entries[0].name) ?? panic("name is UTF-8"), "JET_ENV_B")
     assert_eq(read_entry(entries, "JET_ENV_A".bytes()), Val(""))
     assert(remove_entry(entries, "JET_ENV_A".bytes()))
     assert(!remove_entry(entries, "JET_ENV_A".bytes()))
@@ -245,8 +245,8 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     assert_eq(entry_index(entries, "NO_COLOR".bytes()), 0)
     assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
     if entry_names(entries) == {
-        .Err(error) -> assert(error == EnvError.NonUnicode)
-        .Ok(_) -> assert(false)
+        .Err(.NonUnicode) -> {}
+        else -> panic("a non-Unicode value must refuse enumeration with NonUnicode")
     }
 }
 

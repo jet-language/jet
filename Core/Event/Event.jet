@@ -52,8 +52,8 @@ async_result: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEve
     loop capacity in capacities {
         policy: AsyncPolicy{capacity: capacity, overflow: Overflow.Block}
         if async_result<Int, String>(policy, FailurePolicy.Collect) == {
-            .Err(reason) -> assert_eq(reason, EventConfigError.InvalidCapacity)
-            .Ok(_) -> assert(false)
+            .Err(.InvalidCapacity) -> {}
+            else -> panic("capacity {capacity} must refuse with InvalidCapacity")
         }
     }
 }

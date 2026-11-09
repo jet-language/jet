@@ -117,7 +117,7 @@ impl Clock {
         self.now()
     }
     wait: fn(&self, duration: Duration) -> Int Never! {
-        next: saturating_add_ns(self.now(), duration.ns /% 1000000)
+        next: saturating_add_ns(self.now(), __duration_whole_ms(duration))
         self.set(next)
         self.now()
     }
@@ -170,10 +170,19 @@ impl ExpiringValue {
     expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
     __show: fn(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
 }
+// An ExpiringValue shows its deadline, never its payload.
+impl ExpiringValue.Display { display: fn(self) -> String { self.__show() } }
 
 // The two expiry wrappers share the same saturating millisecond policy.
 __expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
-    saturating_add_ns(now_ms, ttl.ns /% 1000000)
+    saturating_add_ns(now_ms, __duration_whole_ms(ttl))
+}
+
+// Whole milliseconds of `duration`, truncated toward zero (`/%` floors).
+__duration_whole_ms: fn(duration: Duration) -> Int Never! {
+    millis: duration.ns /% 1000000
+    if duration.ns < 0 && duration.ns %% 1000000 != 0 -> return millis + 1
+    millis
 }
 
 #Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
@@ -190,6 +199,7 @@ __expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
     }
     assert_eq(cached.expires_at_ms(), 102)
     assert_eq("{cached}", "Expiring(deadline=102)")
+    assert_eq(cached.display(), "Expiring(deadline=102)")
 }
 
 #Test("ExpiringValue zero and negative TTL preserve open expiry boundaries") {
@@ -223,6 +233,9 @@ impl Clock.Equatable {
         }
     }
 }
+// A Clock renders its current reading, never its shared state cell.
+impl Clock.Display { display: fn(self) -> String { self.__show() } }
+impl Clock.Debug { debug: fn(&&self) -> String { self.__show() } }
 
 #Test("Clock equality compares stored manual and system state without sampling") {
     manual: Clock.new(4)
@@ -240,9 +253,9 @@ impl Clock.Equatable {
 }
 
 #Test("Clock manual forks are independent while observers retain identity") {
-    original: Clock.new(100)
+    original := Clock.new(100)
     observer: original.__observer()
-    fork: original.__fork()
+    fork := original.__fork()
     assert_eq(fork.tick(25), 125)
     assert_eq(original.now(), 100)
     assert_eq(observer.now(), 100)
@@ -261,11 +274,11 @@ impl Clock.Equatable {
 
 #Test("Clock ordinary and nested aggregate copies fork the timeline") {
     original: Clock.new(0)
-    duplicate: original.copy()
+    duplicate := original.copy()
     assert_eq(duplicate.tick(1), 1)
     assert_eq(original.now(), 0)
     clocks: [Clock]{original}
-    copied: clocks.copy()
+    copied := clocks.copy()
     assert_eq(copied[0].advance(2), 2)
     assert_eq(clocks[0].now(), 0)
 }
@@ -274,6 +287,8 @@ impl Clock.Equatable {
     value: Clock.new(5)
     assert_eq("{value}", "Clock {{ now: 5 }}")
     assert_eq("{value:Debug}", "Clock {{ now: 5 }}")
+    assert_eq(value.display(), "Clock {{ now: 5 }}")
+    assert_eq(value.debug(), "Clock {{ now: 5 }}")
 }
 
 time_int_min: fn() -> Int Never! { -9223372036854775808 }
@@ -1811,7 +1826,9 @@ impl Instant {
     leap: parse_rfc3339("2016-12-31T23:59:60.123456789Z") ?? panic("leap second")
     assert_eq(leap.second(), 60)
     assert_eq(leap.nanosecond(), 123456789)
-    assert_eq(leap.add_nanoseconds(1000000000).format_rfc3339(), "2017-01-01T00:00:00.123456789Z")
+    // The 23:59:60 label is the next epoch second (2017-01-01T00:00:00), so
+    // one second later is 00:00:01.
+    assert_eq(leap.add_nanoseconds(1000000000).format_rfc3339(), "2017-01-01T00:00:01.123456789Z")
     offset: parse_rfc3339("2024-03-01T12:00:00+02:30") ?? panic("offset")
     assert_eq(offset.format_rfc3339(), "2024-03-01T09:30:00Z")
     assert_eq(datetime(2024, 2, 29, 12, 34, 56).round("minute").minute(), 35)
@@ -1862,11 +1879,11 @@ impl Instant {
 #Test("Civil codecs retain their permissive wire policy separately from public parsers") {
     date: Dyn.Text("2024-2-29").decode<LocalDate>() ?? panic("Date codec")
     assert_eq(date.to_string(), "2024-02-29")
-    assert_eq(date.encode(), Dyn.Text("2024-02-29"))
+    assert(date.encode() == Dyn.Text("2024-02-29"))
     t: Dyn.Text("1:2:3").decode<LocalTime>() ?? panic("LocalTime codec")
     assert_eq(t.to_string(), "01:02:03")
     assert_eq(parse_time("01:02:03.123456789") ?? panic("time"), t.add_duration(duration_ns(123456789)))
-    assert_eq((parse_time("01:02:03.123456789") ?? panic("time")).encode(), Dyn.Text("01:02:03"))
+    assert((parse_time("01:02:03.123456789") ?? panic("time")).encode() == Dyn.Text("01:02:03"))
     invalid_times: [String]{"-1:2:3", "24:2:3", "1:-1:3", "1:60:3", "1:2:-1", "1:2:60"}
     loop text in invalid_times {
         if Dyn.Text(text).decode<LocalTime>() == {
@@ -1888,8 +1905,8 @@ impl Instant {
     }
     dt: Dyn.Text("2024-02-29T01:02:03.1a2Z").decode<DateTime>() ?? panic("DateTime codec")
     assert_eq(dt.nanosecond(), 120000000)
-    assert_eq(dt.encode(), Dyn.Text("2024-02-29T01:02:03.120000000Z"))
-    assert_eq(new(-1, 1, 1).encode(), Dyn.Text("-001-01-01"))
+    assert(dt.encode() == Dyn.Text("2024-02-29T01:02:03.120000000Z"))
+    assert(new(-1, 1, 1).encode() == Dyn.Text("-001-01-01"))
 }
 
 #Test("Instant arithmetic is a source point with saturating duration differences") {
