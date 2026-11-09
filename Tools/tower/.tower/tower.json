@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6716,
-    "rev": 96459,
+    "nextNum": 6717,
+    "rev": 96460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101648,6 +101648,34 @@
       "updated": "2026-11-09T09:50:48.551Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0cyzxlq",
+      "num": 6716,
+      "title": "Dev stays buildable by the admitted seed: compiler-side uses of new Core and runtime API land one seed later",
+      "body": "The 2026-11-09 all-land left dev unbuildable by seed a0_041. The compiler and its seam packages (JetCli, JetTestKit, the runtime pack, build.jet) used Core and runtime API that landed in the same batch, so a0_041's sema refused them. A bisect over a1fb1f809e..c5e353595a found 2f6cbd424d (JetCli Request.jet imports private core.devtools toolchain_core_asset), which cascades into about 1040 errors. Other two-step uses: the core.math __to_bits_f32/__from_bits_f32 typed rows; core.tasks quiesce, cpu_ns, current_task and TaskID as a map key; core.testing.skip; the os_fill_words_i64 runtime intrinsic; the deleted Core/Game/Raylib.jet that the seed's compiled-in Core table names; and Compiler/test.jet's TestRows filter/selects. Main bootstrapped through a shimmed tree (bootstrap-only rewrites, never committed). The rule needs a gate: the census preflight must build the compiler with the admitted seed before a landing, and the landing must refuse a compiler-side use of API the seed lacks. The guidance must say to stage such uses behind the next seed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T11:36:13.235Z",
+      "updated": "2026-11-09T11:36:13.235Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -190214,6 +190242,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T11:36:13.235Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0cyzxlq",
+      "note": "Dev stays buildable by the admitted seed: compiler-side uses of new Core and runtime API land one seed later"
+    },
     {
       "at": "2026-11-09T11:24:14.952Z",
       "by": "Main",
