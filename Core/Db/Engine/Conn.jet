@@ -521,6 +521,9 @@ Table: struct {
     live: Bool
     name: [U8]
     cols: [Column]
+    // C's nCol < 0: the view's columns are being computed
+    // (sqlite3ViewGetColumnNames), so a reference back is circular.
+    cols_pending: Bool
     index: Int
     col_aff: [U8]?
     check: Int
@@ -1371,7 +1374,7 @@ schema_alloc: fn(db: &Conn) -> Int Never! {
 }
 
 table_new: fn() -> Table Never! {
-    Table{live: true, name: [U8]{}, cols: [Column]{}, index: -1, col_aff: None, check: -1, tnum: 0, n_tab_ref: 1, tab_flags: 0, ipkey: -1, n_nv_col: 0, n_row_log_est: 200, sz_tab_row: 0, key_conf: 0, tab_type: TABTYP_NORM, add_col_offset: 0, fkey: -1, dflt_list: -1, select: -1, vtab_args: [[U8]]{}, vtab: -1, trigger: -1, schema: -1}
+    Table{live: true, name: [U8]{}, cols: [Column]{}, cols_pending: false, index: -1, col_aff: None, check: -1, tnum: 0, n_tab_ref: 1, tab_flags: 0, ipkey: -1, n_nv_col: 0, n_row_log_est: 200, sz_tab_row: 0, key_conf: 0, tab_type: TABTYP_NORM, add_col_offset: 0, fkey: -1, dflt_list: -1, select: -1, vtab_args: [[U8]]{}, vtab: -1, trigger: -1, schema: -1}
 }
 
 table_alloc: fn(db: &Conn) -> Int Never! {

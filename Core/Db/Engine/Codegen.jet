@@ -365,6 +365,12 @@ Gen: trait {
     select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]>
     // sqlite3SelectExpand (select.c).
     select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]>
+    // sqlite3ResultSetOfSelect (select.c): a Table, in p.db.tables, of the
+    // result columns of SELECT `s` with affinity `aff`; -1 on error.
+    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never!
+    // sqlite3ViewGetColumnNames (build.c): table t's columns computed,
+    // when t is a view or virtual table; nonzero on error.
+    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never!
     // The eponymous virtual table `name` names (sqlite3LocateTable's
     // module lookup, sqlite3PragmaVtabRegister for a pragma_ name, and
     // sqlite3VtabEponymousTableInit): its table, or -1.
@@ -655,6 +661,14 @@ v_current_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) }
 v_jump_here: fn(p: &Parse, addr: Int) Never! { aux.jump_here(p.db, p.f.v, addr) }
 
 v_jump_here_or_pop_inst: fn(p: &Parse, addr: Int) Never! { aux.jump_here_or_pop_inst(p.db, p.f.v, addr) }
+
+// sqlite3VdbeEndCoroutine: the OP_EndCoroutine of the coroutine whose
+// return address is reg_yield; the coroutine's temporary registers are
+// its own.
+v_end_coroutine: fn(p: &Parse, reg_yield: Int) Never! {
+    _: op1(p, opc.OP_END_COROUTINE, reg_yield)
+    clear_temp_reg_cache(p)
+}
 
 v_change_p1: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p1(p.db, p.f.v, addr, val) }
 
@@ -1113,6 +1127,8 @@ impl CodegenTestGen.Gen {
     select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
     select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
     select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
     eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
     vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
     vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
