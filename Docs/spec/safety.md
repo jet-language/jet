@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1439,
+  "total": 1442,
   "counts": {
-    "Compiler": 745,
+    "Compiler": 748,
     "Core": 197,
     "Docs": 8,
     "Examples": 41,
@@ -2409,49 +2409,70 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 32,
+      "line": 34,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 130,
+      "line": 132,
       "column": 9,
       "reason": "the retired entry owned this mapping of exactly `size` bytes and no token names it now"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 168,
+      "line": 170,
       "column": 9,
       "reason": "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 230,
+      "line": 273,
+      "column": 9,
+      "reason": "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
+      "line": 300,
+      "column": 9,
+      "reason": "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
+      "line": 335,
+      "column": 9,
+      "reason": "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
+      "line": 367,
       "column": 9,
       "reason": "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 244,
+      "line": 381,
       "column": 9,
       "reason": "the mapping made above was never filed, so this is its only owner"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 309,
+      "line": 446,
       "column": 9,
       "reason": "host_shared_span proved end bytes from base lie inside the live mapping and end <= length bounds data's packed bytes; start + span <= end"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 364,
+      "line": 501,
       "column": 5,
       "reason": "host_shared_span proved count * 4 bytes from base lie inside the live mapping"
     },
@@ -10303,14 +10324,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 745 |
+| Compiler | 748 |
 | Core | 197 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 432 |
-| **total** | **1439** |
+| **total** | **1442** |
 
 ### Regions
 
@@ -10628,13 +10649,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Host.jet | 235:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Host.jet | 243:5 | "value is a borrowed E4 JetCText header; stdout copies its bytes before returning" |
 | Compiler | Compiler/JetRuntime/Source/Host.jet | 255:5 | "value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 32:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 130:9 | "the retired entry owned this mapping of exactly `size` bytes and no token names it now" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 168:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 230:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 244:9 | "the mapping made above was never filed, so this is its only owner" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 309:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 364:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 34:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 132:9 | "the retired entry owned this mapping of exactly `size` bytes and no token names it now" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 170:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 273:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 300:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 335:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 367:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 381:9 | "the mapping made above was never filed, so this is its only owner" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 446:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 501:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 9:9 | "getdents supplies a live terminated name; openat describes the entry without following links" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 15:13 | "the owned descriptor and full Linux stat buffer live through fstat and close" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 46:9 | "an owned fresh directory descriptor and writable getdents64 buffer" |
