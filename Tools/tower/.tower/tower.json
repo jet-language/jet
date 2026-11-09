@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6710,
-    "rev": 96382,
+    "nextNum": 6711,
+    "rev": 96384,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100156,6 +100156,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "BallotLead-2 rewrote the #6689 thread ballots ($JET_SCRATCH_ROOT/lanes/BallotLead/): D-FFI-CARRIER1.json (rec A = the old E, \"the initial thread is Jet's only C thread\"), D-FFI-SERIAL1.json (rec A = the old C+D) and DESIGN-FFI-CARRIER1.md (nine costs with size, mitigation and probe; review gaps G1-G14 mapped; build plan S0-S7). Both validate. Self-verdict ENGINEERED-AWAY=partial. Remaining costs: a 5.5-9.3 us handoff per task-side C call (against 351-371 ns direct); no parallel C from tasks (64 callers wait 254-367 us p50); a long C call stalls other C callers and the UI; a task's C call waits while run computes; a reported but unbroken gate cycle; shared C thread-locals; no C fault handler on a raw carrier; no task survival across fork; nothing changes until #6694/#6695 land. New receipts in v4/probe/ffi/: rawmusl (mode g silently overwrote errno 2 and 201 times; mode f SIGSEGV 3 of 3), setxid (11 overrides route 11 of 11, so no kernel floor), comptime (E3010 at all levels). The planned extra ballots dissolved. Next: a fresh sol-reviewer pass, as with D-APP1; build only after two clean passes. Defect found: the seed accepts FFI(c, concurrent) and ignores the unknown argument."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "SchedLead-9 (raw clone threads, c1) conflicts with CFreeLead-fork1 (#6690 c3, queued for b7). Both grow the Thread.jet registry root from 96 to 104 bytes: fork1 for its gate word @96, SchedLead-9 for its reap list @96. fork1 lands first; SchedLead-9 must be rebased to put the reap list @104 (root 112) before it is integrated."
         },
         {
@@ -100239,7 +100244,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T04:06:06.079Z",
+      "updated": "2026-11-09T05:57:02.594Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101563,6 +101568,34 @@
       "needsAcceptance": false,
       "created": "2026-11-08T22:39:37.102Z",
       "updated": "2026-11-08T22:39:37.102Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c018v880",
+      "num": 6710,
+      "title": "FFI attribute accepts and ignores unknown arguments",
+      "body": "The seed accepts `#FFI(c, concurrent)` and silently ignores the unknown argument `concurrent` (found by BallotLead-2 while probing the #6689 thread ballots). Sema must reject every FFI argument it does not define, with a registered diagnostic (what/why/fix and a UI snapshot), so a misspelt or unsupported option never compiles silently.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T05:57:03.965Z",
+      "updated": "2026-11-09T05:57:03.965Z",
       "updatedBy": "Main"
     }
   ],
@@ -189245,6 +189278,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T05:57:03.965Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c018v880",
+      "note": "FFI attribute accepts and ignores unknown arguments"
+    },
+    {
+      "at": "2026-11-09T05:57:02.594Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T05:53:01.952Z",
       "by": "Main",
