@@ -366,8 +366,9 @@ IRProgram: struct {
     source_rows: [String:Int]
     // The checked foreign functions a call may name, by function key.
     foreign: [String:SemaCheckedForeignFunction]
-    // A runtime library's intrinsics by function key (BuildLibrary.jet):
-    // a call of one is its machine operation, never a call.
+    // The intrinsics by function key (BuildLibrary.jet): a call of one is
+    // its machine operation, never a call. A program has Core's
+    // (ir_core_intrinsics); a runtime library adds its own.
     intrinsics: [String:IRRuntimeIntrinsic]
     // Cutover B L2b: by DeclID row, each declaration's first function row
     // (-1: none) and its checked foreign row in `foreign_rows` (-1: none).
@@ -716,6 +717,22 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
+    p.intrinsics = ir_core_intrinsics(p.functions)
+}
+
+// Core's binary64 bit copies by function key: core.math `__to_bits_i64`
+// and `__from_bits_i64` (Core/Math/Math.jet) are the runtime bitcasts'
+// frame-word copy on every tier and in compile-time evaluation, so Core's
+// bit work stays in I64 where Int to_bits would box. Their Jet bodies are
+// only what a compiler without this table (the seed) runs.
+ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never! {
+    intrinsics := [String:IRRuntimeIntrinsic]{}
+    loop function in functions {
+        if function.module_name != "core.math" -> next
+        if function.name == "__to_bits_i64" && ir_bitcast_signature(function, true) -> intrinsics[function.key] = IRRuntimeIntrinsic.FloatBits
+        if function.name == "__from_bits_i64" && ir_bitcast_signature(function, false) -> intrinsics[function.key] = IRRuntimeIntrinsic.FloatFromBits
+    }
+    intrinsics
 }
 
 // Selects function `index` as `owner`'s `trait_short` hook for the
@@ -1200,7 +1217,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
         loop kept in 0..<p.functions.len() {
             function: p.functions[kept]
             if kept == row || p.checks.modules.get(function.module_identity) == None -> next
-            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> next
+            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
             roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
             kept_keys.push(function.key.copy())
         }
@@ -1460,6 +1477,7 @@ ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef
     roots := [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 -> next
+        if p.intrinsics.get(p.functions[row].key) != None -> next
         roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
     ir_build_waves(p, roots, false, threads)

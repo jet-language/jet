@@ -952,7 +952,7 @@ __cbrt_step: fn(y: Float, zz: Float, rr: Float) -> (hi: Float, lo: Float) Never!
 /// for an infinity.
 cos: fn(n: Float) -> Float Never! {
     z: fabs(n)
-    e: to_bits(z) >> 52
+    e: __to_bits_i64(z) >> 52
     if e < 0x3E4 -> return fma(n, -n, Float{1.0})
     if e < 0x41E -> return __cos_moderate(z)
     if e == 0x7FF -> return __pi_trig_special(n)
@@ -1025,7 +1025,7 @@ __COSH_HARD: [Float]{
 /// e^x, correctly rounded (CORE-MATH exp.c): 1 + x for |x| <= 2^-54, +inf
 /// from about 709.78 up, +0 from about -745.13 down, and NaN for NaN.
 exp: fn(n: Float) -> Float Never! {
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
     if ax <= 0x3C90_0000_0000_0000 -> return Float{1.0} + n
     if ax >= 0x4086_2E42_FEFA_39F0 {
@@ -1038,9 +1038,9 @@ exp: fn(n: Float) -> Float Never! {
         if ax >= 0x4087_4910_D52D_3052 -> return 0.0
     }
     t: round_even(n * Float{5909.278887481194})
-    jt: Int.from_float(t) ?? 0
-    i0: (jt >> 6).bit_and(0x3F)
-    i1: jt.bit_and(0x3F)
+    jt: __whole_i64(t)
+    i0: Int{(jt >> 6).bit_and(0x3F)}
+    i1: Int{jt.bit_and(0x3F)}
     ie: jt >> 12
     tt: __exp_cr_muldd(__EXPCR_T0[2 * i0 + 1], __EXPCR_T0[2 * i0], __EXPCR_T1[2 * i1 + 1], __EXPCR_T1[2 * i1])
     // Cody-Waite: |t| < 2^23 and the high part of log(2)/4096 has 29 bits,
@@ -1054,7 +1054,7 @@ exp: fn(n: Float) -> Float Never! {
     if bits < 0 && ax > 0x4086_232B_DD7A_BCD2 {
         // a subnormal result: 2^(-1022 - ie) added so the sum rounds at the
         // subnormal's last place, then that bit dropped
-        s: __fast_two_sum(from_bits((1 - ie) << 52), fh)
+        s: __fast_two_sum(__from_bits_i64((1 - ie) << 52), fh)
         fh = s.hi
         fl = fl + s.lo
         ub: fh + (fl + eps)
@@ -1070,7 +1070,7 @@ exp: fn(n: Float) -> Float Never! {
 /// 2^x, correctly rounded (CORE-MATH exp2.c): exact at every whole x in
 /// [-1074, 1023], +inf from 1024 up, +0 from -1075 down, and NaN for NaN.
 exp2: fn(n: Float) -> Float Never! {
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
     if ax == 0 -> return 1.0
     if ax >= 0x4090_0000_0000_0000 {
@@ -1089,9 +1089,9 @@ exp2: fn(n: Float) -> Float Never! {
     fx: round_even(sx)
     z: sx - fx
     z2: z * z
-    k: Int.from_float(fx) ?? 0
-    i1: k.bit_and(0x3F)
-    i0: (k >> 6).bit_and(0x3F)
+    k: __whole_i64(fx)
+    i1: Int{k.bit_and(0x3F)}
+    i0: Int{(k >> 6).bit_and(0x3F)}
     ie: k >> 12
     tt: __exp_cr_muldd(__EXP2CR_T0[2 * i0 + 1], __EXP2CR_T0[2 * i0], __EXP2CR_T1[2 * i1 + 1], __EXP2CR_T1[2 * i1])
     tz: tt.hi * z
@@ -1108,7 +1108,7 @@ exp2: fn(n: Float) -> Float Never! {
     }
     // a subnormal result: 2^(-1022 - ie) added so the sum rounds at the
     // subnormal's last place, then that bit dropped
-    s: __fast_two_sum(from_bits((1 - ie) << 52), fh)
+    s: __fast_two_sum(__from_bits_i64((1 - ie) << 52), fh)
     fh = s.hi
     fl = fl + s.lo
     if !whole {
@@ -1121,7 +1121,7 @@ exp2: fn(n: Float) -> Float Never! {
 /// 10^x, correctly rounded (C23 exp10; CORE-MATH exp10.c): exact at every
 /// whole x in [0, 22], +inf above 308.25, +0 below -323.61, and NaN for NaN.
 exp10: fn(n: Float) -> Float Never! {
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
     if ax > 0x4073_4413_509F_79FE {
         if ax > 0x7FF0_0000_0000_0000 -> return n + n
@@ -1140,9 +1140,9 @@ exp10: fn(n: Float) -> Float Never! {
     // 10^x rounds to 1 for |x| <= 2^-55.2
     if ax <= 0x3C7B_CB7B_1526_E50E -> return Float{1.0} + n
     t: round_even(Float{13606.617476658635} * n)
-    jt: Int.from_float(t) ?? 0
-    i1: jt.bit_and(0x3F)
-    i0: (jt >> 6).bit_and(0x3F)
+    jt: __whole_i64(t)
+    i1: Int{jt.bit_and(0x3F)}
+    i0: Int{(jt >> 6).bit_and(0x3F)}
     ie: jt >> 12
     tt: __exp_cr_muldd(__EXP2CR_T0[2 * i0 + 1], __EXP2CR_T0[2 * i0], __EXP2CR_T1[2 * i1 + 1], __EXP2CR_T1[2 * i1])
     dx: (n - Float{0.00007349365125719487} * t) - Float{2.795678930181113e-14} * t
@@ -1158,7 +1158,7 @@ exp10: fn(n: Float) -> Float Never! {
         return __exp_cr_scale(fh + fl, ie)
     }
     // a subnormal result, rounded at its last place as in exp2
-    s: __fast_two_sum(from_bits((1 - ie) << 52), fh)
+    s: __fast_two_sum(__from_bits_i64((1 - ie) << 52), fh)
     fh = s.hi
     fl = fl + s.lo
     lb: fh + (fl - eps)
@@ -1172,7 +1172,7 @@ __EXP10_POWERS: [Float]{1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e
 /// and rounding to -1 from -37.43 down, +inf from 709.79 up, and a zero keeps
 /// its sign.
 exp_m1: fn(n: Float) -> Float Never! {
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
     if ax < 0x3FD0_0000_0000_0000 {
         if ax < 0x3CA0_0000_0000_0000 {
@@ -1184,7 +1184,7 @@ exp_m1: fn(n: Float) -> Float Never! {
         fx: round_even(sx)
         z: sx - fx
         z2: z * z
-        i: (Int.from_float(fx) ?? 0) + 32
+        i: Int{__whole_i64(fx)} + 32
         th: __EXPM1CR_TZ[2 * i + 1]
         tl: __EXPM1CR_TZ[2 * i]
         fh: z * Float{0.0078125}
@@ -1213,9 +1213,9 @@ exp_m1: fn(n: Float) -> Float Never! {
         return ((Float{36.7368005696771} + n) + Float{6.739832990259606e-16}) * Float{8.008566259537294e-17} - Float{0.9999999999999999}
     }
     t: round_even(n * Float{5909.278887481194})
-    jt: Int.from_float(t) ?? 0
-    i0: (jt >> 6).bit_and(0x3F)
-    i1: jt.bit_and(0x3F)
+    jt: __whole_i64(t)
+    i0: Int{(jt >> 6).bit_and(0x3F)}
+    i1: Int{jt.bit_and(0x3F)}
     ie: jt >> 12
     tt: __exp_cr_muldd(__EXP2CR_T0[2 * i0 + 1], __EXP2CR_T0[2 * i0], __EXP2CR_T1[2 * i1 + 1], __EXP2CR_T1[2 * i1])
     dx: (n - Float{0.00016922538588914904} * t) + Float{1.0256140314162804e-14} * t
@@ -1225,7 +1225,7 @@ exp_m1: fn(n: Float) -> Float Never! {
     fl := tt.lo + (tt.hi * dx) * p
     eps: Float{1.64e-19} * tt.hi
     // -1 as -2^-ie before the 2^ie scaling, added where it is exact
-    off: -from_bits((1023 - ie) << 52)
+    off: -__from_bits_i64((1023 - ie) << 52)
     if ie < 53 {
         s: __fast_two_sum(off, fh)
         fh = s.hi
@@ -1667,7 +1667,7 @@ __isqrt_floor: fn(n: Int) -> Int Never! {
 /// below 0, +inf at +inf, and +0 at 1.
 ln: fn(n: Float) -> Float Never! {
     if !(n > Float{0.0}) || n == INFINITY -> return __log_cr_special(n)
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     if bits >= 0x3FEF_F000_0000_0000 && bits < 0x3FF0_0800_0000_0000 -> return __ln_cr_tiny(n)
     f: __log_cr_fast(n, true)
     left: f.hi + (f.lo - Float{2.898440866385809e-21})
@@ -2018,7 +2018,7 @@ logb: fn(n: Float) -> Float Never! {
 /// sin x, correctly rounded (CORE-MATH sin.c): a zero keeps its sign, and NaN
 /// for an infinity.
 sin: fn(n: Float) -> Float Never! {
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     e: (bits >> 52).bit_and(0x7FF)
     if e < 0x3E5 {
         // |x| < 2^-26: x - x^3/6 is within half an ulp of x
@@ -2523,7 +2523,7 @@ __pow_float: fn(x: Float, y: Float) -> Float Never! {
 // in double-double, then y = 1, 2 and 1/2 directly, then __pow_accurate.
 __pow_cr: fn(a: Float, y: Float) -> Float Never! {
     l: __pow_log_1(a)
-    ey: (to_bits(y) >> 52).bit_and(0x7FF)
+    ey: (__to_bits_i64(y) >> 52).bit_and(0x7FF)
     // y log(a) could underflow below 2^-969 or overflow from 2^1014
     if 0x36 <= ey && ey < 0x7F5 {
         r: __s_mul(y, l.hi, l.lo)
@@ -2543,26 +2543,26 @@ __pow_cr: fn(a: Float, y: Float) -> Float Never! {
 // log x = e log 2 - log r + log(1 + z). cancel when e = 0 and lo is not
 // below 2^-24 hi.
 __pow_log_1: fn(x: Float) -> (hi: Float, lo: Float, cancel: Bool) Never! {
-    u: to_bits(x)
+    u: __to_bits_i64(x)
     m := u.bit_and(0xF_FFFF_FFFF_FFFF)
     e := (u >> 52).bit_and(0x7FF)
-    tb := 0
+    tb := I64{0}
     if e != 0 {
         tb = m.bit_or(0x3FF0_0000_0000_0000)
         m = m + 0x10_0000_0000_0000
         e = e - 0x3FF
     } else {
-        k: __clz64(m) - 11
+        k: I64{__clz64(Int{m}) - 11}
         e = -0x3FE - k
         m = m << k
         tb = m.bit_or(0x3FF0_0000_0000_0000)
     }
     c: m >= 0x16_A09E_667F_3BCD
     if c -> e = e + 1
-    i: if c -> (m >> 45) - 181 else -> (m >> 44) - 181
-    t: if c -> from_bits(tb) * Float{0.5} else -> from_bits(tb)
+    i: Int{if c -> (m >> 45) - 181 else -> (m >> 44) - 181}
+    t: if c -> __from_bits_i64(tb) * Float{0.5} else -> __from_bits_i64(tb)
     z: fma(__POW_INVERSE[i], t, Float{-1.0})
-    ee: Float{e}
+    ee: __float_i64(e)
     th: fma(ee, Float{0.6931471805598903}, __POW_LOG_INVERSE[2 * i])
     tl: fma(ee, Float{5.497923018708371e-14}, __POW_LOG_INVERSE[2 * i + 1])
     s: __fast_sum_ddd(th, tl, z)
@@ -3985,12 +3985,12 @@ __sin_moderate: fn(x: Float) -> Float Never! {
     k: round_even(Float{5215.189175235227} * ax)
     r: fma(k, Float{-0.00019174759848570515}, ax) + k * Float{-7.474650873702107e-21}
     r2: r * r
-    j: Int.from_float(k) ?? 0
+    j: __whole_i64(k)
     neg: if (x < Float{0.0}) -> 1 else -> 0
-    g: __sin_grid((j >> 7).bit_and(0x7F), j.bit_and(0x7F))
+    g: __sin_grid(Int{(j >> 7).bit_and(0x7F)}, Int{j.bit_and(0x7F)})
     sh: r * (Float{1.0} - Float{0.16666666659950335} * r2)
     ch: r2 * (Float{-0.5} + Float{0.041666666655141404} * r2)
-    f: __sincos_round(g.hi, g.lo + g.hi * ch + g.other * sh, neg.bit_xor((j >> 14).bit_and(1)), Float{1.0122043719688889e-19})
+    f: __sincos_round(g.hi, g.lo + g.hi * ch + g.other * sh, neg.bit_xor(Int{(j >> 14).bit_and(1)}), Float{1.0122043719688889e-19})
     if !is_nan(f) -> return f
     if (ax < Float{1.52587890625e-5}) -> return __sin_small_accurate(x)
     __sin_accurate(x)
@@ -4011,11 +4011,11 @@ __cos_moderate: fn(x: Float) -> Float Never! {
     k: round_even(Float{5215.189175235227} * x)
     r: fma(k, Float{-0.00019174759848570515}, x) + k * Float{-7.474650873702107e-21}
     r2: r * r
-    j: Int.from_float(k) ?? 0
-    g: __cos_grid((j >> 7).bit_and(0x7F), j.bit_and(0x7F))
+    j: __whole_i64(k)
+    g: __cos_grid(Int{(j >> 7).bit_and(0x7F)}, Int{j.bit_and(0x7F)})
     sh: r * (Float{1.0} - Float{0.16666666659950335} * r2)
     ch: r2 * (Float{-0.5} + Float{0.041666666655141404} * r2)
-    f: __sincos_round(g.hi, g.lo + g.hi * ch - g.other * sh, (j >> 14).bit_and(1), Float{1.0122043719688889e-19})
+    f: __sincos_round(g.hi, g.lo + g.hi * ch - g.other * sh, Int{(j >> 14).bit_and(1)}, Float{1.0122043719688889e-19})
     if !is_nan(f) -> return f
     __cos_accurate(x)
 }
@@ -7973,18 +7973,18 @@ __exp_dd_fast: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
 // 2^(k/4096) (qh + ql) for whole k with 2^(k/4096) a normal Float: 2^(k/4096)
 // from __EXP_T1 and __EXP_T2, the power of two exactly.
 __exp_dd_tail: fn(k: Float, q: (hi: Float, lo: Float)) -> (hi: Float, lo: Float) Never! {
-    kk: Int.from_float(k) ?? 0
+    kk: __whole_i64(k)
     m: (kk >> 12) + 0x3FF
-    i2: (kk >> 6).bit_and(0x3F)
-    i1: kk.bit_and(0x3F)
+    i2: Int{(kk >> 6).bit_and(0x3F)}
+    i1: Int{kk.bit_and(0x3F)}
     t: __d_mul(__EXP_T2[2 * i1], __EXP_T2[2 * i1 + 1], __EXP_T1[2 * i2], __EXP_T1[2 * i2 + 1])
     r: __d_mul(t.hi, t.lo, q.hi, q.lo)
     if m == 0x7FF {
         // 2^1024 is no Float: scale by 2 and 2^1023
-        s: from_bits(0x7FE0_0000_0000_0000)
+        s: __from_bits_i64(0x7FE0_0000_0000_0000)
         return (hi: r.hi * Float{2.0} * s, lo: r.lo * Float{2.0} * s)
     }
-    s: from_bits(m << 52)
+    s: __from_bits_i64(m << 52)
     (hi: r.hi * s, lo: r.lo * s)
 }
 // e^(zh + zl) within 2^-74.346 absolutely for |z| < 0.000130273 and |zl| <
@@ -8050,16 +8050,16 @@ __exp_cr_poly: fn(xh: Float, xl: Float, c: [Float], n: Int) -> (hi: Float, lo: F
     (hi: ch, lo: cl)
 }
 // y 2^e for a normal y 2^e: e added to the exponent field.
-__exp_cr_scale: fn(y: Float, e: Int) -> Float Never! { from_bits(to_bits(y) + (e << 52)) }
+__exp_cr_scale: fn(y: Float, e: I64) -> Float Never! { __from_bits_i64(__to_bits_i64(y) + (e << 52)) }
 // The subnormal under y = 2^-1022 + v: the exponent field cleared.
-__exp_cr_subnormal: fn(y: Float) -> Float Never! { from_bits(to_bits(y).bit_and(0x000F_FFFF_FFFF_FFFF)) }
+__exp_cr_subnormal: fn(y: Float) -> Float Never! { __from_bits_i64(__to_bits_i64(y).bit_and(0x000F_FFFF_FFFF_FFFF)) }
 // exp's accurate path for |x| > 2^-54: a degree-7 double-double polynomial
 // after a three-part Cody-Waite reduction, then __EXPCR_HARD's exceptions.
 __exp_cr_accurate: fn(n: Float) -> Float Never! {
     t: round_even(n * Float{5909.278887481194})
-    jt: Int.from_float(t) ?? 0
-    i0: (jt >> 6).bit_and(0x3F)
-    i1: jt.bit_and(0x3F)
+    jt: __whole_i64(t)
+    i0: Int{(jt >> 6).bit_and(0x3F)}
+    i1: Int{jt.bit_and(0x3F)}
     ie: jt >> 12
     tt: __exp_cr_muldd(__EXPCR_T0[2 * i0 + 1], __EXPCR_T0[2 * i0], __EXPCR_T1[2 * i1 + 1], __EXPCR_T1[2 * i1])
     dx: n - Float{0.00016922538588914904} * t
@@ -8074,15 +8074,16 @@ __exp_cr_accurate: fn(n: Float) -> Float Never! {
     s0: __fast_two_sum(tt.hi, f2.hi)
     fh := s0.hi
     fl := (tt.lo + f2.lo) + s0.lo
-    if to_bits(n) < 0 && to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF) > 0x4086_232B_DD7A_BCD2 {
-        s: __fast_two_sum(from_bits((1 - ie) << 52), fh)
+    bits: __to_bits_i64(n)
+    if bits < 0 && bits.bit_and(0x7FFF_FFFF_FFFF_FFFF) > 0x4086_232B_DD7A_BCD2 {
+        s: __fast_two_sum(__from_bits_i64((1 - ie) << 52), fh)
         return __exp_cr_subnormal(s.hi + (fl + s.lo))
     }
     s: __fast_two_sum(fh, fl)
     fh = s.hi
     // a low part within 4 units of 2^-53 fh's power-of-two boundary: the
     // result may be one of __EXPCR_HARD's exceptions
-    if (to_bits(s.lo) + 4).bit_and(0x000F_FFFF_FFFF_FFFF) <= 4 {
+    if (__to_bits_i64(s.lo) + 4).bit_and(0x000F_FFFF_FFFF_FFFF) <= 4 {
         r: __hard_case(__EXPCR_HARD, n)
         if !is_nan(r) -> fh = r
     }
@@ -8218,16 +8219,16 @@ __exp2_cr_accurate: fn(n: Float) -> Float Never! {
     sx: Float{4096.0} * n
     fx: round_even(sx)
     z: sx - fx
-    k: Int.from_float(fx) ?? 0
-    i1: k.bit_and(0x3F)
-    i0: (k >> 6).bit_and(0x3F)
+    k: __whole_i64(fx)
+    i1: Int{k.bit_and(0x3F)}
+    i0: Int{(k >> 6).bit_and(0x3F)}
     ie: k >> 12
     tt: __exp_cr_muldd(__EXP2CR_T0[2 * i0 + 1], __EXP2CR_T0[2 * i0], __EXP2CR_T1[2 * i1 + 1], __EXP2CR_T1[2 * i1])
     f0: __exp2_cr_polydd(z, __EXP2CR_CD, 6)
     f1: __exp2_cr_mulddd(z, f0.hi, f0.lo)
     fh := f1.hi
     fl := f1.lo
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     if bits >= 0 || bits.bit_and(0x7FFF_FFFF_FFFF_FFFF) <= 0x408F_F000_0000_0000 {
         if (n >= Float{-8.008566259537294e-17}) && (n <= Float{1.6017132519074586e-16}) -> return fma(n, Float{0.5}, Float{1.0})
         if k.bit_and(0xFFF) == 0 {
@@ -8236,10 +8237,10 @@ __exp2_cr_accurate: fn(n: Float) -> Float Never! {
             b: __fast_two_sum(a.lo, fl)
             fh = a.hi
             fl = b.hi
-            if to_bits(fl).bit_and(0x000F_FFFF_FFFF_FFFF) == 0 {
+            if __to_bits_i64(fl).bit_and(0x000F_FFFF_FFFF_FFFF) == 0 {
                 // fl a power of 2: the sticky e moves it one unit
-                step: if (to_bits(fl) < 0) != (to_bits(b.lo) < 0) -> -1 else -> 1
-                fl = from_bits(to_bits(fl) + step)
+                step: if (__to_bits_i64(fl) < 0) != (__to_bits_i64(b.lo) < 0) -> I64{-1} else -> I64{1}
+                fl = __from_bits_i64(__to_bits_i64(fl) + step)
             }
         } else {
             p: __exp_cr_muldd(fh, fl, tt.hi, tt.lo)
@@ -8249,13 +8250,13 @@ __exp2_cr_accurate: fn(n: Float) -> Float Never! {
         }
         r: __fast_two_sum(fh, fl)
         fh = r.hi
-        if (to_bits(r.lo) + 2).bit_and(0x000F_FFFF_FFFF_FFFF) <= 2 -> fh = __exp_cr_listed(n, fh, __EXP2CR_HARD, 0x0034_C797_3B21_6FBD_5FD7_665F, 8677191773140, Float{5.551115123125783e-17})
+        if (__to_bits_i64(r.lo) + 2).bit_and(0x000F_FFFF_FFFF_FFFF) <= 2 -> fh = __exp_cr_listed(n, fh, __EXP2CR_HARD, 0x0034_C797_3B21_6FBD_5FD7_665F, 8677191773140, Float{5.551115123125783e-17})
         return __exp_cr_scale(fh, ie)
     }
     p: __exp_cr_muldd(fh, fl, tt.hi, tt.lo)
     s: __fast_two_sum(tt.hi, p.hi)
     sl: (tt.lo + p.lo) + s.lo
-    u: __fast_two_sum(from_bits((1 - ie) << 52), s.hi)
+    u: __fast_two_sum(__from_bits_i64((1 - ie) << 52), s.hi)
     __exp_cr_subnormal(u.hi + (sl + u.lo))
 }
 // The exceptions of exp2's, exp10's and exp_m1's accurate paths (their
@@ -8267,10 +8268,10 @@ __exp_cr_listed: fn(n: Float, f: Float, xs: [Float], low: Int, neg: Int, tail: F
         if xs[m] == n {
             p: (low >> (2 * m)).bit_and(3)
             dy: if (neg >> m).bit_and(1) == 1 -> -tail else -> tail
-            fb: to_bits(f)
+            fb: __to_bits_i64(f)
             loop j in 0..<3 {
-                yb: fb + j - 1
-                if yb.bit_and(3) == p -> return from_bits(yb) + dy
+                yb: fb + I64{j} - 1
+                if yb.bit_and(3) == (I64{p}) -> return __from_bits_i64(yb) + dy
             }
         }
     }
@@ -8287,9 +8288,9 @@ __EXP10CR_C: [Float]{
 // a degree-6 double-double polynomial, then __EXP10CR_HARD's exceptions.
 __exp10_cr_accurate: fn(n: Float) -> Float Never! {
     t: round_even(Float{13606.617476658635} * n)
-    jt: Int.from_float(t) ?? 0
-    i1: jt.bit_and(0x3F)
-    i0: (jt >> 6).bit_and(0x3F)
+    jt: __whole_i64(t)
+    i1: Int{jt.bit_and(0x3F)}
+    i0: Int{(jt >> 6).bit_and(0x3F)}
     ie: jt >> 12
     tt: __exp_cr_muldd(__EXP2CR_T0[2 * i0 + 1], __EXP2CR_T0[2 * i0], __EXP2CR_T1[2 * i1 + 1], __EXP2CR_T1[2 * i1])
     dx: n - Float{0.00007349365125719487} * t
@@ -8301,25 +8302,25 @@ __exp10_cr_accurate: fn(n: Float) -> Float Never! {
     f1: __exp_cr_muldd(dxh, dxl, f0.hi, f0.lo)
     fh := f1.hi
     fl := f1.lo
-    bits: to_bits(n)
+    bits: __to_bits_i64(n)
     if bits >= 0 || bits.bit_and(0x7FFF_FFFF_FFFF_FFFF) < 0x4073_3A71_46F7_2A42 {
         if jt.bit_and(0xFFF) == 0 {
             // th + tl is 1
             a: __fast_two_sum(fh, fl)
             b: __fast_two_sum(tt.hi, a.hi)
             c: __fast_two_sum(b.lo, a.lo)
-            hb := to_bits(c.hi)
+            hb := __to_bits_i64(c.hi)
             if hb.bit_and(0x000F_FFFF_FFFF_FFFF) == 0 {
                 // c.hi a power of 2: moved half its exponent's unit toward c.lo
-                hb = if (hb < 0) == (to_bits(c.lo) < 0) -> hb + 0x0008_0000_0000_0000 else -> hb - 0x0008_0000_0000_0001
+                hb = if (hb < 0) == (__to_bits_i64(c.lo) < 0) -> hb + 0x0008_0000_0000_0000 else -> hb - 0x0008_0000_0000_0001
             }
-            fh = b.hi + from_bits(hb)
+            fh = b.hi + __from_bits_i64(hb)
         } else {
             p: __exp_cr_muldd(fh, fl, tt.hi, tt.lo)
             s: __fast_two_sum(tt.hi, p.hi)
             r: __fast_two_sum(s.hi, (tt.lo + p.lo) + s.lo)
             fh = r.hi
-            lb: to_bits(r.lo)
+            lb: __to_bits_i64(r.lo)
             // a low part near 0, half or one unit of fh, or tiny
             if (lb + 4).bit_and(0x000F_FFFF_FFFF_FFFF) <= 4 || (lb >> 52).bit_and(0x7FF) < 918 {
                 fh = __exp_cr_listed(n, fh, __EXP10CR_HARD, 0x0003_781B_19E1_7EB3_7EF5_AC3F_E7C6, 371470981966157, Float{5.551115123125783e-17})
@@ -8330,7 +8331,7 @@ __exp10_cr_accurate: fn(n: Float) -> Float Never! {
     p: __exp_cr_muldd(fh, fl, tt.hi, tt.lo)
     s: __fast_two_sum(tt.hi, p.hi)
     sl: (tt.lo + p.lo) + s.lo
-    u: __fast_two_sum(from_bits((1 - ie) << 52), s.hi)
+    u: __fast_two_sum(__from_bits_i64((1 - ie) << 52), s.hi)
     __exp_cr_subnormal(u.hi + (sl + u.lo))
 }
 // The n (hi, lo) coefficients of c at xh + xl, Horner in double-double.
@@ -9436,17 +9437,17 @@ __log_cr_special: fn(n: Float) -> Float Never! {
 // log(r) + z + a degree-6 polynomial of z. log.c's table, for ln, has r = 1
 // and log(r) = 0 at its i = 511 and 512.
 __log_cr_fast: fn(n: Float, ln: Bool) -> (hi: Float, lo: Float) Never! {
-    b0: to_bits(n)
+    b0: __to_bits_i64(n)
     sub: b0 < 0x0010_0000_0000_0000
-    b: if sub -> to_bits(n * Float{4503599627370496.0}) else -> b0
-    scaled: if sub -> 52 else -> 0
+    b: if sub -> __to_bits_i64(n * Float{4503599627370496.0}) else -> b0
+    scaled: if sub -> I64{52} else -> I64{0}
     m: b.bit_and(0xF_FFFF_FFFF_FFFF)
     c: m >= 0x6_A09E_667F_3BCD
     e0: (b >> 52) - 1023 - scaled
     e: if c -> e0 + 1 else -> e0
-    sh: if c -> 44 else -> 43
-    i: ((m + 0x10_0000_0000_0000) >> sh) - 362
-    v: from_bits(m.bit_or(0x3FF0_0000_0000_0000))
+    sh: if c -> I64{44} else -> I64{43}
+    i: Int{((m + 0x10_0000_0000_0000) >> sh) - 362}
+    v: __from_bits_i64(m.bit_or(0x3FF0_0000_0000_0000))
     y: if c -> v * Float{0.5} else -> v
     one: ln && (i == 149 || i == 150)
     r: if one -> Float{1.0} else -> __LOG_FAST_INVERSE[i]
@@ -9457,7 +9458,7 @@ __log_cr_fast: fn(n: Float, ln: Bool) -> (hi: Float, lo: Float) Never! {
     p45: fma(Float{-0.16660715889531294}, z, Float{0.20000091537201936})
     p23: fma(Float{-0.25000000030374225}, z, Float{0.33333333333196213})
     ph: fma(fma(p45, z2, p23), z, Float{-0.49999999999999967}) * z2
-    ee: Float{e}
+    ee: __float_i64(e)
     // log(2) as hi + lo, hi a multiple of 2^-42 so that e hi is exact
     s: __fast_two_sum(fma(ee, Float{0.6931471805598903}, l1), z)
     l: ph + (s.lo + l2)
@@ -11390,9 +11391,9 @@ truncate: fn(n: Float) -> Float Never! { trunc(n) }
 
 cot: fn(n: Float) -> Float Never! { 1.0 / tan(n) }
 copysign: fn(value: Float, sign_value: Float) -> Float Never! {
-    magnitude: to_bits(value).bit_and(9223372036854775807)
-    sign: to_bits(sign_value).bit_and((-9223372036854775807 - 1))
-    from_bits(magnitude.bit_or(sign))
+    magnitude: __to_bits_i64(value).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    sign: __to_bits_i64(sign_value).bit_and(-0x8000_0000_0000_0000)
+    __from_bits_i64(magnitude.bit_or(sign))
 }
 fma: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 muladd: fn(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
@@ -11554,6 +11555,19 @@ to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 __to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
 __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
 from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
+// The bits of n as an I64, and the Float of `bits`: one bit copy each, as
+// to_bits and from_bits, without the Int those box past +-2^62. The
+// compiler builds every call of either as the copy itself (JetIR
+// ir_core_intrinsics); these bodies are what a compiler without that table
+// runs. Core's bit work (copysign, round_even, exp, ln, sin, cos, pow, ...)
+// stays in I64 through them.
+__to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
+__from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
+// A whole t with |t| < 2^51 as an I64: t + 0x1.8p52 is exact, and its bits
+// are 0x1.8p52's plus t.
+__whole_i64: fn(t: Float) -> I64 Never! { __to_bits_i64(t + Float{6755399441055744.0}) - 0x4338_0000_0000_0000 }
+// The Float of an I64 e with |e| < 2^51, exactly: __whole_i64's inverse.
+__float_i64: fn(e: I64) -> Float Never! { __from_bits_i64(e + 0x4338_0000_0000_0000) - Float{6755399441055744.0} }
 // Both of n's correctly rounded cos and sin.
 sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! { (cos: cos(n), sin: sin(n)) }
 /// modf.c from musl 1.2.5: the whole part clears the fraction bits, and a
@@ -11942,11 +11956,11 @@ Rounding: enum {
 /// The integral Float nearest `n`, ties to the even one (C23 roundeven); an
 /// infinity, a NaN or a whole `n` is itself, and the sign of zero is kept.
 round_even: fn(n: Float) -> Float Never! {
-    if !(fabs(n) < Float{4503599627370496.0}) -> return n
-    whole: trunc(n)
-    distance: fabs(n - whole)
-    if (distance > Float{0.5} || (distance == Float{0.5} && fmod(whole, Float{2.0}) != Float{0.0})) -> return whole + copysign(Float{1.0}, n)
-    whole
+    a: fabs(n)
+    if !(a < Float{4503599627370496.0}) -> return n
+    // a + 2^52 lands where the unit is 1, so its rounding (to nearest, ties
+    // to the even integer, 2^52 being even) is a's.
+    copysign((a + Float{4503599627370496.0}) - Float{4503599627370496.0}, n)
 }
 // The integral Float nearest `n`, ties away from zero (C round).
 __round_away: fn(n: Float) -> Float Never! {

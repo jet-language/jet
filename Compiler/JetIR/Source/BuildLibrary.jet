@@ -186,7 +186,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
         if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
     }
     if hooked != lifecycle.len() -> return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
-    intrinsics := [String:IRRuntimeIntrinsic]{}
+    intrinsics := p.intrinsics.move()
     bits := false
     from_bits := false
     rails := false
