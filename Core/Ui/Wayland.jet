@@ -3,15 +3,18 @@ use {
     sys: core.sys
     net: core.net
     core.term.[Key]
-    core.ui.[FrameStats, UIError, UIEvent, UIPointerButton, UIRect]
+    core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIPointerButton, UIRect]
 }
 // __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
 // part of core.ui.
 //
 // Speaks the wire protocol itself over $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY: no
-// libwayland. One xdg_toplevel shows the program's RGBA frames from two
+// libwayland. One xdg_toplevel shows the program's RGBA frames from three
 // wl_shm buffers in one sealed shared-memory pool; wl_surface frame callbacks
 // pace the frames; wl_seat keyboard and pointer events become UIEvents.
+// Buffers are sized in physical pixels: wp_fractional_scale_v1 and
+// wp_viewporter map them onto the window's logical size, else the integer
+// wl_surface buffer scale does.
 // Requests queue in `out` and leave on `flush`; events are parsed from
 // `inbox`, and the descriptors that ride with them (the keymap) queue in
 // `inbox_fds`, newest first.
@@ -22,14 +25,20 @@ DISPLAY: 1
 // memory, the program's RGBA byte order, so it needs no swizzle.
 FORMAT_XRGB8888: 1
 FORMAT_XBGR8888: 875709016
+// An icon's wire format: premultiplied ARGB8888 with its alpha.
+FORMAT_ARGB8888: 0
 RECEIVE_MAX: 65536
 SIDE_MAX: 16384
+// The xdg_toplevel app_id until the program names its own.
+DEFAULT_APP_ID: "dev.jet.app"
 // Three buffers: one on screen, one queued, one being drawn.
 BUFFER_COUNT: 3
 // Present-to-present intervals and input latencies kept for frame_stats.
 SAMPLES_KEPT: 1024
 // Recent frames whose draw time sizes the draw-late budget.
 COSTS_KEPT: 32
+// Configures kept unacked; an older one is answered by acking a newer.
+CONFIGURES_KEPT: 32
 
 // A buffer of the pool. `stale_*` bound what changed in the frames since
 // this buffer was last drawn (empty when x1 <= x0); drawing into it again
@@ -55,6 +64,20 @@ Pending: struct {
     follows: Bool
 }
 
+// An xdg_surface.configure not yet acked and the toplevel size it
+// carries, in logical units; 0 leaves that side to the window.
+Configure: struct {
+    serial: Int
+    width: Int
+    height: Int
+}
+
+// A wl_output and its integer scale (wl_output.scale, 1 until said).
+OutputScale: struct {
+    id: Int
+    scale: Int
+}
+
 Connection: struct {
     priv stream: net.UnixStream
     priv out: [U8]
@@ -68,12 +91,35 @@ Connection: struct {
     priv wm_base: Int
     priv seat: Int
     priv decoration_manager: Int
+    priv fractional_manager: Int
+    priv viewporter: Int
+    priv cursor_manager: Int
+    // wl_compositor's bound version: 3 brings set_buffer_scale, 6
+    // preferred_buffer_scale.
+    priv compositor_version: Int
     priv surface: Int
     priv xdg_surface: Int
     priv toplevel: Int
     priv pointer: Int
+    // The pointer's wp_cursor_shape_device_v1 (0 without one), the
+    // serial of its latest enter (-1 while it is outside the surface)
+    // and the shape the program asked for.
+    priv cursor_device: Int
+    priv pointer_serial: Int
+    priv cursor: UICursor
+    // xdg_toplevel_icon_manager_v1 (0 without one), and the pool and
+    // buffers of the icon set last, kept while it is in use.
+    priv icon_manager: Int
+    priv icon_pool: Int
+    priv icon_buffers: [Int]
     priv keyboard: Int
     priv output: Int
+    // Every output, with its integer scale, and those the surface is on.
+    priv outputs: [OutputScale]
+    priv entered: [Int]
+    // The surface's fractional scale and viewport, 0 without them.
+    priv fractional: Int
+    priv viewport: Int
     priv presentation: Int
     priv pending: [Pending]
     priv frame_callback: Int
@@ -83,10 +129,27 @@ Connection: struct {
     priv configured: Bool
     priv mapped: Bool
     priv format: sys.PixelFormat
+    // The configures not yet acked, oldest first.
+    priv configures: [Configure]
+    // The logical size of the buffer attached last, 0 x 0 before one.
+    priv shown_width: Int
+    priv shown_height: Int
+    // Sizes come in two units. Configures, the viewport and pointer
+    // positions are logical (surface) units; buffers, frames and every
+    // size a program sees are pixels, `scale120` / 120 of them per unit.
     priv pending_width: Int
     priv pending_height: Int
+    priv logical_width: Int
+    priv logical_height: Int
     priv width: Int
     priv height: Int
+    priv scale120: Int
+    // The preferred scale: wp_fractional_scale_v1's in 120ths, and the
+    // integer wl_surface.preferred_buffer_scale; 0 until said.
+    priv fractional_scale: Int
+    priv buffer_scale: Int
+    // The viewport or buffer scale still has to follow a new size.
+    priv rescaled: Bool
     priv pool: Int
     priv memory: sys.SharedMemory
     priv buffers: [Buffer]
@@ -140,6 +203,8 @@ Connection: struct {
 impl Connection {
     width: fn(self) -> Int { self.width }
     height: fn(self) -> Int { self.height }
+    // Pixels per logical unit of the display the window is on.
+    scale: fn(self) -> Float { Float{self.scale120} / 120.0 }
     failure: fn(self) -> UIError? { self.failure }
     // The current frame's predicted presentation time since the first
     // frame's, and the step from the frame before, in nanoseconds.
@@ -185,8 +250,9 @@ available: fn() -[Env]> Bool { sys_get("WAYLAND_DISPLAY") != "" }
 sys_get: fn(name: String) -[Env]> String { sys.get(name) ?? "" }
 
 // Connects, opens an xdg_toplevel titled `title` and waits for its first
-// configure. The window is `width` x `height` unless the compositor
-// chooses a size.
+// configure. The window is `width` x `height` logical units unless the
+// compositor chooses a size; its frames are that many pixels times the
+// scale of the display it is on.
 connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connection UIError! {
     display: sys_get("WAYLAND_DISPLAY")
     if display == "" -> return Err(UIError.NoDisplay)
@@ -199,10 +265,15 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     c := Connection{
         stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
         next_id: 2, registry: 0, compositor: 0, shm: 0, wm_base: 0, seat: 0, decoration_manager: 0,
-        surface: 0, xdg_surface: 0, toplevel: 0, pointer: 0, keyboard: 0, output: 0, presentation: 0,
+        fractional_manager: 0, viewporter: 0, cursor_manager: 0, compositor_version: 0,
+        surface: 0, xdg_surface: 0, toplevel: 0, pointer: 0, cursor_device: 0, pointer_serial: -1, cursor: UICursor.Default,
+        icon_manager: 0, icon_pool: 0, icon_buffers: [Int]{}, keyboard: 0, output: 0,
+        outputs: [OutputScale]{}, entered: [Int]{}, fractional: 0, viewport: 0, presentation: 0,
         pending: [Pending]{}, frame_callback: 0, frame_due: true, sync_callback: 0, synced: false,
         configured: false, mapped: false, format: sys.PixelFormat.XRGB8888,
-        pending_width: 0, pending_height: 0, width: 0, height: 0, pool: 0, memory: memory,
+        configures: [Configure]{}, shown_width: 0, shown_height: 0,
+        pending_width: 0, pending_height: 0, logical_width: 0, logical_height: 0, width: 0, height: 0,
+        scale120: 120, fractional_scale: 0, buffer_scale: 0, rescaled: false, pool: 0, memory: memory,
         buffers: [Buffer]{}, refresh_ns: 0, output_refresh_ns: 0, clock_offset: 0, offset_known: false,
         vblank_ns: 0, vblank_known: false, lag: 0, lag_known: false, late_run: 0, late_least: 0, callback_at: 0, target_ns: 0, first_target: -1, follows: false,
         time_ns: 0, delta_ns: 0, frame_start: 0, costs: [Int]{}, cost_at: 0, safety_ns: 0, input_ms: -1,
@@ -226,7 +297,15 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     c.toplevel = new_id(c)
     request(c, c.xdg_surface, 1, words([Int]{c.toplevel}))
     request(c, c.toplevel, 2, text_argument(title))
-    request(c, c.toplevel, 3, text_argument("dev.jet.app"))
+    request(c, c.toplevel, 3, text_argument(DEFAULT_APP_ID))
+    // Fractional scaling: the compositor names the scale in 120ths and
+    // the viewport maps the pixel-sized buffer onto the logical size.
+    if c.fractional_manager != 0 && c.viewporter != 0 {
+        c.fractional = new_id(c)
+        request(c, c.fractional_manager, 1, words([Int]{c.fractional, c.surface}))
+        c.viewport = new_id(c)
+        request(c, c.viewporter, 1, words([Int]{c.viewport, c.surface}))
+    }
     if c.decoration_manager != 0 {
         decoration: new_id(c)
         request(c, c.decoration_manager, 1, words([Int]{decoration, c.toplevel}))
@@ -265,14 +344,10 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
 // A frame that presents nothing lets the window sleep until input
 // arrives. A failure ends the stream with `.Close`; `failure()` says why.
 next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
-    if c.failure == None && c.pending_width > 0 && c.pending_height > 0 && (c.pending_width != c.width || c.pending_height != c.height) {
-        allocate(c, c.pending_width, c.pending_height)
-        c.events.push(UIEvent.Resize{width: c.width, height: c.height})
-    }
     loop c.failure == None && !c.frame_due && !has_close(c.events) {
         // Idle (the last frame presented nothing): ask for a frame once
         // something happens.
-        if c.mapped && c.frame_callback == 0 && c.events.len() > 0 -> request_frame(c)
+        if c.mapped && c.frame_callback == 0 && (c.events.len() > 0 || wants_reshape(c)) -> request_frame(c)
         flush(c)
         receive(c, -1)
     }
@@ -303,6 +378,17 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
     c.time_ns = c.target_ns + c.lag * refresh_interval(c) - c.first_target
     c.delta_ns = c.time_ns - previous
     if c.failure != None && !has_close(c.events) -> c.events.push(UIEvent.Close)
+    // The size and scale the latest configure and scale events asked
+    // for apply to this frame.
+    if c.failure == None && !has_close(c.events) && wants_reshape(c) {
+        width: c.width
+        height: c.height
+        logical_width: wanted_width(c)
+        logical_height: wanted_height(c)
+        allocate(c, logical_width, logical_height)
+        if c.width != width || c.height != height -> c.events.push(UIEvent.Resize{width: c.width, height: c.height})
+        if c.failure != None -> c.events.push(UIEvent.Close)
+    }
     c.frame_start = core.time.__clock_mono_ns()
     events: c.events.copy()
     c.events.clear()
@@ -353,7 +439,45 @@ request_frame: fn(&c: Connection) {
     put32(c.out, 0)
     put32(c.out, 1)
     put32(c.out, 1)
+    ack_configure(c)
     header(c, c.surface, 6, 0)
+}
+
+// Acks the newest configure the buffer about to be committed answers,
+// in that commit: the compositor takes the next commit after an ack as
+// the answer to it, and moves a window resized by its top or left edge
+// by the difference, so an ack riding a buffer of another size makes
+// the window jump. Acking a configure answers every older one too; a
+// newer configure of another size waits for the frame drawn at it.
+ack_configure: fn(&c: Connection) {
+    found := -1
+    loop index in 0..<c.configures.len() {
+        if answers(c, c.configures[index]) -> found = index
+    }
+    if found < 0 -> return
+    serial: c.configures[found].serial
+    request(c, c.xdg_surface, 4, words([Int]{serial}))
+    c.configures = c.configures[(found + 1)..<c.configures.len()].copy()
+}
+
+// The buffer on screen is `configure`'s size: each side it names
+// matches, and a side it leaves to the window is the window's choice.
+answers: fn(c: Connection, configure: Configure) -> Bool {
+    width_ok: configure.width <= 0 || min_int(configure.width, SIDE_MAX) == c.shown_width
+    height_ok: configure.height <= 0 || min_int(configure.height, SIDE_MAX) == c.shown_height
+    width_ok && height_ok
+}
+
+// Says how the buffers map onto the window: the viewport's logical
+// size, else the integer buffer scale.
+apply_scale: fn(&c: Connection) {
+    if !c.rescaled -> return
+    c.rescaled = false
+    if c.viewport != 0 {
+        request(c, c.viewport, 2, words([Int]{c.logical_width, c.logical_height}))
+        return
+    }
+    if c.compositor_version >= 3 -> request(c, c.surface, 8, words([Int]{c.scale120 /% 120}))
 }
 
 has_close: fn(events: [UIEvent]) -> Bool {
@@ -464,6 +588,10 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
         c.pending.push(Pending{id: feedback, target_ns: c.target_ns, input_ms: c.input_ms, follows: c.follows})
     }
     c.input_ms = -1
+    apply_scale(c)
+    c.shown_width = c.logical_width
+    c.shown_height = c.logical_height
+    ack_configure(c)
     header(c, c.surface, 6, 0)
     c.mapped = true
     flush(c)
@@ -595,7 +723,7 @@ string_at: fn(bytes: [U8], at: Int) -> String {
 }
 
 // Handles every complete event in the inbox.
-dispatch: fn(&c: Connection) -[Env]> {
+dispatch: fn(&c: Connection) -[Env, Time]> {
     at := 0
     loop c.inbox.len() - at >= 8 && c.failure == None {
         object: u32_at(c.inbox, at)
@@ -626,7 +754,7 @@ bind: fn(&c: Connection, name: Int, interface: String, version: Int) -> Int {
 min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
 max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
 
-event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env]> {
+event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
     if body.len() < required_bytes(c, object, opcode) {
         fail(c, UIError.Protocol("event {opcode} on object {object} is too short"))
         return
@@ -647,9 +775,28 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env]> {
         if opcode == 0 && u32_at(body, 0) == FORMAT_XBGR8888 -> c.format = sys.PixelFormat.XBGR8888
         return
     }
-    if object == c.output {
-        // mode: the current one's refresh, in mHz.
-        if opcode == 1 && u32_at(body, 0).bit_and(1) != 0 && i32_at(body, 12) > 0 -> c.output_refresh_ns = 1000000000000 /% i32_at(body, 12)
+    if output_index(c, object) >= 0 {
+        // mode: the current one's refresh, in mHz (the first output's).
+        if object == c.output && opcode == 1 && u32_at(body, 0).bit_and(1) != 0 && i32_at(body, 12) > 0 -> c.output_refresh_ns = 1000000000000 /% i32_at(body, 12)
+        if opcode == 3 -> c.outputs[output_index(c, object)].scale = max_int(i32_at(body, 0), 1)
+        return
+    }
+    if object == c.surface {
+        // enter and leave an output, and the integer scale it prefers.
+        output: u32_at(body, 0)
+        if opcode == 0 && !c.entered.contains(output) -> c.entered.push(output)
+        if opcode == 1 {
+            kept := [Int]{}
+            loop id in c.entered {
+                if id != output -> kept.push(id)
+            }
+            c.entered = kept
+        }
+        if opcode == 2 -> c.buffer_scale = max_int(i32_at(body, 0), 1)
+        return
+    }
+    if object == c.fractional {
+        if opcode == 0 -> c.fractional_scale = u32_at(body, 0)
         return
     }
     if object == c.presentation -> return
@@ -682,7 +829,8 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env]> {
     }
     if object == c.xdg_surface {
         if opcode == 0 {
-            request(c, c.xdg_surface, 4, words([Int]{u32_at(body, 0)}))
+            if c.configures.len() >= CONFIGURES_KEPT -> c.configures = c.configures[1..<c.configures.len()].copy()
+            c.configures.push(Configure{serial: u32_at(body, 0), width: c.pending_width, height: c.pending_height})
             c.configured = true
         }
         return
@@ -713,7 +861,11 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
     if object == c.registry && opcode == 0 -> return 12
     if object == c.shm || object == c.wm_base || object == c.seat || object == c.xdg_surface || object == c.frame_callback -> return 4
     if object == c.toplevel && opcode == 0 -> return 12
-    if object == c.output && opcode == 1 -> return 16
+    if output_index(c, object) >= 0 {
+        if opcode == 1 -> return 16
+        if opcode == 3 -> return 4
+    }
+    if (object == c.surface && opcode <= 2) || object == c.fractional -> return 4
     if opcode == 1 && pending_index(c, object) >= 0 -> return 28
     if object == c.keyboard {
         if opcode == 0 -> return 8
@@ -730,13 +882,48 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
 }
 
 global: fn(&c: Connection, name: Int, interface: String, version: Int) {
-    if interface == "wl_compositor" && c.compositor == 0 -> c.compositor = bind(c, name, interface, min_int(version, 4))
+    if interface == "wl_compositor" && c.compositor == 0 {
+        c.compositor_version = min_int(version, 6)
+        c.compositor = bind(c, name, interface, c.compositor_version)
+    }
     if interface == "wl_shm" && c.shm == 0 -> c.shm = bind(c, name, interface, 1)
     if interface == "xdg_wm_base" && c.wm_base == 0 -> c.wm_base = bind(c, name, interface, 1)
     if interface == "wl_seat" && c.seat == 0 -> c.seat = bind(c, name, interface, min_int(version, 5))
     if interface == "zxdg_decoration_manager_v1" && c.decoration_manager == 0 -> c.decoration_manager = bind(c, name, interface, 1)
-    if interface == "wl_output" && c.output == 0 -> c.output = bind(c, name, interface, min_int(version, 2))
+    if interface == "wp_fractional_scale_manager_v1" && c.fractional_manager == 0 -> c.fractional_manager = bind(c, name, interface, 1)
+    if interface == "wp_viewporter" && c.viewporter == 0 -> c.viewporter = bind(c, name, interface, 1)
+    if interface == "wp_cursor_shape_manager_v1" && c.cursor_manager == 0 {
+        c.cursor_manager = bind(c, name, interface, 1)
+        cursor_device(c)
+    }
+    if interface == "wl_output" {
+        output: bind(c, name, interface, min_int(version, 2))
+        c.outputs.push(OutputScale{id: output, scale: 1})
+        if c.output == 0 -> c.output = output
+    }
     if interface == "wp_presentation" && c.presentation == 0 -> c.presentation = bind(c, name, interface, 1)
+    if interface == "xdg_toplevel_icon_manager_v1" && c.icon_manager == 0 -> c.icon_manager = bind(c, name, interface, 1)
+}
+
+output_index: fn(c: Connection, object: Int) -> Int {
+    loop index in 0..<c.outputs.len() {
+        if c.outputs[index].id == object -> return index
+    }
+    -1
+}
+
+// The scale frames should have, in 120ths: the fractional scale when
+// the compositor offers it, else the integer one it prefers, else the
+// largest of the outputs the window is on; 1 until known.
+wanted_scale: fn(c: Connection) -> Int {
+    if c.fractional != 0 -> return if c.fractional_scale > 0 -> c.fractional_scale else -> 120
+    if c.compositor_version < 3 -> return 120
+    if c.buffer_scale > 0 -> return c.buffer_scale * 120
+    largest := 1
+    loop output in c.outputs {
+        if c.entered.contains(output.id) && output.scale > largest -> largest = output.scale
+    }
+    largest * 120
 }
 
 pending_index: fn(c: Connection, object: Int) -> Int {
@@ -816,6 +1003,7 @@ capabilities: fn(&c: Connection, mask: Int) {
     if mask.bit_and(1) != 0 && c.pointer == 0 {
         c.pointer = new_id(c)
         request(c, c.seat, 0, words([Int]{c.pointer}))
+        cursor_device(c)
     }
     if mask.bit_and(2) != 0 && c.keyboard == 0 {
         c.keyboard = new_id(c)
@@ -854,11 +1042,20 @@ keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env]> {
     if opcode == 4 -> c.modifiers = u32_at(body, 4).bit_or(u32_at(body, 8)).bit_or(u32_at(body, 12))
 }
 
+// Positions arrive in 1/256ths of a logical unit; programs see pixels.
+to_pixels: fn(c: Connection, fixed: Int) -> Int { fixed * c.scale120 /% 30720 }
+
 pointer: fn(&c: Connection, opcode: Int, body: [U8]) {
-    if opcode == 0 -> c.events.push(UIEvent.PointerMove{x: i32_at(body, 8) /% 256, y: i32_at(body, 12) /% 256})
+    // enter: the cursor is the client's to set again, at this serial.
+    if opcode == 0 {
+        c.pointer_serial = u32_at(body, 0)
+        show_cursor(c)
+        c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 8)), y: to_pixels(c, i32_at(body, 12))})
+    }
+    if opcode == 1 -> c.pointer_serial = -1
     if opcode == 2 {
         note_input(c, u32_at(body, 0))
-        c.events.push(UIEvent.PointerMove{x: i32_at(body, 4) /% 256, y: i32_at(body, 8) /% 256})
+        c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 4)), y: to_pixels(c, i32_at(body, 8))})
     }
     if opcode == 3 {
         note_input(c, u32_at(body, 4))
@@ -867,7 +1064,7 @@ pointer: fn(&c: Connection, opcode: Int, body: [U8]) {
     }
     if opcode == 4 {
         note_input(c, u32_at(body, 0))
-        amount: Float{i32_at(body, 8)} / 256.0
+        amount: Float{i32_at(body, 8)} * Float{c.scale120} / 30720.0
         if u32_at(body, 4) == 0 -> c.events.push(UIEvent.Scroll{dx: 0.0, dy: amount}) else -> c.events.push(UIEvent.Scroll{dx: amount, dy: 0.0})
     }
 }
@@ -886,14 +1083,190 @@ pointer_button: fn(code: Int) -> UIPointerButton {
     UIPointerButton.Other(code)
 }
 
+// ---- identity ---------------------------------------------------------
+
+// xdg_toplevel.set_app_id: the desktop matches it to the application's
+// desktop entry, for its name, icon and grouping.
+set_app_id: fn(&c: Connection, app_id: String) {
+    request(c, c.toplevel, 3, text_argument(app_id))
+}
+
+// Shows `icon` through xdg_toplevel_icon_v1: its theme name and its
+// images, as square premultiplied ARGB8888 buffers in one new sealed
+// pool kept until the next icon replaces it; an icon with neither
+// unsets the window's. A compositor without the protocol keeps the icon
+// of the app_id's desktop entry.
+set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
+    if c.icon_manager == 0 -> return Ok()
+    toplevel: c.toplevel
+    manager: c.icon_manager
+    if icon.name == "" && icon.images.len() == 0 {
+        request(c, manager, 2, words([Int]{toplevel, 0}))
+        release_icon(c)
+        return Ok()
+    }
+    pool := 0
+    buffers := [Int]{}
+    if icon.images.len() > 0 {
+        total := 0
+        loop image in icon.images -> total += image.pixels.len()
+        memory := sys.shared_memory(total) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
+        offset := 0
+        loop image in icon.images {
+            memory.write(offset, premultiplied_argb(image.pixels)) ?? return Err(UIError.Protocol("writing the icon failed: {err}"))
+            offset += image.pixels.len()
+        }
+        descriptor: memory.descriptor() ?? return Err(UIError.Protocol("sharing the icon failed: {err}"))
+        pool = new_id(c)
+        // wl_shm.create_pool(new_id, fd, size): the descriptor rides along.
+        request(c, c.shm, 0, words([Int]{pool, total}))
+        c.out_fds.push(descriptor)
+        offset = 0
+        loop image in icon.images {
+            id: new_id(c)
+            request(c, pool, 0, words([Int]{id, offset, image.side, image.side, image.side * 4, FORMAT_ARGB8888}))
+            buffers.push(id)
+            offset += image.pixels.len()
+        }
+    }
+    handle: new_id(c)
+    request(c, manager, 1, words([Int]{handle}))
+    if icon.name != "" -> request(c, handle, 1, text_argument(icon.name))
+    loop id in buffers -> request(c, handle, 2, words([Int]{id, 1}))
+    request(c, manager, 2, words([Int]{toplevel, handle}))
+    // The toplevel keeps the icon; the object is no longer needed.
+    request(c, handle, 0, [U8]{})
+    release_icon(c)
+    c.icon_pool = pool
+    c.icon_buffers = buffers
+    Ok()
+}
+
+// Straight-alpha RGBA pixels as premultiplied ARGB8888 words stored
+// little-endian: B, G, R, A, each color scaled by its alpha.
+premultiplied_argb: fn(rgba: [U8]) -> [U8] {
+    out := [U8]{}
+    at := 0
+    loop at + 4 <= rgba.len() {
+        alpha: Int.from_u8(rgba[at + 3])
+        out.push(U8{(Int.from_u8(rgba[at + 2]) * alpha + 127) /% 255})
+        out.push(U8{(Int.from_u8(rgba[at + 1]) * alpha + 127) /% 255})
+        out.push(U8{(Int.from_u8(rgba[at]) * alpha + 127) /% 255})
+        out.push(U8{alpha})
+        at += 4
+    }
+    out
+}
+
+// Destroys the previous icon's buffers and pool.
+release_icon: fn(&c: Connection) {
+    loop id in c.icon_buffers.copy() -> request(c, id, 0, [U8]{})
+    if c.icon_pool != 0 {
+        pool: c.icon_pool
+        request(c, pool, 1, [U8]{})
+    }
+    c.icon_pool = 0
+    c.icon_buffers = [Int]{}
+}
+
+// ---- cursor -----------------------------------------------------------
+
+// Asks for the pointer's wp_cursor_shape_device_v1 once both the
+// manager and the pointer exist.
+cursor_device: fn(&c: Connection) {
+    if c.cursor_manager == 0 || c.pointer == 0 || c.cursor_device != 0 -> return
+    c.cursor_device = new_id(c)
+    request(c, c.cursor_manager, 1, words([Int]{c.cursor_device, c.pointer}))
+}
+
+// The program's cursor; it is shown at once while the pointer is over
+// the window, else at its next enter.
+set_cursor: fn(&c: Connection, cursor: UICursor) {
+    if cursor == c.cursor -> return
+    c.cursor = cursor
+    show_cursor(c)
+}
+
+// Shows the program's cursor at the latest enter's serial: `.Hidden` is
+// wl_pointer.set_cursor with no surface, every other shape
+// wp_cursor_shape_device_v1.set_shape.
+show_cursor: fn(&c: Connection) {
+    if c.pointer_serial < 0 -> return
+    if c.cursor == .Hidden {
+        request(c, c.pointer, 0, words([Int]{c.pointer_serial, 0, 0, 0}))
+        return
+    }
+    device: c.cursor_device
+    shape: cursor_shape(c.cursor)
+    serial: c.pointer_serial
+    if device != 0 -> request(c, device, 1, words([Int]{serial, shape}))
+}
+
+// wp_cursor_shape_device_v1.shape: the enum's order, from 1.
+cursor_shape: fn(cursor: UICursor) -> Int {
+    if cursor == {
+        .Default -> 1
+        .ContextMenu -> 2
+        .Help -> 3
+        .Pointer -> 4
+        .Progress -> 5
+        .Wait -> 6
+        .Cell -> 7
+        .Crosshair -> 8
+        .Text -> 9
+        .VerticalText -> 10
+        .Alias -> 11
+        .Copy -> 12
+        .Move -> 13
+        .NoDrop -> 14
+        .NotAllowed -> 15
+        .Grab -> 16
+        .Grabbing -> 17
+        .ResizeE -> 18
+        .ResizeN -> 19
+        .ResizeNE -> 20
+        .ResizeNW -> 21
+        .ResizeS -> 22
+        .ResizeSE -> 23
+        .ResizeSW -> 24
+        .ResizeW -> 25
+        .ResizeEW -> 26
+        .ResizeNS -> 27
+        .ResizeNESW -> 28
+        .ResizeNWSE -> 29
+        .ResizeColumn -> 30
+        .ResizeRow -> 31
+        .AllScroll -> 32
+        .ZoomIn -> 33
+        .ZoomOut -> 34
+        .Hidden -> 1
+    }
+}
+
 // ---- buffers ----------------------------------------------------------
 
-// BUFFER_COUNT width x height buffers in one new sealed pool, made once
-// per size; the old pool and buffers are destroyed (the compositor keeps
-// what is on screen).
+// The size the latest configure asks for, in logical units; the current
+// one while the compositor leaves it to the window.
+wanted_width: fn(c: Connection) -> Int { if c.pending_width > 0 -> c.pending_width else -> c.logical_width }
+wanted_height: fn(c: Connection) -> Int { if c.pending_height > 0 -> c.pending_height else -> c.logical_height }
+
+// The configured size or the display's scale moved since the buffers
+// were made.
+wants_reshape: fn(c: Connection) -> Bool {
+    wanted_width(c) != c.logical_width || wanted_height(c) != c.logical_height || wanted_scale(c) != c.scale120
+}
+
+// BUFFER_COUNT buffers for a `width` x `height` logical-unit window at
+// the wanted scale, in one new sealed pool, made once per size; the old
+// pool and buffers are destroyed (the compositor keeps what is on
+// screen). A fractional size rounds half away from zero, as
+// wp_fractional_scale_v1 asks.
 allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
-    w: if width < 1 -> 1 else -> min_int(width, SIDE_MAX)
-    h: if height < 1 -> 1 else -> min_int(height, SIDE_MAX)
+    scale: wanted_scale(c)
+    logical_w: if width < 1 -> 1 else -> min_int(width, SIDE_MAX)
+    logical_h: if height < 1 -> 1 else -> min_int(height, SIDE_MAX)
+    w: min_int(max_int((logical_w * scale + 60) /% 120, 1), SIDE_MAX)
+    h: min_int(max_int((logical_h * scale + 60) /% 120, 1), SIDE_MAX)
     loop buffer in c.buffers -> request(c, buffer.id, 0, [U8]{})
     c.buffers = [Buffer]{}
     if c.pool != 0 -> request(c, c.pool, 1, [U8]{})
@@ -912,6 +1285,10 @@ allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
         fail(c, UIError.Protocol("sharing window buffers failed: {err}"))
         return
     }
+    c.logical_width = logical_w
+    c.logical_height = logical_h
+    c.scale120 = scale
+    c.rescaled = true
     c.width = w
     c.height = h
     c.pool = new_id(c)

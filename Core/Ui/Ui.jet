@@ -13,7 +13,7 @@ use {
     tui_text: core.tui
     core.term.[Key]
     wayland: __core_ui_wayland
-    internal.[checksum]
+    internal.[checksum, has_nul]
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -291,9 +291,16 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
 // The display paces the frames, one per refresh while the program
 // presents; move things as a function of `frame.time`, never per frame.
 //
+// A window's size is asked for in logical units, the desktop's own;
+// frames, pixels and event positions are physical pixels, `frame.scale`
+// of them per unit (1.5 on a display scaled to 150%), so what a program
+// draws stays sharp on every display. The scale changes when the window
+// moves to another display; the frame after carries `.Resize`.
+//
 // The display server comes from the environment: $WAYLAND_DISPLAY.
 
 SIDE_MAX: 16384
+ICON_SIDE_MAX: 1024
 // A headless window's frames are one 60 Hz refresh apart.
 HEADLESS_REFRESH_NS: 16666667
 
@@ -309,6 +316,8 @@ UIError: enum {
     Unsupported(String)
     // A window size or pixel buffer is out of range.
     Size(String)
+    // An app_id or icon name the program passed is malformed.
+    Invalid(String)
 }
 
 UIPointerButton: enum {
@@ -318,9 +327,65 @@ UIPointerButton: enum {
     Other(Int)
 }
 
+// How the pointer looks over a window: CSS's cursor keywords, in the
+// order wp_cursor_shape_v1 numbers them, and `Hidden` (CSS `none`).
+UICursor: enum {
+    Default
+    ContextMenu
+    Help
+    Pointer
+    Progress
+    Wait
+    Cell
+    Crosshair
+    Text
+    VerticalText
+    Alias
+    Copy
+    Move
+    NoDrop
+    NotAllowed
+    Grab
+    Grabbing
+    ResizeE
+    ResizeN
+    ResizeNE
+    ResizeNW
+    ResizeS
+    ResizeSE
+    ResizeSW
+    ResizeW
+    ResizeEW
+    ResizeNS
+    ResizeNESW
+    ResizeNWSE
+    ResizeColumn
+    ResizeRow
+    AllScroll
+    ZoomIn
+    ZoomOut
+    Hidden
+}
+
+// A window icon: the name of a desktop theme icon ("" for none), used
+// when the desktop has one by that name, and images of it, one per size,
+// for when it has not.
+UIIcon: struct {
+    name: String
+    images: [UIIconImage]
+}
+
+// A square icon image `side` pixels across: `side` rows of `side` RGBA
+// pixels, 4 bytes each, alpha straight (not premultiplied), as a frame's.
+UIIconImage: struct {
+    side: Int
+    pixels: [U8]
+}
+
 // What happened since the previous frame. Positions are window pixels
-// from the top-left; `Text` is what a key press typed; `Close` asks the
-// program to close the window and ends the frames.
+// from the top-left; `Text` is what a key press typed; `Resize` gives
+// the new frame size in pixels; `Close` asks the program to close the
+// window and ends the frames.
 UIEvent: enum {
     KeyDown(Key)
     KeyUp(Key)
@@ -345,12 +410,14 @@ UIRect: struct {
 WindowState: struct {
     priv width: Int
     priv height: Int
+    priv scale: Float
     priv frames: Int
     priv closed: Bool
     priv failure: UIError?
     priv link: Shared<wayland.Connection>?
     priv script: [[UIEvent]]
     priv checksums: [Int]
+    priv cursor: UICursor
 }
 
 // A window and its frames. Copies share the one window, which closes when
@@ -359,8 +426,8 @@ Window: struct {
     priv state: Shared<WindowState>
 }
 
-// Opens a `width` x `height` window titled `title` on the environment's
-// display server.
+// Opens a window of `width` x `height` logical units, titled `title`,
+// on the environment's display server.
 open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError! {
     if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
         return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
@@ -368,21 +435,22 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
     if !wayland.available() -> return Err(UIError.NoDisplay)
     link: wayland.connect(width, height, title)
     state: WindowState{
-        width: link.width(), height: link.height(), frames: 0, closed: false, failure: None,
-        link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{},
+        width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
+        link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
     }
     Ok(Window{state: shared state})
 }
 
-// A window with no device: frame `i` carries `script[i]`, one more frame
-// carries `.Close`, and each `present` records a checksum of its pixels.
+// A window with no device at scale 1: frame `i` carries `script[i]`, one
+// more frame carries `.Close`, and each `present` records a checksum of
+// its pixels.
 headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError! {
     if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
         return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
     }
     state: WindowState{
-        width: width, height: height, frames: 0, closed: false, failure: None,
-        link: None, script: script, checksums: [Int]{},
+        width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
+        link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
     }
     Ok(Window{state: shared state})
 }
@@ -415,6 +483,7 @@ impl Window {
     // arrives.
     frames: fn(self) -> Frames { Frames{state: self.state.copy()} }
 
+    // The latest frame's size in pixels, and pixels per logical unit.
     width: fn(self) -> Int {
         guard: self.state.guard_read()
         guard.value.width
@@ -423,6 +492,11 @@ impl Window {
     height: fn(self) -> Int {
         guard: self.state.guard_read()
         guard.value.height
+    }
+
+    scale: fn(self) -> Float {
+        guard: self.state.guard_read()
+        guard.value.scale
     }
 
     // Why the display server ended the frames, if it failed.
@@ -435,6 +509,60 @@ impl Window {
     checksums: fn(self) -> [Int] {
         guard: self.state.guard_read()
         guard.value.checksums.copy()
+    }
+
+    // How the pointer looks over the window; `.Default` until set.
+    cursor: fn(self) -> UICursor {
+        guard: self.state.guard_read()
+        guard.value.cursor
+    }
+
+    // Shows the pointer as `cursor` while it is over the window. A
+    // display server without wp_cursor_shape_v1 keeps its own cursor for
+    // every shape but `.Hidden`.
+    set_cursor: fn(self, cursor: UICursor) {
+        guard := self.state.guard_edit()
+        guard.value.cursor = cursor
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_cursor(connection.value, cursor)
+        }
+    }
+
+    // Names the application the window belongs to, as a reverse-DNS id
+    // ("org.example.Notes"): the desktop matches it to the application's
+    // desktop entry for its name, icon and grouping. It is
+    // "dev.jet.app" until set; set it before the first present.
+    set_app_id: fn(self, app_id: String) UIError! {
+        if app_id == "" -> return Err(UIError.Invalid("an app_id is not empty"))
+        if has_nul(app_id) -> return Err(UIError.Invalid("an app_id has no NUL byte"))
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_app_id(connection.value, app_id)
+        }
+        Ok()
+    }
+
+    // Shows `icon` as the window's icon; one with no name and no images
+    // unsets it. A display server without xdg_toplevel_icon_v1 shows
+    // the icon of the app_id's desktop entry instead.
+    set_icon: fn(self, icon: UIIcon) UIError! -[Env]> {
+        if has_nul(icon.name) -> return Err(UIError.Invalid("an icon name has no NUL byte"))
+        loop image in icon.images {
+            if image.side < 1 || image.side > ICON_SIDE_MAX {
+                return Err(UIError.Size("an icon image is 1 to {ICON_SIDE_MAX} pixels across, not {image.side}"))
+            }
+            if image.pixels.len() != image.side * image.side * 4 {
+                return Err(UIError.Size("a {image.side}x{image.side} icon image needs {image.side * image.side * 4} bytes of RGBA, got {image.pixels.len()}"))
+            }
+        }
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.set_icon(connection.value, icon)
+        }
+        Ok()
     }
 
     // Presentation timing so far; zeros for a headless window or a
@@ -478,6 +606,7 @@ impl FrameCursor.Iterator {
             events = wayland.next_frame(connection.value)
             guard.value.width = connection.value.width()
             guard.value.height = connection.value.height()
+            guard.value.scale = connection.value.scale()
             time_ns = connection.value.time_ns()
             delta_ns = connection.value.delta_ns()
             if connection.value.failure() == .Val(failure) -> guard.value.failure = Val(failure)
@@ -496,7 +625,7 @@ impl FrameCursor.Iterator {
             if event == .Close -> guard.value.closed = true
         }
         frame: Frame{
-            state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height,
+            state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height, scale: guard.value.scale,
             time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
         }
         guard.value.frames += 1
@@ -504,17 +633,19 @@ impl FrameCursor.Iterator {
     }
 }
 
-// One frame: its number from 0, the window size to draw at, when it is
-// meant to be seen and the events since the previous frame. `time` is
-// the vblank this frame is predicted to reach the screen at, in seconds
-// since the first frame's, and `delta` the seconds since the previous
-// frame's; both advance in whole refresh intervals, so motion computed
-// from `time` keeps its speed even when a frame is late.
+// One frame: its number from 0, the size in pixels to draw at and the
+// pixels per logical unit, when it is meant to be seen and the events
+// since the previous frame. `time` is the vblank this frame is
+// predicted to reach the screen at, in seconds since the first frame's,
+// and `delta` the seconds since the previous frame's; both advance in
+// whole refresh intervals, so motion computed from `time` keeps its
+// speed even when a frame is late.
 Frame: struct {
     priv state: Shared<WindowState>
     index: Int
     width: Int
     height: Int
+    scale: Float
     time: Float
     delta: Float
     priv pending: [UIEvent]
@@ -551,6 +682,14 @@ priv internal: module {
         hash := 2166136261
         loop b in bytes -> hash = (hash.bit_xor(Int.from_u8(b)) * 16777619).bit_and(4294967295)
         hash
+    }
+
+    // Whether `text` holds a NUL byte, which a wire string cannot carry.
+    has_nul: fn(text: String) -> Bool {
+        loop b in text.bytes() {
+            if Int.from_u8(b) == 0 -> return true
+        }
+        false
     }
 }
 

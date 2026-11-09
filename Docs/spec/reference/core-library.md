@@ -4197,12 +4197,13 @@ use ui: core.ui
 
 run: fn() {
     window: ui.open(width: 640, height: 400, title: "demo") ?? return
-    pixels := [U8]{}
-    loop _ in 0..<(640 * 400 * 4) { pixels.push(U8{255}) }
+    window.set_app_id("org.example.Demo") ?? return
     loop frame in window.frames() {
         loop event in frame.events() {
             if event == .KeyDown(.Escape) -> return
         }
+        pixels := [U8]{}
+        loop _ in 0..<(frame.width * frame.height * 4) { pixels.push(U8{255}) }
         frame.present(pixels) ?? return
     }
 }
@@ -4219,17 +4220,29 @@ measured draw time allows, so its input is as fresh as possible. Three pooled
 buffers rotate as the compositor releases them, and `present_damage` copies
 and damages only the rectangles that changed.
 
+A window is asked for in logical units; frames, pixels and event positions are
+physical pixels, `frame.scale` of them per unit, so a 640 x 400 window on a
+display scaled to 150% draws 960 x 600 frames and stays sharp. The scale comes
+from `wp_fractional_scale_v1` with `wp_viewporter` when the compositor has
+them, else from the largest `wl_output` scale the window is on; a change of
+scale or size reaches the program as `.Resize` in pixels on the next frame.
+A resize is acknowledged only by the commit of a frame drawn at the new size,
+so the compositor never shows a stretched or cropped frame.
+
 | Signature | Result | Description |
 |---|---|---|
-| `open(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError!` | window | Open a window of 1 to 16384 pixels a side on the environment's display server: `.NoDisplay` when none is named, `.Connect` / `.Protocol` / `.Unsupported` when it fails. |
-| `headless(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!` | window | A window with no device: frame `i` carries `script[i]`, one more carries `.Close`, frames are 1/60 s apart, and each present records a checksum. |
+| `open(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError!` | window | Open a window of 1 to 16384 logical units a side on the environment's display server: `.NoDisplay` when none is named, `.Connect` / `.Protocol` / `.Unsupported` when it fails. |
+| `headless(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!` | window | A window with no device at scale 1: frame `i` carries `script[i]`, one more carries `.Close`, frames are 1/60 s apart, and each present records a checksum. |
 | `Window.frames() -> Frames` | frames | The display-paced frames; the stream ends after the frame that carries `.Close`. |
-| `Window.width()` / `.height()` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The current size, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
+| `Window.width()` / `.height()` / `.scale() -> Float` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The latest frame's size in pixels and pixels per logical unit, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
+| `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
+| `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
+| `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
-| `Frame.index` / `.width` / `.height` / `.time` / `.delta` | fields | The frame's number, the size to draw at, and its predicted presentation time and the step since the previous frame's, in seconds. |
-| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)`, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)`, `Resize(width:, height:)`, `Focus(Bool)`, `Close`. |
+| `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. |
 | `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
-| `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles changed since the previous frame. |
+| `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
