@@ -217,16 +217,33 @@ UTF8: 1
 UTF16LE: 2
 UTF16BE: 3
 UTF16: 4
+// SQLITE_UTF16NATIVE on the little-endian hosts Jet targets.
+UTF16NATIVE: 2
 
-// sqlite3_value_type: the datatype code of a value, SQLITE_INTEGER 1,
-// SQLITE_FLOAT 2, SQLITE_TEXT 3, SQLITE_BLOB 4 or SQLITE_NULL 5. This is the
-// rule the aType[] table encodes (its SQLITE_DEBUG cross-check).
+// Column affinities (sqliteInt.h SQLITE_AFF_*).
+AFF_NONE: 64
+AFF_BLOB: 65
+AFF_TEXT: 66
+AFF_NUMERIC: 67
+AFF_INTEGER: 68
+AFF_REAL: 69
+AFF_FLEXNUM: 70
+
+// The fundamental datatypes (sqlite3.h SQLITE_INTEGER .. SQLITE_NULL).
+SQL_INTEGER: 1
+SQL_FLOAT: 2
+SQL_TEXT: 3
+SQL_BLOB: 4
+SQL_NULL: 5
+
+// sqlite3_value_type: the datatype of a value. This is the rule the aType[]
+// table encodes (its SQLITE_DEBUG cross-check).
 value_type: fn(m: Mem) -> Int Never! {
-    if m.flags.bit_and(MEM_NULL) != 0 -> return 5
-    if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) != 0 -> return 2
-    if m.flags.bit_and(MEM_INT) != 0 -> return 1
-    if m.flags.bit_and(MEM_STR) != 0 -> return 3
-    4
+    if m.flags.bit_and(MEM_NULL) != 0 -> return SQL_NULL
+    if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) != 0 -> return SQL_FLOAT
+    if m.flags.bit_and(MEM_INT) != 0 -> return SQL_INTEGER
+    if m.flags.bit_and(MEM_STR) != 0 -> return SQL_TEXT
+    SQL_BLOB
 }
 
 #Test("sqlite3_value_type follows the datatype bits") {
