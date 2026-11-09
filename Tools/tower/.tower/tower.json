@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97893,
+    "rev": 97896,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34945,8 +34945,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-09T19:36:16.324Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-09T19:56:37.217Z",
+      "updatedBy": "owner",
       "goals": [
         "G6"
       ]
@@ -57646,7 +57646,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:07.706Z",
-      "updated": "2026-11-09T19:52:59.318Z",
+      "updated": "2026-11-09T19:57:00.621Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -73182,8 +73182,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-09T19:40:08.460Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-09T19:56:37.217Z",
+      "updatedBy": "owner",
       "goals": [
         "G4",
         "G11"
@@ -188489,8 +188489,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T19:28:56.402Z"
+      "status": "ratified",
+      "created": "2026-11-09T19:28:56.402Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     },
     {
       "id": "D-META-LADDER1",
@@ -188700,8 +188702,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T19:36:16.324Z"
+      "status": "ratified",
+      "created": "2026-11-09T19:36:16.324Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     },
     {
       "id": "D-JAI-GENERIC1",
@@ -189090,8 +189094,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T19:41:22.823Z"
+      "status": "ratified",
+      "created": "2026-11-09T19:41:22.823Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     },
     {
       "id": "D-PRIM-TYPEKEY1",
@@ -189400,6 +189406,165 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T19:52:59.318Z"
+    },
+    {
+      "id": "D-PRIM-ANY1",
+      "cardId": "c02y3vkg",
+      "group": "types",
+      "title": "A dynamically typed value: an explicit reflect.Any box for plain owned data, with checked access",
+      "situation": "",
+      "gist": "Should an explicit box retain plain owned settings of open-ended concrete types?",
+      "lesson": "An explicit box can hold a value whose type the table does not know. Unlike Dyn, it keeps the original value instead of an encoded tree. Reading it back checks the exact type, and the box obeys ordinary ownership rules.",
+      "explainer": "",
+      "story": "Lin stores plugin settings in one table. Settings that implement Encode and Decode already fit a Dyn tree. Lin also wants to keep plain values such as a Theme struct without encoding them, and read them back with a type check.",
+      "inWild": "Rust's Any uses exact TypeId matching. Borrowed downcast_ref returns Option<&T>; consuming downcast returns the original box on mismatch. Non-static references do not implement Any (https://doc.rust-lang.org/std/any/trait.Any.html). Ownership and lifetime constraints are part of the comparison, not just explicit boxing syntax.",
+      "detail": "Exercised: a1 gives E0119; a2 prints true through a Dyn tree; a3 prints wrong type: 1 error for decoding 14 as String. These establish B, not A. spec.md:5557 deliberately excludes a general top type.\n\nA explicitly amends that boundary: no implicit Any conversion or general top type is added. core.reflect.Any retains plain owned data of open-ended concrete types, such as plugin settings. Enums, generics, traits and Dyn remain first choices. This limited box is not the full unrestricted Jai Any capability; the broader C option remains an owner choice.\n\nAt construction, check T recursively while its type is known. Reject loans, views, stored links, duties, closable resources, callable/coroutine values, secrets, capability tags, thread-confined state and effectful/custom cleanup. Hidden fields are not exempt. No payload check depends on Display text or a user-forged marker. Sendability and memory-only drop follow from that eligibility check; they are implementation requirements, not current measured facts.\n\nA never copies the box; .copy() is refused with the existing E0211 category. get<T>(self) returns View<T>? from self; get_mut<T>(&self) returns ViewMut<T>? from self. Existing View<T> is a window, not scalar T, so the successful window contains one element, read as view[0]. Both use ordinary owner/alias checks. An outstanding loan prevents conflicting edits, moves, drop and task transfer.\n\nTake has an explicit consuming receiver, &&self, and returns T Any!: success transfers the owned payload; mismatch returns the original box unchanged. Exactly one owner survives either branch. Dropping either box or extracted value cleans it exactly once. No unchecked fallback or latent destructor/callable effects are admitted.\n\nMatch only TYPEKEY1 canonical identity, including aliases and nominal/generic distinctions. Reuse reflection descriptors, never paths or a hash-only cast. Descriptor lifetime covers every box and loan. An opaque sandbox plugin contract has no erased box slot here; any future cross-plugin ABI needs explicit owner scope, not an assumed raw pointer transfer.\n\nDo not mandate a heap allocation for an Int. Use inline storage when the payload fits the box's alignment/capacity; otherwise at most one aligned payload allocation. Zero-sized values require none. Descriptors are shared per type, not allocated per box. Allocation failure uses the ordinary collection allocation rule. Moves and loans must work identically for inline and allocated payloads.\n\nB retains encoded Dyn data, not nominal payload identity, but requires no text round trip. C offers implicit top-type conversion and a wider payload domain; it needs a wider policy/ownership design. The options show the same theme and a checked wrong-type read. A's plain-data limit and storage/indirection costs are real tradeoffs, not proof of full Jai parity.\n\nAll A/C APIs are proposed. Acceptance includes nested ineligible fields, simultaneous mutable loans, escape/move/drop checks, wrong-type take preserving the box, zero-sized/overaligned payloads and equal meaning at every tier.",
+      "options": [
+        {
+          "key": "A",
+          "name": "An explicit box for plain owned data",
+          "detail": "reflect.Any{value} moves plain owned data into a box. get<T>() gives a read view, take<T>() moves the value out, and a wrong type gives None or the box back.",
+          "code": "// Proposed; not implemented.\nuse reflect: core.reflect\nTheme: struct { dark: Bool }\nrun: fn() {\n    settings := [String: reflect.Any]{}\n    settings[\"theme\"] = reflect.Any{Theme{dark: true}}\n    settings[\"font_size\"] = reflect.Any{14}\n    if settings[\"theme\"].get<Theme>() == .Val(view) -> print(view[0].dark)\n    if settings[\"font_size\"].get<String>() == None -> print(\"None\")\n    box: settings.remove(\"font_size\") ?? return\n    size: box.take<Int>() ?? return // consuming; mismatch retains box in error\n    print(size)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the refusal",
+          "detail": "No Any. The spec records the refusal and the covering tools. Encodable settings use Dyn trees, as a2 and a3 do today.",
+          "code": "#Codable\nTheme: struct { dark: Bool }\n\nrun: fn() {\n    settings := [String: Dyn]{}\n    settings[\"theme\"] = Theme{dark: true}.encode()\n    settings[\"font_size\"] = 14.encode()\n    theme: settings[\"theme\"].decode<Theme>() ?? return\n    print(theme.dark)                                   // true\n    if settings[\"font_size\"].decode<String>() == {\n        .Ok(text) -> print(text)\n        .Err(errors) -> print(\"wrong type\")             // printed\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "A built-in top type",
+          "detail": "Any is built in, and every value converts to it implicitly, as in Jai and Odin.",
+          "code": "Theme: struct { dark: Bool }\n\nrun: fn() {\n    settings := [String: Any]{}\n    settings[\"theme\"] = Theme{dark: true}   // converts silently\n    settings[\"font_size\"] = 14\n    if settings[\"theme\"] == .Theme(t) -> print(t.dark)        // true\n    if settings[\"font_size\"] == .String(s) -> print(s)       // no match, nothing printed\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps original values with exact type checks. It admits only plain owned data, so erasure hides no loan, duty, cleanup effect or tag. The spec amendment keeps Jet free of a top type.",
+        "gains": [
+          "Plain values need not be encoded into a tree.",
+          "Wrong-type reads return None or the box, never garbage.",
+          "Boxes cross tasks and drop without hidden effects."
+        ],
+        "losses": [
+          {
+            "loss": "The box retains a descriptor and uses indirect checked access; oversized payloads may allocate.",
+            "mitigation": "Inline small and zero-sized payloads; share descriptors and use ordinary owner/loan checks for both representations."
+          },
+          {
+            "loss": "Resources, functions and single-use values cannot be boxed.",
+            "mitigation": "The constructor error names the failing part, and an enum or a trait holds such values."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is sound and needs nothing new, but stores an encoded tree rather than the original value."
+          },
+          {
+            "key": "C",
+            "reason": "Silent conversion to a top type hides type errors in everyday code and needs a wider language change."
+          }
+        ],
+        "tradeoff": "An explicit box limited to plain owned data instead of an implicit top type."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run a1, a2 and a3 and Validate.jet. A remains proposed. Delivery proves recursive payload restrictions, one-element owner-bound View/ViewMut, consuming mismatch-preserving take, E0211 copy refusal, task/loan exclusion and drop-once cleanup. Small/zero-sized values must not require heap allocation; check overalignment and all execution tiers.",
+      "surface": {
+        "gist": "Should an explicit box retain plain owned settings of open-ended concrete types?",
+        "lesson": "An explicit box keeps a value whose type a table does not know. Reading it back checks the exact type. Dyn keeps encoded data instead.",
+        "trio": {
+          "current": {
+            "note": "Today there is no Any type.",
+            "code": "show: fn(value: Any) { print(value) }\n// error E0119: there's no type called `Any`"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Box<dyn Any> is explicit, and downcast returns an Option.",
+            "code": "let s: Box<dyn Any> = Box::new(Theme { dark: true });\nif let Some(t) = s.downcast_ref::<Theme>() { println!(\"{}\", t.dark); }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Explicit box",
+            "gist": "reflect.Any{value} boxes plain owned data; reads check the type.",
+            "gains": [
+              "Keeps the original value.",
+              "Wrong-type reads return None."
+            ],
+            "losses": [
+              "Descriptor/indirection cost; resources cannot be boxed."
+            ],
+            "proposed": {
+              "code": "// Proposed\nsettings[\"theme\"] = reflect.Any{Theme{dark: true}}\nif settings[\"theme\"].get<Theme>() == .Val(view) -> print(view[0].dark)\nif settings[\"font_size\"].get<String>() == None -> print(\"None\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the refusal",
+            "gist": "No Any; open-ended data goes through Dyn trees.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "Stores encoded data rather than the original nominal value."
+            ],
+            "proposed": {
+              "code": "settings[\"theme\"] = Theme{dark: true}.encode()\ntheme: settings[\"theme\"].decode<Theme>() ?? return\n// decode<String>() on 14 is a checked error"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Built-in top type",
+            "gist": "Every value converts to Any silently.",
+            "gains": [
+              "Shortest spelling."
+            ],
+            "losses": [
+              "Silent conversions hide type errors."
+            ],
+            "proposed": {
+              "code": "settings[\"theme\"] = Theme{dark: true}   // converts silently\nif settings[\"font_size\"] == .String(s) -> print(s)   // no match"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps original values with exact checks, and holds only plain owned data, so nothing unsafe hides inside a box.",
+          "gains": [
+            "Original values kept.",
+            "Checked reads."
+          ],
+          "losses": [
+            {
+              "loss": "Descriptor/indirection cost; large payloads may allocate.",
+              "mitigation": "Inline small payloads and share descriptors. The plain-data restriction remains an explicit owner tradeoff."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Stores encoded trees, not the original value."
+            },
+            {
+              "key": "C",
+              "reason": "Silent conversions hide type errors."
+            }
+          ],
+          "tradeoff": "An explicit, limited box instead of an implicit top type."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T19:57:00.621Z"
     }
   ],
   "questions": [
@@ -191642,6 +191807,17 @@
       "created": "2026-11-09T17:00:17.012Z",
       "answeredAt": "2026-11-09",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q48ue1id",
+      "cardId": "c02y3vkg",
+      "decisionId": "D-PRIM-TYPEKEY1",
+      "by": "owner",
+      "kind": "question",
+      "text": "why would types as values be a downside. isnt this something i asked for? then we can do switches on types etc?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-09T19:56:35.167Z"
     }
   ],
   "ideas": [
@@ -192498,6 +192674,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T19:57:00.622Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRIM-ANY1",
+      "note": "A dynamically typed value: an explicit reflect.Any box for plain owned data, with checked access"
+    },
+    {
+      "at": "2026-11-09T19:56:37.217Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PRIM-BOOLSIZE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-09T19:56:37.217Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-META-LADDER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-09T19:56:37.217Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BUILD-TIER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-09T19:56:35.168Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q48ue1id",
+      "note": ""
+    },
     {
       "at": "2026-11-09T19:55:22.085Z",
       "by": "Main",
