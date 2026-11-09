@@ -11,6 +11,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [Combinatorics](Combinatorics.jet) — core.math.combinatorics generates over any element type; list methods cover the sequence work.
 - [Constants](Constants/) — core.math constants: PI, E, TAU, INFINITY and NAN are comptime values, read as `math.PI`, never called.
 - [Decimal](Decimal.jet) — Decimal literals use exact base-10 arithmetic.
+- [ExpMinusOne](ExpMinusOne.jet) — 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and full precision for small x, where exp2(x) - 1 cancels.
 - [FloatExactOps](FloatExactOps.jet) — IEEE 754 exact operations: ties-to-even rounding, rounding into a fixed width, the IEEE remainder, signed-zero min and max, total order and NaN payloads.
 - [FloorDiv](FloorDiv.jet) — Floor division: infix `/%` divides and rounds the answer down, and `/%=` divides a mutable binding in place.
 - [Fraction](Fraction.jet)
