@@ -66,18 +66,6 @@ RunReport: struct {
     }
 }
 
-// The refusal staged-plan and adapter entries still return: their lowering
-// into the canonical BuildPlan graph is not ported yet, so no callback or
-// adapter recipe runs.
-recipe_plan_refusal: fn() -> RecipeDiagnostic Never! {
-    RecipeDiagnostic.new(
-        "E1238",
-        "recipe graph admission is not available in the Jet-hosted engine",
-        "the canonical Core/Build recipe producer and complete-plan fingerprint seam is not admitted; no recipe step or staged-plan callback was launched.",
-        "use an admitted provider without a build recipe; recipe support requires the owner-approved Core/Build seam."
-    )
-}
-
 // Validate a recipe against the safety contract without running it: the read
 // path `jet inspect audit` uses (audit never executes). The first violation
 // is the error.

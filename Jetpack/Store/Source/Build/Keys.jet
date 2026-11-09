@@ -187,6 +187,24 @@ build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! 
     "plan-sha256:{crypto.sha256(bytes).hex()}"
 }
 
+// Rust `map_debug`: entries in key order, each `<len>:<key>:<len>:<value>`
+// with byte lengths, concatenated.
+build_fact_map: fn(values: [String: String]) -> String Never! {
+    keys := values.keys().to_list()
+    keys.sort()
+    out := ""
+    loop key in keys {
+        value: values[key]
+        out = "{out}{key.bytes().len()}:{key}:{value.bytes().len()}:{value}"
+    }
+    out
+}
+
+// A plan fact for a structured row: the digest of its canonical key bytes.
+build_fact_digest: fn(w: BuildKeyWriter) -> String Never! {
+    "sha256:{crypto.sha256(w.bytes).hex()}"
+}
+
 // Rust `allowlisted_env`: the whole env map when the allowlist is empty.
 build_allowlisted_env: fn(action: HermeticBuildAction) -> [String: String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env

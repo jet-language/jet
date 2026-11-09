@@ -14,6 +14,90 @@ HermeticBuildPlan: struct {
 
     default_target: fn(self) -> TargetRef? Never! { self.default }
 
+    // Rust `provider_plan_facts`: the deterministic facts a provider records
+    // for this plan. Jet plans carry no fact contributions, plugins or
+    // generated modules, and no legacy wrapper. Toolchain, signing and probe
+    // rows are the digest of their canonical key bytes.
+    provider_plan_facts: fn(self) -> [String: String] Never! {
+        facts := [String: String]{}
+        facts["plan.recipe_fingerprint"] = build_complete_recipe_fingerprint(self)
+        facts["plan.default"] = if self.default == {
+            .Val(target) -> "{target.id}"
+            .None -> ""
+        }
+        facts["plan.targets"] = "{self.targets.len()}"
+        facts["plan.actions"] = "{self.actions.len()}"
+        nul: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is valid UTF-8")
+        loop index in 0..<self.targets.len() {
+            target: self.targets[index]
+            prefix: "target.{index}"
+            facts["{prefix}.name"] = target.name
+            facts["{prefix}.kind"] = target.kind.debug_name()
+            facts["{prefix}.sources"] = target.sources.join(nul)
+            facts["{prefix}.inputs"] = target.inputs.join(nul)
+            facts["{prefix}.outputs"] = target.outputs.join(nul)
+            deps := [String]{}
+            loop dep in target.deps -> deps.push("{dep.id}")
+            facts["{prefix}.deps"] = deps.join(",")
+            actions := [String]{}
+            loop action in target.actions -> actions.push("{action.id}")
+            facts["{prefix}.actions"] = actions.join(",")
+            facts["{prefix}.toolchain"] = "{target.toolchain.id}"
+            facts["{prefix}.metadata"] = build_fact_map(target.metadata)
+        }
+        loop index in 0..<self.actions.len() {
+            action: self.actions[index]
+            prefix: "action.{index}"
+            facts["{prefix}.name"] = action.name
+            facts["{prefix}.kind"] = action.kind.as_str()
+            facts["{prefix}.cache"] = if action.cache == ActionCache.Cached -> "Cached" else -> "UncachedPhony"
+            facts["{prefix}.argv"] = action.argv.join(nul)
+            facts["{prefix}.inputs"] = action.inputs.join(nul)
+            facts["{prefix}.outputs"] = action.outputs.join(nul)
+            facts["{prefix}.env"] = build_fact_map(action.env)
+            facts["{prefix}.env_allowlist"] = action.env_allowlist.join(nul)
+            caps := [String]{}
+            loop cap in action.caps -> caps.push(cap.name())
+            facts["{prefix}.caps"] = caps.join(nul)
+            facts["{prefix}.toolchain"] = "{action.toolchain.id}"
+            facts["{prefix}.labels"] = build_fact_map(action.labels)
+            facts["{prefix}.helpers"] = build_fact_map(action.helper_versions)
+            pools := [String]{}
+            loop pool in action.resource_pools {
+                pools.push(if pool == {
+                    .Custom(name) -> "custom:{name}"
+                    else -> pool.as_str()
+                })
+            }
+            facts["{prefix}.pools"] = pools.join(nul)
+            facts["{prefix}.variant"] = action.variant_identity ?? ""
+            facts["{prefix}.legacy"] = ""
+            facts["{prefix}.action_key"] = build_canonical_action_key(self, action, [ActionInputSnapshot]{})
+        }
+        loop index in 0..<self.toolchains.len() {
+            w := BuildKeyWriter.new()
+            w.text("jet.toolchain-fact.v1")
+            hermetic_build_key_toolchain(w, self.toolchains[index])
+            facts["toolchain.{index}"] = build_fact_digest(w)
+        }
+        loop index in 0..<self.signing_identities.len() {
+            identity: self.signing_identities[index]
+            w := BuildKeyWriter.new()
+            w.text("jet.signing-fact.v1")
+            w.text(identity.name)
+            w.text(identity.label)
+            build_key_provenance(w, identity.provenance)
+            facts["signing.{index}"] = build_fact_digest(w)
+        }
+        loop index in 0..<self.probes.len() {
+            w := BuildKeyWriter.new()
+            w.text("jet.probe-fact.v1")
+            hermetic_build_key_probe(w, self, self.probes[index])
+            facts["probe.{index}"] = build_fact_digest(w)
+        }
+        facts
+    }
+
     default_host_toolchain: fn(self) -> HermeticBuildToolchain Never! { self.toolchains[0] }
 
     target: fn(self, target: TargetRef) -> HermeticBuildTarget? Never! {

@@ -84,6 +84,22 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     files.remove_all(base).drop("test cleanup")
 }
 
+#Test("recipe install tree of `.` copies the whole staged source root") {
+    // `Recipe.copy` and `.install_tree(src: ".")` name the source root itself.
+    base: recipe_test_scratch("install-root")
+    src: files.join(base, "src")
+    out: files.join(base, "out")
+    files.create_dir_all(files.join(src, "share")) ?? panic("src")
+    files.write(files.join(src, "share/payload.txt"), "payload") ?? panic("source file")
+    ctx: recipe_test_ctx(src, out, files.join(base, "cache"), false)
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "tree"}}}
+    recipe_run(recipe, ctx, None) ?? panic("install the source root")
+    assert_eq(files.read(files.join(out, "tree/share/payload.txt")) ?? panic("installed payload"), "payload")
+    escape: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: "./..", dest: "tree"}}}
+    assert_eq(recipe_test_run_error(escape, ctx).code, "E1237")
+    files.remove_all(base).drop("test cleanup")
+}
+
 #Test("recipe build tool must be a realized dependency") {
     // Ported from build_sandbox.rs:157-180; validate must reject without executing.
     // An exec naming a tool that is not a realized dep: E1238.
@@ -277,20 +293,95 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     assert_eq(unsafe_package.code, "E1238")
 }
 
-recipe_test_forbidden_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    panic("a refused staged-plan callback must not run")
+recipe_test_staged_action: fn(digest: String) -> StagedPlanAction {
+    host: PlatformKey.host()
+    StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform: "{host.os}-{host.arch}"})
 }
 
-#Test("hosted staged plan refuses before callback and artifact publication") {
+recipe_test_staged_fragment: fn() -> BuildPlanFragment {
+    host: PlatformKey.host()
+    emitted := PlanFragmentAction.new("compile", "planner")
+    emitted.inputs = [String]{"manifest"}
+    emitted.outputs = [String]{"result.bin"}
+    emitted.effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
+    emitted.platform = "{host.os}-{host.arch}"
+    BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
+}
+
+recipe_test_staged_tools: fn() -> [String: String] {
+    [String: String]{"planner": sys.executable(), "planner-alt": sys.executable()}
+}
+
+// Reads its one declared input, then emits the fixed fragment.
+recipe_test_reading_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    view := sandbox
+    bytes: view.read_input("manifest")
+    if bytes != "planner manifest".bytes() -> return Err(StagedPlanActionError.Failed("unexpected manifest bytes"))
+    Ok(recipe_test_staged_fragment())
+}
+
+// Reaches for an input the action never declared.
+recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    view := sandbox
+    view.read_input("secret")
+    Ok(recipe_test_staged_fragment())
+}
+
+#Test("recipe staged plan authority order does not change the plan fingerprint") {
+    action: recipe_test_staged_action("sha256-input")
+    fragment: recipe_test_staged_fragment()
+    tools: recipe_test_staged_tools()
+    first: recipe_lower_staged_plan_action(action, fragment, tools) ?? panic("lower first")
+    reordered := action
+    reordered.authority.tools = [String]{"planner-alt", "planner"}
+    reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
+    second: recipe_lower_staged_plan_action(reordered, fragment, tools) ?? panic("lower second")
+    assert_eq(recipe_plan_fingerprint(first) ?? panic("first fingerprint"), recipe_plan_fingerprint(second) ?? panic("second fingerprint"))
+}
+
+#Test("recipe staged plan publishes one artifact and reuses an identical one") {
+    base: recipe_test_scratch("staged-run")
+    src: files.join(base, "src")
+    artifact_root: files.join(base, "artifacts")
+    files.create_dir_all(src) ?? panic("src")
+    manifest: "planner manifest".bytes()
+    files.write_bytes(files.join(src, "manifest"), manifest) ?? panic("manifest")
+    action: recipe_test_staged_action("sha256-{pkg_sha256_hex(manifest)}")
+    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    report: recipe_run_staged_plan_action(action, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) ?? panic("staged plan publishes")
+    assert(report.plan_fingerprint.starts_with("plan-sha256:"))
+    assert_eq(report.lock.action_identity, report.action_identity)
+    assert_eq(files.read(files.join(report.artifact_dir, "plan.fingerprint")) ?? panic("fingerprint file"), report.plan_fingerprint)
+    assert_eq(files.read(files.join(report.artifact_dir, "lock")) ?? panic("lock file"), report.lock.render())
+    assert_eq(files.read_bytes(files.join(report.artifact_dir, "fragment.plan")) ?? panic("fragment file"), recipe_test_staged_fragment().canonical_bytes())
+    again: recipe_run_staged_plan_action(action, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) ?? panic("identical staged plan reuses its artifact")
+    assert_eq(again.artifact_dir, report.artifact_dir)
+    assert_eq((files.list_dir(artifact_root) ?? panic("artifact root")).len(), 1)
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe staged plan refuses undeclared reads and digest drift before publication") {
     base: recipe_test_scratch("staged-refused")
-    artifact: files.join(base, "artifacts")
-    action: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("missing", "sha256-input")}, PlanAuthority{tools: [String]{}, effects: [BuildEffect]{}, platform: "linux-x86_64"})
-    ctx: StagedPlanContext{source_dir: files.join(base, "missing"), artifact_root: artifact}
-    if recipe_run_staged_plan_action(action, ctx, [String: String]{}, StagedPlanEmitter{emit: recipe_test_forbidden_emit}) == {
-        .Ok(_) -> panic("hosted staged-plan execution must refuse")
+    src: files.join(base, "src")
+    artifact_root: files.join(base, "artifacts")
+    files.create_dir_all(src) ?? panic("src")
+    files.write(files.join(src, "manifest"), "planner manifest") ?? panic("manifest")
+    files.write(files.join(src, "secret"), "hidden") ?? panic("secret")
+    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    declared: recipe_test_staged_action("sha256-{pkg_sha256_hex("planner manifest".bytes())}")
+    if recipe_run_staged_plan_action(declared, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_undeclared_emit}) == {
+        .Ok(_) -> panic("an undeclared staged-plan read must refuse")
+        .Err(error) -> {
+            assert_eq(error.code, "E1238")
+            assert(error.why.contains("staged plan action denied input `secret`"))
+        }
+    }
+    drifted: recipe_test_staged_action("sha256-{"0".repeat(64)}")
+    if recipe_run_staged_plan_action(drifted, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) == {
+        .Ok(_) -> panic("a drifted staged-plan input digest must refuse")
         .Err(error) -> assert_eq(error.code, "E1238")
     }
-    assert(!files.exists(artifact))
+    assert(!files.exists(artifact_root))
     files.remove_all(base).drop("test cleanup")
 }
 
