@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96800,
+    "rev": 96825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31724,6 +31724,96 @@
           "verifiedBy": null,
           "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/ownership/runtime_disjoint_views_reject_alias_storage_and_owner_invalidation_2.jet PASS. This row is the proof the precut audit named for this criterion.",
           "at": "2026-11-07T03:46:45.621Z"
+        },
+        {
+          "n": 25,
+          "text": "(was #3318) Owned, shared-borrowed, and exclusive-borrowed forms have distinct observable ownership contracts. (was #4284 c42)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:05.360Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #3318) Mutating a yielded element updates the intended original collection; illegal overlap is rejected before execution. (was #4284 c43)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:07.480Z"
+        },
+        {
+          "n": 27,
+          "text": "(was #3318) Non-overlapping mutable chunks are supported safely; overlapping mutable windows are not fabricated from ordinary references. (was #4284 c44)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:09.736Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #3318) Borrowed windows/chunks and text slices avoid per-output allocation where the source storage permits a view. (was #4284 c45)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:11.875Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #3318) An explicit loan cannot escape its owner. Default read-view stores preserve D-MEM-COPYSEM1 semantic-copy behavior; mutable-view escapes remain rejected. Explicit borrowed aggregates are F083. (was #4284 c46)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:14.071Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Golden Examples/features/collections/borrowed_iteration.jet: ViewMut over a List mutates the original, disjoint mutable chunks update the source, text split/lines views print their text rather than handles, and replaced slots drop exactly once, all on O0, O1 and O2. Proof: `jet test Compiler --profile golden collections/borrowed_iteration`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c47)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:16.248Z"
+        },
+        {
+          "n": 31,
+          "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): UI fixtures for an escaping loan, overlapping mutable windows, and a resize during iteration are rejected before execution. Proof: `jet test Compiler --profile ui view_loan_`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c48)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:18.387Z"
+        },
+        {
+          "n": 32,
+          "text": "(was #3318) [#3340]  • Exact width-zero, remainder, direction, overlap and mutability semantics. • Borrowed windows do not copy. Mutable forms are disjoint only. • JP: `collections/slice_producers`. (was #4284 c50)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:20.625Z"
+        },
+        {
+          "n": 33,
+          "text": "(was #3318) [#3359]  • Move-only items transfer exactly once. • Shared views cannot move. Exclusive-view mutation reaches the original storage. • Escaping callbacks respect their loans. • JP: `collections/map_owned_items`; `map_move_from_shared_view`. (was #4284 c51)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:22.885Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #3318) [#3391]  • Remove the parser special case at Compiler/JetParser/Source/Parser/Expressions.jet:1521-1533. • `values[range]`, `&values[range]` and `~values[range]` keep their contracts. No new `.view()`. • JP: UI `view_method_retired_e0214`. (was #4284 c53)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:25.369Z"
         }
       ],
       "refs": [
@@ -31753,13 +31843,13 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-07T03:46:45.621Z",
+      "updated": "2026-11-09T18:54:25.369Z",
       "updatedBy": "Main",
       "workOrder": 37,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 34
     },
     {
       "id": "c0l0ygs4",
@@ -47279,114 +47369,6 @@
           "at": "2026-10-31T01:28:32.394Z"
         },
         {
-          "n": 39,
-          "text": "(was #4280) [#4467] #Import(c) of an infallible fixed-scalar function emits a plain scalar return (no Result with an undefined Never).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:40.311Z"
-        },
-        {
-          "n": 40,
-          "text": "(was #4280) [#4248] Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds. The work ends with measured no-surface fixes or a short ballot with measured options.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:41.026Z"
-        },
-        {
-          "n": 41,
-          "text": "(was #4280) [#4527] D-WIT-EXPORT2=A: Wasm component export against a pinned WIT world (type pairing, canonical ABI diagnostics). The Zed extension (Tools/editors/zed/wasm-src) is ported off Rust.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:41.713Z"
-        },
-        {
-          "n": 42,
-          "text": "(was #3318) Owned, shared-borrowed, and exclusive-borrowed forms have distinct observable ownership contracts.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:44.532Z"
-        },
-        {
-          "n": 43,
-          "text": "(was #3318) Mutating a yielded element updates the intended original collection; illegal overlap is rejected before execution.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:45.411Z"
-        },
-        {
-          "n": 44,
-          "text": "(was #3318) Non-overlapping mutable chunks are supported safely; overlapping mutable windows are not fabricated from ordinary references.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:46.266Z"
-        },
-        {
-          "n": 45,
-          "text": "(was #3318) Borrowed windows/chunks and text slices avoid per-output allocation where the source storage permits a view.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:47.372Z"
-        },
-        {
-          "n": 46,
-          "text": "(was #3318) An explicit loan cannot escape its owner. Default read-view stores preserve D-MEM-COPYSEM1 semantic-copy behavior; mutable-view escapes remain rejected. Explicit borrowed aggregates are F083.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:48.317Z"
-        },
-        {
-          "n": 47,
-          "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Golden Examples/features/collections/borrowed_iteration.jet: ViewMut over a List mutates the original, disjoint mutable chunks update the source, text split/lines views print their text rather than handles, and replaced slots drop exactly once, all on O0, O1 and O2. Proof: `jet test Compiler --profile golden collections/borrowed_iteration`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:49.268Z"
-        },
-        {
-          "n": 48,
-          "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): UI fixtures for an escaping loan, overlapping mutable windows, and a resize during iteration are rejected before execution. Proof: `jet test Compiler --profile ui view_loan_`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:50.379Z"
-        },
-        {
-          "n": 50,
-          "text": "(was #3318) [#3340]  • Exact width-zero, remainder, direction, overlap and mutability semantics. • Borrowed windows do not copy. Mutable forms are disjoint only. • JP: `collections/slice_producers`.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:52.294Z"
-        },
-        {
-          "n": 51,
-          "text": "(was #3318) [#3359]  • Move-only items transfer exactly once. • Shared views cannot move. Exclusive-view mutation reaches the original storage. • Escaping callbacks respect their loans. • JP: `collections/map_owned_items`; `map_move_from_shared_view`.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:53.113Z"
-        },
-        {
           "n": 53,
           "text": "(was #3318) [#3391]  • Remove the parser special case at Compiler/JetParser/Source/Parser/Expressions.jet:1521-1533. • `values[range]`, `&values[range]` and `~values[range]` keep their contracts. No new `.view()`. • JP: UI `view_method_retired_e0214`.",
           "status": "open",
@@ -47533,7 +47515,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:26:03.045Z",
-      "updated": "2026-11-09T18:53:56.995Z",
+      "updated": "2026-11-09T18:54:23.724Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -81567,6 +81549,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:53:56.132Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #4280) [#4467] #Import(c) of an infallible fixed-scalar function emits a plain scalar return (no Result with an undefined Never). (was #4284 c39)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:53:58.710Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #4280) [#4248] Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds. The work ends with measured no-surface fixes or a short ballot with measured options. (was #4284 c40)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:00.847Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #4280) [#4527] D-WIT-EXPORT2=A: Wasm component export against a pinned WIT world (type pairing, canonical ABI diagnostics). The Zed extension (Tools/editors/zed/wasm-src) is ported off Rust. (was #4284 c41)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:54:03.251Z"
         }
       ],
       "refs": [
@@ -81579,9 +81588,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-09T18:53:56.132Z",
+      "updated": "2026-11-09T18:54:03.251Z",
       "updatedBy": "Main",
-      "criteriaLastN": 34
+      "criteriaLastN": 37
     },
     {
       "id": "c0ov7lce",
@@ -191119,6 +191128,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-09T18:54:25.369Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#34 (was #3318) [#3391]  • Remove the parser special case at Com"
+    },
+    {
+      "at": "2026-11-09T18:54:23.724Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#51: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) [#3359]  • Move-only items transfer exactly once. • Shared views cannot move. Exclusive-view mutation reaches the original storage. • Escaping callbacks respect their loans. • JP: `collect"
+    },
+    {
+      "at": "2026-11-09T18:54:22.885Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#33 (was #3318) [#3359]  • Move-only items transfer exactly once"
+    },
+    {
+      "at": "2026-11-09T18:54:21.508Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#50: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) [#3340]  • Exact width-zero, remainder, direction, overlap and mutability semantics. • Borrowed windows do not copy. Mutable forms are disjoint only. • JP: `collections/slice_producers`."
+    },
+    {
+      "at": "2026-11-09T18:54:20.625Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#32 (was #3318) [#3340]  • Exact width-zero, remainder, directio"
+    },
+    {
+      "at": "2026-11-09T18:54:19.293Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#48: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): UI fixtures for an escaping loan, overlapping mutable windows, and a resize during iteration are rejected before exe"
+    },
+    {
+      "at": "2026-11-09T18:54:18.387Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#31 (was #3318) Proof with the admitted `jet` (stage-2 output of"
+    },
+    {
+      "at": "2026-11-09T18:54:17.073Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#47: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Golden Examples/features/collections/borrowed_iteration.jet: ViewMut over a List mutates the original, disjoint muta"
+    },
+    {
+      "at": "2026-11-09T18:54:16.248Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#30 (was #3318) Proof with the admitted `jet` (stage-2 output of"
+    },
+    {
+      "at": "2026-11-09T18:54:14.909Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#46: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) An explicit loan cannot escape its owner. Default read-view stores preserve D-MEM-COPYSEM1 semantic-copy behavior; mutable-view escapes remain rejected. Explicit borrowed aggregates are F0"
+    },
+    {
+      "at": "2026-11-09T18:54:14.071Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#29 (was #3318) An explicit loan cannot escape its owner. Defaul"
+    },
+    {
+      "at": "2026-11-09T18:54:12.741Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#45: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Borrowed windows/chunks and text slices avoid per-output allocation where the source storage permits a view."
+    },
+    {
+      "at": "2026-11-09T18:54:11.876Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#28 (was #3318) Borrowed windows/chunks and text slices avoid pe"
+    },
+    {
+      "at": "2026-11-09T18:54:10.591Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#44: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Non-overlapping mutable chunks are supported safely; overlapping mutable windows are not fabricated from ordinary references."
+    },
+    {
+      "at": "2026-11-09T18:54:09.737Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#27 (was #3318) Non-overlapping mutable chunks are supported saf"
+    },
+    {
+      "at": "2026-11-09T18:54:08.370Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#43: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Mutating a yielded element updates the intended original collection; illegal overlap is rejected before execution."
+    },
+    {
+      "at": "2026-11-09T18:54:07.480Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#26 (was #3318) Mutating a yielded element updates the intended "
+    },
+    {
+      "at": "2026-11-09T18:54:06.217Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#42: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3317: views and lazy iteration are G3 collection work.; was [open]: (was #3318) Owned, shared-borrowed, and exclusive-borrowed forms have distinct observable ownership contracts."
+    },
+    {
+      "at": "2026-11-09T18:54:05.360Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#25 (was #3318) Owned, shared-borrowed, and exclusive-borrowed f"
+    },
+    {
+      "at": "2026-11-09T18:54:04.100Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#41: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6366: FFI interop belongs to the FFI stream (G7); the FFI v3 review decides whether it supersedes each row.; was [open]: (was #4280) [#4527] D-WIT-EXPORT2=A: Wasm component export against a pinned WIT world (type pairing, canonical ABI diagnostics). The Zed extension (Tools/editors/zed/wasm-src) is ported off Rust."
+    },
+    {
+      "at": "2026-11-09T18:54:03.251Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#37 (was #4280) [#4527] D-WIT-EXPORT2=A: Wasm component export a"
+    },
+    {
+      "at": "2026-11-09T18:54:01.815Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#40: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6366: FFI interop belongs to the FFI stream (G7); the FFI v3 review decides whether it supersedes each row.; was [open]: (was #4280) [#4248] Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds. The work ends with measured no-surface fixes or a short ballot with mea"
+    },
+    {
+      "at": "2026-11-09T18:54:00.847Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#36 (was #4280) [#4248] Each extern form has a probe recording w"
+    },
+    {
+      "at": "2026-11-09T18:53:59.576Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06lr0kz",
+      "note": "#39: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6366: FFI interop belongs to the FFI stream (G7); the FFI v3 review decides whether it supersedes each row.; was [open]: (was #4280) [#4467] #Import(c) of an infallible fixed-scalar function emits a plain scalar return (no Result with an undefined Never)."
+    },
+    {
+      "at": "2026-11-09T18:53:58.710Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#35 (was #4280) [#4467] #Import(c) of an infallible fixed-scalar"
+    },
+    {
       "at": "2026-11-09T18:53:56.995Z",
       "by": "Main",
       "action": "card.criteria-remove",
@@ -194449,713 +194633,6 @@
       "action": "card.criteria-meet",
       "ref": "c00emhw5",
       "note": "#1"
-    },
-    {
-      "at": "2026-11-08T20:13:05.144Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T20:13:03.622Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h114mv",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-08T20:13:02.476Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h114mv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-08T20:13:01.285Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h114mv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T20:10:33.419Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T20:10:31.986Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wz8yaf",
-      "note": "#5 Drift gates: the unsafe-site ratchet can only fall, every le"
-    },
-    {
-      "at": "2026-11-08T20:10:30.922Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wz8yaf",
-      "note": "#4 Checked runtime mode: extend --checked-alloc with a shadow l"
-    },
-    {
-      "at": "2026-11-08T20:10:29.875Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wz8yaf",
-      "note": "#3 Model-based differential testing: a pure-Jet model of the fd"
-    },
-    {
-      "at": "2026-11-08T20:10:28.871Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wz8yaf",
-      "note": "#2 Machine-code translation check: the syscall number and argum"
-    },
-    {
-      "at": "2026-11-08T20:10:27.900Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wz8yaf",
-      "note": "#1 Every runtime syscall leaf carries a machine-checkable contr"
-    },
-    {
-      "at": "2026-11-08T20:10:18.606Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0wz8yaf",
-      "note": "Prove the runtime OS edge safe: leaf contracts, model checking, fault injection, checked mode"
-    },
-    {
-      "at": "2026-11-08T20:10:10.837Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#6 Linux hazards removed by design, each with a case: shared me"
-    },
-    {
-      "at": "2026-11-08T20:10:09.820Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#5 Ownership makes misuse unwritable: Fd and SharedMemory are o"
-    },
-    {
-      "at": "2026-11-08T20:10:08.627Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#4 Minimal trusted base: the OS edge is about 12 generic runtim"
-    },
-    {
-      "at": "2026-11-08T20:09:56.595Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gdndep",
-      "note": "#1 Assigning through a write parameter (`x: &Box`, `x: &Box?`, "
-    },
-    {
-      "at": "2026-11-08T20:00:32.412Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:59:57.220Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0gdndep",
-      "note": "I1: reassigning a Close local in the entry `run` closes the old value twice (SIGSEGV, heap corruption)"
-    },
-    {
-      "at": "2026-11-08T19:56:43.737Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-08T19:56:27.678Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:56:26.425Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0l5a4vu",
-      "note": "#1: owner 2026-11-08: \"ffi gallery just drop for now\" (the raylib apps); was: The three gallery apps (sqlite notes CLI, raylib window, raylib game with sqlite high scores) build from `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs, as golde"
-    },
-    {
-      "at": "2026-11-08T19:54:18.077Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#3 One implementation (owner 2026-11-08: \"keep one implementati"
-    },
-    {
-      "at": "2026-11-08T19:54:16.531Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#2 Safe Jet: programs using ui need no #Unsafe, and Core/Ui (th"
-    },
-    {
-      "at": "2026-11-08T19:53:59.329Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:53:58.005Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0776o2m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:53:56.769Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0tl2yuc",
-      "note": "#2: owner 2026-11-08: no raylib; the raylib cutover moved to #6701; was: core.game.raylib and core.font no longer exist in Core; `use core.font` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06)."
-    },
-    {
-      "at": "2026-11-08T19:53:55.534Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0tl2yuc",
-      "note": "#1: owner 2026-11-08: no raylib; the raylib cutover moved to #6701; was: Every in-repo caller of core.game.raylib and core.font imports the raylib or font package, and its goldens pass on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-08T19:53:53.646Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tl2yuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:53:52.277Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l09me0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-08T19:53:50.950Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l09me0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-08T19:53:49.650Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l09me0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T19:53:48.319Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0awastn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-08T19:53:47.003Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0awastn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T19:53:45.693Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l09me0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:53:44.469Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awastn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:53:43.183Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#1 No reference to raylib remains in code, examples, tests, too"
-    },
-    {
-      "at": "2026-11-08T19:48:41.052Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0awastn",
-      "note": "#1: owner 2026-11-08: no module or subsystem named ray; the window layer is ui; was: D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built: `ray` keeps every raylib name and argument order on window and frame values with typed colors, keys and buttons, written in Jet, and software-drawn "
-    },
-    {
-      "at": "2026-11-08T19:48:39.803Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awastn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:48:38.424Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:46:59.047Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:46:21.160Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0aqrdp0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T19:44:17.135Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0l39twq",
-      "note": "Native windows in pure Jet: a Wayland client that opens a window and presents frames, no external libraries"
-    },
-    {
-      "at": "2026-11-08T19:41:56.681Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c028lxdd",
-      "note": "Correctly rounded Core math: replace the musl ports with CORE-MATH-grade results"
-    },
-    {
-      "at": "2026-11-08T19:41:55.064Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0bzrof5",
-      "note": "#3: owner 2026-11-08: math must be portable and accurate; functions musl lacks have no musl bits to match; was: Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma and the rest) exists in Jet with the same musl-equivalence corpus."
-    },
-    {
-      "at": "2026-11-08T19:40:07.857Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oev2ib",
-      "note": "#4: the old text contradicted ratified D-DECL-COLON1=A, whose canonical form writes commas between enum cases; was: (from #6199 A comma between enum cases gives a misleading E0003 (\"Expect) `enum Color { Red, Green, Blue }` gives a diagnostic naming the separator rule, with a structured fix-it, plus a UI snapshot"
-    },
-    {
-      "at": "2026-11-08T19:39:25.892Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oev2ib",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:38:50.520Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JET-RUN-REMOTE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-08T19:25:38.806Z",
-      "by": "Main",
-      "action": "card.delete",
-      "ref": "c0jbo2e2",
-      "note": "JetDevserver does not parse or check with the current seed"
-    },
-    {
-      "at": "2026-11-08T19:25:37.567Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0t9jcat",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:22:24.125Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0eb35hy",
-      "note": "Diagnostics from b.generate modules render against the entry file at generated offsets"
-    },
-    {
-      "at": "2026-11-08T19:22:04.837Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0jbo2e2",
-      "note": "JetDevserver does not parse or check with the current seed"
-    },
-    {
-      "at": "2026-11-08T19:21:09.944Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0z2nw1h",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-08T19:21:08.266Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0z2nw1h",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T19:18:52.819Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ihjl6a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:18:13.768Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ihjl6a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:18:07.783Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-JET-RUN-REMOTE1",
-      "note": "Run code straight from a URL or the registry, asking before its first run"
-    },
-    {
-      "at": "2026-11-08T19:04:31.082Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0z3glhp",
-      "note": "#9: Re-homed to #4275 (typed configuration and environment ownership); not a one-liner criterion.; was [open]: (was #2161 c2) JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and the one-time cleanup behaviour are modelled through ratified typed mechanisms [precut audit: no dev test, golden, case or sna"
-    },
-    {
-      "at": "2026-11-08T19:04:30.096Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jm0xjt",
-      "note": "#148 (was #6067 c9, earlier #2161 c2) JET_ROOT, TZDIR, JET_ENV_DI"
-    },
-    {
-      "at": "2026-11-08T19:03:18.189Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0cs6xlg",
-      "note": "#2: Owner 2026-11-08: new public APIs follow best practices and idiomatic Jet without a ballot.; was: Every gap is either filled with Jet surface (each new public API through a ballot) or carries an owner ruling that Jet does not need it."
-    },
-    {
-      "at": "2026-11-08T19:03:16.789Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lscvc9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T19:02:10.553Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bzrof5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-08T19:02:09.510Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bzrof5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-08T18:55:12.623Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tbm7r0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:54:54.418Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qe89cl",
-      "note": "#12: Owner ruling 2026-11-08 on Q26: A.; was: Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools"
-    },
-    {
-      "at": "2026-11-08T18:54:53.359Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ihjl6a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:54:52.282Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ihjl6a",
-      "note": "#11: EffectsLead correction: safety.md gates #Import(c) by #Unsafe only when marked; no new #Unsafe requirement (that would be a new rule).; was: Soundness (found by the c1 review, EffectsLead 2026-11-08): a written #Import(c) or other foreign import records FFI.C (or its language leaf) and is treated as reaching every effect, so deny rows, wri"
-    },
-    {
-      "at": "2026-11-08T18:51:47.483Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c015yc5v",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:51:46.395Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzvj2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:51:20.057Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#123 A function value returned from a list (pick.fn_widen, Effect"
-    },
-    {
-      "at": "2026-11-08T18:51:19.035Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ihjl6a",
-      "note": "#12 Soundness (found by the c1 review): the run and entry effect"
-    },
-    {
-      "at": "2026-11-08T18:51:17.965Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ihjl6a",
-      "note": "#11 Soundness (found by the c1 review, EffectsLead 2026-11-08): "
-    },
-    {
-      "at": "2026-11-08T18:50:04.424Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#7 core.net.dtls exposes DTLS 1.2 client and server over UDP on"
-    },
-    {
-      "at": "2026-11-08T18:50:03.431Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#6 U64.mul_wide(other) -> (U64, U64) returns the high and low w"
-    },
-    {
-      "at": "2026-11-08T18:49:40.795Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:49:39.627Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:49:38.541Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oev2ib",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:49:37.477Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oev2ib",
-      "note": "#13: Owner ruling 2026-11-08 on Q22: Ok().; was: (from #6283 Two spellings of unit success: `Ok(())` and `Ok()` in the co) One spelling remains in the repo (git grep proves it); the other is a registered diagnostic with a fix and a ui snapshot"
-    },
-    {
-      "at": "2026-11-08T18:49:35.954Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oev2ib",
-      "note": "#9: Owner ruling 2026-11-08 on Q21: A.; was: (from #6257 Is Float Comparable? The generic bound `T: Comparable` admit) Bound, derive and diagnostic agree on whether Float is Comparable, pinned by UI tests"
-    },
-    {
-      "at": "2026-11-08T18:49:34.948Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z2nw1h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:49:33.937Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0z2nw1h",
-      "note": "#3 waitany on an empty list stops with a precondition panic who"
-    },
-    {
-      "at": "2026-11-08T18:49:32.838Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0z2nw1h",
-      "note": "#1: Owner ruling 2026-11-08 on Q3: the recommendation (A plus the panic).; was: `Receiver<T>` carries any sendable type; `after`, `interval`, `recv`, `waitall` and `waitany` are generic; a case sends a record through a channel on O0, O1 and O2 and web."
-    },
-    {
-      "at": "2026-11-08T18:48:14.106Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z3glhp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:48:12.912Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z3glhp",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-08T18:48:10.896Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0z3glhp",
-      "note": "#8: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: Docs/spec/reference/cli.md and `jet help run` document -e, -n, -p, -a, -F, -i, --begin, --end, --csv and --json; UI snapshot of the help."
-    },
-    {
-      "at": "2026-11-08T18:48:09.602Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0z3glhp",
-      "note": "#6: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: With `--csv Row`, a misspelled field (`r.nmae`) is a compile error before any input is read; the test also records that the awk and Perl versions of the same typo exit 0 with empty output."
-    },
-    {
-      "at": "2026-11-08T18:48:08.413Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0z3glhp",
-      "note": "#4: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: A checked-in table of 10 classic one-liners (print field 2, sum column 3, count matching lines, unique lines in order, in-place replace with -i, number lines, longest line, swap two fields, keep lines"
-    },
-    {
-      "at": "2026-11-08T18:44:05.885Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lscvc9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:44:04.877Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#3 On a host without unprivileged user namespaces, the launch r"
-    },
-    {
-      "at": "2026-11-08T18:44:03.737Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#2 The bwrap binary is gone from the C toolchain pack and from "
-    },
-    {
-      "at": "2026-11-08T18:44:02.638Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#1 Process isolation for jet cc and every other sandboxed launc"
-    },
-    {
-      "at": "2026-11-08T18:43:54.516Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0dlrfkp",
-      "note": "No C: a Jet Linux sandbox replaces the bwrap binary shipped in the C toolchain pack"
-    },
-    {
-      "at": "2026-11-08T18:43:25.105Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:43:24.039Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c086wraw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:43:22.905Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:43:21.838Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:43:20.800Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0wi8ere",
-      "note": "#1: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: A `#!/usr/bin/env jet` script that reads a file, run from a terminal, prompts once listing FS.Read and its path; \"always\" stores the answer and the next run does not prompt; editing the file prompts a"
-    },
-    {
-      "at": "2026-11-08T18:43:19.726Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0wi8ere",
-      "note": "#3: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: Without a terminal, the same script without -A exits non-zero with an error that names `--allow=FS.Read:<path>` and says `-A` allows every effect; UI snapshot registered."
-    },
-    {
-      "at": "2026-11-08T18:43:18.706Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0wi8ere",
-      "note": "#8: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: Before any line runs, the prompt lists every authority the script can reach, from the checked effect set: each with its exact target when the path or host is a literal, and the source line that needs "
-    },
-    {
-      "at": "2026-11-08T18:43:17.613Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:43:16.616Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0esaekb",
-      "note": "#2: Owner ruling 2026-11-08 on Q14: yes, go with Go. We want pareto behavior, what is correct and the best method for the majority of situations; more advanced behavior and APIs can be built for experts beyond that.; was: For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver returns the same addr"
-    },
-    {
-      "at": "2026-11-08T18:36:29.240Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G6",
-      "note": "MetaLead assigned 2026-11-08: triage of every open G6 card; "
-    },
-    {
-      "at": "2026-11-08T18:36:27.888Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G4",
-      "note": "ScriptLead assigned 2026-11-08: triage of every open G4 card"
     }
   ],
   "nextNum": 368,
