@@ -260,6 +260,12 @@ sema_type_used_as_value: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0636", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
+// E0639: a function outside a type body or `impl` declares `self`.
+sema_self_outside_method: fn(name: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E0639") ?? panic("E0639 has no registry row")
+    sema_error("E0639", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
 sema_defined_twice_optional: fn(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }

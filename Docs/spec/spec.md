@@ -601,7 +601,9 @@ on a read parameter E0205, and the error quotes the method's signature line.
 Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
 live in the type, in `impl Type { … }`, or as a top-level external inherent
 method `Type.method: fn(self, …) { … }`; the type must be defined in the current
-source module. Static methods omit `self`, as in `Circle.unit()`.
+source module. Static methods omit `self`, as in `Circle.unit()`. A function
+outside a type body or `impl`, an inline module's included, can't take `self`
+(E0639): it has no receiver, so `self` would silently be an ordinary parameter.
 
 Multiple construction shapes use distinctly named no-`self` statics such as
 `Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name

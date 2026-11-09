@@ -2039,6 +2039,18 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     if !sema_function_header_check_root_params(func, is_method, diagnostics) -> complete = false
     sema_function_header_lint_positional_bools(func, is_method, diagnostics)
     if !sema_function_header_supported(func, context) -> complete = false
+    // `self` is only a method's receiver; outside a type body or `impl` it
+    // would silently be an ordinary parameter. An external `Type.method`
+    // header left a function has an unresolved target, which E0301 reports.
+    if !is_method && !func.compiler_generated && func.external_type == None {
+        loop param in func.params {
+            if param.name == "self" {
+                diagnostics.push(sema_self_outside_method(context.function_name, param.name_span))
+                complete = false
+                break
+            }
+        }
+    }
     if func.is_reactive {
         if func.is_pure {
             diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.autorun` inside a plain `fn`"))

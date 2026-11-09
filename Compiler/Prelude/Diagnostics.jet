@@ -5319,6 +5319,19 @@ NestedFnFailureMismatch: struct {
     }
 }
 
+SelfOutsideMethod: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0639"
+        meaning: "A function outside a type body or `impl` declares a `self` parameter"
+        fix_next: "Move the function into the type's body or an `impl` block, or rename the parameter."
+        what: fn(self) -> String { "`{self.name}` takes `self`, but it is not a method" }
+        why: fn(self) -> String { "`self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter" }
+        fix: fn(self) -> String { "Move `{self.name}` into the type's body or an `impl` block to make it a method, or give the parameter another name" }
+    }
+}
+
 MissingCrateVersion: struct {
     impl Diagnostic {
         code: "E0701"
