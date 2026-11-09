@@ -5,6 +5,7 @@ use {
     core.term.[Key]
     core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIPointerButton, UIRect]
     frame: __core_ui_frame
+    xkb: core.ui.xkb
 }
 // __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
 // part of core.ui.
@@ -13,6 +14,9 @@ use {
 // libwayland. One xdg_toplevel shows the program's RGBA frames from three
 // wl_shm buffers in one sealed shared-memory pool; wl_surface frame callbacks
 // pace the frames; wl_seat keyboard and pointer events become UIEvents.
+// Keys go through core.ui.xkb with the compositor's keymap (its layouts,
+// levels and compose sequences), and held keys repeat at the compositor's
+// rate and delay.
 // Buffers are sized in physical pixels: wp_fractional_scale_v1 and
 // wp_viewporter map them onto the window's logical size, else the integer
 // wl_surface buffer scale does.
@@ -35,6 +39,16 @@ FORMAT_XBGR8888: 875709016
 FORMAT_ARGB8888: 0
 FORMAT_ABGR8888: 875708993
 RECEIVE_MAX: 65536
+// The largest keymap read from the compositor, the most one read gives.
+KEYMAP_MAX: 16777216
+// wl_keyboard.keymap's format code for an XKB text-v1 keymap.
+KEYMAP_XKB_V1: 1
+// wl_keyboard.key's state for a press.
+KEY_PRESSED: 1
+// Key repeat until wl_keyboard.repeat_info, which every keyboard of the
+// wl_seat version bound sends: 25 a second after 600 ms.
+REPEAT_RATE: 25
+REPEAT_DELAY: 600
 SIDE_MAX: 16384
 // The xdg_toplevel app_id until the program names its own.
 DEFAULT_APP_ID: "dev.jet.app"
@@ -258,7 +272,23 @@ Connection: struct {
     // wl_shm offers XBGR8888 and ABGR8888.
     priv xbgr: Bool
     priv abgr: Bool
+    // The compositor's modifiers (depressed | latched | locked), which the
+    // US fallback reads while no keymap has arrived.
     priv modifiers: Int
+    // The compositor's XKB keymap and the keyboard state it tracks: layout,
+    // levels and compose. Empty until wl_keyboard.keymap brings one the
+    // engine compiles, and never more than one; the US table stands in
+    // while it is empty.
+    priv keymap: [xkb.Keymap]
+    // Key repeat from wl_keyboard.repeat_info, and the key that repeats:
+    // its evdev code (-1 for none), what each repeat reports, when it went
+    // down and how many repeats it has made.
+    priv repeat: xkb.Repeat
+    priv held: Int
+    priv held_key: Key
+    priv held_text: String
+    priv held_at: Int
+    priv held_repeats: Int
     priv events: [UIEvent]
     priv failure: UIError?
 }
@@ -352,7 +382,9 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, fullscreen: false, geometry: [Int]{},
         on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
         corner_cover: [U8]{}, corner_scale: 0, xbgr: false, abgr: false,
-        modifiers: 0, events: [UIEvent]{}, failure: None,
+        modifiers: 0, keymap: [xkb.Keymap]{}, repeat: xkb.Repeat{rate: REPEAT_RATE, delay: REPEAT_DELAY},
+        held: -1, held_key: Key.Unknown, held_text: "", held_at: 0, held_repeats: 0,
+        events: [UIEvent]{}, failure: None,
     }
     c.registry = new_id(c)
     request(c, DISPLAY, 1, words([Int]{c.registry}))
@@ -765,14 +797,19 @@ flush: fn(&c: Connection) -[Net, Time]> {
 }
 
 // Waits up to `timeout_ns` (negative: until something arrives) for the
-// compositor on this OS thread, then reads and handles what arrived.
+// compositor on this OS thread, then reads and handles what arrived. A held
+// key's next repeat ends the wait early.
 receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
     if c.failure != None -> return
-    ready: net.unix_wait(c.stream, timeout_ns) ?? {
+    wait_ns: repeat_wait(c, timeout_ns)
+    ready: net.unix_wait(c.stream, wait_ns) ?? {
         fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
         return
     }
-    if !ready -> return
+    if !ready {
+        repeat_key(c)
+        return
+    }
     message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
         fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
         return
@@ -785,6 +822,7 @@ receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
     // Newest first, so `pop` yields the oldest queued descriptor.
     loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
     dispatch(c)
+    repeat_key(c)
     // What only the frame shows (a hover, focus, a pressed button) goes
     // out now; a new size waits for the frame drawn at it.
     if c.chrome_stale && c.mapped && !wants_reshape(c) -> refresh_chrome(c)
@@ -990,6 +1028,7 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
         if opcode == 0 -> return 8
         if opcode == 3 -> return 16
         if opcode == 4 -> return 20
+        if opcode == 5 -> return 8
     }
     if object == c.pointer {
         if opcode == 0 -> return 16
@@ -1143,35 +1182,127 @@ capabilities: fn(&c: Connection, mask: Int) {
     }
 }
 
-keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env]> {
+keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env, Time]> {
     if opcode == 0 {
         // keymap: its descriptor is the oldest one queued.
-        if c.inbox_fds.len() == 0 {
+        fd: c.inbox_fds.pop() ?? {
             fail(c, UIError.Protocol("wl_keyboard.keymap arrived without its descriptor"))
             return
         }
-        _: c.inbox_fds.pop()
+        load_keymap(c, fd, u32_at(body, 0), u32_at(body, 4))
         return
     }
     if opcode == 1 -> c.events.push(UIEvent.Focus(true))
     if opcode == 2 {
         c.modifiers = 0
+        c.held = -1
         c.events.push(UIEvent.Focus(false))
     }
     if opcode == 3 {
         note_input(c, u32_at(body, 4))
         code: u32_at(body, 8)
-        key: evdev_key(code)
-        if u32_at(body, 12) == 1 {
-            c.events.push(UIEvent.KeyDown(key))
-            typed: evdev_text(code, c.modifiers)
-            if typed != "" -> c.events.push(UIEvent.Text(typed))
+        state: u32_at(body, 12)
+        pressed: press(c, code, state)
+        if state == KEY_PRESSED {
+            c.events.push(UIEvent.KeyDown(pressed.key))
+            if pressed.text != "" -> c.events.push(UIEvent.Text(pressed.text))
+            hold(c, code, pressed.key, pressed.text)
         } else {
-            c.events.push(UIEvent.KeyUp(key))
+            c.events.push(UIEvent.KeyUp(pressed.key))
+            if code == c.held -> c.held = -1
         }
     }
-    // modifiers: depressed | latched | locked.
-    if opcode == 4 -> c.modifiers = u32_at(body, 4).bit_or(u32_at(body, 8)).bit_or(u32_at(body, 12))
+    if opcode == 4 {
+        // modifiers: serial, depressed, latched, locked, group.
+        depressed: u32_at(body, 4)
+        latched: u32_at(body, 8)
+        locked: u32_at(body, 12)
+        c.modifiers = depressed.bit_or(latched).bit_or(locked)
+        map := c.keymap.pop() ?? return
+        map.modifiers(depressed, latched, locked, u32_at(body, 16))
+        c.keymap.push(map)
+    }
+    // repeat_info: repeats a second (0: none) and the delay in ms.
+    if opcode == 5 {
+        rate: i32_at(body, 0)
+        delay: i32_at(body, 4)
+        c.repeat = xkb.Repeat{rate: max_int(rate, 0), delay: max_int(delay, 0)}
+    }
+}
+
+// wl_keyboard.keymap: an XKB text-v1 keymap of `size` bytes (its trailing
+// NUL included) behind `fd`. One the engine cannot compile, or another
+// format, leaves the US table in charge; a key held across the change
+// stops repeating.
+load_keymap: fn(&c: Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
+    c.held = -1
+    c.keymap = [xkb.Keymap]{}
+    if format != KEYMAP_XKB_V1 || size < 1 || size > KEYMAP_MAX -> return
+    bytes := fd.read_at(0, size) ?? {
+        fail(c, UIError.Protocol("reading the keymap failed: {err}"))
+        return
+    }
+    loop bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 0 {
+        _: bytes.pop()
+    }
+    map: xkb.keymap(bytes) ?? return
+    c.keymap.push(map)
+}
+
+// A key press or release (wl_keyboard.key's `state`) through the keymap,
+// else the US table: the key and, on a press, the text it types.
+press: fn(&c: Connection, code: Int, state: Int) -> (key: Key, text: String) {
+    down: state == KEY_PRESSED
+    map := c.keymap.pop() ?? {
+        text: if down -> evdev_text(code, c.modifiers) else -> ""
+        return (key: evdev_key(code), text: text)
+    }
+    pressed: map.press(code, down)
+    c.keymap.push(map)
+    pressed
+}
+
+// A press starts the key repeating when the keymap says it repeats (the
+// US table: anything but a modifier), and ends another key's repeat.
+hold: fn(&c: Connection, code: Int, key: Key, text: String) -[Time]> {
+    c.held = -1
+    repeats: if c.keymap.len() > 0 -> c.keymap[0].repeats(code) else -> !modifier(key)
+    if !repeats || c.repeat.rate <= 0 -> return
+    c.held = code
+    c.held_key = key
+    c.held_text = text.copy()
+    c.held_at = core.time.__clock_mono_ns()
+    c.held_repeats = 0
+}
+
+modifier: fn(key: Key) -> Bool {
+    key == .Shift || key == .Control || key == .Alt || key == .Super || key == .CapsLock
+}
+
+// How long a wait of `timeout_ns` (negative: no limit) may last before the
+// held key's next repeat falls due.
+repeat_wait: fn(c: Connection, timeout_ns: Int) -[Time]> Int {
+    if c.held < 0 || c.repeat.rate <= 0 -> return timeout_ns
+    // The first repeat is due at the delay, the nth 1000 * n / rate ms later.
+    n: c.held_repeats
+    due_ms: c.repeat.delay + (n * 1000 + c.repeat.rate - 1) /% c.repeat.rate
+    // Whole milliseconds, rounded up, so a wait never wakes just before.
+    left: (max_int(c.held_at + due_ms * 1000000 - core.time.__clock_mono_ns(), 0) + 999999) /% 1000000 * 1000000
+    if timeout_ns >= 0 && timeout_ns < left -> return timeout_ns
+    left
+}
+
+// The held key repeats once, as a KeyDown and its text, when a repeat has
+// fallen due; repeats missed while the program was busy are dropped, not
+// delivered in a burst.
+repeat_key: fn(&c: Connection) -[Time]> {
+    if c.held < 0 || c.failure != None -> return
+    held_ms: (core.time.__clock_mono_ns() - c.held_at) /% 1000000
+    due: c.repeat.due(held_ms)
+    if due <= c.held_repeats -> return
+    c.held_repeats = due
+    c.events.push(UIEvent.KeyDown(c.held_key))
+    if c.held_text != "" -> c.events.push(UIEvent.Text(c.held_text))
 }
 
 // Positions arrive in 1/256ths of a logical unit; programs see pixels.
