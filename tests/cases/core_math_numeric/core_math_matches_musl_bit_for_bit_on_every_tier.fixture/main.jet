@@ -9,8 +9,6 @@ use {
 }
 
 CEIL: comptime { embed_file("corpus/ceil.txt") }
-ERF: comptime { embed_file("corpus/erf.txt") }
-ERFC: comptime { embed_file("corpus/erfc.txt") }
 FDIM: comptime { embed_file("corpus/fdim.txt") }
 FLOOR: comptime { embed_file("corpus/floor.txt") }
 FMA: comptime { embed_file("corpus/fma.txt") }
@@ -19,7 +17,6 @@ FMIN: comptime { embed_file("corpus/fmin.txt") }
 FMOD: comptime { embed_file("corpus/fmod.txt") }
 FREXP: comptime { embed_file("corpus/frexp.txt") }
 ILOGB: comptime { embed_file("corpus/ilogb.txt") }
-LGAMMA: comptime { embed_file("corpus/lgamma.txt") }
 LOGB: comptime { embed_file("corpus/logb.txt") }
 MODF: comptime { embed_file("corpus/modf.txt") }
 NEXTAFTER: comptime { embed_file("corpus/nextafter.txt") }
@@ -28,7 +25,6 @@ REMQUO: comptime { embed_file("corpus/remquo.txt") }
 ROUNDEVEN: comptime { embed_file("corpus/roundeven.txt") }
 SCALBN: comptime { embed_file("corpus/scalbn.txt") }
 SQRT: comptime { embed_file("corpus/sqrt.txt") }
-TGAMMA: comptime { embed_file("corpus/tgamma.txt") }
 TRUNC: comptime { embed_file("corpus/trunc.txt") }
 
 hex_value: fn(b: U8) -> Int {
@@ -73,21 +69,17 @@ arity: fn(name: String) -> Int {
 // The one Float result of `name` on Float arguments `a`.
 value: fn(name: String, a: [Float]) -> Float {
     if name == "ceil" -> return math.ceil(a[0])
-    if name == "erf" -> return math.erf(a[0])
-    if name == "erfc" -> return math.erfc(a[0])
     if name == "fdim" -> return math.fdim(a[0], a[1])
     if name == "floor" -> return math.floor(a[0])
     if name == "fma" -> return math.fma(a[0], a[1], a[2])
     if name == "fmax" -> return math.max_float(a[0], a[1])
     if name == "fmin" -> return math.min_float(a[0], a[1])
     if name == "fmod" -> return math.fmod(a[0], a[1])
-    if name == "lgamma" -> return math.lgamma(a[0])
     if name == "logb" -> return math.logb(a[0])
     if name == "nextafter" -> return math.next_after(a[0], a[1])
     if name == "remainder" -> return math.remainder(a[0], a[1])
     if name == "roundeven" -> return math.round_even(a[0])
     if name == "sqrt" -> return math.sqrt(a[0])
-    if name == "tgamma" -> return math.gamma(a[0])
     math.trunc(a[0])
 }
 
@@ -189,8 +181,6 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
 run: fn() {
     exact_nan: nan_bits_are_exact()
     check("ceil", CEIL, exact_nan)
-    check("erf", ERF, exact_nan)
-    check("erfc", ERFC, exact_nan)
     check("fdim", FDIM, exact_nan)
     check("floor", FLOOR, exact_nan)
     check("fma", FMA, exact_nan)
@@ -199,7 +189,6 @@ run: fn() {
     check("fmod", FMOD, exact_nan)
     check("frexp", FREXP, exact_nan)
     check("ilogb", ILOGB, exact_nan)
-    check("lgamma", LGAMMA, exact_nan)
     check("logb", LOGB, exact_nan)
     check("modf", MODF, exact_nan)
     check("nextafter", NEXTAFTER, exact_nan)
@@ -208,6 +197,5 @@ run: fn() {
     check("roundeven", ROUNDEVEN, exact_nan)
     check("scalbn", SCALBN, exact_nan)
     check("sqrt", SQRT, exact_nan)
-    check("tgamma", TGAMMA, exact_nan)
     check("trunc", TRUNC, exact_nan)
 }

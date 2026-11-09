@@ -2621,9 +2621,10 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
 `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
 `atanh`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`,
-`cbrt`, `hypot`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
-`acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`, `exp10_m1`, `log2_1p`,
-`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`), and F32 `pow`,
+`cbrt`, `hypot`, `rsqrt`, `erf`, `erfc`, `gamma`, `lgamma`, `sin_pi`,
+`cos_pi`, `tan_pi`, `asin_pi`, `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`,
+`exp10_m1`, `log2_1p`, `log10_1p`, `pow_r`, `pow_n`, `root_n`,
+`compound_n`), and F32 `pow`,
 returns the correctly rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
@@ -2645,7 +2646,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
 | `math.asin_pi(x)`, `acos_pi(x)`, `atan_pi(x)`, `atan2_pi(y, x)` | `Float` | `asin`, `acos`, `atan` and `atan2` divided by `pi`, correctly rounded, so every tier returns the same bits: `asin_pi` in [-1/2, 1/2] and `acos_pi` in [0, 1] with NaN for `abs(x) > 1`, `atan_pi` in [-1/2, 1/2] with ±1/2 at the infinities, and `atan2_pi` the angle of the point `(x, y)` in half-turns, in [-1, 1] with the sign of `y` and the C23 values at zeros and infinities (C23 `asinpi`, `acospi`, `atanpi`, `atan2pi`). |
 | `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)` | `Float` | `e^x`, `2^x`, `10^x` and `e^x - 1`, correctly rounded, so every tier returns the same bits: `+inf` on overflow, 0 (-1 for `exp_m1`) at `-inf`, `exp2` and `exp10` exact wherever the power is a Float, and `exp_m1` keeps the sign of a zero (C23 `exp`, `exp2`, `exp10`, `expm1`). |
-| `math.erf(x)`, `math.erfc(x)` | `Float` | Error functions. |
+| `math.erf(x)`, `math.erfc(x)` | `Float` | The error function and `1 - erf(x)`, correctly rounded, so every tier returns the same bits and `erfc` keeps full precision where `erf` is near 1: `erf` is odd, keeps the sign of a zero and is ±1 beyond about ±5.92, and `erfc` is 2 below about -5.86 and `+0` from about 27.23 (C23 `erf`, `erfc`). |
 | `math.exp2_m1(x)`, `exp10_m1(x)` | `Float` | `2^x - 1` and `10^x - 1`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: -1 at `-inf`, `+inf` on overflow, and a zero keeps its sign (C23 `exp2m1`, `exp10m1`). |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)` | `Float` | `log(x)`, `log(1 + x)`, `log10(x)` and `log2(x)`, correctly rounded, so every tier returns the same bits: NaN below 0 (below -1 for `ln_1p`), `-inf` at ±0 (at -1), `+inf` at `+inf`, `log2` and `log10` exact at every power of 2 or 10 that is a Float, and `ln_1p` keeps the sign of a zero (C23 `log`, `log1p`, `log10`, `log2`). |
 | `math.logb(x)`, `log(x, base)` | `Float` | The binary exponent as a Float, and the logarithm in any base, `ln(x) / ln(base)`. |
@@ -2656,7 +2657,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.root_n(x, n)`, `compound_n(x, n)` | `Float` | The `n`th root of `x` and `(1 + x)^n` for every whole `n: Int`, both correctly rounded, so every tier returns the same bits (C23 `rootn`, `compoundn`). `root_n` gives NaN for `n = 0` and for `x < 0` with `n` even, and a negative root for `x < 0` with `n` odd; `compound_n` gives 1 for `n = 0` (even at a NaN), NaN for `x < -1`, and never rounds `1 + x` first. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
-| `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
+| `math.gamma(x)` / `math.lgamma(x)` | `Float` | The gamma function and `ln(abs(gamma(x)))`, correctly rounded, so every tier returns the same bits: `gamma` is ±inf at ±0, NaN at every negative whole `x` and at `-inf`, and `+inf` from about 171.62; `lgamma` is `+inf` at zero, at every negative whole `x` and at ±inf (C23 `tgamma`, `lgamma`). |
 | `math.degrees(x)` / `math.radians(x)` | `Float` | Convert between degrees and radians. |
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
 | `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once (IEEE 754 `fusedMultiplyAdd`), the same bits on every tier. A nonzero exact result that rounds to zero keeps its sign, so `fma(2^-1074, -0.5, 0.0)` is `-0.0`, where musl's C fma gives `+0.0`. Native x86-64 code runs one `vfmadd213sd` when the CPU has FMA3 (probed at a module's first fma) and the soft fma otherwise, with the same bits either way. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
