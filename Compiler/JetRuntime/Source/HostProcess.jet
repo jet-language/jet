@@ -118,16 +118,18 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     host_sample_out(host_call(I64{124}, native, I64{0}, I64{0}), available, value, errno)
 }
 
+// musl setuid/setgid: __setxid, the call on every thread (Thread.jet
+// thread_setxid), since Linux keeps credentials per thread.
 #Export(c) jet_sys_setuid_raw: fn(uid: I64, available: I64, value: I64, errno: I64) {
     native: host_native_int(uid)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    host_sample_out(host_call(I64{105}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
+    host_sample_out(thread_setxid(I64{105}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) jet_sys_setgid_raw: fn(gid: I64, available: I64, value: I64, errno: I64) {
     native: host_native_int(gid)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    host_sample_out(host_call(I64{106}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
+    host_sample_out(thread_setxid(I64{106}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) jet_sys_setpgid_raw: fn(pid: I64, pgid: I64, available: I64, value: I64, errno: I64) {

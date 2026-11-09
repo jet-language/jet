@@ -1,23 +1,7 @@
 // (core.sys identity, facts and POSIX control). Each call is the Linux system
 // call musl's function of the same name makes, with musl's result: -1 and the
-// errno for a failure, else the call's value. initgroups alone still calls
-// musl, which applies setgroups to every thread; its sample sets errno to 0
-// first, calls, then reads errno, as jet_sys_call_sample does.
-#Import(c) sys_initgroups: fn(user: I64, group: I64) -> I64 = "initgroups"
-
-sys_errno_clear: fn() { net_store_uint(net_errno_location(), I64{4}, I64{0}) }
-
-sys_errno: fn() -> I64 { net_i32(net_load_uint(net_errno_location(), I64{4})) }
-
-// jet_sys_call_sample: (true, value, errno) as owned exact Ints.
-sys_sample: fn(value: I64, available: I64, result: I64, errno: I64) {
-    code: sys_errno()
-    #Unsafe("the caller lends the C-ABI tuple's Bool byte and two writable Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(result, jet_int_owned_from_i64(value))
-        os_store_i64(errno, jet_int_owned_from_i64(code))
-    }
-}
+// errno for a failure, else the call's value. A credential change runs on
+// every thread (Thread.jet thread_setxid), as musl's does.
 
 sys_some: fn(some: I64, value: I64) -> I64 {
     #Unsafe("some lends a writable C-ABI Option success word") { os_store_i64(some, jet_int_owned_from_i64(value)) }
@@ -70,15 +54,283 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
     host_sample_out(host_call(I64{57}, I64{0}, I64{0}, I64{0}), available, value, errno)
 }
 
-// The Rust original initgroups(user, group as u32); Core checked NUL absence.
+// musl's NGROUPS_MAX: initgroups sets at most this many groups.
+SYS_NGROUPS_MAX: I64{32}
+
+// The most groups a GETINITGR answer may list: Linux's NGROUPS_MAX. musl
+// allocates whatever count nscd sends; a larger count fails as its calloc
+// would (ENOMEM) instead of holding memory no setgroups could use.
+SYS_NSCD_GROUPS_MAX: I64{65536}
+
+sys_close: fn(fd: I64) {
+    #Unsafe("close(2) releases a descriptor this route opened") {
+        _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// fread(at, size, 1): the bytes read before end of file, or -errno.
+sys_read_full: fn(fd: I64, at: I64, size: I64) -> I64 {
+    got := I64{0}
+    loop got < size {
+        count := I64{0}
+        #Unsafe("read(2) fills at most the caller's remaining owned bytes") {
+            count = os_syscall_i64(I64{0}, fd, wrapping(at + got), size - got, I64{0}, I64{0}, I64{0})
+        }
+        if (count < I64{0}) -> return count
+        if (count == I64{0}) -> break
+        got += count
+    }
+    got
+}
+
+// musl __nscd_query(GETINITGR, user) and getgrouplist's read of the answer:
+// 0 with the answer's u32 gids at found0 and their count at found8 (both 0
+// when nscd does not answer or knows no such user), or -errno. A short
+// header makes musl retry with the request byteswapped, and that retry's
+// key length word, byteswapped, exceeds LOGIN_NAME_MAX, so it ends as not
+// found without a query; this does the same.
+sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
+    net_put(found, I64{0}, I64{0})
+    net_put(found, I64{8}, I64{0})
+    swapped := false
+    loop {
+        fd := I64{0}
+        #Unsafe("socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory") {
+            fd = os_syscall_i64(I64{41}, I64{1}, I64{524289}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+        // EAFNOSUPPORT: musl reads the answer from /dev/null, not found.
+        if (fd < I64{0}) -> return if (fd == I64{-97}) -> I64{0} else -> fd
+        if (swapped || length >= I64{256}) {
+            sys_close(fd)
+            return I64{0}
+        }
+        // sockaddr_un{AF_UNIX, "/var/run/nscd/socket"}: musl's 23 bytes.
+        address: jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(address, I64{24})
+        net_store_uint(address, I64{2}, I64{1})
+        path: rt_static_text("/var/run/nscd/socket")
+        rt_text_bytes_copy(wrapping(address + I64{2}), rt_text_data(path), rt_text_len(path))
+        status := I64{0}
+        #Unsafe("connect(2) reads the owned 23-byte address") {
+            status = os_syscall_i64(I64{42}, fd, address, I64{23}, I64{0}, I64{0}, I64{0})
+        }
+        jet_rt_free(address, I64{24}, I64{8})
+        if (status < I64{0}) {
+            sys_close(fd)
+            // No nscd running (or none this user may reach): not found.
+            if (status == I64{-13} || status == I64{-111} || status == I64{-2}) -> return I64{0}
+            return status
+        }
+        // {NSCDVERSION 2, GETINITGR 15, key length} then the key and its NUL.
+        request: jet_rt_alloc(length + I64{13}, I64{4})
+        net_store_uint(request, I64{4}, I64{2})
+        net_store_uint(wrapping(request + I64{4}), I64{4}, I64{15})
+        net_store_uint(wrapping(request + I64{8}), I64{4}, length + I64{1})
+        rt_text_bytes_copy(wrapping(request + I64{12}), user, length + I64{1})
+        #Unsafe("sendto(2) with MSG_NOSIGNAL reads the owned request") {
+            status = os_syscall_i64(I64{44}, fd, request, length + I64{13}, I64{16384}, I64{0}, I64{0})
+        }
+        jet_rt_free(request, length + I64{13}, I64{4})
+        if (status < I64{0}) {
+            sys_close(fd)
+            return status
+        }
+        // {version, found, group count}.
+        header: jet_rt_alloc(I64{12}, I64{4})
+        thread_zero(header, I64{12})
+        status = sys_read_full(fd, header, I64{12})
+        version: net_load_uint(header, I64{4})
+        known: net_load_uint(wrapping(header + I64{4}), I64{4})
+        count: net_i32(net_load_uint(wrapping(header + I64{8}), I64{4}))
+        jet_rt_free(header, I64{12}, I64{4})
+        if (status >= I64{0} && status < I64{12}) {
+            sys_close(fd)
+            swapped = true
+            next
+        }
+        if (status < I64{0} || version != I64{2} || known == I64{0}) {
+            sys_close(fd)
+            if (status < I64{0}) -> return status
+            return if (version != I64{2}) -> I64{-5} else -> I64{0}
+        }
+        if (count < I64{0} || count > SYS_NSCD_GROUPS_MAX) {
+            sys_close(fd)
+            return I64{-12}
+        }
+        groups: jet_rt_alloc(count * I64{4} + I64{4}, I64{4})
+        status = sys_read_full(fd, groups, count * I64{4})
+        sys_close(fd)
+        if (status < I64{0} || status < count * I64{4}) {
+            jet_rt_free(groups, count * I64{4} + I64{4}, I64{4})
+            return if (status < I64{0}) -> status else -> I64{-5}
+        }
+        net_put(found, I64{0}, groups)
+        net_put(found, I64{8}, count)
+        return I64{0}
+    }
+}
+
+// C strchr over a NUL-terminated byte run: the first `c`, or 0.
+sys_strchr: fn(at: I64, c: I64) -> I64 {
+    p := at
+    loop {
+        b: rt_text_byte(p)
+        if (b == c) -> return p
+        if (b == I64{0}) -> return I64{0}
+        p = wrapping(p + I64{1})
+    }
+}
+
+sys_streq: fn(a: I64, b: I64) -> Bool {
+    at := I64{0}
+    loop {
+        x: rt_text_byte(wrapping(a + at))
+        if (x != rt_text_byte(wrapping(b + at))) -> return false
+        if (x == I64{0}) -> return true
+        at += I64{1}
+    }
+}
+
+// musl getgrouplist(user, gid, list, &count) with count SYS_NGROUPS_MAX: the
+// number of groups n (list holds the first min(n, SYS_NGROUPS_MAX) u32 gids:
+// gid, each /etc/group group naming the user, then nscd's others), or
+// -errno. `look` is an errno cell (HostNetLookup.jet LK_ERRNO) the
+// /etc/group reader writes, which stays musl's errno for initgroups.
+sys_grouplist: fn(user: I64, length: I64, gid: I64, list: I64, look: I64) -> I64 {
+    net_store_uint(list, I64{4}, gid)
+    n := I64{1}
+    found: jet_rt_alloc(I64{16}, I64{8})
+    status := sys_nscd_initgroups(user, length, found)
+    nscd: net_word(found, I64{0})
+    nscd_count: net_word(found, I64{8})
+    jet_rt_free(found, I64{16}, I64{8})
+    if (status < I64{0}) -> return status
+    reader: lk_open(look, rt_static_text("/etc/group"))
+    if (reader == I64{0}) {
+        errno: net_word(look, LK_ERRNO)
+        if (errno != I64{2} && errno != I64{20}) -> status = I64{0} - errno
+    } else {
+        status = sys_group_file(user, gid, list, look, reader, nscd, nscd_count, n)
+        lk_close(reader)
+        if (status >= I64{0}) -> n = status
+    }
+    if (status >= I64{0}) {
+        at := I64{0}
+        loop at < nscd_count {
+            group: net_load_uint(wrapping(nscd + at * I64{4}), I64{4})
+            at += I64{1}
+            if (group == gid) -> next
+            n += I64{1}
+            if (n <= SYS_NGROUPS_MAX) -> net_store_uint(wrapping(list + (n - I64{1}) * I64{4}), I64{4}, group)
+        }
+        status = n
+    }
+    if (nscd != I64{0}) -> jet_rt_free(nscd, nscd_count * I64{4} + I64{4}, I64{4})
+    status
+}
+
+// getgrouplist's walk of /etc/group, each line split as musl __getgrent_a
+// does (src/passwd/getgrent_a.c): the new n, or -errno for a read error.
+// Entries of nscd's answer equal to a group's gid become `gid`.
+sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd: I64, nscd_count: I64, start: I64) -> I64 {
+    n := start
+    capacity := I64{256}
+    line := jet_rt_alloc(capacity, I64{1})
+    status := I64{0}
+    loop {
+        // getline: through the newline, NUL-terminated; none at end of file.
+        l := I64{0}
+        ended := false
+        loop {
+            c: lk_getc(look, reader)
+            if (c < I64{0}) {
+                ended = l == I64{0} || !lk_eof(reader)
+                break
+            }
+            if (l + I64{2} > capacity) {
+                grown: jet_rt_alloc(capacity * I64{2}, I64{1})
+                rt_text_bytes_copy(grown, line, l)
+                jet_rt_free(line, capacity, I64{1})
+                line = grown
+                capacity = capacity * I64{2}
+            }
+            rt_text_put(wrapping(line + l), c)
+            l += I64{1}
+            if (c == I64{10}) -> break
+        }
+        if ended {
+            if !lk_eof(reader) -> status = I64{0} - net_word(look, LK_ERRNO)
+            break
+        }
+        rt_text_put(wrapping(line + l), I64{0})
+        rt_text_put(wrapping(line + l - I64{1}), I64{0})
+        // name:password:gid:members, the name at least one byte.
+        first: sys_strchr(wrapping(line + I64{1}), I64{58})
+        if (first == I64{0}) -> next
+        second: sys_strchr(wrapping(first + I64{1}), I64{58})
+        if (second == I64{0}) -> next
+        s := wrapping(second + I64{1})
+        group := I64{0}
+        loop {
+            digit: rt_text_byte(s) - I64{48}
+            if (digit < I64{0} || digit > I64{9}) -> break
+            group = (group * I64{10} + digit).bit_and(I64{4294967295})
+            s = wrapping(s + I64{1})
+        }
+        if (rt_text_byte(s) != I64{58}) -> next
+        at := I64{0}
+        loop at < nscd_count {
+            entry: wrapping(nscd + at * I64{4})
+            if (net_load_uint(entry, I64{4}) == group) -> net_store_uint(entry, I64{4}, gid)
+            at += I64{1}
+        }
+        // Members split at each comma; as in musl, the byte after a comma
+        // is never itself taken as a separator.
+        member := wrapping(s + I64{1})
+        matched := false
+        if (rt_text_byte(member) != I64{0}) {
+            p := member
+            loop rt_text_byte(p) != (I64{0}) {
+                if (rt_text_byte(p) == I64{44}) {
+                    rt_text_put(p, I64{0})
+                    if (!matched && sys_streq(user, member)) -> matched = true
+                    p = wrapping(p + I64{1})
+                    member = p
+                }
+                p = wrapping(p + I64{1})
+            }
+            if (!matched && sys_streq(user, member)) -> matched = true
+        }
+        if !matched -> next
+        n += I64{1}
+        if (n <= SYS_NGROUPS_MAX) -> net_store_uint(wrapping(list + (n - I64{1}) * I64{4}), I64{4}, group)
+    }
+    jet_rt_free(line, capacity, I64{1})
+    if (status < I64{0}) -> status else -> n
+}
+
+// musl initgroups: getgrouplist into NGROUPS_MAX gids, then setgroups on
+// every thread. Core checked NUL absence. More groups than NGROUPS_MAX fail
+// with the errno musl leaves: 0, or the /etc/group open's ENOENT/ENOTDIR.
 #Export(c) jet_sys_initgroups_raw: fn(user: I64, group: I64, available: I64, value: I64, errno: I64) {
     native: jet_int_owned_to_i64(group)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     name: fd_c_path(user)
-    sys_errno_clear()
-    result: net_i32(sys_initgroups(name, native.bit_and(I64{4294967295})))
+    list: jet_rt_alloc(SYS_NGROUPS_MAX * I64{4}, I64{4})
+    look: jet_rt_alloc(I64{8}, I64{8})
+    net_put(look, LK_ERRNO, I64{0})
+    n: sys_grouplist(name, rt_text_len(user), native.bit_and(I64{4294967295}), list, look)
+    left: net_word(look, LK_ERRNO)
+    jet_rt_free(look, I64{8}, I64{8})
     fd_c_path_drop(name, user)
-    sys_sample(result, available, value, errno)
+    if (n > SYS_NGROUPS_MAX) {
+        jet_rt_free(list, SYS_NGROUPS_MAX * I64{4}, I64{4})
+        host_sample_fields(I64{-1}, left, available, value, errno)
+        return
+    }
+    result: if (n < I64{0}) -> n else -> thread_setxid(I64{116}, n, list, I64{0})
+    jet_rt_free(list, SYS_NGROUPS_MAX * I64{4}, I64{4})
+    host_sample_out(result, available, value, errno)
 }
 
 // mkfifo(path, mode as u32): mknod(path, mode | S_IFIFO, 0).

@@ -8,11 +8,11 @@
 // the host's system call from `host` and the C library functions the host
 // provides from `c`.
 //
-// Memory: the bytes below WEB_DATA_BASE are the host's (WEB_HOST_ERRNO is
-// errno), then the runtime's data, then the program's, then the stack, then
-// the heap the host's mmap grows. The table: the runtime's slots from 0, then
-// the program's. Each module places its data and slots where the module
-// before it ended (WebLayout).
+// Memory: the bytes below WEB_DATA_BASE are the host's (the auxiliary
+// vector's random bytes), then the runtime's data, then the program's, then
+// the stack, then the heap the host's mmap grows. The table: the runtime's
+// slots from 0, then the program's. Each module places its data and slots
+// where the module before it ended (WebLayout).
 
 use {
     jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
@@ -21,9 +21,6 @@ use {
 
 // The first byte either module's data may take.
 WEB_DATA_BASE: 1024
-
-// The host's errno word (Host.jet `__errno_location`).
-WEB_HOST_ERRNO: 1016
 
 // Where a module's data and table slots start.
 WebLayout: struct {

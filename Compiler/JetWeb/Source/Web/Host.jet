@@ -11,8 +11,8 @@ use {
 
 // The C functions the host provides, each as the runtime's IR calls it.
 WEB_HOST_C: [String]{
-    "__errno_location", "freeaddrinfo", "gai_strerror", "getaddrinfo", "getauxval", "initgroups", "pthread_attr_destroy",
-    "pthread_attr_init", "pthread_attr_setstacksize", "pthread_create", "pthread_detach", "pthread_join",
+    "getauxval", "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setstacksize",
+    "pthread_create", "pthread_detach", "pthread_join",
 }
 
 // Each host C function: true when it replaces the runtime's own definition,
@@ -114,9 +114,7 @@ const nodeProcess = globalThis.process?.versions?.node ? globalThis.process : nu
 const fs = nodeProcess ? await import("node:fs") : null;
 const PAGE = 65536;
 const STACK = 8 * 1024 * 1024;
-const ERRNO_WORD = 1016;
 const AUX_RANDOM = 496;
-const GAI_TEXT = 512;
 const TRAP_STATUS = 134;
 const E = {
   PERM: 1, NOENT: 2, SRCH: 3, INTR: 4, IO: 5, BADF: 9, CHILD: 10, AGAIN: 11, NOMEM: 12, ACCES: 13,
@@ -269,7 +267,6 @@ class Host {
     this.outcome = null;
     this.dom = false;
     crypto.getRandomValues(new Uint8Array(this.memory.buffer, AUX_RANDOM, 16));
-    this.u8().set(encoder.encode("name resolution is unavailable to a web program\0"), GAI_TEXT);
   }
 
   static async open(url, args, environment) {
@@ -327,10 +324,6 @@ class Host {
 
   zero(at, length) {
     if (at !== 0) this.u8().fill(0, at, at + length);
-  }
-
-  setErrno(code) {
-    this.view().setInt32(ERRNO_WORD, code, true);
   }
 
   // Runs `body` unless the program has exited; an exit records its status.
@@ -696,10 +689,6 @@ class Host {
 
   cLibrary() {
     const host = this;
-    const fail = (errno, value) => {
-      host.setErrno(errno);
-      return value;
-    };
     // The host runs one thread: the first refused thread start says why
     // before the runtime stops with E3001.
     let threadsRefused = false;
@@ -714,7 +703,6 @@ class Host {
     };
     const textAt = (bytes, length) => decoder.decode(host.u8().slice(Number(bytes), Number(bytes) + Number(length)));
     return {
-      __errno_location: () => BigInt(ERRNO_WORD),
       jet_ui_provider_capability: (code) => (provider()?.capability(Number(code)) ? 1n : 0n),
       jet_ui_provider_clipboard_get: () => stage(provider()?.clipboardGet()),
       jet_ui_provider_clipboard_set: (bytes, length) => (provider()?.clipboardSet(textAt(bytes, length)) ? 0n : -1n),
@@ -726,16 +714,11 @@ class Host {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
       },
-      getaddrinfo: () => fail(E.NOSYS, -11n),
-      freeaddrinfo: () => {},
-      gai_strerror: () => BigInt(GAI_TEXT),
       getauxval: (type) => {
         if (type === 6n) return 4096n;
         if (type === 25n) return BigInt(AUX_RANDOM);
-        if (type === 23n || type === 16n || type === 26n) return 0n;
-        return fail(E.NOENT, 0n);
+        return 0n;
       },
-      initgroups: () => fail(E.PERM, -1n),
       pthread_attr_init: () => 0n,
       pthread_attr_destroy: () => 0n,
       pthread_attr_setstacksize: () => 0n,

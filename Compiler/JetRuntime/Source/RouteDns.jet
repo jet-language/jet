@@ -29,12 +29,15 @@ dns_cause: fn(prefix: I64, code: I64) -> I64 {
     text
 }
 
+dns_cancelled: fn(name: I64, error: I64) -> I64 { dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`"))) }
+dns_timed_out: fn(name: I64, error: I64) -> I64 { dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`"))) }
+
 // jet_net_dns_remaining: the remaining nanoseconds, or 0 with the cancelled
 // or timed-out message.
 dns_remaining: fn(deadline: I64, name: I64, error: I64) -> I64 {
-    if (scheduler_task_cancelled() && !scheduler_shielded()) -> return dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`")))
+    if (scheduler_task_cancelled() && !scheduler_shielded()) -> return dns_cancelled(name, error)
     remaining: deadline - sync_now_ns()
-    if (remaining <= I64{0}) -> return dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`")))
+    if (remaining <= I64{0}) -> return dns_timed_out(name, error)
     remaining
 }
 
@@ -66,13 +69,17 @@ dns_lookup_deadline: fn(milliseconds: I64, name: I64, error: I64) -> I64 {
     dns_deadline_after(timeout, error)
 }
 
-// poll(fd, events, ms): >0 ready, 0 timeout, -errno.
+// A shielded poller wait for `events` (1 in, 4 out) of at most `milliseconds`
+// on this task, as poll(2) reports it: >0 ready, 0 timeout, -errno. The
+// lookup reports its own cancel and deadline.
 dns_poll: fn(state: I64, events: I64, milliseconds: I64) -> I64 {
-    pollfd: jet_rt_alloc(I64{8}, I64{8})
-    net_store_uint(pollfd, I64{4}, fd_word(state, I64{8}))
-    net_store_uint(wrapping(pollfd + I64{4}), I64{4}, events)
-    result: host_call(I64{7}, pollfd, I64{1}, milliseconds)
-    jet_rt_free(pollfd, I64{8}, I64{8})
+    scratch: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(scratch, I64{32})
+    jet_scheduler_shield_enter()
+    ready: host_net_ready(state, events, milliseconds * I64{1000000}, host_net_wait_kind(), scratch)
+    scheduler_shield_leave_finished()
+    result: if (ready < I64{0}) -> I64{0} - net_word(scratch, I64{8}) else -> ready
+    jet_rt_free(scratch, I64{32}, I64{8})
     result
 }
 
@@ -1197,9 +1204,9 @@ dns_system_lookup_kind: fn(name: I64, milliseconds: I64, kind: I64, data_out: I6
 #Export(c) jet_net_dns_ptr_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_lookup_kind(name, milliseconds, I64{1}, data_out, length_out, error) }
 #Export(c) jet_net_dns_srv_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_lookup_kind(name, milliseconds, I64{2}, data_out, length_out, error) }
 
-// jet_net_dns_system_lookup: the platform resolver for (name, 0) through the
-// shared resolver job (HostNetResolver.jet), waited in <=10 ms slices
-// against this lookup's deadline. An IP literal resolves to itself.
+// jet_net_dns_system_lookup: the platform resolver (HostNetLookup.jet) for
+// (name, 0) on this task, its waits shielded and bounded by this lookup's
+// deadline. An IP literal resolves to itself.
 dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -1210,47 +1217,28 @@ dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out:
     if testing_has_nul(name) {
         return dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: string contained an unexpected NUL byte")))
     }
-    job: jet_rt_alloc(I64{136}, I64{8})
-    thread_zero(job, I64{136})
-    net_put(job, I64{0}, I64{2})
+    if (dns_remaining(deadline, name, error) == I64{0}) -> return I64{0}
     host: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(host, rt_text_data(name), length)
     rt_text_put(wrapping(host + length), I64{0})
-    net_put(job, I64{24}, host)
-    net_put(job, I64{32}, length)
-    net_put(job, I64{40}, I64{0})
-    net_put(job, I64{72}, sync_park_new())
-    net_store_uint(wrapping(job + I64{88}), I64{4}, I64{1})
-    worker: thread_spawn(rt_net_resolver_worker_address(), job)
-    if (worker < I64{0}) {
-        net_resolver_job_drop(job)
-        net_resolver_job_drop(job)
-        return dns_fail(error, dns_named(rt_static_text("DNS lookup worker for `"), name, rt_static_text("` failed")))
+    errno: jet_rt_alloc(I64{8}, I64{8})
+    status: net_lookup(host, length, I64{0}, true, deadline, rows_out, count_out, errno)
+    code: net_word(errno, I64{0})
+    jet_rt_free(errno, I64{8}, I64{8})
+    jet_rt_free(host, length + I64{1}, I64{1})
+    if (status == I64{1}) {
+        if (dns_remaining(deadline, name, error) != I64{0}) -> return I64{1}
+        jet_rt_free(net_word(rows_out, I64{0}), net_word(count_out, I64{0}) * I64{56}, I64{8})
+        return I64{0}
     }
-    _ := thread_detach(worker)
-    result := I64{0}
-    loop {
-        slice: dns_slice_ms(deadline, name, error)
-        if (slice == I64{0}) -> break
-        if (sync_load(wrapping(job + I64{16})) != I64{0}) {
-            sync_mutex_lock(wrapping(job + I64{8}))
-            failure: net_word(job, I64{64})
-            if (failure != I64{0}) {
-                _ := dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: ")))
-                jet_rt_string_builder_push(trap_word(error), net_word(failure, I64{24}))
-            } else {
-                net_put(rows_out, I64{0}, net_word(job, I64{48}))
-                net_put(count_out, I64{0}, net_word(job, I64{56}))
-                net_put(job, I64{48}, I64{0})
-                result = I64{1}
-            }
-            sync_mutex_unlock(wrapping(job + I64{8}))
-            break
-        }
-        _ := sync_park(net_word(job, I64{72}), slice * I64{1000000})
-    }
-    net_resolver_job_drop(job)
-    result
+    if (status == LK_STOP) -> return I64{0}
+    if (status == LK_CANCEL) -> return dns_cancelled(name, error)
+    if (status == LK_TIMEOUT) -> return dns_timed_out(name, error)
+    failure: net_gai_error(status, code)
+    _ := dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: ")))
+    jet_rt_string_builder_push(trap_word(error), net_word(failure, I64{24}))
+    jet_rt_handle_drop_jet_resolve_error(failure)
+    I64{0}
 }
 
 // A/AAAA through the system resolver: one family, sorted by address bytes,

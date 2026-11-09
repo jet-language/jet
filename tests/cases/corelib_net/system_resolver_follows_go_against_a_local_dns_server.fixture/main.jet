@@ -1,0 +1,249 @@
+// The system resolver (core.net.socket_addrs, and dns_a for a deadline)
+// against a DNS server this program runs on 127.0.0.1:53 over UDP and TCP,
+// inside a network and mount namespace whose /etc/resolv.conf and
+// /etc/hosts are this fixture's (inside.sh). Each line is a name and its
+// addresses in the resolver's order, or its error. A query for STOP over
+// each transport ends that server.
+package: {
+    name: "system_resolver"
+    authority: { allow: [IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use net: core.net
+
+STOP: "stop.server"
+
+NAMES: [String]{
+    "localhost", "127.0.0.1", "myhost",
+    "a.test", "aaaa.test", "both.test", "both.test.", "cname.test", "big.test", "flaky.test",
+    "nx.test", "nodata.test", "fail.test", "refused.test", "slow.test",
+    "half.test", "halfslow.test", "halfv6.test",
+    "host", "svc", "late", "empty", "gone", "x.y", "hidden.onion",
+    "v4order.test", "prefix.test", "scope.test", "policy.test"
+}
+
+// A resource record: its type (1 A, 28 AAAA, 5 CNAME) and RDATA.
+Record: struct {
+    kind: Int
+    data: [U8]
+}
+
+// The server's reply to one question: rcode -1 sends nothing.
+Reply: struct {
+    rcode: Int
+    truncated: Bool
+    records: [Record]
+}
+
+Question: struct {
+    name: String
+    kind: Int
+    end: Int
+}
+
+byte: fn(value: Int) -> U8 { U8.from_int(value % 256) ?? U8{0} }
+
+v4: fn(a: Int, b: Int, c: Int, d: Int) -> Record {
+    Record{kind: 1, data: [U8]{byte(a), byte(b), byte(c), byte(d)}}
+}
+
+v6: fn(words: [Int]) -> Record {
+    data := [U8]{}
+    loop word in words {
+        data.push(byte(word /% 256))
+        data.push(byte(word % 256))
+    }
+    Record{kind: 28, data: data}
+}
+
+// A name in DNS wire form: length-prefixed labels, then the root.
+wire_name: fn(name: String) -> [U8] {
+    out := [U8]{}
+    loop label in name.split(".") {
+        out.push(byte(label.bytes().len()))
+        loop b in label.bytes() -> out.push(b)
+    }
+    out.push(U8{0})
+    out
+}
+
+cname: fn(target: String) -> Record { Record{kind: 5, data: wire_name(target)} }
+
+answer: fn(records: [Record]) -> Reply { Reply{rcode: 0, truncated: false, records: records} }
+failure: fn(rcode: Int) -> Reply { Reply{rcode: rcode, truncated: false, records: [Record]{}} }
+SILENT: Reply{rcode: -1, truncated: false, records: [Record]{}}
+
+// The zone: `asked` counts this name and type's queries so far, this one
+// included. Every other name is NXDOMAIN.
+zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
+    if name == "a.test" -> return answer([Record]{v4(10, 0, 0, 1), v4(10, 0, 0, 2)})
+    if name == "aaaa.test" -> return answer([Record]{v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 1})})
+    if name == "both.test" -> return answer([Record]{v4(10, 0, 0, 3), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 3})})
+    if name == "cname.test" -> return answer([Record]{cname("a.test"), v4(10, 0, 0, 1), v4(10, 0, 0, 2)})
+    if name == "big.test" && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
+    if name == "big.test" {
+        records := [Record]{}
+        loop i in 1..<31 -> records.push(v4(10, 2, 0, i))
+        return answer(records)
+    }
+    if name == "flaky.test" && asked == 1 -> return failure(2)
+    if name == "flaky.test" -> return answer([Record]{v4(10, 0, 0, 8)})
+    if name == "nodata.test" -> return answer([Record]{})
+    if name == "fail.test" -> return failure(2)
+    if name == "refused.test" -> return failure(5)
+    if name == "slow.test" -> return SILENT
+    if name == "half.test" && kind == 28 -> return failure(2)
+    if name == "half.test" -> return answer([Record]{v4(10, 0, 0, 4)})
+    if name == "halfslow.test" && kind == 28 -> return SILENT
+    if name == "halfslow.test" -> return answer([Record]{v4(10, 0, 0, 5)})
+    if name == "halfv6.test" && kind == 1 -> return failure(2)
+    if name == "halfv6.test" -> return answer([Record]{v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 6})})
+    if name == "host.corp.test" -> return answer([Record]{v4(10, 1, 1, 1)})
+    if name == "svc.corp.test" -> return failure(2)
+    if name == "svc.name.test" -> return answer([Record]{v4(10, 1, 1, 4)})
+    if name == "late.corp.test" -> return SILENT
+    if name == "late.name.test" -> return answer([Record]{v4(10, 1, 1, 5)})
+    if name == "empty.corp.test" -> return answer([Record]{})
+    if name == "empty.name.test" -> return answer([Record]{v4(10, 1, 1, 6)})
+    if name == "gone.corp.test" || name == "gone.name.test" -> return failure(2)
+    if name == "x.y.corp.test" -> return answer([Record]{v4(10, 1, 1, 7)})
+    if name == "hidden.onion" -> return answer([Record]{v4(10, 6, 6, 6)})
+    if name == "v4order.test" -> return answer([Record]{v4(10, 0, 0, 10), v4(127, 0, 0, 6)})
+    if name == "prefix.test" -> return answer([Record]{v4(127, 255, 0, 1), v4(127, 0, 0, 2), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 7})})
+    if name == "scope.test" -> return answer([Record]{v4(192, 0, 2, 7), v4(127, 0, 0, 7), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 8})})
+    if name == "policy.test" -> return answer([Record]{v6([Int]{0xfec0, 0, 0, 0, 0, 0, 0, 1}), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 5})})
+    failure(3)
+}
+
+// The query's question: its lowercase name, type, and the offset past it.
+question: fn(query: [U8]) -> Question? {
+    at := 12
+    name := ""
+    loop at < query.len() && Int.from_u8(query[at]) != 0 {
+        from: at + 1
+        to: from + Int.from_u8(query[at])
+        if to > query.len() -> return None
+        label: (String.from_bytes(slice(query, from, to)) ?? return None).to_lower()
+        name = if name == "" -> label else -> "{name}.{label}"
+        at = to
+    }
+    if at + 5 > query.len() -> return None
+    Val(Question{name: name, kind: Int.from_u8(query[at + 1]) * 256 + Int.from_u8(query[at + 2]), end: at + 5})
+}
+
+slice: fn(bytes: [U8], from: Int, to: Int) -> [U8] {
+    out := [U8]{}
+    loop i in from..<to -> out.push(bytes[i])
+    out
+}
+
+// The response: the query's ID, RD and question, then the reply's records
+// of the asked type and its CNAMEs.
+encode: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
+    records := [Record]{}
+    loop record in reply.records {
+        if record.kind == asked.kind || record.kind == 5 -> records.push(record.copy())
+    }
+    flags: 128 + Int.from_u8(query[2]) % 2 + (if reply.truncated -> 2 else -> 0)
+    out := [U8]{query[0], query[1], byte(flags), byte(128 + reply.rcode), 0, 1, byte(records.len() /% 256), byte(records.len() % 256), 0, 0, 0, 0}
+    loop b in slice(query, 12, asked.end) -> out.push(b)
+    loop record in records {
+        header: [U8]{0xc0, 0x0c, 0, byte(record.kind), 0, 1, 0, 0, 0, 60, byte(record.data.len() /% 256), byte(record.data.len() % 256)}
+        loop b in header -> out.push(b)
+        loop b in record.data -> out.push(b)
+    }
+    out
+}
+
+udp_serve: fn(server: UDPSocket) {
+    seen := [String: Int]{}
+    loop {
+        request: net.udp_receive(server, 512) ?? return
+        query: net.udp_packet_bytes(request)
+        asked: question(query) ?? next
+        if asked.name == STOP -> return
+        key: "{asked.name}/{asked.kind}"
+        count: (seen.get(key) ?? 0) + 1
+        seen[key] = count
+        reply: zone(asked.name, asked.kind, false, count)
+        if reply.rcode < 0 -> next
+        _: net.udp_send_bytes_to(server, encode(query, asked, reply), net.udp_packet_addr(request)) ?? 0
+    }
+}
+
+// One TCP connection's length-prefixed queries, answered until the client
+// closes it or a silent name comes up; false once STOP is asked.
+tcp_answer: fn(stream: &TCPStream) -> Bool {
+    pending := [U8]{}
+    loop {
+        chunk: net.tcp_read_bytes(stream, 4096) ?? return true
+        if chunk.len() == 0 -> return true
+        loop b in chunk -> pending.push(b)
+        loop pending.len() >= 2 {
+            size: Int.from_u8(pending[0]) * 256 + Int.from_u8(pending[1])
+            if pending.len() < size + 2 -> break
+            query: slice(pending, 2, size + 2)
+            pending = slice(pending, size + 2, pending.len())
+            asked: question(query) ?? return true
+            if asked.name == STOP -> return false
+            reply: zone(asked.name, asked.kind, true, 1)
+            if reply.rcode < 0 -> return true
+            net.tcp_write_all_bytes(stream, framed(encode(query, asked, reply))) ?? return true
+        }
+    }
+}
+
+tcp_serve: fn(listener: TCPListener) {
+    loop {
+        stream := net.tcp_accept(listener) ?? return
+        serving: tcp_answer(stream)
+        stream.close() ?? return
+        if !serving -> return
+    }
+}
+
+// A message with its two-byte TCP length prefix.
+framed: fn(message: [U8]) -> [U8] {
+    out := [U8]{byte(message.len() /% 256), byte(message.len() % 256)}
+    loop b in message -> out.push(b)
+    out
+}
+
+// A recursive A query for `name`.
+query_for: fn(name: String) -> [U8] {
+    out := [U8]{0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+    loop b in wire_name(name) -> out.push(b)
+    tail: [U8]{0, 1, 0, 1}
+    loop b in tail -> out.push(b)
+    out
+}
+
+show: fn(name: String) {
+    if net.socket_addrs(name, 80) == {
+        .Ok(addresses) -> {
+            line := "{name}:"
+            loop address in addresses -> line = "{line} {net.socket_host(address)}"
+            print(line)
+        }
+        .Err(error) -> print("{name}: {net.error_message(error)}")
+    }
+}
+
+run: fn() {
+    udp: net.udp_bind("127.0.0.1:53") ?? panic("bind UDP 127.0.0.1:53")
+    listener: net.tcp_listen("127.0.0.1:53") ?? panic("listen on TCP 127.0.0.1:53")
+    udp_server: task udp_serve(udp)
+    tcp_server: task tcp_serve(listener)
+    loop name in NAMES -> show(name)
+    if net.dns_a("slow.test", 300) == {
+        .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
+        .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+    }
+    client: net.udp_bind("127.0.0.1:0") ?? panic("bind the stopping client")
+    _: net.udp_send_bytes_to(client, query_for(STOP), net.socket_addr_parse("127.0.0.1:53") ?? panic("server address")) ?? panic("stop UDP")
+    stopper := net.tcp_connect("127.0.0.1:53") ?? panic("connect to stop TCP")
+    net.tcp_write_all_bytes(stopper, framed(query_for(STOP))) ?? panic("stop TCP")
+    udp_server.join() ?? panic("UDP server")
+    tcp_server.join() ?? panic("TCP server")
+    stopper.close() ?? panic("close the stopping client")
+}
