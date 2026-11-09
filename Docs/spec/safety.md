@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1411,
+  "total": 1412,
   "counts": {
-    "Compiler": 740,
+    "Compiler": 741,
     "Core": 187,
     "Docs": 8,
     "Examples": 36,
@@ -2962,42 +2962,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 178,
+      "line": 159,
+      "column": 5,
+      "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostProcess.jet",
+      "line": 190,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 198,
+      "line": 210,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 214,
+      "line": 226,
       "column": 5,
       "reason": "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 228,
+      "line": 240,
       "column": 5,
       "reason": "some lends a writable C-ABI Option success word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 238,
+      "line": 250,
       "column": 5,
       "reason": "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 250,
+      "line": 262,
       "column": 5,
       "reason": "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots"
     },
@@ -10107,14 +10114,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 740 |
+| Compiler | 741 |
 | Core | 187 |
 | Docs | 8 |
 | Examples | 36 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
-| **total** | **1411** |
+| **total** | **1412** |
 
 ### Regions
 
@@ -10511,12 +10518,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 163:13 | "the FD72 lock protects this initialized refill-buffer byte" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 7:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 96:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 178:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 198:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 214:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 228:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 238:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 250:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 159:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 190:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 210:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 226:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 240:5 | "some lends a writable C-ABI Option success word" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 250:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 262:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 13:9 | "the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 55:13 | "accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 62:13 | "private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer" |
