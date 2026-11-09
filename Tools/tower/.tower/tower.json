@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96681,
+    "rev": 96700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60005,15 +60005,6 @@
           "at": "2026-10-30T13:26:01.871Z"
         },
         {
-          "n": 11,
-          "text": "The runtime pack builds with jet alone: prebuild-runtime.mjs is a Jet program that needs no node, cc, ar, nm or Nix-built musl/libgcc. It reuses the seed's foreign archives or builds them through Jet's own toolchain, and a fresh clone with only a seed jet rebuilds the pack when its recipe changes (found by SelfMem's #6564 census, 2026-11-04: G3).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T20:57:22.796Z"
-        },
-        {
           "n": 12,
           "text": "Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools/gauntlet/entries/ names that script as its original and holds its Jet twin, the shared fixtures, the expected output and a parity check, all in the same commit. Exempt: browser-executed JS and Nix/flake files (owner 2026-11-06), and test or example subjects that a Jet case or example consumes (tests/cases, tests/fixtures, tests/run, tests/*/inputs, Examples) (owner 2026-11-08, Q26 A). A ScriptBench workload folder holding run.jet and expected.out counts as a pairing like a gauntlet entry. The exemptions live in one place in the guard. A planted unpaired script is refused with a message naming the file; a planted paired script, a planted browser asset and a planted test subject pass.",
           "status": "open",
@@ -60079,11 +60070,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-08T18:54:54.418Z",
+      "updated": "2026-11-09T17:55:24.832Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
-      ]
+      ],
+      "criteriaLastN": 17
     },
     {
       "id": "c022g7qw",
@@ -81011,15 +81003,6 @@
           "at": "2026-10-31T01:10:06.066Z"
         },
         {
-          "n": 11,
-          "text": "(was #4922) Freestanding native startup and runtime: drop musl/libc/libgcc from Jet native binaries",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:09.442Z"
-        },
-        {
           "n": 12,
           "text": "(was #6017) A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size exceeds 200 KB or start exceeds 5 ms.",
           "status": "open",
@@ -81145,7 +81128,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-08T14:38:05.915Z",
+      "updated": "2026-11-09T17:55:23.864Z",
       "updatedBy": "Main",
       "criteriaLastN": 24
     },
@@ -88340,6 +88323,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:28:51.629Z"
+        },
+        {
+          "n": 2,
+          "text": "C-linked programs follow the ratified D-FFI-CARRIER1. If it is option E, only the initial thread runs C, a task's C call is handed to it, and errno and results come back; a case proves that single-threaded C called from many tasks is safe and that main-thread affinity holds, at O0, O1 and O2 (was #6689 c5).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T17:55:19.658Z"
         }
       ],
       "refs": [],
@@ -88354,9 +88346,9 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:23.352Z",
-      "updated": "2026-11-07T03:28:51.629Z",
+      "updated": "2026-11-09T17:55:19.658Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c0x2wq8a",
@@ -93541,8 +93533,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-09T17:30:08.208Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T17:44:57.570Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c00ctwqw",
@@ -99043,12 +99035,12 @@
         },
         {
           "n": 3,
-          "text": "The C compiler and musl are declared with `b.toolchain` and `b.probe`. JET_PACK_MUSL_LIB and the other toolchain environment variables are deleted, and a missing tool fails at once with a registered error.",
+          "text": "build.jet declares no C compiler, musl, ar or nm (#6693, #6687 c2). Every tool it still needs is declared with b.toolchain and b.probe, JET_PACK_MUSL_LIB and the other toolchain environment variables stay deleted, and a missing tool fails at once with a registered error.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:30:57.119Z"
+          "at": "2026-11-09T17:55:25.795Z"
         },
         {
           "n": 4,
@@ -99104,7 +99096,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T18:12:23.576Z",
+      "updated": "2026-11-09T17:55:25.796Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -99456,12 +99448,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every child card is done.",
+          "text": "#6688, #6689, #6690, #6691, #6692, #6693, #6694 and #6695 are done. #6696 (full libc coverage) is G3 and does not gate this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:46:44.629Z"
+          "at": "2026-11-09T17:55:10.583Z"
         },
         {
           "n": 2,
@@ -99483,12 +99475,12 @@
         },
         {
           "n": 4,
-          "text": "No #Import(c) or #FFI(c) remains in Compiler, Core, Jetpack or Tools outside the C-interop feature itself, its tests and its proofs (census command and output in the receipt).",
+          "text": "No #Import(c), #FFI(c) or '#Import c.<lib>: module' import remains in Compiler, Core, Jetpack or Tools outside the C-interop feature itself, its tests and its proofs (census command and output in the receipt).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:46:47.959Z"
+          "at": "2026-11-09T17:55:11.568Z"
         }
       ],
       "refs": [],
@@ -99503,14 +99495,14 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-09T17:21:03.965Z",
+      "updated": "2026-11-09T17:55:11.568Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
     {
       "id": "c0bzrof5",
       "num": 6688,
-      "title": "No C: port the runtime's 33 libm functions to Jet, then all of math.h",
+      "title": "No C: port the runtime's 33 libm functions to Jet",
       "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCompiler/JetRuntime/Source/CompilerNeededMath.jet imports acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, cos, cosh, exp, exp2, expm1, floor, fma, fmod, hypot, log, log10, log1p, log2, pow, round, sin, sinh, sqrt, tan, tanh and trunc from musl. Port them to Jet first; sqrt, floor, ceil, trunc, round and fma may lower to the x86-64 instructions where those give the IEEE result. Then cover every remaining C23 math.h function Core exposes or will expose. Every function returns the same bits as musl's on every tier (I9), web included.",
       "kind": "task",
       "track": "epoch",
@@ -99584,7 +99576,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:49.544Z",
-      "updated": "2026-11-09T15:59:08.208Z",
+      "updated": "2026-11-09T17:55:09.531Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -99606,6 +99598,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "G1Lead-25 (option E) is held until D-FFI-CARRIER1 is ratified with a clean adversarial review (owner direction 2026-11-09). c1/c2 land with raw clone carriers for pure programs only."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -99670,12 +99667,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Thread.jet and Sync.jet import nothing from C, and the runtime object asks libc for no pthread symbol.",
+          "text": "Thread.jet and Sync.jet import nothing from C, and the runtime object asks libc for no pthread symbol. A program that links C keeps today's thread behavior (its carriers come from its C closure's libc) until D-FFI-CARRIER1 is ratified and built on #6504; a case proves both link shapes at O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:46:56.135Z"
+          "at": "2026-11-09T17:55:21.798Z"
         },
         {
           "n": 2,
@@ -99694,15 +99691,6 @@
           "verifiedBy": null,
           "evidence": "dev a796b483ee (SchedLead-6): setuid/setgid/setgroups/initgroups through a Jet synccall over the thread registry; integration b5 passes.",
           "at": "2026-11-09T03:05:52.588Z"
-        },
-        {
-          "n": 5,
-          "text": "C-linked programs default to option E: only the initial thread runs C; a task's C call is handed to it, and errno and results come back. A case proves that single-threaded C called from many tasks is safe, and that main-thread affinity holds, at O0/O1/O2 (owner direction on D-FFI-CARRIER1).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T16:45:08.863Z"
         }
       ],
       "refs": [],
@@ -99717,7 +99705,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T16:45:08.863Z",
+      "updated": "2026-11-09T17:55:22.859Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -99995,7 +99983,11 @@
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
-      "blockedBy": [],
+      "blockedBy": [
+        "c0x92nsv",
+        "c0bnp1zw",
+        "c0ajhpeh"
+      ],
       "assignee": null,
       "log": [
         {
@@ -100012,12 +100004,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "PrebuildRuntime.jet and build.jet's runtime step use no CC, AR or JET_PACK_MUSL_LIB, and the pack's foreign/platform directory is gone.",
+          "text": "Compiler/build.jet and Compiler/Toolchain/RuntimePack.jet probe and call no cc, ar or nm (build.jet:54-56 on dev 6a06b917cb), the pack builds no vendored C, and the pack's foreign/platform directory stays gone.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:47:12.237Z"
+          "at": "2026-11-09T17:55:12.673Z"
         },
         {
           "n": 2,
@@ -100036,6 +100028,15 @@
           "verifiedBy": null,
           "evidence": "a0_042 release admission (cut from d4d45ded4b, whose pack has no foreign/platform musl dir; nm: jet_runtime.pack.o 3293 defined, no musl/libgcc names): kit-candidate-cases.json 4781 rows, PASS 3814, FAIL 1 (process_session_resource_limits, passed on retry), 0 lost vs a0_041 (RELEASE.md: 112 gained, 0 lost). Write-up: CFreeLead3 c3-evidence.md",
           "at": "2026-11-09T17:16:03.185Z"
+        },
+        {
+          "n": 4,
+          "text": "Every comment that names the Rust or musl toolchain matches the code once the pack's C is gone (on dev 6a06b917cb: flake.nix:102-104, Tools/agent/Chain.jet:40-41 and 1443, Tools/agent/JetEnv.jet:4-7, Tools/agent/Land.jet:979, Tools/release/Admit.jet:758-759); a git grep for musl and libgcc in comments lists only true statements (was #6714).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T17:55:15.634Z"
         }
       ],
       "refs": [],
@@ -100050,14 +100051,14 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:10.785Z",
-      "updated": "2026-11-09T17:20:55.370Z",
+      "updated": "2026-11-09T17:55:15.634Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0bnp1zw",
       "num": 6694,
-      "title": "No C: port mbedtls to Jet in full (TLS 1.2 and 1.3, X.509, PSA crypto)",
+      "title": "No C: port the mbedtls that Core uses to Jet (the pinned TLS 1.2 and 1.3 set, X.509, PSA crypto)",
       "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCore/Net/Tls.jet uses c.mbedtls (Core/Vendor/Mbedtls, 272 C and header files). Port the whole library the vendored configuration builds: TLS 1.2 and 1.3 client and server, X.509 parsing and verification, and every cipher, hash, MAC, KDF, key exchange and signature it provides (AES-GCM, ChaCha20-Poly1305, SHA-1 and SHA-2, HMAC, HKDF, ECDHE on X25519 and the NIST curves, ECDSA, RSA PKCS#1 v1.5 and PSS). Constant-time code is required where mbedtls is constant-time. Security closure (Docs/spec/contributing/security-closure.md) applies.",
       "kind": "task",
       "track": "epoch",
@@ -100181,19 +100182,20 @@
         "security"
       ],
       "goals": [
+        "G1",
         "G7"
       ],
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-09T17:24:23.492Z",
+      "updated": "2026-11-09T17:55:06.016Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
     {
       "id": "c0ajhpeh",
       "num": 6695,
-      "title": "No C: port SQLite to Jet in full (core.db)",
+      "title": "No C: port the SQLite that Core/Db uses to Jet (core.db)",
       "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCore/Db/Db.jet uses c.sqlite3 (Core/Vendor/Sqlite3, the amalgamation). Port the whole library the vendored build provides: the SQL language, the file format (databases written by either build open in the other), the pager and journal and WAL modes, locking and the VFS, and the compiled-in extensions (FTS3, FTS5, JSON1, RTree, DBSTAT, STAT4, SOUNDEX, column metadata), with the flags PrebuildRuntime.jet sets today.",
       "kind": "task",
       "track": "epoch",
@@ -100279,12 +100281,13 @@
         "owner-direction"
       ],
       "goals": [
+        "G1",
         "G7"
       ],
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-09T17:24:24.417Z",
+      "updated": "2026-11-09T17:55:07.735Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100772,8 +100775,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T17:40:31.218Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-09T17:44:57.569Z",
+      "updatedBy": "owner",
       "criteriaLastN": 8
     },
     {
@@ -101310,7 +101313,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "frozen",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -101318,7 +101321,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Folded into #6693 as a criterion (BoardPlanner 2026-11-09): the comments go stale in the same cutover that removes the pack's C."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -101336,7 +101345,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T09:36:12.216Z",
-      "updated": "2026-11-09T09:36:20.211Z",
+      "updated": "2026-11-09T17:55:18.554Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -187686,8 +187695,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T06:25:55.197Z"
+      "status": "ratified",
+      "created": "2026-11-09T06:25:55.197Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     },
     {
       "id": "D-FRAME-THEME1",
@@ -188482,8 +188493,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T17:29:54.576Z"
+      "status": "ratified",
+      "created": "2026-11-09T17:29:54.576Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     }
   ],
   "questions": [
@@ -191595,6 +191608,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T17:55:25.796Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0crz3ra",
+      "note": "#3: No-C (G1, #6693 c1) removes the C compiler from the build; declaring it would add back what G1 deletes.; was: The C compiler and musl are declared with `b.toolchain` and `b.probe`. JET_PACK_MUSL_LIB and the other toolchain environment variables are deleted, and a missing tool fails at once with a registered e"
+    },
+    {
+      "at": "2026-11-09T17:55:24.832Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0qe89cl",
+      "note": "#11: prebuild-runtime.mjs became PrebuildRuntime.jet (b46ad51ed4) and then Compiler/build.jet plus Compiler/Toolchain/RuntimePack.jet (42d3bedfe8). No cc/ar/nm/musl is #6693 c1, and the fresh-clone pack rebuild is #6687 c2 (G1).; was [open]: The runtime pack builds with jet alone: prebuild-runtime.mjs is a Jet program that needs no node, cc, ar, nm or Nix-built musl/libgcc. It reuses the seed's foreign archives or builds them through Jet'"
+    },
+    {
+      "at": "2026-11-09T17:55:23.864Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c08r6ogl",
+      "note": "#11: Duplicate of #6693 (G1: the runtime pack and program links drop musl, libgcc and libgcc_eh).; was [open]: (was #4922) Freestanding native startup and runtime: drop musl/libc/libgcc from Jet native binaries"
+    },
+    {
+      "at": "2026-11-09T17:55:22.859Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T17:55:21.798Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0x92nsv",
+      "note": "#1: C-linked programs keep today's behavior until the ballot (C-G1-1).; was: Thread.jet and Sync.jet import nothing from C, and the runtime object asks libc for no pthread symbol."
+    },
+    {
+      "at": "2026-11-09T17:55:20.737Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0x92nsv",
+      "note": "#5: Moved to #6504: D-FFI-CARRIER1 is not on Tower and its reviews are not clean (FFIReview, CarrierReview). G1 removes Jet's own C dependencies; C-linked programs keep today's carriers. Owner ruling 2026-11-09: G1 removes the C dependencies only; full libraries are G3 and speed and size are G11.; was [open]: C-linked programs default to option E: only the initial thread runs C; a task's C call is handed to it, and errno and results come back. A case proves that single-threaded C called from many tasks is "
+    },
+    {
+      "at": "2026-11-09T17:55:19.658Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#2 C-linked programs follow the ratified D-FFI-CARRIER1. If it "
+    },
+    {
+      "at": "2026-11-09T17:55:18.555Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09a7oci",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T17:55:16.634Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09a7oci",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T17:55:15.634Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03a0dhc",
+      "note": "#4 Every comment that names the Rust or musl toolchain matches "
+    },
+    {
+      "at": "2026-11-09T17:55:14.625Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03a0dhc",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-11-09T17:55:12.673Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c03a0dhc",
+      "note": "#1: Tools/packaging/PrebuildRuntime.jet and JET_PACK_MUSL_LIB no longer exist (42d3bedfe8); the probes left are cc, ar and nm in build.jet.; was: PrebuildRuntime.jet and build.jet's runtime step use no CC, AR or JET_PACK_MUSL_LIB, and the pack's foreign/platform directory is gone."
+    },
+    {
+      "at": "2026-11-09T17:55:11.568Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lscvc9",
+      "note": "#4: The old pattern missed the module form that Core/Db/Db.jet:1425 and Core/Net/Tls.jet:1454 use on dev 6a06b917cb.; was: No #Import(c) or #FFI(c) remains in Compiler, Core, Jetpack or Tools outside the C-interop feature itself, its tests and its proofs (census command and output in the receipt)."
+    },
+    {
+      "at": "2026-11-09T17:55:10.583Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lscvc9",
+      "note": "#1: Owner ruling 2026-11-09: G1 removes the C dependencies only; full libraries are G3 and speed and size are G11. #6696 is a child, but it is full-library work (G3).; was: Every child card is done."
+    },
+    {
+      "at": "2026-11-09T17:55:09.531Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bzrof5",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T17:55:07.735Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ajhpeh",
+      "note": "title,goals"
+    },
+    {
+      "at": "2026-11-09T17:55:06.016Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "title,goals"
+    },
+    {
+      "at": "2026-11-09T17:55:04.143Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G1",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-09T17:44:57.570Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-SETTINGS-HOME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-09T17:44:57.570Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FRAME-ACCENT1",
+      "note": "A"
+    },
     {
       "at": "2026-11-09T17:40:33.550Z",
       "by": "Main",
@@ -197316,7 +197469,7 @@
     {
       "id": "G1",
       "title": "Hand-off and durability (P0)",
-      "body": "Every closed card is provably durable on dev or master, and a fresh clone is enough for any agent, local or remote, to continue: seeds are signed GitHub releases, no personal info in committed files, and the test suites are fast (#6610). Every golden, UI and cases row passes on O0, O1 and O2 on the JetIR native path; no row is skipped, unsupported or an internal error. All testing is ported to Jet and works. The unbuilt CLI commands (#6418) and Core APIs (#6419) stay in this goal. Owner order 2026-11-04: first. Owner order 2026-11-06: repo scripting ports are G4 (#5072); testing-toolkit features moved to G5.",
+      "body": "No C: Jet depends on no other language. Everything Jet itself takes from C (musl libc and libm, pthread, getaddrinfo, libgcc, the vendored SQLite and mbedtls, and the compiler's and tools' own C imports) moves into native Jet, so a fresh clone with no C compiler, no musl and no Nix builds jet, jetpack and the runtime pack (#6687). Owner order 2026-11-09: G1 removes the C dependencies only. Full C-equivalent libraries are G3 (#3550, #6696, #6700, #6748), and speed and size are G11 (#6736). Due 2026-11-09 16:00. The earlier hand-off and durability cards are done; #6418 is G5, #6419 is G3 and #6610 is G11.",
       "status": "active",
       "log": [
         {
@@ -197336,7 +197489,7 @@
         }
       ],
       "created": "2026-11-04T18:09:18.839Z",
-      "updated": "2026-11-06T20:05:45.040Z",
+      "updated": "2026-11-09T17:55:04.143Z",
       "updatedBy": "Main"
     },
     {
