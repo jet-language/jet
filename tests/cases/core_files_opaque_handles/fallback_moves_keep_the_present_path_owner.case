@@ -1,0 +1,22 @@
+# A `??` fallback that moves an owner moves it on the absent path only: a
+# `?? return` fallback, the `if x == None -> return` guard sema refines to
+# one, and a value fallback. On the present path the owner still ends its
+# lock at its scope end, so every lock descriptor closes once and none leaks.
+# The same missing drop leaked the REPL's whole registration graph each turn
+# (`sema_comptime_environment_tables`).
+fixture: fallback_moves_keep_the_present_path_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fallback_moves_keep_the_present_path_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fallback_moves_keep_the_present_path_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fallback_moves_keep_the_present_path_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = fallback_moves_keep_the_present_path_owner.out

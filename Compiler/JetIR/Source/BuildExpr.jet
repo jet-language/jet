@@ -5645,6 +5645,10 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     // dropped once the fallback has run.
     owned_subject: b.fresh[subject] && (ir_box_row(m, b.f.slot_type[subject]) || ir_option_inline(m, b.f.slot_type[subject]))
     test: if is_result -> ir_result_is_ok(m, b, subject) else -> ir_option_is_some(m, b, subject)
+    // Each path starts from the ownership before the `??`: a variable the
+    // fallback moves (`x ?? return keep(owner.move())`) still owns its value
+    // on the present path, where ir_meet_paths reconciles the two.
+    before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, test, b.line)
     if view {
         address: ir_view_result_address(m, p, b, subject)
@@ -5665,6 +5669,8 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
             ir_release(m, b, payload)
         }
     }
+    then_states: ir_own_states(b, before.len())
+    ir_set_own_states(b, before)
     ir_else(b.f, b.line)
     // A failure handled here ends its journey: drop it before the fallback
     // runs, off the success edge (#6014).
@@ -5697,6 +5703,8 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         ir_release(m, b, subject)
     }
     ir_end(b.f, b.line)
+    fallback_leaves: ir_fallback_leaves(p, b, fallback)
+    ir_meet_paths(m, b, test, then_states, false, fallback_leaves)
     if view && result >= 0 {
         viewed: ir_allocator_view(m, b, result, row)
         if viewed >= 0 -> b.fresh[viewed] = false
@@ -5791,6 +5799,13 @@ ir_optional_wrap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: Int, val
     boxed: ir_box_alloc(m, b, size, option_row)
     ir_store_at(m, p, b, boxed, 0, owned)
     ir_emit(b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+}
+
+// Whether the `??` fallback `fallback` never reaches what follows the `??`:
+// a return, panic, break or next, or a value of type Never.
+ir_fallback_leaves: fn(p: IRProgram, b: IRBuilder, fallback: BodyOrFallback) -> Bool Never! {
+    if fallback == .Value(alternative) -> return ir_never_type(ir_ty(p, b, alternative))
+    true
 }
 
 ir_fallback_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fallback: BodyOrFallback, result: Int, span: Span) Never! {
