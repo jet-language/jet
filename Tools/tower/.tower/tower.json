@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97746,
+    "rev": 97748,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57386,7 +57386,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:07.706Z",
-      "updated": "2026-11-09T19:41:22.823Z",
+      "updated": "2026-11-09T19:46:43.088Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -86125,6 +86125,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:28:40.305Z"
+        },
+        {
+          "n": 3,
+          "text": "A write to a computed field (for example lock.path = … on a core.files FileLock) is refused by sema with a registered diagnostic, never passing jet check and then failing as an internal compiler error in the backend (I2/I3); a regression case covers struct-field and computed-field writes on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:42:36.844Z"
         }
       ],
       "refs": [],
@@ -86135,9 +86144,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T20:59:59.933Z",
-      "updated": "2026-11-07T03:28:40.305Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2
+      "updated": "2026-11-09T19:42:36.844Z",
+      "updatedBy": "agent",
+      "criteriaLastN": 3
     },
     {
       "id": "c0p2n50x",
@@ -188881,6 +188890,160 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T19:41:22.823Z"
+    },
+    {
+      "id": "D-PRIM-TYPEKEY1",
+      "cardId": "c02y3vkg",
+      "group": "types",
+      "title": "Run-time type values: a comparable reflect.TypeKey in core.reflect",
+      "situation": "",
+      "gist": "How should a running Jet program name a type as a value, for example to key a map by type?",
+      "lesson": "A type-keyed table needs a value identifying the exact type. Jet's current reflection gives display names and paths, which are strings, not an exact portable identity contract.",
+      "explainer": "",
+      "story": "Rui keeps component counts by type. A reflected path works for his small program, but he wants exact identity across generic instances and separately loaded packages, without relying on display text.",
+      "inWild": "Rust's opaque TypeId is comparable and hashable, with release-dependent hash/order and no stable layout (https://doc.rust-lang.org/std/any/struct.TypeId.html). Its documentation warns that identity-based abstractions still need correct variance. A Jet key must similarly be more than a hash of a printable path.",
+      "detail": "Exercised: t1 prints Point, t1.Point, Int and true; t2 reports E0107 for TypeId; t3's string-keyed map prints 2. Core/Reflect/Reflect.jet has text inspection, while typed of is compiler-projected. Calls/Reflection.jet:48-57 builds display paths from module path and name, even replacing hyphens with underscores. That is not a globally unique or persistent type identity proof.\n\nA adds an opaque TypeKey projection of the compiler's existing canonical type identity, not a second identity registry inferred from display strings. reflect.key<T>() and reflect.of(x).key() agree for x's static concrete type T. Existing reflect.of visibility/secret/display restrictions remain; key<T>() itself does not render a value. A key for Any names the box type; Any.key() separately names its stored concrete payload.\n\nAliases share the underlying identity; distinct nominal types differ even with identical layout or path text. Generic type/value arguments and complete callable types participate in the existing canonical identity. Two separately loaded package identities cannot collide merely because their paths match. Hash collisions must still compare full identity. Keys cannot be forged from integers, pointers or strings, and equality alone grants no value access or cast authority.\n\nKeys are meaningful only within one linked program/session identity domain. Do not serialize them as a cross-build protocol. No Encode/Decode or integer conversion is provided, but Display remains printable, so lack of Encode cannot prevent users saving its text. Paths are diagnostic names, not promised stable schema IDs. Applications needing persistence must own versioned schema identifiers.\n\nDynamically loaded metadata must outlive retained keys; unload/reload must not reuse an identity for a different type or leave dangling display pointers. Use the same managed descriptor lifetime as reflection and Any. This metadata retention is a real cost; exact key comparison is not a measured speedup over string maps. No per-key heap allocation is required for statically linked types.\n\nB makes Type a runtime value kind and must explicitly reconcile compile-time type contracts; an archived decision is not authority to dismiss it. C can compute both map keys from reflect.of rather than type path literals, avoiding the draft's alleged unavoidable typo. C still lacks an exact identity guarantee. Beginners need neither API; experts get exact comparison without a new top-level language value kind.",
+      "options": [
+        {
+          "key": "A",
+          "name": "TypeKey in core.reflect",
+          "detail": "An opaque key projects canonical type identity. Same concrete type means equal keys; different nominal types or generic instances remain distinct. Keys are session-local, not a persistent schema format.",
+          "code": "use reflect: core.reflect\n\nPosition: struct { x: Int, y: Int }\nHealth: struct { points: Int }\n\nrun: fn() {\n    counts := [reflect.TypeKey: Int]{}\n    counts[reflect.key<Position>()] = 2\n    counts[reflect.key<Health>()] = 1\n    p: Position{x: 1, y: 2}\n    print(counts[reflect.of(p).key()])   // 2\n    print(reflect.key<Health>())          // game.Health\n}"
+        },
+        {
+          "key": "B",
+          "name": "A built-in Type value",
+          "detail": "Type is a built-in value kind, and type_of(x) returns it, as in Jai and Odin.",
+          "code": "Position: struct { x: Int, y: Int }\nHealth: struct { points: Int }\n\nrun: fn() {\n    counts := [Type: Int]{}\n    counts[Position] = 2\n    counts[Health] = 1\n    p: Position{x: 1, y: 2}\n    print(counts[type_of(p)])   // 2\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep path strings",
+          "detail": "No new value. Programs key by reflect.of(x).path(), as t3.jet does today.",
+          "code": "use reflect: core.reflect\nPosition: struct { x: Int, y: Int }\nrun: fn() {\n    counts := [String: Int]{}\n    p: Position{x: 1, y: 2}\n    counts[reflect.of(p).path()] = 2\n    print(counts[reflect.of(p).path()]) // 2; no manually typed path\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A small key covers maps keyed by type and checked unboxing. It lives in the reflection library next to type_name and path, so the language gains no new value kind.",
+        "gains": [
+          "Exact opaque identity rather than display-name identity.",
+          "No new built-in value kind."
+        ],
+        "losses": [
+          {
+            "loss": "Keys are not a persistent or cross-program schema identifier and may retain type metadata.",
+            "mitigation": "Expose no serialization conversion; print a diagnostic path, and keep descriptor lifetimes managed by the shared reflection mechanism."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is a broader runtime-Type design, not forbidden by an archived record; A meets this exact-identity use without making all types runtime values."
+          },
+          {
+            "key": "C",
+            "reason": "C can avoid path typos by deriving keys from values, but display paths still have no exact identity guarantee."
+          }
+        ],
+        "tradeoff": "A library key fixed per build instead of a built-in Type value."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run t1, t2 and t3 with jet run, then Tools/agent/ballots/Validate.jet on this payload. Before delivery, check aliases, distinct types, generic values/types, same-path package versions, callable identities, hash collisions, metadata lifetime and plugin unload/reload. No current performance advantage is claimed.",
+      "surface": {
+        "gist": "How should a running Jet program name a type as a value, for example to key a map by type?",
+        "lesson": "A type-keyed table needs exact identity. Current reflected names are useful display text, not guaranteed stable schema identifiers.",
+        "trio": {
+          "current": {
+            "note": "Today a program keys by the type's path string.",
+            "code": "counts[reflect.of(p).path()] = 2\n// TypeId.of(Point): error E0107, nothing named `TypeId`"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "TypeId is comparable and hashable, but changes between compiler versions.",
+            "code": "let key = std::any::TypeId::of::<Position>();\ncounts.insert(key, 2);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "TypeKey in core.reflect",
+            "gist": "A comparable key per type, fixed for one build.",
+            "gains": [
+              "Exact canonical type identity.",
+              "No new built-in kind."
+            ],
+            "losses": [
+              "Keys cannot be saved."
+            ],
+            "proposed": {
+              "code": "counts[reflect.key<Position>()] = 2\nprint(counts[reflect.of(p).key()])   // 2"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Built-in Type value",
+            "gist": "Any type can be used as a value.",
+            "gains": [
+              "Shortest spelling."
+            ],
+            "losses": [
+              "Types become values everywhere."
+            ],
+            "proposed": {
+              "code": "counts[Position] = 2\nprint(counts[type_of(p)])   // 2"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep path strings",
+            "gist": "Programs key by the type's path.",
+            "gains": [
+              "Nothing to add."
+            ],
+            "losses": [
+              "Display paths do not guarantee exact identity."
+            ],
+            "proposed": {
+              "code": "counts[reflect.of(p).path()] = 2\nprint(counts[reflect.of(p).path()])"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A small library key covers maps by type and checked unboxing, with no new value kind.",
+          "gains": [
+            "Exact type keys.",
+            "The language stays the same."
+          ],
+          "losses": [
+            {
+              "loss": "Keys change between builds.",
+              "mitigation": "No serialization conversion is exposed; printed paths are diagnostic names, not persistent schema IDs."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Makes types into values everywhere."
+            },
+            {
+              "key": "C",
+              "reason": "Computed paths avoid typos, but are not exact canonical type identity."
+            }
+          ],
+          "tradeoff": "A per-build library key instead of a built-in Type value."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T19:46:43.088Z"
     }
   ],
   "questions": [
@@ -191979,6 +192142,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T19:46:43.088Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRIM-TYPEKEY1",
+      "note": "Run-time type values: a comparable reflect.TypeKey in core.reflect"
+    },
+    {
+      "at": "2026-11-09T19:42:36.844Z",
+      "by": "agent",
+      "action": "card.criteria-add",
+      "ref": "c08tik7v",
+      "note": "#3 A write to a computed field (for example lock.path = … on a "
+    },
     {
       "at": "2026-11-09T19:41:30.363Z",
       "by": "Main",
