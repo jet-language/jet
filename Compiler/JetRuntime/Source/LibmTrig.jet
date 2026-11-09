@@ -647,7 +647,7 @@ LIBM_PI_LO: Float{1.2246467991473532e-16}
 libm_atan2: fn(y: Float, x: Float) -> Float {
     // musl's x + y; its x86_64 build adds y + x, and addsd keeps the first
     // operand's NaN, so a NaN y is the one returned.
-    if (x != x || y != y) -> return y + x
+    if (x != x || y != y) -> return libm_nan_pair(y, x)
     xbits: rt_f64_bits(x)
     ybits: rt_f64_bits(y)
     // x = 1.0

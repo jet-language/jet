@@ -28,6 +28,8 @@ LIBM_PM969: Float{2.004168360008973e-292}
 LIBM_DBL_MIN: Float{2.2250738585072014e-308}
 // asuint64(0x1.8p52)
 LIBM_TOINT_HALF_BITS: I64{4843621399236968448}
+// A NaN's quiet bit, 0x8000000000000.
+LIBM_QUIET: I64{2251799813685248}
 
 // uint64 a < b.
 libm_ult: fn(a: I64, b: I64) -> Bool { a.bit_xor(LIBM_SIGN) < b.bit_xor(LIBM_SIGN) }
@@ -113,6 +115,15 @@ libm_round: fn(x: Float) -> Float {
     y
 }
 
+// x86_64's result for an arithmetic operation on x and y when either is a
+// NaN: the first NaN operand, quieted. musl's `x + y` and `x * y` NaN returns
+// are this. Wasm leaves the choice open (V8 may commute the operands), so
+// naming it keeps the web tier's bits musl's on every run.
+libm_nan_pair: fn(x: Float, y: Float) -> Float {
+    bits: if (x != x) -> rt_f64_bits(x) else -> rt_f64_bits(y)
+    rt_f64_from_bits(bits.bit_or(LIBM_QUIET))
+}
+
 // fmod.c
 libm_fmod: fn(x: Float, y: Float) -> Float {
     uxi := rt_f64_bits(x)
@@ -120,7 +131,8 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
     ex := libm_exponent(uxi)
     ey := libm_exponent(uyi)
     negative: uxi < I64{0}
-    if (libm_shl(uyi, I64{1}) == I64{0} || uyi.bit_and(LIBM_ABS) > LIBM_EXP_INF || ex == I64{2047}) -> return (x * y) / (x * y)
+    if (x != x || y != y) -> return libm_nan_pair(x, y)
+    if (libm_shl(uyi, I64{1}) == I64{0} || ex == I64{2047}) -> return (x * y) / (x * y)
     if (!libm_ult(libm_shl(uyi, I64{1}), libm_shl(uxi, I64{1}))) {
         if (libm_shl(uxi, I64{1}) == libm_shl(uyi, I64{1})) -> return Float{0.0} * x
         return x
@@ -227,7 +239,12 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     xe: libm_fma_exponent(x)
     ye: libm_fma_exponent(y)
     ze: libm_fma_exponent(z)
-    if (xe >= zero_inf_nan || ye >= zero_inf_nan) -> return x * y + z
+    if (xe >= zero_inf_nan || ye >= zero_inf_nan) {
+        // x * y + z keeps x's NaN, else y's, else inf * 0's, else z's.
+        product: if (x != x || y != y) -> libm_nan_pair(x, y) else -> x * y
+        if (product != product || z != z) -> return libm_nan_pair(product, z)
+        return product + z
+    }
     if (ze >= zero_inf_nan) {
         if (ze > zero_inf_nan) -> return x * y + z
         return z

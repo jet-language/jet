@@ -192,7 +192,7 @@ libm_pow_y_special: fn(x: Float, y: Float, ix: I64, iy: I64) -> Float {
     if (libm_shl(iy, I64{1}) == I64{0}) -> return Float{1.0}
     if (ix == LIBM_ONE_BITS) -> return Float{1.0}
     infinity2: libm_shl(LIBM_EXP_INF, I64{1})
-    if (libm_ult(infinity2, libm_shl(ix, I64{1})) || libm_ult(infinity2, libm_shl(iy, I64{1}))) -> return x + y
+    if (libm_ult(infinity2, libm_shl(ix, I64{1})) || libm_ult(infinity2, libm_shl(iy, I64{1}))) -> return libm_nan_pair(x, y)
     one2: libm_shl(LIBM_ONE_BITS, I64{1})
     if (libm_shl(ix, I64{1}) == one2) -> return Float{1.0}
     // |x|<1 && y==inf or |x|>1 && y==-inf.

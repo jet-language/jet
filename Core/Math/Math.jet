@@ -359,13 +359,12 @@ log1p: fn(n: Float) -> Float Never! { ln_1p(n) }
 log: fn(n: Float, base: Float) -> Float Never! { ln(n) / ln(base) }
 log10: fn(n: Float) -> Float Never! { core.math.log10(n) }
 log2: fn(n: Float) -> Float Never! { core.math.log2(n) }
+/// logb.c from musl 1.2.5: ilogb as a Float, x * x for an infinity or NaN
+/// and -inf for a zero.
 logb: fn(n: Float) -> Float Never! {
-    if ilogb(n) == {
-        .Val(exponent) -> return Float{exponent}
-        .None -> {}
-    }
-    if n == 0.0 -> return -INFINITY
-    INFINITY
+    if !is_finite(n) -> return n * n
+    if n == 0.0 -> return Float{-1.0} / (n * n)
+    Float{ilogb(n) ?? 0}
 }
 sin: fn(n: Float) -> Float Never! { core.math.sin(n) }
 sinh: fn(n: Float) -> Float Never! { core.math.sinh(n) }
@@ -439,16 +438,20 @@ next_down: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == -INFINITY -> return n
     next_after(n, -INFINITY)
 }
+/// nextafter.c from musl 1.2.5: one step of the bit pattern toward `toward`.
 next_after: fn(n: Float, toward: Float) -> Float Never! {
-    if is_nan(n) || is_nan(toward) -> return NAN
-    if n == toward -> return toward
-    if n == 0.0 {
-        if toward > 0.0 -> return from_bits(1)
-        return -from_bits(1)
+    if is_nan(n) || is_nan(toward) -> return __nan_pair(n, toward)
+    ux: to_bits(n)
+    uy: to_bits(toward)
+    if ux == uy -> return toward
+    ax: ux.bit_and(9223372036854775807)
+    ay: uy.bit_and(9223372036854775807)
+    if ax == 0 {
+        if ay == 0 -> return toward
+        return from_bits(uy.bit_and(-9223372036854775807 - 1).bit_or(1))
     }
-    bits := to_bits(n)
-    if (toward > n) == !sign_bit(n) -> bits = bits + 1 else -> bits = bits - 1
-    from_bits(bits)
+    if ax > ay || (ux < 0) != (uy < 0) -> return from_bits(ux - 1)
+    from_bits(ux + 1)
 }
 nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
 significand: fn(n: Float) -> Float Never! {
@@ -469,13 +472,45 @@ ulp: fn(n: Float) -> Float Never! {
     if magnitude == 0.0 -> return from_bits(1)
     from_bits(to_bits(magnitude) + 1) - magnitude
 }
+/// ilogb.c from musl 1.2.5: the unbiased exponent, a subnormal's counted
+/// from its leading bit; None for a zero, an infinity or a NaN.
 ilogb: fn(n: Float) -> Int? Never! {
-    if n == 0.0 || !is_finite(n) -> return None
-    Val(Int.from_float(floor(log2(fabs(n)))) ?? panic("finite logarithm exponent fits Int"))
+    bits: to_bits(n).bit_and(9223372036854775807)
+    exponent: bits >> 52
+    if exponent == 2047 -> return None
+    if exponent != 0 -> return Val(exponent - 1023)
+    if bits == 0 -> return None
+    i := bits << 12
+    found := -1023
+    loop i < 9223372036854775808 {
+        found = found - 1
+        i = i << 1
+    }
+    Val(found)
 }
+/// scalbn.c from musl 1.2.5: `n` times 2^exponent, scaled in at most three
+/// exact steps so only the last can round.
 ldexp: fn(n: Float, exponent: Int) -> Float Never! {
-    if !is_finite(n) || n == 0.0 || exponent == 0 -> return n
-    n * (Float{2.0}).pow(Float{clamp(exponent, -2099, 2099)})
+    y := n
+    k := exponent
+    if k > 1023 {
+        y = y * Float{8.98846567431158e307}
+        k = k - 1023
+        if k > 1023 {
+            y = y * Float{8.98846567431158e307}
+            k = k - 1023
+            if k > 1023 -> k = 1023
+        }
+    } else if k < -1022 {
+        y = y * Float{2.004168360008973e-292}
+        k = k + 969
+        if k < -1022 {
+            y = y * Float{2.004168360008973e-292}
+            k = k + 969
+            if k < -1022 -> k = -1022
+        }
+    }
+    y * from_bits((1023 + k) << 52)
 }
 scaleb: fn(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
 radix: fn(n: Float) -> Int Never! { 2 }
@@ -519,13 +554,34 @@ sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! {
     pair: core.math.sin_cos(n)
     (cos: pair.cos, sin: pair.sin)
 }
+/// modf.c from musl 1.2.5: the whole part clears the fraction bits, and a
+/// whole `n` has a fraction of zero with its sign.
 modf: fn(n: Float) -> (fract: Float, whole: Float) Never! {
-    (fract: fract(n), whole: trunc(n))
+    bits: to_bits(n)
+    signed_zero: from_bits(bits.bit_and(-9223372036854775807 - 1))
+    e: (bits >> 52).bit_and(2047) - 1023
+    if e >= 52 {
+        if e == 1024 && bits.bit_and(4503599627370495) != 0 -> return (fract: n, whole: n)
+        return (fract: signed_zero, whole: n)
+    }
+    if e < 0 -> return (fract: n, whole: signed_zero)
+    mask: 4503599627370495 >> e
+    if bits.bit_and(mask) == 0 -> return (fract: signed_zero, whole: n)
+    whole: from_bits(bits - bits.bit_and(mask))
+    (fract: n - whole, whole: whole)
 }
+/// frexp.c from musl 1.2.5: `n` is frac * 2^exp with |frac| in [0.5, 1);
+/// a zero, an infinity or a NaN is its own frac with exp 0.
 frexp: fn(n: Float) -> (exp: Int, frac: Float) Never! {
-    exponent: ilogb(n) ?? 0
-    if n == 0.0 || !is_finite(n) -> return (exp: exponent, frac: n)
-    (exp: exponent, frac: ldexp(n, -exponent))
+    bits: to_bits(n)
+    biased: (bits >> 52).bit_and(2047)
+    if biased == 0 {
+        if n == 0.0 -> return (exp: 0, frac: n)
+        scaled: frexp(n * Float{18446744073709551616.0})
+        return (exp: scaled.exp - 64, frac: scaled.frac)
+    }
+    if biased == 2047 -> return (exp: 0, frac: n)
+    (exp: biased - 1022, frac: from_bits(bits.bit_and(-9218868437227405313).bit_or(4602678819172646912)))
 }
 
 checked_abs: fn(n: Int) -> Int? Never! {
@@ -665,9 +721,9 @@ div_rem: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
 }
 
 digits: fn(n: Int) -> Int Never! {
-    value := n
+    value := abs(n)
     count := 1
-    loop value <= -10 || value >= 10 {
+    loop value >= 10 {
         value = value /% 10
         count = count + 1
     }
@@ -723,16 +779,75 @@ prod_int: fn(values: [Int]) -> Int Never! {
 
 prod: fn(values: [Int]) -> Int Never! { prod_int(values) }
 fmod: fn(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
-remainder: fn(a: Float, b: Float) -> Float Never! {
-    if !is_finite(a) || !is_finite(b) || b == 0.0 -> return NAN
-    quotient: a / b
-    lower: floor(quotient)
-    fraction: quotient - lower
-    nearest := lower
-    if fraction > 0.5 || (fraction == 0.5 && fmod(lower, 2.0) != 0.0) {
-        nearest = lower + 1.0
+/// remainder.c from musl 1.2.5: rem_quo's remainder.
+remainder: fn(a: Float, b: Float) -> Float Never! { rem_quo(a, b).rem }
+/// remquo.c from musl 1.2.5: `a - n * b` for the integer n nearest a / b
+/// (ties to even), found by exact long division of the significands, and
+/// n's low 31 bits signed as a / b.
+rem_quo: fn(a: Float, b: Float) -> (rem: Float, quo: Int) Never! {
+    ux: to_bits(a).bit_and(18446744073709551615)
+    uy: to_bits(b).bit_and(18446744073709551615)
+    ex := (ux >> 52).bit_and(2047)
+    ey := (uy >> 52).bit_and(2047)
+    sx: ux >> 63 != 0
+    sy: uy >> 63 != 0
+    if is_nan(a) || is_nan(b) -> return (rem: __nan_pair(a, b), quo: 0)
+    if uy.bit_and(9223372036854775807) == 0 || ex == 2047 -> return (rem: (a * b) / (a * b), quo: 0)
+    if ux.bit_and(9223372036854775807) == 0 -> return (rem: a, quo: 0)
+    uxi := __remquo_significand(ux, ex)
+    uyi: __remquo_significand(uy, ey)
+    if ex == 0 -> ex = __remquo_exponent(ux)
+    if ey == 0 -> ey = __remquo_exponent(uy)
+    q := 0
+    if ex < ey - 1 -> return (rem: a, quo: 0)
+    if ex >= ey {
+        loop ex > ey {
+            if uxi >= uyi {
+                uxi = uxi - uyi
+                q = q + 1
+            }
+            uxi = uxi << 1
+            q = (q << 1).bit_and(4294967295)
+            ex = ex - 1
+        }
+        if uxi >= uyi {
+            uxi = uxi - uyi
+            q = q + 1
+        }
+        if uxi == 0 {
+            ex = -60
+        } else {
+            loop uxi < 4503599627370496 {
+                uxi = uxi << 1
+                ex = ex - 1
+            }
+        }
     }
-    a - nearest * b
+    bits: if ex > 0 -> (uxi - 4503599627370496).bit_or(ex << 52) else -> uxi >> (1 - ex)
+    x := from_bits(bits)
+    y: fabs(b)
+    if ex == ey || (ex + 1 == ey && (Float{2.0} * x > y || (Float{2.0} * x == y && q % 2 != 0))) {
+        x = x - y
+        q = q + 1
+    }
+    q = q.bit_and(2147483647)
+    (rem: if sx -> -x else -> x, quo: if sx != sy -> -q else -> q)
+}
+// remquo.c: the significand of binary64 `bits` with its leading bit at bit
+// 52, a subnormal's shifted up to it.
+__remquo_significand: fn(bits: Int, biased: Int) -> Int Never! {
+    if biased != 0 -> return bits.bit_and(4503599627370495).bit_or(4503599627370496)
+    (bits << (1 - __remquo_exponent(bits))).bit_and(9007199254740991)
+}
+// remquo.c: a subnormal's exponent, counted down from 0 to its leading bit.
+__remquo_exponent: fn(bits: Int) -> Int Never! {
+    i := (bits << 12).bit_and(18446744073709551615)
+    exponent := 0
+    loop i < 9223372036854775808 {
+        exponent = exponent - 1
+        i = i << 1
+    }
+    exponent
 }
 isclose: fn(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
     if rel_tol < 0.0 || abs_tol < 0.0 -> return false
@@ -760,17 +875,21 @@ clamp_float: fn(value: Float, low: Float, high: Float) -> Float Never! {
     value
 }
 
+/// fmin.c from musl 1.2.5: the lesser, a NaN only when both are, -0 below +0.
 min_float: fn(a: Float, b: Float) -> Float Never! {
     if is_nan(a) -> return b
     if is_nan(b) -> return a
+    if sign_bit(a) != sign_bit(b) -> return if sign_bit(a) -> a else -> b
     if a < b -> return a
     b
 }
+/// fmax.c from musl 1.2.5: the greater, a NaN only when both are, +0 above -0.
 max_float: fn(a: Float, b: Float) -> Float Never! {
     if is_nan(a) -> return b
     if is_nan(b) -> return a
-    if a > b -> return a
-    b
+    if sign_bit(a) != sign_bit(b) -> return if sign_bit(a) -> b else -> a
+    if a < b -> return b
+    a
 }
 midpoint: fn(a: Float, b: Float) -> Float Never! { a + (b - a) * 0.5 }
 
@@ -807,6 +926,196 @@ decimal: fn(text: String) -> Decimal Never! {
 }
 
 copy: fn(n: Float) -> Float Never! { n }
+
+/// The direction `round_to_signed` and `round_to_unsigned` round in: an
+/// IEEE 754 rounding direction, or ties away from zero or to even.
+Rounding: enum {
+    TowardNegative
+    TowardPositive
+    TowardZero
+    TiesToAway
+    TiesToEven
+}
+
+/// The integral Float nearest `n`, ties to the even one (C23 roundeven); an
+/// infinity, a NaN or a whole `n` is itself, and the sign of zero is kept.
+round_even: fn(n: Float) -> Float Never! {
+    if !(fabs(n) < Float{4503599627370496.0}) -> return n
+    whole: trunc(n)
+    distance: fabs(n - whole)
+    if (distance > Float{0.5} || (distance == Float{0.5} && fmod(whole, Float{2.0}) != Float{0.0})) -> return whole + copysign(Float{1.0}, n)
+    whole
+}
+// The integral Float nearest `n`, ties away from zero (C round).
+__round_away: fn(n: Float) -> Float Never! {
+    if !(fabs(n) < Float{4503599627370496.0}) -> return n
+    whole: trunc(n)
+    if (fabs(n - whole) >= Float{0.5}) -> return whole + copysign(Float{1.0}, n)
+    whole
+}
+// `n` rounded to an integral Float in `mode`.
+__rounded: fn(n: Float, mode: Rounding) -> Float Never! {
+    if mode == {
+        .TowardNegative -> floor(n)
+        .TowardPositive -> ceil(n)
+        .TowardZero -> trunc(n)
+        .TiesToAway -> __round_away(n)
+        .TiesToEven -> round_even(n)
+    }
+}
+/// `n` rounded in `mode` to an integer that fits a two's-complement integer
+/// of `bits` bits (C23 fromfp, with widths above 64 read as 64); None for an
+/// infinity, a NaN, `bits` below 1 or a rounded value outside the width.
+round_to_signed: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
+    if !is_finite(n) || bits < 1 -> return None
+    width: min(bits, 64)
+    whole: __rounded(n, mode)
+    limit: ldexp(Float{1.0}, width - 1)
+    if whole < -limit || whole >= limit -> return None
+    Val(Int.from_float(whole) ?? 0)
+}
+/// `n` rounded in `mode` to an integer that fits an unsigned integer of
+/// `bits` bits (C23 ufromfp, with widths above 64 read as 64); None for an
+/// infinity, a NaN, `bits` below 1 or a rounded value outside the width.
+round_to_unsigned: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
+    if !is_finite(n) || bits < 1 -> return None
+    width: min(bits, 64)
+    whole: __rounded(n, mode)
+    if (whole < Float{0.0} || whole >= ldexp(Float{1.0}, width)) -> return None
+    // An Int conversion of a whole value above 2^63 halves exactly first.
+    if (whole >= Float{9223372036854775808.0}) -> return Val((Int.from_float(whole * Float{0.5}) ?? 0) * 2)
+    Val(Int.from_float(whole) ?? 0)
+}
+
+/// fdim.c from musl 1.2.5: `a - b` when `a` is greater, else +0; a NaN
+/// operand is the result.
+fdim: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return a
+    if is_nan(b) -> return b
+    if a > b -> return a - b
+    Float{0.0}
+}
+
+/// IEEE 754-2019 maximum (C23 fmaximum): the greater, +0 above -0, and a NaN
+/// when either operand is one.
+maximum: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if a > b -> return a
+    if b > a -> return b
+    if sign_bit(a) -> return b
+    a
+}
+/// IEEE 754-2019 minimum (C23 fminimum): the lesser, -0 below +0, and a NaN
+/// when either operand is one.
+minimum: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if a < b -> return a
+    if b < a -> return b
+    if sign_bit(a) -> return a
+    b
+}
+/// IEEE 754-2019 maximumMagnitude (C23 fmaximum_mag): the operand of greater
+/// magnitude, `maximum` of equal ones, and a NaN when either operand is one.
+maximum_mag: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if fabs(a) > fabs(b) -> return a
+    if fabs(b) > fabs(a) -> return b
+    maximum(a, b)
+}
+/// IEEE 754-2019 minimumMagnitude (C23 fminimum_mag): the operand of lesser
+/// magnitude, `minimum` of equal ones, and a NaN when either operand is one.
+minimum_mag: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if fabs(a) < fabs(b) -> return a
+    if fabs(b) < fabs(a) -> return b
+    minimum(a, b)
+}
+/// IEEE 754-2019 maximumNumber (C23 fmaximum_num): `maximum` of the numbers
+/// among the operands, a NaN only when both are.
+maximum_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    maximum(a, b)
+}
+/// IEEE 754-2019 minimumNumber (C23 fminimum_num): `minimum` of the numbers
+/// among the operands, a NaN only when both are.
+minimum_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    minimum(a, b)
+}
+/// IEEE 754-2019 maximumMagnitudeNumber (C23 fmaximum_mag_num):
+/// `maximum_mag` of the numbers among the operands, a NaN only when both are.
+maximum_mag_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    maximum_mag(a, b)
+}
+/// IEEE 754-2019 minimumMagnitudeNumber (C23 fminimum_mag_num):
+/// `minimum_mag` of the numbers among the operands, a NaN only when both are.
+minimum_mag_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    minimum_mag(a, b)
+}
+
+// The bits of `n` as a signed Int that orders as IEEE 754 totalOrder: a
+// negative pattern's magnitude bits flip, so -NaN < -inf < ... < -0 < +0.
+__total_order_key: fn(n: Float) -> Int Never! {
+    bits: to_bits(n)
+    if bits < 0 -> return bits.bit_xor(9223372036854775807)
+    bits
+}
+/// IEEE 754 totalOrder (C23 totalorder): whether `a` sorts at or before `b`
+/// when -0 precedes +0 and NaNs sort by sign and payload beyond the
+/// infinities.
+total_order: fn(a: Float, b: Float) -> Bool Never! { __total_order_key(a) <= __total_order_key(b) }
+/// IEEE 754 totalOrderMag (C23 totalordermag): `total_order` of the
+/// magnitudes.
+total_order_mag: fn(a: Float, b: Float) -> Bool Never! {
+    to_bits(a).bit_and(9223372036854775807) <= to_bits(b).bit_and(9223372036854775807)
+}
+
+/// Whether `n` is a signaling NaN: a NaN whose quiet bit is clear.
+is_signaling: fn(n: Float) -> Bool Never! {
+    bits: to_bits(n).bit_and(9223372036854775807)
+    bits > 9218868437227405312 && bits < 9221120237041090560
+}
+/// `n` in canonical form (C23 canonicalize): a signaling NaN becomes the
+/// quiet NaN of the same sign and payload; anything else is itself.
+canonicalize: fn(n: Float) -> Float Never! {
+    if is_signaling(n) -> return from_bits(to_bits(n).bit_or(2251799813685248))
+    n
+}
+// x86-64's result for an arithmetic operation on `a` and `b` when either is
+// a NaN: the first NaN operand, quieted. musl's `x + y` and `x * y` NaN
+// returns are this. Wasm leaves the choice open (V8 may commute the
+// operands), so naming it keeps every tier's bits the same.
+__nan_pair: fn(a: Float, b: Float) -> Float Never! { canonicalize(if is_nan(a) -> a else -> b) }
+/// The payload of NaN `n` as an integral Float (C23 getpayload): its fraction
+/// bits below the quiet bit; None when `n` is not a NaN.
+get_payload: fn(n: Float) -> Float? Never! {
+    if !is_nan(n) -> return None
+    Val(Float{to_bits(n).bit_and(2251799813685247)})
+}
+/// The positive quiet NaN whose payload is `payload` (C23 setpayload); None
+/// unless `payload` is +0 or a whole number below 2^51.
+set_payload: fn(payload: Float) -> Float? Never! {
+    bits: __payload_bits(payload) ?? return None
+    Val(from_bits(bits.bit_or(9221120237041090560)))
+}
+/// The positive signaling NaN whose payload is `payload` (C23
+/// setpayloadsig); None unless `payload` is a whole number in 1..<2^51.
+set_payload_signaling: fn(payload: Float) -> Float? Never! {
+    bits: __payload_bits(payload) ?? return None
+    if bits == 0 -> return None
+    Val(from_bits(bits.bit_or(9218868437227405312)))
+}
+// A payload Float's integer, when it is +0 or whole and below 2^51.
+__payload_bits: fn(payload: Float) -> Int? Never! {
+    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || trunc(payload) != payload -> return None
+    Val(Int.from_float(payload) ?? 0)
+}
 
 #Test("math scalar composition preserves IEEE boundaries") {
     assert(is_nan(NAN))
@@ -851,8 +1160,90 @@ copy: fn(n: Float) -> Float Never! { n }
     assert(ilogb(0.0) == None)
     assert_eq(ldexp(1.5, 2), 6.0)
     pair: frexp(6.0)
-    assert_eq(pair.exp, 2)
-    assert_eq(pair.frac, 1.5)
+    assert_eq(pair.exp, 3)
+    assert_eq(pair.frac, 0.75)
+    tiny: frexp(from_bits(1))
+    assert_eq(tiny.exp, -1073)
+    assert_eq(tiny.frac, 0.5)
+    assert_eq(frexp(INFINITY).exp, 0)
+    assert_eq(logb(from_bits(1)), -1074.0)
+    assert_eq(logb(0.0), -INFINITY)
+    assert_eq(ldexp(1.5, -1074), from_bits(2))
+    assert_eq(ldexp(from_bits(1), 1074), 1.0)
+    assert_eq(ldexp(1.0, 2000), INFINITY)
+    split: modf(-INFINITY)
+    assert(sign_bit(split.fract) && split.fract == 0.0 && split.whole == -INFINITY)
+    assert_eq(to_bits(next_after(-0.0, 1.0)), 1)
+    assert_eq(to_bits(next_after(0.0, -0.0)), to_bits(-0.0))
+}
+
+#Test("math C23 exact operations follow IEEE 754-2019") {
+    assert_eq(round_even(2.5), 2.0)
+    assert_eq(round_even(3.5), 4.0)
+    assert_eq(round_even(-2.5), -2.0)
+    assert(sign_bit(round_even(-0.25)))
+    assert_eq(round_even(4503599627370497.0), 4503599627370497.0)
+    assert_eq(round_to_signed(2.5, Rounding.TiesToEven, 8), Val(2))
+    assert_eq(round_to_signed(2.5, Rounding.TiesToAway, 8), Val(3))
+    assert_eq(round_to_signed(-2.5, Rounding.TowardNegative, 8), Val(-3))
+    assert_eq(round_to_signed(-2.5, Rounding.TowardPositive, 8), Val(-2))
+    assert_eq(round_to_signed(-2.7, Rounding.TowardZero, 8), Val(-2))
+    assert_eq(round_to_signed(127.4, Rounding.TiesToEven, 8), Val(127))
+    assert(round_to_signed(127.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_signed(-128.4, Rounding.TiesToEven, 8), Val(-128))
+    assert(round_to_signed(-128.6, Rounding.TiesToEven, 8) == None)
+    assert(round_to_signed(NAN, Rounding.TowardNegative, 8) == None)
+    assert(round_to_signed(1.0, Rounding.TowardNegative, 0) == None)
+    assert_eq(round_to_signed(-9223372036854775808.0, Rounding.TowardNegative, 64), Val(-9223372036854775807 - 1))
+    assert(round_to_signed(9223372036854775808.0, Rounding.TowardNegative, 100) == None)
+    assert_eq(round_to_unsigned(255.4, Rounding.TiesToEven, 8), Val(255))
+    assert(round_to_unsigned(255.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_unsigned(-0.4, Rounding.TiesToEven, 8), Val(0))
+    assert(round_to_unsigned(-0.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_unsigned(-0.6, Rounding.TowardPositive, 8), Val(0))
+    assert_eq(round_to_unsigned(18446744073709549568.0, Rounding.TowardZero, 64), Val(18446744073709549568))
+    assert(round_to_unsigned(18446744073709551616.0, Rounding.TowardZero, 64) == None)
+    assert(!sign_bit(maximum(-0.0, 0.0)) && !sign_bit(maximum(0.0, -0.0)))
+    assert(sign_bit(minimum(-0.0, 0.0)) && sign_bit(minimum(0.0, -0.0)))
+    assert(is_nan(maximum(NAN, 1.0)) && is_nan(minimum(1.0, NAN)))
+    assert_eq(maximum_num(NAN, 1.0), 1.0)
+    assert_eq(minimum_num(1.0, NAN), 1.0)
+    assert(is_nan(maximum_num(NAN, NAN)))
+    assert_eq(maximum_mag(-3.0, 2.0), -3.0)
+    assert_eq(minimum_mag(-3.0, 2.0), 2.0)
+    assert_eq(maximum_mag(-2.0, 2.0), 2.0)
+    assert_eq(minimum_mag(-2.0, 2.0), -2.0)
+    assert(is_nan(maximum_mag(NAN, 1.0)))
+    assert_eq(maximum_mag_num(NAN, -3.0), -3.0)
+    assert_eq(minimum_mag_num(-3.0, NAN), -3.0)
+    signaling: from_bits(9218868437227405313)
+    quiet: from_bits(9221120237041090560)
+    negative_quiet: from_bits(-2251799813685248)
+    assert(total_order(-0.0, 0.0) && !total_order(0.0, -0.0))
+    assert(total_order(INFINITY, quiet) && !total_order(quiet, INFINITY))
+    assert(total_order(negative_quiet, -INFINITY) && total_order(signaling, quiet))
+    assert(total_order(1.0, 1.0))
+    assert(total_order_mag(-1.0, 2.0) && !total_order_mag(-3.0, 2.0))
+    assert(total_order_mag(-0.0, 0.0) && total_order_mag(0.0, -0.0))
+    assert(is_signaling(signaling) && !is_signaling(quiet) && !is_signaling(INFINITY) && !is_signaling(1.0))
+    assert_eq(to_bits(canonicalize(signaling)), 9221120237041090561)
+    assert_eq(canonicalize(1.5), 1.5)
+    assert(sign_bit(canonicalize(-0.0)))
+    assert_eq(get_payload(from_bits(9221120237041090565)), Val(5.0))
+    assert_eq(get_payload(signaling), Val(1.0))
+    assert(get_payload(1.0) == None)
+    assert_eq(to_bits(set_payload(5.0) ?? 0.0), 9221120237041090565)
+    assert_eq(to_bits(set_payload(0.0) ?? 0.0), 9221120237041090560)
+    assert(set_payload(-1.0) == None && set_payload(-0.0) == None && set_payload(0.5) == None)
+    assert(set_payload(2251799813685248.0) == None && set_payload(NAN) == None)
+    assert_eq(to_bits(set_payload_signaling(1.0) ?? 0.0), 9218868437227405313)
+    assert(set_payload_signaling(0.0) == None)
+    split: rem_quo(7.0, -2.0)
+    assert_eq(split.rem, -1.0)
+    assert_eq(split.quo, -4)
+    assert_eq(fdim(5.0, 3.0), 2.0)
+    assert_eq(fdim(3.0, 5.0), 0.0)
+    assert(is_nan(fdim(NAN, 1.0)))
 }
 
 #Test("math remainder and distance retain their validation") {
@@ -864,6 +1255,8 @@ copy: fn(n: Float) -> Float Never! { n }
     assert_eq(dist([Float]{0.0, 0.0}, [Float]{3.0, 4.0}), 5.0)
     assert(is_nan(dist([Float]{1.0}, [Float]{})))
     assert_eq(digits(-9223372036854775808), 19)
+    assert_eq(digits(-99), 2)
+    assert_eq(digits(0), 1)
     assert_eq(leading_ones(-1), 64)
     assert_eq(trailing_ones(-1), 64)
     assert_eq((Int{3}).bit_xor(5), 6)
@@ -1134,7 +1527,7 @@ impl Float.Mul(Vec4) {
 #Test("Vec4 dot folds from zero in lane order") {
     large: Vec4.new(10000000000000000.0, 1.0, -10000000000000000.0, 2.0)
     assert_eq(large.dot(Vec4.splat(1.0)), 2.0)
-    assert_eq(Vec4.new(0.0, -0.0, 0.0, -0.0).normalize().to_array()[1].to_bits(), to_bits(-0.0))
+    assert_eq(to_bits(Vec4.new(0.0, -0.0, 0.0, -0.0).normalize().to_array()[1]), to_bits(-0.0))
     assert_eq(Vec4.from_array([Float#4]{1.0, 2.0, 3.0, 4.0}).length(), sqrt(30.0))
     assert_eq((Vec4.splat(2.0) + Vec4.splat(3.0)).lane(3), 5.0)
     assert_eq((Vec4.splat(2.0) - Vec4.splat(3.0)).lane(3), -1.0)
@@ -2048,11 +2441,11 @@ impl F64x4.Div {
     assert_eq(value.reduce(.Avg), F64{2.5})
     cancellation: F64x4.new(F64{10000000000000000.0}, F64{1.0}, F64{-10000000000000000.0}, F64{2.0})
     assert_eq(cancellation.sum(), F64{2.0})
-    assert_eq(F64x4.splat(-F64{0.0}).sum().to_bits(), F64{0.0}.to_bits())
+    assert_eq(to_bits(F64x4.splat(-F64{0.0}).sum()), to_bits(F64{0.0}))
     assert_eq(F64x4.splat(NAN).min(), INFINITY)
     assert_eq(F64x4.splat(NAN).max(), -INFINITY)
     assert_eq(F64x4.new(F64{NAN}, F64{3.0}, F64{2.0}, F64{1.0}).min(), F64{1.0})
-    assert_eq(F64x4.splat(F64{-0.0}).sqrt().lane(0).to_bits(), F64{-0.0}.to_bits())
+    assert_eq(to_bits(F64x4.splat(F64{-0.0}).sqrt().lane(0)), to_bits(F64{-0.0}))
     assert_eq(F64x4.splat(F64{4.0}).sqrt().lane(3), F64{2.0})
     assert_eq((value + value).lane(2), F64{6.0})
     assert_eq((value - value).lane(2), F64{0.0})
@@ -4040,9 +4433,9 @@ impl Transform2 {
     assert_eq((narrow.inverse() ?? panic("F32 inverse")).tx, -2.0)
     assert_eq((narrow.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("F32 ray")).direction.x, 1.0)
     assert_eq((narrow.point_at_depth(ScreenPoint.new(1.0, 2.0), 4.0) ?? panic("F32 depth")).x, 7.0)
-    assert_eq(Float{9007199254740993}, 9007199254740992.0)
-    assert_eq(Float{-9007199254740993}, -9007199254740992.0)
-    assert_eq(Float.from_f32(F32{-0.0}).to_bits(), (-0.0).to_bits())
+    assert_eq(approx(9007199254740993), 9007199254740992.0)
+    assert_eq(approx(-9007199254740993), -9007199254740992.0)
+    assert_eq(to_bits(Float.from_f32(F32{-0.0})), to_bits(-0.0))
 }
 
 __decimal_to_string: fn(value: Decimal) -> String Never! {
