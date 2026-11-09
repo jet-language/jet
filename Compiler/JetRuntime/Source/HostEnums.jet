@@ -37,42 +37,22 @@ HOST_TERMINAL_MODE_RAW: I64{0}
 HOST_TERMINAL_MODE_COOKED: I64{1}
 HOST_TERMINAL_MODE_COUNT: I64{2}
 
-host_arguments_refused: fn() {
-    jet_rt_stdout_flush()
-    trap_header(I64{0})
-    trap_write_static(rt_static_text("host arguments unavailable; call jet_rt_host_arguments before env or argv access"))
-    trap_msg_prelude_end()
-    trap_footer(I64{0})
-}
+host_arguments_refused: fn() { host_refused(rt_static_text("host arguments unavailable; call jet_rt_host_arguments before env or argv access")) }
 
-host_environment_index_refused: fn() {
-    jet_rt_stdout_flush()
-    trap_header(I64{0})
-    trap_write_static(rt_static_text("startup environment index out of range"))
-    trap_msg_prelude_end()
-    trap_footer(I64{0})
-}
+host_environment_index_refused: fn() { host_refused(rt_static_text("startup environment index out of range")) }
 
-host_argument_index_refused: fn() {
-    jet_rt_stdout_flush()
-    trap_header(I64{0})
-    trap_write_static(rt_static_text("startup argument index out of range"))
-    trap_msg_prelude_end()
-    trap_footer(I64{0})
-}
+host_argument_index_refused: fn() { host_refused(rt_static_text("startup argument index out of range")) }
 
-host_record_index_refused: fn() {
-    jet_rt_stdout_flush()
-    trap_header(I64{0})
-    trap_write_static(rt_static_text("record variant index out of range"))
-    trap_msg_prelude_end()
-    trap_footer(I64{0})
-}
+host_record_index_refused: fn() { host_refused(rt_static_text("record variant index out of range")) }
 
-host_sigpipe_refused: fn() {
+host_sigpipe_refused: fn() { host_refused(rt_static_text("failed to initialize SIGPIPE handling")) }
+
+// A host table's E3001 stop with the static `reason`.
+host_refused: fn(reason: I64) {
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_static(rt_static_text("failed to initialize SIGPIPE handling"))
+    trap_write_static(reason)
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }

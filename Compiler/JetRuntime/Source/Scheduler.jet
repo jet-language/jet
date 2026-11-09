@@ -1421,6 +1421,7 @@ scheduler_fatal: fn(message: I64) {
     // The Rust original uses E3001 with an empty owner, not <core.prelude>.
     bytes: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
+    trap_stop(I64{1}, bytes, length, I64{0}, I64{0})
     if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
 }

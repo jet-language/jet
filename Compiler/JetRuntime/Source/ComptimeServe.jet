@@ -113,6 +113,14 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
             #Unsafe("the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes") {
                 result = os_call5_i64(a, b, c, d, e, f)
             }
+            // The call runs as jet_rt_main's entry (the serve entry's root):
+            // a stop it published there rather than served (process.exit,
+            // whose status is no stop to serve) ends the child here, as
+            // jet_rt_main ends a stopped entry, with its report on standard
+            // error and its code as the exit status; the compiler reports
+            // that (JetEval Native.jet jet_eval_native_ended). Answering DONE
+            // would hand the compiler the unwound call's garbage word.
+            main_call_stopped()
             // Output the call buffered is its own effect, made before it answers.
             jet_rt_stdout_flush()
             comptime_serve_reply(frame, I64{1}, result, I64{0}, I64{0}, I64{0})
@@ -197,17 +205,9 @@ rt_comptime_serve_stop_address: fn() -> I64 {
 }
 
 // jet_rt_comptime_serve_stop while the image serves the compiler, else 0:
-// every runtime stop asks it first, so only the serve entry installs it and
-// a program that never serves links no serve loop.
+// every runtime stop asks it first (Trap.jet trap_stop), so only the serve
+// entry installs it and a program that never serves links no serve loop.
 comptime_serve_stop_code := I64{0}
-
-comptime_serve_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
-    code: comptime_serve_stop_code
-    if (code == I64{0}) -> return
-    #Unsafe("the serve entry installed this runtime export, whose System V signature takes these five words") {
-        _ := os_call5_i64(code, kind, a, b, c, d)
-    }
-}
 
 // A runtime stop of served code (Trap.jet): its kind and words go to the
 // compiler, which reads their texts. The child then serves on above the

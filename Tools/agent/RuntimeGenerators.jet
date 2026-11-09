@@ -2660,7 +2660,8 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 }
 
 // Registered E3001 stops: the writes are heap-free, and Root owns the
-// captured full report through the trap_header / trap_footer boundary.
+// captured full report through the trap_header / trap_footer boundary. Each
+// goes through host_refused, which serves comptime code first (trap_stop).
 host_refusals: fn() -> [MessageLiteral] Never! {
     [MessageLiteral]{
         MessageLiteral{name: "host_arguments_refused", text: "host arguments unavailable; call jet_rt_host_arguments before env or argv access"},
@@ -2706,20 +2707,20 @@ render_host_carriers: fn(rows: String) -> String GeneratorError! {
         lines.push("{table.prefix}_COUNT: I64{{{table.values.len()}}}")
     }
     loop refusal in host_refusals() {
+        literal: static_text(refusal.text) ?? return Err(err)
         lines.push("")
-        lines.push("{refusal.name}: fn() {{")
-        lines.push("    jet_rt_stdout_flush()")
-        lines.push("    trap_header(I64{{0}})")
-        if static_text_worthy(refusal.text) {
-            literal: static_text(refusal.text) ?? return Err(err)
-            lines.push("    trap_write_static({literal})")
-        } else {
-            loop word in text_words(refusal.text) -> lines.push("    trap_write_word(I64{{{word.value}}}, I64{{{word.count}}})")
-        }
-        lines.push("    trap_msg_prelude_end()")
-        lines.push("    trap_footer(I64{{0}})")
-        lines.push("}}")
+        lines.push("{refusal.name}: fn() {{ host_refused({literal}) }}")
     }
+    lines.push("")
+    lines.push("// A host table's E3001 stop with the static `reason`.")
+    lines.push("host_refused: fn(reason: I64) {{")
+    lines.push("    trap_stop(I64{{1}}, rt_text_data(reason), rt_text_len(reason), I64{{0}}, I64{{0}})")
+    lines.push("    jet_rt_stdout_flush()")
+    lines.push("    trap_header(I64{{0}})")
+    lines.push("    trap_write_static(reason)")
+    lines.push("    trap_msg_prelude_end()")
+    lines.push("    trap_footer(I64{{0}})")
+    lines.push("}}")
     loop text in host_texts() {
         lines.push("")
         lines.push("{text.name}: fn() -> I64 {{")
@@ -2759,7 +2760,7 @@ HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"In
     assert(text.contains("\nHOST_TERMINAL_MODE_RAW: I64{{0}}\nHOST_TERMINAL_MODE_COUNT: I64{{1}}\n"))
     assert(text.contains("#Export(c) jet_rt_record_get_io_error_invalid_input: fn(error: I64) -> I64 {{ host_error_context(error, HOST_IO_KIND_INVALID_INPUT) }}"))
     assert(!text.contains("io_error_resource_limit"))
-    assert(text.contains("    trap_write_static(rt_static_text(\"record variant index out of range\"))"))
+    assert(text.contains("\nhost_record_index_refused: fn() {{ host_refused(rt_static_text(\"record variant index out of range\")) }}\n"))
     assert(text.contains("host_stdout_name: fn() -> I64 {{\n    text: jet_rt_string_builder_new()\n    rt_text_push_word(text, I64{{128047728850035}}, I64{{6}})\n"))
     seen := [String]{}
     loop line in text.split("\n") {
@@ -2768,7 +2769,8 @@ HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"In
         loop earlier in seen -> assert(earlier != name)
         seen.push(name)
     }
-    assert_eq(seen.len(), 11)
+    // The 5 refusals, host_refused and the 6 host texts.
+    assert_eq(seen.len(), 12)
 }
 
 #Test("a missing or repeated host carrier variant fails the whole table") {

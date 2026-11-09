@@ -173,6 +173,8 @@ test_number: fn(value: I64) {
 // Their single defect message deliberately replaces Rust's per-field invariant
 // panic prose; valid unit outcomes retain byte-identical product reports.
 test_invalid: fn() {
+    reason: rt_static_text("native test record is invalid")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_defect_prepare()
     test_msg_invalid(I64{2})
     trap_defect_exit(I64{101})

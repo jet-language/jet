@@ -520,7 +520,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
         report: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color)
         jet_cli_finish(if json -> JetDriverVerbOutput{stdout: "", stderr: "{evaluated.stdout}{report}", exit_code: JET_DRIVER_EXIT_USER_ERROR} else -> JetDriverVerbOutput{stdout: evaluated.stdout, stderr: report, exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
-    if evaluated.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem.message))
+    if evaluated.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice("the native run of `{file}` failed internally: {problem.message}"))
     // The program exited before `run` returned: what it printed, and its status.
     if evaluated.exit_code == .Val(code) -> jet_cli_finish(if json -> JetDriverVerbOutput{stdout: "", stderr: "{evaluated.stdout}{evaluated.stderr}", exit_code: code} else -> JetDriverVerbOutput{stdout: evaluated.stdout, stderr: evaluated.stderr, exit_code: code})
     data: evaluated.value ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))

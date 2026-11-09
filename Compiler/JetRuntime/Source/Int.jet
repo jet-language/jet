@@ -440,6 +440,7 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
         (reason == I64{2}) -> rt_static_text("Invalid shift count")
         else -> rt_static_text("Value doesn't fit in destination type")
     }
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
     if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_header(I64{1})
     trap_write_static(message)

@@ -1026,7 +1026,7 @@ jet_eval_native_alloc: fn(s: &JetEvalIRState, size: Int, align: Int) -> Int? {
 // Whether `count` bytes from `pointer` may be child memory.
 jet_eval_native_address: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> Bool Never! {
     if pointer > 0 && count <= JET_EVAL_NATIVE_READ_MAX && pointer + count <= JET_EVAL_NATIVE_USER_END -> return true
-    jet_eval_ir_problem(s, if pointer == 0 -> "memory access through a null pointer" else -> "memory access through a word that is not an address")
+    jet_eval_ir_problem(s, if pointer == 0 -> "the compiler read the child's memory through a null pointer" else -> "the compiler read the child's memory through a word that is not an address")
     false
 }
 
@@ -1054,7 +1054,7 @@ jet_eval_native_unreadable: fn(s: &JetEvalIRState, page: Int) {
         _ := jet_eval_ir_out_of_fuel(s)
         return
     }
-    jet_eval_ir_problem(s, "memory access through a word that is not an address (page {page})")
+    jet_eval_ir_problem(s, "the compiler read the child's memory through a word that is not an address (page {page})")
 }
 
 // The bytes at `pointer`.
@@ -1145,8 +1145,12 @@ jet_eval_ir_text: fn(s: &JetEvalIRState, header: Int) -> String? {
 
 jet_eval_ir_failed: fn(s: JetEvalIRState) -> Bool Never! { s.failure != None || s.internal_problem != None || s.exit_code != None }
 
+// A compiler defect met while running compile-time code natively: there is
+// no interpreter, and the IR in these names is the JetIR program the child
+// runs. Each caller names the native run around the message (#6725), so it
+// carries no prefix of its own.
 jet_eval_ir_problem: fn(s: &JetEvalIRState, message: String) Never! {
-    if s.internal_problem == None -> s.internal_problem = Val(JetEvalInternalProblem{span: Val(s.span), message: "IR evaluation: {message}"})
+    if s.internal_problem == None -> s.internal_problem = Val(JetEvalInternalProblem{span: Val(s.span), message: message})
 }
 
 jet_eval_ir_source_fail: fn(s: &JetEvalIRState, what: String) Never! {

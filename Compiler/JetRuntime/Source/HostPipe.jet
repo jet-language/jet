@@ -16,9 +16,11 @@ pipe_borrow_stop: fn() {
     // Seed rustc 1.97.1 (8bab26f4f); library/core/src/cell.rs:902,912-917:
     // panic_already_borrowed(BorrowMutError) => "RefCell already borrowed".
     // Emit the actual payload without allocating on the failing borrow path.
+    reason: rt_static_text("RefCell already borrowed")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_static(rt_static_text("RefCell already borrowed"))
+    trap_write_static(reason)
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
