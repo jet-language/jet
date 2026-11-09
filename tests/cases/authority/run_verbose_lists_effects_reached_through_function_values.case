@@ -1,0 +1,11 @@
+# Claim (#6614 c12): the effects a run lists include those of a function that
+# runs only through a value: a named function stored in a list (`FS.Read`)
+# and the implementation a trait-value call runs (`FS.Write`).
+fixture: run_verbose_lists_effects_reached_through_function_values.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step verbose: jet run --verbose -A value.jet
+exit: 0
+stdout: = "read: true\narea: 9\n"
+stderr: = "jet run: effects used: FS.Read, FS.Write, IO\n"

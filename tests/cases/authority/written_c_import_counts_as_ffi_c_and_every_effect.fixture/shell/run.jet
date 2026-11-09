@@ -1,0 +1,12 @@
+// The package denies Exec and FS, yet libc `system` starts a shell that
+// writes a file. The checker cannot see the C body, so the call reaches every
+// effect.
+use c: c.c
+#Import c.c: module {
+    system: fn(command: String) -> I32 = "system"
+}
+
+run: fn() {
+    code: c.system("touch escaped.txt")
+    print("system={code}")
+}

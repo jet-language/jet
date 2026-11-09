@@ -659,7 +659,9 @@ file is the program's (a `--` right after it only separates), so a
 or `-v` comes before `--`; a verbose run reports them before the program
 starts, then one line naming the effects the program uses
 (`jet run: effects used: Exec, IO, Time.Wait`), so `jet run --verbose -A`
-shows what the blanket grant let through. `--json` reports the same problems as the standard `diagnostics` JSON
+shows what the blanket grant let through. The list follows every call and
+every function the program takes as a value (a function stored in a list, each
+implementation a trait-value call may run), and a C call lists `FFI.C`. `--json` reports the same problems as the standard `diagnostics` JSON
 status envelope on stderr, leaving stdout to the program; it never changes the
 exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
 `--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are

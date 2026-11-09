@@ -4253,10 +4253,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
 }
 
 // The effects the application requires: the direct effects of every function
-// the entry `entry_key` reaches along checked call edges. The maximal row an
-// open-world call (an unannotated function value, an extern) seeds into
-// `solved` is a ceiling fact (E0743), not a required right, so it never widens
-// the authority the application must hold. The generated typed-CLI entry
+// the entry `entry_key` reaches along checked call edges and value edges (a
+// function taken as a value, an implementation a trait-value call may run), so
+// a function that runs only through a value still lists its effects. The
+// maximal row an open-world call seeds into `solved` is a ceiling fact (E0743),
+// not an effect the program performs; a written C call with no declared root
+// lists `FFI.C` as a direct effect. The generated typed-CLI entry
 // `__jet_cli_run` and the parser it calls, `__jet_cli_parse` of
 // its module (`__jet_cli_parse_<binding>` for `__jet_cli_run_<binding>`;
 // JetSema Registration/CliEntry.jet), read argv and its env fallbacks, print
@@ -4283,7 +4285,7 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String, startup_
         if !cli {
             loop effect_name in functions[index].effects.direct -> required.push(effect_name.copy())
         }
-        loop edge in functions[index].effects.call_edges {
+        loop edge in jet_driver_effect_edges(functions[index]) {
             callee: name_rows_get_text(by_key, edge) ?? next
             if cli && functions[callee].module_name.starts_with("core.") -> next
             if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") -> parser = callee
@@ -4291,6 +4293,14 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String, startup_
         }
     }
     required
+}
+
+// The edges an effect walk follows from `function`: its call edges, then the
+// functions it takes as values.
+jet_driver_effect_edges: fn(function: FnBody) -> [String] Never! {
+    edges := function.effects.call_edges.copy()
+    loop edge in function.effects.value_edges -> edges.push(edge.copy())
+    edges
 }
 
 // The root package's row when its `authority` writes an `allow` or `deny`
@@ -4450,22 +4460,26 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
     rows := [Int]{}
     loop function in functions -> rows.push(module_rows.get(function.module_identity) ?? -1)
     if rows[entry_row] < 0 -> return [Diagnostic]{}
-    // The functions the entry reaches, in discovery order.
+    // The functions the entry reaches along call and value edges, in
+    // discovery order.
     reached := (loop _ in functions -> false)
     order := [Int]{}
+    // The rows each reached function's edges resolve to.
+    callees := (loop _ in functions -> [Int]{})
     pending := [Int]{entry_row}
     loop pending.len() > 0 {
         index: pending.pop() ?? break
         if reached[index] -> next
         reached[index] = true
         order.push(index)
-        loop edge in functions[index].effects.call_edges {
+        loop edge in jet_driver_effect_edges(functions[index]) {
             callee: name_rows_get_text(by_key, edge) ?? next
+            callees[index].push(callee)
             pending.push(callee)
         }
     }
     // Each reached function's own-package effects, to a fixpoint over the
-    // same-package and Core call edges.
+    // same-package and Core call and value edges.
     local := (loop _ in functions -> [String]{})
     loop index in order {
         loop effect_name in functions[index].effects.direct {
@@ -4478,8 +4492,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
         changed = false
         loop index in order {
             owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
-            loop edge in functions[index].effects.call_edges {
-                callee: name_rows_get_text(by_key, edge) ?? next
+            loop callee in callees[index] {
                 if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
                 reached_effects: local[callee].copy()
                 loop effect_name in reached_effects {
@@ -4507,7 +4520,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
     loop (index, function) in functions {
         if sites[index] == "" -> next
         edges := [String]{}
-        loop edge in function.effects.call_edges {
+        loop edge in jet_driver_effect_edges(function) {
             if name_rows_get_text(by_key, edge) == .Val(callee) {
                 if sites[callee] != "" -> edges.push(sites[callee].copy())
             } else {

@@ -3096,6 +3096,13 @@ The reserved `__bindgen__` path is E3206. A second C `use` form for the same
 library is E3204; an incompatible overlay is E3205, and handwritten
 `#Bindgen` is E3207.
 
+A C call records `FFI.C`. When no binding descriptor owns the declaration's
+effect row (a written `#Import c.<lib>: module` with no `c@` dependency
+descriptor), the checker cannot see what the C body does, so the call also
+reaches every effect: written ceilings (E0740) and `deny` rows (E0749) apply
+to it, and C `system` under `deny: [Exec]` is refused at check time. Core's
+own C bindings are toolchain code whose public functions declare their rows.
+
 A C declaration binds by-value scalars, `String`, `Char`, and C-layout
 aggregates. Lists, maps, tuples, options, results, and other Jet aggregates
 are E3203 at this boundary. Pointer returns are E3202. The status-plus-out
