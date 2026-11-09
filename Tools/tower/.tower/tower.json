@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6711,
-    "rev": 96390,
+    "nextNum": 6712,
+    "rev": 96391,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101546,6 +101546,34 @@
       "created": "2026-11-09T05:57:03.965Z",
       "updated": "2026-11-09T05:57:03.965Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c01xp5ri",
+      "num": 6711,
+      "title": "Generic call to a trait method returning `T? Never!` loses the optional and fails in the backend (ICE)",
+      "body": "Found by SqliteLead on the b6c compiler (#6695 slice 8). A generic call `fn<H: Host>` to a trait method declared `-[]> T? Never!` loses the optional, and the backend rejects it: `ir.build unlowered: ... binder got of type ?[U8] bound to a value of type [U8]`. The smallest repro is the trait `Src{grab -[]> [U8]? Never!; grab2 -> Int? Never!}`, called generically. It works without `Never!`. That breaks I2 (a backend rejection of checked code must not happen) and the one-mechanism promise for effect rows. A workaround is in core.db: VdbeAux.jet Host.vtab_take_errmsg is declared without `Never!`; remove it once fixed. Criteria: a regression case in tests/cases compiles and runs on O0/O1/O2; the workaround is removed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T06:30:13.586Z",
+      "updated": "2026-11-09T06:30:13.586Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -189894,6 +189922,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T06:30:13.586Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c01xp5ri",
+      "note": "Generic call to a trait method returning `T? Never!` loses the optional and fails in the backend (ICE)"
+    },
     {
       "at": "2026-11-09T06:26:16.219Z",
       "by": "Main",
