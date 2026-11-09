@@ -4,7 +4,10 @@
 // embedded Prelude/CoreLib implementations; sema opens this module once per
 // file and resolves each alias through the ordinary Core call path.
 print: fn(value: Any)
-input: fn(prompt: String{""}) -> String IOError!
+// `input` is every line of the program's input, a lazy `Iter<String>`: the
+// files its arguments name, in order, else standard input (core.term
+// __InputLines). `core.term.readline(prompt)` reads one line.
+input: Iter<String>
 panic: fn(message: String)
 assert: fn(cond: Bool)
 assert_eq: fn(a: Any, b: Any)

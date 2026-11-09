@@ -2225,6 +2225,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if operation == .TaskPause || operation == .TaskResume || operation == .TaskCancel -> return ir_task_control(m, p, b, receiver, operation, args, span)
     if operation == .AllocAlloc || operation == .AllocTryAlloc || operation == .AllocReset -> return ir_allocator_method(m, p, b, ty, receiver, operation, args, span)
     if operation == .MappedFileLines -> return ir_mapped_lines(m, p, b, ty, receiver, span)
+    if operation == .LinesIter -> return ir_lines_iter(m, p, b, receiver, span)
     if operation == .DynLen(site, location) -> return ir_dyn_len(m, p, b, ty, receiver, site, location, span)
     if ir_dyn_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) -> return result

@@ -167,7 +167,9 @@ ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     } else if role == "line_next" {
         ir_line_next_body(m, p, a, ty, span)
     } else if role == "line_release" {
-        ir_line_release_body(m, p, a, ty, span)
+        ir_line_release_body(m, p, a, ty, false, span)
+    } else if role == "line_release_boxed" {
+        ir_line_release_body(m, p, a, ty, true, span)
     } else if role == "line_clone" {
         ir_line_clone_body(m, p, a, ty, span)
     } else if role == "compare" {
@@ -1227,19 +1229,14 @@ ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
 }
 
 // `loop line in reader.lines()` / `loop line in io.stdin().lines()` /
-// `loop line in child.stdout.lines()`: the runtime line source `export`
-// (jet_rt_native_iter_{file,stdin,process}_lines) wraps the FileReader,
-// StdinHandle or process stream as an `Iter<String>` through a borrowed
-// adapter32 (IterSources.jet): the handle, lazy.line_next, lazy.line_release
-// and, for a process stream only, lazy.line_clone. A fresh handle is moved
-// into it (read lazily). A kept file or stdin handle is borrowed, and the
-// runtime drains it at init (iter_line_source); a kept process stream is
-// cloned at init, so the Iter holds the shared pipe and reads it lazily. The
-// Iter is then walked as any other. A fresh stdin handle with no stride
-// skips the Iter and reads each line into the binding (ir_stdin_lines_walk).
+// `loop line in child.stdout.lines()`: the handle's line source
+// (ir_lines_source) walked as any other Iter. A fresh handle is moved into
+// it (read lazily). A kept file or stdin handle is borrowed, and the runtime
+// drains it at init (iter_line_source); a kept process stream is cloned at
+// init, so the Iter holds the shared pipe and reads it lazily. A fresh stdin
+// handle with no stride skips the Iter and reads each line into the binding
+// (ir_stdin_lines_walk).
 ir_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, export: String, body: [Int], span: Span) Never! {
-    iter_ty: Type.Apply{name: "Iter", args: [Type]{Type.String}}
-    iter_row: ir_value_type(m, p, iter_ty) ?? return ir_fail(b, span, "type {ir_type_name(iter_ty)}")
     row: ir_string_row(m)
     handle_ty: ir_ty(p, b, ir_lazy_place(p, b, collection))
     handle: ir_expr(m, p, b, collection)
@@ -1250,31 +1247,67 @@ ir_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, var
             return ir_stdin_lines_walk(m, p, b, label, variable, variable_two, failure_ty, body, span)
         }
     }
-    next_helper: ir_lazy_helper(m, p, b, "line_next", handle_ty, span)
-    if next_helper < 0 -> return
-    release_helper: ir_lazy_helper(m, p, b, "line_release", handle_ty, span)
-    if release_helper < 0 -> return
-    shared: export == "jet_rt_native_iter_process_lines"
-    clone_helper: if shared -> ir_lazy_helper(m, p, b, "line_clone", handle_ty, span) else -> -1
-    if ir_failed(b) -> return
     stride: ir_walk_stride(m, p, b, step)
     if ir_failed(b) || (step != None && stride < 0) -> return
-    meta: ir_lazy_meta(m, p, b, Type.String, span)
-    if ir_failed(b) -> return
     moved: ir_lazy_moved(m, b, handle)
+    source: ir_lines_source(m, p, b, handle_ty, handle, moved, export, "line_release", span)
+    if source < 0 -> return
+    ir_release(m, b, handle)
+    ir_lazy_walk_source(m, p, b, label, variable, variable_two, source, row, stride, body, span)
+}
+
+// The ambient `input` (THandleOp.LinesIter): its fresh receiver (core.term
+// __InputLines) as an owned, lazy `Iter<String>` line source, a value like any
+// other Iter. An Aggregate receiver lives in frame storage, so it moves into
+// a heap box the source owns and the Iter may outlive the frame;
+// lazy.line_release_boxed drops and frees that box when the Iter drops.
+ir_lines_iter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
+    handle_ty: ir_ty(p, b, receiver)
+    handle: ir_expr(m, p, b, receiver)
+    if ir_failed(b) || handle < 0 -> return -1
+    handle_row: b.f.slot_type[handle]
+    if m.types[handle_row].kind != .Aggregate {
+        moved: ir_lazy_moved(m, b, handle)
+        source: ir_lines_source(m, p, b, handle_ty, handle, moved, "jet_rt_native_iter_file_lines", "line_release", span)
+        ir_release(m, b, handle)
+        return source
+    }
+    size: m.types[handle_row].size
+    pointer: ir_pointer_row(m)
+    boxed: ir_box_alloc(m, b, size, pointer)
+    ir_store_at(m, p, b, boxed, 0, handle)
+    owned: ir_word_const(m, b, 1)
+    ir_lines_source(m, p, b, handle_ty, boxed, owned, "jet_rt_native_iter_file_lines", "line_release_boxed", span)
+}
+
+// The runtime line source `export` (jet_rt_native_iter_{file,stdin,process}_lines)
+// over the handle word `payload` (handle_ty), an `Iter<String>`: a borrowed
+// adapter32 (IterSources.jet) of the payload, lazy.line_next, lazy.`release`
+// and, for a process stream only, lazy.line_clone. `moved` is 1 when the
+// source owns the payload, 0 when it borrows it. -1 with `b` failed.
+ir_lines_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_ty: Type, payload: Int, moved: Int, export: String, release: String, span: Span) -> Int Never! {
+    iter_ty: Type.Apply{name: "Iter", args: [Type]{Type.String}}
+    iter_row: ir_value_type(m, p, iter_ty) ?? return ir_fail_slot(b, span, "type {ir_type_name(iter_ty)}")
+    next_helper: ir_lazy_helper(m, p, b, "line_next", handle_ty, span)
+    if next_helper < 0 -> return -1
+    release_helper: ir_lazy_helper(m, p, b, release, handle_ty, span)
+    if release_helper < 0 -> return -1
+    shared: export == "jet_rt_native_iter_process_lines"
+    clone_helper: if shared -> ir_lazy_helper(m, p, b, "line_clone", handle_ty, span) else -> -1
+    if ir_failed(b) -> return -1
+    meta: ir_lazy_meta(m, p, b, Type.String, span)
+    if ir_failed(b) -> return -1
     pointer_row: ir_pointer_row(m)
     adapter: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.StackAddress, adapter, 32, 8, -1, b.line)
-    ir_emit(b.f, IROp.Store, -1, adapter, 0, handle, b.line)
+    ir_emit(b.f, IROp.Store, -1, adapter, 0, payload, b.line)
     next_address: ir_lazy_address(m, b, next_helper)
     release_address: ir_lazy_address(m, b, release_helper)
     clone_address: if shared -> ir_lazy_address(m, b, clone_helper) else -> ir_word_const(m, b, 0)
     ir_emit(b.f, IROp.Store, -1, adapter, 8, next_address, b.line)
     ir_emit(b.f, IROp.Store, -1, adapter, 16, release_address, b.line)
     ir_emit(b.f, IROp.Store, -1, adapter, 24, clone_address, b.line)
-    source: ir_runtime(m, b, export, [Int]{adapter, moved, meta}, iter_row)
-    ir_release(m, b, handle)
-    ir_lazy_walk_source(m, p, b, label, variable, variable_two, source, row, stride, body, span)
+    ir_runtime(m, b, export, [Int]{adapter, moved, meta}, iter_row)
 }
 
 // lazy.line_next(payload, output) -> 0 at end, 1 with the moved line in
@@ -1481,11 +1514,18 @@ ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
 }
 
 // lazy.line_release(payload): drops the handle an owned line source holds,
-// once, when the Iter is dropped (IterSources.jet release16).
-ir_line_release_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
+// once, when the Iter is dropped (IterSources.jet release16). With `boxed`
+// (lazy.line_release_boxed) the payload is the heap box ir_lines_iter moved
+// an Aggregate handle into, freed after the drop.
+ir_line_release_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, boxed: Bool, span: Span) Never! {
     handle_row: ir_value_type(m, p, handle_ty) ?? return ir_fail(a, span, "type {ir_type_name(handle_ty)}")
     payload: ir_new_slot(a, handle_row, IRSlotKind.Param, ir_intern_name(m, "payload"))
     if ir_has_drop(m, a, payload) -> ir_emit(a.f, IROp.Drop, -1, payload, -1, -1, a.line)
+    if boxed {
+        size: ir_align8(m.types[handle_row].size)
+        bytes: ir_word_const(m, a, size)
+        ir_free(m, a, payload, bytes)
+    }
     ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 

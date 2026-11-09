@@ -39,7 +39,7 @@ Driver: struct {
     context: String
 }
 
-C_SOURCE: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input(\"name: \") ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"browser-notebook.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"browser-notebook.txt\"))\n    assert_eq(file_exists(\"browser-notebook.txt\"), true)\n    print(read_file(Path.from(\"browser-notebook.txt\")) ?? panic(\"read failed\"))\n}}"
+C_SOURCE: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input.first() ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"browser-notebook.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"browser-notebook.txt\"))\n    assert_eq(file_exists(\"browser-notebook.txt\"), true)\n    print(read_file(Path.from(\"browser-notebook.txt\")) ?? panic(\"read failed\"))\n}}"
 
 run: fn() {
     args: process.args()

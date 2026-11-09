@@ -2234,10 +2234,22 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
 sema_marker_rules_no_prelude_call: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
-    name: call.name
-    diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use io: core.term` and call `io.{name}(…)`, or remove `#NoPrelude`"))
+    fix: if call.name == "print" -> "write `use io: core.term` and call `io.print(…)`, or remove `#NoPrelude`" else -> "write `use io: core.term` and read a line with `io.readline(…)`, or remove `#NoPrelude`"
+    diagnostics.push(sema_marker_rules_no_prelude_error(call.name, call.name_span, fix))
     loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     true
+}
+
+// The bare `input` value under `#NoPrelude` (E0429), when the file declares
+// no `input` of its own.
+sema_marker_rules_no_prelude_input: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if !sema_module_no_prelude(environment, program) -> return false
+    diagnostics.push(sema_marker_rules_no_prelude_error("input", span, "write `use io: core.term` and loop over `io.stdin().lines()`, or remove `#NoPrelude`"))
+    true
+}
+
+sema_marker_rules_no_prelude_error: fn(name: String, span: Span, fix: String) -> Diagnostic Never! {
+    sema_error("E0429", span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", fix)
 }
 
 // (Rust `check_memoized_function`): the marker's result-cache

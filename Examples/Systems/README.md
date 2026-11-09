@@ -74,10 +74,11 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Terminal
 
 - [GrepScan](Terminal/GrepScan.jet) — Parallel directory queue + regex file scan.
+- [InputLines](Terminal/InputLines.jet) — The ambient `input` reads the files the arguments name, in order, else standard input.
 - [Progress](Terminal/Progress.jet) — io.progress wraps a List/Iter and updates as the loop pulls.
 - [ReadSentinel](Terminal/ReadSentinel.jet) — Pull one stdin line per turn and stop on the blank sentinel.
 - [StdinFilter](Terminal/StdinFilter.jet) — Streaming line-by-line stdin.
-- [StdinInput](Terminal/StdinInput.jet) — `input()` reads one line from standard input.
+- [StdinInput](Terminal/StdinInput.jet) — The ambient `input` is every line of the program's input, read lazily: the files its arguments name, else standard input.
 - [StdinTTY](Terminal/StdinTTY.jet) — Every standard stream answers whether it is a terminal.
 - [StdoutBytes](Terminal/StdoutBytes.jet) — `Stdout.write_bytes` sends raw bytes to standard output.
 - [StdoutFlush](Terminal/StdoutFlush.jet) — Standard output is buffered when it goes to a pipe or a file: bytes leave when the buffer fills or the program ends.

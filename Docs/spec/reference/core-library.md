@@ -1886,7 +1886,7 @@ require `FS` because they access files rather than terminal streams.
 use term: core.term
 
 run: fn() {
-    name: term.input("your name? ") ?? return
+    name: term.readline("your name? ") ?? return
     print("hi, {name}")
     term.eprint("(log) done")
     out := term.stdout()
@@ -1897,8 +1897,7 @@ run: fn() {
 
 | API | Result | Description |
 | --- | --- | --- |
-| `input(prompt)` | `String !IOError` | Read one line, stripping its newline; the prompt defaults to empty. |
-| `readline()` | `String !IOError` | Read one line without a prompt. |
+| `readline(prompt)` | `String !IOError` | Write the prompt (default empty) and flush stdout, then read one line without its newline; a closed stream reads as `""`. |
 | `read_until(delimiter)` | `String !IOError` | Read through a non-empty delimiter, excluding the delimiter. |
 | `read_all_input()` | `String !IOError` | Read stdin to EOF. |
 | `input_secret(prompt)` | `String !IOError` | Read without echo; redirected/non-terminal input is an error rather than an echoed fallback. |
@@ -1927,6 +1926,25 @@ after its finite retry budget or when stdin closes.
 Read a buffered handle with `reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
+
+The ambient `input` is every line of the program's input as a lazy
+`Iter<String>`: the lines of each file the program's arguments
+name, in order, or of standard input when it has no arguments, like awk's
+file operands and Perl's `<>`. Lines lose their line ending, one file is open
+at a time, and nothing is read until the walk pulls a line. A file that can't
+be opened or read stops the program with its `IOError`, as a read error of any
+line source does. Reading `input` needs `IO` and `Exec.Args`; the files the
+arguments name are granted by being typed on the command line, so `input`
+needs no `FS.Read` (D-SCRIPT-DESIGNATE1=A). Use `readline(prompt)` to ask for
+one line.
+
+```jet
+run: fn() {
+    loop line in input {
+        if line.contains("error") -> print(line)
+    }
+}
+```
 
 The executable terminal examples cover binary-file composition, UTF-8
 stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:

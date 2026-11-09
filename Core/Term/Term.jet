@@ -8,12 +8,16 @@ package: {
         term: .Library{ entry: term }
     }
 }
-use core: core
+use {
+    core: core
+    core.files.[FileReader]
+}
 // core.term — the connected terminal.
 //
-// `print` / `eprint` write UTF-8. `input` / `readline` / `read_until` read
-// lines. `input_secret` disables echo. `style` is a no-op when stdout is not
-// a TTY unless `style_force` is used. Width and height fall back to 80x24.
+// `print` / `eprint` write UTF-8. `readline` / `read_until` read lines, and
+// the ambient `input` is every line of the program's input (__InputLines).
+// `input_secret` disables echo. `style` is a no-op when stdout is not a TTY
+// unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
 Reader: struct {
@@ -39,6 +43,36 @@ StdinHandle: struct {
     // receiver lets a temporary ask (`stdin().is_tty()`).
     is_tty: fn(self) -[IO]> Bool Never! {
         core.term.__terminal8_stdin_tty()
+    }
+}
+
+// The ambient `input`: the lines of the files the program was given, in
+// order, else of standard input (awk's file operands, perl's `<>`). Lowering
+// walks `read_line` as a lazy `Iter<String>` (THandleOp.LinesIter). A file
+// that does not open ends the walk with its IOError, as any line source's
+// read error does; one file is open at a time.
+__InputLines: struct {
+    priv paths: [String]
+    priv at: Int
+    priv open: [FileReader]
+
+    read_line: fn(&self) -[IO, FS.Read, Time.Wait]> String? IOError! {
+        if self.paths.is_empty() {
+            handle := stdin()
+            return handle.read_line()
+        }
+        loop true {
+            if self.open.is_empty() {
+                if self.at == self.paths.len() -> return Ok(None)
+                reader: core.files.open(self.paths[self.at])
+                self.open = [FileReader]{reader}
+                self.at += 1
+            }
+            line: self.open[0].read_line()
+            if line != None -> return Ok(line)
+            self.open = [FileReader]{}
+        }
+        Ok(None)
     }
 }
 
@@ -127,11 +161,12 @@ eprint: fn(text: String) Never! -[IO, Time.Wait]> {
     _: core.term.__stdio_write("{text}\n", false, true, true)
 }
 
-// jet_std_io_input: the prompt is written and flushed, then one line is read
-// without its line ending; a closed stream reads as "".
-input: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
+// jet_std_io_input: the prompt is written and stdout flushed, then one line
+// is read without its line ending; a closed stream reads as "".
+readline: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     terminal_prompt(prompt, false)
-    readline()
+    line: terminal_line()
+    Ok(line ?? "")
 }
 
 input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
@@ -154,11 +189,6 @@ read_all_input: fn() -[IO, Time.Wait]> String IOError! {
     result: core.term.__terminal8_read_all()
     if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
     Ok(result.text)
-}
-
-readline: fn() -[IO, Time.Wait]> String IOError! {
-    line: terminal_line()
-    Ok(line ?? "")
 }
 
 read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
@@ -187,7 +217,8 @@ binwrite: fn(path: String, bytes: [U8]) IOError! -[FS, IO, Time.Wait]> {
 }
 
 confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! {
-    answer: input("{prompt} [y/N] ") ?? ""
+    terminal_prompt("{prompt} [y/N] ", false) ?? return false
+    answer: terminal_line() ?? ""
     confirm_answer(answer)
 }
 
@@ -209,6 +240,12 @@ choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! 
 }
 
 stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
+
+// What the ambient `input` reads (__InputLines): the program's arguments name
+// its files; none means standard input.
+__input_lines: fn() -[Exec.Args]> __InputLines Never! {
+    __InputLines{paths: core.process.args(), at: 0, open: [FileReader]{}}
+}
 
 stdout: fn() -> Stdout Never! { Stdout{fd: 1} }
 

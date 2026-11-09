@@ -4182,6 +4182,8 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].symbol.id.key) != None {
         diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
     }
+    // The ambient `input`, when no binding shadows it: the program's lines.
+    if unresolved_index == None && name == "input" -> return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
     value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
         if !sema_has_error_since(diagnostics, diagnostics_before) {
             if sema_expr_core_module_alias_visible(name, scopes) -> diagnostics.push(sema_module_used_as_value(name, span)) else -> sema_check_unsupported(context, "`{name}` (read at offset {span.start}) has no checked type")

@@ -277,7 +277,7 @@ use {
 #Test("notebook_first_hour_uses_shared_prelude_ambients_and_path") {
     scratch: Scratch.new("notebook-first-hour")
     document: scratch.join("journey.jetnb")
-    source: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input(\"name: \") ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"notes.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"notes.txt\"))\n    assert_eq(file_exists(\"notes.txt\"), true)\n    print(read_file(Path.from(\"notes.txt\")) ?? panic(\"read failed\"))\n}}"
+    source: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input.first() ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"notes.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"notes.txt\"))\n    assert_eq(file_exists(\"notes.txt\"), true)\n    print(read_file(Path.from(\"notes.txt\")) ?? panic(\"read failed\"))\n}}"
     environment: Kernel.environment_hash(scratch.path)
     kernel := Kernel.open(Val(document), environment.clone()).expect("open first-hour notebook document")
     cell_id: kernel.notebook.add_cell(CellKind.Jet, source).id.clone()

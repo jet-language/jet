@@ -379,10 +379,13 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
         // Core decode helper by name; a helper's own `decode<Item>` reaches
         // the others, so a decode site roots them all. An `ArgsSpec` /
         // `ParsedArgs` method calls its Core/Args/Args.jet helper by name.
-        .HandleMethod(_, operation, _) -> {
+        // The ambient `input` (LinesIter) reads each line with its receiver's
+        // Core `read_line` (__InputLines).
+        .HandleMethod(receiver, operation, _) -> {
             if operation == .DynDecode(_) {
                 loop name in ir_codec_decode_helpers() -> ir_core_reach_add(keys, source_keys.get(name) ?? "")
             }
+            if operation == .LinesIter -> ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, receiver)))
             if ir_args_helper(operation) == .Val(helper) -> ir_core_reach_add(keys, source_keys.get(helper) ?? "")
         }
         .DecodeUnder(_, _) -> ir_core_reach_add(keys, source_keys.get("__decode_under") ?? "")

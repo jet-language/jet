@@ -329,8 +329,11 @@ byte once.
 The explicit `core.term.print` and `core.term.eprint` operations each take one
 `String`; use them for a qualified call rather than relying on ambient aliases.
 `Float` prints a decimal part, so a negative whole-valued float is `-5.0`, not
-`-5`. `input()` or `input(prompt)` reads one line, removes its trailing newline,
-and returns `String !IOError`; use `??` to handle the error. `panic` is the
+`-5`. `input` is every line of the program's input, a lazy `Iter<String>`:
+the lines of the files its arguments name, in order, else of standard input
+(`loop line in input { … }`). `core.term.readline(prompt)` reads one line,
+removes its trailing newline, and returns `String !IOError`; use `??` to
+handle the error. `panic` is the
 bug-stop builtin; `assert` and `assert_eq` are registered assertion builtins.
 Other readable aliases are `Clock`, `Instant`, `Date`, `Duration`, `Path`,
 `read_file`, `write_file`, `file_exists`, and `channel`. The comptime-gated
@@ -4897,7 +4900,7 @@ A manifest-less `.jet` script may begin with an inline dependency:
 use textkit#1.4
 
 run: fn() {
-    print(textkit.wrap(input(), width: 72))
+    print(textkit.wrap(input.join("\n"), width: 72))
 }
 ```
 

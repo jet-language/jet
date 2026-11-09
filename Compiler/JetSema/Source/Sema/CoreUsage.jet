@@ -878,7 +878,7 @@ sema_core_import_usage: fn(row: SemaCoreImport, fallback: String) -> String Neve
 }
 
 sema_core_helper_import_chain: fn(usage: String, imports: [SemaCoreImport]) -> String Never! {
-    if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
+    if usage == "core.term::__input_lines" -> return "ambient `input` (helper `{usage}`)"
     parts := usage.split("::").to_list()
     module_name := if parts.len() > 0 -> parts[0] else -> usage
     loop row in imports {
@@ -903,7 +903,6 @@ sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreI
 sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if expr == {
         .Call(call, _) -> {
-            if call.name == "input" -> sema_core_note_usage(used, spans, "core.term::input", Val(call.name_span))
             if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(used, spans, "core.math::__precise__", Val(call.name_span))
             if call.name == "measurement" -> sema_core_note_usage(used, spans, "core.units::__measurement_new", Val(call.name_span))
             sema_core_note_builtin_math_type(call.name, registered, used, spans, Val(call.name_span))
@@ -1165,6 +1164,10 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
             }
         }
         .Paren(value, _, _) -> sema_core_collect_expr(value, imports, registered, used, spans, callbacks)
+        // The ambient `input` reads through core.term `__input_lines`.
+        .Ident(name, span, _) -> {
+            if name == "input" -> sema_core_note_usage(used, spans, "core.term::__input_lines", Val(span))
+        }
         else -> {}
     }
 }
