@@ -1,13 +1,13 @@
-// Git sparse-index port: Source/Publish/Index.rs. Fixed nine-field JSONL;
-// parsing/quoting reuse Foundation's shared protocol JSON boundary and helpers:
-// Foundation JSON::quote (not sorted/LF CanonicalJSON or RFC8785 JCS).
+// Git sparse-index port: Source/Publish/Index.rs. Fixed nine-field JSONL,
+// written through the Core JSON writer and parsed through Foundation's shared
+// protocol JSON boundary (not sorted/LF CanonicalJSON or RFC8785 JCS).
 // Registry verification/referrer finalization are mandatory shared dependencies.
 // Rust's InvalidData reports InvalidInput (CORE-GAPS 11); open/create/fsync and
 // Stat.modified nanoseconds owe #3593. No Other-kind fallback.
 use {
-    jet_foundation.[foundation_json_quote, foundation_parse_protocol_json]
+    jet_foundation.[foundation_parse_protocol_json]
     jet_pkg_model.[
-        PublicationRegistryTier, pkg_json_bool, pkg_json_object, pkg_json_text, publication_parse_tier,
+        PublicationRegistryTier, pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_text, publication_parse_tier,
         publication_tier_label,
     ]
     jetpack_foundation.[foundation_write_file_nofollow_at_root]
@@ -28,7 +28,17 @@ PublicationIndexEntry: struct {
 }
 
 publication_index_to_jsonl: fn(entry: PublicationIndexEntry) -> String Never! {
-    "{{\"name\":{foundation_json_quote(entry.name)},\"version\":{foundation_json_quote(entry.version)},\"content_hash\":{foundation_json_quote(entry.content_hash)},\"fingerprint\":{foundation_json_quote(entry.fingerprint)},\"yanked\":{if entry.yanked -> "true" else -> "false"},\"tier\":{foundation_json_quote(publication_tier_label(entry.tier))},\"gate_status\":{foundation_json_quote(publication_gate_summary(entry.gate_status))},\"public_key\":{foundation_json_quote(entry.public_key)},\"signature\":{foundation_json_quote(entry.signature)}}}"
+    pkg_json_render(Dyn.Object([
+        "name": Dyn.Text(entry.name.copy()),
+        "version": Dyn.Text(entry.version.copy()),
+        "content_hash": Dyn.Text(entry.content_hash.copy()),
+        "fingerprint": Dyn.Text(entry.fingerprint.copy()),
+        "yanked": Dyn.Bool(entry.yanked),
+        "tier": Dyn.Text(publication_tier_label(entry.tier)),
+        "gate_status": Dyn.Text(publication_gate_summary(entry.gate_status)),
+        "public_key": Dyn.Text(entry.public_key.copy()),
+        "signature": Dyn.Text(entry.signature.copy()),
+    ]))
 }
 
 publication_index_parse_line: fn(line: String) -> PublicationIndexEntry? Never! {

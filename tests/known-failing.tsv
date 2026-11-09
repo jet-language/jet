@@ -1023,12 +1023,11 @@ tests/cases/semindex/aggregate_view_provenance_preserves_slots_and_changes_signa
 tests/cases/semindex/returned_view_provenance_is_structured_and_changes_signature_id.case	#6386	unbuilt: semindex returned view provenance: `pick`'s view_provenance is `[]`, where the predicate reads one row with two parameter sources
 tests/run/Ownership/ReleaseDeferClosePanic	#5989	a panic inside a close while the body's Stop is pending aborts the process (SIGABRT, "panic in a destructor during cleanup") instead of giving the process-fatal Stop [E3001] report at exit 70
 tests/cases/task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier.case	#5989	the cancel interrupts the close's channel wait, so "close worker: finished" never prints; the close is not shielded from cancellation
-tests/guards/corpus_ast: corpus policy dogfood gate	#3590	368 pre-existing Jetpack sites (c198): 246 dogfood-json (wire text built by hand instead of the typed JSON seam) and 122 dogfood-path-containment (string-prefix containment instead of Path.is_within)
+tests/guards/corpus_ast: corpus policy dogfood gate	#3590	23 pre-existing Jetpack/JetOS sites, held for the owner's JetOS ruling: 21 dogfood-json (wire text built by hand instead of the typed JSON seam) and 2 dogfood-path-containment (string-prefix containment instead of core.files.path is_relative_to)
 tests/guards/corpus_ast: failure surface has no active retired spelling	#6582	278 retired failure `?` lines, all in Compiler/JetDevserver, which is Rust transliterated into Jet syntax and is ported under #6582
 tests/cases/corelib_net/net_http_service_policy_tests_pass.case	#3595	7 passed, 1 failed: a second body().text on server.response's one-shot body is not Err(.BodyConsumed); body() hands out a copy of the Body value, which carries no take state (c15)
 Core/Args/Args.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
 Core/Auth/Auth.jet [none]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [none]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
 Core/Data/Data.jet [none]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
 Core/Encoding/Base32.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
 Core/Encoding/Base64.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
@@ -1060,7 +1059,6 @@ Core/Web/Storage/Local.jet [none]	#3550	test drift: `core.web.storage.session.se
 Core/Web/Storage/Session.jet [none]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
 Core/Args/Args.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
 Core/Auth/Auth.jet [basic]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [basic]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
 Core/Data/Data.jet [basic]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
 Core/Encoding/Base32.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
 Core/Encoding/Base64.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
@@ -1092,7 +1090,6 @@ Core/Web/Storage/Local.jet [basic]	#3550	test drift: `core.web.storage.session.s
 Core/Web/Storage/Session.jet [basic]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
 Core/Args/Args.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
 Core/Auth/Auth.jet [full]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [full]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
 Core/Data/Data.jet [full]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
 Core/Encoding/Base32.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
 Core/Encoding/Base64.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument

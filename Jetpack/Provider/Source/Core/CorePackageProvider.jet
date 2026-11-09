@@ -339,7 +339,7 @@ provider_build_rlib_from_cargo: fn(pkg_dir: String, hangar_dir: String, toolchai
     if toolchain.pinned {
         hangar: files.canonicalize(hangar_dir) ?? return Err(CargoBuildError.Failed("could not resolve the immutable tool closure: {err}"))
         cargo: files.canonicalize(toolchain.cargo) ?? return Err(CargoBuildError.Failed("could not resolve pinned cargo in the immutable tool closure: {err}"))
-        if cargo != hangar && !cargo.starts_with("{hangar}/") -> return Err(CargoBuildError.Failed("pinned cargo is outside the immutable tool closure"))
+        if !foundation_paths.is_relative_to(foundation_paths.of(cargo), foundation_paths.of(hangar)) -> return Err(CargoBuildError.Failed("pinned cargo is outside the immutable tool closure"))
     }
     if provider_find_rlib_in(pkg_dir) == {
         .Val(existing) -> return Ok(CargoBuildReceipt{rlib: existing, sandbox_class: "non-executing", sandbox_policy: "no child launched (rlib already present)"})

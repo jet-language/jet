@@ -36,7 +36,19 @@ cli_test_catalog_package_fixtures: fn(root: String, name: String) -[FS, Env]> St
     }
     store_seal_local_output(output) ?? panic("seal catalog package: {err.message()}")
     output_hash: pkg_try_output_hash_of(output) ?? panic("hash catalog package: {err.message()}")
-    files.write(files.join(fixtures, "jetpack-{package}.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-{package}.drv\",\"outputs\":{{\"out\":\"{output}\"}},\"jetpackImport\":{{\"closedGraph\":{{\"root\":{{\"dependencies\":[]}}}},\"selectedOutputs\":{{\"out\":\"{output}\"}},\"dependencies\":[],\"sources\":[],\"hashes\":{{\"out\":\"{output_hash}\"}},\"losses\":[],\"proof\":{{\"source\":\"services-catalog\"}},\"recipe\":{{\"kind\":\"compatibility\"}},\"lock\":{{\"system\":\"x86_64-linux\"}}}}}}]") ?? panic("write catalog package fixture")
+    jetpack_import: Dyn.Object([
+        "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": Dyn.Array([Dyn]{})])]),
+        "selectedOutputs": Dyn.Object(["out": Dyn.Text(output.copy())]),
+        "dependencies": Dyn.Array([Dyn]{}),
+        "sources": Dyn.Array([Dyn]{}),
+        "hashes": Dyn.Object(["out": Dyn.Text(output_hash)]),
+        "losses": Dyn.Array([Dyn]{}),
+        "proof": Dyn.Object(["source": Dyn.Text("services-catalog")]),
+        "recipe": Dyn.Object(["kind": Dyn.Text("compatibility")]),
+        "lock": Dyn.Object(["system": Dyn.Text("x86_64-linux")]),
+    ])
+    record: Dyn.Object(["drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-{package}.drv"), "outputs": Dyn.Object(["out": Dyn.Text(output.copy())]), "jetpackImport": jetpack_import])
+    files.write(files.join(fixtures, "jetpack-{package}.json"), cli_json_render(Dyn.Array([Dyn]{record}))) ?? panic("write catalog package fixture")
     fixtures
 }
 

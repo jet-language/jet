@@ -1,9 +1,9 @@
 // Source/Publish/SBOM.rs: deterministic SPDX 2.3 and CycloneDX 1.5.
 // Namespace/serial identity is the canonical PackageModel lock writer's bytes,
 // hashed by the Compiler-owned SHA kernel. Production never samples a clock.
+// CycloneDX is a Dyn tree in the Core JSON writer's two-space layout.
 use {
-    jet_foundation.[foundation_json_quote]
-    jet_pkg_model.[LockFile, pkg_lock_write, pkg_sha256_hex]
+    jet_pkg_model.[LockFile, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_hex]
 }
 
 publication_emit_spdx: fn(lock: LockFile, root_name: String, root_version: String) -> String Never! {
@@ -30,14 +30,32 @@ publication_emit_spdx: fn(lock: LockFile, root_name: String, root_version: Strin
 
 publication_emit_cyclonedx: fn(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest: publication_lock_digest(lock)
-    components := [String]{}
+    components := [Dyn]{}
     loop index in 0..<lock.packages.len() {
         package: lock.packages[index]
         value: package.content_hash ?? package.fingerprint
         hash: if value.starts_with("sha256-") -> value.removeprefix("sha256-") else -> value
-        components.push("    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-{index}\",\n      \"name\": {foundation_json_quote(package.name)},\n      \"version\": {foundation_json_quote(package.version)},\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": {foundation_json_quote(hash)} }}]\n    }}")
+        components.push(Dyn.Object([
+            "type": Dyn.Text("library"),
+            "bom-ref": Dyn.Text("pkg-{index}"),
+            "name": Dyn.Text(package.name.copy()),
+            "version": Dyn.Text(package.version.copy()),
+            "hashes": Dyn.Array([Dyn]{Dyn.Object(["alg": Dyn.Text("SHA-256"), "content": Dyn.Text(hash)])}),
+        ]))
     }
-    "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": {foundation_json_quote(root_name)},\n      \"version\": {foundation_json_quote(root_version)}\n    }}\n  }},\n  \"components\": [\n{components.join(",\n")}\n  ]\n}}\n"
+    document: Dyn.Object([
+        "bomFormat": Dyn.Text("CycloneDX"),
+        "specVersion": Dyn.Text("1.5"),
+        "serialNumber": Dyn.Text("urn:uuid:jet-{digest}"),
+        "version": Dyn.Int(1),
+        "metadata": Dyn.Object([
+            "timestamp": Dyn.Text("1970-01-01T00:00:00Z"),
+            "tools": Dyn.Array([Dyn]{Dyn.Object(["name": Dyn.Text("jet")])}),
+            "component": Dyn.Object(["type": Dyn.Text("library"), "name": Dyn.Text(root_name.copy()), "version": Dyn.Text(root_version.copy())]),
+        ]),
+        "components": Dyn.Array(components),
+    ])
+    "{pkg_json_render_pretty(document)}\n"
 }
 
 publication_lock_digest: fn(lock: LockFile) -> String Never! {

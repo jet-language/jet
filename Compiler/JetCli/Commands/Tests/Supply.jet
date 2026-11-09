@@ -20,7 +20,7 @@ use {
     lock: "version = 1\n\n[root]\ndependencies = []\n"
     digest: "sha256-5818e1a4ff61c5588768e1a8635440de1bb62905969dabe6786d37baf1dcf4f5"
     expected_spdx: "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/myapp-0.1.0-{digest}\nDocumentName: myapp-0.1.0\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n##### Root package\n\nPackageName: myapp\nSPDXID: SPDXRef-root\nPackageVersion: 0.1.0\nFilesAnalyzed: false\nPackageChecksum: NOASSERTION\nPackageDownloadLocation: NOASSERTION\n\n"
-    expected_cdx: "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": \"myapp\",\n      \"version\": \"0.1.0\"\n    }}\n  }},\n  \"components\": [\n\n  ]\n}}\n"
+    expected_cdx: "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [\n      {{\n        \"name\": \"jet\"\n      }}\n    ],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": \"myapp\",\n      \"version\": \"0.1.0\"\n    }}\n  }},\n  \"components\": []\n}}\n"
     loop carrier in ([String]{"extracted", "inline"}) {
         project: "{root}/{carrier}"
         cli_files.write("{project}/.jet/lock", lock) ?? panic("machine lock")

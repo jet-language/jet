@@ -372,7 +372,7 @@ cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [Instal
     pointer: ToolProfilePointer{generation: generation, witness: witness}.format()
     cli_atomic_write_current_pointer(pointer.bytes())
     cli_profile_failpoint("after-current-pointer")
-    profile: "{{\n  \"name\": \"{TOOL_PROFILE_NAME}\",\n  \"current\": {generation},\n  \"witness\": {cli_tool_json_str(witness)}\n}}\n"
+    profile: "{pkg_json_render_pretty(Dyn.Object(["name": Dyn.Text(TOOL_PROFILE_NAME), "current": Dyn.Int(generation), "witness": Dyn.Text(witness.copy())]))}\n"
     cli_atomic_write_profile_pointer(profile.bytes())
     loop tool in previous {
         loop bin in tool.bins {
@@ -386,11 +386,6 @@ cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [Instal
         }
     }
     store_sync_store_directory(cli_user_bin_dir()) ?? return Err(CLIError.Store(err))
-}
-
-// Rust `json_str`: quote with only `\`, `"`, and newline escaped.
-cli_tool_json_str: fn(value: String) -> String Never! {
-    "\"{value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\""
 }
 
 // ── Recovery ──

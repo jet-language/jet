@@ -5,9 +5,10 @@ use jetpack_nix_eval.[
     NIXEVAL_NIX_SOURCE_COMMIT, NIXEVAL_NIX_TAG_OBJECT, NIXEVAL_NIX_VERSION, NIXEVAL_ORACLE_JSON,
     NixEvalError, NixEvalInternalHarness, NixEvalInternalStage, NixEvalInventoryStatus,
     NixEvalOracleIdentity, NixEvalOracleManifest, nixeval_budget, nixeval_find, nixeval_is_blank,
-    nixeval_matches_at, nixeval_pinned_inventory, nixeval_push_text, nixeval_required_systems,
+    nixeval_pinned_inventory, nixeval_required_systems,
     nixeval_slice,
 ]
+use nixeval_test_core_json: core.encoding.json
 
 NIXEVAL_TEST_ZERO_SRI: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NIXEVAL_TEST_X86_64_LINUX_BUILD: "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y="
@@ -50,28 +51,26 @@ nixeval_replace_first: fn(text: String, needle: String, replacement: String) -> 
     "{nixeval_slice(bytes, 0, at)}{replacement}{nixeval_slice(bytes, at + needle.bytes().len(), bytes.len())}"
 }
 
-// Replace every non-overlapping occurrence of `needle` (Rust `replace`).
-nixeval_replace_all: fn(text: String, needle: String, replacement: String) -> String Never! {
-    bytes: text.bytes()
-    pattern: needle.bytes()
-    if pattern.len() == 0 -> return text.copy()
-    out := [U8]{}
-    index := 0
-    loop index < bytes.len() {
-        if nixeval_matches_at(bytes, pattern, index) {
-            nixeval_push_text(out, replacement)
-            index += pattern.len()
-            next
+// `value` with each object member named `key`, at any depth, set to the text `to`.
+nixeval_test_set_members: fn(value: Dyn, key: String, to: String) -> Dyn {
+    if value == {
+        .Object(pairs) -> {
+            out := [(key: String, value: Dyn)]{}
+            loop pair in pairs {
+                member: if pair.key == key -> Dyn.Text(to.copy()) else -> nixeval_test_set_members(pair.value, key, to)
+                out.push((key: pair.key.copy(), value: member))
+            }
+            Dyn.Object(out)
         }
-        out.push(bytes[index])
-        index += 1
+        else -> value
     }
-    String.from_bytes(out) ?? text.copy()
 }
 
+// The embedded oracle with every build `status` and the `corpus_status` replaced.
 nixeval_test_manifest_with_identities: fn(status: String, corpus_status: String) -> String {
-    ready: nixeval_replace_all(NIXEVAL_ORACLE_JSON, "\"status\": \"ready\"", "\"status\": \"{status}\"")
-    nixeval_replace_all(ready, "bit_exact", corpus_status)
+    oracle: nixeval_test_core_json.parse(NIXEVAL_ORACLE_JSON) ?? panic("the embedded oracle is JSON")
+    edited: nixeval_test_set_members(nixeval_test_set_members(oracle, "status", status), "corpus_status", corpus_status)
+    nixeval_test_core_json.to_string(edited) ?? panic("the edited oracle renders")
 }
 
 nixeval_test_ready_manifest: fn() -> NixEvalOracleManifest {

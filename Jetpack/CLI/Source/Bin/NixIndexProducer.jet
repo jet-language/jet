@@ -121,14 +121,19 @@ cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) CLIToo
     }
     coverage: nix_index_producer_coverage_report(generated.decoded) ?? return Err(CLIToolError.new(err.message()))
     cli_nix_index_write_immutable(files.join(target_dir, "{digest}.coverage.json"), coverage.bytes())
-    report := generated.report
-    if report.ends_with("}}") -> report = report.removesuffix("}}")
-    if write_signature_request {
-        report = "{report},\"target_sha256\":\"{digest}\",\"target\":\"{target}\",\"signature_request\":\"{target}.sig.request\"}}"
-    } else {
-        report = "{report},\"target_sha256\":\"{digest}\",\"target\":\"{target}\",\"trust_tier\":\"local-unofficial\"}}"
+    report_tree: json.parse(generated.report) ?? return Err(CLIToolError.new("generation report is not JSON: {err.reason}"))
+    report := if report_tree == {
+        .Object(pairs) -> pairs
+        else -> { return Err(CLIToolError.new("generation report is not a JSON object")) }
     }
-    cli_nix_index_write_immutable(files.join(target_dir, "{digest}.json.zst.generation-report.json"), report.bytes())
+    report.push((key: "target_sha256", value: Dyn.Text(digest)))
+    report.push((key: "target", value: Dyn.Text(target)))
+    if write_signature_request {
+        report.push((key: "signature_request", value: Dyn.Text("{target}.sig.request")))
+    } else {
+        report.push((key: "trust_tier", value: Dyn.Text("local-unofficial")))
+    }
+    cli_nix_index_write_immutable(files.join(target_dir, "{digest}.json.zst.generation-report.json"), pkg_json_render(Dyn.Object(report)).bytes())
     if native_recipes == {
         .Val(recipes) -> cli_nix_index_write_immutable(files.join(output_root, "recipes-v1.json"), recipes)
         .None -> {}
@@ -510,7 +515,7 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
 // Every `/nix/store/` text value anywhere in `value`.
 cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
     if value == {
-        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> paths.push(text.copy())
+        .Text(text) -> if text != NIX_DEFAULT_STORE_DIR && cli_paths.is_relative_to(cli_paths.of(text), cli_paths.of(NIX_DEFAULT_STORE_DIR)) && !paths.contains(text) -> paths.push(text.copy())
         .Array(items) -> {
             loop item in items -> cli_nix_index_collect_store_paths(item, paths)
         }

@@ -3,6 +3,7 @@
 // (U4/U5/U6/U9).
 use {
     envmodel_source_files: core.files
+    envmodel_paths: core.files.path
     jet_pkg_model.[
         ChannelPolicy, InlinePackageBlock, MergeError, NamedSourceDecl, PackageFacts, ProviderKind,
         ProviderRef, SourceTable, pkg_bytes_text, pkg_extract_inline_package, pkg_merge_sources,
@@ -118,7 +119,7 @@ envmodel_source_loader_error: fn(path: String, cause: String) -> EnvModelEvalErr
 
 // True when `path` is `root` or lies below it (Rust `Path::starts_with`).
 envmodel_path_within: fn(path: String, root: String) -> Bool Never! {
-    path == root || path.starts_with("{root.removesuffix("/")}/")
+    envmodel_paths.is_relative_to(envmodel_paths.of(path), envmodel_paths.of(root))
 }
 
 // A relative path with `.` components and empty segments dropped

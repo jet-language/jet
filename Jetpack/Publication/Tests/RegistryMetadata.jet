@@ -67,8 +67,10 @@ publication_metadata_test_names: fn(metadata: PublicationRegistryPackageMetadata
     assert_eq(model.active_dependencies().len(), 0)
 }
 
+// Raw registry.json input: the fixed head, then a test's member text.
+PUBLICATION_METADATA_TEST_HEAD: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\""
 publication_metadata_test_parse: fn(fields: String) -> PublicationRegistryPackageMetadata Never! {
-    publication_parse_registry_package_metadata("{{\"name\":\"rolekit\",\"version\":\"1.0.0\"{fields}}}", "rolekit", "1.0.0") ?? panic("valid metadata")
+    publication_parse_registry_package_metadata("{PUBLICATION_METADATA_TEST_HEAD}{fields}}}", "rolekit", "1.0.0") ?? panic("valid metadata")
 }
 publication_metadata_test_refusal: fn(text: String, detail: String) Never! {
     if publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") == {

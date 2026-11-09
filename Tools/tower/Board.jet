@@ -225,10 +225,9 @@ parse_request: fn(args: [String]) -> Request Failure! {
         name := arg.removeprefix("--")
         value := ""
         has_value := false
-        if name.contains("=") {
-            parts: name.split("=").to_list()
-            value = name.removeprefix("{parts[0]}=")
-            name = parts[0].copy()
+        if name.split_once("=") == .Val(parts) {
+            value = parts.after.copy()
+            name = parts.before.copy()
             has_value = true
         }
         if BOOLEAN_FLAGS.contains(name) {

@@ -161,7 +161,7 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
     image_write_blob(out_dir, config_digest, config_json.bytes())
     image_write_blob(out_dir, manifest_digest, manifest_json.bytes())
     image_write_index(out_dir, manifest_digest, manifest_json.bytes().len(), ref_name)
-    image_write_layout_file(files.join(out_dir, "oci-layout"), "{{\"imageLayoutVersion\":\"{IMAGE_LAYOUT_VERSION}\"}}".bytes())
+    image_write_layout_file(files.join(out_dir, "oci-layout"), image_json_text(Dyn.Object(["imageLayoutVersion": Dyn.Text(IMAGE_LAYOUT_VERSION)])).bytes())
 
     Ok(OCIBuiltImage{
         out_dir: out_dir.copy(),
@@ -486,7 +486,7 @@ image_validate_layer_files: fn(layer_files: [LayerFile]) ImageError! {
         seen.push(file.path)
     }
     loop index in 1..<seen.len() {
-        if seen[index].starts_with("{seen[index - 1]}/") {
+        if foundation_paths.is_relative_to(foundation_paths.of(seen[index]), foundation_paths.of(seen[index - 1])) {
             return Err(image_invalid("OCI layer contains a file/directory path collision"))
         }
     }

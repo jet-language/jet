@@ -9,6 +9,7 @@ use {
         PACKAGE_FILE, WORKSPACE_FILE, syntax_command_role_file,
     ]
     files: core.files
+    pkg_paths: core.files.path
 }
 
 // One checked package runtime entry: the source file plus the callable the
@@ -531,7 +532,7 @@ PackageFunctionEntry: struct {
 // Whether `relative` lies under any of `directories` (component-wise).
 pkg_path_under_any: fn(relative: String, directories: [String]) -> Bool Never! {
     loop directory in directories {
-        if relative == directory || relative.starts_with("{directory}/") -> return true
+        if pkg_paths.is_relative_to(pkg_paths.of(relative), pkg_paths.of(directory)) -> return true
     }
     false
 }

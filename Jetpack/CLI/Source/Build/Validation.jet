@@ -181,7 +181,7 @@ build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) Hermetic
 
 // Whether `path` is `folder` or under it; `.` holds every path.
 build_path_within: fn(path: String, folder: String) -> Bool Never! {
-    folder == "." || path == folder || path.starts_with("{folder}/")
+    cli_paths.is_relative_to(cli_paths.of(path), cli_paths.of(folder))
 }
 
 build_validate_paths: fn(paths: [String]) HermeticBuildError! {

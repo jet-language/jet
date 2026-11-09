@@ -102,7 +102,7 @@ provider_hash_output_bytes: fn(verification: &StoreVerification, ctx: ProviderCt
         .Val(roots) -> {
             hangar: roots.hangar_dir()
             objects: files.join(hangar, STORE_OBJECTS_DIR)
-            if path == objects || path.starts_with("{objects}/") {
+            if foundation_paths.is_relative_to(foundation_paths.of(path), foundation_paths.of(objects)) {
                 digest: store_verified_output_hash_persistent(verification, path, Val(hangar), false) ?? return Err(ProviderReason{message: err.message()})
                 return Ok(digest)
             }

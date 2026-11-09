@@ -358,19 +358,19 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
     files.create_dir_all(target) ?? return cli_package_dependency_cli_error("E2105", "couldn't create the vendor directory {target}: {err}", None, color, json).output
     names := fetched.directories.keys().to_list()
     names.sort()
-    entries := [String]{}
+    entries := [Dyn]{}
     loop name in names {
         source: fetched.directories.get(name) ?? next
         cli_package_dependency_vendor_copy(target, name, source) ?? return cli_package_dependency_cli_error("E2105", "couldn't copy `{name}` into {target}: {err}", Val("vendored dependency trees hold only regular files and directories; fix `{name}`'s source, then run `jet registry vendor` again"), color, json).output
         loop package in fetched.lock.packages {
-            if package.name == name -> entries.push("    {{ \"name\": {pkg_json_quote(package.name)}, \"version\": {pkg_json_quote(package.version)}, \"fingerprint\": {pkg_json_quote(package.fingerprint)} }}")
+            if package.name == name -> entries.push(Dyn.Object(["name": Dyn.Text(package.name), "version": Dyn.Text(package.version), "fingerprint": Dyn.Text(package.fingerprint)]))
         }
     }
-    manifest: "{{\n  \"vendor_format\": 1,\n  \"packages\": [\n{entries.join(",\n")}\n  ]\n}}\n"
+    manifest: "{pkg_json_render_pretty(Dyn.Object(["vendor_format": Dyn.Int(1), "packages": Dyn.Array(entries)]))}\n"
     foundation_write_file_nofollow_at_root(target, "manifest.json", manifest.bytes(), None) ?? return cli_package_dependency_cli_error("E2105", cli_package_dependency_publication_error(files.join(target, "manifest.json"), err), None, color, json).output
     if quiet -> return PackageDependencyOutput{}
     if names.len() == 0 -> return PackageDependencyOutput{stdout: "vendor: no dependencies to copy\n"}
-    shown: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> target
+    shown: if target != root && cli_path_starts_with(target, root) -> files.relative(target, root) else -> target
     out := ""
     loop name in names -> out = "{out}vendored: {name}\n"
     noun: if names.len() == 1 -> "dependency" else -> "dependencies"

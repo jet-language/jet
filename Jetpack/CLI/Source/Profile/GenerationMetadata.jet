@@ -64,21 +64,18 @@ ToolGenerationTool: struct {
         self.reference < other.reference
     }
 
-    format_into: fn(self, out: &[String], last: Bool) Never! {
-        out.push("    {{\n")
-        fields: [(key: String, value: String)]{
-            (key: "name", value: self.name),
-            (key: "version", value: self.version),
-            (key: "source", value: self.source),
-            (key: "reference", value: self.reference),
-            (key: "output_hash", value: self.output_hash),
-            (key: "store_root", value: self.store_root)
-        }
-        loop field in fields -> out.push("      \"{field.key}\": {cli_json_quote(field.value)},\n")
-        cli_profile_string_array_line(out, "bins", self.bins, true)
-        cli_profile_string_array_line(out, "members", self.members, true)
-        cli_profile_string_array_line(out, "projection_hashes", self.projection_hashes, false)
-        out.push(if last -> "    }}\n" else -> "    }},\n")
+    to_json_tree: fn(self) -> Dyn Never! {
+        Dyn.Object([
+            "name": Dyn.Text(self.name.copy()),
+            "version": Dyn.Text(self.version.copy()),
+            "source": Dyn.Text(self.source.copy()),
+            "reference": Dyn.Text(self.reference.copy()),
+            "output_hash": Dyn.Text(self.output_hash.copy()),
+            "store_root": Dyn.Text(self.store_root.copy()),
+            "bins": cli_json_texts(self.bins),
+            "members": cli_json_texts(self.members),
+            "projection_hashes": cli_json_texts(self.projection_hashes),
+        ])
     }
 
     from_json_tree: fn(value: Dyn) -> ToolGenerationTool CLIError! {
@@ -106,16 +103,17 @@ ToolGenerationMetadata: struct {
 
     format: fn(self) -> String CLIError! {
         self.validate()
-        out := [String]{"{{\n"}
-        out.push("  \"schema\": {cli_json_quote(TOOL_PROFILE_GENERATION_SCHEMA)},\n")
-        out.push("  \"generation\": {self.generation},\n")
-        out.push("  \"owner\": {cli_json_quote(TOOL_PROFILE_OWNER)},\n")
-        out.push("  \"profile\": {cli_json_quote(TOOL_PROFILE_NAME)},\n")
-        out.push("  \"created_at\": {self.created_at},\n")
-        out.push("  \"tools\": [\n")
-        loop index in 0..<self.tools.len() -> self.tools[index].format_into(out, index + 1 == self.tools.len())
-        out.push("  ]\n}}\n")
-        Ok(out.join(""))
+        tools := [Dyn]{}
+        loop tool in self.tools -> tools.push(tool.to_json_tree())
+        record: Dyn.Object([
+            "schema": Dyn.Text(TOOL_PROFILE_GENERATION_SCHEMA),
+            "generation": Dyn.Int(self.generation),
+            "owner": Dyn.Text(TOOL_PROFILE_OWNER),
+            "profile": Dyn.Text(TOOL_PROFILE_NAME),
+            "created_at": Dyn.Int(self.created_at),
+            "tools": Dyn.Array(tools),
+        ])
+        Ok("{pkg_json_render_pretty(record)}\n")
     }
 
     parse: fn(text: String, expected_generation: Int) -> ToolGenerationMetadata CLIError! {
@@ -291,24 +289,11 @@ cli_profile_bounded_string: fn(object: [String: Dyn], key: String) -> String CLI
     Ok(value)
 }
 
-cli_profile_string_array_line: fn(out: &[String], key: String, values: [String], comma: Bool) Never! {
-    quoted := [String]{}
-    loop value in values -> quoted.push(cli_json_quote(value))
-    out.push("      \"{key}\": [{quoted.join(", ")}]{if comma -> "," else -> ""}\n")
-}
-
 // ── Shared bounded JSON field readers (CLI profile, tool manifest, package generations) ──
 
 // One JSON string literal.
 cli_json_quote: fn(value: String) -> String Never! {
     pkg_json_render(Dyn.Text(value.copy()))
-}
-
-// `[a,b]` of JSON string literals, no spaces.
-cli_json_quote_list: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
-    loop value in values -> quoted.push(cli_json_quote(value))
-    quoted.join(",")
 }
 
 cli_json_parse: fn(text: String) -> Dyn CLIError! {

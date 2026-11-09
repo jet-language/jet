@@ -438,7 +438,7 @@ cli_normalize_project_relative_image_path: fn(relative: String) -> String CLIErr
 
 cli_image_layer_path_conflicts: fn(layer_files: [LayerFile], candidate: String) -> Bool Never! {
     loop file in layer_files {
-        if file.path == candidate || candidate.starts_with("{file.path}/") || file.path.starts_with("{candidate}/") -> return true
+        if cli_path_starts_with(candidate, file.path) || cli_path_starts_with(file.path, candidate) -> return true
     }
     false
 }
@@ -509,7 +509,7 @@ cli_image_service_executable: fn(service: String, executable: String) -> String 
         loop part in executable.split("/") {
             if part == ".." -> return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
         }
-        if executable != "/usr/local/bin" && !executable.starts_with("/usr/local/bin/") -> return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
+        if !cli_path_starts_with(executable, "/usr/local/bin") -> return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
         return Ok(executable)
     }
     if executable == "" || executable.contains("/") || executable.contains("\\") -> return Err(CLIError.InvalidData("service {service} has an unsafe executable name"))
@@ -698,7 +698,7 @@ cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: 
     bin_info: files.stat(entry.bin) ?? return Err(CLIError.Other("the Hangar bin projection cannot be opened: {err}"))
     if bin_info.is_symlink -> return Err(CLIError.Other("the Hangar bin projection is a symlink"))
     bin: files.canonicalize(entry.bin) ?? return Err(CLIError.Other("the Hangar bin projection cannot be resolved: {err}"))
-    if bin != output && !bin.starts_with("{output}/") -> return Err(CLIError.Other("the Hangar bin projection escapes its verified output"))
+    if !cli_path_starts_with(bin, output) -> return Err(CLIError.Other("the Hangar bin projection escapes its verified output"))
 }
 
 // One realized executable: its name and bytes.
@@ -723,7 +723,7 @@ cli_read_realized_package_binaries: fn(entry: StoreEntry) -[FS, Env]> [RealizedB
         metadata: files.stat(item_path) ?? return Err(CLIError.Other("{err}"))
         if metadata.is_symlink || !metadata.is_file -> return Err(CLIError.Other("the Hangar bin projection contains a non-regular entry"))
         resolved: files.canonicalize(item_path) ?? return Err(CLIError.Other("{err}"))
-        if !resolved.starts_with("{root}/") -> return Err(CLIError.Other("the Hangar bin projection escapes its package output"))
+        if resolved == root || !cli_path_starts_with(resolved, root) -> return Err(CLIError.Other("the Hangar bin projection escapes its package output"))
         if metadata.size > 536870912 -> return Err(CLIError.Other("a realized package binary exceeds the 512 MiB layer limit"))
         if item_name == "" || pkg_text_has_control(item_name) -> return Err(CLIError.Other("a realized package binary has an unsafe name"))
         data: files.read_bytes(resolved) ?? return Err(CLIError.Other("{err}"))

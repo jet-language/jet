@@ -8,6 +8,7 @@
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     files: core.files
+    pkg_paths: core.files.path
     sys: core.sys
 }
 
@@ -325,10 +326,7 @@ pkg_authority_join: fn(root: String, relative: String) -> String Never! {
 
 // Whether `path` is `root` itself or lies below it, component-wise.
 pkg_authority_path_within: fn(path: String, root: String) -> Bool Never! {
-    trimmed: if root.ends_with("/") && root != "/" -> root.removesuffix("/") else -> root
-    if path == trimmed || path == ("{trimmed}/") -> return true
-    if trimmed == "/" -> return path.starts_with("/")
-    path.starts_with("{trimmed}/")
+    pkg_paths.is_relative_to(pkg_paths.of(path), pkg_paths.of(root))
 }
 
 // `Path::extension`: the text after the last `.` of the final component,

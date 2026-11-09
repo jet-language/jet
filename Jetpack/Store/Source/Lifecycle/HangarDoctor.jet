@@ -314,7 +314,7 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: &[String: String]) N
         if producer.provider != "nix" -> next
         primary: entry.envelope.output_hash
         if producer.facts.get("nix.store-path") == {
-            .Val(store_path) -> if store_path.starts_with("/nix/store/") && !paths.has_key(primary) -> paths[primary] = store_path
+            .Val(store_path) -> if store_path_below(store_path, "/nix/store") && !paths.has_key(primary) -> paths[primary] = store_path
             .None -> {}
         }
         keys := producer.facts.keys().to_list()
@@ -322,7 +322,7 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: &[String: String]) N
         loop key in keys {
             if !key.starts_with("nix.output.") -> next
             store_path: producer.facts[key]
-            if !store_path.starts_with("/nix/store/") -> next
+            if !store_path_below(store_path, "/nix/store") -> next
             output_name: key.removeprefix("nix.output.")
             digest: if output_name == "out" -> primary else -> entry.named_outputs.get(output_name) ?? next
             if !paths.has_key(digest) -> paths[digest] = store_path
@@ -337,11 +337,7 @@ store_doctor_object_digest: fn(verification: &StoreVerification, path: String, h
 
 // Rust `doctor_subject`: the path relative to the Hangar with `/` separators.
 store_doctor_subject: fn(hangar: String, path: String) -> String Never! {
-    relative: if {
-        path == hangar -> ""
-        path.starts_with("{hangar}/") -> path.removeprefix("{hangar}/")
-        else -> path
-    }
+    relative: store_path_strip_prefix(path, hangar) ?? path
     out := [U8]{}
     raw: relative.bytes()
     loop byte in raw {

@@ -41,15 +41,33 @@ cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pa
     loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
     if parsed.flags.json {
-        facts := [String]{}
-        loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) -> facts.push("{cli_json_quote(raw)}:{plan.provider_facts[raw].to_json()}")
-        packages := [String]{}
+        facts := [(key: String, value: Dyn)]{}
+        loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) -> facts.push((key: raw, value: plan.provider_facts[raw].to_json_tree()))
+        packages := [Dyn]{}
         loop package in plan.packages {
-            packages.push("{{\"raw\":{cli_json_quote(package.raw)},\"target\":{cli_json_quote(package.target)},\"source\":{cli_json_quote(package.source)},\"upstream\":{cli_json_optional(package.upstream)},\"provider\":{cli_json_quote(package.provider)},\"channel\":{cli_json_optional(package.channel)},\"declared_by\":[{cli_json_quote_list(package.declared_by)}],\"provider_facts\":{package.provider_facts.to_json()}}}")
+            packages.push(Dyn.Object([
+                "raw": Dyn.Text(package.raw),
+                "target": Dyn.Text(package.target),
+                "source": Dyn.Text(package.source),
+                "upstream": cli_json_optional_text(package.upstream),
+                "provider": Dyn.Text(package.provider),
+                "channel": cli_json_optional_text(package.channel),
+                "declared_by": cli_json_texts(package.declared_by),
+                "provider_facts": package.provider_facts.to_json_tree(),
+            ]))
         }
-        collisions := [String]{}
-        loop path in cli_sorted_map_keys(plan.collisions) -> collisions.push("{cli_json_quote(path)}:{cli_json_quote(plan.collisions[path])}")
-        print("{{\"name\":{cli_json_quote(plan.name)},\"fingerprint\":{cli_json_quote(plan.fingerprint)},\"selected_profiles\":[{cli_json_quote_list(plan.selected_profiles)}],\"applied\":[{cli_json_quote_list(plan.applied)}],\"sources\":[{cli_json_quote_list(plan.sources)}],\"packages\":[{packages.join(",")}],\"collisions\":{{{collisions.join(",")}}},\"provider_facts\":{{{facts.join(",")}}}}}")
+        collisions := [(key: String, value: Dyn)]{}
+        loop path in cli_sorted_map_keys(plan.collisions) -> collisions.push((key: path, value: Dyn.Text(plan.collisions[path])))
+        print(cli_json_render(Dyn.Object([
+            "name": Dyn.Text(plan.name),
+            "fingerprint": Dyn.Text(plan.fingerprint),
+            "selected_profiles": cli_json_texts(plan.selected_profiles),
+            "applied": cli_json_texts(plan.applied),
+            "sources": cli_json_texts(plan.sources),
+            "packages": Dyn.Array(packages),
+            "collisions": Dyn.Object(collisions),
+            "provider_facts": Dyn.Object(facts),
+        ])))
         return EXIT_OK
     }
     theme.ok("package generation {theme.bold(plan.name)} planned")
@@ -81,7 +99,7 @@ cli_package_profile_build: fn(verification: &StoreVerification, cache: &Workspac
     plan: loaded.plan
     generation: cli_build_package_generation_locked(verification, cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(plan.name)},\"generation\":{generation},\"fingerprint\":{cli_json_quote(plan.fingerprint)}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(plan.name), "generation": Dyn.Int(generation), "fingerprint": Dyn.Text(plan.fingerprint)])))
     } else {
         theme.ok("package generation {theme.bold(plan.name)} built as {generation}")
     }
@@ -99,7 +117,7 @@ cli_package_profile_switch: fn(verification: &StoreVerification, cache: &Workspa
     plan: loaded.plan
     record: cli_switch_package_generation_locked(verification, cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(plan.name)},\"current\":{record.generation},\"witness\":{cli_json_quote(record.witness)}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(plan.name), "current": Dyn.Int(record.generation), "witness": Dyn.Text(record.witness)])))
     } else {
         theme.ok("package generation {theme.bold(plan.name)} switched to {record.generation}")
     }
@@ -146,7 +164,7 @@ cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &Works
     project_dir: cli_project_env_root(cache, cli_current_dir())
     record: cli_rollback_package_generation_locked(verification, project_dir, name, target) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(name)},\"current\":{record.generation},\"witness\":{cli_json_quote(record.witness)}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(name), "current": Dyn.Int(record.generation), "witness": Dyn.Text(record.witness)])))
     } else {
         theme.ok("package generation {theme.bold(name)} rolled back to {record.generation}")
     }
@@ -193,15 +211,16 @@ cli_package_profile_generations: fn(verification: &StoreVerification, cache: &Wo
     project_dir: cli_project_env_root(cache, cli_current_dir())
     history: cli_package_generation_history_locked(verification, project_dir, name) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
-        generations := [String]{}
+        generations := [Dyn]{}
         loop record in history.records {
-            generations.push("{{\"generation\":{record.generation},\"fingerprint\":{cli_json_quote(record.fingerprint)},\"witness\":{cli_json_quote(record.witness)},\"lock\":{record.metadata.trim()}}}")
+            lock: cli_json_parse(record.metadata) ?? return cli_report_package_generation_error(theme, err)
+            generations.push(Dyn.Object(["generation": Dyn.Int(record.generation), "fingerprint": Dyn.Text(record.fingerprint), "witness": Dyn.Text(record.witness), "lock": lock]))
         }
         current: if history.current == {
-            .Val(value) -> "{value}"
-            .None -> "null"
+            .Val(value) -> Dyn.Int(value)
+            .None -> Dyn.Null
         }
-        print("{{\"profile\":{cli_json_quote(name)},\"current\":{current},\"generations\":[{generations.join(",")}]}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(name), "current": current, "generations": Dyn.Array(generations)])))
     } else if history.records.len() == 0 {
         theme.detail("package generation {name} has no built generations")
     } else {

@@ -369,36 +369,43 @@ FlakeGraph: struct {
     // The whole graph as one stable JSON document.
     stable_json: fn(self) -> String Never! {
         // These projected objects contain only Text leaves and text keys.
-        inputs := [String]{}
+        inputs := [Dyn]{}
         loop input in self.inputs {
-            inputs.push(trust_json_object_text([TrustJSONField]{
+            inputs.push(trust_json_object_tree([TrustJSONField]{
                 {key: "name", value: Dyn.Text(input.name.copy())},
                 {key: "url", value: Dyn.Text(input.url.copy())},
                 {key: "revision", value: Dyn.Text(input.revision.copy())},
                 {key: "follows", value: Dyn.Text(input.follows.copy())},
                 {key: "provenance", value: Dyn.Text(input.provenance.copy())}
-            }) ?? panic("typed flake input must be JSON-encodable"))
+            }))
         }
-        outputs := [String]{}
+        outputs := [Dyn]{}
         loop output in self.outputs {
-            outputs.push(trust_json_object_text([TrustJSONField]{
+            outputs.push(trust_json_object_tree([TrustJSONField]{
                 {key: "name", value: Dyn.Text(output.name.copy())},
                 {key: "kind", value: Dyn.Text(output.kind.label())},
                 {key: "system", value: Dyn.Text(output.system.copy())},
                 {key: "attribute", value: Dyn.Text(output.attribute.copy())},
                 {key: "provenance", value: Dyn.Text(output.provenance.copy())}
-            }) ?? panic("typed flake output must be JSON-encodable"))
+            }))
         }
-        lock_nodes := [String]{}
-        loop node in self.lock_nodes -> lock_nodes.push(trust_flake_lock_node_json(node))
-        registries := [String]{}
-        loop registry in self.registries -> registries.push(trust_flake_registry_json(registry))
+        lock_nodes := [Dyn]{}
+        loop node in self.lock_nodes -> lock_nodes.push(trust_flake_lock_node_tree(node))
+        registries := [Dyn]{}
+        loop registry in self.registries -> registries.push(trust_flake_registry_tree(registry))
         composition: if self.composition == {
-            .Val(declared) -> trust_flake_composition_json(declared)
-            .None -> "null"
+            .Val(declared) -> trust_flake_composition_tree(declared)
+            .None -> Dyn.Null
         }
-        unsupported: trust_json_canonical(trust_json_texts(self.unsupported)) ?? panic("text arrays must be JSON-encodable")
-        "{{\"source\":{trust_json_quote(self.source)},\"inputs\":[{inputs.join(",")}],\"lockNodes\":[{lock_nodes.join(",")}],\"registries\":[{registries.join(",")}],\"outputs\":[{outputs.join(",")}],\"composition\":{composition},\"unsupported\":{unsupported}}}"
+        trust_json_canonical(Dyn.Object([
+            "source": Dyn.Text(self.source.copy()),
+            "inputs": Dyn.Array(inputs),
+            "lockNodes": Dyn.Array(lock_nodes),
+            "registries": Dyn.Array(registries),
+            "outputs": Dyn.Array(outputs),
+            "composition": composition,
+            "unsupported": trust_json_texts(self.unsupported),
+        ])) ?? panic("typed flake graph must be JSON-encodable")
     }
 
     // Load-time staleness: `self` is the graph read back from the semantic

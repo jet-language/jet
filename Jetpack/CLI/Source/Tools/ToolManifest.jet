@@ -88,20 +88,34 @@ ToolManifest: struct {
         sources.sort_by((left: ToolManifestSource, right: ToolManifestSource) -> left.name <=> right.name)
         tools := self.tools
         tools.sort_by((left: ToolManifestEntry, right: ToolManifestEntry) -> (left.name <=> right.name).then(left.resolved <=> right.resolved))
-        source_rows := [String]{}
+        source_rows := [Dyn]{}
         loop source in sources {
-            raw: source.raw
-            source_rows.push("    {{\"name\":{cli_json_quote(source.name)},\"policy\":{cli_json_quote(cli_tool_policy_marker(source.policy))},\"provider\":{cli_json_quote(source.provider.label())},\"raw\":{cli_json_quote(raw)},\"upstream\":{cli_json_quote(source.upstream)}}}")
+            source_rows.push(Dyn.Object([
+                "name": Dyn.Text(source.name),
+                "policy": Dyn.Text(cli_tool_policy_marker(source.policy)),
+                "provider": Dyn.Text(source.provider.label()),
+                "raw": Dyn.Text(source.raw),
+                "upstream": Dyn.Text(source.upstream),
+            ]))
         }
-        tool_rows := [String]{}
+        tool_rows := [Dyn]{}
         loop tool in tools {
-            reference: tool.reference
-            resolved: tool.resolved
-            tool_rows.push("    {{\"bins\":[{cli_json_quote_list(tool.bins)}],\"members\":[{cli_json_quote_list(tool.members)}],\"name\":{cli_json_quote(tool.name)},\"reference\":{cli_json_quote(reference)},\"resolved\":{cli_json_quote(resolved)},\"tier\":{cli_json_quote(cli_tool_policy_marker(tool.tier))}}}")
+            tool_rows.push(Dyn.Object([
+                "bins": cli_json_texts(tool.bins),
+                "members": cli_json_texts(tool.members),
+                "name": Dyn.Text(tool.name),
+                "reference": Dyn.Text(tool.reference),
+                "resolved": Dyn.Text(tool.resolved),
+                "tier": Dyn.Text(cli_tool_policy_marker(tool.tier)),
+            ]))
         }
-        source_text: if source_rows.len() == 0 -> "" else -> "\n{source_rows.join(",\n")}\n  "
-        tool_text: if tool_rows.len() == 0 -> "" else -> "\n{tool_rows.join(",\n")}\n  "
-        "{{\n  \"profile\":{cli_json_quote(TOOL_PROFILE_NAME)},\n  \"schema\":{cli_json_quote(TOOL_MANIFEST_SCHEMA)},\n  \"sources\": [{source_text}],\n  \"tools\": [{tool_text}]\n}}\n"
+        manifest: Dyn.Object([
+            "profile": Dyn.Text(TOOL_PROFILE_NAME),
+            "schema": Dyn.Text(TOOL_MANIFEST_SCHEMA),
+            "sources": Dyn.Array(source_rows),
+            "tools": Dyn.Array(tool_rows),
+        ])
+        "{cli_json_render(manifest)}\n"
     }
 
     // The realization source table: declared sources, the built-ins, and

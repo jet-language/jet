@@ -633,7 +633,9 @@ policy_is_hand_json_wire: fn(expression: Expr) -> Bool {
 }
 // `"key":` (optionally `\"key\":`, optionally with spaces before the colon):
 // a double quote, a key of letters, digits, `_`, `-`, `.` or `@`, a closing
-// quote, then `:`.
+// quote, then `:`. A key opens its literal part or follows `{` or `,` (blanks
+// between); after anything else (a C ternary's `? "true" : "false"`) it is
+// not an object member.
 policy_text_has_quoted_key: fn(text: String) -> Bool {
     bytes: text.bytes()
     quote: U8{34}
@@ -642,6 +644,7 @@ policy_text_has_quoted_key: fn(text: String) -> Bool {
     colon: U8{58}
     loop i in 0..<bytes.len() {
         if bytes[i] != quote -> next
+        if !policy_json_member_start(bytes, i) -> next
         j := i + 1
         key_len := 0
         loop j < bytes.len() && policy_json_key_byte(bytes[j]) {
@@ -656,6 +659,14 @@ policy_text_has_quoted_key: fn(text: String) -> Bool {
         if j < bytes.len() && bytes[j] == colon -> return true
     }
     false
+}
+// Whether the quote at `at` can open an object member: only blanks (after
+// one escaping backslash) precede it in the part, or `{` or `,` does.
+policy_json_member_start: fn(bytes: [U8], at: Int) -> Bool {
+    k := at - 1
+    if k >= 0 && bytes[k] == (U8{92}) -> k = k - 1
+    loop k >= 0 && (bytes[k] == (U8{32}) || bytes[k] == (U8{10}) || bytes[k] == (U8{13}) || bytes[k] == (U8{9})) -> k = k - 1
+    k < 0 || bytes[k] == (U8{123}) || bytes[k] == (U8{44})
 }
 policy_json_key_byte: fn(byte: U8) -> Bool {
     (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95}) || byte == (U8{45}) || byte == (U8{46}) || byte == (U8{64})
@@ -1925,6 +1936,7 @@ policy_ast_test_dogfood_and_workload_shapes: fn() PolicyError! {
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ out: \"#Import c.{{abi}}: module {{{{\\n    open: fn() -> Int = \\\"{{abi}}_open\\\"\\n}}}}\\n\" }}", rule: "dogfood-json", present: false},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ message: \"write `{{name}}: module {{{{ members: find(\\\"./packages\\\") }}}}` in `{{file}}`\" }}", rule: "dogfood-json", present: false},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ script: \"[ \\\"$code\\\" = 0 ] || {{{{ echo \\\"{{kind}}\\\"; }}}}\" }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ arg: \"arg{{index}} ? \\\"true\\\" : \\\"false\\\"\" }}", rule: "dogfood-json", present: false},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: url.query() }}", rule: "dogfood-url-query", present: false},
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "run: fn() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},

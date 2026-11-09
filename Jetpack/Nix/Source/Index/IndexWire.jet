@@ -3,6 +3,7 @@
 // parser re-encodes what it read and rejects bytes that are not already
 // canonical, because the canonical bytes are what the producer signed.
 use {
+    files: core.files
     json: core.encoding.json
     jet_foundation.[foundation_json_integer]
     jet_pkg_model.[
@@ -664,8 +665,8 @@ nix_index_validate_attrpath: fn(attrpath: [String]) NixIndexError! {
 
 nix_index_validate_store_path: fn(path: String, derivation: Bool) NixIndexError! {
     malformed: NixIndexError.Invalid("malformed Nix store path `{path}`")
-    if !path.starts_with("/nix/store/") -> return Err(malformed)
-    parts: path.removeprefix("/nix/store/").split_once("-") ?? return Err(malformed)
+    if files.dirname(path) != NIX_DEFAULT_STORE_DIR -> return Err(malformed)
+    parts: files.basename(path).split_once("-") ?? return Err(malformed)
     hash: parts.before.bytes()
     if hash.len() != 32 || parts.after == "" || parts.after.contains("/") || pkg_text_has_control(parts.after) || (derivation && !parts.after.ends_with(".drv")) {
         return Err(malformed)

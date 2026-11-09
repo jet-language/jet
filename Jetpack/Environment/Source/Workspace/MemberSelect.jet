@@ -15,6 +15,7 @@ use {
         pkg_ref_nearest,
     ]
     files: core.files
+    env_paths: core.files.path
     process: core.process
 }
 
@@ -241,8 +242,7 @@ env_members_changed_since: fn(root: String, plan: WorkspacePlan, git_ref: String
     loop member in plan.members {
         prefix: env_normalize_member_prefix(member.path)
         loop file in changed_files {
-            relative: env_trim_leading_dot_slash(file)
-            if relative == prefix || relative.starts_with("{prefix}/") {
+            if env_paths.is_relative_to(env_paths.of(env_trim_leading_dot_slash(file)), env_paths.of(prefix)) {
                 if !out.contains(member.name) -> out.push(member.name)
                 break
             }

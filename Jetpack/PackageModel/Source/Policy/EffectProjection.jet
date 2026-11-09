@@ -166,16 +166,12 @@ pkg_render_effect_projection_line: fn(projection: EffectProjection) -> String Ne
 // The JSON object embedded in semantic-index, dossier, and Canvas documents,
 // so the four roles stay one shared projection.
 pkg_render_effect_projection_object: fn(projection: EffectProjection) -> String Never! {
-    required: pkg_render_quoted_list(projection.required_effects)
-    granted: pkg_render_quoted_list(projection.granted_effects)
-    denied: pkg_render_quoted_list(projection.denied_effects)
-    "{{\"required_effects\":[{required}],\"granted_effects\":[{granted}],\"denied_effects\":[{denied}],\"authority\":{pkg_json_quote(projection.authority)}}}"
-}
-
-pkg_render_quoted_list: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
-    loop value in values -> quoted.push(pkg_json_quote(value))
-    quoted.join(",")
+    pkg_json_render(Dyn.Object([
+        "required_effects": pkg_json_texts(projection.required_effects),
+        "granted_effects": pkg_json_texts(projection.granted_effects),
+        "denied_effects": pkg_json_texts(projection.denied_effects),
+        "authority": Dyn.Text(projection.authority.copy()),
+    ]))
 }
 
 // Machine application-boundary summary. The legacy `effects` field stays for

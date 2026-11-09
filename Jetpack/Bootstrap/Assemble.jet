@@ -53,6 +53,7 @@ use {
     crypto: core.crypto
     files: core.files
     json: core.encoding.json
+    fspath: core.files.path
     process: core.process
     term: core.term
 }
@@ -766,7 +767,7 @@ resolve_path: fn(base: String, path: String) -> String {
 
 // Whether `path` (absolute, normalized) is `root` or under it.
 contained: fn(root: String, path: String) -> Bool {
-    path == root || path.starts_with("{root}/") || root == "/"
+    fspath.is_relative_to(fspath.of(path), fspath.of(root))
 }
 
 // `path` relative to `root`, which holds it.

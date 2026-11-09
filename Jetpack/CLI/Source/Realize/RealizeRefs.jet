@@ -429,10 +429,8 @@ cli_package_fixture_available: fn(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Bo
 cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
     if flags.json {
         hole_texts := [String]{}
-        loop hole in holes -> hole_texts.push(cli_json_quote(hole.reference))
-        realized_texts := [String]{}
-        loop reference in realized_refs -> realized_texts.push(cli_json_quote(reference))
-        print("{{\"code\":\"E1272\",\"realized\":[{realized_texts.join(", ")}],\"holes\":[{hole_texts.join(", ")}]}}")
+        loop hole in holes -> hole_texts.push(hole.reference)
+        print(cli_json_render(Dyn.Object(["code": Dyn.Text("E1272"), "realized": cli_json_texts(realized_refs), "holes": cli_json_texts(hole_texts)])))
     }
     count: holes.len()
     subject: if count == 1 -> "package lacks" else -> "packages lack"
