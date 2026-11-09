@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96353,
+    "rev": 96356,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101185,6 +101185,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner 2026-11-08 ~19:55 rejected D-APP-WEB1 and D-APP-RUN1: \"the two open ballots are not consistent between eachother and the downsides are not engineered away. the goal is to have one unified framework that will work seamlessly between ALL platforms with consistent look and behavior so an app can be built once and used everywhere, with easy usability and functionality for the programmer, beginner magic and full expert control\". Both drafts deleted. BallotLead redesigns them as one coherent ballot, D-APP1, covering every platform, with no conditional recommendation and every downside engineered away. Two fresh sol reviews follow before it is posted. Evidence: Docs/audits/2026-11-08-unified-app-framework-review{,-2}.md."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Owner 2026-11-08 ~17:55: \"ensure the design is cohesive and well integrated and designed. remember that the goal is for one cohesive development experience for apps, so we should be able to run as a web app or a native app and it should work flawlessly and consistently either way with exactly the same behavior, look, functionality, etc. that is the point of the unified jet app framework stuff/module\". Consequence: the frame, style, layout, Canvas, text and input models are each one implementation, shared by native (Wayland) and web. The targets only present pixels and marshal events. How the web target presents (Jet-rendered canvas vs DOM) is an owner ballot, and it needs an adversarial review before the frame and style work is built."
@@ -101295,7 +101300,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T02:31:30.072Z",
+      "updated": "2026-11-09T02:39:47.927Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -186153,367 +186158,6 @@
       "created": "2026-11-08T19:18:07.783Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
-    },
-    {
-      "id": "D-APP-WEB1",
-      "cardId": "c0l39twq",
-      "group": "web-ui",
-      "title": "How one Jet application presents in a browser",
-      "situation": "The owner wants one Jet program with the same appearance and behavior in a native window and a browser. The exercised toolchain has cell-sized nodes and DOM paths, not a proven shared pixel renderer. Choose a direction, not a claim that downsides are solved. A retains browser Find and extension gaps; B/C relax visual and editing parity; D changes safe-Jet rendering and dependency scope. All require explicit acceptance of remaining host limits.",
-      "gist": "Should Jet draw browser apps itself, use HTML controls, mix both, or use a browser engine on desktop too?",
-      "lesson": "Canvas displays Jet pixels but needs a separate accessible HTML projection. Real HTML controls supply browser text and document behavior but can differ from Jet drawing. A browser engine on desktop shares those facilities at a dependency and packaging cost. None can make a page control its containing browser tab.",
-      "explainer": "",
-      "story": "Ana writes a notes app once. It has editable text, a password field, a link, scrolling, custom drawing and independent settings. She needs selection, Find, autofill and screen-reader access, not just matching screenshots.",
-      "inWild": "Flutter documents canvas drawing with semantic HTML and its performance cost. React Native for Web documents shared components presented through DOM and CSS. Qt documents in-page windows and suspension. Electron uses Chromium processes; Tauri uses system WebViews. Both audits read vendor sources, not benchmarked competitor apps.",
-      "detail": "Choose one canonical renderer, not four selectable implementations. Preserve application-owned windows and cancellable per-window close requests under D-UI-WINDOW-LIFE1. Explicit application shutdown closes owned windows and releases work. Tab close cannot be reliably vetoed.\n\nEach option writes the same 1,000-row keyed notes program in proposed notation. RUN=A is held constant for comparison only; WEB does not select RUN. Substitute the selected RUN entry without changing state, views or actions. APIs are not implemented or compile-verified.\n\nA compares canonical pixels for equal assets, logical inputs, viewport, scale, locale, preferences and capabilities. Browser Find, text-only zoom, extensions, IME UI, permission outcomes and physical output are not thereby equal. B/C relax visual and editing parity. D also requires approval to replace safe-Jet rendering with an external engine. None silently waives I9.\n\nPreserve native Jet chrome, one bundled Latin-only Atkinson font, safe Core/Ui, TUI and null; delete GTK. Extra default fonts and Page-versus-InPage defaults need the explicit choices in the design.\n\nA/B/C also need the native editing adapter: text-input-v3 surrounding context is limited to 4,000 UTF-8 bytes, unlike browser UTF-16 ranges. Track context origin, byte boundaries, selection direction and commit serials. Long selections/reconversion may exceed the transport; report that limit rather than silently truncate semantics. These are required facilities, not existing Jet integration.\n\nG1-G32 name requirements, costs and tests, not completed fixes. This direction vote never authorizes advertising flawless parity or deferring accessibility while claiming success.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Shared drawing with an accessible HTML projection",
-          "detail": "Jet draws the same display list and font on both targets. The browser retains transparent accessible HTML, real links and text/password controls. Core owns state, geometry, validation and editing transactions.\n\nBeginners write one app without CSS. Experts control theme, font assets, custom paint and semantics. Accessibility is always on. Full searchable text costs O(N) memory even with virtual raster rows. A fits first-party drawing, but browser-menu Find, generic translation/style extensions and exact host editing remain unproved or limited.",
-          "technical": "Patch stable IDs and changed bounds. Do not hide the accessible root. Use logical DOM/tab order, real controls, modal background inertness, focus restoration and one action per gesture. Materialize offscreen focus through supported DOM events; do not assume a generic screen-reader request API.\n\nOne Core editing transaction model maps UTF-16/UTF-8/grapheme offsets, replacement ranges and composition identity. Retain controls during composition. Form names/association/autocomplete help autofill but cannot guarantee managers. Never export passwords into ordinary text, HTML, print or logs.\n\nPreserve browser Find and application Find. Transparent text does not guarantee visible browser matches; ::selection is not a Find API. Keep page/pinch zoom enabled. Distinguish layout and visual viewports; map offsets once. Text-only zoom needs shared text-scale input, not just DPR. Focus real controls during trusted input for mobile keyboards; delayed focus can be denied.\n\nFeed forced-colors palettes, contrast, text scale and reduced motion into canvas theme, focus and selection. Protect only duplicate mirror paint from forced-color backplates, not the whole app. Pin bidi/segmentation data; test mixed-direction selection with supplied script fonts, not matching tofu.\n\nBudget glyph/tile caches, patch damage and stop idle/hidden frames. Measure cold transfer, decode/compile, first usable frame, peak/retained wasm+DOM+AX memory and energy/task. Compression/SSR cannot erase first-visit cost. Same-tree startup HTML is read-only until one handoff, not another interactive renderer.\n\nReuse existing routes for deep links/history. Back is not a cancellable Jet close; never trap it. Persist non-secret drafts incrementally and report storage failure. Print the full semantic document through a noninteractive paginated projection, not a viewport screenshot. Printer output, arbitrary extensions and host UI retain limits. G1-G32 require real desktop/mobile browser evidence.",
-          "code": "// Proposed notation, not compile-verified; RUN=A held constant.\nuse ui: core.ui\nNoteState: struct {\n    title: String\n    password: String\n    notes: [String]\n    query: String\n    dirty: Bool\n}\nchange: fn(&s: NoteState, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Edit(\"title\", t) -> {\n            s.title = t\n            s.dirty = true\n        }\n        .Edit(\"password\", t) -> { s.password = t }\n        .Edit(\"query\", t) -> { s.query = t }\n        .Action(\"copy\") -> return [ui.CopySelection]\n        .Action(\"find\") -> return [ui.Find(s.query)]\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"notes\") -> if s.dirty -> return [ui.CancelClose(\"notes\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&NoteState) -> ui.UINode {\n    ui.column([ui.editor(\"title\", s.title), ui.password(\"password\", s.password, autocomplete: \"current-password\"),\n      ui.selectable(\"é Greek α Arabic ع CJK 中 emoji 😀\"), ui.link(\"Help\", \"https://example.org/help\"),\n      ui.scroll(ui.list(s.notes, key: fn(n) { n })), ui.drawing([ui.fill_rect(0, 0, 32, 32, \"#336699\")]),\n      ui.editor(\"query\", s.query), ui.action(\"Copy\", \"copy\"), ui.action(\"Find\", \"find\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    rows := [String]{}\n    loop i in 0..<1000 -> rows.push(\"Note {i}\")\n    app: ui.application()\n    main: app.window(\"Notes\", ui.text(\"Loading\"), id: \"notes\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.run(main, NoteState{title: \"Notes\", password: \"\", notes: rows, query: \"\", dirty: false}, change, view)\n    // Host retains session after entry returns and reports failures.\n    // Non-Latin samples require expert font assets; no tofu parity claim.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        },
-        {
-          "key": "B",
-          "name": "Real HTML presentation",
-          "detail": "The browser renders HTML controls and text for the same nodes. Core supplies state, style and geometry; custom drawing uses canvas. Native keeps Jet drawing.\n\nBeginners write one UI without CSS. Experts control shared nodes and drawing. Browser text, controls, undo and wrapping can differ: B explicitly relaxes visual and editing parity. Its strongest case is document behavior, readable startup HTML, browser scrolling, user styles and inspection, not flawless parity.",
-          "technical": "Project shared geometry into CSS boxes and derive public static HTML from the same nodes, resuming stable IDs. This avoids authoring a second layout/theme but does not guarantee fluid document reflow or functional no-JS forms. Browser text/controls own internal layout and editing. Preserve user styles, zoom and forced colors.\n\nTranslate edits once into Core; keep browser undo/selection rather than recreate A's editor. G21-G32 still apply: preferences, bidi, Back/deep links, tab order, keyboard occlusion, print and lifecycle. Custom canvases still need semantics and contrast handling.\n\nMeasure cold usable paint, memory, power and scrolling with equivalent content; CSS/SSR are not free. Test Find, IME, autofill, screen readers, forced colors, motion and print. Arbitrary extensions can mutate DOM without updating Core; metadata mitigates, not guarantees compatibility. State parity and bounded visual differences require owner acceptance.",
-          "code": "// Proposed notation, not compile-verified; RUN=A held constant.\nuse ui: core.ui\nNoteState: struct {\n    title: String\n    password: String\n    notes: [String]\n    query: String\n    dirty: Bool\n}\nchange: fn(&s: NoteState, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Edit(\"title\", t) -> {\n            s.title = t\n            s.dirty = true\n        }\n        .Edit(\"password\", t) -> { s.password = t }\n        .Edit(\"query\", t) -> { s.query = t }\n        .Action(\"copy\") -> return [ui.CopySelection]\n        .Action(\"find\") -> return [ui.Find(s.query)]\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"notes\") -> if s.dirty -> return [ui.CancelClose(\"notes\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&NoteState) -> ui.UINode {\n    ui.column([ui.editor(\"title\", s.title), ui.password(\"password\", s.password, autocomplete: \"current-password\"),\n      ui.selectable(\"é Greek α Arabic ع CJK 中 emoji 😀\"), ui.link(\"Help\", \"https://example.org/help\"),\n      ui.scroll(ui.list(s.notes, key: fn(n) { n })), ui.drawing([ui.fill_rect(0, 0, 32, 32, \"#336699\")]),\n      ui.editor(\"query\", s.query), ui.action(\"Copy\", \"copy\"), ui.action(\"Find\", \"find\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    rows := [String]{}\n    loop i in 0..<1000 -> rows.push(\"Note {i}\")\n    app: ui.application()\n    main: app.window(\"Notes\", ui.text(\"Loading\"), id: \"notes\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.run(main, NoteState{title: \"Notes\", password: \"\", notes: rows, query: \"\", dirty: false}, change, view)\n    // Host retains session after entry returns and reports failures.\n    // Non-Latin samples require expert font assets; no tofu parity claim.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        },
-        {
-          "key": "C",
-          "name": "Jet drawing with visible HTML editors",
-          "detail": "Jet draws the app except visible browser text/password controls, positioned from Core geometry. Shared state receives their edits.\n\nBeginners write the same app. Experts control geometry, clipping and drawing, not a second editor per field. Real controls improve keyboard/IME integration but accept browser-only appearance/editing differences. Non-field text retains A's document costs; overlays add hit-testing and compositing work.",
-          "technical": "Retain controls during composition; share font/rect transforms and clips; suppress underlying canvas text/caret. Reconcile edits once into Core. These requirements address teardown/double-paint only after implementation and tests, not browser undo, selection, auto-zoom or autofill differences.\n\nApply G21-G32, including forced colors on fields and canvas, motion, bidi, history, tab order, print and keyboard viewport changes. Test scroll+zoom+transform+IME+autofill together. Native host controls add adapters and still differ. Measure compositing, memory, startup, power and focus latency; no performance advantage is established.",
-          "code": "// Proposed notation, not compile-verified; RUN=A held constant.\nuse ui: core.ui\nNoteState: struct {\n    title: String\n    password: String\n    notes: [String]\n    query: String\n    dirty: Bool\n}\nchange: fn(&s: NoteState, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Edit(\"title\", t) -> {\n            s.title = t\n            s.dirty = true\n        }\n        .Edit(\"password\", t) -> { s.password = t }\n        .Edit(\"query\", t) -> { s.query = t }\n        .Action(\"copy\") -> return [ui.CopySelection]\n        .Action(\"find\") -> return [ui.Find(s.query)]\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"notes\") -> if s.dirty -> return [ui.CancelClose(\"notes\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&NoteState) -> ui.UINode {\n    ui.column([ui.editor(\"title\", s.title), ui.password(\"password\", s.password, autocomplete: \"current-password\"),\n      ui.selectable(\"é Greek α Arabic ع CJK 中 emoji 😀\"), ui.link(\"Help\", \"https://example.org/help\"),\n      ui.scroll(ui.list(s.notes, key: fn(n) { n })), ui.drawing([ui.fill_rect(0, 0, 32, 32, \"#336699\")]),\n      ui.editor(\"query\", s.query), ui.action(\"Copy\", \"copy\"), ui.action(\"Find\", \"find\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    rows := [String]{}\n    loop i in 0..<1000 -> rows.push(\"Note {i}\")\n    app: ui.application()\n    main: app.window(\"Notes\", ui.text(\"Loading\"), id: \"notes\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.run(main, NoteState{title: \"Notes\", password: \"\", notes: rows, query: \"\", dirty: false}, change, view)\n    // Host retains session after entry returns and reports failures.\n    // Non-Latin samples require expert font assets; no tofu parity claim.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        },
-        {
-          "key": "D",
-          "name": "Browser document engine on both targets",
-          "detail": "Use browser presentation on desktop and web. Beginners use the same program; experts control document nodes, styles, drawing and typed host capabilities. Reusing text, layout and tooling is a strong alternative to implementing them in Jet.\n\nPinned engines cost package size, processes, memory and updates; system engines trade packaging for drift. Visiting browsers vary. Embedded engines need not include extensions, saved-password services, chrome or print UI. D explicitly changes safe-Jet rendering and dependency scope.",
-          "technical": "Approve one engine/dependency policy and restrict host IPC to typed capabilities. Do not ship pinned and system engines as competing defaults. Browser editing feeds the same Core reducer. G21-G32 still apply to embedded and visiting hosts: history, focus, keyboard, preferences, print, recovery and privacy.\n\nTest named password/assistive services, not assumed browser-profile integration. Measure usable paint, package/download size, processes, memory, battery and update delivery. D reduces some bridge work but has no measured cost or flawless-parity result; visiting browsers cannot be pinned.",
-          "code": "// Proposed notation, not compile-verified; RUN=A held constant.\nuse ui: core.ui\nNoteState: struct {\n    title: String\n    password: String\n    notes: [String]\n    query: String\n    dirty: Bool\n}\nchange: fn(&s: NoteState, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Edit(\"title\", t) -> {\n            s.title = t\n            s.dirty = true\n        }\n        .Edit(\"password\", t) -> { s.password = t }\n        .Edit(\"query\", t) -> { s.query = t }\n        .Action(\"copy\") -> return [ui.CopySelection]\n        .Action(\"find\") -> return [ui.Find(s.query)]\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"notes\") -> if s.dirty -> return [ui.CancelClose(\"notes\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&NoteState) -> ui.UINode {\n    ui.column([ui.editor(\"title\", s.title), ui.password(\"password\", s.password, autocomplete: \"current-password\"),\n      ui.selectable(\"é Greek α Arabic ع CJK 中 emoji 😀\"), ui.link(\"Help\", \"https://example.org/help\"),\n      ui.scroll(ui.list(s.notes, key: fn(n) { n })), ui.drawing([ui.fill_rect(0, 0, 32, 32, \"#336699\")]),\n      ui.editor(\"query\", s.query), ui.action(\"Copy\", \"copy\"), ui.action(\"Find\", \"find\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    rows := [String]{}\n    loop i in 0..<1000 -> rows.push(\"Note {i}\")\n    app: ui.application()\n    main: app.window(\"Notes\", ui.text(\"Loading\"), id: \"notes\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.run(main, NoteState{title: \"Notes\", password: \"\", notes: rows, query: \"\", dirty: false}, change, view)\n    // Host retains session after entry returns and reports failures.\n    // Non-Latin samples require expert font assets; no tofu parity claim.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A fits the owner's first-party drawing constraint and expert paint control. This is conditional direction, not a finding that browser functionality or unrestricted parity is solved.",
-        "tradeoff": "Pay for cold wasm startup, retained DOM/AX/text, raster uploads, power and an editing bridge. Find, generic extensions, text-only zoom, printing and host UI retain limits. Accept these explicitly or reconsider B/D; do not redefine flawless parity.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B has the strongest browser document behavior, but explicitly weakens exact visual and editing parity with native Jet rendering."
-          },
-          {
-            "key": "C",
-            "reason": "C improves browser fields but retains the canvas document work and adds visible control-overlay differences."
-          },
-          {
-            "key": "D",
-            "reason": "D is strong for document apps, but changes desktop architecture and adds an unapproved engine dependency and deployment cost."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "Canvas does not inherit browser document, extension or text-only zoom behavior.",
-            "mitigation": "Retain real semantics, preserve browser commands, add shared text scaling and semantic printing. Find highlights and generic translation/style extensions remain unguaranteed; test named integrations."
-          },
-          {
-            "loss": "Raster, duplicate DOM/AX/text and wasm startup cost memory, power and time.",
-            "mitigation": "Patch damage, budget caches, stop idle/hidden frames and stream assets. Measure cold usable paint, peak/retained memory and joules/task. Full searchable text still costs O(N)."
-          },
-          {
-            "loss": "Browser navigation, keyboards, permissions and tab behavior cannot exactly match native.",
-            "mitigation": "One router/focus model; preserve Back/zoom; handle keyboard occlusion; start privileged requests during trusted input. Persist drafts with visible failures. Tab death and host UI remain external."
-          },
-          {
-            "loss": "Latin-only assets lack sample scripts; CSS forced colors do not recolor canvas pixels.",
-            "mitigation": "Shared expert font resolver and explicit missing-glyph reporting; repaint using user palette, motion and text preferences. Test bidi with real fonts. Extra defaults require approval."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT Sol. Fresh agent: AppReview. AppReview repaired parity framing and added the engine alternative. AppReview2 (OpenAI GPT) independently exercised adapters/probes and checked decisions, then added G21-G32 covering performance, preferences, navigation, mobile input, printing, extensions and driver limits; neither audit certifies browser parity."
-      },
-      "checkInstructions": "Run jet Tools/agent/ballots/Validate.jet on this payload from the checkout, without writing Tower. Read both audits and G1-G32. Require real desktop/mobile browser, assistive, keyboard/IME, forced-colors, motion, bidi, Find/autofill, Back/deep-link, print and extension evidence, plus measured cold usable paint, memory, battery and latency. Node doubles and SSR first content cannot substitute.",
-      "surface": {
-        "gist": "Should Jet draw browser apps itself or let a browser engine draw their controls?",
-        "lesson": "Shared drawing best controls pixels. HTML best inherits browser text and document behavior. Both need host integration and neither controls the browser tab.",
-        "trio": {
-          "current": {
-            "note": "A probe rendered a five-cell label through null and web paths, not a graphical app.",
-            "code": "ui.text(\"hello\")\n// width 5, height 1; text command, no pixel proof"
-          },
-          "wild": {
-            "lang": "Flutter and React Native for Web",
-            "note": "Flutter pairs drawing with HTML semantics; React Native for Web uses DOM and generated CSS.",
-            "code": "// Shared app nodes; different presentation trade-offs.\n// Sources and limits are in the audit."
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Shared drawing",
-            "gist": "Jet pixels plus accessible HTML, not full browser-document parity.",
-            "gains": [
-              "One drawing model",
-              "No desktop browser-engine dependency"
-            ],
-            "losses": [
-              "Find, extensions and host editing retain limits",
-              "Cold startup, memory and battery costs"
-            ],
-            "proposed": {
-              "code": "// Same 1,000-row notes app; RUN is a separate choice.\nmain: app.window(\"Notes\", view)\napp.window(\"Settings\", preferences)\n// Jet pixels plus accessible HTML."
-            }
-          },
-          {
-            "key": "B",
-            "name": "HTML controls",
-            "gist": "Browser document facilities, with relaxed visual and editing parity.",
-            "gains": [
-              "Browser text, scrolling, styles and inspection"
-            ],
-            "losses": [
-              "Native and browser layout/editing differ"
-            ],
-            "proposed": {
-              "code": "main: app.window(\"Notes\", view)\napp.window(\"Settings\", preferences)\n// Same notes app; browser controls, native Jet drawing."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Drawing plus visible editors",
-            "gist": "Browser text fields over Jet drawing.",
-            "gains": [
-              "Real browser text controls"
-            ],
-            "losses": [
-              "Overlay, editing and non-field document costs remain"
-            ],
-            "proposed": {
-              "code": "main: app.window(\"Notes\", view)\napp.window(\"Settings\", preferences)\n// Same notes app; canvas plus HTML fields."
-            }
-          },
-          {
-            "key": "D",
-            "name": "Browser engine on desktop too",
-            "gist": "Browser rendering on both targets; change safe-Jet scope.",
-            "gains": [
-              "Browser text, document layout and tooling"
-            ],
-            "losses": [
-              "Dependency, updates, memory and packaging",
-              "Embedded services and visiting browsers differ"
-            ],
-            "proposed": {
-              "code": "main: app.window(\"Notes\", view)\napp.window(\"Settings\", preferences)\n// Same notes app; desktop engine and visiting browser."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A fits first-party Jet drawing. Accept its browser limits explicitly; none proves flawless parity.",
-          "gains": [
-            "One canonical drawing model"
-          ],
-          "losses": [
-            {
-              "loss": "Find/extensions, startup, memory, power and host behavior retain costs.",
-              "mitigation": "Retain semantics, budget caches, honor preferences, preserve Back/zoom and require real-browser measurements; never advertise unrestricted parity."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Browser glyphs and editing can differ from native Jet."
-            },
-            {
-              "key": "C",
-              "reason": "Visible overlays add differences without solving the whole document."
-            },
-            {
-              "key": "D",
-              "reason": "An engine changes desktop scope and adds deployment costs."
-            }
-          ],
-          "tradeoff": "A needs acceptance of browser limits. B/C relax parity; D changes safe-Jet/dependency scope. Scheduling is a separate vote."
-        }
-      },
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-09T02:31:28.789Z"
-    },
-    {
-      "id": "D-APP-RUN1",
-      "cardId": "c0l39twq",
-      "group": "web-ui",
-      "title": "One application driver for beginners and expert loop control",
-      "situation": "Application-owned windows, one loop and cancellable close requests are ratified. The proposed framework needs a driver on both targets. A browser event thread must yield, but wasm can suspend with JSPI; this does not establish Jet suspension integration. Choose managed scheduling with explicit expert control, explicit stepping only, or sequential suspension. All preserve window ownership. A/B explicitly amend run completion timing and require a native dispatcher to outlive the returning entry function.",
-      "gist": "Should the application schedule a shared step by default, should every author schedule it, or should Jet suspend a sequential application loop?",
-      "lesson": "A UI driver receives host events and advances application state, effects, layout and drawing. Callbacks return control to the host between batches. A sequential loop can instead suspend while waiting. Both approaches must preserve ownership and shutdown, and neither permits blocking the browser's event thread.",
-      "explainer": "",
-      "story": "Ana's counter has a main window and a settings window. Closing settings must leave the counter alive. A dirty main window can veto its close request. She wants a short first program, then precise animation and scheduling control without rewriting its state or views.",
-      "inWild": "Qt documents asynchronous startup and JSPI/Asyncify for sequential flow, including lifetime limitations. Flutter documents framework-owned startup. These are architectural precedents, not proof of Jet's proposed APIs, browser support or performance.",
-      "detail": "Every option preserves D-UI-WINDOW-LIFE1: application-owned windows, cancellable per-window close requests, last-window completion and one loop. Explicit shutdown closes owned windows and releases callbacks/work; tab death cannot guarantee cleanup. No per-window loops or native-only UI meaning.\n\nA/B explicitly amend run timing: start returns a session on both targets. Native entry then remains in the application host dispatcher until completion; returning a local handle cannot terminate the process. The host owns the active session, including dropped handles, and releases it after cleanup. Completion reports success or a typed failure once. Empty apps finish after setup; hidden windows are not closed.\n\nWindow IDs are stable and separate from titles. Veto leaves window/work alive; accepted close invalidates its handles and discards late events. State, views and close behavior are the same in all proposed specimens. They are notation, not implemented or compile-verified APIs. WEB independently chooses presentation.\n\nOne ordered reducer/effect path serves all options. Views borrow state and cannot start tasks. Work is owned/cancellable. Batch tokens are single-consumption; duplicate, out-of-order and reentrant step attempts fail without applying effects twice. Register callbacks before first delivery; on_ready replays the initial pending batch once after registration.\n\nGesture-sensitive requests must start inside their originating trusted callback. Managed scheduling may defer paint, not those actions. Manual/sequential consumers must step that batch before yielding; deferral can produce activation-required/denied. A later callback, worker or resumed stack cannot recreate activation. This explicit timing cost prevents a false promise of arbitrary scheduling with identical permission outcomes.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Managed application driver with explicit expert stepping",
-          "detail": "Beginners call app.run with state, update and view. It starts one application driver and returns a session on native and web. The default scheduler advances only on input, pending work or animation demand.\n\nExperts pass scheduling: .Manual and install a ready callback that receives the same session and event batch. They control clock, batching, frame requests and custom paint through the same step. No second editor, state model or event translation appears.",
-          "technical": "The managed scheduler calls the same session.step as manual scheduling, not a second transition engine. Native dispatcher lifetime must survive entry return; no nested event loops. Close veto precedes disposal; last accepted close cancels work and releases captured values before completion. Explicit application shutdown retains its ratified close-all meaning.\n\nCallbacks must return promptly; sequential workflows use state or owned cooperative tasks. Manual mode changes pacing, not the need to yield or gesture timing. Register the ready handler before any delivery, including initial readiness. Privileged requests start synchronously during trusted input; rendering can batch afterward.\n\nUse frame deadlines rather than continuous callbacks; stop idle/hidden decorative frames and bound catch-up on resume. Measure joules/task, idle wakeups, peak/retained memory and p95 latency against direct stepping, with the same semantics and accessibility work. Tasks cannot be forcibly cancelled while running non-yielding safe code; bound callback work and test cancellation at cooperative edges.\n\nTest zero/hidden/two windows, duplicate titles, close veto, dropped handles, startup/step failure, callback cycles, reentrancy, ordered single-use batches, late completion after close and destructor counts. Include a form with clipboard/keyboard focus and a custom-animation app on both hosts. One shared step is an I8 ladder; no second editor/router/default policy.",
-          "code": "// Proposed notation, not implemented or compile-verified.\nuse ui: core.ui\nState: struct {\n    count: Int\n    dirty: Bool\n}\nupdate: fn(&s: State, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Action(\"add\") -> {\n            s.count += 1\n            s.dirty = true\n        }\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"main\") -> if s.dirty -> return [ui.CancelClose(\"main\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&State) -> ui.UINode {\n    ui.column([ui.text(\"Count: {s.count}\"), ui.action(\"Add\", \"add\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    app: ui.application()\n    main: app.window(\"Main\", ui.text(\"Count: 0\"), id: \"main\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.run(main, State{count: 0, dirty: false}, update, view)\n    // Host retains session after entry returns and reports failures.\n    // Mark clean demonstrates close veto, not disk persistence.\n}\n// Expert substitution for app.run:\n// session: app.run(main, State{count: 0, dirty: false}, update, view, scheduling: .Manual)\n// session.on_ready(fn(s, batch) { s.step(batch) })\n// Ready registration precedes first delivery; step consumes each batch once."
-        },
-        {
-          "key": "B",
-          "name": "Explicit application stepping only",
-          "detail": "Every author starts an application session and supplies a ready callback that calls step. There is no managed run shortcut. The callback and shared state reducer have the same behavior on native and web.\n\nBeginners see event scheduling in their first program. Experts have immediate control over clock, batch order and custom drawing without opting out of a default. This removes a convenience wrapper, not the need to yield to the browser.",
-          "technical": "The host calls the registered ready handler with the owned session and pending batch. The same reducer, commands, close rules and completion apply as A. Diagnose duplicate/out-of-order/reentrant step. Initial readiness is retained until registration; it must not race startup.\n\nEvery author must choose when to step. Delaying a privileged action loses activation; omitted steps freeze progress. Long work uses owned cooperative tasks as A. Idle/hidden frames must stop; no polling. Measure the same energy, memory, latency and workloads as A. No inherent rendering advantage over a managed wrapper is established.\n\nTest missed/duplicate batches, empty apps, dropped handles, close veto, callbacks after close, startup failure, reentrancy and gesture-time clipboard/focus. B's smallest surface removes a wrapper but makes beginners learn scheduling immediately.",
-          "code": "// Proposed notation, not implemented or compile-verified.\nuse ui: core.ui\nState: struct {\n    count: Int\n    dirty: Bool\n}\nupdate: fn(&s: State, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Action(\"add\") -> {\n            s.count += 1\n            s.dirty = true\n        }\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"main\") -> if s.dirty -> return [ui.CancelClose(\"main\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&State) -> ui.UINode {\n    ui.column([ui.text(\"Count: {s.count}\"), ui.action(\"Add\", \"add\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    app: ui.application()\n    main: app.window(\"Main\", ui.text(\"Count: 0\"), id: \"main\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    session: app.start(main, State{count: 0, dirty: false}, update, view)\n    session.on_ready(fn(s, batch) { s.step(batch) })\n    // Host retains session after entry returns and reports failures.\n    // Registration precedes first delivery; step consumes each batch once.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        },
-        {
-          "key": "C",
-          "name": "Sequential application loop with suspension",
-          "detail": "The program pulls batches from one application event stream. Waiting suspends its task on both targets without blocking the browser event thread. State and views still use the same driver.\n\nBeginners see familiar sequential control flow. Experts control each wait, step, clock and custom drawing. Compiler and host integration must preserve suspended ownership and cleanup. This does not permit per-window loops, busy waits or a native-only frames API.",
-          "technical": "An independently repeated raw-wasm JSPI probe returned 42 while a timer advanced. This proves suspension in that Node host, not Jet ABI stack/globals, roots, callbacks, browser availability or cancellation. Feature-detect and integrate every suspending boundary. Unsupported engines need continuation lowering of the same task mechanism or explicit approval of a browser floor, never a second public callback framework.\n\nSuspension retains stack/roots; lowering costs code and state. Worker waiting may need shared memory/isolation and main-thread UI proxies, with latency and activation limits. Resume a gesture batch and step before yielding to issue privileged requests; prove this on the actual browser boundary. If the task mechanism resumes too late, report activation-required; do not advertise equal permission behavior.\n\nTest all A/B ownership/failure cases plus cancellation/traps/nested imports while suspended, suspended borrows, cleanup counts and background suspension. Measure stack/code bytes, peak retained memory, wakeups, energy and input latency. C has a genuine sequential-control benefit but no integrated Jet proof. Reuse approved tasks, not a second generator or unratified async mechanism.",
-          "code": "// Proposed notation, not implemented or compile-verified.\nuse ui: core.ui\nState: struct {\n    count: Int\n    dirty: Bool\n}\nupdate: fn(&s: State, e: ui.UIEvent) -> [ui.UICommand] {\n    if e == {\n        .Action(\"add\") -> {\n            s.count += 1\n            s.dirty = true\n        }\n        .Action(\"clean\") -> { s.dirty = false }\n        .CloseRequested(\"main\") -> if s.dirty -> return [ui.CancelClose(\"main\")]\n        else -> {}\n    }\n    []\n}\nview: fn(s: &&State) -> ui.UINode {\n    ui.column([ui.text(\"Count: {s.count}\"), ui.action(\"Add\", \"add\"), ui.action(\"Mark clean\", \"clean\")])\n}\nrun: fn() {\n    app: ui.application()\n    main: app.window(\"Main\", ui.text(\"Count: 0\"), id: \"main\")\n    app.window(\"Settings\", ui.text(\"Preferences\"), id: \"settings\")\n    driver: app.driver(main, State{count: 0, dirty: false}, update, view)\n    loop batch in app.events() { driver.step(batch) }\n    // One app stream suspends without blocking the host event thread.\n    // Completion follows last accepted close and task cleanup; failures report.\n    // Mark clean demonstrates close veto, not disk persistence.\n}"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps the first program short and gives experts the same driver's step without a second semantic loop. It does not depend on browser-wide JSPI support.",
-        "tradeoff": "Callbacks split sequential work into state/tasks; cancellation is cooperative. Managed scheduling must prove its cost, stop idle/hidden work and preserve gesture-time requests. Expert deferral cannot preserve arbitrary host activation. Native dispatcher lifetime after entry return is an explicit contract change.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B exposes scheduling boilerplate to every beginner without granting experts control they lack in A."
-          },
-          {
-            "key": "C",
-            "reason": "C preserves sequential flow but needs unproved suspension, ownership and browser-support integration. It is viable, not forbidden by wasm."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "Callbacks split sequential native workflows across events.",
-            "mitigation": "Use owned cancellable tasks and explicit state transitions. Keep one shared step and expose manual scheduling; suspension remains a separately priced alternative."
-          },
-          {
-            "loss": "Managed scheduling can add latency, wakeups, retained memory or battery use.",
-            "mitigation": "Use demand/deadline scheduling, stop hidden/idle frames and offer manual stepping. Measure p95 latency, retained memory and joules/task against identical direct stepping; no zero-cost claim."
-          },
-          {
-            "loss": "Returning a session changes approved run timing and needs native process retention.",
-            "mitigation": "Amend only run timing explicitly. Host dispatcher owns the live session after entry returns; preserve close veto, explicit shutdown and last-window cleanup. Test dropped handles and empty apps."
-          },
-          {
-            "loss": "Deferred expert batches can lose browser activation; cooperative work cannot be forcibly stopped mid-callback.",
-            "mitigation": "Step privileged batches during trusted callbacks or return activation-required. Bound callback work and cancel at task yield edges; prove failure and cleanup ordering."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT Sol. Fresh agent: AppReview. AppReview corrected the wasm premise and restored application ownership with explicit-stepping and suspension alternatives. AppReview2 (OpenAI GPT) independently repeated probes and checked close law, adding dispatcher retention, batch/failure ordering, stable identities, cooperative cancellation, power and activation limits; neither audit certifies proposed Jet drivers."
-      },
-      "checkInstructions": "Validate this payload from the checkout without writing Tower. Read both audits and G13-G14/G21-G22/G31-G32. Require zero/hidden/two-window, startup/failure, close-veto, explicit-shutdown, dropped-handle, batch-order, cancellation, destructor and trusted-activation evidence on both hosts. Measure idle wakeups, memory, battery and latency for form and animation workloads. C must prove suspended ABI ownership and gesture timing in supported browsers, not just Node JSPI.",
-      "surface": {
-        "gist": "Should Jet schedule the application by default or make authors control every wait and step?",
-        "lesson": "Browsers require yielding, not necessarily callbacks. A managed driver makes the first program short; explicit stepping or suspension gives different control-flow costs.",
-        "trio": {
-          "current": {
-            "note": "The probed toolchain has no ui.run. Application-owned windows are approved, not per-window loops.",
-            "code": "ui.run()\n// E1004: core.ui has no item run"
-          },
-          "wild": {
-            "lang": "egui and Qt",
-            "note": "egui exposes callbacks and loop integration. Qt documents sequential suspension with JSPI or Asyncify.",
-            "code": "// Callback-driven application or suspended application loop.\n// Both return control to the browser between events."
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Managed driver, expert stepping",
-            "gist": "Start simply; opt into driving the same step yourself.",
-            "gains": [
-              "Short beginner path",
-              "Expert scheduling on both targets"
-            ],
-            "losses": [
-              "Sequential work uses state or tasks"
-            ],
-            "proposed": {
-              "code": "app: ui.application()\nmain: app.window(\"Main\", view)\napp.window(\"Settings\", preferences)\nsession: app.run(main, state, update, view)\n// Expert: scheduling: .Manual, then on_ready calls step."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Explicit stepping only",
-            "gist": "Every program supplies the ready callback and step.",
-            "gains": [
-              "Scheduling is always visible"
-            ],
-            "losses": [
-              "More work in the first program"
-            ],
-            "proposed": {
-              "code": "app: ui.application()\nmain: app.window(\"Main\", view)\napp.window(\"Settings\", preferences)\nsession: app.start(main, state, update, view)\nsession.on_ready(fn(s, batch) { s.step(batch) })"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Sequential suspended loop",
-            "gist": "Wait for application batches without blocking the browser thread.",
-            "gains": [
-              "Sequential control flow"
-            ],
-            "losses": [
-              "Suspension and browser support need proof"
-            ],
-            "proposed": {
-              "code": "app: ui.application()\nmain: app.window(\"Main\", view)\napp.window(\"Settings\", preferences)\ndriver: app.driver(main, state, update, view)\nloop batch in app.events() { driver.step(batch) }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A gives beginners useful defaults and experts the same transition engine, without requiring JSPI in every browser.",
-          "gains": [
-            "One driver and one control ladder"
-          ],
-          "losses": [
-            {
-              "loss": "Callbacks split workflows; deferral loses activation; idle work can waste battery.",
-              "mitigation": "Use owned tasks, step privileged input immediately, stop idle frames and measure cost. Native host retains sessions after entry returns."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B makes everyone write scheduling code."
-            },
-            {
-              "key": "C",
-              "reason": "C needs suspension and browser-support integration not established by the raw-wasm probe."
-            }
-          ],
-          "tradeoff": "A/B explicitly amend run timing, not owned-window close law. Native host must outlive entry return. Presentation is a separate vote."
-        }
-      },
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-09T02:31:30.072Z"
     }
   ],
   "questions": [
@@ -189573,6 +189217,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T02:39:47.927Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T02:39:47.043Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-APP-RUN1",
+      "note": "One application driver for beginners and expert loop control"
+    },
+    {
+      "at": "2026-11-09T02:39:46.173Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-APP-WEB1",
+      "note": "How one Jet application presents in a browser"
+    },
     {
       "at": "2026-11-09T02:31:30.072Z",
       "by": "Main",
