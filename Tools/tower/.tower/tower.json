@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96975,
+    "rev": 97000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28756,7 +28756,7 @@
     {
       "id": "c0dktg7a",
       "num": 3202,
-      "title": "Choose structured source origin for public compiler diagnostics",
+      "title": "Structured source origin for public compiler diagnostics",
       "body": "Choose structured source origin for public compiler diagnostics.\n\nA build/comptime tool receiving only a diagnostic byte span cannot safely identify an imported source snapshot. The current CLI location repair does not by itself change this public Core record.\n\nRecommend a versioned optional origin on CompilerDiagnostic with a source path when known and a source digest. Keep byte spans relative to that origin. Retain the existing read-only core.compiler module and mirror, not a new library or dependency. Submit the complete short ballot before changing the public record/schema.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-big-f20. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nExact final evidence boundary: Current public shape inspected; no runtime Core-API misattribution claimed. The related CLI import-origin failure is separately observed.\n\nOwner choice: A: add versioned source-origin data to existing stock core.compiler diagnostics. B: keep the current thin facade and require other tools for per-file attribution. A recommended; no new module/dependency.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-semindex/src\n- crates/jet-driver/src\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. Owner ratifies D-BIG-DIAGORIGIN1 or retains the current thin facade explicitly.\n2. If A, every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.",
       "kind": "feature",
       "track": "epoch",
@@ -28828,48 +28828,48 @@
         },
         {
           "n": 8,
-          "text": "[retarget] Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin.",
+          "text": "Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:34:58.975Z"
+          "at": "2026-11-09T19:19:51.470Z"
         },
         {
           "n": 9,
-          "text": "[retarget] No diagnostic inherits the entry path because its own origin is missing; an imported/local contrast fixture run through the self-hosted compiler identifies the right document for each diagnostic.",
+          "text": "No diagnostic inherits the entry path because its own origin is missing; an imported/local contrast fixture run through the self-hosted compiler identifies the right document for each diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:34:59.648Z"
+          "at": "2026-11-09T19:19:52.924Z"
         },
         {
           "n": 10,
-          "text": "[retarget] The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged.",
+          "text": "The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:56:50.670Z"
+          "at": "2026-11-09T19:19:54.384Z"
         },
         {
           "n": 11,
-          "text": "[retarget] The digest is computed or reused once per snapshot, never once per diagnostic or from re-read disk text.",
+          "text": "The digest is computed or reused once per snapshot, never once per diagnostic or from re-read disk text.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:35:00.903Z"
+          "at": "2026-11-09T19:19:55.877Z"
         },
         {
           "n": 12,
-          "text": "[retarget] No new runtime compiler service, AST mutation, third-party dependency or optional Core library is added.",
+          "text": "No new runtime compiler service, AST mutation, third-party dependency or optional Core library is added.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:35:01.512Z"
+          "at": "2026-11-09T19:19:57.462Z"
         },
         {
           "n": 13,
@@ -28944,7 +28944,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-07T02:56:55.291Z",
+      "updated": "2026-11-09T19:19:57.462Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "goals": [
@@ -48441,6 +48441,15 @@
           "verifiedBy": null,
           "evidence": "7d03b85290 (PriorityQueue.by/by_desc/from_by/from_by_desc) and 7358c18b48 (Rank.by …): release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). PASS: golden Examples/Collections/KeyedPriorityQueue and KeyedRank at o0, o1 and o2; ui priority_queue_key_effect and rank_key_effect.",
           "at": "2026-11-08T06:12:39.225Z"
+        },
+        {
+          "n": 2,
+          "text": "Owner ruling on C-G3-1: PriorityQueue.new() and PriorityQueue.from(xs) pop the smallest item first by its own order, the same as by(key); by_desc and from_by_desc pop the largest first. Every caller, example, case and Docs/spec/reference/core-library.md:474 move in one cutover, and a golden passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:03:01.640Z"
         }
       ],
       "refs": [],
@@ -48450,11 +48459,12 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-04T00:06:29.585Z",
-      "updated": "2026-11-09T19:01:50.328Z",
+      "updated": "2026-11-09T19:03:01.640Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c0s8gang",
@@ -52014,15 +52024,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "Measurement receipts under the strict gate for both programs on file and pipe targets, with write-syscall counts.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:54.718Z"
-        },
-        {
           "n": 2,
           "text": "Interleaving fixtures pass unchanged on every execution level.",
           "status": "open",
@@ -52075,11 +52076,12 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.718Z",
-      "updated": "2026-11-07T04:01:07.220Z",
+      "updated": "2026-11-09T19:02:58.577Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 5
     },
     {
       "id": "c04es5yq",
@@ -59797,6 +59799,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner 2026-11-09 asked for static typing on the remaining untyped IR ops; #6065 and #6114 are done and archived, so the follow-up criteria live here. Built by SUB OwnerDesk-1."
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "Single-source census F21 (Docs/audits/2026-11-05-single-source-census.md): Generators whose output no gate checks. Already owned by #5073 c2, #6168, #4896 c4; this is the drift evidence those criteria must clear. One hand-written home: The generator registry (F7). Fix: add `--check`; run every generator in s5. Drift check: s5. Drifted on 2026-11-05: Not checked (that needs the generators run) Effort S."
@@ -60221,6 +60228,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:49:38.221Z"
+        },
+        {
+          "n": 14,
+          "text": "IR Lint types every op (owner 2026-11-09; follows done #6065): IRLintTyping has no Bare row, so every IROp but Nop and Unreachable has a typing rule (Load, Store, CallIndirect and the other 13 former Bare rows), and LintPlanted plants a violation for each new rule with lp_valid exercising every op with no finding.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:02.068Z"
+        },
+        {
+          "n": 15,
+          "text": "CallIndirect is typed: indirect and closure calls load the code word into a #code<Fn> row and the lint checks arity, argument and result kinds against it; the golden, ui and cases profiles show no new internal-error row.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:03.082Z"
+        },
+        {
+          "n": 16,
+          "text": "Every path that builds IR lints it once: jet emit --ir (an internal error with exit 101 after the dump), comptime batches and the comptime entry module; the emit --ir and comptime_ cases pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:03.996Z"
+        },
+        {
+          "n": 17,
+          "text": "Docs/spec/architecture.md's IR Lint section lists the typing rows and names each lint point; the stale text left by #6470 is gone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:04.941Z"
+        },
+        {
+          "n": 18,
+          "text": "Regression found 2026-11-09 (LintPlanted core routes row on dev 6a06b917cb; #6114 was met): core.plugin.load is 2 args in CORE_CALLS but jet_plugin_load takes 3, and core.crypto.vault.current is 1 arg but jet_vault_current_impl takes 2; the arity rows agree again and the R4 core.arity check keeps them agreeing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:05.966Z"
         }
       ],
       "refs": [],
@@ -60234,10 +60286,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-07T02:45:11.777Z",
+      "updated": "2026-11-09T19:04:07.061Z",
       "updatedBy": "Main",
       "goals": [],
-      "criteriaLastN": 13
+      "criteriaLastN": 18
     },
     {
       "id": "c0nux77t",
@@ -65052,12 +65104,12 @@
         },
         {
           "n": 34,
-          "text": "D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) is rewritten by jet fix, and no old spelling, alias or shim remains. Main-13 lands only the conversion part first (wrapping, saturating and checked around T{x}, a word around a widening refused, runtime and Core narrowings moved to wrapping(T{x})).",
+          "text": "D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) is rewritten in the same batch by a one-time in-repo script (no shipped jet fix rule, owner order 2026-11-06), and no old spelling, alias or shim remains. Main-13 lands only the conversion part first (wrapping, saturating and checked around T{x}, a word around a widening refused, runtime and Core narrowings moved to wrapping(T{x})).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T19:02:55.220Z"
+          "at": "2026-11-09T19:03:05.996Z"
         },
         {
           "n": 35,
@@ -65104,7 +65156,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-07T02:53:19.650Z",
+      "updated": "2026-11-09T19:03:05.996Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -73439,6 +73491,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:55:43.616Z"
+        },
+        {
+          "n": 12,
+          "text": "jet run and jet build refuse an unknown dash option with a registered diagnostic and a UI snapshot (today -O1 and -Ozzz are silently ignored, so 59 -O0/-O1/-O2 steps in 19 cases all ran at O0), and those cases use the real tier spelling so each tests the tier it names.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:08.177Z"
         }
       ],
       "refs": [
@@ -73451,12 +73512,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-09T18:55:44.603Z",
+      "updated": "2026-11-09T19:04:08.177Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0aqwnas",
@@ -75648,15 +75709,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T15:30:08.091Z"
-        },
-        {
-          "n": 51,
-          "text": "D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even; a literal body is checked at compile time. New math.round_even(f) -> Int rounds ties to even. New saturating_from(f) on every integer head (Int, I64, U8, I16, ...) truncates, clamps and maps NaN to 0. math.round and round_even stop on NaN, infinity and out of range. Every in-repository caller is migrated, and each form has a UI snapshot and a golden example on O0, O1, O2 and web.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T01:38:21.183Z"
         }
       ],
       "refs": [],
@@ -75667,7 +75719,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-09T18:55:31.847Z",
+      "updated": "2026-11-09T19:03:10.067Z",
       "updatedBy": "Main",
       "criteriaLastN": 51
     },
@@ -77502,6 +77554,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c68's case generics/generic_modules_complete_instantiation is also #6661 c3's known-failing row (G3). Whoever fixes it meets both rows."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Lane paused by owner (4-lead cap). Unlanded: MetaLead-2-9 (unfinished, never built). It holds the closed-else coverage fix (a .None arm before else read as .Val), a partial Core migration (36 files) and the #3505 const-generics WIP. It does not apply on dev a64704fde3. Code ruling (Main): dev's E0639 stays 'self parameter outside a method' (648603aa34, #6129 c51). The closed-else rule takes the next free code, E0640, which needs its own row, snapshots and docs page. Resume after seed a0_042: rebase, keep-going check, codemod phases A-C, claim c50/c52/c53 (c51 partial, with gaps disclosed)."
         },
         {
@@ -78371,7 +78428,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-09T18:55:28.717Z",
+      "updated": "2026-11-09T19:03:11.824Z",
       "updatedBy": "Main",
       "criteriaLastN": 123
     },
@@ -79271,6 +79328,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-30T16:26:48.012Z"
+        },
+        {
+          "n": 5,
+          "text": "D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even; a literal body is checked at compile time. New math.round_even(f) -> Int rounds ties to even. checked(Int{f}) gives None where Int{f} would stop, and saturating(Int{f}) truncates, clamps and maps NaN to 0, on every integer head (Int, I64, U8, I16, ...); no from_float or saturating_from method exists. math.round and round_even stop on NaN, infinity and out of range. Every in-repository caller is migrated, and each form has a UI snapshot and a golden example on O0, O1, O2 and web. (was #6151 c51)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:03:08.340Z"
         }
       ],
       "refs": [],
@@ -79281,8 +79347,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-09T19:01:23.425Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T19:03:08.340Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     },
     {
       "id": "c0ct4a0i",
@@ -80280,6 +80347,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Owner 2026-11-09: hold lifted; build c3-c5 under ratified D-MACHINE1."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-MACHINE1 is ratified (2026-11-01), but the body holds implementation until the owner asks; c3-c5 wait for that word."
         }
       ],
@@ -80338,7 +80410,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-09T19:01:48.750Z",
+      "updated": "2026-11-09T19:03:13.663Z",
       "updatedBy": "Main"
     },
     {
@@ -91830,6 +91902,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T00:02:35.054Z"
+        },
+        {
+          "n": 12,
+          "text": "Owner ruling 2026-11-09 (BoardPlanner C-G5-1): jet fmt keeps one blank line between a file's opening comment block and the first item, so the header stays a file comment and never becomes that item's doc; a formatter case proves it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:04:09.170Z"
         }
       ],
       "refs": [
@@ -91842,8 +91923,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-06T22:29:42.338Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T19:04:09.170Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 12
     },
     {
       "id": "c0q4s6en",
@@ -94855,12 +94937,12 @@
       "criteria": [
         {
           "n": 3,
-          "text": "Examples/features/tooling/compute_autodiff.jet passes on every tier with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #3955 c3)",
+          "text": "Examples/Math/Compute/ComputeAutoDiff.jet (gradient, jvp, vjp, value_and_gradient) passes on O0, O1, O2 and web with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #3955 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:03:36.651Z"
+          "at": "2026-11-09T19:02:56.936Z"
         }
       ],
       "refs": [],
@@ -94871,7 +94953,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:43.242Z",
-      "updated": "2026-11-09T19:02:54.011Z",
+      "updated": "2026-11-09T19:02:56.936Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -97555,6 +97637,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c3's generic_modules_complete_instantiation row is also #6281 c68's proof (G6). Whoever fixes it meets both rows."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "c4 progress (TestSystemLead-2): ebb25ee28f makes a valueless builtin call (print/assert/assert_eq/consume/close) as a value-block tail report E0114 unless an earlier line always leaves. value_block_tails_report_unit_and_lint_old_arm_table_shape passes step 1 and stays KF at step 2 (lintable.jet gets E0003, not L0513). 0e5a5249b8 reserves Solver again: solve_solver_type_name_is_reserved KF→PASS, 8 Solver rows still pass. Remaining rows: game_run_needs_mutable_scene_lvalue needs core.game.run to take the scene mutably (a Core signature change); b3_map_get_through_object_pattern:  now binds key/value entries, not a map, so the fixture's .get is a type error (fixture intent); generated_internal_tagged_enum_round_trips_every_variant_shape (unit variant decode panics) and io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty (transcript matches a forbidden pattern) are not yet examined."
@@ -97616,7 +97703,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-08T00:55:06.853Z",
+      "updated": "2026-11-09T19:03:00.075Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -191029,6 +191116,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-09T19:19:57.462Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#12: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The [retarget] prefix is a leftover of an old merge.; was: [retarget] No new runtime compiler service, AST mutation, third-party dependency or optional Core library is added."
+    },
+    {
+      "at": "2026-11-09T19:19:55.877Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#11: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The [retarget] prefix is a leftover of an old merge.; was: [retarget] The digest is computed or reused once per snapshot, never once per diagnostic or from re-read disk text."
+    },
+    {
+      "at": "2026-11-09T19:19:54.384Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#10: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The [retarget] prefix is a leftover of an old merge.; was: [retarget] The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged."
+    },
+    {
+      "at": "2026-11-09T19:19:52.924Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#9: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The [retarget] prefix is a leftover of an old merge.; was: [retarget] No diagnostic inherits the entry path because its own origin is missing; an imported/local contrast fixture run through the self-hosted compiler identifies the right document for each diagn"
+    },
+    {
+      "at": "2026-11-09T19:19:51.470Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#8: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The [retarget] prefix is a leftover of an old merge.; was: [retarget] Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin."
+    },
+    {
+      "at": "2026-11-09T19:19:49.863Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:19:47.875Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G5",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-09T19:04:09.170Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gelll3",
+      "note": "#12 Owner ruling 2026-11-09 (BoardPlanner C-G5-1): jet fmt keeps"
+    },
+    {
+      "at": "2026-11-09T19:04:08.177Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0a0gmpl",
+      "note": "#12 jet run and jet build refuse an unknown dash option with a r"
+    },
+    {
+      "at": "2026-11-09T19:04:07.061Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:04:05.966Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c022g7qw",
+      "note": "#18 Regression found 2026-11-09 (LintPlanted core routes row on "
+    },
+    {
+      "at": "2026-11-09T19:04:04.941Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c022g7qw",
+      "note": "#17 Docs/spec/architecture.md's IR Lint section lists the typing"
+    },
+    {
+      "at": "2026-11-09T19:04:03.996Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c022g7qw",
+      "note": "#16 Every path that builds IR lints it once: jet emit --ir (an i"
+    },
+    {
+      "at": "2026-11-09T19:04:03.082Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c022g7qw",
+      "note": "#15 CallIndirect is typed: indirect and closure calls load the c"
+    },
+    {
+      "at": "2026-11-09T19:04:02.068Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c022g7qw",
+      "note": "#14 IR Lint types every op (owner 2026-11-09; follows done #6065"
+    },
+    {
+      "at": "2026-11-09T19:03:13.663Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06he0ee",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:03:11.824Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oev2ib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:03:10.067Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0w1wcfc",
+      "note": "#51: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6313: float-to-integer conversion is the conversion stream (#6313), not Core host leaves.; was [open]: D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even; a literal body is check"
+    },
+    {
+      "at": "2026-11-09T19:03:08.340Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vhdiiv",
+      "note": "#5 D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, "
+    },
+    {
+      "at": "2026-11-09T19:03:05.996Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c08s0ppt",
+      "note": "#34: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner ruling on C-G6-3: the greenfield order (2026-11-06) governs; the migration is a one-time in-repo script, with no shipped jet fix rule.; was: D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) i"
+    },
+    {
+      "at": "2026-11-09T19:03:03.678Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#51: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner ruling on C-G3-2: D-FIXED-WRAP1's one-spelling rule governs; checked(Int{f}) and saturating(Int{f}) replace from_float and saturating_from.; was: D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even; a literal body is check"
+    },
+    {
+      "at": "2026-11-09T19:03:01.640Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0eo2mnm",
+      "note": "#2 Owner ruling on C-G3-1: PriorityQueue.new() and PriorityQueu"
+    },
+    {
+      "at": "2026-11-09T19:03:00.075Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:02:58.577Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0j8dr0e",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). c5's measurement-before-change receipts include the file and pipe targets with syscall counts (D-G3-8).; was [open]: Measurement receipts under the strict gate for both programs on file and pipe targets, with write-syscall counts."
+    },
+    {
+      "at": "2026-11-09T19:02:56.936Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wyaelh",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The example moved in the Examples cutover (2c3e68a70b); c1 and c2 fold in (D-G3-7).; was: Examples/features/tooling/compute_autodiff.jet passes on every tier with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #39"
+    },
+    {
       "at": "2026-11-09T19:02:54.011Z",
       "by": "Main",
       "action": "card.criteria-remove",
@@ -196766,11 +197028,11 @@
     {
       "id": "G5",
       "title": "Developer experience: CLI, errors and editor",
-      "body": "Every error in plain words, every registered command and flag built, one settings table for run, build, dev and test, a generated CLI reference, and a working LSP and developer tools. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is sixth.\n\nMerged from G15 (Best testing toolkit in Jet): A world-class testing toolkit in Jet's testing module that everyone can use: jet test and the testkit as a Jet library, property tests with shrinking, fuzzing, schedule exploration, mutation testing and result reuse. Split out of G1 by owner order 2026-11-06 so G1 holds only hand-off and durability; the moved cards keep every criterion.",
+      "body": "Every error in plain words, every registered command and flag built, one settings table for run, build, dev and test, a generated CLI reference, a working LSP and developer tools, and a world-class testing toolkit. Owner ruling 2026-11-09: speed and size of these tools are G11; this goal keeps a new feature's own paired perf cell. Loose-file scripting is G4. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is sixth.\n\nMerged from the former testing-toolkit goal (then numbered G15; G15 is now One typed IR): a world-class testing toolkit in Jet's testing module that everyone can use: jet test and the testkit as a Jet library, property tests with shrinking, fuzzing, schedule exploration, mutation testing and result reuse. Split out of G1 by owner order 2026-11-06 so G1 holds only hand-off and durability; the moved cards keep every criterion.\n\nOne card per stream: JetDevserver port #5931, JetLSP build #6650, LSP features #4917, Canvas #6618, notebook #6619, hot reload #6625, debugger #6730, SemIndex #6630, unbuilt commands #6418, diagnostic sweep #3720, diagnostic gaps #4260, sema parity #6425, single-source facts #6568, receipts #6629, the rest of the developer tools #6386.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:41.788Z",
-      "updated": "2026-11-08T13:53:30.446Z",
+      "updated": "2026-11-09T19:19:47.875Z",
       "updatedBy": "Main"
     },
     {
