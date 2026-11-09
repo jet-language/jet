@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6728,
-    "rev": 96511,
+    "rev": 96513,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102153,21 +102153,27 @@
     {
       "id": "c0bf5kow",
       "num": 6725,
-      "title": "I2: comptime math.from_bits of an Int literal at or above 2^63 is an internal compiler error",
+      "title": "I9/I2: comptime drops a runtime stop (from_bits of an Int at or above 2^63) and returns a value or crashes the comptime child",
       "body": "Repro (dev 4169604f62 and later): main.jet = `use math: core.math` + `main: fn() { x: comptime { math.to_bits(math.from_bits(0x8000000000000000)) }; print(x) }`; `jet run main.jet` prints 'internal compiler error: the native comptime run failed internally: IR evaluation: memory access through a null pointer'. The same call at runtime is fine. Any Int literal >= 2^63 passed to from_bits inside comptime fails. Also check why the comptime path reports 'IR evaluation' when I9 says compile-time code runs natively at O0 with no interpreter. Found by G1Lead-2 during G1Lead-22b.",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
       "phase": "planning",
-      "priority": "P1",
+      "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Correction from G1Lead-2 (verified on the s9 compiler): math.from_bits takes a signed Int, so from_bits(0x8000000000000000) is a runtime stop E3010 'Value doesn't fit in destination type' (Math.jet:11557). At comptime the stop is not reported: (1) word: fn() -> Int { math.to_bits(math.from_bits(0x8000000000000000)) } with a: comptime { word() } builds and prints 1; (2) inside a [Int]-returning loop, b: comptime { words() } is an ICE 'the comptime child ended on signal 6' (the null-pointer ICE is a variant). Comptime must report the same stop the runtime does (I9), and never an ICE for a user stop (I2). The repro is with G1Lead-2's lane."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -102194,7 +102200,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:46:19.481Z",
-      "updated": "2026-11-09T14:46:27.040Z",
+      "updated": "2026-11-09T14:59:47.057Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -191126,6 +191132,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T14:59:47.057Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bf5kow",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T14:59:45.782Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bf5kow",
+      "note": "title,priority"
+    },
     {
       "at": "2026-11-09T14:54:54.140Z",
       "by": "Main",
