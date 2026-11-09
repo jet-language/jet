@@ -34,6 +34,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [RandomAudit](RandomAudit.jet)
 - [RandomSeededSequence](RandomSeededSequence.jet)
 - [ReciprocalSquareRoot](ReciprocalSquareRoot.jet) — 1/sqrt(x) correctly rounded, and powers of ten. Both give the same bits on every tier.
+- [Roots](Roots.jet) — The nth root of x and (1 + x)^n for a whole n, correctly rounded: the same bits on every tier, exact roots exact, and 1 + x never rounded first.
 - [Spaceship](Spaceship.jet) — Primitive `<=>`, Ordering combinators, and a user comparator.
 - [TypedAbs](TypedAbs.jet)
 - [XorOperator](XorOperator.jet) — Bitwise exclusive-or: infix `~|` keeps a bit where exactly one side has it — the exclusive variant of `|`.

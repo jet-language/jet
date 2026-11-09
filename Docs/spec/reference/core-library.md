@@ -2576,6 +2576,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
 | `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
 | `math.pow_n(x, n)`, `pow_r(x, y)` | `Float` | `x^n` for every whole `n: Int`, taken exactly however large, and `e^(y ln x)`, both correctly rounded, so every tier returns the same bits (C23 `pown`, `powr`). `pow_n` gives 1 for `n = 0` even at a NaN, and a negative result for a negative `x` and odd `n`; `pow_r` gives NaN for `x < 0`, `0^0`, `inf^0` and `1^inf`, and `+inf` for `0^y` with `y < 0`. `value.pow` keeps its own rules and bits. |
+| `math.root_n(x, n)`, `compound_n(x, n)` | `Float` | The `n`th root of `x` and `(1 + x)^n` for every whole `n: Int`, both correctly rounded, so every tier returns the same bits (C23 `rootn`, `compoundn`). `root_n` gives NaN for `n = 0` and for `x < 0` with `n` even, and a negative root for `x < 0` with `n` odd; `compound_n` gives 1 for `n = 0` (even at a NaN), NaN for `x < -1`, and never rounds `1 + x` first. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |

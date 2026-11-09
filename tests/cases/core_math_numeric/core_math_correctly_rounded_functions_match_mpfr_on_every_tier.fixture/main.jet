@@ -21,6 +21,8 @@ LOG2_P1: comptime { embed_file("corpus/log2p1.txt") }
 LOG10_P1: comptime { embed_file("corpus/log10p1.txt") }
 POW_R: comptime { embed_file("corpus/powr.txt") }
 POW_N: comptime { embed_file("corpus/pown.txt") }
+ROOT_N: comptime { embed_file("corpus/rootn.txt") }
+COMPOUND_N: comptime { embed_file("corpus/compoundn.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -53,8 +55,8 @@ is_nan_word: fn(word: Int) -> Bool {
     magnitude > 9218868437227405312
 }
 
-// The result of `name` on arguments `a`, whose words are `w`: pown takes its
-// exponent word as a whole number.
+// The result of `name` on arguments `a`, whose words are `w`: pown, rootn
+// and compoundn take their second word as a whole number.
 value: fn(name: String, a: [Float], w: [Int]) -> Float {
     if name == "rsqrt" -> return math.rsqrt(a[0])
     if name == "sinpi" -> return math.sin_pi(a[0])
@@ -70,6 +72,8 @@ value: fn(name: String, a: [Float], w: [Int]) -> Float {
     if name == "log10p1" -> return math.log10_1p(a[0])
     if name == "powr" -> return math.pow_r(a[0], a[1])
     if name == "pown" -> return math.pow_n(a[0], w[1])
+    if name == "rootn" -> return math.root_n(a[0], w[1])
+    if name == "compoundn" -> return math.compound_n(a[0], w[1])
     panic("no corpus function {name}")
 }
 
@@ -123,4 +127,6 @@ run: fn() {
     check("log10p1", LOG10_P1)
     check("powr", POW_R)
     check("pown", POW_N)
+    check("rootn", ROOT_N)
+    check("compoundn", COMPOUND_N)
 }

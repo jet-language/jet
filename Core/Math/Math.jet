@@ -744,6 +744,134 @@ __pow_big: fn(a: Float, n: Int) -> Float Never! {
     if (lg < Float{-1200.0}) -> return 0.0
     __pow_ziv(x.m, x.e, n, 0, 1)
 }
+/// The nth root of x, correctly rounded (C23 rootn): NaN for n = 0, for a
+/// NaN and for x < 0 with n even; for x < 0 and n odd the negative root. A
+/// zero gives a zero for n > 0 and an infinity for n < 0, an infinity the
+/// reverse, each negative only for a negative x and an odd n.
+root_n: fn(x: Float, n: Int) -> Float Never! {
+    if n == 0 -> return NAN
+    if is_nan(x) -> return x + x
+    odd: n.bit_and(1) == 1
+    if (x < Float{0.0}) && !odd -> return NAN
+    sign: if odd && to_bits(x) < 0 -> Float{-1.0} else -> Float{1.0}
+    a: fabs(x)
+    if a == 0.0 || is_inf(a) {
+        if (n > 0) == (a == 0.0) -> return sign * Float{0.0}
+        return sign * INFINITY
+    }
+    if n == 1 -> return x
+    if n == -1 -> return Float{1.0} / x
+    if n == 2 -> return sqrt(a)
+    if n == -2 -> return rsqrt(a)
+    if (a == Float{1.0}) -> return sign
+    sign * __root_cr(a, n)
+}
+// a^(1/n) for finite a > 0, a != 1 and |n| >= 3: exact roots exactly, then
+// for |n| <= 2^53 pow's phase 1 on log(a)/n, then __pow_ziv. No such root
+// lies outside the normal Floats, and none is a midpoint: one would need an
+// odd 54-bit significand whose nth power is a's 53-bit one.
+__root_cr: fn(a: Float, n: Int) -> Float Never! {
+    exact: __root_exact(a, n)
+    if !is_nan(exact) -> return exact
+    if -0x20_0000_0000_0000 <= n && n <= 0x20_0000_0000_0000 {
+        l: __pow_log_1(a)
+        d: Float{n}
+        rh: l.hi / d
+        rl: (fma(-rh, d, l.hi) + l.lo) / d
+        r: __fast_two_sum(rh, rl)
+        e: __pow_exp_1(r.hi, r.lo)
+        // pow's bounds plus 2^-90 for the division
+        bound: if l.cancel -> Float{4.6485168145316e-18} else -> Float{6.246867986000465e-20}
+        low: e.hi + fma(bound + Float{8.077935669463161e-28}, -e.hi, e.lo)
+        if low == e.hi + fma(bound + Float{8.077935669463161e-28}, e.hi, e.lo) -> return low
+    }
+    x: __float_parts(a)
+    if n < 0 -> return __pow_ziv(x.m, x.e, -1, 0, -n)
+    __pow_ziv(x.m, x.e, 1, 0, n)
+}
+// a^(1/n) when it is a Float, else NaN: with a = m 2^e and m odd, n must
+// divide e and m must be the nth power of a whole s, and s = 1 for n < 0.
+__root_exact: fn(a: Float, n: Int) -> Float Never! {
+    x: __float_parts(a)
+    m := x.m
+    e := x.e
+    loop m.bit_and(1) == 0 {
+        m = m >> 1
+        e = e + 1
+    }
+    if (e /% n) * n != e -> return NAN
+    if m == 1 -> return ldexp(Float{1.0}, e /% n)
+    // 3^34 > 2^53
+    if n < 0 || n > 33 -> return NAN
+    lo := 1
+    hi := Int{1} << (__bit_len(m) /% n + 1)
+    loop lo + 1 < hi {
+        mid: (lo + hi) >> 1
+        if mid.pow(n) <= m {
+            lo = mid
+        } else {
+            hi = mid
+        }
+    }
+    if lo.pow(n) != m -> return NAN
+    ldexp(Float{lo}, e /% n)
+}
+/// (1 + x)^n for a whole n, correctly rounded (C23 compoundn): 1 for n = 0
+/// when x >= -1 or x is NaN, NaN for x < -1 and for a NaN x otherwise, +0
+/// or +inf at x = -1 and +inf or +0 at x = +inf for n > 0 and n < 0. Every
+/// Int n is taken exactly, and 1 + x is never rounded.
+compound_n: fn(x: Float, n: Int) -> Float Never! {
+    if is_nan(x) {
+        if n == 0 -> return Float{1.0}
+        return x + x
+    }
+    if (x < Float{-1.0}) -> return NAN
+    if n == 0 || x == 0.0 -> return Float{1.0}
+    if (x == Float{-1.0}) || is_inf(x) {
+        if (n > 0) == is_inf(x) -> return INFINITY
+        return Float{0.0}
+    }
+    if n == 1 -> return Float{1.0} + x
+    b: if (fabs(x) > Float{1.0}) -> __fast_two_sum(x, Float{1.0}) else -> __fast_two_sum(Float{1.0}, x)
+    if b.lo == 0.0 -> return pow_n(b.hi, n)
+    __compound_cr(x, b.hi, b.lo, n)
+}
+// (1 + x)^n for bh + bl = 1 + x exactly, bl != 0 and n not 0 or 1: for
+// |n| <= 2^53 pow's phase 1 on n (log(bh) + log(1 + bl/bh)), then a power
+// far outside the Floats from an estimate of n log2(1 + x), and the rest by
+// __pow_ziv on the exact 1 + x. As bl != 0 the odd part of 1 + x exceeds
+// 2^53, so no such power is a Float or the midpoint of two.
+__compound_cr: fn(x: Float, bh: Float, bl: Float, n: Int) -> Float Never! {
+    if -0x20_0000_0000_0000 <= n && n <= 0x20_0000_0000_0000 {
+        l: __pow_log_1(bh)
+        ch: bl / bh
+        cl: fma(-ch, bh, bl) / bh
+        s: __add_dd(l.hi, l.lo, ch, cl - Float{0.5} * ch * ch)
+        g: __fast_two_sum(s.hi, s.lo)
+        r: __s_mul(Float{n}, g.hi, g.lo)
+        e: __pow_exp_1(r.hi, r.lo)
+        // twice pow's bounds, as log(bh) is at most twice log(1 + x), plus
+        // 2^-90 for the quotient and the sum
+        bound: if l.cancel -> Float{9.2970336290632e-18} else -> Float{1.249373597200093e-19}
+        low: e.hi + fma(bound + Float{8.077935669463161e-28}, -e.hi, e.lo)
+        if low == e.hi + fma(bound + Float{8.077935669463161e-28}, e.hi, e.lo) -> return low
+    }
+    // 1 + x = bm 2^be exactly
+    p: __float_parts(x)
+    sx: if (x < Float{0.0}) -> -p.m else -> p.m
+    bm: if p.e < 0 -> (Int{1} << -p.e) + sx else -> 1 + (sx << p.e)
+    be: if p.e < 0 -> p.e else -> 0
+    cap: Int{1} << 1000
+    cn := n
+    if cn > cap -> cn = cap
+    if cn < -cap -> cn = -cap
+    // log2(1 + x) within 2^-20 relative
+    l2: if (fabs(x) < Float{9.5367431640625e-7}) -> x * Float{1.4426950408889634} else -> log2(bh)
+    lg: approx(cn) * l2
+    if (lg > Float{1100.0}) -> return INFINITY
+    if (lg < Float{-1200.0}) -> return 0.0
+    __pow_ziv(bm, be, n, 0, 1)
+}
 // a^y rounded when it is a Float or the midpoint of two, else NaN (the
 // cases of CORE-MATH pow.c is_exact). With a = m 2^e and y = n 2^f, m and n
 // odd: a power of two gives 2^(e y) when e y is whole; otherwise y > 0, and
@@ -6970,6 +7098,41 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     // CORE-MATH pow.wc worst cases, one subnormal
     assert_eq(to_bits(pow_r(from_bits(4835813121993211188), 0.3125)), 4678529498034705970)
     assert_eq(to_bits(pow_r(from_bits(3138866179343064177), from_bits(4614256656552045848))), 958906342421917)
+}
+
+#Test("math root_n and compound_n are correctly rounded") {
+    assert_eq(root_n(-8.0, 3), -2.0)
+    assert_eq(root_n(16.0, -4), 0.5)
+    assert_eq(root_n(2.0, 3), 1.2599210498948732)
+    assert_eq(root_n(2.0, -3), 0.7937005259840998)
+    assert_eq(root_n(10.0, 5), 1.5848931924611134)
+    assert_eq(root_n(1e-310, -9), 2.7825594022071255e34)
+    assert_eq(root_n(3.0, 1000000), 1.0000010986128922)
+    assert_eq(root_n(3.0, 9223372036854775807), 1.0)
+    assert_eq(to_bits(root_n(-0.0, 2)), to_bits(0.0))
+    assert_eq(root_n(-0.0, -3), -INFINITY)
+    assert_eq(root_n(INFINITY, -2), 0.0)
+    assert(is_nan(root_n(-8.0, 2)))
+    assert(is_nan(root_n(2.0, 0)))
+    assert(is_nan(root_n(NAN, 3)))
+    // a CORE-MATH cbrt.wc worst case
+    assert_eq(to_bits(root_n(from_bits(4615315874094516424), -3)), 4604045713815548866)
+    assert_eq(compound_n(0.5, 2), 2.25)
+    assert_eq(compound_n(-0.5, -3), 8.0)
+    assert_eq(compound_n(0.1, 10), 2.5937424601)
+    assert_eq(compound_n(1e-10, -1), 0.9999999999)
+    assert_eq(compound_n(1e-300, 3), 1.0)
+    assert_eq(compound_n(8.673617379884035e-19, 1152921504606846976), 2.718281828459045)
+    assert_eq(to_bits(compound_n(8.470329472543003e-22, -4611686018427387904)), 4607147303058014140)
+    assert_eq(compound_n(1e300, 2), INFINITY)
+    assert_eq(compound_n(NAN, 0), 1.0)
+    assert_eq(compound_n(-1.0, -1), INFINITY)
+    assert_eq(compound_n(-1.0, 2), 0.0)
+    assert_eq(compound_n(INFINITY, -1), 0.0)
+    assert(is_nan(compound_n(-2.0, 0)))
+    assert(is_nan(compound_n(NAN, 1)))
+    // a CORE-MATH log1p.wc worst case
+    assert_eq(to_bits(compound_n(from_bits(-4717333287328040252), 4)), 4607182412178923782)
 }
 
 #Test("math special functions match musl") {
