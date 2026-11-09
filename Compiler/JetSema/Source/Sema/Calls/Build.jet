@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, CtValue, DeriveBodyItem, Diagnostic, Expr, Item, NamedCtValue, ParamZone, Span, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -157,23 +157,119 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
         values.push(value.copy())
         params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
     }
-    ownership: sema_ownership_check_method_call(state, "Build.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
-    if !ownership.accepted || !ownership.complete -> return failed
+    // `b.generate` sends its formatted items, then a (marker, value) pair per
+    // build local the template splices; the locals are read like arguments.
+    generated := [TExpr]{}
     if method == "generate" {
-        // Rust lower_build_generate also expands/formats the typed body under
-        // an empty compile-time scope before sending private host payload text.
         loop argument in args {
-            if argument.flags.template_items == .Val(body) {
-                items: sema_derive_expand_template_body(body, [NamedCtValue]{}, diagnostics) ?? return failed
-                generated_program := ast_program()
-                generated_program.items = items
-                source: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
-                values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
+            body: argument.flags.template_items ?? next
+            splices: sema_build_generate_splices(body, argument.span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+            generated.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: splices.source}}}, argument.span))
+            loop index in 0..<splices.markers.len() {
+                generated.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: splices.markers[index], width: None}, argument.span))
+                generated.push(splices.values[index].copy())
+                ordinary.push(splices.args[index].copy())
+                params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(splices.values[index].ty), variadic: false})
             }
         }
     }
+    ownership: sema_ownership_check_method_call(state, "Build.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    loop value in generated -> values.push(value.copy())
     value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// A `b.generate` template's formatted items and the build locals it splices.
+// Each `$name` naming a build local is formatted as that splice's marker, a
+// whole Int literal, which the build host replaces with the local's value
+// written as a Jet literal (JetDriver jet_driver_build_host_call).
+SemaBuildGenerateSplices: struct {
+    source: String
+    markers: [Int]
+    args: [CallArg]
+    values: [TExpr]
+}
+
+// The first splice marker, a 19-digit Int; every marker shares the prefix,
+// and a template that spells the prefix itself is refused.
+SEMA_BUILD_GENERATE_SPLICE_BASE: 4611686018427387000
+SEMA_BUILD_GENERATE_SPLICE_PREFIX: "4611686018427387"
+SEMA_BUILD_GENERATE_SPLICE_LIMIT: 1000
+
+sema_build_generate_format: fn(items: [Item]) -> String {
+    generated_program := ast_program()
+    generated_program.items = items
+    jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
+}
+
+// Rust lower_build_generate expands and formats the typed body under an empty
+// compile-time scope. A `$name` still unbound there that names a build local
+// of a literal type is spliced: the body is expanded again with each such
+// name bound to its marker, so the marker stands exactly where the value goes.
+sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaBuildGenerateSplices? {
+    items: sema_derive_expand_template_body(body, [NamedCtValue]{}, diagnostics) ?? return None
+    splices := SemaBuildGenerateSplices{source: sema_build_generate_format(items), markers: [Int]{}, args: [CallArg]{}, values: [TExpr]{}}
+    scope := [NamedCtValue]{}
+    loop name in sema_build_generate_splice_names(splices.source) {
+        if sema_scope_resolve_index(scopes, name) == None -> next
+        local: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+        value: sema_check_expression(local.copy(), None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        if !sema_build_generate_splice_type(value.ty) {
+            diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice `${name}`, a `{type_name(value.ty)}`", "a build local enters the generated items as a literal, and only String, Int and Bool values and lists of them have one", "splice a String, Int or Bool built from `{name}`"))
+            return None
+        }
+        marker: SEMA_BUILD_GENERATE_SPLICE_BASE + splices.markers.len()
+        scope.push(NamedCtValue{name: name, value: CtValue.Int{value: marker}})
+        splices.markers.push(marker)
+        splices.args.push(CallArg{convention: AccessConvention.Read, expr: local, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        splices.values.push(value)
+    }
+    if splices.markers.len() == 0 -> return Val(splices)
+    if splices.markers.len() > SEMA_BUILD_GENERATE_SPLICE_LIMIT || splices.source.contains(SEMA_BUILD_GENERATE_SPLICE_PREFIX) {
+        diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice build locals into these items", "the items splice more than {SEMA_BUILD_GENERATE_SPLICE_LIMIT} build locals, or already spell the splice marker prefix `{SEMA_BUILD_GENERATE_SPLICE_PREFIX}`", "splice fewer build locals, or write that number another way"))
+        return None
+    }
+    spliced: sema_derive_expand_template_body(body, scope, diagnostics) ?? return None
+    splices.source = sema_build_generate_format(spliced)
+    Val(splices)
+}
+
+// The names of the `$name` splices in formatted items, in first-use order.
+sema_build_generate_splice_names: fn(text: String) -> [String] Never! {
+    names := [String]{}
+    bytes: text.bytes()
+    index := 0
+    loop index < bytes.len() {
+        if (bytes[index] != U8{36}) {
+            index += 1
+            next
+        }
+        end := index + 1
+        loop end < bytes.len() && sema_build_generate_name_byte(bytes[end], end > index + 1) -> end += 1
+        if end > index + 1 {
+            name: String.from_bytes(bytes[index + 1..<end]) ?? ""
+            seen := false
+            loop known in names {
+                if known == name -> seen = true
+            }
+            if !seen && name.count_bytes() > 0 -> names.push(name)
+        }
+        index = end
+    }
+    names
+}
+
+sema_build_generate_name_byte: fn(byte: U8, digits: Bool) -> Bool Never! {
+    (byte >= U8{97} && byte <= U8{122}) || (byte >= U8{65} && byte <= U8{90}) || byte == U8{95} || (digits && byte >= U8{48} && byte <= U8{57})
+}
+
+sema_build_generate_splice_type: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .String | .Int | .Bool -> true
+        .List(element) -> sema_build_generate_splice_type(element)
+        else -> false
+    }
 }
 
 // The calls on a `b.run` step (BuildAction) and on a BuildFile: each file

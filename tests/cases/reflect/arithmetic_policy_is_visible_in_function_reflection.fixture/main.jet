@@ -1,24 +1,19 @@
 #Arithmetic(.Wrapping)
-wrapped: fn(value: U8) -> U8 { return value + U8{1} }
-run: fn() {}
+wrapped: fn(value: U8) -> U8 { value + U8{1} }
 
-REFLECTION_APP: Output.Executable{ name: "reflection", entry: reflection_probe }
 build: fn(b: Build) {
-    loop function in b.program.functions {
+    loop function in b.program.functions() {
         if function.name == "wrapped" {
             operation: function.arithmetic[0].operation
             policy: function.arithmetic[0].policy
-            
-    // Original tests/reflect.rs:85-87 first arithmetic scope_span is a record.
-    scope_start: function.arithmetic[0].scope_span.start
-            
-    // Original tests/reflect.rs:85-87 first arithmetic scope_span is a record.
-    scope_end: function.arithmetic[0].scope_span.end
+            // Original tests/reflect.rs:85-87 first arithmetic scope_span is a record.
+            scope_start: function.arithmetic[0].scope_span.start
+            scope_end: function.arithmetic[0].scope_span.end
             b.generate("reflection_values") {
-                reflected_operation: fn() -> String { return $operation }
-                reflected_policy: fn() -> String { return $policy }
-                reflected_scope_start: fn() -> Int { return $scope_start }
-                reflected_scope_end: fn() -> Int { return $scope_end }
+                reflected_operation: fn() -> String { $operation }
+                reflected_policy: fn() -> String { $policy }
+                reflected_scope_start: fn() -> Int { $scope_start }
+                reflected_scope_end: fn() -> Int { $scope_end }
             }
             break
         }
@@ -26,13 +21,11 @@ build: fn(b: Build) {
     app: b.add_executable("reflection", ["main.jet", ".jet/generated/reflection/reflection_values.jet"], [])
     b.default(app)
 }
-reflection_probe: fn() {
-    
+
+run: fn() {
     // Original tests/reflect.rs:79-81 first arithmetic operation add.
     print(reflected_operation())
-    
     // Original tests/reflect.rs:82-84 first arithmetic policy .Wrapping.
     print(reflected_policy())
-    _scope_start: reflected_scope_start()
-    _scope_end: reflected_scope_end()
+    if reflected_scope_end() <= reflected_scope_start() -> print("empty arithmetic scope")
 }

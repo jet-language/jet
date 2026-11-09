@@ -48,6 +48,7 @@ use {
     jet_parser.[parse_source]
     jet_sema.[
         SemaNameReferenceFact,
+        sema_arithmetic_policy_facts,
         sema_compiler_index_view_map,
         sema_compiler_index_view_provenance,
         sema_state_graph_facts,
@@ -752,6 +753,7 @@ semindex_with_caller_body: fn(frame: SemCallerFrame, slot: String, body: [Stmt],
 // walks record them; nested trait blocks do not).
 semindex_method: fn(owner: String, method: Func, origin: String, origin_trait: String, params: Bool, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
     semindex_func_type_nodes(method, db, ctx)
+    semindex_function_arithmetic(method, db, ctx)
     identity: semindex_callable_identity(ctx.scope_identity, Val(owner), method.name)
     db.members.push(semindex_method_fact(ctx, owner, method, origin, origin_trait))
     db.defs.push(semindex_def(ctx, identity, method.name, semindex_display(ctx, Val(owner), method.name), method.name_span, semindex_callable_kind(method, ctx.source)))
@@ -798,6 +800,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
         .FactDecl(value) -> db.defs.push(semindex_type_def(ctx, value.name, value.name_span, [String]{}, "fact"))
         .Func(f) -> {
             semindex_func_type_nodes(f, db, ctx)
+            semindex_function_arithmetic(f, db, ctx)
             identity: semindex_callable_identity(ctx.scope_identity, None, f.name)
             if f.return_view_provenance == .Val(provenance) -> db.view_provenance[identity] = provenance
             db.defs.push(semindex_def(ctx, identity, f.name, semindex_display(ctx, None, f.name), f.name_span, semindex_callable_kind(f, ctx.source)))
@@ -1162,6 +1165,15 @@ semindex_binding: fn(binding: Binding, db: &SemDB, ctx: &SemWalk, modules: [JetD
     semindex_scalar("initializer", binding.init, db, ctx, modules)
 }
 
+// The lexical `#Arithmetic(mode)` operations of one function, from the
+// shared sema scan the compiler semantic index and reflection also read.
+semindex_function_arithmetic: fn(function: Func, db: &SemDB, ctx: &SemWalk) {
+    loop fact in sema_arithmetic_policy_facts(function) {
+        operation: semindex_arithmetic_operation(fact) ?? next
+        db.arithmetic.push(SemArithmetic{operation: operation, policy: semindex_arithmetic_mode(fact), module_path: ctx.module_path, operation_span: fact.operation_span, scope_span: fact.scope_span})
+    }
+}
+
 semindex_arithmetic_operation: fn(fact: ArithmeticPolicyFact) -> String? Never! {
     operation: fact.operation ?? return None
     if operation == {
@@ -1173,11 +1185,13 @@ semindex_arithmetic_operation: fn(fact: ArithmeticPolicyFact) -> String? Never! 
     }
 }
 
+// The policy is the `#Arithmetic` variant name: LSP semantic tokens
+// (JetLSP Navigation) and the `fixed-width add: .Wrapping` hover read it so.
 semindex_arithmetic_mode: fn(fact: ArithmeticPolicyFact) -> String Never! {
     if fact.mode == {
-        .Checked -> "checked"
-        .Wrapping -> "wrapping"
-        .Saturating -> "saturating"
+        .Checked -> "Checked"
+        .Wrapping -> "Wrapping"
+        .Saturating -> "Saturating"
     }
 }
 
@@ -1228,11 +1242,6 @@ semindex_expr: fn(expr: Expr, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
         }
         .Ident(name, span, _) -> db.refs.push(semindex_scoped_ref(name, span, ctx))
         .Call(call, _) -> {
-            loop argument in call.args {
-                fact: argument.flags.arithmetic_policy ?? next
-                operation: semindex_arithmetic_operation(fact) ?? next
-                db.arithmetic.push(SemArithmetic{operation: operation, policy: semindex_arithmetic_mode(fact), module_path: ctx.module_path, operation_span: fact.operation_span, scope_span: fact.scope_span})
-            }
             semindex_record_call(db, ctx, call.name, call.name_span)
             db.free_calls[semindex_site_key(ctx.module_path, call.name_span)] = true
             db.refs.push(semindex_scoped_ref(call.name, call.name_span, ctx))

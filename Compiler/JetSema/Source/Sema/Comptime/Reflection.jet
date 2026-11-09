@@ -5,6 +5,7 @@ use jet_foundation.[
     AccessConvention,
     ArithmeticOperation,
     ArithmeticPolicyFact,
+    BinOp,
     CallContractRow,
     CallablePolicy,
     CallablePolicyChain,
@@ -45,6 +46,7 @@ use jet_foundation.[
     TraitImplBlock,
     Type,
     TypeParam,
+    UnOp,
     Variant,
     VariantPayload,
     ViewProvenance,
@@ -896,7 +898,7 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
         SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: effects}})},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
-        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method.body)}},
+        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method)}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(method.markers, registry)}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: method.is_pub}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(method.name_span)},
@@ -927,11 +929,64 @@ sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact) -> TCom
     })
 }
 
-sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &[TComptimeValue]) {
+// One written fixed-width-policy candidate: a `+`, `-`, `*`, `**` or prefix
+// `-`, or a compound `+=`, `-=`, `*=`, `**=`, at its operator span.
+SemaArithmeticSite: struct {
+    operation: ArithmeticOperation
+    span: Span
+}
+
+// The arithmetic syntax of one function body: every candidate operation and
+// every `#Arithmetic(mode) { … }` block, in source order.
+SemaArithmeticScan: struct {
+    sites: [SemaArithmeticSite]
+    scopes: [ArithmeticPolicyFact]
+}
+
+sema_arithmetic_binary_operation: fn(op: BinOp) -> ArithmeticOperation? Never! {
+    if op == {
+        .Add -> Val(ArithmeticOperation.Add)
+        .Sub -> Val(ArithmeticOperation.Sub)
+        .Mul -> Val(ArithmeticOperation.Mul)
+        .Pow -> Val(ArithmeticOperation.Pow)
+        else -> None
+    }
+}
+
+// The arithmetic policy facts of one function: each candidate operation
+// written inside a lexical `#Arithmetic(mode)` scope, with that mode and the
+// innermost enclosing scope. A `#Arithmetic(mode) { … }` block scopes its
+// own span; the function's `#Arithmetic(mode)` marker scopes the whole
+// function from the marker. The facts are lexical, as the policy is: the
+// checker lowers the fixed-width ones through the mode's overflow route
+// (Expressions.jet sema_expr_arithmetic_policy_value).
+sema_arithmetic_policy_facts: fn(function: Func) -> [ArithmeticPolicyFact] {
+    scan := SemaArithmeticScan{sites: [SemaArithmeticSite]{}, scopes: [ArithmeticPolicyFact]{}}
+    sema_comptime_reflection_append_arithmetic_stmts(function.body, scan)
+    function_policy: sema_function_arithmetic_policy(function.markers)
+    function_start: if function_policy == .Val(policy) && policy.scope_span.start < function.span.start -> policy.scope_span.start else -> function.span.start
+    facts := [ArithmeticPolicyFact]{}
+    loop site in scan.sites {
+        innermost := -1
+        loop index in 0..<scan.scopes.len() {
+            block: scan.scopes[index].scope_span
+            if block.start > site.span.start || block.end < site.span.end -> next
+            if innermost >= 0 && scan.scopes[innermost].scope_span.start > block.start -> next
+            innermost = index
+        }
+        if innermost >= 0 {
+            facts.push(ArithmeticPolicyFact{mode: scan.scopes[innermost].mode, scope_span: scan.scopes[innermost].scope_span, operation_span: site.span, operation: Val(site.operation)})
+            next
+        }
+        if function_policy == .Val(policy) -> facts.push(ArithmeticPolicyFact{mode: policy.mode, scope_span: Span{start: function_start, end: function.span.end}, operation_span: site.span, operation: Val(site.operation)})
+    }
+    facts
+}
+
+sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &SemaArithmeticScan) {
     if expr == {
         .Call(call, _) -> {
             loop argument in call.args {
-                if argument.flags.arithmetic_policy == .Val(fact) && fact.operation != None -> values.push(sema_comptime_reflection_arithmetic_fact(fact))
                 sema_comptime_reflection_append_arithmetic_expr(argument.expr, values)
             }
         }
@@ -945,7 +1000,11 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &[TCompt
                 sema_comptime_reflection_append_arithmetic_expr(value, values)
             }
         }
-        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Unary(_, base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) | .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) | .Ok(base, _, _) | .Err(base, _, _) | .Try(base, _, _, _, _) | .Paren(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, values)
+        .Unary(op, base, span, _) -> {
+            if op == UnOp.Neg -> values.sites.push(SemaArithmeticSite{operation: ArithmeticOperation.Neg, span: span})
+            sema_comptime_reflection_append_arithmetic_expr(base, values)
+        }
+        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) | .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) | .Ok(base, _, _) | .Err(base, _, _) | .Try(base, _, _, _, _) | .Paren(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, values)
         .MapLit(entries, _, _) -> {
             loop entry in entries {
                 sema_comptime_reflection_append_arithmetic_expr(entry.key, values)
@@ -962,7 +1021,12 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &[TCompt
             sema_comptime_reflection_append_arithmetic_expr(end, values)
             if range == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
         }
-        .Range(start, end, _, _, _) | .Binary(_, start, end, _, _) -> {
+        .Binary(op, left, right, span, _) -> {
+            if sema_arithmetic_binary_operation(op) == .Val(operation) -> values.sites.push(SemaArithmeticSite{operation: operation, span: span})
+            sema_comptime_reflection_append_arithmetic_expr(left, values)
+            sema_comptime_reflection_append_arithmetic_expr(right, values)
+        }
+        .Range(start, end, _, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(start, values)
             sema_comptime_reflection_append_arithmetic_expr(end, values)
         }
@@ -1037,12 +1101,13 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &[TCompt
     }
 }
 
-sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &[TComptimeValue]) {
+sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &SemaArithmeticScan) {
     loop statement in body {
         if statement == {
             .Expr(value) | .BreakValue(value, _) | .Yield(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
             .Val(binding) -> sema_comptime_reflection_append_arithmetic_expr(binding.init, values)
-            .Assign(target, _, _, value) -> {
+            .Assign(target, op, op_span, value) -> {
+                if op == .Val(compound) && sema_arithmetic_binary_operation(compound) == .Val(operation) -> values.sites.push(SemaArithmeticSite{operation: operation, span: op_span})
                 if target == {
                     .Index(base, index, _, _) -> {
                         sema_comptime_reflection_append_arithmetic_expr(base, values)
@@ -1093,7 +1158,10 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &[TCo
                 sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }
             .DeferClose(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-            .ScopeMember(_, _, args, _, nested, _, _, _) -> {
+            .ScopeMember(name, _, args, _, nested, dsl, _, span) -> {
+                if name == "Arithmetic" && !dsl && args.len() == 1 && sema_function_arithmetic_mode(args[0]) == .Val(mode) {
+                    values.scopes.push(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})
+                }
                 loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument, values)
                 sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }
@@ -1102,10 +1170,8 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &[TCo
     }
 }
 
-sema_comptime_reflection_arithmetic_facts: fn(body: [Stmt]) -> [TComptimeValue] {
-    values := [TComptimeValue]{}
-    sema_comptime_reflection_append_arithmetic_stmts(body, values)
-    values
+sema_comptime_reflection_arithmetic_facts: fn(function: Func) -> [TComptimeValue] {
+    loop fact in sema_arithmetic_policy_facts(function) -> sema_comptime_reflection_arithmetic_fact(fact)
 }
 
 sema_comptime_reflection_maturity: fn(method: Func) -> TComptimeValue Never! {
