@@ -1,0 +1,52 @@
+// A write through a write parameter or a write receiver replaces the
+// caller's value in place: the old value closes once, whole, before its
+// drop, and the caller's scope end closes the new one.
+Box: struct {
+    name: String
+    p: [U64]
+}
+
+impl Box.Close {
+    close: fn(&&self) {
+        p := self.p.move()
+        sum := U64{0}
+        loop i in 0..<p.len() -> sum = sum.wrapping_add(p[i])
+        print("close {self.name} len {p.len()} sum {sum}")
+    }
+}
+
+impl Box {
+    renew: fn(&self, name: String) {
+        self = Box{name: name, p: [U64]{U64{4}, U64{4}}}
+    }
+}
+
+make: fn(name: String, v: U64) -> Box {
+    Box{name: name, p: [U64]{v, v, v}}
+}
+
+held_box: fn(name: String, v: U64) -> Box? {
+    Val(make(name, v))
+}
+
+replace: fn(x: &Box, name: String) {
+    x = make(name, U64{2})
+}
+
+replace_held: fn(x: &Box?, name: String) {
+    x = Val(make(name, U64{3}))
+}
+
+run: fn() {
+    x := make("first", U64{1})
+    replace(x, "second")
+    print("after {x.name}")
+    x.renew("third")
+    print("renewed {x.name}")
+    held := held_box("held", U64{5})
+    replace_held(held, "held2")
+    if held == {
+        .Val(got) -> print("held {got.name}")
+        .None -> print("none")
+    }
+}

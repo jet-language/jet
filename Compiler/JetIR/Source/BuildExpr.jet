@@ -510,7 +510,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             owned: ir_own(m, p, b, result)
             if binding.write && ir_kind_of(m, b, binding.slot) == .Aggregate {
                 // The caller's value is replaced in place: its old value
-                // ends here, the new one's bytes move into its storage.
+                // closes and ends here, the new one's bytes move into its
+                // storage. Nothing moves out of a write parameter (E0201),
+                // so the old value is whole.
+                if !ir_close_fresh(m, p, b, binding.slot, span) -> return
                 if ir_has_drop(m, b, binding.slot) -> ir_emit(b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
                 size: m.types[b.f.slot_type[binding.slot]].size
                 ir_emit(b.f, IROp.CopyBytes, -1, binding.slot, owned, size, b.line)
@@ -519,8 +522,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             }
             // A variable that closes its value closes the old one first,
             // while it is still whole, as its scope end does: its drop
-            // follows.
+            // follows. So does a write parameter's old value behind its
+            // address, which is whole.
             if binding.indirect < 0 -> ir_close_now(b, binding.slot)
+            if binding.indirect >= 0 && binding.write && !ir_close_fresh(m, p, b, current, span) -> return
             // The right side may have moved the old value out (`x = f(x)`,
             // `x = [T]{T{part: x}}`): only a value the variable still owns ends.
             still: ir_owned_binding(b, binding.slot)

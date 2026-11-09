@@ -1472,9 +1472,10 @@ ir_end_walked_temporary: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Bool Neve
     true
 }
 
-// A fresh value ended in place (`close(make.move()("x"))`, `consume(make("x"))`):
-// when its value closes it closes now, once, before its drop. A lent value
-// or an allocator view closes nothing. False when the build failed.
+// A fresh value ended in place (`close(make.move()("x"))`, `consume(make("x"))`),
+// or a write parameter's old value a write replaces: when its value closes
+// it closes now, once, before its drop. A lent value or an allocator view
+// closes nothing. False when the build failed.
 ir_close_fresh: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Bool Never! {
     if b.views.get(slot) != None || ir_lent(b, slot) -> return true
     glue: ir_close_glue(m, p, b, b.f.slot_type[slot], false, span)
