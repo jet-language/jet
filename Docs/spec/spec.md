@@ -1835,6 +1835,31 @@ no declared leaves remains open. The same rule applies to function effect
 rows, `#FX`, and package effect budgets. Declarations have no runtime
 representation. An unknown root is a language error, not a new effect.
 
+A package writes its own effect the same way, as a *library effect*: a
+struct or enum that implements `Effect`, with `#FX(…)` above it naming the
+kernel effects it relies on (D-EFFTYPE-USES1, D-DECL-TYPES1):
+
+```jet
+#FX(Net)
+Query: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+count: fn(sql: String) -[Query.Read]> Int { sql.len() }
+```
+
+A row that names a library effect, or one of its cases, may do what its
+list names and nothing else: a body that reaches another kernel effect is
+E0756. Inside its package the name is bare; elsewhere it is qualified by the
+name the package is imported under (`graph.Query`), and the bare name there
+is E0119. Denials keep checking what a body really reaches (D-PROP1), so
+`-[!Net]>` blocks a call into `Query`'s network work. The list above a
+library effect holds no `!` entries, and a row denies the kernel effects a
+library effect relies on rather than its name; both are E0757.
+
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.
 Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics

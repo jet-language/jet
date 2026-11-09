@@ -131,6 +131,8 @@ SemaEffectModuleInput: struct {
     // Owner.CheckedText` block implements, by function key: the trait has no
     // source row, so the checked body is a plain method (E0742 still bounds it).
     owned_trait_hooks: [String:String]{[String:String]{}}
+    // The library effect names this module may write (sema_library_effect_view).
+    library_effects: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
 }
 
 SemaEffectDispatchSite: struct {
@@ -323,6 +325,9 @@ SemaEffectNode: struct {
     // Calls that bind type parameters, and what they reach through them.
     instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}}
     instance_reaches: [SemaEffectInstanceReach]{[SemaEffectInstanceReach]{}}
+    // The library effects its declared row names, each with the kernel
+    // effects it lists (E0756).
+    library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
 }
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -1431,7 +1436,7 @@ sema_effect_publish_diagnostics: fn(all: &[Diagnostic], source_segments: [SemaSo
     }
 }
 
-sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, diagnostics: &[Diagnostic]) -> SemaEffectNode {
+sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], diagnostics: &[Diagnostic]) -> SemaEffectNode {
     node := SemaEffectNode{
         key: function.key,
         name: function.name,
@@ -1519,7 +1524,17 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 if pieces.len() > 1 -> raw = pieces[1]
             }
             effect_name: sema_effect_parse_name(raw) ?? {
-                diagnostics.push(sema_effect_unknown(raw, entry.span))
+                // A library effect admits the kernel effects it lists.
+                kernel: sema_library_effect_kernel(library, raw) ?? {
+                    diagnostics.push(sema_effect_unknown(raw, entry.span))
+                    next
+                }
+                if prohibited {
+                    diagnostics.push(sema_library_effect_denied_diagnostic(raw, kernel, entry.span))
+                    next
+                }
+                loop listed in kernel -> sema_effect_set_add(node.declared, listed)
+                node.library_rows.push(SemaLibraryEffectName{written: raw, kernel: kernel})
                 next
             }
             if !prohibited && sema_effect_root(effect_name) == "Panic" {
@@ -1629,7 +1644,9 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
             raw: entry.name
             if raw.starts_with("!") || raw.starts_with("..") -> next
             effect_name: sema_effect_parse_name(raw) ?? {
-                diagnostics.push(sema_effect_unknown(raw, entry.span))
+                // A callee with a body checks its own row where it is
+                // written, library effects included (sema_effect_node_from_source).
+                if !known_callee -> diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
             if declared_row -> sema_effect_node_add_direct(nodes, node_index, effect_name, if known_callee -> fact.span else -> entry.span)
@@ -3184,10 +3201,11 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
                 valid = false
             }
         }
-        node.has_declared_row && node.declared.len() > 0 -> {
+        node.has_declared_row && (node.declared.len() > 0 || node.library_rows.len() > 0) -> {
             over: sema_effect_uncovered(solved, node.declared)
             if over.len() > 0 {
-                diagnostics.push(sema_effect_with_instance_notes(sema_effect_bound_diagnostic(node, over), notes, over))
+                reported: if node.library_rows.len() > 0 -> sema_library_effect_reach_diagnostic(node, over) else -> sema_effect_bound_diagnostic(node, over)
+                diagnostics.push(sema_effect_with_instance_notes(reported, notes, over))
                 valid = false
             }
         }
@@ -3577,7 +3595,7 @@ sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModu
     loop function in functions {
         function_diagnostics := [Diagnostic]{}
         node_keys.push(function.key)
-        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, function_diagnostics))
+        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, module_row.library_effects, function_diagnostics))
         sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, function_diagnostics)
     }
 }

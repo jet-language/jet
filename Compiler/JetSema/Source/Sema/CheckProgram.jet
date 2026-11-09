@@ -8099,7 +8099,7 @@ sema_effect_body_block_traits: fn(graph: SemaRegistrationGraph, module_identity:
 
 // One checked module's effect inputs, read in place from its registration
 // row `graph.modules[source_index]`.
-sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, module_index: Int, type_caps: [String:SemaEffectTypeCap]) -> SemaEffectModuleInput Never! {
+sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, module_index: Int, type_caps: [String:SemaEffectTypeCap], library: [SemaLibraryEffect]) -> SemaEffectModuleInput Never! {
     source: graph.modules[source_index]
     SemaEffectModuleInput{
         module_index: module_index,
@@ -8109,6 +8109,7 @@ sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, mo
         trait_bounds: sema_effect_trait_bounds(source.program.items),
         trait_implementers: sema_effect_trait_implementers(source.program.items),
         owned_trait_hooks: sema_effect_owned_trait_hooks(source),
+        library_effects: sema_library_effect_view(library, source),
     }
 }
 
@@ -9881,9 +9882,10 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             first: part * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             last: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             type_caps: sema_effect_type_caps(graph.modules)
+            library: sema_library_effects(graph)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-                input := sema_effect_module_input(graph, source_index, module_index, type_caps)
+                input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
                 // Input positions count from the part's first input; the join shifts them.
                 sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls)
                 side.effect_inputs.push(input)

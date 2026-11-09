@@ -1,0 +1,54 @@
+// Library effects: a struct or enum that implements `Effect`, with `#FX(…)`
+// above it naming the kernel effects it relies on. Its rows check inside its
+// package (bare, cases too) and outside it (qualified by the import); a bare
+// name outside its package is unknown (E0119); a denial of a kernel effect it
+// relies on blocks its work (E0749); a row that names it may use only what it
+// lists (E0756); and neither its list nor a row may deny by name (E0757).
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR]
+}
+
+library_effect_fixture_reject: fn(file: String, code: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> {
+            if !refusal.stderr.contains(code) -> panic("{file}: refusal lost {code}")
+            return
+        }
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == code -> return
+            }
+            panic("{file}: expected checked refusal {code}")
+        }
+    }
+}
+
+library_effect_fixture_accept: fn(file: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+            }
+        }
+    }
+}
+
+#Test("library_effect_fixtures") {
+    fixture_root: "Compiler/JetSema/Tests/fixtures"
+    ui_root: "tests/ui/effects"
+    library_effect_fixture_accept("{ui_root}/library_effect_row_admits_its_list_ok.jet")
+    library_effect_fixture_accept("{fixture_root}/LibraryEffectQualified.fixture/LibraryEffectQualified.jet")
+    library_effect_fixture_reject("{fixture_root}/LibraryEffectUnqualified.fixture/LibraryEffectUnqualified.jet", "E0119")
+    library_effect_fixture_reject("{fixture_root}/LibraryEffectKernelDenied.fixture/LibraryEffectKernelDenied.jet", "E0749")
+    library_effect_fixture_reject("{ui_root}/library_effect_reach_outside_is_e0756.jet", "E0756")
+    library_effect_fixture_reject("{ui_root}/library_effect_list_denial_is_e0757.jet", "E0757")
+    library_effect_fixture_reject("{fixture_root}/LibraryEffectNameDenied.fixture/LibraryEffectNameDenied.jet", "E0757")
+    print("library effects: passed")
+}

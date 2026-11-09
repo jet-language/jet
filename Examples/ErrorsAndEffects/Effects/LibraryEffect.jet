@@ -1,0 +1,46 @@
+// A library effect written as a type: `Sql` implements `Effect`, and the
+// `#FX(…)` above it names the kernel effects it relies on, here the terminal
+// its query log prints to. A row that names `Sql`, or one of its cases, may
+// do what `Sql` lists and nothing else: a query that reached the network
+// would stop the check with E0756. Another package names it `sql.Sql`
+// through its import, and a caller that denies `IO` still can't run a query.
+#FX(IO)
+Sql: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+Table: struct {
+    name: String
+    rows: [String]
+}
+
+insert: fn(table: &Table, row: String) -[Sql.Write]> {
+    print("INSERT INTO {table.name} VALUES ('{row}')")
+    table.rows.push(row.copy())
+}
+
+select: fn(table: Table, prefix: String) -[Sql.Read]> [String] {
+    print("SELECT * FROM {table.name} WHERE name LIKE '{prefix}%'")
+    found := [String]{}
+    loop row in table.rows {
+        if row.starts_with(prefix) -> found.push(row.copy())
+    }
+    found
+}
+
+// A caller that names the whole effect may read and write.
+seed: fn(table: &Table) -[Sql]> {
+    names: [String]{"ada", "alan", "grace"}
+    loop name in names -> insert(table, name)
+}
+
+run: fn() {
+    users := Table{name: "users", rows: [String]{}}
+    seed(users)
+    matches: select(users, "a")
+    listed: matches.join(", ")
+    print("{matches.len()} rows: {listed}")
+}

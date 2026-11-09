@@ -5699,6 +5699,26 @@ TypeFieldCapExceeded: struct {
     }
 }
 
+LibraryEffectReachOutside: struct {
+    impl Diagnostic {
+        code: "E0756"
+        meaning: "A function whose row names a library effect uses a kernel effect that library effect's `#FX(…)` doesn't list"
+        what: fn(self) -> String { "A function whose row names a library effect reaches a kernel effect the `#FX(…)` above that effect doesn't list" }
+        why: fn(self) -> String { "A library effect stands for the kernel effects listed above it, so a row that names it may do those and nothing else" }
+        fix: fn(self) -> String { "Add the kernel effect to the `#FX(…)` above the library effect, add it to the function's row, or stop using it" }
+    }
+}
+
+LibraryEffectNotKernel: struct {
+    impl Diagnostic {
+        code: "E0757"
+        meaning: "The `#FX(…)` above a library effect holds a `!` entry, or a function row's `!` entry denies a library effect"
+        what: fn(self) -> String { "A library effect's `#FX(…)` list denies an effect, or a function row denies a library effect by name" }
+        why: fn(self) -> String { "The list above a library effect names the kernel effects it relies on, and a denial checks what a body really reaches, which is kernel effects" }
+        fix: fn(self) -> String { "List kernel effects above the library effect, and deny the kernel effects it relies on instead of its name" }
+    }
+}
+
 UnknownEffectLeaf: struct {
     effect_name: String
 
