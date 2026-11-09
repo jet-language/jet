@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6713,
-    "rev": 96425,
+    "rev": 96429,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -94533,8 +94533,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-09T07:44:19.525Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-09T07:50:05.790Z",
+      "updatedBy": "owner",
       "criteriaLastN": 12
     },
     {
@@ -100110,6 +100110,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "AppReview6: D-FFI-CARRIER1/SERIAL1 v6 are not engineered away (O1-O3, O13, O15: syscall census coverage and wait classification, carrier saturation, safepoint evidence, binding-lock ownership and callback safety). The v7 drafts and audit are under '$JET_SCRATCH_ROOT/lanes/AppReview6/'."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "FFI v6 redesign (BallotLead-2; scratch, not posted). CARRIER1 A: programs that link C keep C-ready pthread workers and direct calls, and pure programs keep raw carriers. The runtime adds compensation, an open-operation rule, owner tasks for affine state, a movable host pump, and prompt cancel. SERIAL1 A: bindings guard their real state with the existing Shared guards; there is no global gate. No new syntax. On a C model (gcc -O2, 3 runs) a call costs 2.0-2.7 ns, against 6.4-8.6 us for the v5 channel executor. Compensation cuts a 51 ms starvation gap to 3-4.7 ms. Jet probes on seed a0_040 pass at none/basic/full. Six named irreducible costs; open work includes callback adapters (E2104 today) and macOS/Windows pump placement. AppReview6 is reviewing it."
         },
         {
@@ -100208,7 +100213,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T07:16:12.565Z",
+      "updated": "2026-11-09T07:52:21.089Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100255,11 +100260,11 @@
         {
           "n": 1,
           "text": "None of these runtime files imports anything from C, and the runtime object asks libc for none of these symbols (symbol census receipt).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T15:47:00.501Z"
+          "evidence": "Symbol census on the b6d-built runtime (dev 0073f4fc47+): runtime-c-census.mjs over jet_runtime_jet.o and jet_runtime.pack.o, against the platform libc/libgcc/libgcc_eh archives. The only libc references left are the 6 pthread_* roots (pthread_attr_init/destroy/setstacksize, create, detach, join), which belong to #6689. Nothing else is unresolved except linker/program symbols (main, __EH_FRAME_BEGIN__, __jet_init_array_*, jet_rt_fault_report). None of this card's syscall-family symbols (__errno_location, getaddrinfo, initgroups, ...) remain. The #Import(c) census likewise finds no C import in these runtime files. Receipt: '$JET_SCRATCH_ROOT/lanes/LangLead' census, 2026-11-09.",
+          "at": "2026-11-09T07:52:17.149Z"
         },
         {
           "n": 2,
@@ -100292,7 +100297,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:59.496Z",
-      "updated": "2026-11-08T16:49:26.619Z",
+      "updated": "2026-11-09T07:52:17.149Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -101046,6 +101051,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "AppReview6 (sol-reviewer) reviewed D-APP1 v6 and the FFI CARRIER1/SERIAL1 v6 ballots. ENGINEERED-AWAY=no for all three, with 15 open items O1-O15: the movable Win32 pump claim is invalid (the queue belongs to the thread that created it); the C model loses its in-foreign mark after nested callbacks; IME reconciliation drops deletions; event merging loses modifiers and phases; plus web, accessibility, FFI lifetime and machine-ceiling evidence gaps. It wrote repaired v7 drafts and an audit under '$JET_SCRATCH_ROOT/lanes/AppReview6/'. Not buildable yet; the next step is a BallotLead redesign, then two consecutive clean fresh reviews."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "D-APP1 v6 (BallotLead-2; scratch, not posted) answers AppReview5. It merges v5 A with G's fallback: JSPI where an executed check passes, otherwise Jet continuations, chosen before any app effect. R1-R27: 20 engineered away, 4 irreducible, 3 open, and 11 rows still have open parts. ENGINEERED-AWAY=no by its own count. A fresh sol-reviewer (AppReview6) is reviewing it together with the FFI v6 ballots. Nothing is built until two fresh reviews in a row are clean."
         },
         {
@@ -101204,8 +101214,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T07:49:29.325Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-09T07:52:19.095Z",
+      "updatedBy": "Main",
       "criteriaLastN": 7
     },
     {
@@ -187155,8 +187165,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T07:44:19.525Z"
+      "status": "ratified",
+      "created": "2026-11-09T07:44:19.525Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09"
     }
   ],
   "questions": [
@@ -190249,6 +190261,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T07:52:21.089Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T07:52:19.095Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T07:52:17.149Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wl6r2h",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-09T07:50:05.790Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JET-EXPLAIN-EFFECTS1",
+      "note": "A"
+    },
     {
       "at": "2026-11-09T07:49:29.325Z",
       "by": "owner",
