@@ -16,10 +16,13 @@ test_reads_fd := I64{-1}
 
 // Startup (HostStartup.jet host_arguments_register), single-threaded and
 // before user code: arms the recorder when `envp` holds JET_TEST_READS_PATH.
+// A restart's registration (jet_rt_host_restart) stops the recorder the old
+// environment armed, so only the new environment arms one.
 rt_test_reads_arm: fn(envp: I64) {
     prefix: rt_static_text("JET_TEST_READS_PATH=")
     prefix_data: rt_text_data(prefix)
     prefix_length: rt_text_len(prefix)
+    armed := I64{-1}
     index := I64{0}
     loop {
         entry := I64{0}
@@ -36,14 +39,19 @@ rt_test_reads_arm: fn(envp: I64) {
             #Unsafe("the startup entry is a live NUL-terminated path for open") {
                 fd = os_syscall_i64(I64{2}, path, I64{525313}, I64{0}, I64{0}, I64{0}, I64{0})
             }
-            if (fd >= I64{0}) {
-                #Unsafe("startup is single-threaded and precedes user code") {
-                    test_reads_fd = fd
-                }
-            }
-            return
+            if (fd >= I64{0}) -> armed = fd
+            break
         }
         index += I64{1}
+    }
+    old: test_reads_fd
+    if (armed < I64{0} && old < I64{0}) -> return
+    #Unsafe("startup is single-threaded and precedes user code") {
+        // close(2) of the recorder's own descriptor.
+        if (old >= I64{0}) {
+            _ := os_syscall_i64(I64{3}, old, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+        test_reads_fd = armed
     }
 }
 

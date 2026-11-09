@@ -62,20 +62,38 @@ host_environment_split: fn(bytes: I64) -> I64 {
 }
 
 #Export(c) jet_rt_host_arguments: fn(argc: I64, argv: I64, envp: I64) {
-    host_arguments_register(argc, argv, envp, false)
+    host_arguments_register(argc, argv, envp, false, false)
 }
 
 // A program's main (JetBackend Image/Object.jet x64_object_main): argv and
 // envp are the startup stack's, so the environment is indexed when first read.
 #Export(c) jet_rt_host_main_arguments: fn(argc: I64, argv: I64, envp: I64) {
-    host_arguments_register(argc, argv, envp, true)
+    host_arguments_register(argc, argv, envp, true, false)
 }
 
-host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool) {
+// A process that takes over another's start (a shared-Core server's child
+// becomes the process its client was started as): argc/argv/envp are laid
+// out as a main's startup stack (envp's NULL followed by the auxiliary
+// vector), live for the rest of the process, and replace the startup
+// arguments and environment, which are captured again exactly as a main's
+// registration captures them; the read recorder the old environment armed
+// stops (TestReads.jet rt_test_reads_arm). The caller is single-threaded and
+// runs no user code meanwhile. 0 once restarted; -1, changing nothing, when
+// no main registered the startup stack. Runtime test: HostRestartTests.jet.
+#Export(c) jet_rt_host_restart: fn(argc: I64, argv: I64, envp: I64) -> I64 {
+    if (host_argc == I64{-1} || host_envp_lives != I64{1}) -> return I64{-1}
+    host_arguments_register(argc, argv, envp, true, true)
+    I64{0}
+}
+
+// `restart` (jet_rt_host_restart) replaces a registration instead of
+// refusing a different one; capture then takes the new environment anew
+// (its pending copy, or its index, replaces the old one before any read).
+host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart: Bool) {
     // libc main's argc is a nonnegative int32. Explicit hosts use that same
     // range; discard unspecified upper register bits before any other use.
     count: argc.bit_and(I64{4294967295})
-    if (host_argc != I64{-1}) {
+    if (host_argc != I64{-1} && !restart) {
         if !(host_argc == count && host_argv == argv && host_envp == envp) {
             host_arguments_refused()
         }
