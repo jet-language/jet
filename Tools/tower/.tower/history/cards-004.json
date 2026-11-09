@@ -84956,6 +84956,49 @@
       "completedAt": "2026-11-06T02:13:24.201Z",
       "questions": [],
       "retiredAt": "2026-11-09T02:31:28.938Z"
+    },
+    {
+      "id": "c0tklwsm",
+      "num": 6587,
+      "title": "A BuildError from an implicit-contract fn build loses its identity and reports E3502",
+      "body": "Found by JetpackEngine on dev 7de2280131. A BuildError returned from an implicit-contract fn build reports 'fn build returns nothing' (E3502) instead of the typed build error. JetIR BuildTypes.jet .Typed conversion calls the Prelude impl BuildError -> Err { Err(\"{self}\") }, dropping typed_identity and details, so jet_eval_build_failed_diagnostic (BuildServices.jet) returns None. Three non-known-failing cases fail on base because of it: criterion9_programmable_build_cli_human_and_json_reports_match, ..._implicit_failure_preserves_build_error_identity, ..._error_union_widens_build_error_without_losing_identity. Fix at the conversion so the typed identity survives on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A BuildError from an implicit-contract fn build reports its typed identity and details, proven by the three criterion9 build_entry cases",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d6c1a293bc (JetpackEngine): the IR .Typed conversion takes the BuildError's own Err record via BuildError.into_err and the evaluator writes it as a native JetErr (the inverse of jet_eval_ir_err_data), so typed_identity and details survive. On s1 of HEAD+patch, cases build_entry/criterion9_programmable_build* pass 6/6, including cli_human_and_json_reports_match, implicit_failure_preserves_build_error_identity and error_union_widens_build_error_without_losing_identity (all FAIL on base). Other build_entry/package_outputs/comptime rows match base; known-failing row duplicate_generated_modules_fail_before_any_file_is_written now passes and is removed.",
+          "at": "2026-11-06T02:47:34.914Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T02:33:27.042Z",
+      "updated": "2026-11-06T02:47:36.194Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T02:47:36.194Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T03:05:41.589Z"
     }
   ]
 }
