@@ -2466,6 +2466,9 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
             if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
+            if definition.trait_name == None && rows.nominals.get(definition.type_name) == .Val(nominal_index) && module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait {
+                diagnostics.push(sema_registration_impl_on_trait(definition))
+            }
             module_row.impls.push(row.copy())
             if row.target_module_identity != None {
                 nominal_index: rows.nominals.get(definition.type_name) ?? -1
@@ -2497,6 +2500,14 @@ sema_registration_unknown_impl_target: fn(definition: ImplDef) -> Diagnostic {
         }
     }
     sema_error("E0301", definition.type_span, "`impl {header}` needs a user-defined type", why, fix)
+}
+
+// `impl Shape { … }` outside a type body, where `Shape` is a trait, names no
+// type to implement it for: an in-body `impl Shape` is the enclosing type's,
+// and an outside one is written `impl Type.Shape`.
+sema_registration_impl_on_trait: fn(definition: ImplDef) -> Diagnostic {
+    name: definition.type_name
+    sema_error("E0301", definition.type_span, "`impl {name}` needs a user-defined type", "`{name}` is a trait, and an `impl` outside a type body only extends a declared struct, enum, or distinct type, so these methods would belong to no type", "write `impl Type.{name} {{ … }}` for the type that implements `{name}`, or move the block into that type's body")
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
@@ -2599,13 +2610,16 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
                 if !sema_registration_opmix_builtin_impl(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
                 next
             }
+            owner_nominal: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
+            if definition.trait_name == None && graph.modules[owner_index].nominals[owner_nominal].kind == SemaRegistrationNominalKind.Trait {
+                sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_impl_on_trait(definition))
+            }
             // The first registration already reported the methods' own
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
             row: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
             graph.modules[module_index].impls[impl_index] = row
-            nominal_index: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
-            loop method in row.methods -> graph.modules[owner_index].nominals[nominal_index].methods.push(method)
+            loop method in row.methods -> graph.modules[owner_index].nominals[owner_nominal].methods.push(method)
         }
     }
 }

@@ -623,6 +623,9 @@ impl Circle.Shape {
 }
 ```
 
+Outside a type body, `impl Shape { … }` on a trait names no type to implement
+it for and is E0301.
+
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
 and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
