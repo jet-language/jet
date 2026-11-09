@@ -199,27 +199,24 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     assert_eq(jetos_collect_names(system, "users"), [String]{"user", "zoe"})
     assert_eq(jetos_user_names(system), [String]{"anna", "user", "zoe"})
     assert_eq(jetos_collect_names(system, "missing"), [String]{})
-    assert_eq(jetos_option_rows_json(jetos_prefixed_options(system, "users.zoe.")), "{{\n  \"key\": \"home\",\n  \"value\": \"z\"\n}},{{\n  \"key\": \"home\",\n  \"value\": \"zz\"\n}}")
-    assert_eq(jetos_option_rows_json(jetos_prefixed_options(system, "missing.")), "")
+    assert_eq(pkg_json_render(jetos_option_rows_dyn(jetos_prefixed_options(system, "users.zoe."))), "[{{\"key\":\"home\",\"value\":\"z\"}},{{\"key\":\"home\",\"value\":\"zz\"}}]")
+    assert_eq(pkg_json_render(jetos_option_rows_dyn(jetos_prefixed_options(system, "missing."))), "[]")
     assert_eq(jetos_prefixed_options(system, "").len(), 8)
     exact: jetos_test_system([OptionPlan]{jetos_test_option("prefix", "v")})
-    assert_eq(jetos_option_rows_json(jetos_prefixed_options(exact, "prefix")), "{{\n  \"key\": \"\",\n  \"value\": \"v\"\n}}")
-    assert_eq(jetos_strings_json([String]{"雪", "a\"b", "line\n"}), "\"雪\",\"a\\\"b\",\"line\\n\"")
-    assert_eq(jetos_strings_json([String]{}), "")
-    controls: String.from_bytes([U8]{8, 12, 127, 194, 128, 194, 159}) ?? panic("valid control scalars")
-    // Rust JSON::quote protocol spelling, distinct from generic Core JSON.
-    assert_eq(jetos_strings_json([String]{controls}), "\"\\u0008\\u000c\\u007f\\u0080\\u009f\"")
+    assert_eq(pkg_json_render(jetos_option_rows_dyn(jetos_prefixed_options(exact, "prefix"))), "[{{\"key\":\"\",\"value\":\"v\"}}]")
 }
 
-#Test("JetOS all JSON projections retain Rust control escape spellings") {
+#Test("JetOS all JSON projections use Core JSON control escapes") {
     controls: String.from_bytes([U8]{8, 12, 127, 194, 128, 194, 159}) ?? panic("valid control scalars")
-    quoted: "\"\\u0008\\u000c\\u007f\\u0080\\u009f\""
+    // Core escapes backspace and form feed by name and leaves DEL and C1 raw.
+    unescaped: String.from_bytes([U8]{127, 194, 128, 194, 159}) ?? panic("valid DEL and C1 scalars")
+    quoted: "\"\\b\\f{unescaped}\""
     boot: JetOSBootProfile{loader: controls, kernel: controls, init: controls, initrd_modules: [String]{controls}}
     assert_eq(boot.to_json(), "{{\"loader\":{quoted},\"kernel\":{quoted},\"init\":{quoted},\"initrd_modules\":[{quoted}]}}")
     resolved: JetOSResolvedOption{key: controls, value: controls, tier: controls, priority: 1, contenders: [JetOSOptionContender]{JetOSOptionContender{value: controls, tier: controls, priority: 1, source_order: 0, winner: true}}}
     assert_eq(resolved.to_json(), "{{\"key\":{quoted},\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"contenders\":[{{\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"source_order\":0,\"winner\":true}}]}}")
-    assert_eq(jetos_option_rows_json([(key: String, value: String)]{(key: controls, value: controls)}), "{{\n  \"key\": {quoted},\n  \"value\": {quoted}\n}}")
-    assert_eq(jetos_render_user_profile_json_parts(controls, controls, controls, "", "", ""), "{{\"kind\":\"jetos.user-generation\",\"user\":{quoted},\"home\":{quoted},\"shell\":{quoted},\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+    assert_eq(pkg_json_render(jetos_option_rows_dyn([(key: String, value: String)]{(key: controls, value: controls)})), "[{{\"key\":{quoted},\"value\":{quoted}}}]")
+    assert_eq(jetos_render_user_profile_json_parts(controls, controls, controls, [String]{}, [String]{}, [(key: String, value: String)]{}), "{{\"kind\":\"jetos.user-generation\",\"user\":{quoted},\"home\":{quoted},\"shell\":{quoted},\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
 }
 
 #Test("JetOS boot profile defaults empty lists and honors explicit aliases") {
@@ -251,9 +248,9 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
         jetos_test_option("user.user.files.a\"b", "\"second\""),
         jetos_test_option("users.user.files.ignored", "ignored")
     })
-    assert_eq(jetos_render_user_profile_json(system, "user"), "{{\"kind\":\"jetos.user-generation\",\"user\":\"user\",\"home\":\"/new\",\"shell\":\"/run/current-system/sw/bin/fish\",\"packages\":[\"hello\",\"a,b\"],\"services\":[\"syncthing\"],\"files\":[{{\n  \"path\": \"a\\\"b\",\n  \"source\": \"source\\\\n\"\n}},{{\n  \"path\": \"a\\\"b\",\n  \"source\": \"second\"\n}}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+    assert_eq(jetos_render_user_profile_json(system, "user"), "{{\"kind\":\"jetos.user-generation\",\"user\":\"user\",\"home\":\"/new\",\"shell\":\"/run/current-system/sw/bin/fish\",\"packages\":[\"hello\",\"a,b\"],\"services\":[\"syncthing\"],\"files\":[{{\"path\":\"a\\\"b\",\"source\":\"source\\\\n\"}},{{\"path\":\"a\\\"b\",\"source\":\"second\"}}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
     plural: jetos_test_system([OptionPlan]{jetos_test_option("users.user.home", "/home/other"), jetos_test_option("users.user.shell", "/bin/zsh"), jetos_test_option("users.user.packages", "[.hello]"), jetos_test_option("user.user.services", "[.syncthing]")})
-    assert_eq(jetos_render_user_profile_json(plural, "user"), jetos_render_user_profile_json_parts("user", "/home/other", "/bin/zsh", "\"hello\"", "\"syncthing\"", ""))
+    assert_eq(jetos_render_user_profile_json(plural, "user"), jetos_render_user_profile_json_parts("user", "/home/other", "/bin/zsh", [String]{"hello"}, [String]{"syncthing"}, [(key: String, value: String)]{}))
     assert_eq(jetos_package_path_or_literal("packages."), "/run/current-system/sw/bin/")
     assert_eq(jetos_package_path_or_literal("/bin/sh"), "/bin/sh")
     assert_eq(jetos_package_path_or_literal(" packages.sh"), " packages.sh")

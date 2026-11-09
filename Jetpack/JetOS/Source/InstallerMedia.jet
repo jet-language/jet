@@ -8,7 +8,9 @@ jetos_render_installed_limine_conf: fn(system: SystemPlan, generation: JetOSGene
 }
 
 jetos_render_installer_limine_conf: fn(system: SystemPlan, generation: JetOSGeneration, disk: String) -> String Never! {
-    target: if disk.starts_with("/dev/") -> disk else -> "/dev/sda"
+    // A device strictly below /dev; any other disk falls back to /dev/sda.
+    below_dev: disk != "/dev" && foundation_paths.is_relative_to(foundation_paths.of(disk), foundation_paths.of("/dev"))
+    target: if below_dev -> disk else -> "/dev/sda"
     "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install {jetos_release_label(false)} — {system.name}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={system.name} jetos.generation={generation.name} jetos.disk={target}\n"
 }
 
@@ -84,7 +86,7 @@ jetos_should_preserve_staged_symlink: fn(target: String) -> Bool Never! {
 
 // Rust Path::starts_with("/nix/store"): whole components, not a byte prefix.
 jetos_is_store_path: fn(path: String) -> Bool Never! {
-    path == "/nix/store" || path.starts_with("/nix/store/")
+    foundation_paths.is_relative_to(foundation_paths.of(path), foundation_paths.of("/nix/store"))
 }
 
 // The parent is created, a destination is removed best-effort, and the

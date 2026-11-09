@@ -30,11 +30,11 @@
 
 #Test("JetOS boot facts preserve exact field order and null package") {
     boot: JetOSBootProfile{loader: "Limine", kernel: "CachyOS", init: "/sbin/init", initrd_modules: [String]{"virtio_blk", "ext4"}}
-    assert_eq(jetos_render_boot_facts_parts(boot, "null"), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
+    assert_eq(jetos_render_boot_facts_parts(boot, Dyn.Null), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
     escaped: JetOSBootProfile{loader: "\"\\\n", kernel: "雪", init: "\t", initrd_modules: [String]{"a\"", "b\\", "c\n"}}
-    assert_eq(jetos_render_boot_facts_parts(escaped, "null"), "{{\"loader\":\"\\\"\\\\\\n\",\"kernel\":\"雪\",\"init\":\"\\t\",\"initrd_modules\":[\"a\\\"\",\"b\\\\\",\"c\\n\"],\"kernel_package\":null}}")
+    assert_eq(jetos_render_boot_facts_parts(escaped, Dyn.Null), "{{\"loader\":\"\\\"\\\\\\n\",\"kernel\":\"雪\",\"init\":\"\\t\",\"initrd_modules\":[\"a\\\"\",\"b\\\\\",\"c\\n\"],\"kernel_package\":null}}")
     empty: JetOSBootProfile{loader: "", kernel: "", init: "", initrd_modules: [String]{}}
-    assert_eq(jetos_render_boot_facts_parts(empty, "null"), "{{\"loader\":\"\",\"kernel\":\"\",\"init\":\"\",\"initrd_modules\":[],\"kernel_package\":null}}")
+    assert_eq(jetos_render_boot_facts_parts(empty, Dyn.Null), "{{\"loader\":\"\",\"kernel\":\"\",\"init\":\"\",\"initrd_modules\":[],\"kernel_package\":null}}")
 }
 
 jetos_identity_test_system: fn(options: [OptionPlan]) -> SystemPlan Never! {
@@ -45,14 +45,14 @@ jetos_identity_test_system: fn(options: [OptionPlan]) -> SystemPlan Never! {
 // is not bypassed by providing a made-up boot profile to this claim.
 #Test("JetOS real SystemPlan boot defaults and option projections") {
     defaults: jetos_boot_profile(jetos_identity_test_system([OptionPlan]{}))
-    assert_eq(jetos_render_boot_facts_parts(defaults, "null"), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
+    assert_eq(jetos_render_boot_facts_parts(defaults, Dyn.Null), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
     system: jetos_identity_test_system([OptionPlan]{
         {key: "boot.loader", value: ".Grub"},
         {key: "boot.kernel", value: "\"/kernel\""},
         {key: "init.path", value: "\"/init\""},
         {key: "boot.initrd.modules", value: "[\"zfs\", \"nvme\"]"}
     })
-    assert_eq(jetos_render_boot_facts_parts(jetos_boot_profile(system), "null"), "{{\"loader\":\"Grub\",\"kernel\":\"/kernel\",\"init\":\"/init\",\"initrd_modules\":[\"zfs\",\"nvme\"],\"kernel_package\":null}}")
+    assert_eq(jetos_render_boot_facts_parts(jetos_boot_profile(system), Dyn.Null), "{{\"loader\":\"Grub\",\"kernel\":\"/kernel\",\"init\":\"/init\",\"initrd_modules\":[\"zfs\",\"nvme\"],\"kernel_package\":null}}")
 }
 
 #Test("JetOS native etc tree preserves root accounts PAM and both identity files") {
@@ -138,10 +138,10 @@ jetos_identity_test_realized: fn(verification: &StoreVerification, root: String,
     package := jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, original, Val(projection))
     assert_eq(package.original_output(), original)
     assert_eq(package.original_reference(), "original@jetpack")
-    expected: "{{\"mode\":\"source-built\",\"files\":[{{\n  \"name\": \"recipe\",\n  \"path\": \"{original}/source/recipe.jet\",\n  \"sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n}},{{\n  \"name\": \"builder\",\n  \"path\": \"{original}/source/build.sh\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"config\",\n  \"path\": \"{original}/source/config\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"patches\",\n  \"path\": \"{original}/source/patches.manifest\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"initrd_inputs\",\n  \"path\": \"{original}/source/initrd-inputs.manifest\",\n  \"sha256\": \"<missing>\"\n}}]}}"
-    assert_eq(jetos_kernel_source_json(package), expected)
+    expected: "{{\"mode\":\"source-built\",\"files\":[{{\"name\":\"recipe\",\"path\":\"{original}/source/recipe.jet\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}},{{\"name\":\"builder\",\"path\":\"{original}/source/build.sh\",\"sha256\":\"<missing>\"}},{{\"name\":\"config\",\"path\":\"{original}/source/config\",\"sha256\":\"<missing>\"}},{{\"name\":\"patches\",\"path\":\"{original}/source/patches.manifest\",\"sha256\":\"<missing>\"}},{{\"name\":\"initrd_inputs\",\"path\":\"{original}/source/initrd-inputs.manifest\",\"sha256\":\"<missing>\"}}]}}"
+    assert_eq(pkg_json_render(jetos_kernel_source_dyn(package)), expected)
     expected_package: "{{\"name\":\"cachyos-kernel\",\"reference\":\"kernel@jetpack\",\"out\":\"{package.entry.out}\",\"output_hash\":\"\",\"provenance\":\"\",\"bootstrap\":\"source-built\",\"source_recipe\":{expected}}}"
-    assert_eq(jetos_kernel_package_json(package), expected_package)
+    assert_eq(pkg_json_render(jetos_kernel_package_dyn(package)), expected_package)
     packages := [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_boot_facts(jetos_identity_test_system([OptionPlan]{}), packages), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":{expected_package}}}")
     held: packages.pop() ?? panic("one kernel package")

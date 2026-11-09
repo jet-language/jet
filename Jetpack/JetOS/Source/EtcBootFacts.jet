@@ -107,10 +107,16 @@ jetos_is_initrd_image_bytes: fn(bytes: [U8]) -> Bool Never! {
     bytes.len() >= 6 && bytes[0] == 48 && bytes[1] == 55 && bytes[2] == 48 && bytes[3] == 55 && bytes[4] == 48 && (bytes[5] == 49 || bytes[5] == 50)
 }
 
-// Rust render_boot_facts's exact ordered wire; the caller provides the actual
-// boot profile and actual kernel_package_json (or Rust's literal null).
-jetos_render_boot_facts_parts: fn(boot: JetOSBootProfile, kernel_package: String) -> String Never! {
-    "{{\"loader\":{foundation_json_quote(boot.loader)},\"kernel\":{foundation_json_quote(boot.kernel)},\"init\":{foundation_json_quote(boot.init)},\"initrd_modules\":[{jetos_strings_json(boot.initrd_modules)}],\"kernel_package\":{kernel_package}}}"
+// Rust render_boot_facts's ordered fields; the caller provides the actual
+// boot profile and the kernel package object (or null).
+jetos_render_boot_facts_parts: fn(boot: JetOSBootProfile, kernel_package: Dyn) -> String Never! {
+    pkg_json_render(Dyn.Object([
+        "loader": Dyn.Text(boot.loader.copy()),
+        "kernel": Dyn.Text(boot.kernel.copy()),
+        "init": Dyn.Text(boot.init.copy()),
+        "initrd_modules": pkg_json_texts(boot.initrd_modules),
+        "kernel_package": kernel_package.copy(),
+    ]))
 }
 
 // The position of the first CachyOS kernel package, not the latest or a
@@ -125,20 +131,27 @@ jetos_cachyos_kernel_index: fn(realized: [JetOSRealizedPackage]) -> Int? Never! 
 jetos_render_boot_facts: fn(system: SystemPlan, realized: [JetOSRealizedPackage]) -[FS]> String Never! {
     boot: jetos_boot_profile(system)
     kernel_package: if jetos_cachyos_kernel_index(realized) == {
-        .Val(at) -> jetos_kernel_package_json(realized[at])
-        .None -> "null"
+        .Val(at) -> jetos_kernel_package_dyn(realized[at])
+        .None -> Dyn.Null
     }
     jetos_render_boot_facts_parts(boot, kernel_package)
 }
 
-jetos_kernel_package_json: fn(entry: JetOSRealizedPackage) -[FS]> String Never! {
-    source: jetos_kernel_source_json(entry)
-    "{{\"name\":{foundation_json_quote(entry.entry.name)},\"reference\":{foundation_json_quote(entry.entry.reference)},\"out\":{foundation_json_quote(entry.entry.out)},\"output_hash\":{foundation_json_quote(entry.entry.envelope.output_hash)},\"provenance\":{foundation_json_quote(entry.entry.envelope.provenance)},\"bootstrap\":\"source-built\",\"source_recipe\":{source}}}"
+jetos_kernel_package_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
+    Dyn.Object([
+        "name": Dyn.Text(entry.entry.name.copy()),
+        "reference": Dyn.Text(entry.entry.reference.copy()),
+        "out": Dyn.Text(entry.entry.out.copy()),
+        "output_hash": Dyn.Text(entry.entry.envelope.output_hash.copy()),
+        "provenance": Dyn.Text(entry.entry.envelope.provenance.copy()),
+        "bootstrap": Dyn.Text("source-built"),
+        "source_recipe": jetos_kernel_source_dyn(entry),
+    ])
 }
 
 // Rust kernel_source_json: original_output() is store_realize.rs:55-57's
 // original_out, NEVER the lease projection or consumption_override.
-jetos_kernel_source_json: fn(entry: JetOSRealizedPackage) -[FS]> String Never! {
+jetos_kernel_source_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
     out: entry.original_output()
     facts: [(name: String, relative: String)]{
         (name: "recipe", relative: "source/recipe.jet"),
@@ -147,17 +160,16 @@ jetos_kernel_source_json: fn(entry: JetOSRealizedPackage) -[FS]> String Never! {
         (name: "patches", relative: "source/patches.manifest"),
         (name: "initrd_inputs", relative: "source/initrd-inputs.manifest")
     }
-    files_json := [String]{}
+    source_files := [Dyn]{}
     loop fact in facts {
         path: files.join(out, fact.relative)
         sha: if files.read_bytes(path) == {
             .Ok(bytes) -> pkg_sha256_hex(bytes)
             .Err(_) -> "<missing>"
         }
-        // Rust JSON::object_of emits its ordered fields with these newlines.
-        files_json.push("{{\n  \"name\": {foundation_json_quote(fact.name)},\n  \"path\": {foundation_json_quote(path)},\n  \"sha256\": {foundation_json_quote(sha)}\n}}")
+        source_files.push(Dyn.Object(["name": Dyn.Text(fact.name.copy()), "path": Dyn.Text(path), "sha256": Dyn.Text(sha)]))
     }
-    "{{\"mode\":\"source-built\",\"files\":[{files_json.join(",")}]}}"
+    Dyn.Object(["mode": Dyn.Text("source-built"), "files": Dyn.Array(source_files)])
 }
 
 // Rust boot_artifact: lease-projected consumption; projection refusal is None.
