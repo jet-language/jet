@@ -629,6 +629,13 @@ trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 `#Codable` requests both codec directions; `#Encode` and `#Decode` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
 
+Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
+-0.0 < +0.0 < ... < +inf < NaN): `<=>`, `.compare`, sorting, a list's `max` and
+`min`, and a derived `compare` over a Float field all use it. The operators
+`<`, `<=`, `>` and `>=` stay the IEEE comparisons, so `NaN < 1.0` is false. A
+map or a function has no order, so an explicit `#Comparable` over a type that
+holds one is E0905 at the marker.
+
 ### Encoding and validation
 
 `Encode.encode(self) -> Dyn` and

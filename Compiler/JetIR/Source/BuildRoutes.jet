@@ -1575,8 +1575,9 @@ ir_list_value_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, s
     Val(found)
 }
 
-// Float max/min in an Option box: NaNs order after every number; ties keep
-// the last maximum and the first minimum.
+// Float max/min in an Option box, under IEEE 754 totalOrder (-NaN first,
+// -0.0 before +0.0, NaN last); ties keep the last maximum and the first
+// minimum.
 ir_list_float_extremum: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Int, result_row: Int, maximum: Bool) -> Int Never! {
     result: ir_fresh_temp(m, b, result_row)
     ir_option_none(m, b, result)
@@ -1599,16 +1600,11 @@ ir_list_float_extremum: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int,
     stride: ir_list_stride(m, element)
     address: ir_element_address(m, b, data, at, stride)
     item: ir_load_at(m, b, address, 0, element)
-    // best orders above item: best > item, or best is NaN and item a number.
-    greater: ir_bool_op(m, b, IROp.Gt, best, item)
+    // best orders above item under IEEE 754 totalOrder (ir_float_total_value).
+    best_key: ir_float_total_value(m, p, b, best, Span{start: 0, end: 0})
+    item_key: ir_float_total_value(m, p, b, item, Span{start: 0, end: 0})
+    greater: ir_bool_op(m, b, IROp.Gt, best_key, item_key)
     ir_emit(b.f, IROp.Copy, ordered, greater, -1, -1, b.line)
-    best_nan: ir_bool_op(m, b, IROp.Ne, best, best)
-    ir_open_if(b.f, best_nan, b.line)
-    item_number: ir_bool_op(m, b, IROp.Eq, item, item)
-    ir_open_if(b.f, item_number, b.line)
-    ir_emit(b.f, IROp.Const, ordered, 1, -1, -1, b.line)
-    ir_end(b.f, b.line)
-    ir_end(b.f, b.line)
     ir_open_if(b.f, ordered, b.line)
     if !maximum -> ir_emit(b.f, IROp.Copy, best, item, -1, -1, b.line)
     ir_else(b.f, b.line)

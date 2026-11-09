@@ -2347,13 +2347,14 @@ ir_time_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, sit
 }
 
 // `left <=> right`: the Less/Equal/Greater variant of Ordering. Exact Ints
-// and fixed-width words compare as their `<` and `==` do; Strings by the sign
-// of jet_rt_string_compare; any other ordered value (a runtime handle such as
-// Decimal, a tuple, a Comparable record) by the sign ir_order_sign gives.
+// and fixed-width words compare as their `<` and `==` do; Floats by IEEE 754
+// totalOrder; Strings by the sign of jet_rt_string_compare; any other ordered
+// value (a runtime handle such as Decimal, a tuple, a Comparable record) by
+// the sign ir_order_sign gives.
 ir_three_way: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     kind: ir_kind_of(m, b, left)
     left_ty: m.types[b.f.slot_type[left]].ty
-    if kind == .Float || kind == .Float32 || kind == .Unit -> return ir_fail_slot(b, span, "operator <=> on {ir_type_name(left_ty)}")
+    if kind == .Unit -> return ir_fail_slot(b, span, "operator <=> on {ir_type_name(left_ty)}")
     ordering: ir_type_def(p, "Ordering") ?? return ir_fail_slot(b, span, "`<=>` result Ordering has no definition")
     result_row: ir_value_type(m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(b, span, "layout of Ordering")
     less: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(b, span, "Ordering has no Less variant")
@@ -2365,6 +2366,9 @@ ir_three_way: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: In
         word: ir_word_row(m)
         a = ir_runtime(m, b, "jet_rt_string_compare", [Int]{left, right}, word)
         c = ir_word_const(m, b, 0)
+    } else if kind == .Float || kind == .Float32 {
+        a = ir_float_total_value(m, p, b, left, span)
+        c = ir_float_total_value(m, p, b, right, span)
     } else if kind != .Int && kind != .Word && kind != .Char {
         a = ir_order_sign(m, p, b, left, right, span)
         if ir_failed(b) -> return -1
@@ -2409,8 +2413,14 @@ ir_order_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int
     if kind == .Unit -> return
     ty: ir_untag(m.types[row].ty)
     if left < 0 || right < 0 -> return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
+    // Floats order by IEEE 754 totalOrder (ir_float_total_value).
+    if kind == .Float || kind == .Float32 {
+        low: ir_float_total_value(m, p, b, left, span)
+        high: ir_float_total_value(m, p, b, right, span)
+        return ir_order_step(m, b, low, high, sign, decided)
+    }
     // An inline Option is a Word of its own order (the Option arm).
-    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .String {
         a := left
         c := right
         if kind == .String {

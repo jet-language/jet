@@ -1,0 +1,44 @@
+// Float is Comparable by IEEE 754 totalOrder: `<=>`, `.compare`, sorting,
+// `max`/`min` over a list and a derived `#Comparable` all put -0.0 before
+// +0.0 and NaN above +inf. The plain operators `<`, `>`, `<=` and `>=` stay
+// the IEEE comparisons, so `NaN < 1.0` is false.
+#Comparable
+Reading: struct {
+    value: Float
+    label: String
+}
+
+#Comparable Ratio: distinct Float
+
+big: fn<T: Comparable>(a: T, b: T) -> T {
+    if a.compare(b) == .Less -> return b
+    a
+}
+
+run: fn() {
+    nan: Float.NAN
+    inf: Float.INFINITY
+    xs := [Float]{3.0, nan, -0.0, 0.0, -inf, 1.0}
+    xs.sort()
+    print(xs[0] == -inf)
+    print((xs[1] <=> xs[2]) == .Less)
+    print(xs[3] == 1.0 && xs[4] == 3.0)
+    print(xs[5].is_nan())
+    print(xs.max().is_nan())
+    print(xs.min() == -inf)
+    print(nan < 1.0)
+    print(nan.compare(1.0) == .Greater)
+    print((1.5 <=> 2.5) == .Less)
+    print((-0.0 <=> 0.0) == .Less)
+    print(-0.0 < 0.0)
+    print(big(1.5, 2.5))
+    print(big(nan, 1.0).is_nan())
+    low: Reading{value: 1.0, label: "low"}
+    high: Reading{value: nan, label: "high"}
+    print((low <=> high) == .Less)
+    print(low.compare(high) == .Less)
+    print((Ratio{0.5} <=> Ratio{nan}) == .Less)
+    readings := [Reading]{high, low}
+    readings.sort()
+    print(readings[0].label)
+}

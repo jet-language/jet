@@ -277,7 +277,6 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                 why := "`{name}` would need to implement `{bound}` before it can be used here"
                 fix := "write `impl {name}.{bound} {{ … }}` with every required method"
                 if bound == "Comparable" -> fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
-                if bound == "Comparable" && name == "Float" -> fix = "use explicit Float comparisons or sort by a total key that handles NaN"
                 if bound == "Numeric" -> fix = "write `#Numeric` on a distinct number type, or `impl {name}.Numeric {{ … }}` with `zero` and `one` on a struct that implements {owned_trait_requires_listed(bound)}"
                 loop caller_parameter in context.lexical_generic_params {
                     if caller_parameter.name == name {
