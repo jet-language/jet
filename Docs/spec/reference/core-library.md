@@ -4186,18 +4186,50 @@ IME polling yields an optional event after host failure propagation.
 
 #### Native windows
 
-These are the values a native window trades with its program. Core speaks the
-display server's wire protocol itself: Wayland, picked from `$WAYLAND_DISPLAY`,
-in the private part [`Core/Ui/Wayland.jet`](../../../Core/Ui/Wayland.jet). It
-uses no C library.
+`open` shows a native window and `headless` gives the same `Window`, `Frame`
+and `UIEvent` types with no device, for tests. The program draws its own RGBA
+pixels; Core speaks the display server's wire protocol itself (Wayland now,
+picked from `$WAYLAND_DISPLAY`; [`Core/Ui/Wayland.jet`](../../../Core/Ui/Wayland.jet)),
+with no C library, so programs need no `#Unsafe` and no native dependency.
 
-| Type | Description |
-|---|---|
-| `UIEvent` | Input a frame carries: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)`, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)`, `Resize(width:, height:)`, `Focus(Bool)`, `Close`. Positions are window pixels from the top-left. |
-| `UIPointerButton` | `Left`, `Right`, `Middle`, or `Other(Int)` with the evdev button code. |
-| `UIError` | `.NoDisplay` when the environment names no display server, `.Connect` / `.Protocol` / `.Unsupported` when it fails, `.Size` for a size or pixel buffer out of range. |
-| `UIRect` | A damage rectangle of window pixels: `x`, `y` from the top-left, `width`, `height`. |
-| `FrameStats` | Presentation timing: `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
+```jet
+use ui: core.ui
+
+run: fn() {
+    window: ui.open(width: 640, height: 400, title: "demo") ?? return
+    pixels := [U8]{}
+    loop _ in 0..<(640 * 400 * 4) { pixels.push(U8{255}) }
+    loop frame in window.frames() {
+        loop event in frame.events() {
+            if event == .KeyDown(.Escape) -> return
+        }
+        frame.present(pixels) ?? return
+    }
+}
+```
+
+The display paces the frames, exactly one in flight: a frame is due when the
+compositor's frame callback arrives, so a window presents on every vblank
+while the program keeps presenting and sleeps, with no timer, while it does
+not, until input arrives. `frame.time` is the vblank the frame is predicted to
+reach the screen at (from `wp_presentation` feedback), in seconds since the
+first frame; compute motion from it, never per frame, and a late frame shows
+the right position instead of slowing down. A frame starts as late as its
+measured draw time allows, so its input is as fresh as possible. Three pooled
+buffers rotate as the compositor releases them, and `present_damage` copies
+and damages only the rectangles that changed.
+
+| Signature | Result | Description |
+|---|---|---|
+| `open(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError!` | window | Open a window of 1 to 16384 pixels a side on the environment's display server: `.NoDisplay` when none is named, `.Connect` / `.Protocol` / `.Unsupported` when it fails. |
+| `headless(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!` | window | A window with no device: frame `i` carries `script[i]`, one more carries `.Close`, frames are 1/60 s apart, and each present records a checksum. |
+| `Window.frames() -> Frames` | frames | The display-paced frames; the stream ends after the frame that carries `.Close`. |
+| `Window.width()` / `.height()` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The current size, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
+| `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
+| `Frame.index` / `.width` / `.height` / `.time` / `.delta` | fields | The frame's number, the size to draw at, and its predicted presentation time and the step since the previous frame's, in seconds. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)`, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)`, `Resize(width:, height:)`, `Focus(Bool)`, `Close`. |
+| `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
+| `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles changed since the previous frame. |
 
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,

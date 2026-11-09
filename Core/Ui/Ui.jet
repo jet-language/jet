@@ -12,6 +12,8 @@ use {
     core: core
     tui_text: core.tui
     core.term.[Key]
+    wayland: __core_ui_wayland
+    internal.[checksum]
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -277,9 +279,23 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
 
 // ---- windows ----------------------------------------------------------
 //
-// The values a native window trades with its program: the events a frame
-// carries, the window layer's errors, damage rectangles and presentation
-// timing. The display server comes from the environment: $WAYLAND_DISPLAY.
+// `open` shows a native window; `headless` gives the same Window, Frame
+// and event types with no device. A program draws its own RGBA pixels:
+//
+//     window: ui.open(width: 640, height: 400, title: "demo")
+//     loop frame in window.frames() {
+//         loop event in frame.events() { … }
+//         frame.present(pixels)
+//     }
+//
+// The display paces the frames, one per refresh while the program
+// presents; move things as a function of `frame.time`, never per frame.
+//
+// The display server comes from the environment: $WAYLAND_DISPLAY.
+
+SIDE_MAX: 16384
+// A headless window's frames are one 60 Hz refresh apart.
+HEADLESS_REFRESH_NS: 16666667
 
 #Error
 UIError: enum {
@@ -326,6 +342,51 @@ UIRect: struct {
     height: Int
 }
 
+WindowState: struct {
+    priv width: Int
+    priv height: Int
+    priv frames: Int
+    priv closed: Bool
+    priv failure: UIError?
+    priv link: Shared<wayland.Connection>?
+    priv script: [[UIEvent]]
+    priv checksums: [Int]
+}
+
+// A window and its frames. Copies share the one window, which closes when
+// the last copy is dropped.
+Window: struct {
+    priv state: Shared<WindowState>
+}
+
+// Opens a `width` x `height` window titled `title` on the environment's
+// display server.
+open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    if !wayland.available() -> return Err(UIError.NoDisplay)
+    link: wayland.connect(width, height, title)
+    state: WindowState{
+        width: link.width(), height: link.height(), frames: 0, closed: false, failure: None,
+        link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{},
+    }
+    Ok(Window{state: shared state})
+}
+
+// A window with no device: frame `i` carries `script[i]`, one more frame
+// carries `.Close`, and each `present` records a checksum of its pixels.
+headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    state: WindowState{
+        width: width, height: height, frames: 0, closed: false, failure: None,
+        link: None, script: script, checksums: [Int]{},
+    }
+    Ok(Window{state: shared state})
+}
+
 // How evenly frames reached the screen and how fast input showed.
 // `presented` frames were shown; `missed` counts refreshes frames were
 // late by against the vblank they aimed at; `discarded` frames were never
@@ -346,6 +407,151 @@ FrameStats: struct {
     // Present-to-present intervals by refreshes spanned: [0] one
     // refresh (every vblank), [1] two, [2] three, [3] four or more.
     spans: [Int]
+}
+
+impl Window {
+    // The window's frames, paced by the display alone: one per refresh
+    // while the program presents, none while it is idle until input
+    // arrives.
+    frames: fn(self) -> Frames { Frames{state: self.state.copy()} }
+
+    width: fn(self) -> Int {
+        guard: self.state.guard_read()
+        guard.value.width
+    }
+
+    height: fn(self) -> Int {
+        guard: self.state.guard_read()
+        guard.value.height
+    }
+
+    // Why the display server ended the frames, if it failed.
+    failure: fn(self) -> UIError? {
+        guard: self.state.guard_read()
+        guard.value.failure
+    }
+
+    // The FNV-1a checksum of each frame a headless window presented.
+    checksums: fn(self) -> [Int] {
+        guard: self.state.guard_read()
+        guard.value.checksums.copy()
+    }
+
+    // Presentation timing so far; zeros for a headless window or a
+    // display server without presentation feedback.
+    frame_stats: fn(self) -> FrameStats {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection: link.guard_read()
+            return connection.value.frame_stats()
+        }
+        FrameStats{presented: 0, missed: 0, discarded: 0, refresh_ns: 0, median_ns: 0, p99_ns: 0, input_samples: 0, input_median_ns: 0, input_p99_ns: 0, spans: [Int]{0, 0, 0, 0}}
+    }
+}
+
+Frames: struct {
+    priv state: Shared<WindowState>
+}
+
+FrameCursor: struct {
+    priv state: Shared<WindowState>
+}
+
+impl Frames.Iterable {
+    Iter: FrameCursor
+    iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
+}
+
+impl FrameCursor.Iterator {
+    Item: Frame
+    // The next frame, once it is due; none after the frame that carried
+    // `.Close`.
+    next: fn(&self) -[Env, Net, Time]> Frame? {
+        guard := self.state.guard_edit()
+        if guard.value.closed -> return None
+        events := [UIEvent]{}
+        index: guard.value.frames
+        time_ns := 0
+        delta_ns := 0
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            events = wayland.next_frame(connection.value)
+            guard.value.width = connection.value.width()
+            guard.value.height = connection.value.height()
+            time_ns = connection.value.time_ns()
+            delta_ns = connection.value.delta_ns()
+            if connection.value.failure() == .Val(failure) -> guard.value.failure = Val(failure)
+        } else {
+            time_ns = index * HEADLESS_REFRESH_NS
+            delta_ns = if index == 0 -> 0 else -> HEADLESS_REFRESH_NS
+            if index < guard.value.script.len() -> events = guard.value.script[index].copy() else -> events.push(UIEvent.Close)
+            loop event in events {
+                if event == .Resize(width, height) {
+                    guard.value.width = width
+                    guard.value.height = height
+                }
+            }
+        }
+        loop event in events {
+            if event == .Close -> guard.value.closed = true
+        }
+        frame: Frame{
+            state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height,
+            time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
+        }
+        guard.value.frames += 1
+        Val(frame)
+    }
+}
+
+// One frame: its number from 0, the window size to draw at, when it is
+// meant to be seen and the events since the previous frame. `time` is
+// the vblank this frame is predicted to reach the screen at, in seconds
+// since the first frame's, and `delta` the seconds since the previous
+// frame's; both advance in whole refresh intervals, so motion computed
+// from `time` keeps its speed even when a frame is late.
+Frame: struct {
+    priv state: Shared<WindowState>
+    index: Int
+    width: Int
+    height: Int
+    time: Float
+    delta: Float
+    priv pending: [UIEvent]
+}
+
+impl Frame {
+    events: fn(self) -> [UIEvent] { self.pending.copy() }
+
+    // Shows `pixels`: `height` rows of `width` RGBA pixels, 4 bytes each.
+    present: fn(self, pixels: [U8]) UIError! -[Env, Net, Time]> {
+        self.present_damage(pixels, [UIRect]{UIRect{x: 0, y: 0, width: self.width, height: self.height}})
+    }
+
+    // Shows `pixels` where only the `damage` rectangles changed since the
+    // previous frame; only they are copied to the display.
+    present_damage: fn(self, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+        if pixels.len() != self.width * self.height * 4 {
+            return Err(UIError.Size("frame {self.index} needs {self.width * self.height * 4} bytes for {self.width}x{self.height} RGBA, got {pixels.len()}"))
+        }
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.present(connection.value, pixels, damage)
+        }
+        guard.value.checksums.push(checksum(pixels))
+        Ok()
+    }
+}
+
+// How a headless frame is recorded: not part of the ui surface.
+priv internal: module {
+    // FNV-1a, 32-bit.
+    checksum: fn(bytes: [U8]) -> Int {
+        hash := 2166136261
+        loop b in bytes -> hash = (hash.bit_xor(Int.from_u8(b)) * 16777619).bit_and(4294967295)
+        hash
+    }
 }
 
 #Test("UI aria role constructors") {

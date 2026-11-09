@@ -6742,49 +6742,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 160,
+      "line": 162,
       "column": 5,
       "reason": "Core UI text input: the provider sets the explicitly requested IME slot"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 197,
+      "line": 199,
       "column": 5,
       "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 202,
+      "line": 204,
       "column": 5,
       "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 207,
+      "line": 209,
       "column": 5,
       "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 218,
+      "line": 220,
       "column": 5,
       "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 235,
+      "line": 237,
       "column": 5,
       "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 262,
+      "line": 264,
       "column": 5,
       "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
     },
@@ -11142,13 +11142,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Core | Core/Tui/Tui.jet | 656:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
-| Core | Core/Ui/Ui.jet | 160:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
-| Core | Core/Ui/Ui.jet | 197:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 202:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 207:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 218:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/Ui/Ui.jet | 235:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/Ui/Ui.jet | 262:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
+| Core | Core/Ui/Ui.jet | 162:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
+| Core | Core/Ui/Ui.jet | 199:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 204:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 209:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 220:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| Core | Core/Ui/Ui.jet | 237:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| Core | Core/Ui/Ui.jet | 264:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
 | Core | Core/Vendor/Sqlite3/Fixture/run.jet | 19:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |

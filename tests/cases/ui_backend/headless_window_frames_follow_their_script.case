@@ -1,0 +1,16 @@
+# #6701: a headless window's frames carry their script, then `.Close`, then
+# end; each present records the FNV-1a checksum of its pixels, and pixels of
+# the wrong size are a typed Size error that records nothing.
+fixture: headless_window_frames_follow_their_script.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "frame 0 2x1\nkey a\nframe 0 needs 8 bytes for 2x1 RGBA, got 3\nframe 1 2x1\nfocus true\nframe 1 needs 8 bytes for 2x1 RGBA, got 3\nframe 2 2x1\nclose\nframe 2 needs 8 bytes for 2x1 RGBA, got 3\n[2262743661, 2262743661, 2977187269, 2977187269, 1176470573, 1176470573]\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "frame 0 2x1\nkey a\nframe 0 needs 8 bytes for 2x1 RGBA, got 3\nframe 1 2x1\nfocus true\nframe 1 needs 8 bytes for 2x1 RGBA, got 3\nframe 2 2x1\nclose\nframe 2 needs 8 bytes for 2x1 RGBA, got 3\n[2262743661, 2262743661, 2977187269, 2977187269, 1176470573, 1176470573]\n"
+stderr: empty

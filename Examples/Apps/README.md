@@ -45,6 +45,7 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 - [UITUIReactive](UI/UITUIReactive.jet)
 - [UITypedStyle](UI/UITypedStyle.jet)
 - [UIViewTree](UI/UIViewTree.jet)
+- [Window](UI/Window.jet) — A native window drawn by Jet alone, paced by the display; headless without one.
 
 ## Web
 
