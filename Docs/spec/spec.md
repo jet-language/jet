@@ -1952,6 +1952,12 @@ call, or reports E0712. It is a ceiling, not a grant: the operations still
 happen and contribute to the enclosing function's inferred row. `#FX` is a
 lexical block and disappears in generated code.
 
+`jet explain effects <file>:<line>` prints every cap in force at a site,
+nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
+module caps, the package `authority` rows, and `run`, each with the
+`file:line` that writes it, then what the site reaches and the call chain to
+each effect. `--caps` lists every module cap under a path.
+
 ### Higher-order and trait effects
 
 A higher-order function's row includes its own body and the effects of function
