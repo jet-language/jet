@@ -1,0 +1,418 @@
+// DELETE: a port of SQLite 3.45.0 delete.c, the code generator for DELETE
+// statements (sqlite3DeleteFrom with sqlite3GenerateRowDelete and
+// sqlite3GenerateRowIndexDelete), and the helpers INSERT and UPDATE share
+// with it: sqlite3SrcListLookup, sqlite3IsReadOnly, sqlite3CodeChangeCount,
+// and insert.c's sqlite3OpenTableAndIndices and sqlite3AutoincrementEnd,
+// which DELETE calls and so live in this lower part. sqlite3GenerateIndexKey
+// and sqlite3ResolvePartIdxLabel are Where's; sqlite3OpenTable is Expr's.
+//
+// This build of the engine has no triggers, foreign-key enforcement,
+// RETURNING or writable virtual tables, and no
+// SQLITE_ENABLE_UPDATE_DELETE_LIMIT or SQLITE_ENABLE_PREUPDATE_HOOK: the
+// trigger list is always empty, sqlite3FkRequired is always false, so a
+// view (which has no INSTEAD OF triggers to fire) is never modified and
+// sqlite3MaterializeView is not needed, and every virtual table is
+// read-only (as C's are when their module has no xUpdate). The table lock
+// sqlite3TableLock takes is a no-op without shared cache; VdbeComment and
+// VdbeCoverage code nothing.
+use {
+    base: __core_db_base
+    ast: __core_db_ast
+    util: __core_db_util
+    conn: __core_db_conn
+    btree: __core_db_btree
+    opc: __core_db_opcodes
+    aux: __core_db_vdbeaux
+    cg: __core_db_codegen
+    cat: __core_db_catalog
+    rs: __core_db_resolve
+    ex: __core_db_expr
+    we: __core_db_whereexpr
+    wh: __core_db_where
+    sel: __core_db_select
+}
+
+// sqlite3SrcListLookup: the table the single FROM item of `src` names, or
+// -1. The item takes a reference on it; an INDEXED BY that names no index
+// of it is an error.
+src_list_lookup: fn(p: &cg.Parse, a: &ast.AST, src: Int) -[DB]> Int Never! {
+    si: ast.src_item(a, src, 0)
+    t := cat.locate_table_item(p, a, 0, si)
+    if a.items[si].tab >= 0 -> ast.tab_unref(a, a.items[si].tab)
+    a.items[si].tab = t
+    a.items[si].not_cte = true
+    if t >= 0 {
+        ast.tab_ref(a, t)
+        if a.items[si].is_indexed_by && sel.indexed_by_lookup(p, a, si) != base.OK -> t = -1
+    }
+    t
+}
+
+// sqlite3CodeChangeCount: report the number of rows a DELETE, INSERT or
+// UPDATE changed, which register reg counts, as column `name`.
+code_change_count: fn(p: &cg.Parse, reg: Int, name: String) Never! {
+    _: cg.op0(p, opc.OP_FK_CHECK)
+    _: cg.op2(p, opc.OP_RESULT_ROW, reg, 1)
+    cg.v_set_num_cols(p, 1)
+    cg.v_set_col_name(p, 0, conn.COLNAME_NAME, name.bytes())
+}
+
+// sqlite3ReadOnlyShadowTables (build.c): whether shadow tables are
+// read-only, as they are in defensive mode for a top-level statement.
+read_only_shadow_tables: fn(db: conn.Conn) -> Bool Never! {
+    db.flags.bit_and(btree.SQLITE_DEFENSIVE) != 0 && db.n_vdbe_exec == 0 && !db.vtab_in_sync
+}
+
+// tabIsReadOnly: a virtual table (this build has no module with xUpdate),
+// sqlite_schema outside a nested parse without writable_schema, or a
+// shadow table in defensive mode.
+tab_is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
+    if ex.is_virtual(p.db, t) -> return true
+    flags: p.db.tables[t].tab_flags
+    if flags.bit_and(ast.TF_READONLY.bit_or(ast.TF_SHADOW)) == 0 -> return false
+    if flags.bit_and(ast.TF_READONLY) != 0 -> return !cat.conn_writable_schema(p.db) && a.ctx.nested == 0
+    read_only_shadow_tables(p.db)
+}
+
+// sqlite3IsReadOnly: an error, and true, when table t may not be modified.
+// With no triggers a view never may be.
+is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
+    name: ast.text(p.db.tables[t].name)
+    if tab_is_read_only(p, a, t) {
+        ast.error(a, "table {name} may not be modified")
+        return true
+    }
+    if p.db.tables[t].tab_type == conn.TABTYP_VIEW {
+        ast.error(a, "cannot modify {name} because it is a view")
+        return true
+    }
+    false
+}
+
+// sqlite3OpenTableAndIndices (insert.c): open write (or read) cursors on
+// table t and its indices, numbered from i_base (p.f.n_tab when negative):
+// the table's cursor first, then one per index in Table.pIndex order. A
+// WITHOUT ROWID table's data cursor is its PRIMARY KEY index's. to_open,
+// when given, says which of them (index 0 the table, i+1 index i) to open.
+// n is the number of indices; a virtual table opens nothing and its
+// cursors are -999.
+open_table_and_indices: fn(p: &cg.Parse, a: &ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> (n: Int, data_cur: Int, idx_cur: Int) Never! {
+    if ex.is_virtual(p.db, t) -> return (n: 0, data_cur: -999, idx_cur: -999)
+    i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
+    i_base := if i_base0 < 0 -> p.f.n_tab else -> i_base0
+    data_cur := i_base
+    i_base += 1
+    has_rowid: ex.has_rowid(p.db, t)
+    open_tab := true
+    if to_open == .Val(o) -> open_tab = o[0]
+    if has_rowid && open_tab -> ex.open_table(p, a, data_cur, i_db, t, op)
+    idx_cur: i_base
+    p5 := p5_0
+    i := 0
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        cur: i_base
+        i_base += 1
+        if p.db.indexes[ix].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
+            data_cur = cur
+            p5 = 0
+        }
+        want := true
+        if to_open == .Val(o) -> want = o[i + 1]
+        if want {
+            _: cg.op3(p, op, cur, p.db.indexes[ix].tnum, i_db)
+            ex.set_p4_key_info(p, a, ix)
+            cg.v_change_p5(p, p5)
+        }
+        i += 1
+        ix = p.db.indexes[ix].next
+    }
+    if i_base > p.f.n_tab -> p.f.n_tab = i_base
+    (n: i, data_cur: data_cur, idx_cur: idx_cur)
+}
+
+op_list_item: fn(opcode: Int, p1: Int, p2: Int, p3: Int) -> aux.VdbeOpList Never! {
+    aux.VdbeOpList{opcode: opcode, p1: p1, p2: p2, p3: p3}
+}
+
+// sqlite3AutoincrementEnd (insert.c): write each AUTOINCREMENT table's
+// largest rowid back to sqlite_sequence when it grew. Coded at the end of
+// a top-level INSERT, UPDATE or DELETE.
+autoincrement_end: fn(p: &cg.Parse, a: &ast.AST) Never! {
+    x := p.f.ainc
+    loop x >= 0 {
+        info: p.aincs[x]
+        mem_id: info.reg_ctr
+        i_rec: cg.get_temp_reg(p)
+        addr_le: cg.v_current_addr(p) + 7
+        _: cg.op3(p, opc.OP_LE, mem_id + 2, addr_le, mem_id)
+        seq: p.db.schemas[p.db.dbs[info.i_db].schema].seq_tab
+        ex.open_table(p, a, 0, info.i_db, seq, opc.OP_OPEN_WRITE)
+        first: cg.v_op_list(p, [aux.VdbeOpList]{
+            op_list_item(opc.OP_NOT_NULL, mem_id + 1, 2, 0),
+            op_list_item(opc.OP_NEW_ROWID, 0, mem_id + 1, 0),
+            op_list_item(opc.OP_MAKE_RECORD, mem_id - 1, 2, i_rec),
+            op_list_item(opc.OP_INSERT, 0, i_rec, mem_id + 1),
+            op_list_item(opc.OP_CLOSE, 0, 0, 0)
+        })
+        if first < 0 -> break
+        p.f.v.ops[first + 3].p5 = conn.OPFLAG_APPEND
+        cg.release_temp_reg(p, i_rec)
+        x = info.next
+    }
+}
+
+// sqlite3GenerateRowIndexDelete: delete the index entries of the row the
+// data cursor is on, from the indices at cursors i_idx_cur+i; only those
+// with a nonzero a_reg_idx[i] when a_reg_idx is given, and never the
+// PRIMARY KEY index of a WITHOUT ROWID table or cursor i_idx_no_seek.
+generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) Never! -[DB]> {
+    pk: if ex.has_rowid(p.db, t) -> -1 else -> cat.primary_key_index(p.db, t)
+    r1 := -1
+    prior := -1
+    i := 0
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        cur: ix
+        k: i
+        ix = p.db.indexes[cur].next
+        i += 1
+        if a_reg_idx == .Val(regs) && regs[k] == 0 -> next
+        if cur == pk || i_idx_cur + k == i_idx_no_seek -> next
+        key: wh.generate_index_key(p, a, cur, i_data_cur, 0, true, true, prior, r1)
+        r1 = key.reg_base
+        n: if p.db.indexes[cur].uniq_not_null -> p.db.indexes[cur].n_key_col else -> p.db.indexes[cur].n_column
+        _: cg.op3(p, opc.OP_IDX_DELETE, i_idx_cur + k, r1, n)
+        cg.v_change_p5(p, 1)
+        wh.resolve_part_idx_label(p, key.label)
+        prior = cur
+    }
+}
+
+// sqlite3GenerateRowDelete: delete one row of table t and its index
+// entries. The row's key is the n_pk registers from i_pk (one record
+// register when n_pk is 0); with e_mode ONEPASS_OFF the data cursor is
+// first moved to it, else it is already there. count makes the OP_Delete
+// count the change. C's onconf only matters to triggers, which this build
+// has none of; with no triggers or foreign keys there are no OLD.*
+// registers to fill.
+generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, i_pk: Int, n_pk: Int, count: Bool, e_mode: Int, i_idx_no_seek: Int) Never! -[DB]> {
+    i_label: cg.v_make_label(p)
+    op_seek: if ex.has_rowid(p.db, t) -> opc.OP_NOT_EXISTS else -> opc.OP_NOT_FOUND
+    if e_mode == we.ONEPASS_OFF -> _: cg.op4_int(p, op_seek, i_data_cur, i_label, i_pk, n_pk)
+    if p.db.tables[t].tab_type != conn.TABTYP_VIEW {
+        generate_row_index_delete(p, a, t, i_data_cur, i_idx_cur, None, i_idx_no_seek)
+        _: cg.op2(p, opc.OP_DELETE, i_data_cur, if count -> conn.OPFLAG_NCHANGE else -> 0)
+        if a.ctx.nested == 0 || util.str_icmp(p.db.tables[t].name, "sqlite_stat1".bytes()) == 0 {
+            cg.v_append_p4(p, conn.P4.Table(t))
+        }
+        if e_mode != we.ONEPASS_OFF -> cg.v_change_p5(p, conn.OPFLAG_AUXDELETE)
+        if i_idx_no_seek >= 0 && i_idx_no_seek != i_data_cur -> _: cg.op1(p, opc.OP_DELETE, i_idx_no_seek)
+        p5: if e_mode == we.ONEPASS_MULTI -> conn.OPFLAG_SAVEPOSITION else -> 0
+        cg.v_change_p5(p, p5)
+    }
+    cg.v_resolve_label(p, i_label)
+}
+
+// sqlite3DeleteFrom: code DELETE FROM src WHERE where_expr. src is a
+// single-item SrcList; where_expr is -1 when there is no WHERE. Without
+// SQLITE_ENABLE_UPDATE_DELETE_LIMIT the grammar takes no ORDER BY or
+// LIMIT on DELETE. The statement owns src and where_expr and deletes them.
+delete_from: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[DB]> {
+    if cg.n_err(a) == 0 -> delete_body(p, a, src, where_expr)
+    ast.src_list_delete(a, src)
+    ast.expr_delete(a, where_expr)
+}
+
+// The body of sqlite3DeleteFrom up to its delete_from_cleanup label.
+delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[DB]> {
+    t: src_list_lookup(p, a, src)
+    if t < 0 -> return
+    b_complex := false
+    g := p.up
+    if g.view_get_column_names(p, a, t) != 0 -> return
+    if is_read_only(p, a, t) -> return
+    i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
+    rcauth: cg.auth_check(p, a, conn.AUTH_DELETE, Val(p.db.tables[t].name.copy()), None, Val(p.db.dbs[i_db].name.copy()))
+    if rcauth == conn.AUTH_DENY -> return
+
+    // Assign cursor numbers to the table and all its indices.
+    si: ast.src_item(a, src, 0)
+    i_tab_cur: p.f.n_tab
+    a.items[si].cursor = i_tab_cur
+    p.f.n_tab += 1
+    n_idx := 0
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        p.f.n_tab += 1
+        n_idx += 1
+        ix = p.db.indexes[ix].next
+    }
+
+    cg.get_vdbe(p)
+    if a.ctx.nested == 0 -> cg.v_count_changes(p)
+    cg.begin_write_operation(p, a, b_complex, i_db)
+
+    // Resolve the column names in the WHERE clause.
+    mark: p.ncs.len()
+    nc: rs.nc_push(p, rs.nc_new(src, 0))
+    if rs.resolve_expr_names(p, a, nc, where_expr) != 0 {
+        rs.nc_release(p, mark)
+        return
+    }
+    nc_flags: p.ncs[nc].nc_flags
+    rs.nc_release(p, mark)
+
+    // The counter of the rows deleted, when counting rows.
+    mem_cnt := 0
+    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
+        p.f.n_mem += 1
+        mem_cnt = p.f.n_mem
+        _: cg.op2(p, opc.OP_INTEGER, 0, mem_cnt)
+    }
+    cnt_arg: if mem_cnt != 0 -> mem_cnt else -> -1
+
+    if rcauth == base.OK && where_expr < 0 && !b_complex && !ex.is_virtual(p.db, t) {
+        // The truncate optimization: a DELETE without a WHERE clause erases
+        // the whole table.
+        has_rowid: ex.has_rowid(p.db, t)
+        if has_rowid -> _: cg.op4_text(p, opc.OP_CLEAR, p.db.tables[t].tnum, i_db, cnt_arg, p.db.tables[t].name.copy())
+        jx := p.db.tables[t].index
+        loop jx >= 0 {
+            if p.db.indexes[jx].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
+                _: cg.op3(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db, cnt_arg)
+            } else {
+                _: cg.op2(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db)
+            }
+            jx = p.db.indexes[jx].next
+        }
+    } else {
+        wcf := cg.WHERE_ONEPASS_DESIRED.bit_or(cg.WHERE_DUPLICATES_OK)
+        if nc_flags.bit_and(ast.NC_SUBQUERY) != 0 -> b_complex = true
+        if !b_complex -> wcf = wcf.bit_or(cg.WHERE_ONEPASS_MULTIROW)
+        pk := -1
+        i_pk := 0
+        n_pk := 1
+        i_eph_cur := 0
+        i_row_set := 0
+        addr_eph_open := 0
+        if ex.has_rowid(p.db, t) {
+            // A rowid table collects the rowids in a RowSet.
+            p.f.n_mem += 1
+            i_row_set = p.f.n_mem
+            _: cg.op2(p, opc.OP_NULL, 0, i_row_set)
+        } else {
+            // A WITHOUT ROWID table collects the primary keys in an
+            // ephemeral table.
+            pk = cat.primary_key_index(p.db, t)
+            n_pk = p.db.indexes[pk].n_key_col
+            i_pk = p.f.n_mem + 1
+            p.f.n_mem += n_pk
+            i_eph_cur = p.f.n_tab
+            p.f.n_tab += 1
+            addr_eph_open = cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_eph_cur, n_pk)
+            ex.set_p4_key_info(p, a, pk)
+        }
+
+        // The loop that finds the rowid or primary key of every row to
+        // delete; e_one_pass says how the rows are then deleted.
+        wr := wh.where_begin(p, a, src, where_expr, -1, -1, -1, wcf, i_tab_cur + 1)
+        if wr == .Val(wi0) {
+            wi := wi0
+            one: wh.where_ok_one_pass(wi)
+            e_one_pass: one.e
+            ai_cur: one.cur
+            if e_one_pass != we.ONEPASS_SINGLE -> cg.multi_write(p)
+            if wh.where_uses_deferred_seek(wi) -> _: cg.op1(p, opc.OP_FINISH_SEEK, i_tab_cur)
+            if mem_cnt != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, mem_cnt, 1)
+
+            // The rowid or primary key of the current row.
+            i_key := 0
+            if pk >= 0 {
+                loop i in 0..<n_pk {
+                    ex.expr_code_get_column_of_table(p, a, t, i_tab_cur, p.db.indexes[pk].ai_column[i], i_pk + i)
+                }
+                i_key = i_pk
+            } else {
+                p.f.n_mem += 1
+                i_key = p.f.n_mem
+                ex.expr_code_get_column_of_table(p, a, t, i_tab_cur, -1, i_key)
+            }
+
+            n_key := 0
+            to_open := [Bool]{}
+            addr_bypass := 0
+            if e_one_pass != we.ONEPASS_OFF {
+                // One pass: the key stays in its registers and the delete
+                // code follows inside the WHERE loop.
+                n_key = n_pk
+                loop _ in 0..<(n_idx + 1) -> to_open.push(true)
+                to_open.push(false)
+                if ai_cur[0] >= 0 -> to_open[ai_cur[0] - i_tab_cur] = false
+                if ai_cur[1] >= 0 -> to_open[ai_cur[1] - i_tab_cur] = false
+                if addr_eph_open != 0 -> _: cg.v_change_to_noop(p, addr_eph_open)
+                addr_bypass = cg.v_make_label(p)
+            } else {
+                if pk >= 0 {
+                    // Add the row's primary key to the ephemeral table.
+                    p.f.n_mem += 1
+                    i_key = p.f.n_mem
+                    n_key = 0
+                    aff: wh.index_affinity_str(p.db, a, pk)
+                    _: cg.op4(p, opc.OP_MAKE_RECORD, i_pk, n_pk, i_key, conn.P4.Text(aff))
+                    _: cg.op4_int(p, opc.OP_IDX_INSERT, i_eph_cur, i_key, i_pk, n_pk)
+                } else {
+                    // Add the row's rowid to the RowSet.
+                    n_key = 1
+                    _: cg.op2(p, opc.OP_ROW_SET_ADD, i_row_set, i_key)
+                }
+                wh.where_end(p, a, wi)
+            }
+
+            // Open the table and its indices for writing.
+            addr_once := 0
+            if e_one_pass == we.ONEPASS_MULTI -> addr_once = cg.op0(p, opc.OP_ONCE)
+            opened: open_table_and_indices(p, a, t, opc.OP_OPEN_WRITE, conn.OPFLAG_FORDELETE, i_tab_cur, if e_one_pass != we.ONEPASS_OFF -> Val(to_open.copy()) else -> None)
+            i_data_cur: opened.data_cur
+            i_idx_cur: opened.idx_cur
+            if e_one_pass == we.ONEPASS_MULTI -> cg.v_jump_here_or_pop_inst(p, addr_once)
+
+            // The loop over the rowids or primary keys found above.
+            addr_loop := 0
+            if e_one_pass != we.ONEPASS_OFF {
+                if !ex.is_virtual(p.db, t) && to_open[i_data_cur - i_tab_cur] {
+                    _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, addr_bypass, i_key, n_key)
+                }
+            } else if pk >= 0 {
+                addr_loop = cg.op1(p, opc.OP_REWIND, i_eph_cur)
+                _: cg.op2(p, opc.OP_ROW_DATA, i_eph_cur, i_key)
+            } else {
+                addr_loop = cg.op3(p, opc.OP_ROW_SET_READ, i_row_set, 0, i_key)
+            }
+
+            // Delete the row.
+            generate_row_delete(p, a, t, i_data_cur, i_idx_cur, i_key, n_key, a.ctx.nested == 0, e_one_pass, ai_cur[1])
+
+            // The end of the loop.
+            if e_one_pass != we.ONEPASS_OFF {
+                cg.v_resolve_label(p, addr_bypass)
+                wh.where_end(p, a, wi)
+            } else if pk >= 0 {
+                _: cg.op2(p, opc.OP_NEXT, i_eph_cur, addr_loop + 1)
+                cg.v_jump_here(p, addr_loop)
+            } else {
+                _: cg.goto(p, addr_loop)
+                cg.v_jump_here(p, addr_loop)
+            }
+        } else {
+            return
+        }
+    }
+
+    // Store the largest rowids AUTOINCREMENT tables reached in
+    // sqlite_sequence.
+    if a.ctx.nested == 0 && p.f.trigger_tab < 0 -> autoincrement_end(p, a)
+
+    // Return the number of rows deleted.
+    if mem_cnt != 0 -> code_change_count(p, mem_cnt, "rows deleted")
+}

@@ -2371,17 +2371,28 @@ SemaEffectPending: struct {
 }
 
 // Each node's callers, in caller and call-edge order: the reverse call graph
-// the fixed point and the reach walks share.
+// the fixed point and the reach walks share. A `core.db` call into the SQL
+// engine's parts is no edge: see sema_effect_sealed_edge.
 sema_effect_callers: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [[Int]] Never! {
     callers := (loop _ in nodes -> [Int]{})
     loop (index, node) in nodes {
         loop edge in node.call_edges {
             if edge == "__jet_panic__" -> next
             target: sema_effect_node_index(node_by_key, edge) ?? next
+            if sema_effect_sealed_edge(node, nodes[target]) -> next
             callers[target].push(index)
         }
     }
     callers
+}
+
+// The SQL engine's parts (`<corelib>/__core_db_*`) reach `core.db` the way
+// the C library they replace did: `core.db`'s declared rows (`DB.Read` on
+// queries, `DB.Write` on `execute`, the `DB` root on transaction control)
+// are the effects its callers see, so an engine row does not flow into a
+// `core.db` body. Calls between engine parts keep their edges.
+sema_effect_sealed_edge: fn(caller: SemaEffectNode, target: SemaEffectNode) -> Bool Never! {
+    caller.module_identity == "<corelib>/core.db" && target.module_identity.starts_with("<corelib>/__core_db_")
 }
 
 // Propagate each newly reached effect to callers once. Set insertion keeps

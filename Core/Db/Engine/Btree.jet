@@ -188,21 +188,15 @@ BtDB: struct {
     temp_in_memory: Bool
     // u1.isInterrupted.
     is_interrupted: Bool
-    // The database's schema name (aDb[i].zDbSName) for xAutovacPages.
-    db_name: String
-    // xAutovacPages (with its pAutovacPagesArg bound in): the pages to
-    // vacuum from the schema name, the page count, the free pages and the
-    // page size.
-    autovac_pages: (fn(String, Int, Int, Int) -[]> Int Never!)?
-    // xProgress (with its pProgressArg bound in), true to interrupt, and
-    // nProgressOps.
-    progress: (fn() -[]> Bool Never!)?
-    n_progress_ops: Int
+    // This build has no sqlite3_autovacuum_pages and sets no progress
+    // handler (Prepare's Host), so xAutovacPages and xProgress are always
+    // NULL: the btree keeps no callback, and a connection handle stays
+    // plain data that can cross threads.
 }
 
 // A connection state with every flag clear.
 bt_db_default: fn() -> BtDB Never! {
-    BtDB{flags: 0, n_savepoint: 0, n_vdbe_read: 0, temp_in_memory: false, is_interrupted: false, db_name: "main", autovac_pages: None, progress: None, n_progress_ops: 0}
+    BtDB{flags: 0, n_savepoint: 0, n_vdbe_read: 0, temp_in_memory: false, is_interrupted: false}
 }
 
 // One page as the btree sees it (btreeInt.h MemPage). The page image is
@@ -1840,12 +1834,8 @@ auto_vacuum_commit: fn(bt: &Btree) -[DB]> Int Never! {
     n_orig: btree_pagecount(bt)
     if ptrmap_is_page(bt, n_orig) || n_orig == pending_byte_page(bt) -> return base.CORRUPT
     n_free: pg4(bt, bt.page1, 36)
-    n_vac := n_free
-    if bt.db.autovac_pages == .Val(cb) {
-        n_vac = cb(bt.db.db_name, n_orig, n_free, bt.page_size)
-        if n_vac > n_free -> n_vac = n_free
-        if n_vac == 0 -> return base.OK
-    }
+    // xAutovacPages is NULL in this build: every free page is vacuumed.
+    n_vac: n_free
     n_fin: final_db_size(bt, n_orig, n_vac)
     if n_fin > n_orig -> return base.CORRUPT
     if n_fin < n_orig -> rc = save_all_cursors(bt, 0, -1)
@@ -4872,7 +4862,6 @@ IntegrityCk: struct {
     mx_err: Int
     n_err: Int
     rc: Int
-    n_step: Int
     pg_ref: [Bool]
     heap: [Int]
     pfx: Int
@@ -4882,21 +4871,13 @@ IntegrityCk: struct {
     msg: String
 }
 
-// checkProgress: stop the check once the connection is interrupted or its
-// progress callback asks to.
+// checkProgress: stop the check once the connection is interrupted. (No
+// progress callback can be set in this build; xProgress is NULL.)
 check_progress: fn(db: BtDB, ck: &IntegrityCk) Never! {
     if db.is_interrupted {
         ck.rc = base.INTERRUPT
         ck.n_err += 1
         ck.mx_err = 0
-    }
-    if db.progress == .Val(cb) {
-        ck.n_step += 1
-        if ck.n_step % db.n_progress_ops == 0 && cb() {
-            ck.rc = base.INTERRUPT
-            ck.n_err += 1
-            ck.mx_err = 0
-        }
     }
 }
 
@@ -5196,7 +5177,7 @@ btree_integrity_check: fn(bt: &Btree, roots: [Int], mx_err: Int, n_err: &Int, ou
         b_partial = true
         if roots[1] != 1 -> b_ck_freelist = false
     }
-    ck := IntegrityCk{n_ck_page: btree_pagecount(bt), mx_err: mx_err, n_err: 0, rc: base.OK, n_step: 0, pg_ref: [Bool]{}, heap: [Int]{}, pfx: PFX_NONE, v0: 0, v1: 0, v2: 0, msg: ""}
+    ck := IntegrityCk{n_ck_page: btree_pagecount(bt), mx_err: mx_err, n_err: 0, rc: base.OK, pg_ref: [Bool]{}, heap: [Int]{}, pfx: PFX_NONE, v0: 0, v1: 0, v2: 0, msg: ""}
     if ck.n_ck_page != 0 -> integrity_check_body(bt, ck, roots, b_partial, b_ck_freelist)
     // integrity_ck_cleanup.
     n_err = ck.n_err
