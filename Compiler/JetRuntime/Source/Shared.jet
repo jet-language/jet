@@ -366,7 +366,12 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 
 // A cell retires when it has no logical owners AND no
 // lifetime physical borrowers. A passive pin retains only the cell allocation.
+// An ending process gives up no owner, as jet_rt_rc_release (#5478, Main.jet
+// main_process_ending): no payload's drop glue runs and the heap is the
+// kernel's. A forked process ending (a shared-Core compile) would otherwise
+// write, and so copy, every page of the parent's cells it walked.
 shared_count_release: fn(shared: I64, pin: Bool) {
+    if (main_process_ending != I64{0}) -> return
     sync_mutex_lock(wrapping(shared + I64{8}))
     refs := sync_load(shared)
     next := refs
