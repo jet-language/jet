@@ -12,6 +12,8 @@
 //   sweep                     type every key with symbols, codes 1 to 255
 //   repeats                   list the keys with symbols that do not repeat
 //   repeat R D MS...          wl_keyboard.repeat_info timing for holds of MS ms
+//   state C...                the layout name, the modifiers in effect by name
+//                             and the keysym name each key C would produce
 use {
     files: core.files
     xkb: core.ui.xkb
@@ -78,11 +80,31 @@ timing: fn(repeat: xkb.Repeat, line: String, held: [Int]) -> String {
     "{line}: {due.join(" ")}, between {repeat.between(held[0], held[held.len() - 1])}"
 }
 
+// The `state` line: the active layout, the named modifiers in effect and the
+// keysym each listed key produces now.
+state: fn(km: xkb.Keymap, w: [String]) -> String {
+    names: [String]{"Shift", "Lock", "Control", "Mod1", "Mod2", "Mod3", "Mod4", "Mod5", "Alt", "Meta", "NumLock", "LevelThree", "LevelFive", "Super", "Hyper", "ScrollLock"}
+    on := [String]{}
+    loop name in names {
+        if km.active(name) -> on.push(name.copy())
+    }
+    syms := [String]{}
+    loop i in 1..<w.len() {
+        code: number(w[i])
+        syms.push("{code}={km.keysym_name(km.keysym(code))}")
+    }
+    "state: layout {km.layout()}; active {on.join(" ")}; {syms.join(" ")}"
+}
+
 play: fn(&km: xkb.Keymap, line: String, &out: [String]) {
     w: words(line)
     if w[0] == "mods" {
         km.modifiers(depressed: number(w[1]), latched: number(w[2]), locked: number(w[3]), group: number(w[4]))
         out.push(line.copy())
+        return
+    }
+    if w[0] == "state" {
+        out.push(state(km, w))
         return
     }
     if w[0] == "repeat" {

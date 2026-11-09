@@ -2,7 +2,7 @@ use {
     tables: __core_ui_xkb_tables
     core.term.[Key]
     core.ui.[UIError]
-    internal.[lex, keysym_names, parse_keymap, compile, key_at, press_text, ui_key, refresh, update_key, test_keymap_source, test_keymap, exercise]
+    internal.[lex, keysym_names, parse_keymap, compile, key_at, press_text, ui_key, refresh, update_key, one_sym, real_mod_index, hex, test_keymap_source, test_keymap, exercise]
 }
 // core.ui.xkb — the XKB keyboard engine for native windows, in pure Jet.
 //
@@ -22,6 +22,9 @@ use {
 //   table, fed as xkb_compose_state_feed feeds them.
 // - key repeat: `repeats` says which keys repeat and Repeat schedules them
 //   from wl_keyboard.repeat_info.
+// - queries: `keysym`, `keysym_name`, `layout` and `active` report the
+//   state as xkb_state_key_get_one_sym, xkb_keysym_get_name,
+//   xkb_keymap_layout_get_name and xkb_state_mod_name_is_active do.
 // Keysym names, values and texts come from the generated Core/Ui/XkbTables.jet.
 
 SHIFT: 1
@@ -189,6 +192,7 @@ Parser: struct {
     keys: [KeyDef]
     key_index: [String: Int]
     modmap: [ModmapEntry]
+    layouts: [String]
 }
 
 /// A compiled keymap and the keyboard state it tracks.
@@ -211,6 +215,11 @@ Keymap: struct {
     priv filters: [Filter]
     priv server: Bool
     priv compose: Int
+    // Group names (name[GroupN]), virtual modifier names and their real masks.
+    priv layouts: [String]
+    priv vmod_names: [String]
+    priv vmod_masks: [Int]
+    priv sym_names: [Int: String]
 }
 
 /// Compiles an XKB text-v1 keymap. Every failure is `UIError.Protocol`.
@@ -219,7 +228,7 @@ keymap: fn(bytes: [U8]) -> Keymap UIError! {
         toks: lex(bytes), at: 0, names: keysym_names(), synthetic: [String: Int]{},
         codes: [String: Int]{}, aliases: [String: String]{}, vmods: [String]{}, vmod_fixed: [Int]{},
         types: [KeyType]{}, interps: [Interp]{}, default_repeat: true, default_level_one: false,
-        keys: [KeyDef]{}, key_index: [String: Int]{}, modmap: [ModmapEntry]{},
+        keys: [KeyDef]{}, key_index: [String: Int]{}, modmap: [ModmapEntry]{}, layouts: [String]{},
     }
     parse_keymap(p)
     compile(p)
@@ -272,11 +281,60 @@ impl Keymap {
         }
         out
     }
+
+    /// The keysym evdev key `code` produces in the current state, as
+    /// xkb_state_key_get_one_sym; 0 for none. Ask before `press`.
+    keysym: fn(self, code: Int) -> Int {
+        index: key_at(self, code + 8)
+        if index < 0 -> return 0
+        one_sym(self, index)
+    }
+
+    /// The name of keysym `sym` as xkb_keysym_get_name writes it: "eacute",
+    /// "Shift_L", "NoSymbol" for 0, "U20AC" for an unnamed Unicode keysym,
+    /// else "0x" and eight hex digits. `sym` is read as a uint32.
+    keysym_name: fn(self, sym: Int) -> String {
+        value: sym.bit_and(4294967295)
+        if self.sym_names.get(value) == .Val(name) -> return name
+        if value >= 16777472 && value <= 17891327 -> return "U{hex(value - 16777216, 4)}"
+        "0x{hex(value, 8).lower()}"
+    }
+
+    /// The active layout's name (name[GroupN]), else "Group N".
+    layout: fn(self) -> String {
+        if self.group >= 0 && self.group < self.layouts.len() && self.layouts[self.group] != "" -> return self.layouts[self.group].copy()
+        "Group {self.group + 1}"
+    }
+
+    /// True when modifier `name` is in effect: a real modifier ("Shift",
+    /// "Lock", "Control", "Mod1".."Mod5") or a virtual one the keymap maps
+    /// ("Alt", "NumLock", "LevelThree", "Super").
+    active: fn(self, name: String) -> Bool {
+        real: real_mod_index(name)
+        if real >= 0 -> return (self.mods >> real).bit_and(1) == 1
+        loop v in 0..<self.vmod_names.len() {
+            if self.vmod_names[v].lower() == name.lower() -> return self.vmod_masks[v] != 0 && self.mods.bit_and(self.vmod_masks[v]) != 0
+        }
+        false
+    }
 }
 
 // The parser, compiler and state machine behind the public items above:
 // not part of the surface.
 priv internal: module {
+    // At least `width` upper-case hex digits.
+    hex: fn(value: Int, width: Int) -> String {
+        digits: "0123456789ABCDEF".bytes()
+        out := [U8]{}
+        v := value
+        loop v > 0 || out.len() < width {
+            out.push(digits[v %% 16])
+            v = v /% 16
+        }
+        out.reverse()
+        String.from_bytes(out) ?? ""
+    }
+
     syntax: fn(line: Int, message: String) -> UIError {
         UIError.Protocol("xkb keymap line {line}: {message}")
     }
@@ -1121,6 +1179,15 @@ priv internal: module {
             } else if word == "modifier_map" || word == "modmap" || word == "mod_map" {
                 advance(p)
                 modifier_map(p)
+            } else if word == "name" {
+                // name[GroupN] = "English (US)";
+                advance(p)
+                group: group_index(p)
+                expect(p, "=")
+                name: expect_string(p)
+                _: accept(p, ";")
+                loop p.layouts.len() <= group -> p.layouts.push("")
+                p.layouts[group] = name
             } else {
                 skip_statement(p, false)
             }
@@ -1478,10 +1545,18 @@ priv internal: module {
         loop k in 0..<p.keys.len() -> by_code[p.keys[k].code] = k
         counts := [Int]{}
         loop _ in 0..<32 -> counts.push(0)
+        sym_names := [Int: String]{}
+        values: tables.XKB_KEYSYM_VALUES
+        names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
+        loop i in 0..<names.len() {
+            value: be(values, i * 4, 4)
+            if sym_names.get(value) == None -> _: sym_names.add(value, names[i].copy())
+        }
         Ok(Keymap{
             keys: p.keys.copy(), by_code: by_code, types: p.types.copy(), group_count: group_count,
             base_mods: 0, latched_mods: 0, locked_mods: 0, base_group: 0, latched_group: 0, locked_group: 0,
             mods: 0, group: 0, set_mods: 0, clear_mods: 0, mod_counts: counts, filters: [Filter]{}, server: false, compose: -1,
+            layouts: p.layouts.copy(), vmod_names: p.vmods.copy(), vmod_masks: vmod_masks, sym_names: sym_names,
         })
     }
 
@@ -1927,6 +2002,8 @@ priv internal: module {
             "    }};",
             "}};",
             "xkb_symbols \"us_de\" {{",
+            "    name[Group1]= \"English (US)\";",
+            "    name[Group2]= \"German\";",
             "    key <AE12> {{",
             "        symbols[1]= [ equal, plus ],",
             "        symbols[2]= [ dead_acute, dead_grave ]",
@@ -1981,6 +2058,30 @@ priv internal: module {
 }
 
 // --- tests -------------------------------------------------------------------
+
+#Test("keysym, keysym_name, layout and active report the keyboard state") {
+    km := test_keymap()
+    assert_eq(km.layout(), "English (US)")
+    assert_eq(km.keysym_name(km.keysym(16)), "q")
+    _: km.press(42, true)
+    assert(km.active("Shift"))
+    assert(!km.active("Alt"))
+    assert_eq(km.keysym_name(km.keysym(16)), "Q")
+    _: km.press(56, true)
+    _: km.press(56, false)
+    _: km.press(42, false)
+    assert_eq(km.layout(), "German")
+    _: km.press(56, true)
+    assert(km.active("Alt"))
+    assert(km.active("mod1"))
+    _: km.press(56, false)
+    assert(!km.active("Alt"))
+    assert_eq(km.keysym_name(0x20AC), "EuroSign")
+    assert_eq(km.keysym_name(0x100263A), "U263A")
+    assert_eq(km.keysym_name(0), "NoSymbol")
+    assert_eq(km.keysym_name(0x1000041), "0x01000041")
+    assert_eq(km.keysym_name(-1), "0xffffffff")
+}
 
 #Test("a small US+DE keymap parses and types its levels") {
     km := test_keymap()
