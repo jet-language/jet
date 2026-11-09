@@ -19,6 +19,7 @@ use {
     core.sys.[EnvError]
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
+    shared_bounds.[shared_range_valid]
 }
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
@@ -636,6 +637,125 @@ set_current_dir: fn(path: String) IOError! -[FS, Env]> {
 
 #Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") close_fd: fn(fd: Int) Never! -[FS, Env]> {
     core.sys.__close_fd_os(fd)
+}
+
+// An owned operating-system descriptor, closed exactly once when its owner
+// drops it. Descriptors arrive from `net.unix_receive` or
+// `SharedMemory.descriptor`. The Fd holds the runtime's token for the
+// descriptor, never its number, and every descriptor is close-on-exec.
+// Descriptors from another process are read with `read_at`, never mapped,
+// so a peer that truncates its file cannot fault this one.
+Fd: struct {
+    priv token: Int
+}
+
+impl Fd.Close {
+    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+}
+
+impl Fd {
+    // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
+    // (fewer at its end; none past it).
+    read_at: fn(self, offset: Int, max: Int) -[Env]> [U8] IOError! {
+        if offset < 0 -> return Err(syscall_input(.Read, None, "read offset must be non-negative"))
+        if max < 1 || max > FD_READ_MAX -> return Err(syscall_input(.Read, None, "a read is 1 to {FD_READ_MAX} bytes"))
+        core.sys.__fd_read_at_raw(self.token, offset, max)
+    }
+
+    // The size in bytes of the file behind the descriptor.
+    size: fn(self) -[Env]> Int IOError! { core.sys.__fd_size_raw(self.token) }
+
+    // A second descriptor for the same open file, owned on its own.
+    duplicate: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+}
+
+// The Fd owning a token the runtime just issued (net.unix_receive).
+__fd_adopt: fn(token: Int) -> Fd { Fd{token: token} }
+
+// The token `fd` owns, lent to a leaf for one call.
+__fd_token: fn(fd: Fd) -> Int { fd.token }
+
+// Anonymous memory of a fixed size shared with other processes through its
+// descriptor (a memfd), mapped read-write into this one. The memfd is sealed
+// against shrinking and growing once sized, so no process holding it can
+// truncate it under the mapping; a different size is a new SharedMemory.
+// Every access is bounds-checked; dropping it unmaps the memory and closes
+// the descriptor.
+SharedMemory: struct {
+    priv token: Int
+    priv size: Int
+}
+
+impl SharedMemory.Close {
+    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+}
+
+FD_READ_MAX: 16777216
+SHARED_MEMORY_MAX: 1073741824
+
+// `size` zeroed bytes of shared memory, 1 B to 1 GiB.
+shared_memory: fn(size: Int) -[Env]> SharedMemory IOError! {
+    if size < 1 || size > SHARED_MEMORY_MAX -> return Err(syscall_input(.Write, None, "shared memory is 1 to {SHARED_MEMORY_MAX} bytes"))
+    Ok(SharedMemory{token: core.sys.__shared_create_raw(size), size: size})
+}
+
+// How SharedMemory bounds its accesses: not part of the sys surface.
+priv shared_bounds: module {
+    // Whether `count` bytes from byte `offset` lie inside `memory`.
+    shared_range_valid: fn(memory: SharedMemory, offset: Int, count: Int) -> Bool {
+        offset >= 0 && count >= 0 && offset <= memory.size && count <= memory.size - offset
+    }
+}
+
+// A 32-bit pixel layout with a padding byte, named as wl_shm and DRM name
+// them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
+// is R, G, B, X.
+PixelFormat: enum {
+    XRGB8888
+    XBGR8888
+}
+
+impl SharedMemory {
+    len: fn(self) -> Int { self.size }
+
+    // Copies `bytes` in at byte `offset`.
+    write: fn(&self, offset: Int, bytes: [U8]) IOError! -[Env]> {
+        if !shared_range_valid(self, offset, bytes.len()) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        core.sys.__shared_write_raw(self.token, offset, bytes)
+    }
+
+    // `count` bytes from byte `offset`.
+    read: fn(self, offset: Int, count: Int) -[Env]> [U8] IOError! {
+        if !shared_range_valid(self, offset, count) -> return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
+        core.sys.__shared_read_raw(self.token, offset, count)
+    }
+
+    // Copies the rectangle at (`x`, `y`), `width` by `height` pixels, of an
+    // RGBA image `stride` bytes per row into the same rectangle of the image
+    // of that stride starting at byte `offset`, as `format`, whose fourth
+    // byte is padding set to 255. Only the rectangle's rows are touched and
+    // the conversion happens in place, so presenting a frame allocates
+    // nothing and costs only its damage.
+    write_pixels: fn(&self, offset: Int, rgba: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: PixelFormat) IOError! -[Env]> {
+        if stride <= 0 || stride %% 4 != 0 -> return Err(syscall_input(.Write, None, "an RGBA row is a positive whole number of 4-byte pixels"))
+        if x < 0 || y < 0 || width < 0 || height < 0 || x + width > stride /% 4 -> return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the image"))
+        end: (y + height) * stride
+        if height > 0 && end > rgba.len() -> return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the RGBA image"))
+        if height > 0 && !shared_range_valid(self, offset, end) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        order: if format == .XRGB8888 -> 0 else -> 1
+        core.sys.__shared_write_pixels_raw(self.token, offset, rgba, stride, x, y, width, height, order)
+    }
+
+    // Stores `count` little-endian copies of the 32-bit `value` from byte
+    // `offset`: a solid run of pixels.
+    fill_u32: fn(&self, offset: Int, count: Int, value: Int) IOError! -[Env]> {
+        if value < 0 || value > 4294967295 -> return Err(syscall_input(.Write, None, "a fill value is 32 bits"))
+        if !shared_range_valid(self, offset, count * 4) -> return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
+        core.sys.__shared_fill_raw(self.token, offset, count, value)
+    }
+
+    // A new descriptor for this memory, to pass to another process.
+    descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
 }
 
 atexit: fn(handler: fn()) Never! -[Env]> {

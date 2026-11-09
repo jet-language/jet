@@ -1,0 +1,988 @@
+use {
+    core: core
+    sys: core.sys
+    net: core.net
+    core.term.[Key]
+    core.ui.[FrameStats, UIError, UIEvent, UIPointerButton, UIRect]
+}
+// __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
+// part of core.ui.
+//
+// Speaks the wire protocol itself over $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY: no
+// libwayland. One xdg_toplevel shows the program's RGBA frames from two
+// wl_shm buffers in one sealed shared-memory pool; wl_surface frame callbacks
+// pace the frames; wl_seat keyboard and pointer events become UIEvents.
+// Requests queue in `out` and leave on `flush`; events are parsed from
+// `inbox`, and the descriptors that ride with them (the keymap) queue in
+// `inbox_fds`, newest first.
+
+// Global ids are fixed by the protocol: wl_display is object 1.
+DISPLAY: 1
+// Wire formats: XRGB8888 is always offered; XBGR8888 is R, G, B, X in
+// memory, the program's RGBA byte order, so it needs no swizzle.
+FORMAT_XRGB8888: 1
+FORMAT_XBGR8888: 875709016
+RECEIVE_MAX: 65536
+SIDE_MAX: 16384
+// Three buffers: one on screen, one queued, one being drawn.
+BUFFER_COUNT: 3
+// Present-to-present intervals and input latencies kept for frame_stats.
+SAMPLES_KEPT: 1024
+// Recent frames whose draw time sizes the draw-late budget.
+COSTS_KEPT: 32
+
+// A buffer of the pool. `stale_*` bound what changed in the frames since
+// this buffer was last drawn (empty when x1 <= x0); drawing into it again
+// copies only that plus the new damage.
+Buffer: struct {
+    id: Int
+    offset: Int
+    busy: Bool
+    stale_x0: Int
+    stale_y0: Int
+    stale_x1: Int
+    stale_y1: Int
+}
+
+// A committed frame awaiting presentation feedback: the time it was
+// meant to be seen (local clock) and its oldest input's time (ms on the
+// compositor's clock, -1 for none).
+Pending: struct {
+    id: Int
+    target_ns: Int
+    input_ms: Int
+    // The frame directly follows the previous one, a refresh later.
+    follows: Bool
+}
+
+Connection: struct {
+    priv stream: net.UnixStream
+    priv out: [U8]
+    priv out_fds: [sys.Fd]
+    priv inbox: [U8]
+    priv inbox_fds: [sys.Fd]
+    priv next_id: Int
+    priv registry: Int
+    priv compositor: Int
+    priv shm: Int
+    priv wm_base: Int
+    priv seat: Int
+    priv decoration_manager: Int
+    priv surface: Int
+    priv xdg_surface: Int
+    priv toplevel: Int
+    priv pointer: Int
+    priv keyboard: Int
+    priv output: Int
+    priv presentation: Int
+    priv pending: [Pending]
+    priv frame_callback: Int
+    priv frame_due: Bool
+    priv sync_callback: Int
+    priv synced: Bool
+    priv configured: Bool
+    priv mapped: Bool
+    priv format: sys.PixelFormat
+    priv pending_width: Int
+    priv pending_height: Int
+    priv width: Int
+    priv height: Int
+    priv pool: Int
+    priv memory: sys.SharedMemory
+    priv buffers: [Buffer]
+    // The refresh interval: presentation feedback's, else the output's
+    // current mode's; 0 while unknown.
+    priv refresh_ns: Int
+    priv output_refresh_ns: Int
+    // Local clock minus the presentation clock: the smallest gap seen
+    // between a frame reaching the screen and its feedback arriving.
+    priv clock_offset: Int
+    priv offset_known: Bool
+    // The latest vblank a frame reached the screen at, local clock.
+    priv vblank_ns: Int
+    priv vblank_known: Bool
+    // Refreshes the compositor holds a frame beyond the vblank it was
+    // committed for (its own pipeline depth, learned from feedback), and
+    // the run of frames seen later than that.
+    priv lag: Int
+    priv lag_known: Bool
+    priv late_run: Int
+    priv late_least: Int
+    priv callback_at: Int
+    // When the current frame is meant to be seen, and the first frame's.
+    priv target_ns: Int
+    priv first_target: Int
+    priv follows: Bool
+    priv time_ns: Int
+    priv delta_ns: Int
+    // Draw late: a frame starts the slowest recent draw time plus a
+    // safety margin before its vblank. A missed vblank widens the margin.
+    priv frame_start: Int
+    priv costs: [Int]
+    priv cost_at: Int
+    priv safety_ns: Int
+    // The oldest input since the last frame went out, ms on the
+    // compositor's clock; -1 for none.
+    priv input_ms: Int
+    priv presented: Int
+    priv missed: Int
+    priv discarded: Int
+    priv presented_abs: Int
+    priv intervals: [Int]
+    priv interval_at: Int
+    priv latencies: [Int]
+    priv latency_at: Int
+    priv modifiers: Int
+    priv events: [UIEvent]
+    priv failure: UIError?
+}
+
+impl Connection {
+    width: fn(self) -> Int { self.width }
+    height: fn(self) -> Int { self.height }
+    failure: fn(self) -> UIError? { self.failure }
+    // The current frame's predicted presentation time since the first
+    // frame's, and the step from the frame before, in nanoseconds.
+    time_ns: fn(self) -> Int { self.time_ns }
+    delta_ns: fn(self) -> Int { self.delta_ns }
+
+    // How evenly frames reached the screen and how fast input showed,
+    // from presentation feedback.
+    frame_stats: fn(self) -> FrameStats {
+        FrameStats{
+            presented: self.presented, missed: self.missed, discarded: self.discarded,
+            refresh_ns: refresh_interval(self),
+            median_ns: percentile(self.intervals, 50), p99_ns: percentile(self.intervals, 99),
+            input_samples: self.latencies.len(),
+            input_median_ns: percentile(self.latencies, 50), input_p99_ns: percentile(self.latencies, 99),
+            spans: spans(self.intervals, refresh_interval(self)),
+        }
+    }
+}
+
+spans: fn(intervals: [Int], refresh: Int) -> [Int] {
+    counts := [Int]{0, 0, 0, 0}
+    if refresh <= 0 -> return counts
+    loop interval in intervals {
+        spanned: (interval + refresh /% 2) /% refresh
+        slot: if spanned <= 1 -> 0 else -> min_int(spanned - 1, 3)
+        counts[slot] = counts[slot] + 1
+    }
+    counts
+}
+
+percentile: fn(samples: [Int], percent: Int) -> Int {
+    if samples.len() == 0 -> return 0
+    sorted := samples.copy()
+    sorted.sort()
+    count: sorted.len()
+    sorted[min_int(count - 1, (count - 1) * percent /% 100)]
+}
+
+// True when the environment names a Wayland display.
+available: fn() -[Env]> Bool { sys_get("WAYLAND_DISPLAY") != "" }
+
+sys_get: fn(name: String) -[Env]> String { sys.get(name) ?? "" }
+
+// Connects, opens an xdg_toplevel titled `title` and waits for its first
+// configure. The window is `width` x `height` unless the compositor
+// chooses a size.
+connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connection UIError! {
+    display: sys_get("WAYLAND_DISPLAY")
+    if display == "" -> return Err(UIError.NoDisplay)
+    runtime: sys_get("XDG_RUNTIME_DIR")
+    if !display.starts_with("/") && runtime == "" -> return Err(UIError.Connect("XDG_RUNTIME_DIR is not set"))
+    path: if display.starts_with("/") -> display else -> "{runtime}/{display}"
+    stream: net.unix_connect(path) ?? return Err(UIError.Connect("{path}: {err}"))
+    // Replaced by the first `allocate`; a page until then.
+    memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
+    c := Connection{
+        stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
+        next_id: 2, registry: 0, compositor: 0, shm: 0, wm_base: 0, seat: 0, decoration_manager: 0,
+        surface: 0, xdg_surface: 0, toplevel: 0, pointer: 0, keyboard: 0, output: 0, presentation: 0,
+        pending: [Pending]{}, frame_callback: 0, frame_due: true, sync_callback: 0, synced: false,
+        configured: false, mapped: false, format: sys.PixelFormat.XRGB8888,
+        pending_width: 0, pending_height: 0, width: 0, height: 0, pool: 0, memory: memory,
+        buffers: [Buffer]{}, refresh_ns: 0, output_refresh_ns: 0, clock_offset: 0, offset_known: false,
+        vblank_ns: 0, vblank_known: false, lag: 0, lag_known: false, late_run: 0, late_least: 0, callback_at: 0, target_ns: 0, first_target: -1, follows: false,
+        time_ns: 0, delta_ns: 0, frame_start: 0, costs: [Int]{}, cost_at: 0, safety_ns: 0, input_ms: -1,
+        presented: 0, missed: 0, discarded: 0, presented_abs: 0, intervals: [Int]{}, interval_at: 0,
+        latencies: [Int]{}, latency_at: 0, modifiers: 0, events: [UIEvent]{}, failure: None,
+    }
+    c.registry = new_id(c)
+    request(c, DISPLAY, 1, words([Int]{c.registry}))
+    roundtrip(c)
+    // The binds made while the globals arrived reach the compositor here,
+    // and so do the wl_shm formats.
+    roundtrip(c)
+    if c.failure == .Val(failure) -> return Err(failure)
+    if c.compositor == 0 -> return Err(UIError.Unsupported("the compositor offers no wl_compositor"))
+    if c.shm == 0 -> return Err(UIError.Unsupported("the compositor offers no wl_shm"))
+    if c.wm_base == 0 -> return Err(UIError.Unsupported("the compositor offers no xdg_wm_base"))
+    c.surface = new_id(c)
+    request(c, c.compositor, 0, words([Int]{c.surface}))
+    c.xdg_surface = new_id(c)
+    request(c, c.wm_base, 2, words([Int]{c.xdg_surface, c.surface}))
+    c.toplevel = new_id(c)
+    request(c, c.xdg_surface, 1, words([Int]{c.toplevel}))
+    request(c, c.toplevel, 2, text_argument(title))
+    request(c, c.toplevel, 3, text_argument("dev.jet.app"))
+    if c.decoration_manager != 0 {
+        decoration: new_id(c)
+        request(c, c.decoration_manager, 1, words([Int]{decoration, c.toplevel}))
+        // Server-side: the compositor draws the title bar and borders.
+        request(c, decoration, 1, words([Int]{2}))
+    }
+    request(c, c.surface, 6, [U8]{})
+    flush(c)
+    waited := 0
+    loop !c.configured && c.failure == None && waited < 50 {
+        receive(c, 100000000)
+        waited += 1
+    }
+    if c.failure == .Val(failure) -> return Err(failure)
+    if !c.configured -> return Err(UIError.Protocol("the compositor never configured the window"))
+    chosen_width: if c.pending_width > 0 -> c.pending_width else -> width
+    chosen_height: if c.pending_height > 0 -> c.pending_height else -> height
+    allocate(c, chosen_width, chosen_height)
+    if c.failure == .Val(failure) -> return Err(failure)
+    c.events = [UIEvent]{}
+    Ok(c)
+}
+
+// Waits for the next frame and returns the events that arrived meanwhile.
+// The compositor alone paces frames, the way a GTK frame clock or a
+// Chromium BeginFrame does: exactly one frame is in flight, the next is
+// due when its wl_surface.frame callback fires, and nothing ever waits
+// on a frame rate. Input is read the moment it arrives and goes out with
+// the next frame.
+//
+// A frame starts late, its measured draw time plus a safety margin
+// before the vblank it aims for, so its input is as fresh as possible;
+// `time_ns` is that vblank, predicted from presentation feedback, so
+// motion computed from it keeps its speed even when a frame is late.
+//
+// A frame that presents nothing lets the window sleep until input
+// arrives. A failure ends the stream with `.Close`; `failure()` says why.
+next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
+    if c.failure == None && c.pending_width > 0 && c.pending_height > 0 && (c.pending_width != c.width || c.pending_height != c.height) {
+        allocate(c, c.pending_width, c.pending_height)
+        c.events.push(UIEvent.Resize{width: c.width, height: c.height})
+    }
+    loop c.failure == None && !c.frame_due && !has_close(c.events) {
+        // Idle (the last frame presented nothing): ask for a frame once
+        // something happens.
+        if c.mapped && c.frame_callback == 0 && c.events.len() > 0 -> request_frame(c)
+        flush(c)
+        receive(c, -1)
+    }
+    if c.frame_due && c.failure == None && !has_close(c.events) {
+        c.frame_due = false
+        // Frames step one refresh at a time; prediction jitter of a
+        // refresh never moves `time`. Only a gap of more than one refresh
+        // (a stall, or a window idle since) resyncs to the prediction.
+        predicted: predict(c)
+        refresh: refresh_interval(c)
+        c.follows = refresh > 0 && c.first_target >= 0 && predicted <= c.target_ns + 2 * refresh
+        c.target_ns = if c.follows -> c.target_ns + refresh else -> predicted
+        // Draw late: wait for the frame's start, reading input meanwhile.
+        start: c.target_ns - draw_budget(c) - safety(c)
+        loop c.failure == None && !has_close(c.events) {
+            now: core.time.__clock_mono_ns()
+            if now >= start -> break
+            receive(c, start - now)
+        }
+    } else {
+        c.target_ns = core.time.__clock_mono_ns()
+        c.follows = false
+    }
+    if c.first_target < 0 -> c.first_target = c.target_ns
+    previous: c.time_ns
+    // The compositor shows a frame `lag` refreshes after the vblank it
+    // was committed for; motion follows when it is actually seen.
+    c.time_ns = c.target_ns + c.lag * refresh_interval(c) - c.first_target
+    c.delta_ns = c.time_ns - previous
+    if c.failure != None && !has_close(c.events) -> c.events.push(UIEvent.Close)
+    c.frame_start = core.time.__clock_mono_ns()
+    events: c.events.copy()
+    c.events.clear()
+    events
+}
+
+// The refresh interval in nanoseconds, or 0 while unknown.
+refresh_interval: fn(c: Connection) -> Int { if c.refresh_ns > 0 -> c.refresh_ns else -> c.output_refresh_ns }
+
+// The vblank a frame starting now can still make: the first one at
+// least the draw budget and safety margin away, on the grid of the
+// latest presented vblank (else of the frame callback's arrival).
+predict: fn(c: Connection) -[Time]> Int {
+    now: core.time.__clock_mono_ns()
+    refresh: refresh_interval(c)
+    if refresh <= 0 -> return now
+    base: if c.vblank_known -> c.vblank_ns else -> c.callback_at
+    earliest: now + draw_budget(c) + safety(c)
+    steps: if earliest <= base -> 1 else -> (earliest - base + refresh - 1) /% refresh
+    base + steps * refresh
+}
+
+// The margin a commit needs before its vblank for the compositor to
+// latch it: half a refresh at first, widened by each missed frame.
+safety: fn(c: Connection) -> Int {
+    half: refresh_interval(c) /% 2
+    if c.safety_ns > half -> c.safety_ns else -> half
+}
+
+// The slowest of the recent frames' draw times: frame start to the
+// commit leaving.
+draw_budget: fn(c: Connection) -> Int {
+    most := 0
+    loop cost in c.costs {
+        if cost > most -> most = cost
+    }
+    most
+}
+
+// Asks for a frame callback with a one-pixel damage of the buffer on
+// screen, so a compositor that repaints only damaged surfaces sends it.
+request_frame: fn(&c: Connection) {
+    c.frame_callback = new_id(c)
+    header(c, c.surface, 3, 4)
+    put32(c.out, c.frame_callback)
+    header(c, c.surface, 9, 16)
+    put32(c.out, 0)
+    put32(c.out, 0)
+    put32(c.out, 1)
+    put32(c.out, 1)
+    header(c, c.surface, 6, 0)
+}
+
+has_close: fn(events: [UIEvent]) -> Bool {
+    loop event in events {
+        if event == .Close -> return true
+    }
+    false
+}
+
+// Shows `pixels`, RGBA rows of the window's current size, of which only
+// `damage` changed since the previous frame. Only the damage, plus what
+// changed since the chosen buffer was last drawn, is converted straight
+// into that buffer; it is attached, damaged and committed with a frame
+// callback and presentation feedback. Three buffers and one frame in
+// flight leave one free; if none is, this waits for a release rather
+// than drop the frame.
+present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+    if c.failure == .Val(failure) -> return Err(failure)
+    frame_bytes: c.width * c.height * 4
+    if pixels.len() != frame_bytes {
+        return Err(UIError.Size("present needs {frame_bytes} bytes for {c.width}x{c.height} RGBA, got {pixels.len()}"))
+    }
+    free := free_buffer(c)
+    if free < 0 {
+        started: core.time.__clock_mono_ns()
+        loop free < 0 && c.failure == None && core.time.__clock_mono_ns() - started < 1000000000 {
+            receive(c, 1000000000 - (core.time.__clock_mono_ns() - started))
+            free = free_buffer(c)
+        }
+        if c.failure == .Val(failure) -> return Err(failure)
+        if free < 0 -> return Err(UIError.Protocol("the compositor released no buffer for a second"))
+    }
+    // The damage's bounds, clipped to the window.
+    x0 := c.width
+    y0 := c.height
+    x1 := 0
+    y1 := 0
+    loop rect in damage {
+        left: max_int(rect.x, 0)
+        top: max_int(rect.y, 0)
+        right: min_int(rect.x + rect.width, c.width)
+        bottom: min_int(rect.y + rect.height, c.height)
+        if right > left && bottom > top {
+            x0 = min_int(x0, left)
+            y0 = min_int(y0, top)
+            x1 = max_int(x1, right)
+            y1 = max_int(y1, bottom)
+        }
+    }
+    target: c.buffers[free]
+    stale: target.stale_x1 > target.stale_x0
+    copy_x0: if stale -> min_int(x0, target.stale_x0) else -> x0
+    copy_y0: if stale -> min_int(y0, target.stale_y0) else -> y0
+    copy_x1: if stale -> max_int(x1, target.stale_x1) else -> x1
+    copy_y1: if stale -> max_int(y1, target.stale_y1) else -> y1
+    if copy_x1 > copy_x0 && copy_y1 > copy_y0 {
+        c.memory.write_pixels(target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(UIError.Protocol("writing the frame failed: {err}"))
+    }
+    loop index in 0..<c.buffers.len() {
+        if index == free {
+            c.buffers[index].stale_x0 = 0
+            c.buffers[index].stale_y0 = 0
+            c.buffers[index].stale_x1 = 0
+            c.buffers[index].stale_y1 = 0
+        } else if x1 > x0 && y1 > y0 {
+            other: c.buffers[index]
+            if other.stale_x1 > other.stale_x0 {
+                c.buffers[index].stale_x0 = min_int(other.stale_x0, x0)
+                c.buffers[index].stale_y0 = min_int(other.stale_y0, y0)
+                c.buffers[index].stale_x1 = max_int(other.stale_x1, x1)
+                c.buffers[index].stale_y1 = max_int(other.stale_y1, y1)
+            } else {
+                c.buffers[index].stale_x0 = x0
+                c.buffers[index].stale_y0 = y0
+                c.buffers[index].stale_x1 = x1
+                c.buffers[index].stale_y1 = y1
+            }
+        }
+    }
+    c.buffers[free].busy = true
+    header(c, c.surface, 1, 12)
+    put32(c.out, c.buffers[free].id)
+    put32(c.out, 0)
+    put32(c.out, 0)
+    loop rect in damage {
+        left: max_int(rect.x, 0)
+        top: max_int(rect.y, 0)
+        right: min_int(rect.x + rect.width, c.width)
+        bottom: min_int(rect.y + rect.height, c.height)
+        if right > left && bottom > top {
+            header(c, c.surface, 9, 16)
+            put32(c.out, left)
+            put32(c.out, top)
+            put32(c.out, right - left)
+            put32(c.out, bottom - top)
+        }
+    }
+    if c.frame_callback == 0 {
+        c.frame_callback = new_id(c)
+        header(c, c.surface, 3, 4)
+        put32(c.out, c.frame_callback)
+    }
+    if c.presentation != 0 {
+        feedback: new_id(c)
+        header(c, c.presentation, 1, 8)
+        put32(c.out, c.surface)
+        put32(c.out, feedback)
+        c.pending.push(Pending{id: feedback, target_ns: c.target_ns, input_ms: c.input_ms, follows: c.follows})
+    }
+    c.input_ms = -1
+    header(c, c.surface, 6, 0)
+    c.mapped = true
+    flush(c)
+    if c.failure == .Val(failure) -> return Err(failure)
+    cost: core.time.__clock_mono_ns() - c.frame_start
+    if c.costs.len() < COSTS_KEPT -> c.costs.push(cost) else -> c.costs[c.cost_at] = cost
+    c.cost_at = (c.cost_at + 1) %% COSTS_KEPT
+    Ok()
+}
+
+free_buffer: fn(c: Connection) -> Int {
+    loop index in 0..<c.buffers.len() {
+        if !c.buffers[index].busy -> return index
+    }
+    -1
+}
+
+fail: fn(&c: Connection, failure: UIError) {
+    if c.failure == None -> c.failure = Val(failure)
+}
+
+// ---- the wire ---------------------------------------------------------
+
+new_id: fn(&c: Connection) -> Int {
+    id: c.next_id
+    c.next_id += 1
+    id
+}
+
+put32: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> put32(out, value)
+    out
+}
+
+// A wire string: length with the NUL, the bytes, the NUL, padding to 4.
+text_argument: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    put32(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+request: fn(&c: Connection, object: Int, opcode: Int, arguments: [U8]) {
+    header(c, object, opcode, arguments.len())
+    loop b in arguments -> c.out.push(b)
+}
+
+// A request header; `argument_bytes` of arguments must follow.
+header: fn(&c: Connection, object: Int, opcode: Int, argument_bytes: Int) {
+    put32(c.out, object)
+    put32(c.out, ((argument_bytes + 8) << 16) + opcode)
+}
+
+// Sends the queued requests; queued descriptors ride with them and are
+// closed here (the compositor got its own copies).
+flush: fn(&c: Connection) -[Net, Time]> {
+    if c.out.len() == 0 || c.failure != None -> return
+    net.unix_send(c.stream, c.out, c.out_fds) ?? {
+        fail(c, UIError.Protocol("sending to the compositor failed: {err}"))
+        return
+    }
+    c.out.clear()
+    if c.out_fds.len() > 0 -> c.out_fds = [sys.Fd]{}
+}
+
+// Waits up to `timeout_ns` (negative: until something arrives) for the
+// compositor on this OS thread, then reads and handles what arrived.
+receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
+    if c.failure != None -> return
+    ready: net.unix_wait(c.stream, timeout_ns) ?? {
+        fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
+        return
+    }
+    if !ready -> return
+    message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
+        fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
+        return
+    }
+    if message.bytes.len() == 0 && message.fds.len() == 0 {
+        fail(c, UIError.Protocol("the compositor closed the connection"))
+        return
+    }
+    loop b in message.bytes -> c.inbox.push(b)
+    // Newest first, so `pop` yields the oldest queued descriptor.
+    loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
+    dispatch(c)
+    flush(c)
+}
+
+roundtrip: fn(&c: Connection) -[Env, Net, Time]> {
+    c.synced = false
+    c.sync_callback = new_id(c)
+    request(c, DISPLAY, 0, words([Int]{c.sync_callback}))
+    flush(c)
+    waited := 0
+    loop !c.synced && c.failure == None && waited < 50 {
+        receive(c, 100000000)
+        waited += 1
+    }
+    if !c.synced -> fail(c, UIError.Protocol("the compositor did not answer wl_display.sync"))
+}
+
+u32_at: fn(bytes: [U8], at: Int) -> Int {
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+i32_at: fn(bytes: [U8], at: Int) -> Int {
+    v: u32_at(bytes, at)
+    if v >= 2147483648 -> return v - 4294967296
+    v
+}
+
+string_at: fn(bytes: [U8], at: Int) -> String {
+    length: u32_at(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+// Handles every complete event in the inbox.
+dispatch: fn(&c: Connection) -[Env]> {
+    at := 0
+    loop c.inbox.len() - at >= 8 && c.failure == None {
+        object: u32_at(c.inbox, at)
+        word: u32_at(c.inbox, at + 4)
+        size: word >> 16
+        if size < 8 || size %% 4 != 0 {
+            fail(c, UIError.Protocol("malformed event header"))
+            return
+        }
+        if c.inbox.len() - at < size -> break
+        event(c, object, word.bit_and(65535), c.inbox[(at + 8)..<(at + size)].copy())
+        at += size
+    }
+    if at > 0 -> c.inbox = c.inbox[at..<c.inbox.len()].copy()
+}
+
+bind: fn(&c: Connection, name: Int, interface: String, version: Int) -> Int {
+    id: new_id(c)
+    arguments := text_argument(interface)
+    args := words([Int]{name})
+    loop b in arguments -> args.push(b)
+    put32(args, version)
+    put32(args, id)
+    request(c, c.registry, 0, args)
+    id
+}
+
+min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+
+event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env]> {
+    if body.len() < required_bytes(c, object, opcode) {
+        fail(c, UIError.Protocol("event {opcode} on object {object} is too short"))
+        return
+    }
+    if object == DISPLAY {
+        if opcode == 0 -> fail(c, UIError.Protocol("protocol error on object {u32_at(body, 0)}, code {u32_at(body, 4)}: {string_at(body, 8)}"))
+        return
+    }
+    if object == c.registry {
+        if opcode == 0 -> global(c, u32_at(body, 0), string_at(body, 4), u32_at(body, 8 + ((u32_at(body, 4) + 3) /% 4) * 4))
+        return
+    }
+    if object == c.sync_callback {
+        c.synced = true
+        return
+    }
+    if object == c.shm {
+        if opcode == 0 && u32_at(body, 0) == FORMAT_XBGR8888 -> c.format = sys.PixelFormat.XBGR8888
+        return
+    }
+    if object == c.output {
+        // mode: the current one's refresh, in mHz.
+        if opcode == 1 && u32_at(body, 0).bit_and(1) != 0 && i32_at(body, 12) > 0 -> c.output_refresh_ns = 1000000000000 /% i32_at(body, 12)
+        return
+    }
+    if object == c.presentation -> return
+    if pending_index(c, object) >= 0 {
+        // presented and discarded end a feedback object; sync_output does not.
+        if opcode == 1 -> presented(c, object, body)
+        if opcode == 2 -> c.discarded += 1
+        if opcode != 0 {
+            slot: pending_index(c, object)
+            _: c.pending.remove(slot, .Slot)
+        }
+        return
+    }
+    if object == c.wm_base {
+        // ping → pong
+        if opcode == 0 -> request(c, c.wm_base, 3, words([Int]{u32_at(body, 0)}))
+        return
+    }
+    if object == c.seat {
+        if opcode == 0 -> capabilities(c, u32_at(body, 0))
+        return
+    }
+    if object == c.toplevel {
+        if opcode == 0 {
+            c.pending_width = min_int(i32_at(body, 0), SIDE_MAX)
+            c.pending_height = min_int(i32_at(body, 4), SIDE_MAX)
+        }
+        if opcode == 1 -> c.events.push(UIEvent.Close)
+        return
+    }
+    if object == c.xdg_surface {
+        if opcode == 0 {
+            request(c, c.xdg_surface, 4, words([Int]{u32_at(body, 0)}))
+            c.configured = true
+        }
+        return
+    }
+    if object == c.frame_callback {
+        c.frame_callback = 0
+        c.frame_due = true
+        c.callback_at = core.time.__clock_mono_ns()
+        return
+    }
+    if object == c.keyboard {
+        keyboard(c, opcode, body)
+        return
+    }
+    if object == c.pointer {
+        pointer(c, opcode, body)
+        return
+    }
+    loop index in 0..<c.buffers.len() {
+        if c.buffers[index].id == object && opcode == 0 -> c.buffers[index].busy = false
+    }
+}
+
+// The fixed argument bytes each handled event carries, so a short event
+// fails instead of reading past its end.
+required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
+    if object == DISPLAY && opcode == 0 -> return 12
+    if object == c.registry && opcode == 0 -> return 12
+    if object == c.shm || object == c.wm_base || object == c.seat || object == c.xdg_surface || object == c.frame_callback -> return 4
+    if object == c.toplevel && opcode == 0 -> return 12
+    if object == c.output && opcode == 1 -> return 16
+    if opcode == 1 && pending_index(c, object) >= 0 -> return 28
+    if object == c.keyboard {
+        if opcode == 0 -> return 8
+        if opcode == 3 -> return 16
+        if opcode == 4 -> return 20
+    }
+    if object == c.pointer {
+        if opcode == 0 -> return 16
+        if opcode == 2 -> return 12
+        if opcode == 3 -> return 16
+        if opcode == 4 -> return 12
+    }
+    0
+}
+
+global: fn(&c: Connection, name: Int, interface: String, version: Int) {
+    if interface == "wl_compositor" && c.compositor == 0 -> c.compositor = bind(c, name, interface, min_int(version, 4))
+    if interface == "wl_shm" && c.shm == 0 -> c.shm = bind(c, name, interface, 1)
+    if interface == "xdg_wm_base" && c.wm_base == 0 -> c.wm_base = bind(c, name, interface, 1)
+    if interface == "wl_seat" && c.seat == 0 -> c.seat = bind(c, name, interface, min_int(version, 5))
+    if interface == "zxdg_decoration_manager_v1" && c.decoration_manager == 0 -> c.decoration_manager = bind(c, name, interface, 1)
+    if interface == "wl_output" && c.output == 0 -> c.output = bind(c, name, interface, min_int(version, 2))
+    if interface == "wp_presentation" && c.presentation == 0 -> c.presentation = bind(c, name, interface, 1)
+}
+
+pending_index: fn(c: Connection, object: Int) -> Int {
+    loop index in 0..<c.pending.len() {
+        if c.pending[index].id == object -> return index
+    }
+    -1
+}
+
+// wp_presentation_feedback.presented: when the frame reached the screen
+// (the presentation clock) and the refresh interval. It sets the vblank
+// grid frames aim at and the local clock's offset; a frame seen after
+// the vblank it aimed at is missed and widens the safety margin.
+// Intervals and input-to-photon latencies feed frame_stats.
+presented: fn(&c: Connection, object: Int, body: [U8]) -[Time]> {
+    stamp: ((u32_at(body, 0) << 32) + u32_at(body, 4)) * 1000000000 + u32_at(body, 8)
+    refresh: u32_at(body, 12)
+    if refresh > 0 -> c.refresh_ns = refresh
+    gap: core.time.__clock_mono_ns() - stamp
+    if !c.offset_known || gap < c.clock_offset {
+        c.clock_offset = gap
+        c.offset_known = true
+    }
+    local: stamp + c.clock_offset
+    if !c.vblank_known || local > c.vblank_ns {
+        c.vblank_ns = local
+        c.vblank_known = true
+    }
+    frame: c.pending[pending_index(c, object)]
+    interval: refresh_interval(c)
+    if interval > 0 {
+        // Refreshes this frame came after its target, counting from the
+        // vblank it was committed for.
+        late: (local - frame.target_ns + interval * 64 + interval /% 2) /% interval - 64
+        if !c.lag_known || late < c.lag {
+            c.lag = if late < 0 -> 0 else -> late
+            c.lag_known = true
+            c.late_run = 0
+        } else if late > c.lag {
+            // A compositor whose pipeline grew: adopt its new depth after
+            // a second of frames all later than the old one.
+            c.late_least = if c.late_run == 0 || late < c.late_least -> late else -> c.late_least
+            c.late_run += 1
+            if c.late_run * interval >= 1000000000 {
+                c.lag = c.late_least
+                c.late_run = 0
+            }
+        } else {
+            c.late_run = 0
+        }
+    }
+    if c.presented_abs > 0 {
+        between: stamp - c.presented_abs
+        keep(c.intervals, c.interval_at, between)
+        c.interval_at = (c.interval_at + 1) %% SAMPLES_KEPT
+        // A vblank passed with no new frame: missed, so commit earlier.
+        if frame.follows && interval > 0 && between > interval + interval /% 2 {
+            c.missed += (between + interval /% 2) /% interval - 1
+            c.safety_ns = min_int(safety(c) + interval /% 4, interval * 3 /% 4)
+        }
+    }
+    if frame.input_ms >= 0 {
+        // Input times are ms on the same clock, wrapped to 32 bits.
+        since: ((stamp /% 1000000) - frame.input_ms).bit_and(4294967295)
+        keep(c.latencies, c.latency_at, since * 1000000 + stamp %% 1000000)
+        c.latency_at = (c.latency_at + 1) %% SAMPLES_KEPT
+    }
+    c.presented_abs = stamp
+    c.presented += 1
+}
+
+keep: fn(&samples: [Int], at: Int, value: Int) {
+    if samples.len() < SAMPLES_KEPT -> samples.push(value) else -> samples[at] = value
+}
+
+capabilities: fn(&c: Connection, mask: Int) {
+    if mask.bit_and(1) != 0 && c.pointer == 0 {
+        c.pointer = new_id(c)
+        request(c, c.seat, 0, words([Int]{c.pointer}))
+    }
+    if mask.bit_and(2) != 0 && c.keyboard == 0 {
+        c.keyboard = new_id(c)
+        request(c, c.seat, 1, words([Int]{c.keyboard}))
+    }
+}
+
+keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env]> {
+    if opcode == 0 {
+        // keymap: its descriptor is the oldest one queued.
+        if c.inbox_fds.len() == 0 {
+            fail(c, UIError.Protocol("wl_keyboard.keymap arrived without its descriptor"))
+            return
+        }
+        _: c.inbox_fds.pop()
+        return
+    }
+    if opcode == 1 -> c.events.push(UIEvent.Focus(true))
+    if opcode == 2 {
+        c.modifiers = 0
+        c.events.push(UIEvent.Focus(false))
+    }
+    if opcode == 3 {
+        note_input(c, u32_at(body, 4))
+        code: u32_at(body, 8)
+        key: evdev_key(code)
+        if u32_at(body, 12) == 1 {
+            c.events.push(UIEvent.KeyDown(key))
+            typed: evdev_text(code, c.modifiers)
+            if typed != "" -> c.events.push(UIEvent.Text(typed))
+        } else {
+            c.events.push(UIEvent.KeyUp(key))
+        }
+    }
+    // modifiers: depressed | latched | locked.
+    if opcode == 4 -> c.modifiers = u32_at(body, 4).bit_or(u32_at(body, 8)).bit_or(u32_at(body, 12))
+}
+
+pointer: fn(&c: Connection, opcode: Int, body: [U8]) {
+    if opcode == 0 -> c.events.push(UIEvent.PointerMove{x: i32_at(body, 8) /% 256, y: i32_at(body, 12) /% 256})
+    if opcode == 2 {
+        note_input(c, u32_at(body, 0))
+        c.events.push(UIEvent.PointerMove{x: i32_at(body, 4) /% 256, y: i32_at(body, 8) /% 256})
+    }
+    if opcode == 3 {
+        note_input(c, u32_at(body, 4))
+        button: pointer_button(u32_at(body, 8))
+        if u32_at(body, 12) == 1 -> c.events.push(UIEvent.PointerDown(button)) else -> c.events.push(UIEvent.PointerUp(button))
+    }
+    if opcode == 4 {
+        note_input(c, u32_at(body, 0))
+        amount: Float{i32_at(body, 8)} / 256.0
+        if u32_at(body, 4) == 0 -> c.events.push(UIEvent.Scroll{dx: 0.0, dy: amount}) else -> c.events.push(UIEvent.Scroll{dx: amount, dy: 0.0})
+    }
+}
+
+// Notes an input event's time (ms on the compositor's clock) for the
+// input-to-photon latency of the frame that shows it.
+note_input: fn(&c: Connection, ms: Int) {
+    if c.input_ms < 0 -> c.input_ms = ms
+}
+
+// Linux BTN_LEFT, BTN_RIGHT and BTN_MIDDLE; other buttons keep their code.
+pointer_button: fn(code: Int) -> UIPointerButton {
+    if code == 272 -> return UIPointerButton.Left
+    if code == 273 -> return UIPointerButton.Right
+    if code == 274 -> return UIPointerButton.Middle
+    UIPointerButton.Other(code)
+}
+
+// ---- buffers ----------------------------------------------------------
+
+// BUFFER_COUNT width x height buffers in one new sealed pool, made once
+// per size; the old pool and buffers are destroyed (the compositor keeps
+// what is on screen).
+allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
+    w: if width < 1 -> 1 else -> min_int(width, SIDE_MAX)
+    h: if height < 1 -> 1 else -> min_int(height, SIDE_MAX)
+    loop buffer in c.buffers -> request(c, buffer.id, 0, [U8]{})
+    c.buffers = [Buffer]{}
+    if c.pool != 0 -> request(c, c.pool, 1, [U8]{})
+    c.pool = 0
+    frame_bytes: w * h * 4
+    pool_bytes: frame_bytes * BUFFER_COUNT
+    if pool_bytes > 1073741824 {
+        fail(c, UIError.Size("a {w}x{h} window needs more than 1 GiB of buffers"))
+        return
+    }
+    memory: sys.shared_memory(pool_bytes) ?? {
+        fail(c, UIError.Protocol("allocating window buffers failed: {err}"))
+        return
+    }
+    descriptor: memory.descriptor() ?? {
+        fail(c, UIError.Protocol("sharing window buffers failed: {err}"))
+        return
+    }
+    c.width = w
+    c.height = h
+    c.pool = new_id(c)
+    // wl_shm.create_pool(new_id, fd, size): the descriptor rides along.
+    request(c, c.shm, 0, words([Int]{c.pool, pool_bytes}))
+    c.out_fds.push(descriptor)
+    format: if c.format == .XBGR8888 -> FORMAT_XBGR8888 else -> FORMAT_XRGB8888
+    loop k in 0..<BUFFER_COUNT {
+        id: new_id(c)
+        request(c, c.pool, 0, words([Int]{id, k * frame_bytes, w, h, w * 4, format}))
+        c.buffers.push(Buffer{id: id, offset: k * frame_bytes, busy: false, stale_x0: 0, stale_y0: 0, stale_x1: w, stale_y1: h})
+    }
+    c.memory = memory
+    flush(c)
+}
+
+// ---- keys -------------------------------------------------------------
+
+// Linux evdev key codes on a US layout. The XKB keymap the compositor
+// sends replaces this table.
+evdev_key: fn(code: Int) -> Key {
+    if code == 1 -> return .Escape
+    if code == 14 -> return .Backspace
+    if code == 15 -> return .Tab
+    if code == 28 || code == 96 -> return .Enter
+    if code == 29 || code == 97 -> return .Control
+    if code == 42 || code == 54 -> return .Shift
+    if code == 56 || code == 100 -> return .Alt
+    if code == 57 -> return .Char(' ')
+    if code == 58 -> return .CapsLock
+    if code >= 59 && code <= 68 -> return .F(code - 58)
+    if code == 87 -> return .F(11)
+    if code == 88 -> return .F(12)
+    if code == 102 -> return .Home
+    if code == 103 -> return .Up
+    if code == 104 -> return .PageUp
+    if code == 105 -> return .Left
+    if code == 106 -> return .Right
+    if code == 107 -> return .End
+    if code == 108 -> return .Down
+    if code == 109 -> return .PageDown
+    if code == 110 -> return .Insert
+    if code == 111 -> return .Delete
+    if code == 125 || code == 126 -> return .Super
+    symbol: evdev_symbol(code, false).chars()
+    if symbol.len() == 1 -> return Key.Char(symbol[0])
+    Key.Unknown
+}
+
+// The text a key types: shifted when Shift (mask 1) is held, and letters
+// shifted by the Lock modifier (mask 2); nothing while Control (4) or Alt (8) is held.
+evdev_text: fn(code: Int, modifiers: Int) -> String {
+    if code == 57 -> return " "
+    if modifiers.bit_and(12) != 0 -> return ""
+    plain: evdev_symbol(code, false)
+    shift: modifiers.bit_and(1) != 0
+    letter: plain.len() == 1 && plain >= "a" && plain <= "z"
+    upper: if letter -> shift != (modifiers.bit_and(2) != 0) else -> shift
+    evdev_symbol(code, upper)
+}
+
+US_ROWS: [String]{"1234567890-=", "qwertyuiop[]", "asdfghjkl;'`", "\\zxcvbnm,./"}
+US_SHIFTED_ROWS: [String]{"!@#$%^&*()_+", "QWERTYUIOP{{}}", "ASDFGHJKL:\"~", "|ZXCVBNM<>?"}
+US_ROW_STARTS: [Int]{2, 16, 30, 43}
+
+evdev_symbol: fn(code: Int, shifted: Bool) -> String {
+    loop row in 0..<4 {
+        start: US_ROW_STARTS[row]
+        text: if shifted -> US_SHIFTED_ROWS[row] else -> US_ROWS[row]
+        bytes: text.bytes()
+        if code >= start && code < start + bytes.len() -> return String.from_bytes(bytes[(code - start)..<(code - start + 1)]) ?? ""
+    }
+    ""
+}

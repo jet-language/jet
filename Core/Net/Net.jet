@@ -9,7 +9,10 @@ package: {
     }
 }
 
-use core: core
+use {
+    core: core
+    sys: core.sys
+}
 
 // core.net — blocking sockets and name resolution.
 //
@@ -467,6 +470,53 @@ unix_read_bytes: fn(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetErro
 
 unix_write_all_bytes: fn(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     core.net.__unix_write_all_bytes(stream, bytes)
+}
+
+// One received Unix-socket message: its bytes and the descriptors that rode
+// with them, each owned by the receiver and closed when dropped. Empty bytes
+// and no descriptors mean the peer closed the stream.
+UnixMessage: struct {
+    bytes: [U8]
+    fds: [sys.Fd]
+}
+
+// Sends every byte with `fds` attached (SCM_RIGHTS) to the first byte the
+// peer reads; the peer receives its own copies, so `fds` stay open here.
+// Descriptors need at least one byte to ride with; at most 253 per send.
+unix_send: fn(&stream: UnixStream, bytes: [U8], fds: [sys.Fd]) NetError! -[Net, Time.Wait]> {
+    if bytes.len() == 0 -> return Err(net_err("unix_send", "", "a send needs at least one byte"))
+    if fds.len() > 253 -> return Err(net_err("unix_send", "", "a send carries at most 253 descriptors"))
+    tokens := [Int]{}
+    loop fd in fds { tokens.push(sys.__fd_token(fd)) }
+    core.net.__unix_send_fds_raw(stream, bytes, tokens)
+}
+
+// At most `max` bytes, 1 B to 16 MiB, from one message, with any descriptors
+// it carried. A message whose descriptors did not all arrive fails with
+// `.Protocol`, and the ones that did are closed.
+unix_receive: fn(&stream: UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage NetError! {
+    if max < 1 || max > 16777216 -> return Err(net_err("unix_receive", "", "a receive takes 1 to 16777216 bytes"))
+    packed: core.net.__unix_receive_fds_raw(stream, max)
+    if packed.len() == 0 -> return Ok(UnixMessage{bytes: [U8]{}, fds: [sys.Fd]{}})
+    // The leaf appends each descriptor's token as eight little-endian bytes
+    // and then one byte counting them.
+    count: Int.from_u8(packed[packed.len() - 1])
+    end: packed.len() - 1 - count * 8
+    fds := [sys.Fd]{}
+    loop index in 0..<count {
+        token := 0
+        loop byte in 0..<8 { token = token * 256 + Int.from_u8(packed[end + index * 8 + 7 - byte]) }
+        fds.push(sys.__fd_adopt(token))
+    }
+    Ok(UnixMessage{bytes: packed[0..<end].copy(), fds: fds})
+}
+
+// Waits on the calling thread until `stream` has bytes, descriptors or a
+// hang-up to read: true then, false once `timeout_ns` nanoseconds pass
+// (negative: wait without limit). Interrupted waits resume with the time left.
+unix_wait: fn(&stream: UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetError! {
+    ready: core.net.__unix_wait_raw(stream, timeout_ns)
+    Ok(ready != 0)
 }
 
 unix_shutdown: fn(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {

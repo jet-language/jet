@@ -6553,140 +6553,140 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 423,
+      "line": 424,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 592,
+      "line": 593,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 598,
+      "line": 599,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 603,
+      "line": 604,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 610,
+      "line": 611,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 614,
+      "line": 615,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 621,
+      "line": 622,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 631,
+      "line": 632,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 637,
+      "line": 638,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 652,
+      "line": 772,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 657,
+      "line": 777,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 661,
+      "line": 781,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 665,
+      "line": 785,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 671,
+      "line": 791,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 677,
+      "line": 797,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 681,
+      "line": 801,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 685,
+      "line": 805,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 689,
+      "line": 809,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 693,
+      "line": 813,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 697,
+      "line": 817,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -6728,49 +6728,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 159,
+      "line": 160,
       "column": 5,
       "reason": "Core UI text input: the provider sets the explicitly requested IME slot"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 196,
+      "line": 197,
       "column": 5,
       "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 201,
+      "line": 202,
       "column": 5,
       "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 206,
+      "line": 207,
       "column": 5,
       "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 217,
+      "line": 218,
       "column": 5,
       "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 234,
+      "line": 235,
       "column": 5,
       "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 261,
+      "line": 262,
       "column": 5,
       "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
     },
@@ -11094,38 +11094,38 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 423:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 592:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 598:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 603:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 610:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 614:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 621:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 631:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 637:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 652:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 657:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 661:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 665:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 671:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 677:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 681:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 685:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 689:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 693:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 697:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 424:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 593:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 599:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 604:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 611:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 615:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 622:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 632:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 638:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 772:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 777:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 781:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 785:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 791:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 797:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 801:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 805:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 809:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 813:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 817:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1355:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1376:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Core | Core/Tui/Tui.jet | 656:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
-| Core | Core/Ui/Ui.jet | 159:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
-| Core | Core/Ui/Ui.jet | 196:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 201:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 206:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 217:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/Ui/Ui.jet | 234:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/Ui/Ui.jet | 261:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
+| Core | Core/Ui/Ui.jet | 160:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
+| Core | Core/Ui/Ui.jet | 197:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 202:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 207:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 218:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| Core | Core/Ui/Ui.jet | 235:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| Core | Core/Ui/Ui.jet | 262:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
 | Core | Core/Vendor/Sqlite3/Fixture/run.jet | 19:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |

@@ -83,7 +83,11 @@ Stderr: struct {
     }
 }
 
-// The one `Key` value `read_key()` answers on every tier.
+// The one `Key` value, for `read_key()` and for native windows' key events
+// (core.ui): `Char` holds the key's character, `F(n)` the function key n.
+// A terminal reports `Ctrl(c)` for a control chord; a window reports the
+// Control key itself and its modifier state instead. `Insert`, the
+// navigation keys and the modifier keys come from windows only.
 Key: enum {
     Char(Char)
     Enter
@@ -91,10 +95,20 @@ Key: enum {
     Backspace
     Tab
     Delete
+    Insert
     Up
     Down
     Left
     Right
+    Home
+    End
+    PageUp
+    PageDown
+    Shift
+    Control
+    Alt
+    Super
+    CapsLock
     F(Int)
     Ctrl(Char)
     Unknown

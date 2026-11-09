@@ -11,6 +11,7 @@ package: {
 use {
     core: core
     tui_text: core.tui
+    core.term.[Key]
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -272,6 +273,79 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
         }
     }
     Ok(UIPreviewRegistry{entries: entries})
+}
+
+// ---- windows ----------------------------------------------------------
+//
+// The values a native window trades with its program: the events a frame
+// carries, the window layer's errors, damage rectangles and presentation
+// timing. The display server comes from the environment: $WAYLAND_DISPLAY.
+
+#Error
+UIError: enum {
+    // The environment names no display server.
+    NoDisplay
+    // The display server could not be reached.
+    Connect(String)
+    // The display server broke or refused the protocol.
+    Protocol(String)
+    // The display server lacks something a window needs.
+    Unsupported(String)
+    // A window size or pixel buffer is out of range.
+    Size(String)
+}
+
+UIPointerButton: enum {
+    Left
+    Right
+    Middle
+    Other(Int)
+}
+
+// What happened since the previous frame. Positions are window pixels
+// from the top-left; `Text` is what a key press typed; `Close` asks the
+// program to close the window and ends the frames.
+UIEvent: enum {
+    KeyDown(Key)
+    KeyUp(Key)
+    Text(String)
+    PointerMove(x: Int, y: Int)
+    PointerDown(UIPointerButton)
+    PointerUp(UIPointerButton)
+    Scroll(dx: Float, dy: Float)
+    Resize(width: Int, height: Int)
+    Focus(Bool)
+    Close
+}
+
+// A rectangle of window pixels: `x`, `y` from the top-left.
+UIRect: struct {
+    x: Int
+    y: Int
+    width: Int
+    height: Int
+}
+
+// How evenly frames reached the screen and how fast input showed.
+// `presented` frames were shown; `missed` counts refreshes frames were
+// late by against the vblank they aimed at; `discarded` frames were never
+// shown (a hidden window). Intervals run present to present; input
+// latency runs from an input event to the frame that showed it reaching
+// the screen (ms resolution: input times are whole ms). All times are
+// nanoseconds.
+FrameStats: struct {
+    presented: Int
+    missed: Int
+    discarded: Int
+    refresh_ns: Int
+    median_ns: Int
+    p99_ns: Int
+    input_samples: Int
+    input_median_ns: Int
+    input_p99_ns: Int
+    // Present-to-present intervals by refreshes spanned: [0] one
+    // refresh (every vblank), [1] two, [2] three, [3] four or more.
+    spans: [Int]
 }
 
 #Test("UI aria role constructors") {

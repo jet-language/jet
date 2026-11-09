@@ -1916,8 +1916,12 @@ run: fn() {
 
 `style` is a no-op when output is not a TTY unless `style_force` is used.
 `Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
-are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
-`Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
+are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, `Insert`, the four arrow
+keys, `Home`, `End`, `PageUp`, `PageDown`, the modifier keys `Shift`, `Control`,
+`Alt`, `Super` and `CapsLock`, and `Unknown`. `read_key` reports a control chord
+as `Ctrl(c)` and never reports `Insert`, `Home`, `End`, `PageUp`, `PageDown` or
+a modifier key; those come from a window's `UIEvent.KeyDown`/`KeyUp` (core.ui).
+`confirm` treats a bare Enter as no; `choose` returns an input error
 after its finite retry budget or when stdin closes.
 
 Read a buffered handle with `reader.read_line()`: each call mutably lends
@@ -2105,6 +2109,18 @@ run: fn() {
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
+
+Descriptors and shared memory are owned values: no descriptor number or
+address reaches Jet code, every descriptor is close-on-exec, and each closes
+exactly once when its owner is dropped.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `shared_memory(size)` | `SharedMemory !IOError -[Env]>` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
+| `SharedMemory.write(offset, bytes)` / `.read(offset, count)` / `.len()` | `!IOError -[Env]>` / `[U8] !IOError -[Env]>` / `Int` | Copy bytes in or out within bounds. |
+| `SharedMemory.write_pixels(offset, rgba, stride, x, y, width, height, format)` | `!IOError -[Env]>` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
+| `SharedMemory.descriptor()` | `Fd !IOError -[Env]>` | A new descriptor for the memory, to pass to another process. |
+| `Fd.read_at(offset, max)` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read a received descriptor's file without mapping it (`pread`), size it, or own a second descriptor for it. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -4150,6 +4166,21 @@ Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.
 
+#### Native windows
+
+These are the values a native window trades with its program. Core speaks the
+display server's wire protocol itself: Wayland, picked from `$WAYLAND_DISPLAY`,
+in the private part [`Core/Ui/Wayland.jet`](../../../Core/Ui/Wayland.jet). It
+uses no C library.
+
+| Type | Description |
+|---|---|
+| `UIEvent` | Input a frame carries: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)`, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)`, `Resize(width:, height:)`, `Focus(Bool)`, `Close`. Positions are window pixels from the top-left. |
+| `UIPointerButton` | `Left`, `Right`, `Middle`, or `Other(Int)` with the evdev button code. |
+| `UIError` | `.NoDisplay` when the environment names no display server, `.Connect` / `.Protocol` / `.Unsupported` when it fails, `.Size` for a size or pixel buffer out of range. |
+| `UIRect` | A damage rectangle of window pixels: `x`, `y` from the top-left, `width`, `height`. |
+| `FrameStats` | Presentation timing: `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
+
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
@@ -4765,6 +4796,9 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
+| `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit !NetError` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
+| `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage !NetError` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
+| `unix_wait(&stream, timeout_ns: Int) -[Net, Time.Wait]> Bool !NetError` | ready | Wait on the calling thread until the stream has something to read (true) or `timeout_ns` passes (false); a negative timeout waits without limit. Interrupted waits resume with the time left. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
