@@ -216,10 +216,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Compiler": 748,
     "Core": 191,
     "Docs": 8,
-    "Examples": 39,
+    "Examples": 40,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 426
+    "tests": 427
   },
   "regions": [
     {
@@ -7035,6 +7035,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Examples",
+      "file": "Examples/Systems/Process/OSCpuTime.jet",
+      "line": 34,
+      "column": 5,
+      "reason": "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel"
+    },
+    {
+      "package": "Examples",
       "file": "Examples/Systems/Process/OSMknod.jet",
       "line": 29,
       "column": 5,
@@ -9583,6 +9590,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/set_wall_clock.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "a time before 1970 is refused before it reaches the kernel, so the clock never changes"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/sys/setgid.jet",
       "line": 5,
       "column": 5,
@@ -10229,7 +10243,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | 748 |
 | Core | 191 |
 | Docs | 8 |
-| Examples | 39 |
+| Examples | 40 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
@@ -11212,6 +11226,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
+| Examples | Examples/Systems/Process/OSCpuTime.jet | 34:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
 | Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/OSScheduling.jet | 26:5 | "posix set_scheduling: the out-of-range priority never reaches the kernel" |
@@ -11576,6 +11591,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
 | tests | tests/conformance/corpus/core/sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
 | tests | tests/conformance/corpus/core/sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
+| tests | tests/conformance/corpus/core/sys/set_wall_clock.jet | 8:5 | "a time before 1970 is refused before it reaches the kernel, so the clock never changes" |
 | tests | tests/conformance/corpus/core/sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
 | tests | tests/conformance/corpus/core/sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |
 | tests | tests/conformance/corpus/core/sys/setpgrp.jet | 5:5 | "set the current process group" |

@@ -56,6 +56,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Process
 
 - [EnvOverlay](Process/EnvOverlay.jet)
+- [OSCpuTime](Process/OSCpuTime.jet) — `core.sys.cpu_time` reads the CPU time of any process; `set_wall_clock` sets the machine's wall clock under `#Unsafe`, which needs privilege.
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
 - [OSLockMemory](Process/OSLockMemory.jet) — `core.sys.lock_memory` keeps the program's pages in RAM (mlockall) until it ends; without privilege the locked-memory limit may refuse it.
 - [OSMknod](Process/OSMknod.jet) — `core.sys.mknod` makes a character or block device file under `#Unsafe`; only a privileged process may.

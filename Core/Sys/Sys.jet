@@ -619,6 +619,39 @@ round_robin_interval: fn(pid: Int{0}) -[Env]> Duration IOError! {
     Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("round_robin_interval"), "the slice is outside Duration's range")))
 }
 
+/// The CPU time process `pid` has used, this program when 0: the user and
+/// system time of all its threads together, as `usage` splits it for this
+/// program. No such process (or a pid that names a thread rather than a
+/// process) is `IOError.NotFound`.
+cpu_time: fn(pid: Int{0}) -[Env]> Duration IOError! {
+    if pid < 0 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val("cpu_time"), os_code: None, cause: Val("pid {pid} is negative")}))
+    }
+    // No Linux pid exceeds PID_MAX_LIMIT (4194304), so a larger one names no
+    // process; the bound also keeps the kernel's clock id from wrapping.
+    if pid > 4194304 -> return Err(process_error(.Read, "cpu_time", 3))
+    row: core.sys.__cpu_clock(pid)
+    if !row.available -> return Err(unsupported("cpu_time"))
+    if row.errno != 0 -> return Err(process_error(.Read, "cpu_time", row.errno))
+    Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("cpu_time"), "the CPU time is outside Duration's range")))
+}
+
+/// Set the machine's wall clock (CLOCK_REALTIME) to `time`. `core.time.now`
+/// jumps in every process; `core.time.instant` and stopwatches do not, since
+/// they read the monotonic clock. Setting needs CAP_SYS_TIME, otherwise it is
+/// `IOError.PermissionDenied`. A time before 1970 is `IOError.InvalidInput`.
+#Unsafe("posix set_wall_clock: the caller owns the machine's wall clock, which every process reads") set_wall_clock: fn(time: DateTime) IOError! -[Env]> {
+    ns: time.to_unix_ns() ?? -1
+    if ns < 0 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val("set_wall_clock"), os_code: None,
+            cause: Val("{time.format_rfc3339()} is before 1970 or past the Unix nanosecond range")}))
+    }
+    row: core.sys.__clock_set(ns)
+    if !row.available -> return Err(unsupported("set_wall_clock"))
+    if row.errno != 0 -> return Err(limit_error(.Write, "set_wall_clock", row.errno))
+    Ok(())
+}
+
 // The IOError of a call that names a process: not part of the sys surface.
 priv process_errors: module {
     // ESRCH (no such process) is NotFound, and EPERM and EINVAL get their own
