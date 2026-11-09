@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98100,
+    "rev": 98125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24122,6 +24122,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:16:07.154Z"
+        },
+        {
+          "n": 140,
+          "text": "Inlined x64 refcount release honors the process-exit flag, so drop walks do not run at exit: an A/B on an exit-heavy program shows the walk skipped and the exit time reduced, with identical output on O0, O1 and O2 (was #5014 c5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:47:59.425Z"
+        },
+        {
+          "n": 141,
+          "text": "(was #6355) The checked raw-pointer read finds its allocation in constant or logarithmic time without a global lock on the read path, keeping every check it makes today; the probe's raw-read kernel is within 1.5x of the list kernel at o2, and the out-of-bounds and use-after-free reports are byte-identical. (was #5014 c9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:48:03.714Z"
+        },
+        {
+          "n": 142,
+          "text": "(was #6418 c96) Safe-Jet-only programs show zero measurable overhead under --profile=hardened against the normal profile, with the gauntlet method.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:48:09.895Z"
         }
       ],
       "refs": [],
@@ -24137,7 +24164,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-09T20:16:07.154Z",
+      "updated": "2026-11-09T20:48:09.895Z",
       "updatedBy": "Main",
       "probe": null,
       "claimedAt": "2026-11-08T13:19:43.795Z",
@@ -24145,7 +24172,7 @@
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 139
+      "criteriaLastN": 142
     },
     {
       "id": "c0pr2dsz",
@@ -30150,15 +30177,6 @@
           "at": "2026-10-31T01:29:36.332Z"
         },
         {
-          "n": 49,
-          "text": "(was #3000) [#4176] jet test/dev report live allocations, unreleased foreign handles and Shared cycles with their sites on every level. Release builds carry no tracking.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:29:50.186Z"
-        },
-        {
           "n": 50,
           "text": "(was #6013) The restart policy of #1076 (limit, window, backoff) works for services on the self-hosted toolchain; its Rust-era acceptance tests are ported and pass.",
           "status": "open",
@@ -30304,7 +30322,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-09T20:47:11.717Z",
+      "updated": "2026-11-09T20:48:26.957Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -39861,6 +39879,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:46:12.315Z"
+        },
+        {
+          "n": 15,
+          "text": "ProcessSpec.keep_open uses one Core body over the approved union parameter, with no JetSema routing by probed handle type and no per-type core.files.__keep_open_{reader,writer,directory} bodies. (was #6677 c3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:48:13.024Z"
         }
       ],
       "refs": [
@@ -39878,12 +39905,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-09T20:46:12.315Z",
+      "updated": "2026-11-09T20:48:13.024Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0692z4s",
@@ -40432,12 +40459,12 @@
         },
         {
           "n": 2,
-          "text": "F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary; a UI snapshot and cases on O0, O1 and O2 prove it.",
+          "text": "F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary. Proof: a tests/cases row reports E1102 on the generic `spawn_with(c)` program (spawn_with takes `&&`) under jet check, and `jet run` on it exits with the same diagnostic (no output `1`), on O0, O1 and O2 (was c5; tests/ui/generic_task_sendability is not on dev).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:39.650Z"
+          "at": "2026-11-09T20:48:30.017Z"
         },
         {
           "n": 4,
@@ -40447,15 +40474,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-09-28T00:47:01.935Z"
-        },
-        {
-          "n": 5,
-          "text": "F1 regression: the tests/ui/generic_task_sendability UI snapshot reports E1102 on the generic `spawn_with(c)` program (spawn_with takes `&&`), and `jet run` on it exits with the same diagnostic (no output `1`).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:41.309Z"
         },
         {
           "n": 6,
@@ -40511,7 +40529,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-09T20:44:17.523Z",
+      "updated": "2026-11-09T20:48:32.806Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -45152,24 +45170,6 @@
           "at": "2026-11-07T03:07:56.387Z"
         },
         {
-          "n": 48,
-          "text": "(was #3309 c2) Keep credentials out of diagnostics and do not add ambient file discovery or network authentication as a parsing side effect [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:56.794Z"
-        },
-        {
-          "n": 49,
-          "text": "(was #3309 c3) A new stock netrc API or credential data model needs an independent complete ballot after current auth-type evidence [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:57.509Z"
-        },
-        {
           "n": 50,
           "text": "D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem.Alloc` stays plain and `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate, through every callee; manifests write `deny: [Mem.Alloc(above: 65536)]`. Proof: a golden passes under the bound and a UI snapshot shows the refusal naming the call path, on O0, O1 and O2. (was #3239 c35)",
           "status": "open",
@@ -45190,7 +45190,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-09T20:47:42.348Z",
+      "updated": "2026-11-09T20:47:49.765Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -47957,15 +47957,6 @@
           "at": "2026-10-04T18:45:36.659Z"
         },
         {
-          "n": 2,
-          "text": "(was #4596) Parser reads `[Int?].filled(3, None)` as a list literal (reports E-ERR-PROPAGATE)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:01:27.401Z"
-        },
-        {
           "n": 3,
           "text": "(was #4971) Jet parser has no `alias.Ptr<T>.from_addr(addr)` form (Expr.PtrFromAddr); restore Core mem.from_addr",
           "status": "met",
@@ -47992,11 +47983,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-07T03:24:24.601Z",
+      "updated": "2026-11-09T20:47:53.012Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 4
     },
     {
       "id": "c0p6h37r",
@@ -50360,15 +50352,6 @@
           "at": "2026-11-04T23:44:27.551Z"
         },
         {
-          "n": 11,
-          "text": "(was #2790 c1) Implementation-only closure: mapped files use the existing read-only view ownership mechanism, return checked view-shaped types through nested Option/Result/Shared carriers, root every borrowed result in the receiver mapping, and route O0, O1, O2 and web where applicable behavior through the same mmap Prelude kernels [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:44:28.225Z"
-        },
-        {
           "n": 12,
           "text": "(was #2993 c1) Fresh compilation reaches the intended removed-ID access rather than exit 101 in IR verification.",
           "status": "open",
@@ -50421,7 +50404,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-09T20:44:37.173Z",
+      "updated": "2026-11-09T20:47:56.743Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -56112,6 +56095,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:27:48.242Z"
+        },
+        {
+          "n": 3,
+          "text": "D-TAKE-REPLACE1=A, extended by D-WRITE-TAKE1=A (ratified 2026-11-04): core.mem has swap<T> and replace<T> (-[!Panic]>), named by the prelude with no import, while a user swap or replace still wins; List and Map gain swap. Sema tracks each moved-out gap behind E0121: an exit or a call that can stop inside a gap is E0201, and its fix offers swap or replace. IR moves the value back on every stop path inside a gap. An example with goldens on o0, o1 and o2, and UI snapshots for E0201 (was #6066 c14)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:48:36.922Z"
         }
       ],
       "refs": [],
@@ -56125,12 +56117,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-07T03:27:48.242Z",
+      "updated": "2026-11-09T20:48:36.922Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0xgg9f1",
@@ -57366,15 +57358,6 @@
           "at": "2026-10-28T20:20:06.889Z"
         },
         {
-          "n": 5,
-          "text": "(was #5890) Inlined x64 refcount release ignores the process-exit flag, so drop walks still run at exit: the inlined path skips the walk at exit; an A/B on an exit-heavy",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:59:49.055Z"
-        },
-        {
           "n": 6,
           "text": "(was #5922) Runtime witnesses can't see jet_rt_free calls made inside the runtime object (--wrap misses direct-patched calls): root cause named; the witness passes; a regression case.",
           "status": "open",
@@ -57400,15 +57383,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:25:30.957Z"
-        },
-        {
-          "n": 9,
-          "text": "(was #6355) The checked raw-pointer read finds its allocation in constant or logarithmic time without a global lock on the read path, keeping every check it makes today; the probe's raw-read kernel is within 1.5x of the list kernel at o2, and the out-of-bounds and use-after-free reports are byte-identical.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:34.933Z"
         },
         {
           "n": 10,
@@ -57508,7 +57482,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-09T20:44:51.390Z",
+      "updated": "2026-11-09T20:48:04.817Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -57628,6 +57602,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G6: D-JAI-EXPERT1=A is the Meta effect family, metaprogramming beside #5021 (Jai parity). c1 names its proof."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #8: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -57659,10 +57638,10 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-09T20:44:53.640Z",
+      "updated": "2026-11-09T20:48:19.060Z",
       "updatedBy": "Main",
       "goals": [
-        "G10"
+        "G6"
       ]
     },
     {
@@ -65738,6 +65717,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:47:44.801Z"
+        },
+        {
+          "n": 108,
+          "text": "(was #3309 c3) A new stock netrc API or credential data model needs an independent complete ballot after current auth-type evidence [precut audit: no dev test, golden, case or snapshot proves this today] (was #4268 c49)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:47:48.759Z"
         }
       ],
       "refs": [],
@@ -65748,12 +65736,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-09T20:47:44.802Z",
+      "updated": "2026-11-09T20:47:48.759Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 107
+      "criteriaLastN": 108
     },
     {
       "id": "c0h4r83r",
@@ -68568,6 +68556,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:44:42.183Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #1888 c2) A program with a deliberately wrong #Unsafe region passes the normal profile and is caught with an actionable report under the hardened profile. Proof: tests/cases/cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region (known-failing on dev under #6418: `jet test --profile hardened` is E2104; its ledger row moves to #6011) (was #6418 c96)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:48:07.042Z"
         }
       ],
       "refs": [
@@ -68585,12 +68582,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-09T20:44:45.582Z",
+      "updated": "2026-11-09T20:48:07.042Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c09f1iks",
@@ -78213,6 +78210,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:45:56.425Z"
+        },
+        {
+          "n": 131,
+          "text": "The parser reads `[Int?].filled(3, None)` as a call on the list type, not a list literal (today it reports E-ERR-PROPAGATE). Proof: a tests/cases row runs it on O0, O1 and O2. (was #4500 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:47:51.895Z"
         }
       ],
       "refs": [],
@@ -78223,9 +78229,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-09T20:45:56.425Z",
+      "updated": "2026-11-09T20:47:51.895Z",
       "updatedBy": "Main",
-      "criteriaLastN": 130
+      "criteriaLastN": 131
     },
     {
       "id": "c0kyjdtx",
@@ -79873,6 +79879,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G10: zero undefined behavior is soundness. c9 gained #5014 c8 (D-G10-4)."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Merged #4726 \"Defined-behavior ledger: one spec table of every operation's result on every tier, with one conformance test per row\" into this card (zero undefined behavior with one defined-behavior table); its 5 open item(s) are carried as \"(was #4726)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
@@ -79968,11 +79979,13 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G10"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-05T14:36:19.384Z",
+      "updated": "2026-11-09T20:48:22.876Z",
       "updatedBy": "Main"
     },
     {
@@ -83722,15 +83735,6 @@
           "at": "2026-11-06T20:53:34.695Z"
         },
         {
-          "n": 96,
-          "text": "(was #1888 c2) Post-ratification: a program with a deliberately wrong #Unsafe region passes the normal profile and is caught with an actionable report under the hardened profile; safe-Jet-only programs show zero measurable overhead in either profile [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region KNOWN-FAILING #6418 `jet test --profile hardened` is not built yet (E2104), and `--profile=release` still runs the dev lifetime sentry (R0802); pointer spelling (known-failing #6418: `jet test…]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:33:03.634Z"
-        },
-        {
           "n": 97,
           "text": "(was #2119 c4) The vocabulary does not overload the existing meaning of hole in E3011, E2902 or D-TOOL2 [precut audit: failing on 9c7ddf1359: C:todo_fill/check_reports_goal_and_fill_only_offers_checked_candidates FAIL stream predicate ~ failed]",
           "status": "met",
@@ -84098,7 +84102,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-09T19:25:15.434Z",
+      "updated": "2026-11-09T20:48:08.089Z",
       "updatedBy": "Main",
       "criteriaLastN": 146
     },
@@ -91218,12 +91222,12 @@
         },
         {
           "n": 7,
-          "text": "A runtime leak and double-drop witness proves leak freedom per program: today JET_MEMORY_LEDGER records only unsafe sentry events (not leaks or double drops), and the counting allocator cap does not trip on String allocations (a 32 MB copy ran under a 48 MB cap; found by CoreCliLead-2 on #6677). A safe-Jet program run under the witness reports live allocations at exit = 0 and any double drop as a failure, on O0, O1 and O2.",
+          "text": "A runtime leak and double-drop witness proves leak freedom per program: today JET_MEMORY_LEDGER records only unsafe sentry events (not leaks or double drops), and the counting allocator cap does not trip on String allocations (a 32 MB copy ran under a 48 MB cap; found by CoreCliLead-2 on #6677). A safe-Jet program run under the witness reports live allocations at exit = 0 and any double drop as a failure, on O0, O1 and O2. jet test and jet dev print the same witness: live allocations, unreleased foreign handles and Shared cycles with their sites on every level; release builds carry no tracking (was #3239 c49).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T19:01:32.137Z"
+          "at": "2026-11-09T20:48:25.019Z"
         }
       ],
       "refs": [],
@@ -91234,7 +91238,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-07T19:01:32.137Z",
+      "updated": "2026-11-09T20:48:25.019Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -98561,15 +98565,6 @@
           "at": "2026-11-07T19:53:55.048Z"
         },
         {
-          "n": 3,
-          "text": "ProcessSpec.keep_open uses one Core body over the approved union parameter, with no JetSema routing by probed handle type and no per-type core.files.__keep_open_{reader,writer,directory} bodies.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T18:37:00.294Z"
-        },
-        {
           "n": 4,
           "text": "The same lend applies to ir_trait_box: a borrowed handle boxed into a trait object for a call is lent, not moved (sibling found while fixing #6677), with a row proving a borrowed Directory passed twice to a trait-typed parameter stays open.",
           "status": "met",
@@ -98594,7 +98589,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-08T14:37:40.469Z",
+      "updated": "2026-11-09T20:48:14.197Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -101000,6 +100995,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T21:18:50.483Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #2790 c1) Implementation-only closure: mapped files use the existing read-only view ownership mechanism, return checked view-shaped types through nested Option/Result/Shared carriers, root every borrowed result in the receiver mapping, and route O0, O1, O2 and web where applicable behavior through the same mmap Prelude kernels [precut audit: no dev test, golden, case or snapshot proves this today] (was #4620 c11)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:47:55.603Z"
         }
       ],
       "refs": [],
@@ -101010,8 +101014,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-08T21:18:50.483Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T20:47:55.604Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     },
     {
       "id": "c09yzxgv",
@@ -193397,6 +193402,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:48:36.922Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01sunrb",
+      "note": "#3 D-TAKE-REPLACE1=A, extended by D-WRITE-TAKE1=A (ratified 202"
+    },
+    {
+      "at": "2026-11-09T20:48:32.806Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0tgtjtu",
+      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged into c2 (D-G10-2).; was [open]: F1 regression: the tests/ui/generic_task_sendability UI snapshot reports E1102 on the generic `spawn_with(c)` program (spawn_with takes `&&`), and `jet run` on it exits with the same diagnostic (no ou"
+    },
+    {
+      "at": "2026-11-09T20:48:30.017Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged c5 (its proof) into this row (D-G10-2).; was: F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary; a UI snapshot and cases on O0, O1 and O2 prove it."
+    },
+    {
+      "at": "2026-11-09T20:48:26.957Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#49: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged into #6567 c7 (D-G10-1).; was [open]: (was #3000) [#4176] jet test/dev report live allocations, unreleased foreign handles and Shared cycles with their sites on every level. Release builds carry no tracking."
+    },
+    {
+      "at": "2026-11-09T20:48:25.019Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#7: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged #3239 c49 (the jet test and jet dev report) into this row (D-G10-1).; was: A runtime leak and double-drop witness proves leak freedom per program: today JET_MEMORY_LEDGER records only unsafe sentry events (not leaks or double drops), and the counting allocator cap does not t"
+    },
+    {
+      "at": "2026-11-09T20:48:22.876Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sg79an",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:48:21.346Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sg79an",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T20:48:19.060Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04pd50v",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:48:17.188Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04pd50v",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T20:48:14.197Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fs42sy",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3594: ProcessSpec.keep_open is core.process (G3); the I1 soundness fix on this card is met.; was [open]: ProcessSpec.keep_open uses one Core body over the approved union parameter, with no JetSema routing by probed handle type and no per-type core.files.__keep_open_{reader,writer,directory} bodies."
+    },
+    {
+      "at": "2026-11-09T20:48:13.024Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#15 ProcessSpec.keep_open uses one Core body over the approved u"
+    },
+    {
+      "at": "2026-11-09T20:48:09.895Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hs3czc",
+      "note": "#142 (was #6418 c96) Safe-Jet-only programs show zero measurable "
+    },
+    {
+      "at": "2026-11-09T20:48:08.089Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0hn7w1n",
+      "note": "#96: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6011 with corrected text: the hardened profile is #6011 (D-MEM-HARDEN1); the zero-overhead clause is G11 #2858.; was [open]: (was #1888 c2) Post-ratification: a program with a deliberately wrong #Unsafe region passes the normal profile and is caught with an actionable report under the hardened profile; safe-Jet-only program"
+    },
+    {
+      "at": "2026-11-09T20:48:07.042Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bmxzrb",
+      "note": "#5 (was #1888 c2) A program with a deliberately wrong #Unsafe r"
+    },
+    {
+      "at": "2026-11-09T20:48:04.817Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0mj3ijb",
+      "note": "#9: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858: the raw-read lookup speed is G11 (2026-11-09 order); its report-identity clause travels with it.; was [open]: (was #6355) The checked raw-pointer read finds its allocation in constant or logarithmic time without a global lock on the read path, keeping every check it makes today; the probe's raw-read kernel is"
+    },
+    {
+      "at": "2026-11-09T20:48:03.714Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hs3czc",
+      "note": "#141 (was #6355) The checked raw-pointer read finds its allocatio"
+    },
+    {
+      "at": "2026-11-09T20:48:00.615Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0mj3ijb",
+      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 with corrected text: speed is G11 (2026-11-09 order); the row was cut off on Tower at \"exit-heavy\".; was [open]: (was #5890) Inlined x64 refcount release ignores the process-exit flag, so drop walks still run at exit: the inlined path skips the walk at exit; an A/B on an exit-heavy"
+    },
+    {
+      "at": "2026-11-09T20:47:59.425Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hs3czc",
+      "note": "#140 Inlined x64 refcount release honors the process-exit flag, s"
+    },
+    {
+      "at": "2026-11-09T20:47:56.743Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c00rqc09",
+      "note": "#11: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6706: mapped-file view ownership is the file-map card; #6706 found the read-only view premise unsound.; was [open]: (was #2790 c1) Implementation-only closure: mapped files use the existing read-only view ownership mechanism, return checked view-shaped types through nested Option/Result/Shared carriers, root every "
+    },
+    {
+      "at": "2026-11-09T20:47:55.604Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vwlomv",
+      "note": "#4 (was #2790 c1) Implementation-only closure: mapped files use"
+    },
+    {
+      "at": "2026-11-09T20:47:53.012Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0s8gang",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6281 with corrected text: a parser defect (G6 #6281); the row named no proof.; was [open]: (was #4596) Parser reads `[Int?].filled(3, None)` as a list literal (reports E-ERR-PROPAGATE)"
+    },
+    {
+      "at": "2026-11-09T20:47:51.895Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#131 The parser reads `[Int?].filled(3, None)` as a call on the l"
+    },
+    {
+      "at": "2026-11-09T20:47:49.765Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c052rw8k",
+      "note": "#49: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5976: netrc parsing is a Core data codec (G3).; was [open]: (was #3309 c3) A new stock netrc API or credential data model needs an independent complete ballot after current auth-type evidence [precut audit: no dev test, golden, case or snapshot proves this tod"
+    },
+    {
+      "at": "2026-11-09T20:47:48.759Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iuv3zr",
+      "note": "#108 (was #3309 c3) A new stock netrc API or credential data mode"
+    },
+    {
+      "at": "2026-11-09T20:47:46.166Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c052rw8k",
+      "note": "#48: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5976: netrc parsing is a Core data codec (G3).; was [open]: (was #3309 c2) Keep credentials out of diagnostics and do not add ambient file discovery or network authentication as a parsing side effect [precut audit: no dev test, golden, case or snapshot proves "
+    },
     {
       "at": "2026-11-09T20:47:44.802Z",
       "by": "Main",
