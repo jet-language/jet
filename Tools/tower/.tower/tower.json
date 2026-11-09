@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6719,
-    "rev": 96476,
+    "nextNum": 6720,
+    "rev": 96479,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-09T07:42:28.183Z"
+    "completionCursor": "2026-11-09T13:19:56.729Z"
   },
   "epochs": [
     {
@@ -101782,7 +101782,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "WaylandLead3 numbers, 1080p best of 5, O0 before->after: clear 37.5->0.9 ms, fill_opaque 37.4->0.8, fill_alpha 108->44, gradient_v 333->0.96, gradient_h 417->0.99, circle_r300 9.8->6.0, rounded 13.2->9.1, triangle 26->16.7; owner demo frame 900x600 99->4.6 ms at O0 (3.9 at O2). AA Atkinson text: 7 lines in 344 us at O0. Byte-identical to the per-pixel reference. Remaining: span/coverage pipeline, translucent fill, a [U32] canvas, and gauntlet cells. Compiler defects are on a child card."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -101818,9 +101824,37 @@
       "parentId": "c0l39twq",
       "needsAcceptance": false,
       "created": "2026-11-09T12:47:48.165Z",
-      "updated": "2026-11-09T12:47:59.874Z",
+      "updated": "2026-11-09T13:21:29.911Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0qoe1b9",
+      "num": 6719,
+      "title": "Codegen: pixel-loop throughput (fill leaf through a &struct field place, slow U64 arithmetic at O2, O0 indexed stores ~3 ns/element)",
+      "body": "Found by WaylandLead3 while speeding up the core.ui rasterizer (#6718); repro in Micro.jet from the renderer lane. (1) The O2 fill leaf doesn't fire for stores through a &struct field place: 1.15 ns/B vs 0.07 ns/B for a local. (2) U64 arithmetic takes ~10 ns/iteration even at O2, no faster than O0. (3) An O0 indexed store costs ~3 ns/element, so per-pixel Jet code can't redraw 1080p in a few ms at O0 (jet run). Fix each at its root in the compiler (IR/backend), not with library workarounds. The same semantics on every tier (I9).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": "c0f9brds",
+      "needsAcceptance": false,
+      "created": "2026-11-09T13:21:28.909Z",
+      "updated": "2026-11-09T13:21:28.909Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -190387,6 +190421,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T13:21:29.911Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f9brds",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T13:21:28.910Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qoe1b9",
+      "note": "Codegen: pixel-loop throughput (fill leaf through a &struct field place, slow U64 arithmetic at O2, O0 indexed stores ~3 ns/element)"
+    },
+    {
+      "at": "2026-11-09T13:19:56.729Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-09T13:19:56.729Z"
+    },
     {
       "at": "2026-11-09T13:14:46.944Z",
       "by": "Main",
