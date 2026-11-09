@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96650,
+    "rev": 96665,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74812,6 +74812,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Correction: my earlier log said c49 stays open, which was wrong; my helper misnumbered the criteria. c49 is the impl Trait defect, met by e477930fe5."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "EffectsLead-3-13 landed on dev e477930fe5: impl Trait {} outside a type body is E0301 (UI snapshot). The author tagged it c49, but c49 is the 'self param on a module function' defect, so c49 stays open."
         },
         {
@@ -74994,11 +74999,11 @@
         {
           "n": 14,
           "text": "(from #6135 Effects on types: module rung (file-head and inline `#FX`)) A file-head `#FX(...)` and an inline `#FX(...) module m { }` bound every item inside, with E0749/E0712 reported at the offending item and the module marker as secondary label (UI snapshots).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:54:42.328Z"
+          "evidence": "on dev 6a06b917cb: b19942b4b2 and 925acbca54: file-head and inline module caps, E0749 with the secondary label; UI module_cap_* (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:08.213Z"
         },
         {
           "n": 15,
@@ -75039,11 +75044,11 @@
         {
           "n": 19,
           "text": "(from #6136 Effects on types: package rows and dependency grants checked) `policy: { effects: … }` is removed from the manifest model, docs and examples, with no shim.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:55:06.851Z"
+          "evidence": "on dev 6a06b917cb: policy has no effects field (Manifest/Blocks/Policy.jet:102); no docs or examples use policy effects (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:09.173Z"
         },
         {
           "n": 20,
@@ -75237,11 +75242,11 @@
         {
           "n": 41,
           "text": "A module #FX limit also covers methods inside struct and enum bodies and trait default bodies in that module; a function row wider than its module limit is an error; and a file-head #FX above use lines applies to the file instead of being dropped silently. Each has a UI or case proof.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T14:31:58.033Z"
+          "evidence": "on dev 6a06b917cb: b19942b4b2 (EffectsLead-3-10) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:10.116Z"
         },
         {
           "n": 42,
@@ -75273,11 +75278,11 @@
         {
           "n": 45,
           "text": "(Defect, found 2026-11-04 on 52d3e9cf79; holds under every D-EFFTYPE-MODVALUE1 option) A generic module's #FX cap is checked. Today '#FX(!IO) module quiet<T>(...)' with a direct print passes (probe $JET_SCRATCH_ROOT/lanes/Main/prep/mv/m3g_ctrl_gen.jet), while the same cap on a plain module is E0749 (m3f_ctrl). The cap also bounds what a module argument does inside the instance (m3c_cap). Each has a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:13:27.315Z"
+          "evidence": "on dev 6a06b917cb: 925acbca54 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:11.089Z"
         },
         {
           "n": 46,
@@ -75300,38 +75305,38 @@
         {
           "n": 48,
           "text": "(Defect, found 2026-11-04, effect soundness; breaks D-DET1) A function declared pure (-[]>) can write module state: a 'shared' and a '#Persist' module value are written from a -[]> function, which prints 1 then 2 ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/st/run.jet, run3.jet). Writing module state is an effect the row must show, or it is refused, with a UI snapshot and a case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:23:41.155Z"
+          "evidence": "on dev 6a06b917cb: c962b0554e (E3401) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:12.013Z"
         },
         {
           "n": 49,
           "text": "(Defect, found 2026-11-04) 'impl Trait { }' outside a type body is accepted, its method gives E0102, and calling it through the trait is an ICE ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n11c.jet). It gets a meaning per the D-EFFTYPE-MODVALUE1 outcome or a registered diagnostic, never an ICE (I2), with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:23:41.668Z"
+          "evidence": "on dev 6a06b917cb: e477930fe5 (EffectsLead-3-13): impl Trait outside a type body is E0301, UI snapshot (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:12.934Z"
         },
         {
           "n": 50,
           "text": "(Defect, found 2026-11-04) A constant in an inline module ('RATE: 3') is E0107 inside that module's own function ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n8.jet). It resolves, with a case on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:23:42.123Z"
+          "evidence": "on dev 6a06b917cb: 9e0a6f8943 (MetaLead, G6 #6281 c62) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:13.849Z"
         },
         {
           "n": 51,
           "text": "(Defect, found 2026-11-04) A parameter named self on a module function outside any impl is silently an ordinary parameter ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n6.jet). It is refused with a registered diagnostic and a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:23:42.567Z"
+          "evidence": "on dev 6a06b917cb: 648603aa34 (EffectsLead-3-12, E0639) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:14.767Z"
         }
       ],
       "refs": [],
@@ -75342,7 +75347,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-09T17:10:04.499Z",
+      "updated": "2026-11-09T17:18:17.726Z",
       "updatedBy": "Main",
       "criteriaLastN": 51
     },
@@ -77068,11 +77073,11 @@
         {
           "n": 2,
           "text": "A probe using each effect leaf type-checks the same through every path",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T19:13:30.568Z"
+          "evidence": "on dev 6a06b917cb: f883a257c6 (every leaf, through every path) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:15.781Z"
         },
         {
           "n": 4,
@@ -77176,11 +77181,11 @@
         {
           "n": 18,
           "text": "(was #6207) Every FFI effect leaf a program can reach is registered, proven by a probe per language",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:13:40.180Z"
+          "evidence": "on dev 6a06b917cb: acc351e025 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:16.728Z"
         },
         {
           "n": 19,
@@ -77281,7 +77286,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-07T03:04:14.127Z",
+      "updated": "2026-11-09T17:18:16.728Z",
       "updatedBy": "Main",
       "criteriaLastN": 34
     },
@@ -93932,29 +93937,29 @@
         {
           "n": 6,
           "text": "A deny written on a package, module, type or function prohibits the denied effects for everything inside it, transitively, at check time (E0749). The existing deny rows keep passing, and a new case covers a deny on a type.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:37:33.904Z"
+          "evidence": "on dev 6a06b917cb: tests/cases/effects/type_cap_binds_every_method, module_cap_* cases, e562609300 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:04.245Z"
         },
         {
           "n": 7,
           "text": "jetpack records each dependency's inferred effect row in the lock. An update that widens a dependency's row prints which package gained which effect, and --locked refuses the widening with a registered diagnostic that has a UI snapshot. Proof: a jetpack case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:37:35.138Z"
+          "evidence": "on dev 6a06b917cb: 84c15bf0d5 (E3513) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:05.241Z"
         },
         {
           "n": 8,
           "text": "Code run straight from a URL or the registry asks before its first run in a terminal. Without a terminal it stops, and the Fix names the -A command. Proof: a case for each path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:37:36.325Z"
+          "evidence": "on dev 6a06b917cb: 07bb069962 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:06.179Z"
         },
         {
           "n": 9,
@@ -93968,11 +93973,11 @@
         {
           "n": 10,
           "text": "The Run it? prompt path, the always grant writer, and every diagnostic used only by the old model are removed; every in-repository caller, test, snapshot and example is migrated in the same change (no alias, fallback or second path). Proof: a census in the closing commit shows no remaining caller.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:37:38.456Z"
+          "evidence": "on dev 6a06b917cb: 8f0c8df256 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:07.248Z"
         },
         {
           "n": 11,
@@ -94004,7 +94009,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-09T17:18:02.958Z",
+      "updated": "2026-11-09T17:18:07.248Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -191350,6 +191355,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T17:18:17.726Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09kjhit",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T17:18:16.728Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0scf8mn",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-09T17:18:15.781Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0scf8mn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-09T17:18:14.767Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#51"
+    },
+    {
+      "at": "2026-11-09T17:18:13.849Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#50"
+    },
+    {
+      "at": "2026-11-09T17:18:12.935Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-09T17:18:12.013Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-09T17:18:11.089Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-09T17:18:10.116Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-09T17:18:09.173Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-09T17:18:08.213Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-09T17:18:07.248Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ihjl6a",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-09T17:18:06.180Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ihjl6a",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-09T17:18:05.242Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ihjl6a",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-09T17:18:04.245Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ihjl6a",
+      "note": "#6"
+    },
     {
       "at": "2026-11-09T17:18:02.958Z",
       "by": "Main",
