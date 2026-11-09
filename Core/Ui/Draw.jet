@@ -1,5 +1,6 @@
 use {
     core: core
+    font: core.ui.font
     core.ui.[Color, Point, Rect]
 }
 // __core_ui_draw — core.ui's software rasterizer, a private part of
@@ -11,8 +12,13 @@ use {
 // clipped to the image, and `fill` paints each run, src-over with
 // rounding, (src * a + dst * (255 - a) + 127) / 255 on every channel,
 // alpha included, the straight-alpha blend (a clear copies instead).
-// The same integer code runs on every tier and target, so a checksum of
-// the pixels is exact everywhere.
+// Opaque paint that covers much of the image goes through `stitch`, which
+// rebuilds the pixels from whole-list copies of the untouched bytes and of
+// one painted row; it writes the same bytes as storing them one at a time.
+// Text is Atkinson Hyperlegible Next from core.ui.font, its anti-aliased
+// glyph masks blended as `fill` blends, each mask pixel's coverage scaling
+// the color's alpha. The same integer code runs on every tier and target,
+// so a checksum of the pixels is exact everywhere.
 //
 // Textures decode here too: `load_texture_atlas` reads an atlas's region
 // list and its PNG, and `draw_sprite` blends a region onto an image.
@@ -171,10 +177,7 @@ get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! {
 // makes no image.
 gen_image_color: fn(width: Int, height: Int, color: Color) -> Image Never! {
     if !image_size_ok(width, height) -> return no_image()
-    rgba: pack_rgba(color)
-    pixels := [U8]{}
-    loop _ in 0..<(width * height) -> push_rgba(pixels, rgba)
-    Image{width: width, height: height, pixels: pixels}
+    Image{width: width, height: height, pixels: solid_row(pack_rgba(color), width * height)}
 }
 
 // Checks of checks_x by checks_y pixels with `first` at the top left; a check
@@ -458,34 +461,142 @@ draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, colo
     fill(target, x, y, width, height, pack_rgba(color), false)
 }
 
-// Text in the built-in font: the 5x7 glyphs at a whole-pixel
-// scale, one per scalar (see text_runs).
-draw_text: fn(target: &Image, text: String, x: Int, y: Int, size: Int, color: Color) Never! {
-    extent: extent_of(target)
-    paint(target, text_runs(extent, text, x, y, size, pack_rgba(color)))
+// The built-in face, loaded on first use, and the glyph masks drawn with
+// it. A window keeps one, so its text loads the face once and draws each
+// glyph's mask once per size and quarter-pixel position.
+Typeset: struct {
+    face: font.Face?
+    cache: font.GlyphCache
 }
 
-// The width in pixels of the widest line draw_text draws. Each scalar is 5
-// columns plus 1 of spacing at the text's
-// scale, and the last scalar on a line adds no spacing. Lines split at "\n",
-// and empty text or empty lines measure 0.
-measure_text: fn(text: String, size: Int) -> Int Never! {
-    scale: text_scale(size)
+typeset: fn() -> Typeset {
+    Typeset{face: None, cache: font.cache()}
+}
+
+typeset_face: fn(set: &Typeset) -> font.Face {
+    if set.face == .Val(face) -> return face
+    loaded: font.regular()
+    set.face = Val(loaded.copy())
+    loaded
+}
+
+// Text in Atkinson Hyperlegible Next at `size` pixels to the em: the first
+// line's top at `y`, its baseline the face's ascent (rounded) below that,
+// and each "\n" starts a line one line height lower (ascent, descent and
+// line gap, rounded). Glyphs sit at quarter-pixel positions along the
+// kerned layout from `x`, and each mask pixel blends the color as `fill`
+// does with its alpha scaled by the pixel's coverage. A size below 1 draws
+// nothing.
+draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size: Int, color: Color) Never! {
+    if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return
+    rgba: pack_rgba(color)
+    if rgba.bit_and(255) == 0 -> return
+    face: typeset_face(set)
+    px: Float{size}
+    metrics: face.metrics(px)
+    step: line_height(metrics)
+    baseline := y + round_px(metrics.ascent)
+    loop line in text_lines(text) {
+        if baseline - step >= target.height -> break
+        if line != "" && baseline + step > 0 {
+            run: face.layout(line, px)
+            loop glyph in run.glyphs {
+                at: Float{x} + glyph.x
+                whole: floor_px(at)
+                mask: set.cache.glyph(face, glyph.id, px, at - Float{whole})
+                paint_mask(target, mask, whole, baseline + round_px(glyph.y), rgba)
+            }
+        }
+        baseline += step
+    }
+}
+
+// The width in pixels of the widest line draw_text draws: the line's
+// kerned advance, rounded. Lines split at "\n", and empty text, empty
+// lines and a size below 1 measure 0.
+measure_text: fn(set: &Typeset, text: String, size: Int) -> Int Never! {
+    if size < 1 -> return 0
+    face: typeset_face(set)
     widest := 0
-    count := 0
+    loop line in text_lines(text) {
+        if line != "" -> widest = max_int(widest, round_px(face.layout(line, Float{size}).advance))
+    }
+    widest
+}
+
+// The distance between two baselines of draw_text's lines.
+line_height: fn(metrics: font.FaceMetrics) -> Int {
+    round_px(metrics.ascent - metrics.descent + metrics.line_gap)
+}
+
+// The lines of `text`, split at "\n".
+text_lines: fn(text: String) -> [String] {
+    lines := [String]{}
+    line := [U8]{}
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
-        if code == 10 {
-            widest = max_int(widest, count)
-            count = 0
+        if byte == (U8{10}) {
+            lines.push(String.from_bytes(line) ?? "")
+            line = [U8]{}
             next
         }
-        if code >= 128 && code < 192 -> next
-        count += 1
+        line.push(byte)
     }
-    widest = max_int(widest, count)
-    if widest == 0 -> return 0
-    (C_FONT_ADVANCE * widest - 1) * scale
+    lines.push(String.from_bytes(line) ?? "")
+    lines
+}
+
+// Blends a glyph mask whose origin, on the baseline, is pixel (x, y).
+paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, rgba: Int) {
+    if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height -> return
+    x0: x + mask.left
+    y0: y - mask.top
+    left: max_int(x0, 0)
+    right: min_int(x0 + mask.width, target.width)
+    top: max_int(y0, 0)
+    bottom: min_int(y0 + mask.height, target.height)
+    if left >= right || top >= bottom -> return
+    red: (rgba >> 24).bit_and(255)
+    green: (rgba >> 16).bit_and(255)
+    blue: (rgba >> 8).bit_and(255)
+    alpha: rgba.bit_and(255)
+    loop row in top..<bottom {
+        from := (row - y0) * mask.width + left - x0
+        at := (row * target.width + left) * 4
+        loop _ in left..<right {
+            cover: Int.from_u8(mask.coverage[from])
+            if cover != 0 -> blend_pixel(target.pixels, at, red, green, blue, div255(cover * alpha + 127))
+            from += 1
+            at += 4
+        }
+    }
+}
+
+// The pixel at byte `at` src-over the color (red, green, blue) at alpha
+// `alpha`, as `fill` blends; alpha 255 copies and alpha 0 leaves it.
+blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: Int) {
+    if alpha == 0 -> return
+    if alpha == 255 {
+        pixels[at] = U8{red}
+        pixels[at + 1] = U8{green}
+        pixels[at + 2] = U8{blue}
+        pixels[at + 3] = U8{255}
+        return
+    }
+    rest: 255 - alpha
+    pixels[at] = U8{div255(red * alpha + Int.from_u8(pixels[at]) * rest + 127)}
+    pixels[at + 1] = U8{div255(green * alpha + Int.from_u8(pixels[at + 1]) * rest + 127)}
+    pixels[at + 2] = U8{div255(blue * alpha + Int.from_u8(pixels[at + 2]) * rest + 127)}
+    pixels[at + 3] = U8{div255(alpha * alpha + Int.from_u8(pixels[at + 3]) * rest + 127)}
+}
+
+// A Float rounded to the nearest whole pixel, halves up; past the Int
+// range it is 0.
+round_px: fn(value: Float) -> Int {
+    Int.from_float(core.math.floor(value + 0.5)) ?? 0
+}
+
+floor_px: fn(value: Float) -> Int {
+    Int.from_float(core.math.floor(value)) ?? 0
 }
 
 // A line; both endpoints are drawn.
@@ -534,17 +645,151 @@ draw_rectangle_lines_ex: fn(target: &Image, rec: Rect, line_thick: Float, color:
 }
 
 // A vertical gradient: `top` along the top edge, `bottom` along
-// the bottom edge.
+// the bottom edge, shaded as gradient_runs shades (see axis_rgba).
 draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) Never! {
-    extent: extent_of(target)
-    paint(target, gradient_runs(extent, int_rectangle(x, y, width, height), pack_rgba(top), pack_rgba(bottom), pack_rgba(bottom), pack_rgba(top)))
+    rec: int_rectangle(x, y, width, height)
+    box: gradient_box(extent_of(target), rec)
+    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 -> return
+    first: pack_rgba(top)
+    last: pack_rgba(bottom)
+    levels := [Int]{}
+    loop row in box.top..<box.bottom -> levels.push(axis_rgba(first, last, (Float{row} + 0.5 - rec.y) / rec.height))
+    span: box.right - box.left
+    opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
+    if {
+        opaque && span * (box.bottom - box.top) * BULK_SHARE >= target.width * target.height -> {
+            starts := [Int]{}
+            counts := [Int]{}
+            picks := [Int]{}
+            rows := [[U8]]{}
+            shown := -1
+            loop k in 0..<levels.len() {
+                if levels[k] < 0 -> next
+                if levels[k] != shown {
+                    rows.push(solid_row(levels[k], span))
+                    shown = levels[k]
+                }
+                starts.push(((box.top + k) * target.width + box.left) * 4)
+                counts.push(span * 4)
+                picks.push(rows.len() - 1)
+            }
+            stitch(target, starts, counts, picks, rows)
+        }
+        else -> {
+            loop k in 0..<levels.len() {
+                if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
+            }
+        }
+    }
+    loop k in 0..<levels.len() {
+        if levels[k] >= 0 -> next
+        row: box.top + k
+        v: (Float{row} + 0.5 - rec.y) / rec.height
+        loop column in box.left..<box.right {
+            u: (Float{column} + 0.5 - rec.x) / rec.width
+            fill(target, column, row, 1, 1, gradient_rgba(first, last, last, first, u, v), false)
+        }
+    }
 }
 
 // A horizontal gradient: `left` along the left edge, `right` along
-// the right edge.
+// the right edge, shaded as gradient_runs shades (see axis_rgba).
 draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) Never! {
-    extent: extent_of(target)
-    paint(target, gradient_runs(extent, int_rectangle(x, y, width, height), pack_rgba(left), pack_rgba(left), pack_rgba(right), pack_rgba(right)))
+    rec: int_rectangle(x, y, width, height)
+    box: gradient_box(extent_of(target), rec)
+    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 -> return
+    first: pack_rgba(left)
+    last: pack_rgba(right)
+    levels := [Int]{}
+    loop column in box.left..<box.right -> levels.push(axis_rgba(first, last, (Float{column} + 0.5 - rec.x) / rec.width))
+    span: box.right - box.left
+    opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
+    // Opaque, one row of the levels copied to every row (a column on a tie
+    // takes black here and its own pixels below); translucent, blended.
+    line := [U8]{}
+    if opaque {
+        loop level in levels -> push_rgba(line, max_int(level, 0))
+    }
+    if {
+        opaque && span * (box.bottom - box.top) * BULK_SHARE >= target.width * target.height -> {
+            starts := [Int]{}
+            counts := [Int]{}
+            picks := [Int]{}
+            loop row in box.top..<box.bottom {
+                starts.push((row * target.width + box.left) * 4)
+                counts.push(span * 4)
+                picks.push(0)
+            }
+            stitch(target, starts, counts, picks, [[U8]]{line})
+        }
+        opaque -> {
+            loop row in box.top..<box.bottom {
+                at := (row * target.width + box.left) * 4
+                loop byte in line {
+                    target.pixels[at] = byte
+                    at += 1
+                }
+            }
+        }
+        else -> {
+            loop row in box.top..<box.bottom {
+                at := (row * target.width + box.left) * 4
+                loop level in levels {
+                    if level >= 0 -> blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
+                    at += 4
+                }
+            }
+        }
+    }
+    loop k in 0..<levels.len() {
+        if levels[k] >= 0 -> next
+        column: box.left + k
+        u: (Float{column} + 0.5 - rec.x) / rec.width
+        loop row in box.top..<box.bottom {
+            v: (Float{row} + 0.5 - rec.y) / rec.height
+            fill(target, column, row, 1, 1, gradient_rgba(first, first, last, last, u, v), false)
+        }
+    }
+}
+
+// The pixels gradient_runs shades: those whose centers `rec` holds, clipped
+// to the image.
+GradientBox: struct {
+    left: Int
+    top: Int
+    right: Int
+    bottom: Int
+}
+
+gradient_box: fn(extent: Extent, rec: Rect) -> GradientBox {
+    if rec.width <= 0.0 || rec.height <= 0.0 -> return GradientBox{left: 0, top: 0, right: 0, bottom: 0}
+    GradientBox{
+        left: max_int(center_from(subpixel(rec.x)), 0),
+        top: max_int(center_from(subpixel(rec.y)), 0),
+        right: min_int(center_from(subpixel(rec.x + rec.width)), extent.width),
+        bottom: min_int(center_from(subpixel(rec.y + rec.height)), extent.height),
+    }
+}
+
+// The packed color a pixel center at `t` along a two-color axis takes,
+// first * (1 - t) + last * t on each channel rounded to the nearest level,
+// or -1 when a channel lies within 1e-9 of a rounding tie. gradient_runs
+// computes the same blend over its two triangles, which with equal corners
+// on each side reduces to this one up to a few units in the last place
+// (each term is at most 255), so away from a tie both round alike and a row
+// (or column) of one gradient shares one color; on a tie the caller asks
+// gradient_rgba pixel by pixel.
+axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
+    rgba := 0
+    shift := 24
+    loop shift >= 0 {
+        level: Float{(first >> shift).bit_and(255)} * (Float{1.0} - t) + Float{(last >> shift).bit_and(255)} * t + 0.5
+        whole: core.math.floor(level)
+        if level - whole < 0.000000001 || whole + 1.0 - level < 0.000000001 -> return -1
+        rgba = (rgba << 8) + clamp8(Int.from_float(whole) ?? 0)
+        shift -= 8
+    }
+    rgba
 }
 
 // A four-corner gradient: the corner colors run counter-clockwise
@@ -853,7 +1098,45 @@ extent_of: fn(image: Image) -> Extent {
     Extent{width: image.width, height: image.height}
 }
 
+// Opaque paint covering at least 1 / BULK_SHARE of the image goes through
+// `stitch`; smaller or translucent paint stores pixel by pixel.
+BULK_SHARE: 16
+
+// Paints the runs as `fill` does. One primitive's runs share a color and
+// come row by row, left to right, so opaque runs covering much of the image
+// stitch in one pass.
 paint: fn(target: &Image, runs: [Run]) {
+    if runs.len() == 0 || target.pixels.len() != target.width * target.height * 4 -> return
+    rgba: runs[0].rgba
+    area := 0
+    widest := 0
+    same := true
+    loop run in runs {
+        area += run.width * run.height
+        widest = max_int(widest, run.width)
+        if run.rgba != rgba -> same = false
+    }
+    if same && rgba.bit_and(255) == 255 && area * BULK_SHARE >= target.width * target.height {
+        starts := [Int]{}
+        counts := [Int]{}
+        picks := [Int]{}
+        end := 0
+        ordered := true
+        loop run in runs {
+            loop row in run.y..<(run.y + run.height) {
+                start: (row * target.width + run.x) * 4
+                if start < end -> ordered = false
+                starts.push(start)
+                counts.push(run.width * 4)
+                picks.push(0)
+                end = start + run.width * 4
+            }
+        }
+        if ordered {
+            stitch(target, starts, counts, picks, [[U8]]{solid_row(rgba, widest)})
+            return
+        }
+    }
     loop run in runs -> fill(target, run.x, run.y, run.width, run.height, run.rgba, false)
 }
 
@@ -876,34 +1159,96 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     green: (rgba >> 16).bit_and(255)
     blue: (rgba >> 8).bit_and(255)
     if replace || alpha == 255 {
+        if (right - left) * (bottom - top) * BULK_SHARE >= target.width * target.height {
+            starts := [Int]{}
+            counts := [Int]{}
+            picks := [Int]{}
+            loop row in top..<bottom {
+                starts.push((row * target.width + left) * 4)
+                counts.push((right - left) * 4)
+                picks.push(0)
+            }
+            stitch(target, starts, counts, picks, [[U8]]{solid_row(rgba, right - left)})
+            return
+        }
+        r8: U8{red}
+        g8: U8{green}
+        b8: U8{blue}
+        a8: U8{alpha}
         loop row in top..<bottom {
             at := (row * target.width + left) * 4
             loop _ in left..<right {
-                target.pixels[at] = U8{red}
-                target.pixels[at + 1] = U8{green}
-                target.pixels[at + 2] = U8{blue}
-                target.pixels[at + 3] = U8{alpha}
+                target.pixels[at] = r8
+                target.pixels[at + 1] = g8
+                target.pixels[at + 2] = b8
+                target.pixels[at + 3] = a8
                 at += 4
             }
         }
         return
     }
+    // blend's sums, the source's share hoisted; x / 255 is
+    // (x + 1 + (x >> 8)) >> 8 for every sum src-over makes (at most
+    // 255 * 255 + 127).
+    rest: 255 - alpha
+    sr: red * alpha + 127
+    sg: green * alpha + 127
+    sb: blue * alpha + 127
+    sa: alpha * alpha + 127
     loop row in top..<bottom {
         at := (row * target.width + left) * 4
         loop _ in left..<right {
-            target.pixels[at] = U8{blend(red, byte_at(target.pixels, at), alpha)}
-            target.pixels[at + 1] = U8{blend(green, byte_at(target.pixels, at + 1), alpha)}
-            target.pixels[at + 2] = U8{blend(blue, byte_at(target.pixels, at + 2), alpha)}
-            target.pixels[at + 3] = U8{blend(alpha, byte_at(target.pixels, at + 3), alpha)}
+            r: sr + Int.from_u8(target.pixels[at]) * rest
+            g: sg + Int.from_u8(target.pixels[at + 1]) * rest
+            b: sb + Int.from_u8(target.pixels[at + 2]) * rest
+            a: sa + Int.from_u8(target.pixels[at + 3]) * rest
+            target.pixels[at] = U8{(r + 1 + (r >> 8)) >> 8}
+            target.pixels[at + 1] = U8{(g + 1 + (g >> 8)) >> 8}
+            target.pixels[at + 2] = U8{(b + 1 + (b >> 8)) >> 8}
+            target.pixels[at + 3] = U8{(a + 1 + (a >> 8)) >> 8}
             at += 4
         }
     }
+}
+
+// Rebuilds the pixels with the first counts[k] bytes of rows[picks[k]] at
+// each byte offset starts[k] (ascending, disjoint, inside the image) and
+// every other byte as it was. Each piece is one list copy, so a large opaque
+// paint costs a pass over the image at copy speed instead of a store per
+// byte.
+stitch: fn(target: &Image, starts: [Int], counts: [Int], picks: [Int], rows: [[U8]]) {
+    out := [U8]{}
+    at := 0
+    loop k in 0..<starts.len() {
+        start: starts[k]
+        if start > at -> out.extend(target.pixels[at..<start].copy())
+        if counts[k] == rows[picks[k]].len() -> out.extend(rows[picks[k]].copy()) else -> out.extend(rows[picks[k]][0..<counts[k]].copy())
+        at = start + counts[k]
+    }
+    if at < target.pixels.len() -> out.extend(target.pixels[at..<target.pixels.len()].copy())
+    target.pixels = out
+}
+
+// `count` pixels of the packed color, built by doubling.
+solid_row: fn(rgba: Int, count: Int) -> [U8] {
+    row := [U8]{}
+    if count <= 0 -> return row
+    push_rgba(row, rgba)
+    loop row.len() * 2 <= count * 4 -> row.extend(row.copy())
+    if row.len() < count * 4 -> row.extend(row[0..<(count * 4 - row.len())].copy())
+    row
 }
 
 // One channel src-over with rounding: the source
 // weighs `alpha`, the image the rest.
 blend: fn(source: Int, target: Int, alpha: Int) -> Int {
     (source * alpha + target * (255 - alpha) + 127) /% 255
+}
+
+// x / 255 rounded down, for 0 <= x <= 255 * 255 + 127: the sums src-over
+// makes.
+div255: fn(value: Int) -> Int {
+    (value + 1 + (value >> 8)) >> 8
 }
 
 // The inclusive column range a triangle row keeps; empty when lo > hi.
@@ -1662,11 +2007,9 @@ no_image: fn() -> Image {
 // no PNG limit bounds.
 fit: fn(image: &Image, width: Int, height: Int) {
     if image.width == width && image.height == height && image.pixels.len() == width * height * 4 -> return
-    pixels := [U8]{}
-    loop _ in 0..<(width * height * 4) -> pixels.push(U8{0})
     image.width = width
     image.height = height
-    image.pixels = pixels
+    image.pixels = solid_row(0, width * height)
 }
 
 byte_at: fn(data: [U8], at: Int) -> Int {
@@ -1871,84 +2214,6 @@ png_sample: fn(line: [U8], column: Int, format: PNGFormat, palette: [U8], key: [
     png_rgba(red, green, blue, if keyed -> 0 else -> 255)
 }
 
-// The built-in 5x7 font for ASCII 0x20..0x7E: five column bytes per glyph,
-// bit 0 the top row. A glyph cell is 6 x 10 at scale 1, the 10-pixel base
-// size of the classic default font; sizes scale it by whole pixels.
-C_FONT_ADVANCE: 6
-
-C_FONT_LINE: 10
-
-C_FONT_UNKNOWN: 31
-
-C_FONT5X7: [Int]{
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x07, 0x00, 0x07, 0x00, 0x14, 0x7F, 0x14, 0x7F, 0x14, 0x24, 0x2A, 0x7F, 0x2A, 0x12,
-    0x23, 0x13, 0x08, 0x64, 0x62, 0x36, 0x49, 0x55, 0x22, 0x50, 0x00, 0x05, 0x03, 0x00, 0x00, 0x00, 0x1C, 0x22, 0x41, 0x00, 0x00, 0x41, 0x22, 0x1C, 0x00,
-    0x08, 0x2A, 0x1C, 0x2A, 0x08, 0x08, 0x08, 0x3E, 0x08, 0x08, 0x00, 0x50, 0x30, 0x00, 0x00, 0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x60, 0x60, 0x00, 0x00,
-    0x20, 0x10, 0x08, 0x04, 0x02, 0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x42, 0x7F, 0x40, 0x00, 0x42, 0x61, 0x51, 0x49, 0x46, 0x21, 0x41, 0x45, 0x4B, 0x31,
-    0x18, 0x14, 0x12, 0x7F, 0x10, 0x27, 0x45, 0x45, 0x45, 0x39, 0x3C, 0x4A, 0x49, 0x49, 0x30, 0x01, 0x71, 0x09, 0x05, 0x03, 0x36, 0x49, 0x49, 0x49, 0x36,
-    0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x36, 0x36, 0x00, 0x00, 0x00, 0x56, 0x36, 0x00, 0x00, 0x08, 0x14, 0x22, 0x41, 0x00, 0x14, 0x14, 0x14, 0x14, 0x14,
-    0x00, 0x41, 0x22, 0x14, 0x08, 0x02, 0x01, 0x51, 0x09, 0x06, 0x32, 0x49, 0x79, 0x41, 0x3E, 0x7E, 0x11, 0x11, 0x11, 0x7E, 0x7F, 0x49, 0x49, 0x49, 0x36,
-    0x3E, 0x41, 0x41, 0x41, 0x22, 0x7F, 0x41, 0x41, 0x22, 0x1C, 0x7F, 0x49, 0x49, 0x49, 0x41, 0x7F, 0x09, 0x09, 0x09, 0x01, 0x3E, 0x41, 0x49, 0x49, 0x7A,
-    0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x20, 0x40, 0x41, 0x3F, 0x01, 0x7F, 0x08, 0x14, 0x22, 0x41, 0x7F, 0x40, 0x40, 0x40, 0x40,
-    0x7F, 0x02, 0x0C, 0x02, 0x7F, 0x7F, 0x04, 0x08, 0x10, 0x7F, 0x3E, 0x41, 0x41, 0x41, 0x3E, 0x7F, 0x09, 0x09, 0x09, 0x06, 0x3E, 0x41, 0x51, 0x21, 0x5E,
-    0x7F, 0x09, 0x19, 0x29, 0x46, 0x46, 0x49, 0x49, 0x49, 0x31, 0x01, 0x01, 0x7F, 0x01, 0x01, 0x3F, 0x40, 0x40, 0x40, 0x3F, 0x1F, 0x20, 0x40, 0x20, 0x1F,
-    0x3F, 0x40, 0x38, 0x40, 0x3F, 0x63, 0x14, 0x08, 0x14, 0x63, 0x07, 0x08, 0x70, 0x08, 0x07, 0x61, 0x51, 0x49, 0x45, 0x43, 0x00, 0x7F, 0x41, 0x41, 0x00,
-    0x02, 0x04, 0x08, 0x10, 0x20, 0x00, 0x41, 0x41, 0x7F, 0x00, 0x04, 0x02, 0x01, 0x02, 0x04, 0x40, 0x40, 0x40, 0x40, 0x40, 0x00, 0x01, 0x02, 0x04, 0x00,
-    0x20, 0x54, 0x54, 0x54, 0x78, 0x7F, 0x48, 0x44, 0x44, 0x38, 0x38, 0x44, 0x44, 0x44, 0x20, 0x38, 0x44, 0x44, 0x48, 0x7F, 0x38, 0x54, 0x54, 0x54, 0x18,
-    0x08, 0x7E, 0x09, 0x01, 0x02, 0x0C, 0x52, 0x52, 0x52, 0x3E, 0x7F, 0x08, 0x04, 0x04, 0x78, 0x00, 0x44, 0x7D, 0x40, 0x00, 0x20, 0x40, 0x44, 0x3D, 0x00,
-    0x7F, 0x10, 0x28, 0x44, 0x00, 0x00, 0x41, 0x7F, 0x40, 0x00, 0x7C, 0x04, 0x18, 0x04, 0x78, 0x7C, 0x08, 0x04, 0x04, 0x78, 0x38, 0x44, 0x44, 0x44, 0x38,
-    0x7C, 0x14, 0x14, 0x14, 0x08, 0x08, 0x14, 0x14, 0x18, 0x7C, 0x7C, 0x08, 0x04, 0x04, 0x08, 0x48, 0x54, 0x54, 0x54, 0x20, 0x04, 0x3F, 0x44, 0x40, 0x20,
-    0x3C, 0x40, 0x40, 0x20, 0x7C, 0x1C, 0x20, 0x40, 0x20, 0x1C, 0x3C, 0x40, 0x30, 0x40, 0x3C, 0x44, 0x28, 0x10, 0x28, 0x44, 0x0C, 0x50, 0x50, 0x50, 0x3C,
-    0x44, 0x64, 0x54, 0x4C, 0x44, 0x00, 0x08, 0x36, 0x41, 0x00, 0x00, 0x00, 0x7F, 0x00, 0x00, 0x00, 0x41, 0x36, 0x08, 0x00, 0x08, 0x04, 0x08, 0x10, 0x08,
-}
-
-// Sizes below the base size draw at the base size.
-text_scale: fn(size: Int) -> Int {
-    max_int((size + C_FONT_LINE /% 2) /% C_FONT_LINE, 1)
-}
-
-glyph_runs: fn(runs: &[Run], extent: Extent, glyph: Int, x: Int, y: Int, scale: Int, rgba: Int) {
-    column := 0
-    loop column < 5 {
-        bits: C_FONT5X7[glyph * 5 + column]
-        row := 0
-        loop row < 7 {
-            if (bits >> row).bit_and(1) == 0 {
-                row += 1
-                next
-            }
-            start: row
-            loop row < 7 && (bits >> row).bit_and(1) != 0 -> row += 1
-            push_clipped(runs, extent, x + column * scale, y + start * scale, scale, (row - start) * scale, rgba)
-        }
-        column += 1
-    }
-}
-
-// One glyph per scalar: "\n" starts a new line at x, and a scalar outside the
-// font draws as "?". Glyphs wholly outside the image emit nothing.
-text_runs: fn(extent: Extent, text: String, x: Int, y: Int, size: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
-    scale: text_scale(size)
-    pen_x := x
-    pen_y := y
-    loop byte in text.bytes() {
-        code: Int.from_u8(byte)
-        if code == 10 {
-            pen_x = x
-            pen_y += C_FONT_LINE * scale
-            next
-        }
-        // UTF-8 continuation bytes belong to the scalar already drawn.
-        if code >= 128 && code < 192 -> next
-        glyph := C_FONT_UNKNOWN
-        if code >= 32 && code <= 126 -> glyph = code - 32
-        glyph_runs(runs, extent, glyph, pen_x, pen_y, scale, rgba)
-        pen_x += C_FONT_ADVANCE * scale
-    }
-    runs
-}
-
 #Test("color channel bounds") {
     c: color(-1, 0, 255, 256)
     assert(c.r == 0 && c.g == 0 && c.b == 255 && c.a == 255)
@@ -2044,19 +2309,45 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(triangle_runs(extent, 0, 0, 2, 2, 4, 4, 1).len(), 0)
 }
 
-#Test("raster text draws the 5x7 font by whole-pixel scale") {
-    extent: Extent{width: 40, height: 40}
-    assert_eq(C_FONT5X7.len(), 475)
-    assert_eq(C_FONT5X7[33 * 5], 0x7E)
-    assert_eq(run_words(text_runs(extent, "I", 0, 0, 10, 1)), [Int]{1, 0, 1, 1, 1, 1, 6, 1, 1, 1, 2, 0, 1, 7, 1, 3, 0, 1, 1, 1, 3, 6, 1, 1, 1})
-    assert_eq(run_words(text_runs(extent, "I", 1, 2, 20, 1)), [Int]{3, 2, 2, 2, 1, 3, 14, 2, 2, 1, 5, 2, 2, 14, 1, 7, 2, 2, 2, 1, 7, 14, 2, 2, 1})
-    assert_eq(text_scale(4), 1)
-    assert_eq(text_scale(16), 2)
-    lines: text_runs(extent, "I\nI", 0, 0, 10, 1)
-    assert_eq(lines.len(), 10)
-    assert_eq(lines[5].y, 10)
-    assert_eq(text_runs(extent, "II", 0, 0, 10, 1)[5].x, 7)
-    assert_eq(run_words(text_runs(extent, "é", 0, 0, 10, 1)), run_words(text_runs(extent, "?", 0, 0, 10, 1)))
+#Test("raster glyph masks blend their coverage into the color's alpha") {
+    black: png_rgba(0, 0, 0, 255)
+    // A 2x2 mask one pixel left of and one above its origin, at origin
+    // (2, 1): it covers columns 1..2 of rows 0..1. The weight of coverage c
+    // is (c * 255 + 127) / 255, so c itself for an opaque color; each
+    // channel then blends as fill does:
+    // c = 255 copies (200, 100, 50, 255);
+    // c = 128: (200 * 128 + 127) / 255 = 100, (100 * 128 + 127) / 255 = 50,
+    // (50 * 128 + 127) / 255 = 25, (128 * 128 + 255 * 127 + 127) / 255 = 191;
+    // c = 0 leaves black;
+    // c = 51: (200 * 51 + 127) / 255 = 40, (100 * 51 + 127) / 255 = 20,
+    // (50 * 51 + 127) / 255 = 10, (51 * 51 + 255 * 204 + 127) / 255 = 214.
+    mask: font.GlyphMask{width: 2, height: 2, left: -1, top: 1, coverage: [U8]{255, 128, 0, 51}}
+    drawn := gen_image_color(3, 2, color(0, 0, 0, 255))
+    paint_mask(drawn, mask, 2, 1, pack_rgba(color(200, 100, 50, 255)))
+    assert_eq(image_words(drawn), [Int]{3, 2, black, png_rgba(200, 100, 50, 255), png_rgba(100, 50, 25, 191), black, black, png_rgba(40, 20, 10, 214)})
+    // At origin (0, 0) only the mask's bottom right pixel lands, on (0, 0).
+    clipped := gen_image_color(2, 1, color(0, 0, 0, 255))
+    paint_mask(clipped, mask, 0, 0, pack_rgba(color(200, 100, 50, 255)))
+    assert_eq(image_words(clipped), [Int]{2, 1, png_rgba(40, 20, 10, 214), black})
+    // A color at alpha 128 weighs coverage 255 as (255 * 128 + 127) / 255 = 128.
+    half := gen_image_color(1, 1, color(0, 0, 0, 255))
+    paint_mask(half, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, pack_rgba(color(200, 100, 50, 128)))
+    assert_eq(image_words(half), [Int]{1, 1, png_rgba(100, 50, 25, 191)})
+}
+
+#Test("raster text splits lines and rounds its metrics to whole pixels") {
+    assert_eq(text_lines("ab\n\nc"), [String]{"ab", "", "c"})
+    assert_eq(text_lines(""), [String]{""})
+    assert_eq(text_lines("x\n"), [String]{"x", ""})
+    // 15.744 + 5.056 + 0.0 = 20.8 rounds to 21.
+    assert_eq(line_height(font.FaceMetrics{ascent: 15.744, descent: -5.056, line_gap: 0.0, units_per_em: 1000}), 21)
+    assert_eq(round_px(2.5), 3)
+    assert_eq(round_px(-2.5), -2)
+    assert_eq(round_px(2.49), 2)
+    assert_eq(floor_px(-0.25), -1)
+    assert_eq(div255(255 * 255 + 127), 255)
+    assert_eq(div255(254), 0)
+    assert_eq(div255(255), 1)
 }
 
 #Test("raster float rectangles take the pixels whose centers they hold") {
@@ -2096,6 +2387,90 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(gradient_rgba(0, 0xFF000000, 0, 0, 0.75, 0.25), 0)
     assert_eq(gradient_rgba(0x64000000, 0, 0xC8000000, 0, 0.5, 0.5), 0x96000000)
     assert_eq(gradient_runs(extent, rect_of(0.0, 0.0, 0.0, 2.0), 1, 1, 1, 1).len(), 0)
+}
+
+// Paints runs pixel by pixel with blend: the plain reading of `fill`.
+reference_paint: fn(image: &Image, runs: [Run]) {
+    loop run in runs {
+        alpha: run.rgba.bit_and(255)
+        loop row in run.y..<(run.y + run.height) {
+            loop column in run.x..<(run.x + run.width) {
+                at: (row * image.width + column) * 4
+                loop k in 0..<4 {
+                    image.pixels[at + k] = U8{blend((run.rgba >> (24 - 8 * k)).bit_and(255), Int.from_u8(image.pixels[at + k]), alpha)}
+                }
+            }
+        }
+    }
+}
+
+axis_matches: fn(width: Int, height: Int, x: Int, y: Int, gw: Int, gh: Int, first: Color, last: Color) -> Bool {
+    extent: Extent{width: width, height: height}
+    rec: int_rectangle(x, y, gw, gh)
+    f: pack_rgba(first)
+    l: pack_rgba(last)
+    vertical := gen_image_color(width, height, color(9, 30, 60, 200))
+    draw_rectangle_gradient_v(vertical, x, y, gw, gh, first, last)
+    vertical_runs := gen_image_color(width, height, color(9, 30, 60, 200))
+    reference_paint(vertical_runs, gradient_runs(extent, rec, f, l, l, f))
+    horizontal := gen_image_color(width, height, color(9, 30, 60, 200))
+    draw_rectangle_gradient_h(horizontal, x, y, gw, gh, first, last)
+    horizontal_runs := gen_image_color(width, height, color(9, 30, 60, 200))
+    reference_paint(horizontal_runs, gradient_runs(extent, rec, f, f, l, l))
+    vertical.pixels == vertical_runs.pixels && horizontal.pixels == horizontal_runs.pixels
+}
+
+#Test("raster axis gradients shade as gradient_runs does, byte for byte") {
+    red: color(255, 0, 0, 255)
+    blue: color(0, 0, 255, 255)
+    // Covering the image (stitched), small, clipped and translucent.
+    assert(axis_matches(40, 30, 0, 0, 40, 30, red, blue))
+    assert(axis_matches(40, 30, 3, 4, 5, 6, red, blue))
+    assert(axis_matches(40, 30, 30, 25, 20, 20, red, blue))
+    assert(axis_matches(40, 30, -5, -3, 50, 40, color(255, 80, 40, 255), color(40, 200, 120, 96)))
+    assert(axis_matches(40, 30, 2, 2, 9, 7, color(255, 80, 40, 0), color(40, 200, 120, 255)))
+    // From 0 to 2 a pixel center a quarter along sits at 0.5, a rounding
+    // tie, which is left to the pixel-by-pixel blend.
+    assert_eq(axis_rgba(0x000000FF, 0x020000FF, 0.25), -1)
+    assert_eq(axis_rgba(0x000000FF, 0xFF0000FF, 0.25), 0x400000FF)
+    assert(axis_matches(4, 2, 0, 0, 4, 2, color(0, 0, 0, 255), color(2, 0, 0, 255)))
+    assert(axis_matches(4, 4, 0, 0, 2, 4, color(0, 0, 0, 255), color(2, 0, 0, 255)))
+    assert(axis_matches(40, 30, 1, 1, 4, 2, color(0, 0, 0, 120), color(2, 0, 0, 120)))
+}
+
+checks_20x10: fn() -> Image {
+    gen_image_checked(20, 10, 3, 2, color(10, 20, 30, 40), color(200, 100, 50, 255))
+}
+
+#Test("raster opaque paint over much of the image stitches the same bytes") {
+    extent: Extent{width: 20, height: 10}
+    // 15 x 7 of 20 x 10 is past the stitch share, 2 x 2 is not; the line from
+    // the bottom right runs right to left and does not stitch.
+    pieces: [[Run]]{
+        rec_runs(extent, int_rectangle(3, 2, 15, 7), 0x112233FF),
+        rec_runs(extent, int_rectangle(3, 2, 2, 2), 0x112233FF),
+        circle_runs(extent, 9, 5, 6, 0x445566FF),
+        line_runs(extent, 19, 9, 0, 0, 0x778899FF),
+        line_runs(extent, 0, 9, 19, 0, 0x778899FF),
+        rec_runs(extent, int_rectangle(0, 0, 20, 10), 0x99887766),
+    }
+    loop runs in pieces {
+        drawn := checks_20x10()
+        paint(drawn, runs)
+        expected := checks_20x10()
+        reference_paint(expected, runs)
+        assert_eq(image_words(drawn), image_words(expected))
+    }
+    filled := checks_20x10()
+    fill(filled, -2, 1, 30, 8, 0x0A0B0CFF, false)
+    filled_runs := checks_20x10()
+    reference_paint(filled_runs, rec_runs(extent, int_rectangle(-2, 1, 30, 8), 0x0A0B0CFF))
+    assert_eq(image_words(filled), image_words(filled_runs))
+    cleared := checks_20x10()
+    clear_background(cleared, color(1, 2, 3, 0))
+    assert_eq(image_words(cleared), image_words(gen_image_color(20, 10, color(1, 2, 3, 0))))
+    assert_eq(solid_row(0x01020304, 3), [U8]{1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4})
+    assert_eq(solid_row(0x01020304, 0).len(), 0)
 }
 
 triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
@@ -2304,20 +2679,16 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert(get_image_color(tone, 0, 0).b == 255)
 }
 
-#Test("measure_text spans what draw_text draws") {
-    assert_eq(measure_text("", 10), 0)
-    assert_eq(measure_text("\n", 10), 0)
-    assert_eq(measure_text("Hi", 10), 11)
-    assert_eq(measure_text("Hi", 4), 11)
-    assert_eq(measure_text("Hi", 20), 22)
-    assert_eq(measure_text("A", 15), 10)
-    assert_eq(measure_text("ab\nlonger\nc", 10), 35)
-    assert_eq(measure_text("é?", 10), 11)
-    // "H" fills its fifth column, so the drawn pixels end at the measured width.
-    runs: text_runs(Extent{width: 100, height: 40}, "HH", 0, 0, 20, 1)
-    right := 0
-    loop run in runs -> right = max_int(right, run.x + run.width)
-    assert_eq(right, measure_text("HH", 20))
+#Test("measure_text spans the widest line's rounded advance") {
+    set := typeset()
+    assert_eq(measure_text(set, "", 16), 0)
+    assert_eq(measure_text(set, "\n", 16), 0)
+    assert_eq(measure_text(set, "Hi", 0), 0)
+    face: typeset_face(set)
+    assert_eq(measure_text(set, "Hi", 20), round_px(face.layout("Hi", 20.0).advance))
+    assert_eq(measure_text(set, "ab\nlonger\nc", 16), measure_text(set, "longer", 16))
+    assert(measure_text(set, "HH", 16) > measure_text(set, "H", 16))
+    assert(measure_text(set, "H", 16) > 0)
 }
 
 push_be32: fn(out: &[U8], value: Int) {
@@ -2422,21 +2793,68 @@ gray: fn(value: Int) -> Int {
     assert_eq(Int.from_u8(broken.pixels[0]), 0)
 }
 
-#Test("text paints the 5x7 glyph columns") {
-    // "I" is glyph 41, columns 0x00 0x41 0x7F 0x41 0x00: rows 0 and 6 of
-    // columns 1 and 3, every row of column 2.
-    image := gen_image_color(6, 7, color(0, 0, 0, 255))
-    draw_text(image, "I", 0, 0, 10, color(255, 255, 255, 255))
-    white: png_rgba(255, 255, 255, 255)
-    black: png_rgba(0, 0, 0, 255)
-    words: image_words(image)
-    loop y in 0..<7 {
-        loop x in 0..<6 {
-            expected := black
-            if x == 2 || ((x == 1 || x == 3) && (y == 0 || y == 6)) -> expected = white
-            assert_eq(words[2 + y * 6 + x], expected)
+// The pixels that differ between two images of one size, as x, y pairs.
+changed_pixels: fn(before: Image, after: Image) -> [Int] {
+    out := [Int]{}
+    loop at in 0..<(before.width * before.height) {
+        same := true
+        loop k in 0..<4 {
+            if before.pixels[at * 4 + k] != after.pixels[at * 4 + k] -> same = false
+        }
+        if !same {
+            out.push(at %% before.width)
+            out.push(at /% before.width)
         }
     }
+    out
+}
+
+#Test("text draws the face's glyphs inside its line box") {
+    set := typeset()
+    white: color(255, 255, 255, 255)
+    blank: gen_image_color(60, 50, color(0, 0, 0, 255))
+    hi := gen_image_color(60, 50, color(0, 0, 0, 255))
+    draw_text(hi, set, "Hi", 4, 3, 16, white)
+    marks: changed_pixels(blank, hi)
+    assert(marks.len() > 0)
+    metrics: typeset_face(set).metrics(16.0)
+    width: measure_text(set, "Hi", 16)
+    // "Hi" has no descender: its ink lies between x and its advance, and
+    // between the line's top and its baseline.
+    loop k in 0..<(marks.len() /% 2) {
+        assert(marks[2 * k] >= 4 && marks[2 * k] < 4 + width)
+        assert(marks[2 * k + 1] >= 3 && marks[2 * k + 1] < 3 + round_px(metrics.ascent))
+    }
+    // A whole pixel to the right draws the same pixels one column over.
+    moved := gen_image_color(60, 50, color(0, 0, 0, 255))
+    draw_text(moved, set, "Hi", 5, 3, 16, white)
+    shifted: changed_pixels(blank, moved)
+    assert_eq(shifted.len(), marks.len())
+    loop k in 0..<(marks.len() /% 2) {
+        assert_eq(shifted[2 * k], marks[2 * k] + 1)
+        assert_eq(shifted[2 * k + 1], marks[2 * k + 1])
+        at: (marks[2 * k + 1] * 60 + marks[2 * k]) * 4
+        assert_eq(moved.pixels[at + 4], hi.pixels[at])
+    }
+    // A second line draws the first's ink again, one line height lower.
+    one := gen_image_color(60, 50, color(0, 0, 0, 255))
+    draw_text(one, set, "H", 4, 3, 16, white)
+    two := gen_image_color(60, 50, color(0, 0, 0, 255))
+    draw_text(two, set, "H\nH", 4, 3, 16, white)
+    ink: changed_pixels(blank, one)
+    both: changed_pixels(blank, two)
+    step: line_height(metrics)
+    assert_eq(both.len(), ink.len() * 2)
+    loop k in 0..<(ink.len() /% 2) {
+        assert_eq(both[ink.len() + 2 * k], ink[2 * k])
+        assert_eq(both[ink.len() + 2 * k + 1], ink[2 * k + 1] + step)
+    }
+    // A clear color, a size below 1 and empty text leave the image.
+    same := gen_image_color(60, 50, color(0, 0, 0, 255))
+    draw_text(same, set, "Hi", 4, 3, 0, white)
+    draw_text(same, set, "Hi", 4, 3, 16, color(255, 255, 255, 0))
+    draw_text(same, set, "", 4, 3, 16, white)
+    assert_eq(changed_pixels(blank, same).len(), 0)
 }
 
 #Test("sprites copy opaque texels, skip clear ones and blend the rest") {

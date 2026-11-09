@@ -16,14 +16,3 @@
 #Export(c) jet_rt_handle_drop_jet_hook_policy: fn(value: I64) { encoding_enum_drop(value) }
 #Export(c) jet_rt_handle_clone_jet_event_policy: fn(value: I64) -> I64 { encoding_enum_clone(value) }
 #Export(c) jet_rt_handle_drop_jet_event_policy: fn(value: I64) { encoding_enum_drop(value) }
-// Unit ordinals, exact Show spellings. Bad ordinal uses shared record-variant
-// stop (composition dep 2442d5d80).
-#Export(c) jet_rt_handle_clone_jet_event_result: fn(value: I64) -> I64 { encoding_enum_clone(value) }
-#Export(c) jet_rt_handle_drop_jet_event_result: fn(value: I64) { encoding_enum_drop(value) }
-#Export(c) jet_rt_handle_eq_jet_event_result: fn(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
-#Export(c) jet_rt_handle_show_jet_event_result: fn(value: I64) -> I64 {
-    ordinal: encoding_word(wrapping(value + ENCODING_ENUM_TAG))
-    if (ordinal != I64{0} && ordinal != I64{1}) -> rt_record_variant_panic()
-    // Shared exact-size E4 literal owner; no growable builder or temporary Int.
-    display_literal(if (ordinal == I64{0}) -> I64{28259013886894408} else -> I64{28259039841249097}, I64{7})
-}

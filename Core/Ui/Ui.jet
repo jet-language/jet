@@ -12,9 +12,11 @@ use {
     core: core
     tui_text: core.tui
     core.term.[Key]
+    core.ui.host.[UIAccessibility, UIAccessibilityState, UITextRange]
+    core.ui.host.ime.[UIIMEComposition]
     draw: __core_ui_draw
     wayland: __core_ui_wayland
-    internal.[checksum, has_nul, without_key, without_button]
+    internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -124,8 +126,30 @@ InputEvent: enum {
     Resize(size: Size)
 }
 
+// One node of the portable tree: its label, its size in cells, and what
+// hosts and assistive tech read. A box stacks its children top to bottom;
+// a button built with a handler (`button(display) { … }`) holds its click
+// slot.
+UINode: struct {
+    label: String
+    width: Float
+    height: Float
+    accessibility: UIAccessibility?
+    ime: UIIMEMode?
+    shortcut: UIShortcut?
+    priv role: UIAriaRole?
+    priv kind: UINodeKind
+    priv children: [UINode]
+    priv color: String?
+    // The id the runtime's click registry keeps the handler under; 0 for none.
+    priv click: Int
+}
 
-
+// Whether a backend used an input event.
+EventResult: enum {
+    Handled
+    Ignored
+}
 
 point: fn(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
 size: fn(width: Float, height: Float) -> Size Never! {
@@ -141,7 +165,7 @@ constraint: fn(min_width: Float, min_height: Float, max_width: Float, max_height
 }
 
 node: fn(label: String, width: Float, height: Float) -> UINode Never! {
-    transfer_node(label, width, height, None, UINodeKind.Custom, [UINode]{}, None)
+    leaf(label, width, height, None, UINodeKind.Custom, None)
 }
 
 box: fn(children: [UINode]) -> UINode Never! {
@@ -152,28 +176,40 @@ box: fn(children: [UINode]) -> UINode Never! {
         if child.width > width -> width = child.width
         height += child.height
     }
-    transfer_node("", width, height, Val(UIAriaRole.Container), UINodeKind.Box, children, None)
+    UINode{
+        label: "", width: width, height: height, accessibility: None, ime: None, shortcut: None,
+        role: Val(UIAriaRole.Container), kind: UINodeKind.Box, children: children, color: None, click: 0,
+    }
 }
 
 text: fn(value: String) -> UINode Never! {
     width: Float{tui_text.display_width(value)}
-    transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
+    leaf(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, None)
 }
 
 // A button sized to its label plus two cells of padding on each side. The
-// callback form `button(display) { … }` registers its click handler through
-// the compiler's retained-closure emission.
+// callback form `button(display) { … }` is `__button_click`.
 button: fn(display: String) -> UINode Never! {
     width: Float{tui_text.display_width(display)} + 4.0
-    transfer_node(display, width, 1.0, Val(UIAriaRole.Button), UINodeKind.Button, [UINode]{}, None)
+    leaf(display, width, 1.0, Val(UIAriaRole.Button), UINodeKind.Button, None)
 }
 
-// A text input over `state` with its IME mode. The host provider fills the
-// IME slot, which the audited node transfer leaves absent.
+// `button(display, shortcut:, label:) { on_click }`: the compiler registers
+// the handler with the runtime's click registry as slot `click`, then builds
+// the button here. `label` names it to assistive tech.
+__button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click: Int) -> UINode Never! {
+    result := button(display)
+    result.shortcut = shortcut
+    if label == .Val(name) -> result.accessibility = Val(UIAccessibility{name: Val(name), description: None, states: [UIAccessibilityState]{}})
+    result.click = click
+    result
+}
+
+// A text input over `state`, one cell per scalar, with its IME mode.
 text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
-    #Unsafe("Core UI text input: the provider sets the explicitly requested IME slot") {
-        return core.ui.__text_input(state, ime)
-    }
+    result := leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
+    result.ime = Val(ime)
+    result
 }
 
 desktop: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
@@ -207,14 +243,10 @@ resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
 }
 
 tui_backend: fn() -[Browser]> TUIBackend Never! {
-    #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
-        return core.ui.__tui_backend()
-    }
+    TUIBackend{state: shared backend_state(true, tui_text.capabilities().unicode)}
 }
 null_backend: fn() -[Browser]> NullBackend Never! {
-    #Unsafe("Core creates the real retained null renderer through the registered host allocation boundary") {
-        return core.ui.__null_backend()
-    }
+    NullBackend{state: shared backend_state(false, false)}
 }
 
 aria_role_button: fn() -> UIAriaRole Never! { UIAriaRole.Button }
@@ -223,53 +255,26 @@ aria_role_label: fn() -> UIAriaRole Never! { UIAriaRole.Label }
 aria_role_text_input: fn() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 node_accessibility: fn(n: UINode, metadata: UIAccessibility) -> UINode Never! {
-    #Unsafe("Core UI accessibility slot transfer: explicitly present validated metadata") {
-        return core.ui.__accessibility_transfer(n, metadata, true)
-    }
+    result := n.copy()
+    result.accessibility = Val(metadata)
+    result
 }
 
 node_color: fn(label: String, width: Float, height: Float, color: String) -> UINode Never! {
-    transfer_node(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, [UINode]{}, Val(color))
+    leaf(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, Val(color))
 }
 
 node_role: fn(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
     kind := UINodeKind.Custom
     if role == .Button -> kind = UINodeKind.Button
     if role == .TextInput -> kind = UINodeKind.TextInput
-    transfer_node(label, width, height, Val(role), kind, [UINode]{}, None)
+    leaf(label, width, height, Val(role), kind, None)
 }
 
 node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
-    #Unsafe("Core UI shortcut slot transfer: explicitly present validated shortcut") {
-        return core.ui.__shortcut_transfer(n, shortcut, true)
-    }
-}
-
-
-transfer_node: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, children: [UINode], color: String?) -> UINode Never! {
-    // Policy chooses the absent metadata slots here. The wire explicitly
-    // carries their six absence bits, rather than asking the host for defaults.
-    role_tag := -1
-    if role == .Val(value) {
-        if value == .Button -> role_tag = 0
-        if value == .TextInput -> role_tag = 1
-        if value == .Label -> role_tag = 2
-        if value == .Container -> role_tag = 3
-    }
-    kind_tag := 0
-    if kind == .Text -> kind_tag = 1
-    if kind == .Box -> kind_tag = 2
-    if kind == .Button -> kind_tag = 3
-    if kind == .TextInput -> kind_tag = 4
-    color_present := false
-    color_word := ""
-    if color == .Val(value) {
-        color_present = true
-        color_word = value
-    }
-    #Unsafe("Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words") {
-        return core.ui.__node_transfer(label, width, height, role_tag, kind_tag, children, color_present, color_word, 63, false, 0, 0, 0, 0, 0)
-    }
+    result := n.copy()
+    result.shortcut = Val(shortcut)
+    result
 }
 
 preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
@@ -283,6 +288,156 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
     Ok(UIPreviewRegistry{entries: entries})
 }
 
+// ---- backends -----------------------------------------------------------
+//
+// A backend measures a tree, lays it out in a frame and paints it. The
+// null backend records what each leaf would draw as text commands; the
+// TUI backend writes each leaf's label into a grid of terminal cells. Both
+// keep a focus ring, the buttons and text inputs the latest paint found,
+// which Tab advances, and a web build's page shows each paint's scene.
+// Copies of a backend share it.
+
+UIBackendState: struct {
+    priv tui: Bool
+    // Whether the TUI grid shows Unicode; else labels are projected to ASCII.
+    priv unicode: Bool
+    // Where the next paint goes; a tree's own size at the origin when unset.
+    priv frame: Rect?
+    priv commands: [String]
+    priv focus: [UINode]
+    // The index of the focused node in `focus`, -1 for none.
+    priv focused: Int
+    // The TUI grid: `rows` rows of `cols` cells, one scalar each, row-major.
+    priv cols: Int
+    priv rows: Int
+    priv cells: [Int]
+    priv renders: Int
+}
+
+NullBackend: struct {
+    priv state: Shared<UIBackendState>
+}
+
+TUIBackend: struct {
+    priv state: Shared<UIBackendState>
+}
+
+impl NullBackend {
+    // The size `tree` takes within `constraint`: a box its widest child by
+    // its children's summed heights, any other node its own size.
+    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
+
+    // Places the next paints in `frame`.
+    layout: fn(self, _tree: UINode, frame: Rect) {
+        guard := self.state.guard_edit()
+        layout_state(guard.value, frame)
+    }
+
+    // Records a fill (the node's color, else #000000) for each leaf but a
+    // text, then its text, and refocuses on the interactive nodes found.
+    paint: fn(self, tree: UINode) {
+        guard := self.state.guard_edit()
+        paint_state(guard.value, tree)
+    }
+
+    // Clears the commands, then measures `tree` within `constraint` (80 x
+    // 24 cells when absent), lays it out at the origin and paints it.
+    mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
+        guard := self.state.guard_edit()
+        guard.value.commands = [String]{}
+        mount_state(guard.value, tree, constraint)
+    }
+
+    // Tab moves the focus to the next node of the ring; an empty key and a
+    // resize to no area are Ignored.
+    on_event: fn(self, event: InputEvent) -> EventResult {
+        guard := self.state.guard_edit()
+        dispatch(guard.value, event)
+    }
+
+    // Makes `nodes` the focus ring, focused on its first node.
+    set_focus_group: fn(self, nodes: [UINode]) {
+        guard := self.state.guard_edit()
+        focus_ring(guard.value, nodes)
+    }
+
+    // The focused node's label; "" with none focused.
+    focused_label: fn(self) -> String {
+        guard: self.state.guard_read()
+        focused_text(guard.value)
+    }
+
+    // What the paints since the latest mount drew, in order.
+    commands: fn(self) -> [String] {
+        guard: self.state.guard_read()
+        guard.value.commands.copy()
+    }
+}
+
+impl TUIBackend {
+    // The size `tree` takes within `constraint`: a box its widest child by
+    // its children's summed heights, any other node its own size.
+    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
+
+    // Places the next paints in `frame` and clears a grid of its whole cells.
+    layout: fn(self, _tree: UINode, frame: Rect) {
+        guard := self.state.guard_edit()
+        layout_state(guard.value, frame)
+    }
+
+    // Blanks the grid and writes each leaf's label into it, from its
+    // frame's top-left cell, then refocuses on the interactive nodes found.
+    paint: fn(self, tree: UINode) {
+        guard := self.state.guard_edit()
+        paint_state(guard.value, tree)
+    }
+
+    // Measures `tree` within `constraint` (80 x 24 cells when absent), lays
+    // it out at the origin and paints it.
+    mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
+        guard := self.state.guard_edit()
+        mount_state(guard.value, tree, constraint)
+    }
+
+    // Tab moves the focus to the next node of the ring and a resize lays
+    // the grid out again; an empty key and a resize to no area are Ignored.
+    on_event: fn(self, event: InputEvent) -> EventResult {
+        guard := self.state.guard_edit()
+        dispatch(guard.value, event)
+    }
+
+    // Makes `nodes` the focus ring, focused on its first node.
+    set_focus_group: fn(self, nodes: [UINode]) {
+        guard := self.state.guard_edit()
+        focus_ring(guard.value, nodes)
+    }
+
+    // The focused node's label; "" with none focused.
+    focused_label: fn(self) -> String {
+        guard: self.state.guard_read()
+        focused_text(guard.value)
+    }
+
+    // The grid's rows, each without its trailing white space.
+    frame_lines: fn(self) -> [String] {
+        guard: self.state.guard_read()
+        state: guard.value
+        lines := [String]{}
+        loop row in 0..<state.rows {
+            line := [U8]{}
+            loop col in 0..<state.cols -> push_scalar(line, state.cells[row * state.cols + col])
+            lines.push((String.from_bytes(line) ?? "").trim_end())
+        }
+        lines
+    }
+
+    // How many paints the backend has drawn.
+    render_count: fn(self) -> Int {
+        guard: self.state.guard_read()
+        guard.value.renders
+    }
+}
+
 // ---- drawing ----------------------------------------------------------
 //
 // Jet's software rasterizer draws 2D shapes, text and sprites into a
@@ -292,9 +447,10 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
 // centers lie inside it and blends src-over with rounding,
 // (src * a + dst * (255 - a) + 127) / 255 on every channel, alpha
 // included; a clear copies its color. Float geometry (Point, Rect) is in
-// pixels and snaps to a 1/256-pixel grid. Text is the built-in 5x7 bitmap
-// font at a whole-pixel scale. The names and argument orders are the
-// classic immediate-mode 2D ones, so such programs port line for line.
+// pixels and snaps to a 1/256-pixel grid. Text is Atkinson Hyperlegible
+// Next, anti-aliased, kerned, at any whole-pixel size. The names and
+// argument orders are the classic immediate-mode 2D ones, so such programs
+// port line for line.
 
 // An image in memory: `width` x `height` RGBA pixels, row-major, alpha
 // straight. An image of width 0 holds no pixels.
@@ -338,11 +494,13 @@ load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
     TextureAtlas{atlas: draw.load_texture_atlas(path)}
 }
 
-// The width in pixels of the widest line `draw_text` draws: each scalar
-// is 5 columns plus 1 of spacing at the text's scale (size / 10 rounded,
-// at least 1), and the last scalar on a line adds no spacing. Lines split
-// at "\n".
-measure_text: fn(text: String, size: Int) -> Int Never! { draw.measure_text(text, size) }
+// The width in pixels of the widest line `draw_text` draws at `size`: its
+// kerned advance in Atkinson Hyperlegible Next, rounded to a whole pixel.
+// Lines split at "\n". Each call loads the face.
+measure_text: fn(text: String, size: Int) -> Int Never! {
+    set := draw.typeset()
+    draw.measure_text(set, text, size)
+}
 
 // Collision checks: they draw nothing and need no window.
 check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! { draw.check_collision_recs(rec1, rec2) }
@@ -486,6 +644,12 @@ image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { dr
 // shadow) around the frames unless the display server draws its own;
 // frames are the content below the title bar.
 //
+// Each window has its own connection to the display server. A program
+// with several windows drives each one's frames in its own task:
+//
+//     editor: task { run_editor() }
+//     palette: task { run_palette() }
+//
 // The display server comes from the environment: $WAYLAND_DISPLAY.
 
 SIDE_MAX: 16384
@@ -503,7 +667,7 @@ UIError: enum {
     Protocol(String)
     // The display server lacks something a window needs.
     Unsupported(String)
-    // A window size or pixel buffer is out of range.
+    // A window size, pixel buffer or the clipboard's text is out of range.
     Size(String)
     // An app_id or icon name the program passed is malformed.
     Invalid(String)
@@ -572,13 +736,17 @@ UIIconImage: struct {
 }
 
 // What happened since the previous frame. Positions are window pixels
-// from the top-left; `Text` is what a key press typed; `Resize` gives
-// the new frame size in pixels; `Close` asks the program to close the
-// window and ends the frames.
+// from the top-left; `Text` is what a key press typed or an input method
+// committed; `Compose` is the input method's composition in progress,
+// shown at the caret in place of the previous one until its text is
+// committed (empty text: none); `Resize` gives the new frame size in
+// pixels; `Close` asks the program to close the window and ends the
+// frames.
 UIEvent: enum {
     KeyDown(Key)
     KeyUp(Key)
     Text(String)
+    Compose(UIIMEComposition)
     PointerMove(x: Int, y: Int)
     PointerDown(UIPointerButton)
     PointerUp(UIPointerButton)
@@ -609,6 +777,8 @@ WindowState: struct {
     priv cursor: UICursor
     // What the frames drew, and whether the latest frame drew or presented.
     priv canvas: draw.Image
+    // The face text draws in, loaded at the first draw_text, and its masks.
+    priv typeset: draw.Typeset
     priv drawn: Bool
     priv presented: Bool
     // The keys and pointer buttons held and the pointer's place, as of
@@ -617,6 +787,10 @@ WindowState: struct {
     priv buttons: [UIPointerButton]
     priv mouse_x: Int
     priv mouse_y: Int
+    // A headless window's clipboard, and its states as last set.
+    priv clipboard: String
+    priv maximized: Bool
+    priv fullscreen: Bool
 }
 
 // A window and its frames. Copies share the one window, which closes when
@@ -636,7 +810,8 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
     state: WindowState{
         width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
         link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0,
+        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+        maximized: false, fullscreen: false,
     }
     Ok(Window{state: shared state})
 }
@@ -651,7 +826,8 @@ headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!
     state: WindowState{
         width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
         link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0,
+        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+        maximized: false, fullscreen: false,
     }
     Ok(Window{state: shared state})
 }
@@ -771,6 +947,101 @@ impl Window {
             return wayland.set_icon(connection.value, icon)
         }
         Ok()
+    }
+
+    // The clipboard's text: "" when it is empty or holds no text. Another
+    // program's copy is read from it then and there, waiting up to 2 s; a
+    // headless window has a clipboard of its own.
+    clipboard_text: fn(self) -[Env, Net, Time]> String UIError! {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.clipboard_text(connection.value)
+        }
+        Ok(guard.value.clipboard.copy())
+    }
+
+    // Puts `text` on the clipboard, for this and every other program to
+    // paste until another copy replaces it. Copy in answer to input: the
+    // display server takes a copy only from the window with the keyboard
+    // focus.
+    set_clipboard_text: fn(self, text: String) UIError! -[Net, Time]> {
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.set_clipboard_text(connection.value, text)
+        }
+        guard.value.clipboard = text.copy()
+        Ok()
+    }
+
+    // The program's text field, for the display server's input method to
+    // compose into: `area` is its caret's rectangle, where the input
+    // method shows its candidates; none says there is no text field,
+    // which ends any composition. Compositions arrive as `.Compose` and
+    // their committed text as `.Text`. Without an input method, typing
+    // arrives from the keyboard alone; a headless window has none.
+    set_text_input: fn(self, area: UIRect?) UIError! -[Net, Time]> {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.set_text_input(connection.value, area)
+        }
+        Ok()
+    }
+
+    // Whether the window fills the desktop's work area, and whether it
+    // fills a whole screen with no frame, as the display server last
+    // said; a headless window's as last set.
+    maximized: fn(self) -> Bool {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection: link.guard_read()
+            return wayland.is_maximized(connection.value)
+        }
+        guard.value.maximized
+    }
+
+    fullscreen: fn(self) -> Bool {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection: link.guard_read()
+            return wayland.is_fullscreen(connection.value)
+        }
+        guard.value.fullscreen
+    }
+
+    // Asks the display server to maximize the window or to restore it,
+    // to make it fullscreen or to leave fullscreen, or to minimize it.
+    // The display server decides: a new size arrives as `.Resize` on a
+    // later frame, and `maximized()` and `fullscreen()` follow its
+    // answer. A minimized window comes back only when the user brings
+    // it back. A headless window takes each state at once and keeps its
+    // size.
+    set_maximized: fn(self, maximized: Bool) {
+        guard := self.state.guard_edit()
+        guard.value.maximized = maximized
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_maximized(connection.value, maximized)
+        }
+    }
+
+    set_fullscreen: fn(self, fullscreen: Bool) {
+        guard := self.state.guard_edit()
+        guard.value.fullscreen = fullscreen
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_fullscreen(connection.value, fullscreen)
+        }
+    }
+
+    minimize: fn(self) {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.minimize(connection.value)
+        }
     }
 
     // Presentation timing so far; zeros for a headless window or a
@@ -1134,12 +1405,14 @@ impl Frame {
         guard.value.drawn = true
     }
 
-    // Text in the built-in 5x7 font at a whole-pixel scale (see
-    // measure_text), its top-left at (x, y); "\n" starts a line.
+    // Text in Atkinson Hyperlegible Next, anti-aliased, `size` pixels to
+    // the em: the first line's top at `y` and its baseline the face's
+    // ascent below that, the line starting at `x`; "\n" starts a line one
+    // line height lower. Each pixel blends the color by the glyph's coverage.
     draw_text: fn(self, text: String, x: Int, y: Int, size: Int, color: Color) {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
-        draw.draw_text(guard.value.canvas, text, x, y, size, color)
+        draw.draw_text(guard.value.canvas, guard.value.typeset, text, x, y, size, color)
         guard.value.drawn = true
     }
 
@@ -1154,8 +1427,8 @@ impl Frame {
     }
 }
 
-// How a headless frame is recorded and input is tracked: not part of the
-// ui surface.
+// How a headless frame is recorded, input is tracked and the backends
+// measure, lay out and paint: not part of the ui surface.
 priv internal: module {
     // FNV-1a, 32-bit.
     checksum: fn(bytes: [U8]) -> Int {
@@ -1187,6 +1460,248 @@ priv internal: module {
         }
         kept
     }
+
+    leaf: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, color: String?) -> UINode Never! {
+        UINode{
+            label: label, width: width, height: height, accessibility: None, ime: None, shortcut: None,
+            role: role, kind: kind, children: [UINode]{}, color: color, click: 0,
+        }
+    }
+
+    backend_state: fn(tui: Bool, unicode: Bool) -> UIBackendState Never! {
+        UIBackendState{
+            tui: tui, unicode: unicode, frame: None, commands: [String]{}, focus: [UINode]{}, focused: -1,
+            cols: 0, rows: 0, cells: [Int]{}, renders: 0,
+        }
+    }
+
+    measure_tree: fn(tree: UINode, constraint: SizeConstraint) -> Size Never! {
+        Size{
+            width: clamp_float(tree.width, constraint.min_width, constraint.max_width),
+            height: clamp_float(tree.height, constraint.min_height, constraint.max_height),
+        }
+    }
+
+    // f64::clamp: a NaN value stays NaN, and a NaN bound or min > max panics.
+    clamp_float: fn(value: Float, min: Float, max: Float) -> Float Never! {
+        if !(min <= max) -> panic("min > max, or either was NaN. min = {min}, max = {max}")
+        if value < min -> return min
+        if value > max -> return max
+        value
+    }
+
+    layout_state: fn(&state: UIBackendState, frame: Rect) Never! {
+        state.frame = Val(frame)
+        if state.tui -> reset_cells(state, frame.width, frame.height)
+    }
+
+    mount_state: fn(&state: UIBackendState, tree: UINode, constraint: SizeConstraint?) Never! {
+        viewport: constraint ?? SizeConstraint{min_width: 0.0, min_height: 0.0, max_width: 80.0, max_height: 24.0}
+        size: measure_tree(tree, viewport)
+        layout_state(state, Rect{x: 0.0, y: 0.0, width: size.width, height: size.height})
+        paint_state(state, tree)
+    }
+
+    paint_state: fn(&state: UIBackendState, tree: UINode) Never! {
+        frame: state.frame ?? Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
+        if state.tui {
+            state.renders += 1
+            if state.rows == 0 -> reset_cells(state, frame.width, frame.height)
+            loop index in 0..<state.cells.len() -> state.cells[index] = 32
+        }
+        visit(state, tree, frame)
+        if core.ui.__web_attached() {
+            records := [String]{}
+            scene_records(tree, frame, records)
+            core.ui.__web_scene(records.join(""))
+        }
+        found := [UINode]{}
+        collect_focus(tree, found)
+        if found.len() > 0 {
+            state.focus = found
+            state.focused = 0
+        }
+    }
+
+    // A box stacks its children down its frame, each its own height across
+    // the frame's width; every other node is a leaf painted into its frame.
+    visit: fn(&state: UIBackendState, node: UINode, frame: Rect) Never! {
+        if node.kind == .Box {
+            at := frame.y
+            loop child in node.children {
+                visit(state, child, Rect{x: frame.x, y: at, width: frame.width, height: child.height})
+                at += child.height
+            }
+            return
+        }
+        if state.tui {
+            row: cell_index(frame.y)
+            if row < state.rows -> tui_text.__write_cells(state.cells, state.cols, row, cell_index(frame.x), node.label, state.unicode)
+            return
+        }
+        place: rect_text(frame)
+        if node.kind != .Text {
+            color: node.color ?? "#000000"
+            state.commands.push("fill({place}, {color})")
+        }
+        state.commands.push("text({place}, {node.label})")
+    }
+
+    // The interactive nodes (buttons and text inputs) of a tree, in pre-order.
+    collect_focus: fn(node: UINode, &found: [UINode]) Never! {
+        if node.role == Val(UIAriaRole.Button) || node.role == Val(UIAriaRole.TextInput) -> found.push(node.copy())
+        loop child in node.children -> collect_focus(child, found)
+    }
+
+    dispatch: fn(&state: UIBackendState, event: InputEvent) -> EventResult Never! {
+        if event == {
+            .Key(code) -> {
+                if code.to_ascii_lower() == "tab" && state.focus.len() > 0 {
+                    state.focused = if state.focused < 0 -> 0 else -> (state.focused + 1) % state.focus.len()
+                    return EventResult.Handled
+                }
+                if code == "" -> EventResult.Ignored else -> EventResult.Handled
+            }
+            .Resize(size) -> {
+                if size.width <= 0.0 || size.height <= 0.0 -> return EventResult.Ignored
+                if state.tui {
+                    state.frame = Val(Rect{x: 0.0, y: 0.0, width: size.width, height: size.height})
+                    reset_cells(state, size.width, size.height)
+                }
+                EventResult.Handled
+            }
+        }
+    }
+
+    focus_ring: fn(&state: UIBackendState, nodes: [UINode]) Never! {
+        state.focus = nodes.copy()
+        state.focused = if nodes.len() == 0 -> -1 else -> 0
+    }
+
+    focused_text: fn(state: UIBackendState) -> String Never! {
+        if state.focused < 0 || state.focused >= state.focus.len() -> return ""
+        state.focus[state.focused].label.copy()
+    }
+
+    // A grid of the whole cells of a side, at least one each way, all blank.
+    reset_cells: fn(&state: UIBackendState, width: Float, height: Float) Never! {
+        state.cols = cell_index(if width >= 1.0 -> width else -> 1.0)
+        state.rows = cell_index(if height >= 1.0 -> height else -> 1.0)
+        count: state.cols * state.rows
+        state.cells = [Int]{}
+        loop state.cells.len() < count -> state.cells.push(32)
+    }
+
+    // The whole cells before `value`: none for a NaN or a value below one, and
+    // at most the Int range of a 64-bit target.
+    cell_index: fn(value: Float) -> Int Never! {
+        if !(value >= 1.0) -> return 0
+        if value >= 9223372036854775807.0 -> return 9223372036854775807
+        Int.from_float(core.math.floor(value)) ?? 0
+    }
+
+    // The UTF-8 bytes of scalar `n`.
+    push_scalar: fn(&out: [U8], n: Int) Never! {
+        if n < 0x80 {
+            out.push(U8{n})
+        } else if n < 0x800 {
+            out.push(U8{0xC0 + (n >> 6)})
+            out.push(U8{0x80 + n.bit_and(63)})
+        } else if n < 0x10000 {
+            out.push(U8{0xE0 + (n >> 12)})
+            out.push(U8{0x80 + (n >> 6).bit_and(63)})
+            out.push(U8{0x80 + n.bit_and(63)})
+        } else {
+            out.push(U8{0xF0 + (n >> 18)})
+            out.push(U8{0x80 + (n >> 12).bit_and(63)})
+            out.push(U8{0x80 + (n >> 6).bit_and(63)})
+            out.push(U8{0x80 + n.bit_and(63)})
+        }
+    }
+
+    // A paint's frame as its commands show it: {x:…,y:…,w:…,h:…}.
+    rect_text: fn(frame: Rect) -> String Never! {
+        "{{x:{float_text(frame.x)},y:{float_text(frame.y)},w:{float_text(frame.width)},h:{float_text(frame.height)}}}"
+    }
+
+    // A Float as Rust's Display shows it, the form of the backends' commands
+    // and scenes: decimal digits with no exponent and no ".0" on a whole value.
+    float_text: fn(value: Float) -> String Never! {
+        shown: "{value}"
+        raw: shown.bytes()
+        exponent_at := -1
+        loop (index, b) in raw {
+            if b == (U8{101}) -> exponent_at = index
+        }
+        if exponent_at < 0 {
+            if shown.ends_with(".0") -> return String.from_bytes(raw[0..<raw.len() - 2]) ?? shown
+            return shown
+        }
+        negative: raw[0] == U8{45}
+        digits := [U8]{}
+        point := -1
+        loop index in (if negative -> 1 else -> 0)..<exponent_at {
+            if raw[index] == (U8{46}) {
+                point = digits.len()
+            } else {
+                digits.push(raw[index])
+            }
+        }
+        if point < 0 -> point = digits.len()
+        exponent := 0
+        below := false
+        loop index in (exponent_at + 1)..<raw.len() {
+            if raw[index] == (U8{45}) {
+                below = true
+            } else {
+                exponent = exponent * 10 + Int.from_u8(raw[index]) - 48
+            }
+        }
+        place: if below -> point - exponent else -> point + exponent
+        out := [U8]{}
+        if negative -> out.push(U8{45})
+        if place <= 0 {
+            out.push(U8{48})
+            out.push(U8{46})
+            loop out.len() < (if negative -> 3 else -> 2) - place -> out.push(U8{48})
+            loop d in digits -> out.push(d)
+        } else if place >= digits.len() {
+            loop d in digits -> out.push(d)
+            loop index in digits.len()..<place -> out.push(U8{48})
+        } else {
+            loop index in 0..<place -> out.push(digits[index])
+            out.push(U8{46})
+            loop index in place..<digits.len() -> out.push(digits[index])
+        }
+        String.from_bytes(out) ?? shown
+    }
+
+    // A paint's web scene, one record per leaf in paint order: a box adds
+    // none and stacks its children as a paint does. A record is its fields
+    // separated by tabs, kind (Custom 0, Text 1, Box 2, Button 3, TextInput 4),
+    // click slot (0 for none), x, y, width, height, color (empty for none) and
+    // the label's UTF-8 byte length, then the label and a newline. A web
+    // build's host (JetWeb Host.jet) turns it into the page's elements.
+    scene_records: fn(node: UINode, frame: Rect, &records: [String]) Never! {
+        if node.kind == .Box {
+            at := frame.y
+            loop child in node.children {
+                scene_records(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, records)
+                at += child.height
+            }
+            return
+        }
+        kind: if node.kind == {
+            .Custom -> 0
+            .Text -> 1
+            .Box -> 2
+            .Button -> 3
+            .TextInput -> 4
+        }
+        color: node.color ?? ""
+        place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
+        records.push("{kind}\t{node.click}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n")
+    }
 }
 
 #Test("UI aria role constructors") {
@@ -1194,6 +1709,28 @@ priv internal: module {
     assert(aria_role_container() == UIAriaRole.Container)
     assert(aria_role_label() == UIAriaRole.Label)
     assert(aria_role_text_input() == UIAriaRole.TextInput)
+}
+
+#Test("backends draw commands and cells, and Tab walks the focus ring") {
+    assert(float_text(100.0) == "100" && float_text(2.5) == "2.5" && float_text(-0.0) == "-0")
+    assert(float_text(10000000000000000.0) == "10000000000000000" && float_text(0.000001) == "0.000001")
+    assert(float_text(-0.00000015) == "-0.00000015")
+    backend: null_backend()
+    backend.mount(box([text("hi"), button("Go")]))
+    assert_eq(backend.commands(), [String]{"text({{x:0,y:0,w:6,h:1}}, hi)", "fill({{x:0,y:1,w:6,h:1}}, #000000)", "text({{x:0,y:1,w:6,h:1}}, Go)"})
+    assert(backend.focused_label() == "Go")
+    backend.set_focus_group([node_role("A", 1.0, 1.0, .Button), node_role("B", 1.0, 1.0, .Button)])
+    assert(backend.on_event(key_event("Tab")) == EventResult.Handled && backend.focused_label() == "B")
+    assert(backend.on_event(key_event("TAB")) == EventResult.Handled && backend.focused_label() == "A")
+    assert(backend.on_event(key_event("")) == EventResult.Ignored)
+    grid: tui_backend()
+    assert(grid.measure(node_role("A", 3.0, 2.0, .Button), SizeConstraint{min_width: 0.0, min_height: 0.0, max_width: 2.0, max_height: 24.0}) == Size{width: 2.0, height: 2.0})
+    grid.mount(box([text("ab"), text("c")]))
+    assert_eq(grid.frame_lines(), [String]{"ab", "c"})
+    assert(grid.on_event(resize_event(0.0, 5.0)) == EventResult.Ignored)
+    assert(grid.on_event(resize_event(3.0, 1.0)) == EventResult.Handled)
+    assert_eq(grid.frame_lines(), [String]{""})
+    assert(grid.render_count() == 1)
 }
 
 #Test("UI event constructors preserve named payloads") {
@@ -1279,6 +1816,24 @@ priv internal: module {
     assert(window.load_image_from_screen().width() == 0)
 }
 
+#Test("a headless window takes its states at once and keeps its size") {
+    window: headless(width: 4, height: 2, script: [[UIEvent]]{[UIEvent]{.Compose(UIIMEComposition{text: "a", selection: UITextRange{start: 1, end: 1}, marked: None})}}) ?? panic("headless")
+    assert(!window.maximized() && !window.fullscreen())
+    window.set_maximized(true)
+    window.set_fullscreen(true)
+    window.minimize()
+    assert(window.maximized() && window.fullscreen())
+    window.set_maximized(false)
+    assert(!window.maximized() && window.fullscreen())
+    seen := [UIEvent]{}
+    loop frame in window.frames() {
+        loop event in frame.events() -> seen.push(event)
+    }
+    assert_eq(seen.len(), 2)
+    assert(seen[0] == UIEvent.Compose(UIIMEComposition{text: "a", selection: UITextRange{start: 1, end: 1}, marked: None}))
+    assert(window.width() == 4 && window.height() == 2)
+}
+
 #Test("images, collisions and text measure without a window") {
     image := gen_image_checked(2, 1, 1, 1, color(1, 2, 3, 255), color(4, 5, 6, 255))
     image_flip_horizontal(image)
@@ -1289,5 +1844,7 @@ priv internal: module {
     assert(check_collision_recs(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)))
     assert(get_collision_rec(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)) == rect(1.0, 1.0, 1.0, 1.0))
     assert(check_collision_lines(point(0.0, 0.0), point(2.0, 2.0), point(0.0, 2.0), point(2.0, 0.0)) == Val(point(1.0, 1.0)))
-    assert_eq(measure_text("Hi", 10), 11)
+    assert(measure_text("Hi", 10) > 0)
+    assert_eq(measure_text("Hi\nH", 10), measure_text("Hi", 10))
+    assert_eq(measure_text("", 10), 0)
 }

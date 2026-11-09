@@ -3645,8 +3645,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if layout.handled -> return layout
-    ui := sema_call_try_ui_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if ui.handled -> return ui
+    sema_call_ui_backend_lint(receiver_value, method, args, span, environment, program, scopes, diagnostics)
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if stream.handled -> return stream
     process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

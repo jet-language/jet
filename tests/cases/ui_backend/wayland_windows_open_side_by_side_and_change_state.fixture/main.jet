@@ -1,0 +1,399 @@
+package: {
+    name: "wayland_windows_open_side_by_side_and_change_state"
+    authority: { allow: [Env, IO, Net, Time] }
+}
+use {
+    net: core.net
+    sys: core.sys
+    ui: core.ui
+}
+
+// A fake Wayland compositor on $WAYLAND_DISPLAY serves two `ui.open`
+// windows at once, each driven by its own task over its own connection.
+// The window titled "states" asks to be maximized, is made fullscreen,
+// leaves fullscreen and asks to be minimized; each answer is a configure
+// whose size reaches the window as `.Resize`, with `maximized()` and
+// `fullscreen()` following its states. The window titled "plain" just
+// presents until the compositor closes it.
+
+Fake: struct {
+    stream: net.UnixStream
+    inbox: [U8]
+    out: [U8]
+    registry: Int
+    compositor: Int
+    shm: Int
+    wm_base: Int
+    surface: Int
+    xdg_surface: Int
+    toplevel: Int
+    title: String
+    // Received descriptors, newest first; pools keep theirs.
+    fds: [sys.Fd]
+    pool_fds: [sys.Fd]
+    attached: Int
+    current: Int
+    callbacks: [Int]
+    serial: Int
+    configured: Bool
+    commits: Int
+    closed: Bool
+    records: [String]
+    failures: [String]
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base"}
+
+fake_put: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(&f: Fake) -[Net, Time]> {
+    if f.out.len() == 0 -> return
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if !f.closed -> f.failures.push("send failed: {err}")
+        return
+    }
+}
+
+fake_fail: fn(&f: Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push(message)
+}
+
+// xdg_toplevel.configure at `width` x `height` logical units with
+// `states`, then xdg_surface.configure.
+fake_configure: fn(&f: Fake, width: Int, height: Int, states: [Int]) {
+    f.serial += 1
+    args := fake_words([Int]{width, height, states.len() * 4})
+    loop state in states -> fake_put(args, state)
+    toplevel: f.toplevel
+    xdg_surface: f.xdg_surface
+    fake_event(f, toplevel, 0, args)
+    fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+}
+
+fake_close: fn(&f: Fake) {
+    toplevel: f.toplevel
+    f.closed = true
+    fake_event(f, toplevel, 1, [U8]{})
+}
+
+fake_commit: fn(&f: Fake) {
+    f.commits += 1
+    if f.attached != 0 {
+        previous: f.current
+        f.current = f.attached
+        f.attached = 0
+        if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    }
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.title == "plain" && f.commits == 3 {
+        f.records.push("plain: closed by the compositor after 3 commits")
+        fake_close(f)
+    }
+}
+
+// The toplevel's requests: set_title 2, and the states: set_maximized
+// 9, unset_maximized 10, set_fullscreen 11, unset_fullscreen 12 and
+// set_minimized 13. This compositor maximizes to 400x300, makes
+// fullscreen at 640x480 and leaves fullscreen at 200x100, and closes a
+// window that asks to be minimized.
+fake_toplevel: fn(&f: Fake, opcode: Int, body: [U8]) {
+    if opcode == 2 {
+        f.title = fake_string(body, 0)
+        return
+    }
+    if opcode < 9 -> return
+    if f.title != "states" -> fake_fail(f, "{f.title}: state request {opcode}")
+    if opcode == 9 {
+        f.records.push("states: maximize")
+        fake_configure(f, 400, 300, [Int]{1, 4})
+    }
+    if opcode == 10 -> f.records.push("states: restore")
+    if opcode == 11 {
+        f.records.push("states: fullscreen on output {fake_u32(body, 0)}")
+        fake_configure(f, 640, 480, [Int]{2, 4})
+    }
+    if opcode == 12 {
+        f.records.push("states: leave fullscreen")
+        fake_configure(f, 200, 100, [Int]{4})
+    }
+    if opcode == 13 {
+        f.records.push("states: minimize")
+        fake_close(f)
+    }
+}
+
+fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        loop (index, interface) in GLOBALS {
+            args := fake_words([Int]{index + 1})
+            loop b in fake_text(interface) -> args.push(b)
+            version: if interface == "wl_compositor" -> 6 else if interface == "xdg_wm_base" -> 2 else -> 1
+            fake_put(args, version)
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        return
+    }
+    if object == f.compositor && opcode == 0 {
+        f.surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        fd: f.fds.pop() ?? {
+            fake_fail(f, "create_pool without a descriptor")
+            return
+        }
+        f.pool_fds.push(fd)
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface && opcode == 1 {
+        f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if object == f.toplevel && f.toplevel != 0 {
+        fake_toplevel(f, opcode, body)
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                // The initial commit: the first configure, activated.
+                f.configured = true
+                fake_configure(f, 200, 100, [Int]{4})
+                return
+            }
+            fake_commit(f)
+        }
+    }
+}
+
+fake_dispatch: fn(&f: Fake) {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word.bit_and(65535), body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+// Serves one window until it disconnects.
+fake_serve: fn(stream: net.UnixStream) -[Net, Time]> Fake {
+    f := Fake{
+        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
+        surface: 0, xdg_surface: 0, toplevel: 0, title: "", fds: [sys.Fd]{}, pool_fds: [sys.Fd]{},
+        attached: 0, current: 0, callbacks: [Int]{}, serial: 0, configured: false, commits: 0,
+        closed: false, records: [String]{}, failures: [String]{},
+    }
+    idle := 0
+    loop idle < 40 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        message: net.unix_receive(f.stream, 65536) ?? {
+            if !f.closed -> f.failures.push("receive failed: {err}")
+            return f
+        }
+        if message.bytes.len() == 0 -> return f
+        loop fd in message.fds.move() { f.fds.insert(0, fd) }
+        loop b in message.bytes -> f.inbox.push(b)
+        fake_dispatch(f)
+        fake_flush(f)
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+// Accepts the two windows, whichever connects first, and serves both at
+// once.
+fake_serve_two: fn(listener: net.UnixListener) -[Net, Time]> [Fake] {
+    first_stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    first: task { fake_serve(first_stream) }
+    second_stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    second: fake_serve(second_stream)
+    [Fake]{first.join() ?? panic("compositor task failed"), second}
+}
+
+white: fn(frame: ui.Frame) -> [U8] {
+    pixels := [U8]{}
+    count := frame.width * frame.height * 4
+    loop count > 0 {
+        pixels.push(U8{255})
+        count -= 1
+    }
+    pixels
+}
+
+state_line: fn(window: ui.Window) -> String {
+    "maximized {window.maximized()} fullscreen {window.fullscreen()}"
+}
+
+// Maximized after its first frame; then fullscreen once maximized, out
+// of fullscreen once fullscreen, and minimized once neither.
+states_window: fn() -[Env, Net, Time]> [String] {
+    log := [String]{}
+    window: ui.open(width: 200, height: 100, title: "states") ?? {
+        log.push("states: open failed: {err}")
+        return log
+    }
+    log.push("states: opened {state_line(window)}")
+    loop frame in window.frames() {
+        closed := false
+        loop event in frame.events() {
+            if event == .Close -> closed = true
+            if event == .Resize(width, height) {
+                log.push("states: {width}x{height} {state_line(window)}")
+                if window.fullscreen() {
+                    window.set_fullscreen(false)
+                } else if window.maximized() {
+                    window.set_fullscreen(true)
+                } else {
+                    window.minimize()
+                }
+            }
+        }
+        if closed -> break
+        if frame.index == 0 -> window.set_maximized(true)
+        frame.present(white(frame)) ?? {
+            log.push("states: present failed: {err}")
+            return log
+        }
+    }
+    if window.failure() == .Val(failure) -> log.push("states: failed: {failure}")
+    log.push("states: closed {state_line(window)}")
+    log
+}
+
+plain_window: fn() -[Env, Net, Time]> [String] {
+    log := [String]{}
+    window: ui.open(width: 120, height: 80, title: "plain") ?? {
+        log.push("plain: open failed: {err}")
+        return log
+    }
+    presents := 0
+    loop frame in window.frames() {
+        if frame.events().contains(.Close) -> break
+        frame.present(white(frame)) ?? {
+            log.push("plain: present failed: {err}")
+            return log
+        }
+        presents += 1
+    }
+    if window.failure() == .Val(failure) -> log.push("plain: failed: {failure}")
+    log.push("plain: closed after {presents} presents at {window.width()}x{window.height()} {state_line(window)}")
+    log
+}
+
+run: fn() {
+    path: sys.get("WAYLAND_DISPLAY") ?? ""
+    if !path.starts_with("/") {
+        print("WAYLAND_DISPLAY must be an absolute socket path")
+        return
+    }
+    listener: net.unix_listen(path) ?? {
+        print("listen failed: {err}")
+        return
+    }
+    server: task { fake_serve_two(listener) }
+    states: task { states_window() }
+    plain: task { plain_window() }
+    states_log: states.join() ?? panic("the states window's task failed")
+    plain_log: plain.join() ?? panic("the plain window's task failed")
+    fakes: server.join() ?? panic("compositor task failed")
+    loop line in states_log -> print(line)
+    loop line in plain_log -> print(line)
+    titles: [String]{"states", "plain"}
+    loop title in titles {
+        served := 0
+        loop f in fakes {
+            if f.title != title -> next
+            served += 1
+            loop record in f.records -> print(record)
+            loop failure in f.failures -> print("FAIL {title}: {failure}")
+        }
+        if served != 1 -> print("FAIL {served} windows titled {title}")
+    }
+}

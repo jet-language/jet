@@ -1,0 +1,18 @@
+use ui: core.ui
+
+// A TUI backend measures a tree within its constraint, lays it out in a
+// frame and paints each leaf's label into the grid; a mount does all three
+// at the origin.
+run: fn() {
+    backend: ui.tui_backend()
+    tree: ui.box([ui.text("ab"), ui.button("Go")])
+    size: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    print("{size.width == 6.0} {size.height == 2.0}")
+    print(backend.measure(tree, ui.constraint(0.0, 0.0, 4.0, 24.0)).width == 4.0)
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+    loop line in backend.frame_lines() { print(line) }
+    backend.mount(ui.box([ui.text("c")]))
+    loop line in backend.frame_lines() { print(line) }
+    print(backend.render_count())
+}

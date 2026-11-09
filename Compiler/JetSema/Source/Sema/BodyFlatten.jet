@@ -621,7 +621,7 @@ body_flat_core_closure_kind: fn(value: TCoreClosureKind, flat: &BodyFlat) -> Bod
         .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_flat_lambda(f_executable, flat)}
         .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, flat)}
         .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, flat)}
-        .UIButtonOnClick(f_label, f_shortcut, f_accessible_label, f_executable) -> BodyCoreClosureKind.UIButtonOnClick{label: body_flat_expr(f_label, flat), shortcut: body_flat_expr(f_shortcut, flat), accessible_label: body_flat_expr(f_accessible_label, flat), executable: body_flat_lambda(f_executable, flat)}
+        .UIClickSlot(f_executable) -> BodyCoreClosureKind.UIClickSlot{executable: body_flat_lambda(f_executable, flat)}
         .UITextInputOnDrop(f_state, f_ime, f_executable) -> BodyCoreClosureKind.UITextInputOnDrop{state: body_flat_expr(f_state, flat), ime: body_flat_expr(f_ime, flat), executable: body_flat_lambda(f_executable, flat)}
         .ReactiveDerived(f_executable) -> BodyCoreClosureKind.ReactiveDerived{executable: body_flat_lambda(f_executable, flat)}
         .ReactiveEffect(f_executable) -> BodyCoreClosureKind.ReactiveEffect{executable: body_flat_lambda(f_executable, flat)}
@@ -882,7 +882,6 @@ body_flat_handle_op_2: fn(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Nev
         .PathIsWithin -> BodyHandleOp.PathIsWithin
         .PathToString -> BodyHandleOp.PathToString
         .PathWalk -> BodyHandleOp.PathWalk
-        .UIBackendMethod(f_method) -> BodyHandleOp.UIBackendMethod{method: f_method}
         .PluginInvoke(f_export_name, f_signature) -> BodyHandleOp.PluginInvoke{export_name: f_export_name, signature: f_signature}
         .ReaderOver(f_owned) -> BodyHandleOp.ReaderOver{owned: f_owned}
         .ReaderReadU8 -> BodyHandleOp.ReaderReadU8
@@ -1493,7 +1492,7 @@ body_copy_core_closure_kind: fn(value: BodyCoreClosureKind, flat: &BodyFlat) -> 
         .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_copy_lambda(f_executable, flat)}
         .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, flat)}
         .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, flat)}
-        .UIButtonOnClick(f_label, f_shortcut, f_accessible_label, f_executable) -> BodyCoreClosureKind.UIButtonOnClick{label: body_copy_expr(f_label, flat), shortcut: body_copy_expr(f_shortcut, flat), accessible_label: body_copy_expr(f_accessible_label, flat), executable: body_copy_lambda(f_executable, flat)}
+        .UIClickSlot(f_executable) -> BodyCoreClosureKind.UIClickSlot{executable: body_copy_lambda(f_executable, flat)}
         .UITextInputOnDrop(f_state, f_ime, f_executable) -> BodyCoreClosureKind.UITextInputOnDrop{state: body_copy_expr(f_state, flat), ime: body_copy_expr(f_ime, flat), executable: body_copy_lambda(f_executable, flat)}
         .ReactiveDerived(f_executable) -> BodyCoreClosureKind.ReactiveDerived{executable: body_copy_lambda(f_executable, flat)}
         .ReactiveEffect(f_executable) -> BodyCoreClosureKind.ReactiveEffect{executable: body_copy_lambda(f_executable, flat)}

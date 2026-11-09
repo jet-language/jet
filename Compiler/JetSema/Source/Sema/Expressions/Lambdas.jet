@@ -1093,18 +1093,12 @@ sema_expression_lambda_collect_tree_core_closure: fn(kind: TCoreClosureKind, fra
         }
         .Guard(executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
-        .UIButtonOnClick(label, shortcut, accessible, executable) -> {
-            sema_expression_lambda_collect_tree_expr(label, frame, scopes, keys)
-            sema_expression_lambda_collect_tree_expr(shortcut, frame, scopes, keys)
-            sema_expression_lambda_collect_tree_expr(accessible, frame, scopes, keys)
-            sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
-        }
         .UITextInputOnDrop(state, ime, executable) -> {
             sema_expression_lambda_collect_tree_expr(state, frame, scopes, keys)
             sema_expression_lambda_collect_tree_expr(ime, frame, scopes, keys)
             sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
         }
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
     }
 }
 

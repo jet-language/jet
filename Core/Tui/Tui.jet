@@ -586,6 +586,37 @@ scalar_display_width: fn(n: Int) -> Int Never! {
     1
 }
 
+// core.ui's TUI backend writes a leaf's label into its grid with this:
+// `cells` holds rows of `cols` scalars, and `label` goes along `row` from
+// column `col` with its ANSI escapes stripped, projected to ASCII without
+// `unicode`. A zero-width scalar takes no cell, a wide one blanks the cell
+// after it, and the label stops at the row's end.
+__write_cells: fn(&cells: [Int], cols: Int, row: Int, col: Int, label: String, unicode: Bool) Never! {
+    raw: label.bytes()
+    at := col
+    offset := 0
+    escape := false
+    loop offset < raw.len() && at < cols {
+        width: utf8_width(raw[offset])
+        n: scalar_at(raw, offset, width)
+        offset += width
+        if escape {
+            // An escape sequence ends at its final letter (or `@`).
+            if n == 64 || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> escape = false
+        } else if n == 27 {
+            escape = true
+        } else {
+            shown: if unicode -> n else -> ascii_scalar(n)
+            cells_wide: scalar_display_width(shown)
+            if cells_wide > 0 {
+                cells[row * cols + at] = shown
+                if cells_wide == 2 && at + 1 < cols -> cells[row * cols + at + 1] = 32
+                at += cells_wide
+            }
+        }
+    }
+}
+
 #Test("TUI ASCII projection and display width") {
     assert(ascii("─━═│┃║┌┏╔┐┓╗└┗╚┘┛╝├┤┬┴┼╋╬") == "---|||+++++++++++++++++++")
     assert(ascii("→⇒➜←⇐↑⇑↓⇓é🙂") == ">>><<^^vv??")
@@ -652,23 +683,25 @@ scalar_display_width: fn(n: Int) -> Int Never! {
     assert(escape.len() == 1)
 }
 
-normalized_style_test_node: fn(words: StyleWords) -> UINode Never! {
-    #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
-        return ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
-            words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
-    }
-}
-
-#Test("TUI normalized style words cross the actual retained renderer boundary") {
+#Test("TUI style words normalize and the TUI backend shows styled text plain") {
     styled: style_background(style_foreground(style_bold(style(), true), color_rgb(12, 34, 56)), color_ansi16(2))
     words: style_words(styled)
     assert(words.foreground.kind == 3 && words.foreground.word == 795192)
     assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)
-    node: normalized_style_test_node(words)
+    escape: String.from_bytes([U8]{27}) ?? ""
     backend: ui.tui_backend()
-    ui.mount(backend, node)
-    lines: backend.frame_lines()
-    assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
+    ui.mount(backend, ui.text("{escape}[1;38;2;12;34;56mjet{escape}[0m"))
+    assert_eq(backend.frame_lines(), [String]{"jet"})
+}
+
+#Test("TUI cells strip escapes, skip zero-width scalars and widen wide ones") {
+    cells := [Int]{46, 46, 46, 46, 46, 46}
+    escape: String.from_bytes([U8]{27}) ?? ""
+    acute: String.from_bytes([U8]{0xCC, 0x81}) ?? ""
+    __write_cells(cells, 3, 1, 0, "{escape}[31m界{acute}x", true)
+    assert_eq(cells, [Int]{46, 46, 46, 0x754C, 32, 120})
+    __write_cells(cells, 3, 0, 1, "→ab", false)
+    assert_eq(cells, [Int]{46, 62, 97, 0x754C, 32, 120})
 }
 
 #Test("TUI list/table formatting keeps scalar widths and empty cells") {

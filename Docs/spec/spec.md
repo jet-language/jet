@@ -2149,8 +2149,8 @@ D-TLSSERVE1).
 the same way on every backend.
 `clear_background`, the 2D shapes (pixels, rectangles with outlines, gradients
 and rounded corners, lines, circles, ellipses, rings and sectors, triangles and
-regular polygons) and `draw_text` (a built-in 5x7 bitmap font scaled by whole
-pixels, whose width `measure_text` reports without an effect) paint an RGBA
+regular polygons) and `draw_text` (anti-aliased Atkinson Hyperlegible Next at
+any pixel size, whose width `measure_text` reports without an effect) paint an RGBA
 canvas the size of the window with src-over blending; the frame presents the
 canvas when the next frame begins unless the program presented its own pixels.
 `load_texture_atlas` decodes the atlas's PNG texture in Jet, and `draw_sprite`

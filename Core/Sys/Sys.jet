@@ -765,11 +765,11 @@ set_current_dir: fn(path: String) IOError! -[FS, Env]> {
 }
 
 // An owned operating-system descriptor, closed exactly once when its owner
-// drops it. Descriptors arrive from `net.unix_receive` or
-// `SharedMemory.descriptor`. The Fd holds the runtime's token for the
-// descriptor, never its number, and every descriptor is close-on-exec.
-// Descriptors from another process are read with `read_at`, never mapped,
-// so a peer that truncates its file cannot fault this one.
+// drops it. Descriptors arrive from `net.unix_receive`,
+// `SharedMemory.descriptor` or `open_pipe`. The Fd holds the runtime's
+// token for the descriptor, never its number, and every descriptor is
+// close-on-exec. Descriptors from another process are read with `read_at`,
+// never mapped, so a peer that truncates its file cannot fault this one.
 Fd: struct {
     priv token: Int
 }
@@ -791,6 +791,36 @@ impl Fd {
 
     // A second descriptor for the same open file, owned on its own.
     duplicate: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+
+    // At most `max` bytes, 1 B to 16 MiB, read from a pipe or socket once
+    // it has some, waiting at most `timeout_ns` nanoseconds (negative: no
+    // limit). Empty means the writer closed its end; a wait that runs out
+    // fails with `.TimedOut`.
+    read: fn(self, max: Int(1..16777216), timeout_ns: Int) -[Env]> [U8] IOError! {
+        core.sys.__fd_read_raw(self.token, wrapping(max + 0), timeout_ns)
+    }
+
+    // Writes the first of `bytes`, at most 4096, once a pipe or socket has
+    // room, waiting at most `timeout_ns` nanoseconds (negative: no limit),
+    // and gives how many it wrote; a loop over the rest writes them all. A
+    // wait that runs out fails with `.TimedOut`, a closed reader with
+    // `.Closed`.
+    write: fn(self, bytes: [U8], timeout_ns: Int) -[Env]> Int IOError! {
+        core.sys.__fd_write_raw(self.token, bytes, timeout_ns)
+    }
+}
+
+// A new pipe: its read end, then its write end. Both block, so either can
+// go to another process; `Fd.read` and `Fd.write` wait with a timeout.
+open_pipe: fn() -[Env]> [Fd] IOError! {
+    packed: core.sys.__fd_pipe_raw()
+    ends := [Fd]{}
+    loop end in 0..<2 {
+        token := 0
+        loop byte in 0..<8 { token = token * 256 + Int.from_u8(packed[end * 8 + 7 - byte]) }
+        ends.push(Fd{token: token})
+    }
+    Ok(ends)
 }
 
 // The Fd owning a token the runtime just issued (net.unix_receive).

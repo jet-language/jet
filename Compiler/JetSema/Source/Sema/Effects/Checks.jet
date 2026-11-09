@@ -4090,13 +4090,7 @@ sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: &[SemaEf
             sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         }
         .Guard(executable) -> sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
-        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
-            sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, label)
-            sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, shortcut)
-            sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, accessible_label)
-            sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
-        }
     }
 }

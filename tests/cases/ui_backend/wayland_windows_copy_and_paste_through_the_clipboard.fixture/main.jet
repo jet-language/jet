@@ -1,0 +1,499 @@
+package: {
+    name: "wayland_windows_copy_and_paste_through_the_clipboard"
+    authority: { allow: [Env, IO, Net, Time] }
+}
+use {
+    net: core.net
+    sys: core.sys
+    ui: core.ui
+}
+
+// A fake Wayland compositor on $WAYLAND_DISPLAY with a wl_data_device
+// serves a `ui.open` window's clipboard. With the keyboard focus comes a
+// selection offered as HTML and UTF-8 text: the window pastes it, as
+// UTF-8, through a pipe the compositor writes 6007 bytes into. Then the
+// window copies 9007 bytes of its own, offered as all five text types at
+// its focus serial; reading the clipboard back takes no round trip, and
+// the compositor pastes the copy through a pipe of its own. Another
+// client then copies an image: the window's source is cancelled and
+// destroyed, the first offer is destroyed, and the clipboard holds no
+// text. A headless window keeps a clipboard of its own.
+
+// The server-side ids of the two offers.
+FIRST_OFFER: 4278190080
+SECOND_OFFER: 4278190081
+WAIT_NS: 2000000000
+
+Fake: struct {
+    stream: net.UnixStream
+    inbox: [U8]
+    out: [U8]
+    registry: Int
+    compositor: Int
+    shm: Int
+    wm_base: Int
+    seat: Int
+    keyboard: Int
+    manager: Int
+    device: Int
+    source: Int
+    surface: Int
+    xdg_surface: Int
+    toplevel: Int
+    // Received descriptors, newest first; pools keep theirs.
+    fds: [sys.Fd]
+    pool_fds: [sys.Fd]
+    attached: Int
+    current: Int
+    callbacks: [Int]
+    serial: Int
+    focus_serial: Int
+    configured: Bool
+    // 0 before the focus, 1 until the copy, 2 until the other copy, 3
+    // until the close, 4 closed.
+    phase: Int
+    commits: Int
+    due_commit: Int
+    closed: Bool
+    source_types: [String]
+    records: [String]
+    failures: [String]
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat", "wl_data_device_manager"}
+
+fake_put: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(&f: Fake) -[Net, Time]> {
+    if f.out.len() == 0 -> return
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if !f.closed -> f.failures.push("send failed: {err}")
+        return
+    }
+}
+
+fake_fail: fn(&f: Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
+}
+
+// `count` copies of the ten digits.
+digits: fn(count: Int) -> String {
+    out := ""
+    loop _ in 0..<count -> out = "{out}0123456789"
+    out
+}
+
+// Writes all of `bytes` into `fd`, 4096 at a time; dropping `fd` closes
+// the pipe and ends the text.
+fake_write_all: fn(&f: Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
+    at := 0
+    loop at < bytes.len() {
+        end: if at + 4096 < bytes.len() -> at + 4096 else -> bytes.len()
+        wrote: fd.write(bytes[at..<end].copy(), WAIT_NS) ?? {
+            fake_fail(f, "pipe write failed: {err}")
+            return
+        }
+        at += wrote
+    }
+}
+
+// Reads `fd` to its end.
+fake_read_all: fn(&f: Fake, fd: sys.Fd) -[Env]> [U8] {
+    bytes := [U8]{}
+    loop {
+        chunk: fd.read(65536, WAIT_NS) ?? {
+            fake_fail(f, "pipe read failed: {err}")
+            return bytes
+        }
+        if chunk.len() == 0 -> break
+        loop b in chunk -> bytes.push(b)
+    }
+    bytes
+}
+
+// The queued events go out with `fd`, which this end then drops.
+fake_send_fd: fn(&f: Fake, fd: sys.Fd) -[Net, Time]> {
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{fd}) ?? {
+        fake_fail(f, "send with a descriptor failed: {err}")
+        return
+    }
+}
+
+// wl_data_device.set_selection: the compositor pastes the new copy at
+// once, through a pipe whose write end goes to the window with
+// wl_data_source.send, and reads it to its end.
+fake_paste_copy: fn(&f: Fake, source: Int, serial: Int) -[Env, Net, Time]> {
+    if serial != f.focus_serial -> fake_fail(f, "set_selection at serial {serial}, not the focus serial {f.focus_serial}")
+    f.source = source
+    f.records.push("copy offers {f.source_types.join(",")}")
+    fake_flush(f)
+    ends := sys.open_pipe() ?? {
+        fake_fail(f, "pipe: {err}")
+        return
+    }
+    writer: ends.pop() ?? return
+    reader: ends.pop() ?? return
+    fake_event(f, source, 1, fake_text("UTF8_STRING"))
+    fake_send_fd(f, writer)
+    bytes: fake_read_all(f, reader)
+    text: String.from_bytes(bytes) ?? "not UTF-8"
+    f.records.push("copied {bytes.len()} bytes, as sent: {text == "copied:{digits(900)}"}")
+    f.phase = 2
+    f.due_commit = f.commits + 2
+}
+
+fake_commit: fn(&f: Fake) -[Env, Net, Time]> {
+    f.commits += 1
+    if f.attached != 0 {
+        previous: f.current
+        f.current = f.attached
+        f.attached = 0
+        if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    }
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.current == 0 || f.commits < f.due_commit -> return
+    keyboard: f.keyboard
+    device: f.device
+    if f.phase == 0 {
+        // The focus, then the clipboard: HTML and UTF-8 text.
+        f.serial += 1
+        f.focus_serial = f.serial
+        surface: f.surface
+        fake_event(f, keyboard, 1, fake_words([Int]{f.serial, surface, 0}))
+        fake_event(f, device, 0, fake_words([Int]{FIRST_OFFER}))
+        fake_event(f, FIRST_OFFER, 0, fake_text("text/html"))
+        fake_event(f, FIRST_OFFER, 0, fake_text("UTF8_STRING"))
+        fake_event(f, FIRST_OFFER, 0, fake_text("text/plain;charset=utf-8"))
+        fake_event(f, device, 5, fake_words([Int]{FIRST_OFFER}))
+        f.phase = 1
+        return
+    }
+    if f.phase == 2 {
+        // Another client copies an image; a key asks the window to look.
+        source: f.source
+        fake_event(f, source, 2, [U8]{})
+        fake_event(f, device, 0, fake_words([Int]{SECOND_OFFER}))
+        fake_event(f, SECOND_OFFER, 0, fake_text("image/png"))
+        fake_event(f, device, 5, fake_words([Int]{SECOND_OFFER}))
+        f.serial += 1
+        fake_event(f, keyboard, 3, fake_words([Int]{f.serial, 1000, 30, 1}))
+        f.serial += 1
+        fake_event(f, keyboard, 3, fake_words([Int]{f.serial, 1001, 30, 0}))
+        f.phase = 3
+        f.due_commit = f.commits + 2
+        return
+    }
+    if f.phase == 3 {
+        toplevel: f.toplevel
+        f.closed = true
+        fake_event(f, toplevel, 1, [U8]{})
+        f.phase = 4
+    }
+}
+
+fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        loop (index, interface) in GLOBALS {
+            args := fake_words([Int]{index + 1})
+            loop b in fake_text(interface) -> args.push(b)
+            version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else if interface == "wl_data_device_manager" -> 3 else -> 1
+            fake_put(args, version)
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        if interface == "wl_seat" {
+            f.seat = id
+            // capabilities: a keyboard.
+            fake_event(f, id, 0, fake_words([Int]{2}))
+        }
+        if interface == "wl_data_device_manager" -> f.manager = id
+        return
+    }
+    if object == f.compositor && opcode == 0 {
+        f.surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        fd: f.fds.pop() ?? {
+            fake_fail(f, "create_pool without a descriptor")
+            return
+        }
+        f.pool_fds.push(fd)
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface && opcode == 1 {
+        f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if object == f.seat && opcode == 1 {
+        f.keyboard = fake_u32(body, 0)
+        return
+    }
+    if object == f.manager {
+        // get_data_device(id, seat) and create_data_source(id).
+        if opcode == 1 {
+            f.device = fake_u32(body, 0)
+            if fake_u32(body, 4) != f.seat -> fake_fail(f, "a data device for object {fake_u32(body, 4)}, not the seat")
+        }
+        if opcode == 0 {
+            f.source = fake_u32(body, 0)
+            f.source_types = [String]{}
+        }
+        return
+    }
+    if object == f.device && opcode == 1 {
+        fake_paste_copy(f, fake_u32(body, 0), fake_u32(body, 4))
+        return
+    }
+    if object == f.source && f.source != 0 {
+        if opcode == 0 -> f.source_types.push(fake_string(body, 0))
+        if opcode == 1 -> f.records.push("source destroyed")
+        return
+    }
+    if object == FIRST_OFFER || object == SECOND_OFFER {
+        which: if object == FIRST_OFFER -> "first" else -> "second"
+        if opcode == 1 {
+            // receive(mime_type, fd): the text goes through the pipe.
+            kind: fake_string(body, 0)
+            f.records.push("{which} offer received as {kind}")
+            fd: f.fds.pop() ?? {
+                fake_fail(f, "receive without a descriptor")
+                return
+            }
+            fake_write_all(f, fd, "pasted:{digits(600)}".bytes())
+        }
+        if opcode == 2 -> f.records.push("{which} offer destroyed")
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                // The initial commit: the first configure, activated.
+                f.configured = true
+                f.serial += 1
+                toplevel: f.toplevel
+                xdg_surface: f.xdg_surface
+                fake_event(f, toplevel, 0, fake_words([Int]{200, 100, 4, 4}))
+                fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+                return
+            }
+            fake_commit(f)
+        }
+    }
+}
+
+fake_dispatch: fn(&f: Fake) -[Env, Net, Time]> {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word.bit_and(65535), body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+// Accepts one window and serves it until it disconnects.
+fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time, IO]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    f := Fake{
+        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
+        seat: 0, keyboard: 0, manager: 0, device: 0, source: 0, surface: 0, xdg_surface: 0, toplevel: 0,
+        fds: [sys.Fd]{}, pool_fds: [sys.Fd]{}, attached: 0, current: 0, callbacks: [Int]{}, serial: 0, focus_serial: -1,
+        configured: false, phase: 0, commits: 0, due_commit: 0, closed: false,
+        source_types: [String]{}, records: [String]{}, failures: [String]{},
+    }
+    idle := 0
+    loop idle < 40 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        message: net.unix_receive(f.stream, 65536) ?? {
+            if !f.closed -> f.failures.push("receive failed: {err}")
+            return f
+        }
+        if message.bytes.len() == 0 -> return f
+        loop fd in message.fds.move() { f.fds.insert(0, fd) }
+        loop b in message.bytes -> f.inbox.push(b)
+        fake_dispatch(f)
+        fake_flush(f)
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+// With the focus the window pastes, copies and reads its copy back; a
+// key after another client's copy finds no text.
+client: fn() -[Env, IO, Net, Time]> {
+    window: ui.open(width: 200, height: 100, title: "clipboard") ?? {
+        print("open failed: {err}")
+        return
+    }
+    loop frame in window.frames() {
+        closed := false
+        loop event in frame.events() {
+            if event == .Close -> closed = true
+            if event == .Focus(focused) {
+                print("focus {focused}")
+                pasted: window.clipboard_text() ?? {
+                    print("paste failed: {err}")
+                    return
+                }
+                print("pasted {pasted.bytes().len()} bytes, as sent: {pasted == "pasted:{digits(600)}"}")
+                window.set_clipboard_text("copied:{digits(900)}") ?? {
+                    print("copy failed: {err}")
+                    return
+                }
+                own: window.clipboard_text() ?? {
+                    print("reading the copy back failed: {err}")
+                    return
+                }
+                print("own copy {own.bytes().len()} bytes")
+            }
+            if event == .KeyDown(key) {
+                text: window.clipboard_text() ?? {
+                    print("paste failed: {err}")
+                    return
+                }
+                print("{key} after another copy: {text.bytes().len()} bytes of text")
+            }
+        }
+        if closed -> break
+        pixels := [U8]{}
+        count := frame.width * frame.height * 4
+        loop count > 0 {
+            pixels.push(U8{255})
+            count -= 1
+        }
+        frame.present(pixels) ?? {
+            print("present failed: {err}")
+            return
+        }
+    }
+    if window.failure() == .Val(failure) -> print("failed: {failure}")
+    print("closed")
+}
+
+// A headless window's clipboard is its own: empty, then what it copied.
+offline: fn() -[Env, IO, Net, Time]> {
+    window: ui.headless(width: 1, height: 1, script: [[ui.UIEvent]]{}) ?? {
+        print("headless failed: {err}")
+        return
+    }
+    empty: window.clipboard_text() ?? {
+        print("headless paste failed: {err}")
+        return
+    }
+    window.set_clipboard_text("kept") ?? {
+        print("headless copy failed: {err}")
+        return
+    }
+    kept: window.clipboard_text() ?? {
+        print("headless paste failed: {err}")
+        return
+    }
+    print("headless {empty.bytes().len()} bytes, then {kept}")
+}
+
+run: fn() {
+    offline()
+    path: sys.get("WAYLAND_DISPLAY") ?? ""
+    if !path.starts_with("/") {
+        print("WAYLAND_DISPLAY must be an absolute socket path")
+        return
+    }
+    listener: net.unix_listen(path) ?? {
+        print("listen failed: {err}")
+        return
+    }
+    server: task { fake_serve(listener) }
+    client()
+    f: server.join() ?? panic("compositor task failed")
+    if f.phase != 4 -> print("FAIL the compositor stopped in phase {f.phase}")
+    loop record in f.records -> print(record)
+    loop failure in f.failures -> print("FAIL {failure}")
+}

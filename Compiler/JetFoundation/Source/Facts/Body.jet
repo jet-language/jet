@@ -408,7 +408,7 @@ BodyCoreClosureKind: enum {
     Guard(executable: BodyLambda)
     OnCommit(handle_name: String, executable: BodyLambda)
     OnRollback(handle_name: String, executable: BodyLambda)
-    UIButtonOnClick(label: Int, shortcut: Int, accessible_label: Int, executable: BodyLambda)
+    UIClickSlot(executable: BodyLambda)
     UITextInputOnDrop(state: Int, ime: Int, executable: BodyLambda)
     ReactiveDerived(executable: BodyLambda)
     ReactiveEffect(executable: BodyLambda)
@@ -653,7 +653,6 @@ BodyHandleOp: enum {
     PathIsWithin
     PathToString
     PathWalk
-    UIBackendMethod(method: String)
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1632,11 +1631,8 @@ body_each_core_closure_kind_child: fn(tree: BodyTree, value: BodyCoreClosureKind
         .OnRollback(_, f1) -> {
             body_each_lambda_child(tree, f1, visit)
         }
-        .UIButtonOnClick(f0, f1, f2, f3) -> {
-            visit(f0)
-            visit(f1)
-            visit(f2)
-            body_each_lambda_child(tree, f3, visit)
+        .UIClickSlot(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
         }
         .UITextInputOnDrop(f0, f1, f2) -> {
             visit(f0)

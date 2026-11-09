@@ -5899,9 +5899,8 @@ sema_stmt_tree_core_closure_touches_shared: fn(kind: TCoreClosureKind, arena: Bo
             false
         }
         .Realtime(rate, frames, _) -> sema_stmt_tree_expr_touches_shared(rate, arena) || sema_stmt_tree_expr_touches_shared(frames, arena)
-        .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_tree_expr_touches_shared(label, arena) || sema_stmt_tree_expr_touches_shared(shortcut, arena) || sema_stmt_tree_expr_touches_shared(accessible_label, arena)
         .UITextInputOnDrop(state, ime, _) -> sema_stmt_tree_expr_touches_shared(state, arena) || sema_stmt_tree_expr_touches_shared(ime, arena)
-        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
+        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) | .UIClickSlot(_) -> false
     }
 }
 
@@ -6050,9 +6049,8 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
         .CoreClosureCall(kind) -> return if kind == {
             .Spawn(group, _, _, _) -> if group == .Val(value) -> sema_stmt_row_touches_shared(tree, value) else -> false
             .Realtime(rate, frames, _) -> sema_stmt_row_touches_shared(tree, rate) || sema_stmt_row_touches_shared(tree, frames)
-            .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_row_touches_shared(tree, label) || sema_stmt_row_touches_shared(tree, shortcut) || sema_stmt_row_touches_shared(tree, accessible_label)
             .UITextInputOnDrop(state, ime, _) -> sema_stmt_row_touches_shared(tree, state) || sema_stmt_row_touches_shared(tree, ime)
-            .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
+            .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) | .UIClickSlot(_) -> false
         }
         .FnValue(kind) -> {
             if kind == {

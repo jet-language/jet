@@ -2176,6 +2176,9 @@ handling its failure; only the end of an access is checked when it runs.
 | `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `!IOError -[Env]>` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
 | `SharedMemory.descriptor()` | `Fd !IOError -[Env]>` | A new descriptor for the memory, to pass to another process. |
 | `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
+| `open_pipe()` | `[Fd] !IOError -[Env]>` | A new pipe: its read end, then its write end. Both block, so either can go to another process (a Wayland paste hands the write end to the copying client). |
+| `Fd.read(max: Int(1..16777216), timeout_ns)` | `[U8] !IOError -[Env]>` | At most `max` bytes from a pipe or socket once it has some, waiting at most `timeout_ns` nanoseconds (negative: no limit). Empty means the writer closed its end; a wait that runs out is `.TimedOut`. |
+| `Fd.write(bytes, timeout_ns)` | `Int !IOError -[Env]>` | Writes the first of `bytes`, at most 4096 (`PIPE_BUF`, which a pipe that polls writable takes whole), once there is room, waiting at most `timeout_ns`; gives the count written. A wait that runs out is `.TimedOut`, a closed reader `.Closed`. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -4170,11 +4173,13 @@ standard-library vocabulary.
 `core.ui` represents a UI as a typed node tree plus geometry and accessibility
 metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
-rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet).
+rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet);
+nodes and backends are plain Jet values, with no `#Unsafe`.
 
-`box` stores its children in the returned tree. Its runtime boundary therefore
-accepts an owned child list; compiler borrow-elision must not treat that native
-call as lending the caller's list.
+A `UINode` shows its `label`, `width` and `height` (in cells) and the
+optional `accessibility`, `ime` and `shortcut` metadata; its kind, role,
+children, color and click handler are its own. `box` stores its children in
+the returned tree.
 
 The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 `UI.Pointer`; capability checks and runtime support use the same spelling.
@@ -4196,13 +4201,30 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
-| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
+| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend; copies of a backend share it. |
+| `mount(backend, tree: UINode)`, `mount(backend, tree: UINode, constraint: SizeConstraint)` | — | Call the backend's `mount`. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
 | `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
 | `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
 | `node_color(label: String, width: Float, height: Float, color: String) -> UINode` | node | Construct a colored node. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
+
+Both backends have the same methods. `measure(tree, constraint) -> Size` is a
+box's widest child by its children's summed heights, any other node its own
+size, clamped to the constraint. `layout(tree, frame: Rect)` places the next
+paints. `paint(tree)` draws the tree and makes its buttons and text inputs the
+focus ring. `mount(tree, constraint?)` measures within the constraint (80 × 24
+cells when absent), lays out at the origin and paints. `on_event(event:
+InputEvent) -> EventResult` answers `Handled` or `Ignored`; Tab moves the
+focus to the next node of the ring. `set_focus_group(nodes: [UINode])` sets
+the ring and `focused_label() -> String` names its focused node ("" for
+none). `NullBackend.commands() -> [String]` lists what the paints since the
+latest mount drew: `fill(rect, color)` for each leaf but a text, then
+`text(rect, label)`. `TUIBackend` writes each leaf's label into a grid of
+terminal cells: `frame_lines() -> [String]` gives its rows without trailing
+white space and `render_count() -> Int` counts its paints. In a web build the
+page shows each paint.
 
 `UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
 scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
@@ -4290,9 +4312,12 @@ frames are the whole window.
 | `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
 | `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
 | `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
+| `Window.clipboard_text() -[Env, Net, Time]> String UIError!` / `.set_clipboard_text(text: String) -[Net, Time]> UIError!` | clipboard | Paste and copy through the seat's `wl_data_device`. A paste reads the holder's text in its first type of `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `TEXT`, `STRING` through a pipe, waiting up to 2 s (`.Protocol` past that or for text that is not UTF-8, `.Size` past 16 MiB), and is `""` when the clipboard is empty or holds no text; the window's own copy comes back without a round trip. A copy offers the text as all five types at the latest input's serial (the compositor takes it only from the focused window) and answers each paste until another program copies. `.Unsupported` without `wl_data_device_manager`; a headless window keeps a clipboard of its own. The web host's clipboard stays `core.ui.host`'s `read_text` / `write_text`. |
+| `Window.set_text_input(area: UIRect?) -[Net, Time]> UIError!` | text input | The program's text field, for the compositor's input method (`zwp_text_input_v3`) to compose into: `area` is the caret's rectangle in pixels, where the input method shows its candidates, and `None` says there is no text field, which disables the text input and ends any composition. Without `zwp_text_input_v3`, and in a headless window, typing comes from the keyboard alone. |
+| `Window.maximized() -> Bool` / `.fullscreen() -> Bool` / `.set_maximized(maximized: Bool)` / `.set_fullscreen(fullscreen: Bool)` / `.minimize()` | states | The window's states as the display server last configured them, and requests to change them (`xdg_toplevel`'s set/unset maximized and fullscreen, on the output the display server picks, and set_minimized). The display server decides; a new size arrives as `.Resize`, and a minimized window comes back only when the user brings it back. A headless window takes each state at once and keeps its size. Each window has its own connection to the display server, so a program shows several windows by driving each window's `frames()` in its own task. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
 | `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
-| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. |
 | `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
 | `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
@@ -4384,8 +4409,8 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `Frame.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
 | `Frame.draw_poly(center, sides, radius, rotation, color)` | — | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
 | `Frame.draw_poly_lines(center, sides, radius, rotation, color)` | — | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
-| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
-| `measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
+| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in anti-aliased Atkinson Hyperlegible Next at `size` pixels to the em, kerned, with glyphs at quarter-pixel positions. The first line's top is at `y` and its baseline the face's ascent below that, rounded; `\n` starts a new line one line height (ascent, descent and line gap, rounded) lower. Each pixel blends the color src-over with its alpha scaled by the glyph's coverage. A size below 1 draws nothing. |
+| `measure_text(text, size)` | `Int` | The width in pixels of `draw_text`'s widest line: its kerned advance, rounded. Lines break at `\n`; empty text, empty lines and a size below 1 measure 0. Needs no effect. |
 | `Frame.draw_sprite(atlas, source, x, y)` | — | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
 | `check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
 | `check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
