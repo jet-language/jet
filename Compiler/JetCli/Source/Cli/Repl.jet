@@ -1,15 +1,16 @@
 // `jet repl` and `jet eval <expression>` (crates/jet-repl; The session is
-// source: its imports, items and accepted statements. Each turn is checked here
-// by the compiler against the session so far (types, problems, denied
-// effects), then built and run as one program by a private child `jet`
-// (`__jet_repl_run_stdin`) that replays the earlier statements and prints the
-// values this turn shows behind a per-session marker.
+// source: its imports, items and accepted statements. Each turn is one program
+// that replays the earlier statements and prints the values this turn shows
+// behind a per-session marker. It is checked and built here, in one compile,
+// against the session so far (types, problems, denied effects), then run by a
+// private child `jet` (`__jet_repl_run_stdin`) under the session's authority.
 use {
     repl_files: core.files
     repl_process: core.process
     repl_sys: core.sys
     repl_term: core.term
     repl_time: core.time
+    jet_backend.[X64Executable, x64_file_exec]
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
@@ -105,18 +106,21 @@ JetCLIReplValue: struct {
 // `TurnOutcome`: what the child reported for one program.
 JetCLIReplOutcome: enum {
     Done(stdout: String, stderr: String, values: [JetCLIReplValue])
-    // The child refused the program before it ran (its status line).
-    Refused(diagnostics: [Diagnostic])
     // The program ran and stopped with an error; `report` is its stderr.
     Stopped(stdout: String, report: String)
     Interrupted
     Unstarted(diagnostic: Diagnostic)
 }
 
-// The in-process check of one turn's program.
+// One turn program compiled here: an item or import checked with the
+// session, or a turn's statements built into the binary its child runs.
 JetCLIReplChecked: enum {
-    Checked(locals: [JetCLIReplLocal], required: [String])
-    Failed(diagnostics: [Diagnostic])
+    // The built binary ("" for a check) and the checked `let` locals of `run`.
+    Checked(binary: String, locals: [JetCLIReplLocal])
+    // Problems, placed in the user's input or unplaced as a run names them;
+    // `reports` when only the lines that show the turn's values met them.
+    Failed(diagnostics: [Diagnostic], reports: Bool)
+    // The report that stopped the compile or the build.
     Refused(report: String)
 }
 
@@ -125,12 +129,14 @@ JetCLIReplLocal: struct {
     ty: Type
 }
 
-// A session program and where its parts start, in bytes.
+// A session program and where its parts start, in bytes: `reports_at` is
+// where the lines that print the turn's values begin.
 JetCLIReplSource: struct {
     text: String
     import_at: Int
     item_at: Int
     statements_at: Int
+    reports_at: Int
 }
 
 // `TurnResult` for the line loop and `jet eval`.
@@ -328,32 +334,98 @@ jet_cli_repl_source: fn(session: JetCLIReplSession, extra_import: String, extra_
     if marked -> text = "{text}print(\"{mark}turn\")\neprint(\"{mark}turn\")\n"
     statements_at: text.count_bytes()
     if statements != "" -> text = "{text}{jet_cli_repl_rename_run(statements, rename)}\n"
+    reports_at: text.count_bytes()
     loop (index, report) in reports {
         shown: "jet_repl_s_{session.nonce}_{index}"
         count: "jet_repl_n_{session.nonce}_{index}"
         text = "{text}{shown}: \"{{{report.name}}}\"\n{count}: {shown}.count_bytes()\nprint(\"{mark}value {index} {{{count}}}\")\nprint({shown})\n"
     }
-    JetCLIReplSource{text: "{text}}}\n", import_at: import_at, item_at: item_at, statements_at: statements_at}
+    JetCLIReplSource{text: "{text}}}\n", import_at: import_at, item_at: item_at, statements_at: statements_at, reports_at: reports_at}
 }
 
-// --- the in-process check ---------------------------------------------------
+// --- the in-process compile -------------------------------------------------
+
+jet_cli_repl_unwritable: fn(session: JetCLIReplSession, error: String) -> String {
+    jet_cli_report("E2105", "couldn't write the REPL session file `{session.anchor}`: {error}", jet_cli_why("E2105"), "check that the temporary directory is writable", session.color)
+}
 
 jet_cli_repl_check: fn(session: JetCLIReplSession, source: String, input_start: Int) -> JetCLIReplChecked {
-    repl_files.write(session.anchor, source) ?? return JetCLIReplChecked.Refused{report: jet_cli_report("E2105", "couldn't write the REPL session file `{session.anchor}`: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable", session.color)}
+    repl_files.write(session.anchor, source) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
     prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: source}}, session.color, None, JetDriverCompileMode.Program)
     compiled := jet_cli_compile_executable(prepared, None, build_options_stock("run"), None, None, session.color)
-    checked := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}}
+    checked := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
         .Refused(output) -> checked = JetCLIReplChecked.Refused{report: output.stderr}
-        .Checked(result, inputs, snapshot) -> checked = jet_cli_repl_checked(session, result, inputs, snapshot, input_start)
+        .Checked(result, _, snapshot) -> checked = jet_cli_repl_checked(session, result, snapshot, input_start)
     }
     checked
 }
 
-jet_cli_repl_checked: fn(session: JetCLIReplSession, result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, input_start: Int) -> JetCLIReplChecked {
+jet_cli_repl_checked: fn(session: JetCLIReplSession, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, input_start: Int) -> JetCLIReplChecked {
     errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
-    if errors.len() > 0 -> return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_localize(session, errors, input_start)}
+    if errors.len() > 0 -> return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_localize(session, errors, input_start), reports: false}
     if result.internal_problem == .Val(problem) -> return JetCLIReplChecked.Refused{report: jet_cli_ice(problem).stderr}
+    JetCLIReplChecked.Checked{binary: "", locals: [JetCLIReplLocal]{}}
+}
+
+// Compile one turn's `program` and build the binary its child runs, in the
+// session's private directory. Problems in the user's input (from
+// `input_start`) come first; problems only the value lines past
+// `program.reports_at` met (a value with no `Display`) are marked so. Under
+// `gate` the session's authority gate then names or refuses the effects the
+// program needs (jet_cli_repl_refusal); every program also passes the
+// authority check a run makes.
+jet_cli_repl_build: fn(session: &JetCLIReplSession, program: JetCLIReplSource, input_start: Int, gate: Bool) -> JetCLIReplChecked {
+    repl_files.write(session.anchor, program.text) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
+    prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: program.text}}, session.color, None, JetDriverCompileMode.Program)
+    options: build_options_stock("run")
+    compiled := jet_cli_compile_executable(prepared, None, options, None, None, session.color)
+    built := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
+    if compiled.move() == {
+        .Refused(output) -> built = JetCLIReplChecked.Refused{report: output.stderr}
+        .Checked(result, inputs, snapshot) -> built = jet_cli_repl_built(session, program, input_start, gate, options, result, inputs, snapshot)
+    }
+    built
+}
+
+jet_cli_repl_built: fn(session: &JetCLIReplSession, program: JetCLIReplSource, input_start: Int, gate: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIReplChecked {
+    errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
+    placed := [Diagnostic]{}
+    unshown := [Diagnostic]{}
+    loop diagnostic in errors {
+        if jet_cli_repl_in_reports(session, diagnostic, program.reports_at) {
+            unshown.push(diagnostic.copy())
+        } else {
+            placed.push(diagnostic.copy())
+        }
+    }
+    if placed.len() > 0 -> return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_localize(session, placed, input_start), reports: false}
+    if unshown.len() > 0 -> return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_unplaced(unshown), reports: true}
+    if result.internal_problem == .Val(problem) -> return JetCLIReplChecked.Refused{report: jet_cli_ice(problem).stderr}
+    locals: jet_cli_repl_locals(inputs)
+    if gate {
+        if jet_cli_repl_refusal(session, result.entry_effects) == .Val(refusal) {
+            session.denied = true
+            return JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{refusal}, reports: false}
+        }
+    }
+    if jet_cli_authority_refusal(jet_cli_application_authority(result, session.invocation)) == .Val(refusal) -> return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_unplaced([Diagnostic]{refusal}), reports: false}
+    built := jet_cli_build_binary(session.anchor, "repl", "run", false, options, result, inputs, snapshot)
+    if built.move() == {
+        .Failed(failure) -> JetCLIReplChecked.Refused{report: "{failure.stdout}{failure.stderr}"}
+        .Image(executable, _) -> jet_cli_repl_written(session, executable, locals)
+    }
+}
+
+// The turn's binary, written where only this session reads it.
+jet_cli_repl_written: fn(session: JetCLIReplSession, executable: X64Executable, locals: &&[JetCLIReplLocal]) -> JetCLIReplChecked {
+    binary: "{session.dir}/repl"
+    if jet_cli_native_write(binary, executable) == .Val(failure) -> return JetCLIReplChecked.Refused{report: jet_cli_native_report(session.anchor, "run", failure, false).stderr}
+    JetCLIReplChecked.Checked{binary: binary, locals: locals}
+}
+
+// The `let` locals of the session program's `run`, with their checked types.
+jet_cli_repl_locals: fn(inputs: JetDriverLoweringInputs?) -> [JetCLIReplLocal] {
     locals := [JetCLIReplLocal]{}
     if inputs == .Val(checked) {
         entry: checked.entry_key ?? ""
@@ -364,7 +436,29 @@ jet_cli_repl_checked: fn(session: JetCLIReplSession, result: JetDriverCompileRes
             }
         }
     }
-    JetCLIReplChecked.Checked{locals: locals, required: result.entry_effects}
+    locals
+}
+
+// Whether `diagnostic` lies in the session file at or past byte `at`.
+jet_cli_repl_in_reports: fn(session: JetCLIReplSession, diagnostic: Diagnostic, at: Int) -> Bool Never! {
+    if diagnostic.origin == .Val(origin) {
+        if origin.path != session.anchor && origin.path != session.anchor_real && origin.display != session.anchor -> return false
+    }
+    if diagnostic.span == .Val(span) -> return span.start >= at
+    false
+}
+
+// Problems as a run's status line names them: code and text, with no place
+// in the user's input.
+jet_cli_repl_unplaced: fn(diagnostics: [Diagnostic]) -> [Diagnostic] {
+    loop diagnostic in diagnostics -> diagnostic_from_registry(diagnostic.code, None, diagnostic.what, diagnostic.why, diagnostic.fix)
+}
+
+// A turn's binary and its debug file, once its child ended.
+jet_cli_repl_discard: fn(binary: String) {
+    repl_files.remove(binary).drop("the turn binary is private to this session")
+    debug: "{binary}.debug"
+    if repl_files.is_file(debug) -> repl_files.remove(debug).drop("the turn binary is private to this session")
 }
 
 // Problems in the session file are shown against the user's input; problems in
@@ -511,18 +605,26 @@ jet_cli_repl_child_argv: fn(session: JetCLIReplSession) -> [String] {
 }
 
 jet_cli_repl_unstarted: fn(error: String) -> JetCLIReplOutcome Never! {
-    JetCLIReplOutcome.Unstarted{diagnostic: diagnostic_from_registry("E2105", None, "couldn't start the build for this turn: {error}", "every REPL turn is built and run by a child `jet`", "check that the `jet` executable is still in place")}
+    JetCLIReplOutcome.Unstarted{diagnostic: diagnostic_from_registry("E2105", None, "couldn't start this turn: {error}", "every REPL turn runs in a child `jet`", "check that the `jet` executable is still in place")}
 }
 
-// `run_turn`: the child builds and runs `program` from stdin (`<byte
-// length>\n<source>`) in the session's base directory.
-jet_cli_repl_run_child: fn(session: JetCLIReplSession, program: String) -> JetCLIReplOutcome {
+// `run_turn`: the child runs the turn's `binary`, named on its stdin
+// (`<byte length>\n<path>`), in the session's base directory. The binary is
+// gone once the child ended.
+jet_cli_repl_run_child: fn(session: JetCLIReplSession, binary: String) -> JetCLIReplOutcome {
     spec := repl_process.cmd(jet_cli_repl_child_argv(session)).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture)
     if repl_files.is_dir(session.base_dir) -> spec = spec.cwd(session.base_dir)
-    child := spec.spawn() ?? return jet_cli_repl_unstarted("{err}")
-    child.stdin.write("{program.count_bytes()}\n{program}".bytes()).drop("a child that stopped reading reports why on stderr")
+    child := spec.spawn() ?? {
+        jet_cli_repl_discard(binary)
+        return jet_cli_repl_unstarted("{err}")
+    }
+    child.stdin.write("{binary.count_bytes()}\n{binary}".bytes()).drop("a child that stopped reading reports why on stderr")
     child.stdin.close()
-    receipt: child.wait() ?? return jet_cli_repl_unstarted("{err}")
+    receipt: child.wait() ?? {
+        jet_cli_repl_discard(binary)
+        return jet_cli_repl_unstarted("{err}")
+    }
+    jet_cli_repl_discard(binary)
     jet_cli_repl_parse_outcome(session, receipt.output, receipt.errors, receipt.code, receipt.signal)
 }
 
@@ -532,8 +634,6 @@ jet_cli_repl_parse_outcome: fn(session: JetCLIReplSession, stdout: String, stder
         if signal == .Val(number) {
             if number == 2 || number == 9 || number == 15 -> return JetCLIReplOutcome.Interrupted
         }
-        diagnostics: jet_cli_repl_child_refusal(stdout)
-        if diagnostics.len() > 0 -> return JetCLIReplOutcome.Refused{diagnostics: diagnostics}
         return JetCLIReplOutcome.Stopped{stdout: "", report: "{stdout}{stderr}"}
     }
     value_header: "{mark}value "
@@ -571,72 +671,22 @@ jet_cli_repl_parse_outcome: fn(session: JetCLIReplSession, stdout: String, stder
     JetCLIReplOutcome.Done{stdout: user_out, stderr: turn_err, values: values}
 }
 
-// The errors of the child's `run` status line.
-jet_cli_repl_child_refusal: fn(stdout: String) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
-    loop line in stdout.lines() {
-        if !line.starts_with("{{") -> next
-        parsed: jet_cli_status_value_parse(line) ?? next
-        reports: jet_cli_status_list(jet_cli_status_get(parsed, "reports")) ?? next
-        loop report in reports {
-            if (jet_cli_status_string(jet_cli_status_get(report, "severity")) ?? "") != "error" -> next
-            code: jet_cli_status_string(jet_cli_status_get(report, "code")) ?? next
-            what: jet_cli_status_string(jet_cli_status_get(report, "what")) ?? ""
-            why: jet_cli_status_string(jet_cli_status_get(report, "why")) ?? ""
-            fix: jet_cli_status_string(jet_cli_status_get(report, "fix")) ?? ""
-            diagnostics.push(diagnostic_from_registry(code, None, what, why, fix))
-        }
-    }
-    diagnostics
-}
-
-// `jet __jet_repl_run_stdin --session=<nonce>`: build and run one REPL turn's
-// program, read from stdin as `<byte length>\n<source>`. A program the
-// compiler or the authority policy refuses is one `run` status line on
-// stdout; one that builds replaces this process.
-jet_cli_repl_child: fn(session: String, invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
-    framed: repl_term.read_all_input() ?? return jet_cli_repl_child_failed("couldn't read the turn program: {err}")
+// `jet __jet_repl_run_stdin --session=<nonce>`: run one REPL turn's binary,
+// whose path stdin holds as `<byte length>\n<path>`, in place of this process
+// as `jet run` runs a program from a file, under the session's authority
+// rows (a read grant confines it). Returns only when it can't.
+jet_cli_repl_child: fn(invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
+    framed: repl_term.read_all_input() ?? return jet_cli_repl_child_failed("couldn't read the turn binary's path: {err}")
     newline: framed.find("\n")
     length: if newline < 0 -> -1 else -> Int.parse(jet_cli_repl_bytes(framed, 0, newline)) ?? -1
-    if length < 0 || newline + 1 + length > framed.count_bytes() -> return jet_cli_repl_child_failed("the turn program is not framed as `<byte length>\\n<source>`")
-    source: jet_cli_repl_bytes(framed, newline + 1, newline + 1 + length)
-    dir: repl_files.mkdtemp("jet-repl-{session}") ?? return jet_cli_repl_child_failed("couldn't create the turn directory: {err}")
-    file: "{dir}/repl.jet"
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    repl_files.write(file, source) ?? {
-        repl_files.remove_all(dir).drop("the turn directory is private to this child")
-        return jet_cli_repl_child_failed("couldn't write the turn program: {err}")
-    }
-    options: build_options_stock("run")
-    compiled := jet_cli_compile_executable_file(file, None, false, None, options, None)
-    if compiled.move() == {
-        .Refused(refusal) -> output = refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_repl_child_run(dir, file, source, invocation, options, result, inputs, snapshot))
-    }
-    // Reached only by a refusal.
-    repl_files.remove_all(dir).drop("the turn directory is private to this child")
-    output
+    if length < 0 || newline + 1 + length > framed.count_bytes() -> return jet_cli_repl_child_failed("the turn binary's path is not framed as `<byte length>\\n<path>`")
+    binary: jet_cli_repl_bytes(framed, newline + 1, newline + 1 + length)
+    launch: jet_cli_launch_plan(binary, [String]{}, build_options_stock("run"), invocation, [JetCLIEnvVar]{})
+    jet_cli_launch_failed(x64_file_exec(binary, launch), false)
 }
 
 jet_cli_repl_child_failed: fn(what: String) -> JetDriverVerbOutput Never! {
     jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), "run `jet repl`; it starts this command itself", false, JET_DRIVER_EXIT_USER_ERROR)
-}
-
-jet_cli_repl_child_run: fn(dir: String, file: String, source: String, invocation: JetCLIInvocationAuthority?, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    errors := jet_cli_errors(result.diagnostics)
-    if errors.len() == 0 {
-        if jet_cli_authority_refusal(jet_cli_application_authority(result, invocation)) == .Val(refusal) -> errors.push(refusal)
-    }
-    if errors.len() > 0 {
-        repl_files.remove_all(dir).drop("the turn directory is private to this child")
-        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("run", false, None, file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    }
-    built := jet_cli_build_binary(file, "repl", "run", false, options, result, inputs, snapshot)
-    repl_files.remove_all(dir).drop("the turn directory is private to this child")
-    if built.move() == {
-        .Failed(failure) -> failure
-        .Image(executable, path) -> jet_cli_launch(executable, file, path, [String]{}, options, invocation, [JetCLIEnvVar]{}, false, false)
-    }
 }
 
 // `jet __jet_repl_run_stdin ...`: the child's plan. Without `--session` it is
@@ -654,7 +704,7 @@ jet_cli_repl_child_plan: fn(raw: [String]) -> JetCLIPlan Never! {
     }
     if session == "" -> return jet_cli_fail("E2104", "`jet {JET_CLI_REPL_CHILD_VERB}` needs `--session=<nonce>`", jet_cli_why("E2104"), "this command runs one `jet repl` turn; start `jet repl` instead", false, JET_DRIVER_EXIT_USAGE)
     if jet_cli_authority_flags(rows, false) == {
-        .Rows(invocation) -> JetCLIPlan.ReplChild{session: session, invocation: invocation}
+        .Rows(invocation) -> JetCLIPlan.ReplChild{invocation: invocation}
         .Refused(plan) -> plan
     }
 }
@@ -723,35 +773,17 @@ jet_cli_repl_is_string: fn(ty: Type?) -> Bool Never! {
     false
 }
 
-// `run_stmts_turn`: check the statements against the session, run them after
-// the replayed ones, and keep what they bind.
+// `run_stmts_turn`: compile the statements after the replayed ones, with the
+// lines that show this turn's values, in one program; run it and keep what
+// the statements bind.
 jet_cli_repl_stmts: fn(session: &JetCLIReplSession, body: [Stmt], suppress: Bool, echo: Bool, check_source: String) -> JetCLIReplTurnResult {
     echo_name: "jet_repl_echo_{session.nonce}_{session.step}"
     plain: jet_cli_repl_trim_semicolons(check_source)
     prefix: if echo -> "{echo_name}: " else -> ""
     statement: "{prefix}{plain}"
-    checking: jet_cli_repl_source(session, "", "", true, false, statement, [JetCLIReplReport]{})
-    checked: jet_cli_repl_check(session, checking.text, checking.statements_at + prefix.count_bytes())
-    locals := [JetCLIReplLocal]{}
-    required := [String]{}
-    if checked == {
-        .Refused(report) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{}, report: report}
-        .Failed(diagnostics) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""}
-        .Checked(found, rights) -> {
-            locals = found
-            required = rights
-        }
-    }
-    if jet_cli_repl_refusal(session, required) == .Val(refusal) {
-        session.denied = true
-        return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{refusal}, report: ""}
-    }
-    echo_ty: if echo -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
-    // A Unit value (`print(...)`) has nothing to show.
-    echo_reported: echo && !jet_cli_repl_is_unit(echo_ty)
-    shows_echo: echo_reported && !suppress
     moved: jet_cli_repl_moves(session, body)
-    // This turn's new bindings, the last of a name winning.
+    // This turn's new bindings, the last of a name winning; the compile gives
+    // their types.
     fresh := [JetCLIReplReport]{}
     loop stmt in body {
         if stmt == .Val(binding) {
@@ -760,7 +792,7 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, body: [Stmt], suppress: Bool
             loop earlier in fresh {
                 if earlier.name != binding.name -> kept.push(earlier)
             }
-            kept.push(JetCLIReplReport{name: binding.name, ty: jet_cli_repl_local_type(locals, binding.name), mutable: binding.mutable})
+            kept.push(JetCLIReplReport{name: binding.name, ty: None, mutable: binding.mutable})
             fresh = kept
         }
     }
@@ -775,39 +807,76 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, body: [Stmt], suppress: Bool
         if !fresh_name -> live_names.push(binding.name)
     }
     live_names.sort()
-    reports := [JetCLIReplReport]{}
-    if echo_reported -> reports.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
-    loop report in fresh -> reports.push(report)
+    live := [JetCLIReplReport]{}
     loop name in live_names {
         index: jet_cli_repl_binding_index(session.bindings, name) ?? next
-        reports.push(JetCLIReplReport{name: name, ty: session.bindings[index].ty, mutable: true})
+        live.push(JetCLIReplReport{name: name, ty: session.bindings[index].ty, mutable: true})
     }
+    bindings := [JetCLIReplReport]{}
+    loop report in fresh -> bindings.push(report.copy())
+    loop report in live -> bindings.push(report.copy())
+    // An echo `;` doesn't suppress shows its value first. A Unit value
+    // (`print(...)`) has no `Display` and nothing to show: when only the value
+    // lines fail, the turn is built again without the echo's, and an echo of
+    // another type keeps the first build's problems.
+    echoed := echo && !suppress
+    reports := [JetCLIReplReport]{}
+    if echoed -> reports.push(JetCLIReplReport{name: echo_name, ty: None, mutable: false})
+    loop report in bindings -> reports.push(report.copy())
     program: jet_cli_repl_source(session, "", "", true, true, statement, reports)
-    outcome: jet_cli_repl_run_child(session, program.text)
-    if outcome == {
-        .Interrupted -> return JetCLIReplTurnResult.Interrupted
-        .Unstarted(diagnostic) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{diagnostic}, report: ""}
-        .Refused(diagnostics) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""}
-        .Stopped(stdout, report) -> return JetCLIReplTurnResult.Failed{stdout: stdout, stderr: "", diagnostics: [Diagnostic]{}, report: report}
-        .Done(stdout, stderr, values) -> {
-            session.statements.push(statement)
-            echo_shown := ""
-            loop value in values {
-                if value.index < 0 || value.index >= reports.len() -> next
-                report: reports[value.index]
-                if echo_reported && value.index == 0 {
-                    echo_shown = value.shown
-                    next
+    built := jet_cli_repl_build(session, program, program.statements_at + prefix.count_bytes(), true)
+    retry := false
+    if built == .Failed(_, only_reports) -> retry = echoed && only_reports
+    if retry {
+        bare: jet_cli_repl_source(session, "", "", true, true, statement, bindings)
+        rebuilt := jet_cli_repl_build(session, bare, bare.statements_at + prefix.count_bytes(), true)
+        unit := true
+        if rebuilt == .Checked(binary, locals) {
+            unit = jet_cli_repl_is_unit(jet_cli_repl_local_type(locals, echo_name))
+            if !unit -> jet_cli_repl_discard(binary)
+        }
+        if unit {
+            built = rebuilt
+            echoed = false
+        }
+    }
+    if built == {
+        .Refused(report) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{}, report: report}
+        .Failed(diagnostics, _) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""}
+        .Checked(binary, locals) -> {
+            echo_ty: if echoed -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
+            shown := [JetCLIReplReport]{}
+            if echoed -> shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
+            loop report in fresh -> shown.push(JetCLIReplReport{name: report.name, ty: jet_cli_repl_local_type(locals, report.name), mutable: report.mutable})
+            loop report in live -> shown.push(report.copy())
+            outcome: jet_cli_repl_run_child(session, binary)
+            if outcome == {
+                .Interrupted -> return JetCLIReplTurnResult.Interrupted
+                .Unstarted(diagnostic) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{diagnostic}, report: ""}
+                .Stopped(stdout, report) -> return JetCLIReplTurnResult.Failed{stdout: stdout, stderr: "", diagnostics: [Diagnostic]{}, report: report}
+                .Done(stdout, stderr, values) -> {
+                    session.statements.push(statement)
+                    echo_shown := ""
+                    loop value in values {
+                        if value.index < 0 || value.index >= shown.len() -> next
+                        report: shown[value.index]
+                        if echoed && value.index == 0 {
+                            echo_shown = value.shown
+                            next
+                        }
+                        jet_cli_repl_bind(session, report, value.shown)
+                    }
+                    kept := [JetCLIReplBinding]{}
+                    loop binding in session.bindings {
+                        if !moved.contains(binding.name) -> kept.push(binding.copy())
+                    }
+                    session.bindings = kept
+                    // A Unit value has nothing to show.
+                    shows_echo: echoed && !jet_cli_repl_is_unit(echo_ty)
+                    echo_report: if shows_echo -> Val(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false}) else -> JetCLIReplReport?{None}
+                    return JetCLIReplTurnResult.Done{stdout: stdout, stderr: stderr, echo: echo_report, shown: echo_shown}
                 }
-                jet_cli_repl_bind(session, report, value.shown)
             }
-            kept := [JetCLIReplBinding]{}
-            loop binding in session.bindings {
-                if !moved.contains(binding.name) -> kept.push(binding.copy())
-            }
-            session.bindings = kept
-            echo_report: if shows_echo -> Val(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false}) else -> JetCLIReplReport?{None}
-            return JetCLIReplTurnResult.Done{stdout: stdout, stderr: stderr, echo: echo_report, shown: echo_shown}
         }
     }
 }
@@ -839,7 +908,7 @@ jet_cli_repl_declaration: fn(session: &JetCLIReplSession, text: String, program:
             jet_cli_repl_err(report)
             jet_cli_repl_record(session, report, jet_cli_repl_summary(report), JetCLIReplStatus.Error)
         }
-        .Failed(diagnostics) -> {
+        .Failed(diagnostics, _) -> {
             jet_cli_repl_render(session, text, diagnostics)
             jet_cli_repl_record(session, "", jet_cli_repl_error_summary(diagnostics), JetCLIReplStatus.Error)
         }
@@ -919,15 +988,23 @@ jet_cli_repl_functions: fn(items: [String]) -> [String] {
 }
 
 // `run_session_program`: the session's statements (or its own `run`) as one
-// program, outside the turn loop.
-jet_cli_repl_run_program: fn(session: JetCLIReplSession, statements: String) -> String {
+// program, outside the turn loop. Its problems are named as a run names them.
+jet_cli_repl_run_program: fn(session: &JetCLIReplSession, statements: String) -> String {
     program: jet_cli_repl_source(session, "", "", false, true, statements, [JetCLIReplReport]{})
-    outcome: jet_cli_repl_run_child(session, program.text)
+    built: jet_cli_repl_build(session, program, program.statements_at, false)
+    if built == {
+        .Checked(binary, _) -> jet_cli_repl_ran_program(session, binary)
+        .Failed(diagnostics, _) -> diagnostic_render_all("", "", jet_cli_repl_unplaced(diagnostics), session.color)
+        .Refused(report) -> if report == "" || report.ends_with("\n") -> report.copy() else -> "{report}\n"
+    }
+}
+
+jet_cli_repl_ran_program: fn(session: JetCLIReplSession, binary: String) -> String {
+    outcome: jet_cli_repl_run_child(session, binary)
     if outcome == {
         .Done(stdout, stderr, _) -> "{stdout}{stderr}"
         .Interrupted -> "{JET_CLI_REPL_INTERRUPTED}\n"
         .Unstarted(diagnostic) -> diagnostic_render_all("", "", [Diagnostic]{diagnostic}, session.color)
-        .Refused(diagnostics) -> diagnostic_render_all("", "", diagnostics, session.color)
         .Stopped(stdout, report) -> if report == "" || report.ends_with("\n") -> "{stdout}{report}" else -> "{stdout}{report}\n"
     }
 }
