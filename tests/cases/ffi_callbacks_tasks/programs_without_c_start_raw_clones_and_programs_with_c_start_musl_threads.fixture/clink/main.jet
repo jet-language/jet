@@ -1,0 +1,27 @@
+// #6689 c1: a program that links C keeps musl threads. Sixteen tasks each
+// ask C where it runs; every task thread off the initial one has musl's own
+// thread state (JetBackend Image/StaticLink.jet link_thread_create), and
+// none shares the initial thread's.
+use c: c.probe
+
+#Import c.probe: module {
+    mark_initial: fn() = "probe_mark_initial"
+    place: fn() -> Int = "probe_place"
+}
+
+run: fn() {
+    c.mark_initial()
+    workers := [Task<Int>]{}
+    loop _ in 0..<16 {
+        workers.push(task { c.place() })
+    }
+    own := 0
+    shared := 0
+    loop worker in workers {
+        place: worker.join() ?? panic("C probe task")
+        if place == 1 -> own += 1
+        if place == 2 -> shared += 1
+    }
+    print("C ran on a musl thread of its own: {own > 0}")
+    print("C shared the initial thread's musl state off it: {shared > 0}")
+}

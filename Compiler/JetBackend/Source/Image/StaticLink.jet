@@ -10,8 +10,8 @@
 //    can be satisfied (all archives form one group). COMDAT groups keep the
 //    first copy; weak and common definitions yield to strong ones.
 // 2. Synthesis: when musl's `__libc_start_main` is available the linker adds
-//    the startup object (`_start`, and a `main` thunk that hands musl's
-//    thread functions to the Jet runtime, so its threads are musl's
+//    the startup object (`_start`, and a `main` thunk that hands the Jet
+//    runtime three thread functions of musl's, so its threads are musl's
 //    (LINK_THREAD_LIBC), hands the unwind tables to `__jet_eh_startup` and
 //    runs `.init_array` with glibc's (argc, argv, envp) arguments, which the
 //    gnu-target Rust std expects); the Rust
@@ -1054,8 +1054,8 @@ link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
 
 // The startup object for musl: `_start` hands `__jet_link_main` to
 // `__libc_start_main`, which initializes libc and calls it with (argc, argv,
-// envp). `__jet_link_main` hands musl's thread functions to the Jet runtime
-// (when the link has both: link_thread_libc), the unwind tables to
+// envp). `__jet_link_main` hands the Jet runtime musl's thread functions
+// (when the link has both: link_thread_libc, link_thread_create), the unwind tables to
 // `__jet_eh_startup` (when `register_frames`; link_eh_shims), runs every
 // `.init_array` entry with those three arguments (glibc's convention; musl's
 // own init loop sees an empty array), and tail-calls the program's `main`.
@@ -1073,14 +1073,16 @@ link_startup: fn(c: LinkContext, register_frames: Bool) -> LinkSynth Never! {
     link_synth_function(s, "__jet_link_main")
     // push rbx; push r12; push r13; push r14; sub rsp, 8; mov r12d, edi; mov r13, rsi; mov r14, rdx
     link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
-    if link_thread_libc(c) {
-        // lea rdi, rsi, rdx, rcx, r8, r9 in turn, [rip + each of
-        // LINK_THREAD_LIBC_NAMES]; call jet_rt_thread_libc
-        loads: [[Int]]{[Int]{0x48, 0x8d, 0x3d}, [Int]{0x48, 0x8d, 0x35}, [Int]{0x48, 0x8d, 0x15}, [Int]{0x48, 0x8d, 0x0d}, [Int]{0x4c, 0x8d, 0x05}, [Int]{0x4c, 0x8d, 0x0d}}
-        loop (k, name) in LINK_THREAD_LIBC_NAMES {
-            link_synth_code(s, loads[k])
-            link_synth_rel32(s, name, LINK_R_PC32)
-        }
+    threads: link_thread_libc(c)
+    if threads {
+        // lea rdi, [rip + __jet_thread_create]; lea rsi, [rip + pthread_join];
+        // lea rdx, [rip + pthread_detach]; call jet_rt_thread_libc
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x3d})
+        link_synth_rel32(s, LINK_THREAD_CREATE, LINK_R_PC32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x35})
+        link_synth_rel32(s, "pthread_join", LINK_R_PC32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x15})
+        link_synth_rel32(s, "pthread_detach", LINK_R_PC32)
         link_synth_code(s, [Int]{0xe8})
         link_synth_rel32(s, LINK_THREAD_LIBC, LINK_R_PLT32)
     }
@@ -1105,6 +1107,7 @@ link_startup: fn(c: LinkContext, register_frames: Bool) -> LinkSynth Never! {
     // done: mov edi, r12d; mov rsi, r13; mov rdx, r14; add rsp, 8; pop r14; pop r13; pop r12; pop rbx; jmp main
     link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0x48, 0x83, 0xc4, 0x08, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xe9})
     link_synth_rel32(s, "main", LINK_R_PLT32)
+    if threads -> link_thread_create(s)
     link_synth_define(s, "__dso_handle", 2, 0)
     loop _ in 0..<8 -> s.data.push(U8{0})
     // libgcc's `object: struct` for the registered tables (at most 8 words),
@@ -1155,16 +1158,47 @@ link_owned_startup: fn() -> LinkSynth Never! {
 
 LINK_OWNED_START: "__jet_start"
 
-// The Jet runtime's export that takes musl's thread functions (JetRuntime
-// Thread.jet jet_rt_thread_libc), and those functions in its parameter
-// order. A program that links C runs that C on the runtime's threads, which
-// must then be musl's own (pthread_create): a raw clone shares the main
-// thread's FS TLS (errno, pthread_self) and leaves musl's malloc and stdio
-// unlocked (libc.need_locks). The musl startup (link_startup) makes the
-// call whenever the link has both the runtime and musl's functions
-// (link_thread_libc); a program without libc starts raw clones.
+// The Jet runtime's export that takes a program's C thread functions
+// (JetRuntime Thread.jet jet_rt_thread_libc), and the musl functions they
+// are made of. A program that links C runs that C on the runtime's threads,
+// which must then be musl's own (pthread_create): a raw clone shares the
+// main thread's FS TLS (errno, pthread_self) and leaves musl's malloc and
+// stdio unlocked (libc.need_locks). The musl startup (link_startup) makes
+// the call whenever the link has both the runtime and musl's functions
+// (link_thread_libc), handing over link_thread_create's function,
+// pthread_join and pthread_detach; a program without libc starts raw
+// clones. Only this synthesized startup names musl's thread functions, so
+// the runtime object asks libc for none and a program that links no C
+// pulls none in.
 LINK_THREAD_LIBC: "jet_rt_thread_libc"
 LINK_THREAD_LIBC_NAMES: [String]{"pthread_create", "pthread_join", "pthread_detach", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_attr_destroy"}
+LINK_THREAD_CREATE: "__jet_thread_create"
+
+// `__jet_thread_create(word, entry, start, bytes)`: the runtime's create
+// function in a program that links C. It starts a musl thread running
+// entry(start) on a stack of `bytes` and stores its pthread_t at `word`,
+// returning 0 or pthread_attr_setstacksize's or pthread_create's errno
+// (musl's pthread_attr_init and pthread_attr_destroy always return 0). The
+// pthread_attr_t (56 bytes in musl on x86-64) lives in its frame.
+link_thread_create: fn(s: &LinkSynth) Never! {
+    link_synth_function(s, LINK_THREAD_CREATE)
+    // push rbx; push r12; push r13; push r14; sub rsp, 72; mov rbx, rdi;
+    // mov r12, rsi; mov r13, rdx; mov r14, rcx; mov rdi, rsp; call pthread_attr_init
+    link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x48, 0x48, 0x89, 0xfb, 0x49, 0x89, 0xf4, 0x49, 0x89, 0xd5, 0x49, 0x89, 0xce, 0x48, 0x89, 0xe7, 0xe8})
+    link_synth_rel32(s, "pthread_attr_init", LINK_R_PLT32)
+    // mov rdi, rsp; mov rsi, r14; call pthread_attr_setstacksize
+    link_synth_code(s, [Int]{0x48, 0x89, 0xe7, 0x4c, 0x89, 0xf6, 0xe8})
+    link_synth_rel32(s, "pthread_attr_setstacksize", LINK_R_PLT32)
+    // test eax, eax; jnz done; mov rdi, rbx; mov rsi, rsp; mov rdx, r12;
+    // mov rcx, r13; call pthread_create
+    link_synth_code(s, [Int]{0x85, 0xc0, 0x75, 0x11, 0x48, 0x89, 0xdf, 0x48, 0x89, 0xe6, 0x4c, 0x89, 0xe2, 0x4c, 0x89, 0xe9, 0xe8})
+    link_synth_rel32(s, "pthread_create", LINK_R_PLT32)
+    // done: mov ebx, eax; mov rdi, rsp; call pthread_attr_destroy
+    link_synth_code(s, [Int]{0x89, 0xc3, 0x48, 0x89, 0xe7, 0xe8})
+    link_synth_rel32(s, "pthread_attr_destroy", LINK_R_PLT32)
+    // mov eax, ebx; add rsp, 72; pop r14; pop r13; pop r12; pop rbx; ret
+    link_synth_code(s, [Int]{0x89, 0xd8, 0x48, 0x83, 0xc4, 0x48, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3})
+}
 
 // Whether the link has the runtime's LINK_THREAD_LIBC and every one of
 // musl's functions it takes: a fact of the inputs alone.
