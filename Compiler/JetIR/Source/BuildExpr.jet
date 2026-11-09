@@ -469,7 +469,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if op == None {
                 if ir_self_append(m, p, b, binding, value, span) -> return
                 if ir_clear_string(m, p, b, binding, value) -> return
-                if ir_clear_list(m, p, b, binding, value) -> return
+                if ir_clear_list(m, p, b, binding, value, span) -> return
             }
             right: ir_expr(m, p, b, value)
             if ir_failed(b) -> return
@@ -3022,9 +3022,10 @@ ir_empty_list_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never!
 // `xs = [T]{}` on a List place that always holds its value (a variable that
 // still owns it on every path, or an aggregate write parameter's place): the
 // List is emptied in place (ir_list_clear_in_place), so a sole owner keeps
-// its buffer and refilling it reuses the capacity. False, emitting nothing,
-// for any other assignment.
-ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding, value: Int) -> Bool Never! {
+// its buffer and refilling it reuses the capacity. The old value closes first,
+// as any assignment closes it. False, emitting nothing, for any other
+// assignment.
+ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding, value: Int, span: Span) -> Bool Never! {
     if binding.indirect >= 0 || !ir_empty_list_literal(p, b, value) -> return false
     if ir_kind_of(m, b, binding.slot) != .Aggregate -> return false
     if ir_untag(m.types[b.f.slot_type[binding.slot]].ty) == {
@@ -3034,6 +3035,9 @@ ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding,
     element: ir_list_element(m, p, b, binding.slot) ?? return false
     if !binding.write && (!ir_owned_binding(b, binding.slot) || ir_live_flag(b, binding.slot) >= 0) -> return false
     if binding.write {
+        // The caller's old value is whole (nothing moves out of a write
+        // parameter) and closes here, as a write to it closes it.
+        if !ir_close_fresh(m, p, b, binding.slot, span) -> return true
         ir_list_clear_in_place(m, b, binding.slot, element)
         return true
     }
@@ -3074,10 +3078,12 @@ ir_clear_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
 }
 
 // Empties the List header at `header` (element type row `element`) in place
-// of assigning it a new empty List: a sole owner of a counted buffer ends its
-// elements and keeps the buffer, capacity and all, at length 0; any other
-// header (a shared or frozen buffer, a write window) ends as an assignment
-// ends it and becomes the empty List.
+// of assigning it a new empty List, once its old value closed: a sole owner of
+// a counted buffer ends its elements as the List's drop would (its move-only
+// handles, which the close ended, it leaves alone: ir_glue_drops) and keeps
+// the buffer, capacity and all, at length 0; any other header (a shared or
+// frozen buffer, a write window) ends as an assignment ends it and becomes
+// the empty List.
 ir_list_clear_in_place: fn(m: &IRModule, b: &IRBuilder, header: Int, element: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     zero: ir_word_const(m, b, 0)
@@ -3087,7 +3093,7 @@ ir_list_clear_in_place: fn(m: &IRModule, b: &IRBuilder, header: Int, element: In
     data: ir_load_word(m, b, header, 16)
     sole: ir_runtime(m, b, "jet_rt_block_unique", [Int]{data}, bool_row)
     ir_open_if(b.f, sole, b.line)
-    ir_list_drop_items(m, b, header, element)
+    if ir_glue_drops(m, element) -> ir_list_drop_items(m, b, header, element)
     ir_emit(b.f, IROp.Store, -1, header, 0, zero, b.line)
     ir_else(b.f, b.line)
     ir_list_replace_empty(m, b, header, zero)
