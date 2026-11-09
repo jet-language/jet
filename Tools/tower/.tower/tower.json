@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6750,
-    "rev": 96625,
+    "nextNum": 6751,
+    "rev": 96631,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100727,7 +100727,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T16:59:15.436Z",
+      "updated": "2026-11-09T17:00:17.012Z",
       "updatedBy": "owner",
       "criteriaLastN": 8
     },
@@ -102308,6 +102308,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T15:56:51.507Z"
+        },
+        {
+          "n": 3,
+          "text": "OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The only exceptions are names a tool requires (.git, .agents, .jet, src/ where ratified), each listed with the code that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T17:04:18.661Z"
         }
       ],
       "refs": [],
@@ -102316,9 +102325,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-09T15:57:04.476Z",
+      "updated": "2026-11-09T17:04:18.661Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0cnf5w8",
@@ -102679,6 +102688,56 @@
       "needsAcceptance": false,
       "created": "2026-11-09T16:58:53.917Z",
       "updated": "2026-11-09T16:59:02.889Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0ccaugz",
+      "num": 6750,
+      "title": "jet run of a loose file walks and vets its whole folder tree, so one unrelated symlink refuses the run",
+      "body": "Owner hit it 2026-11-09: jet run tests/int_ring_witness.jet (a 10-line program that imports nothing) fails E2105 'can't securely read the sources under tests/' because the hostile-fixture symlink tests/compiled_workloads/fixtures/systems-file-index/hostile/links/absolute lives somewhere under the same folder. Compiler/JetCli/Source/Cli/Request.jet jet_cli_prepare_snapshot: a non-script entry outside a package is rooted at its directory (jet_cli_source_root) and jet_cli_walk_sources reads and vets every file below it (tens of thousands under tests/) before compiling. Only a #!/ script gets a one-file snapshot.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A loose (non-package) entry's snapshot holds only the entry and the sources it reaches. An unrelated symlink or unreadable file elsewhere under its folder does not refuse the run, while a reached source that is a symlink is still refused with E2105. There is a cases row for each, plus a timing row showing that jet run tests/<loose file> no longer reads the whole tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T17:04:41.650Z"
+        },
+        {
+          "n": 2,
+          "text": "The three loose programs at the tests/ root (int_ring_witness.jet, decimal_perf_witness.jet, http_i9_resident_probe.jet) move to the corpus or Tools/perf folder that owns them, or are deleted if nothing runs them.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T17:04:42.683Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T17:04:20.016Z",
+      "updated": "2026-11-09T17:04:44.354Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     }
@@ -190354,6 +190413,17 @@
       "created": "2026-11-09T07:49:27.083Z",
       "answeredAt": "2026-11-09",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q3phuw6h",
+      "cardId": "c0l39twq",
+      "decisionId": "D-FRAME-ACCENT1",
+      "by": "owner",
+      "kind": "question",
+      "text": "If an accent color is a standard thing, use system default, then fall back to jet red if not viable for system, otherwise if we dont need this remove it",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-09T17:00:17.012Z"
     }
   ],
   "ideas": [
@@ -191210,6 +191280,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T17:04:44.354Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ccaugz",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T17:04:42.683Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ccaugz",
+      "note": "#2 The three loose programs at the tests/ root (int_ring_witnes"
+    },
+    {
+      "at": "2026-11-09T17:04:41.651Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ccaugz",
+      "note": "#1 A loose (non-package) entry's snapshot holds only the entry "
+    },
+    {
+      "at": "2026-11-09T17:04:20.017Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ccaugz",
+      "note": "jet run of a loose file walks and vets its whole folder tree, so one unrelated symlink refuses the run"
+    },
+    {
+      "at": "2026-11-09T17:04:18.661Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#3 OWNER 2026-11-09: every folder in the repository is TitleCas"
+    },
+    {
+      "at": "2026-11-09T17:00:17.012Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q3phuw6h",
+      "note": ""
+    },
     {
       "at": "2026-11-09T16:59:15.436Z",
       "by": "owner",
