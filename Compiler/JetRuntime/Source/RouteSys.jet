@@ -416,6 +416,39 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     host_sample_out(if (result < I64{0}) -> result else -> nanos, available, value, errno)
 }
 
+// clock_gettime of the CPU-time clock of process `pid`, this process when 0:
+// (true, nanoseconds, errno). The clock id is musl clock_getcpuclockid's
+// (-pid-1)*8 + 2, the whole thread group's CPUCLOCK_SCHED, or
+// CLOCK_PROCESS_CPUTIME_ID 2 for this process. The kernel's EINVAL for a pid
+// with no process becomes ESRCH, as musl reports it.
+#Export(c) jet_sys_cpu_clock_raw: fn(pid: I64, available: I64, value: I64, errno: I64) {
+    native: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    clock: if (native == I64{0}) -> I64{2} else -> wrapping(wrapping(I64{0} - native - I64{1}) * I64{8} + I64{2})
+    span: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(span, I64{16})
+    result := host_call(I64{228}, clock, span, I64{0})
+    if (result == I64{-22} && native != I64{0}) -> result = I64{-3}
+    nanos: trap_word(span) * I64{1000000000} + trap_word(wrapping(span + I64{8}))
+    jet_rt_free(span, I64{16}, I64{8})
+    host_sample_out(if (result < I64{0}) -> result else -> nanos, available, value, errno)
+}
+
+// clock_settime(CLOCK_REALTIME, &{seconds, nanoseconds}) for Unix time `ns`
+// (Core checked it is not negative): (true, 0, errno).
+#Export(c) jet_sys_clock_set_raw: fn(ns: I64, available: I64, value: I64, errno: I64) {
+    native: jet_int_owned_to_i64(ns)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    seconds: native /% I64{1000000000}
+    span: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(span, I64{16})
+    net_store_uint(span, I64{8}, seconds)
+    net_store_uint(wrapping(span + I64{8}), I64{8}, native - seconds * I64{1000000000})
+    result: host_call(I64{227}, I64{0}, span, I64{0})
+    jet_rt_free(span, I64{16}, I64{8})
+    host_sample_out(result, available, value, errno)
+}
+
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
 // three loads, each a 16-bit binary fraction; the doubles cross as their raw
 // f64 bits in the Float out slots. A host without sysinfo (the web) has no

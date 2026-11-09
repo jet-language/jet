@@ -4145,21 +4145,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 427,
+      "line": 460,
       "column": 5,
       "reason": "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 459,
+      "line": 492,
       "column": 5,
       "reason": "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 474,
+      "line": 507,
       "column": 5,
       "reason": "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words"
     },
@@ -10729,9 +10729,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 114:9 | "connect(2) reads the owned 23-byte address" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 130:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 379:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 427:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 459:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 474:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 460:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 492:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 507:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 58:5 | "the caller lends the tuple's Bool byte, Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 229:5 | "the caller lends the tuple's Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 332:13 | "written under the host lock" |
