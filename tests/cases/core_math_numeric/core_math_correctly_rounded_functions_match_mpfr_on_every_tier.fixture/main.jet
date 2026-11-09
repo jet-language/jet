@@ -1,0 +1,86 @@
+// Every corpus row is a call of one correctly rounded core.math function:
+// its argument words, then the correctly rounded result word MPFR computed
+// offline, as hex binary64 bits. The program prints one line per function
+// with the rows it checked and how many results differ, plus the first
+// differing rows. MPFR has no NaN bits, so a NaN matches any NaN.
+use {
+    math: core.math
+}
+
+RSQRT: comptime { embed_file("corpus/rsqrt.txt") }
+
+hex_value: fn(b: U8) -> Int {
+    n: Int.from_u8(b)
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The 16-digit hex word at `at`, as the signed Int math.from_bits takes.
+word_at: fn(raw: [U8], at: Int) -> Int {
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    n
+}
+
+hex_word: fn(word: Int) -> String {
+    digits: "0123456789abcdef".bytes()
+    n := if word < 0 -> word + 18446744073709551616 else -> word
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+is_nan_word: fn(word: Int) -> Bool {
+    magnitude: if word < 0 -> word + 9223372036854775808 else -> word
+    magnitude > 9218868437227405312
+}
+
+// The result of `name` on arguments `a`.
+value: fn(name: String, a: [Float]) -> Float {
+    if name == "rsqrt" -> return math.rsqrt(a[0])
+    panic("no corpus function {name}")
+}
+
+check: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        // The row's words: its arguments, then the result.
+        words := [Int]{}
+        loop {
+            words.push(word_at(raw, at))
+            at = at + 17
+            if raw[at - 1] == (U8{10}) -> break
+        }
+        want: words[words.len() - 1]
+        arguments := [Float]{}
+        shown := [String]{}
+        loop i in 0..<(words.len() - 1) {
+            arguments.push(math.from_bits(words[i]))
+            shown.push(hex_word(words[i]))
+        }
+        got: math.to_bits(value(name, arguments))
+        rows = rows + 1
+        if got != want && !(is_nan_word(got) && is_nan_word(want)) {
+            wrong = wrong + 1
+            if wrong <= 3 -> print("{name}({shown.join(", ")}) = {hex_word(got)}, correctly rounded {hex_word(want)}")
+        }
+    }
+    print("{name}: {rows} rows, {wrong} not correctly rounded")
+}
+
+run: fn() {
+    check("rsqrt", RSQRT)
+}

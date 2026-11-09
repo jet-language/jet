@@ -76,7 +76,7 @@ POSIX: "POSIX"
 FAMILIES: [Family]{
     // ---- Math ----
     {area: "Math", header: "math.h", standard: C23, names: "acos asin atan atan2 cos sin tan", variants: "f l", jet: "core.math.acos core.math.asin core.math.atan core.math.atan2 core.math.cos core.math.sin core.math.tan", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
-    {area: "Math", header: "math.h", standard: C23, names: "acosh asinh atanh cosh sinh tanh", variants: "f l", jet: "core.math.acosh core.math.asinh core.math.atanh core.math.cosh core.math.sinh core.math.tanh", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
+    {area: "Math", header: "math.h", standard: C23, names: "acosh asinh atanh cosh sinh tanh", variants: "f l", jet: "core.math.acosh core.math.asinh core.math.atanh core.math.cosh core.math.sinh core.math.tanh", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit, except that acosh is NaN for every x below 1"},
     {area: "Math", header: "math.h", standard: C23, names: "exp exp2 expm1 log log10 log1p log2 logp1", variants: "f l", jet: "core.math.exp core.math.exp2 core.math.exp_m1 core.math.ln core.math.log10 core.math.ln_1p core.math.log2", coverage: .Covered, note: "logp1 is C23's name for log1p"},
     {area: "Math", header: "math.h", standard: C23, names: "pow sqrt cbrt hypot", variants: "f l", jet: "Float.pow core.math.sqrt core.math.cbrt core.math.hypot", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "erf erfc lgamma tgamma", variants: "f l", jet: "core.math.erf core.math.erfc core.math.lgamma core.math.gamma", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
@@ -93,8 +93,10 @@ FAMILIES: [Family]{
     {area: "Math", header: "math.h", standard: C23, names: "isgreater isgreaterequal isless islessequal islessgreater isunordered iseqsig", variants: "", jet: "core.math.is_nan", coverage: .Language, note: "Float comparison operators are quiet; isunordered is is_nan of either operand"},
     {area: "Math", header: "math.h", standard: POSIX, names: "j0 j1 jn y0 y1 yn", variants: "", jet: "", coverage: .Gap, note: "no Bessel functions"},
     {area: "Math", header: "math.h", standard: C23, names: "acospi asinpi atanpi atan2pi cospi sinpi tanpi", variants: "f l", jet: "", coverage: .Gap, note: "no half-revolution trigonometry"},
-    {area: "Math", header: "math.h", standard: C23, names: "exp10 exp10m1 exp2m1 log10p1 log2p1", variants: "f l", jet: "", coverage: .Gap, note: ""},
-    {area: "Math", header: "math.h", standard: C23, names: "compoundn pown powr rootn rsqrt", variants: "f l", jet: "", coverage: .Gap, note: ""},
+    {area: "Math", header: "math.h", standard: C23, names: "exp10", variants: "f l", jet: "core.math.exp10", coverage: .Covered, note: "musl 1.2.5's algorithm, bit for bit"},
+    {area: "Math", header: "math.h", standard: C23, names: "exp10m1 exp2m1 log10p1 log2p1", variants: "f l", jet: "", coverage: .Gap, note: ""},
+    {area: "Math", header: "math.h", standard: C23, names: "rsqrt", variants: "f l", jet: "core.math.rsqrt", coverage: .Covered, note: "correctly rounded"},
+    {area: "Math", header: "math.h", standard: C23, names: "compoundn pown powr rootn", variants: "f l", jet: "", coverage: .Gap, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "fromfp ufromfp fromfpx ufromfpx", variants: "f l", jet: "core.math.round_to_signed core.math.round_to_unsigned core.math.Rounding", coverage: .Covered, note: "the x forms are the same calls: Jet has no inexact flag to raise"},
     {area: "Math", header: "math.h", standard: C23, names: "fmaximum fminimum fmaximum_mag fminimum_mag fmaximum_num fminimum_num fmaximum_mag_num fminimum_mag_num", variants: "f l", jet: "core.math.maximum core.math.minimum core.math.maximum_mag core.math.minimum_mag core.math.maximum_num core.math.minimum_num core.math.maximum_mag_num core.math.minimum_mag_num", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "fadd faddl daddl fsub fsubl dsubl fmul fmull dmull fdiv fdivl ddivl ffma ffmal dfmal fsqrt fsqrtl dsqrtl", variants: "", jet: "", coverage: .Gap, note: "no correctly rounded narrowing arithmetic"},

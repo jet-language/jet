@@ -80,6 +80,19 @@ cos: fn(n: Float) -> Float Never! { core.math.cos(n) }
 cosh: fn(n: Float) -> Float Never! { core.math.cosh(n) }
 exp: fn(n: Float) -> Float Never! { core.math.exp(n) }
 exp2: fn(n: Float) -> Float Never! { core.math.exp2(n) }
+/// exp10.c from musl 1.2.5: 10^x. A whole part below 16 in magnitude takes
+/// its power of ten from a table, times exp2(log2(10) * fraction); anything
+/// else is pow(10, x).
+exp10: fn(n: Float) -> Float Never! {
+    parts: modf(n)
+    if (to_bits(parts.whole) >> 52).bit_and(2047) < 1027 {
+        index: (Int.from_float(parts.whole) ?? 0) + 15
+        if parts.fract == 0.0 -> return __EXP10_POWERS[index]
+        return exp2(Float{3.321928094887362} * parts.fract) * __EXP10_POWERS[index]
+    }
+    Float{10.0}.pow(n)
+}
+__EXP10_POWERS: [Float]{1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15}
 exp_m1: fn(n: Float) -> Float Never! { core.math.exp_m1(n) }
 expm1: fn(n: Float) -> Float Never! { exp_m1(n) }
 /// erf.c from musl 1.2.5: erf of |x| below 0.84375 is x + x*R(x^2); from
@@ -369,6 +382,77 @@ logb: fn(n: Float) -> Float Never! {
 sin: fn(n: Float) -> Float Never! { core.math.sin(n) }
 sinh: fn(n: Float) -> Float Never! { core.math.sinh(n) }
 sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
+/// 1/sqrt(x), correctly rounded (C23 rsqrt; CORE-MATH rsqrt.c): +inf for +0,
+/// -inf for -0, +0 for +inf and NaN below zero. One Newton step on
+/// (1/x) * sqrt(x) lands within a hair of the answer; when that hair could
+/// straddle a rounding boundary the result is settled exactly.
+rsqrt: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    biased: (bits >> 52).bit_and(0x7FF)
+    if bits < 0 {
+        if n == 0.0 -> return -INFINITY
+        if is_nan(n) -> return n + n
+        return from_bits(0x7FF8_0000_0000_0000)
+    }
+    r := Float{0.0}
+    if biased == 0 {
+        if bits == 0 -> return INFINITY
+        r = sqrt(n) / n
+    } else if biased < 0x7FD {
+        r = (Float{1.0} / n) * sqrt(n)
+    } else if biased < 0x7FF {
+        r = (Float{4.0} / n) * (Float{0.25} * sqrt(n))
+    } else {
+        if is_nan(n) -> return n + n
+        return 0.0
+    }
+    // r' = r - r/2 * (r^2 * x - 1), with r * x carried to about 106 bits
+    rx: r * n
+    drx: fma(r, n, -rx)
+    h: fma(r, rx, Float{-1.0}) + r * drx
+    dr: (r * Float{0.5}) * h
+    refined: r - dr
+    dr_bits: to_bits(dr).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    gap: (to_bits(r) >> 52) - (dr_bits >> 52).bit_and(0x7FF)
+    if (dr_bits + 18).bit_and(0x7_FFFF_FFFF_FFFF) <= 23 || gap > 100 -> return __rsqrt_exact(refined, n)
+    refined
+}
+// The correctly rounded 1/sqrt(x) for a finite x > 0, from a candidate r
+// within an ulp: the midpoints on either side of r are tested exactly, by
+// comparing m * m * x with 1 in integers. No midpoint is ever exact.
+__rsqrt_exact: fn(candidate: Float, n: Float) -> Float Never! {
+    x: __float_parts(n)
+    r := candidate
+    loop {
+        c: __float_parts(r)
+        if __square_times_below_one(2 * c.m + 1, c.e - 1, x) {
+            r = next_up(r)
+            next
+        }
+        power_of_two: c.m == 0x10_0000_0000_0000 && c.e > -1074
+        low_m: if power_of_two -> 4 * c.m - 1 else -> 2 * c.m - 1
+        low_e: if power_of_two -> c.e - 2 else -> c.e - 1
+        if !__square_times_below_one(low_m, low_e, x) {
+            r = next_down(r)
+            next
+        }
+        return r
+    }
+}
+// A finite x >= 0 as m * 2^e with m an Int.
+__float_parts: fn(n: Float) -> (m: Int, e: Int) Never! {
+    bits: to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    biased: bits >> 52
+    fraction: bits.bit_and(0xF_FFFF_FFFF_FFFF)
+    if biased == 0 -> return (m: fraction, e: -1074)
+    (m: fraction.bit_or(0x10_0000_0000_0000), e: biased - 1075)
+}
+// Whether (m * 2^e)^2 * x < 1, exactly.
+__square_times_below_one: fn(m: Int, e: Int, x: (m: Int, e: Int)) -> Bool Never! {
+    shift: 2 * e + x.e
+    if shift >= 0 -> return false
+    m * m * x.m < (Int{1} << -shift)
+}
 tan: fn(n: Float) -> Float Never! { core.math.tan(n) }
 tanh: fn(n: Float) -> Float Never! { core.math.tanh(n) }
 trunc: fn(n: Float) -> Float Never! { core.math.trunc(n) }
@@ -1260,6 +1344,27 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     assert_eq(leading_ones(-1), 64)
     assert_eq(trailing_ones(-1), 64)
     assert_eq((Int{3}).bit_xor(5), 6)
+}
+
+#Test("math rsqrt is correctly rounded and exp10 matches musl") {
+    assert_eq(rsqrt(4.0), 0.5)
+    assert_eq(rsqrt(0.0), INFINITY)
+    assert_eq(rsqrt(-0.0), -INFINITY)
+    assert_eq(to_bits(rsqrt(INFINITY)), 0)
+    assert(is_nan(rsqrt(-1.0)))
+    assert(is_nan(rsqrt(NAN)))
+    assert_eq(to_bits(rsqrt(2.0)), 4604544271217802189)
+    // A CORE-MATH worst case, and the smallest subnormal (2^537).
+    assert_eq(to_bits(rsqrt(from_bits(4610114390058515662))), 4605185130452627605)
+    assert_eq(to_bits(rsqrt(from_bits(1))), 7025615418697973760)
+    assert_eq(exp10(2.0), 100.0)
+    assert_eq(exp10(-3.0), 0.001)
+    assert_eq(exp10(INFINITY), INFINITY)
+    assert_eq(exp10(-INFINITY), 0.0)
+    assert(is_nan(exp10(NAN)))
+    assert_eq(to_bits(exp10(0.5)), 4614303235046005586)
+    // musl's own result at its worst input, 4 ulps from 10^x.
+    assert_eq(to_bits(exp10(from_bits(-4598200772700550838))), 4368491250563624223)
 }
 
 #Test("math special functions match musl") {

@@ -2522,7 +2522,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
+| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2531,15 +2531,16 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
 | `math.cos(x)`, `cosh(x)`, `sin(x)`, `sinh(x)`, `tan(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Trigonometric and hyperbolic functions. |
-| `math.exp(x)`, `exp2(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
+| `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)`, `logb(x)`, `log(x, base)` | `Float` | Natural, base-specific, and compensated logarithms. |
 | `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
+| `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
 | `math.degrees(x)` / `math.radians(x)` | `Float` | Convert between degrees and radians. |
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
-| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign or perform fused multiply-add where supported by the numeric backend. |
+| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once, the same bits on every tier. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
