@@ -69,6 +69,7 @@ use {
         sema_comptime_value_sites,
         sema_comptime_value_sites_empty,
         sema_copy_facts_table_empty,
+        sema_core_source_lint,
         sema_finalize_graph,
         sema_cli_entry_output_wrapper,
         sema_output_legacy_run_contract,
@@ -3745,7 +3746,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     check_lookups = jet_driver_stage_lookup_counts(comptime_stage.graph, check_lookups)
     jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", check_lookups, register_lookups)
     if kg.enabled {
-        loop diagnostic in comptime_stage.diagnostics -> load.diagnostics.push(diagnostic)
+        // Finalization drops Core's lints (sema_finalize_graph); the stage's own
+        // reports land here before it, so they are dropped here too.
+        loop diagnostic in comptime_stage.diagnostics {
+            if !sema_core_source_lint(diagnostic) -> load.diagnostics.push(diagnostic)
+        }
         jet_driver_keep_going_diagnostics(kg, "sema.check", load.diagnostics)
         jet_driver_keep_going_incomplete_modules(kg, "sema.check", comptime_stage.modules)
         jet_driver_keep_going_flush(kg, request.trace_sink)

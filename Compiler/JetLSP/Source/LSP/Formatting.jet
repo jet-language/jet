@@ -153,6 +153,14 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
     expected := "{base_indent}    "
     if first < line_end && bytes[first] == (U8{125}) {
         if pair.close.start != first -> return [TextEdit]{}
+        // Typed inside an empty block: the new line opens the block's body and
+        // the brace moves to a line of its own below it.
+        if lsp_blank_bytes(bytes, pair.open.end, line_start) {
+            opened := [TextEdit]{}
+            if src.slice(line_start, indent_end) != expected -> opened.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+            opened.push(TextEdit{span: Span{start: indent_end, end: indent_end}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
+            return opened
+        }
         expected = base_indent.copy()
     }
     edits := [TextEdit]{}
@@ -165,6 +173,15 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
         }
     }
     edits
+}
+
+// Whether `bytes[start..<end]` holds only spaces, tabs and line breaks.
+lsp_blank_bytes: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    loop index in start..<end {
+        byte: bytes[index]
+        if byte != (U8{32}) && byte != (U8{9}) && byte != (U8{13}) && byte != (U8{10}) -> return false
+    }
+    true
 }
 
 lsp_closing_brace_format_edits: fn(src: String, pair: LSPTokenBracePair) -> [TextEdit] Never! {

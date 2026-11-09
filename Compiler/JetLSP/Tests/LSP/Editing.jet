@@ -91,10 +91,16 @@ lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [
 
 }
 `, 1, 0, "\n"), [String]{"10-10:    "})
-    // The closing brace already on the new line stays at the block's indent.
+    // Typed inside an empty block, the new line opens its body and the brace
+    // moves below it at the block's indent (`f: fn() {\n    \n}\n`).
     assert_eq(lsp_test_typed(`f: fn() {
 }
-`, 1, 0, "\n"), [String]{})
+`, 1, 0, "\n"), [String]{"10-10:    ", "10-10:\n"})
+    // The closing brace of a block with a body stays at the block's indent.
+    assert_eq(lsp_test_typed(`f: fn() {
+    x: 1
+}
+`, 2, 0, "\n"), [String]{})
     // Typed before the closing brace's line content, the brace moves to its
     // own line at the block's indent: `x: 1}` holds it at byte 14.
     assert_eq(lsp_test_typed("f: fn() {{\nx: 1}}\n", 1, 0, "\n"), [String]{"10-10:    ", "14-14:\n"})

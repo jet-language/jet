@@ -121,16 +121,16 @@ kit_exec_toolchain_root: fn(root: String) -> String? {
     None
 }
 
-// The children's PATH leads with the directory of JET, the `jet` the run was
-// handed, so a script's `#!/usr/bin/env jet` runs it rather than the host's
-// `jet` (a seed launcher reads the home the kit replaced). The inherited PATH
-// when JET is unset or names no `jet`.
-kit_exec_path: fn() -> String? {
+// The children's PATH leads with the directory of the `jet` under test, so a
+// script's `#!/usr/bin/env jet` runs it rather than the host's `jet` (a seed
+// launcher reads the home the kit replaced). The inherited PATH when the run
+// has no `jet` or it is named otherwise.
+kit_exec_path: fn(jet: String) -> String? {
     inherited: sys.get("PATH")
-    named: sys.get("JET") ?? return inherited
-    jet: files.canonicalize(named) ?? return inherited
-    if files.basename(jet) != "jet" -> return inherited
-    directory: files.dirname(jet)
+    if jet == "" -> return inherited
+    canonical: files.canonicalize(jet) ?? return inherited
+    if files.basename(canonical) != "jet" -> return inherited
+    directory: files.dirname(canonical)
     if inherited == {
         .Val(path) -> Val("{directory}:{path}")
         .None -> Val(directory)
@@ -148,7 +148,10 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JET_REPL_HISTORY" -> Val("off")
         // Cases run outside the checkout: the compiler under test reads the kit's toolchain tree.
         name == "JET_TOOLCHAIN_ROOT" -> kit_exec_toolchain_root(env.root)
-        name == "PATH" -> kit_exec_path()
+        name == "PATH" -> kit_exec_path(env.jet)
+        // Children that run `jet` themselves (jetpack, scripts) run the `jet`
+        // under test, never the caller's JET.
+        name == "JET" -> if env.jet != "" -> Val(env.jet) else -> None
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
         name == "JET_FFI_CACHE_DIR" -> if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
         // A row's tools that stage files of their own keep them in its tree.
@@ -209,6 +212,10 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             .None -> spec = spec.env_remove("JET_TOOLCHAIN_ROOT")
         }
         if kit_exec_base_value("PATH", env, scratch) == .Val(path) -> spec = spec.env("PATH", path)
+        if kit_exec_base_value("JET", env, scratch) == {
+            .Val(jet) -> spec = spec.env("JET", jet)
+            .None -> spec = spec.env_remove("JET")
+        }
     }
     if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
     loop variable in overlay {

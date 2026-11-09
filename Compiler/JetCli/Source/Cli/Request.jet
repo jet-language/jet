@@ -1615,8 +1615,10 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
     // An explicitly selected entry is a source whatever its suffix (`jet self
     // devtools reduce` and `ice-report` compile the input under its own name),
     // and so is a script, which the walk leaves out; the walk's placement,
-    // link, stat and read rules still hold for it.
-    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) {
+    // link, stat and read rules still hold for it. An entry no file holds yet
+    // comes from its overlay below.
+    unsaved: !cli_files.exists(entry_path) && jet_cli_overlaid_path(entry_path, overlays) != None
+    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) && !unsaved {
         relative: entry_path.slice(prefix.len()..<entry_path.len())
         if !jet_cli_outside_walk(root, relative) {
             stat: cli_files.stat(entry_path) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
