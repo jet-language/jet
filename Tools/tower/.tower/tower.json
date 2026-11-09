@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6713,
-    "rev": 96438,
+    "rev": 96440,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100057,21 +100057,21 @@
         },
         {
           "n": 2,
-          "text": "Each ported function matches musl bit for bit on a committed corpus: special values (signed zeros, infinities, NaNs, subnormals), musl libc-test math vectors and random inputs, on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "71ec4588bb and 66879594c0. Main 2026-11-08 with the integration b1 compiler (5987d18926): jet test Compiler --profile cases --filter core_math_matches_musl_bit_for_bit_on_every_tier PASS 1/1; corpus 33 functions, 76,399 rows, 0 differ from musl, asserted on O0, O1, O2 and web.",
-          "at": "2026-11-08T19:02:10.553Z"
-        },
-        {
-          "n": 3,
-          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma and the rest) exists in Jet. Functions musl 1.2.5 provides match musl bit for bit on the musl-equivalence corpus (documented musl bugs such as acosh of large negative inputs returning a number instead of NaN are fixed and listed); functions musl lacks (rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn) are correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases; all on O0, O1, O2 and web, with no host libm and no fused operations",
+          "text": "Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH hard cases and random inputs, on O0, O1, O2 and web. Every corpus input where musl 1.2.5 differs is listed as a musl rounding error.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T19:41:55.064Z"
+          "at": "2026-11-09T08:34:26.075Z"
+        },
+        {
+          "n": 3,
+          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T08:34:27.087Z"
         },
         {
           "n": 4,
@@ -100095,7 +100095,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:49.544Z",
-      "updated": "2026-11-09T08:34:13.566Z",
+      "updated": "2026-11-09T08:34:27.087Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -190277,6 +190277,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T08:34:27.087Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bzrof5",
+      "note": "#3: Owner accuracy order: correct rounding supersedes bit-for-bit musl equivalence.; was: Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma and the rest) exists in Jet. Functions musl 1.2.5 provides match musl bit f"
+    },
+    {
+      "at": "2026-11-09T08:34:26.075Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bzrof5",
+      "note": "#2: Owner accuracy order: correct rounding supersedes bit-for-bit musl equivalence. (reopened); was: Each ported function matches musl bit for bit on a committed corpus: special values (signed zeros, infinities, NaNs, subnormals), musl libc-test math vectors and random inputs, on O0, O1, O2 and web."
+    },
     {
       "at": "2026-11-09T08:34:13.566Z",
       "by": "Main",
