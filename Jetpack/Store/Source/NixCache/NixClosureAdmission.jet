@@ -587,7 +587,10 @@ store_nix_remove_tree: fn(path: String) StoreError! -[FS]> {
         if store_io_is_not_found(error) -> return
         return Err(StoreError.IO(error))
     }
-    if info.is_symlink || info.is_file -> return Ok(files.remove(path))
+    if info.is_symlink || info.is_file {
+        files.remove(path)
+        return
+    }
     if info.is_dir {
         store_make_tree_writable_for_removal(path)
         files.remove_all(path)
