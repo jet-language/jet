@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97901,
+    "rev": 97925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24113,6 +24113,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:54:50.297Z"
+        },
+        {
+          "n": 139,
+          "text": "Web dev study timing (G9 #6552): the timing cells of the 2026-11-04 jet dev study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) are rerun with the gauntlet method against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel, and every loss is on a card with its root cause.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:16:07.154Z"
         }
       ],
       "refs": [],
@@ -24128,7 +24137,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-09T19:54:50.297Z",
+      "updated": "2026-11-09T20:16:07.154Z",
       "updatedBy": "Main",
       "probe": null,
       "claimedAt": "2026-11-08T13:19:43.795Z",
@@ -24136,7 +24145,7 @@
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 138
+      "criteriaLastN": 139
     },
     {
       "id": "c0pr2dsz",
@@ -51591,6 +51600,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. c1 and c5 now name http.serve and web.app().serve(). c6 names its proof case. c9 merged into c8 (D-G9-3); the Tower DataTree resident proof in c8 was the Node Tower and is dropped. c10's proof case (http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient) is known-failing under #4260 (G5: how a printed HTTP error reads), so c10 closes after #4260."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
@@ -51609,12 +51623,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "http.serve(addr, lambda), router serve and mux serve run through one server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
+          "text": "http.serve(addr, handler) and web.app().serve() run through one server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:55.999Z"
+          "at": "2026-11-09T20:15:37.342Z"
         },
         {
           "n": 2,
@@ -51645,21 +51659,21 @@
         },
         {
           "n": 5,
-          "text": "Keep-alive behavior is the same for every serve spelling; goldens for each spelling are updated.",
+          "text": "Keep-alive behavior is the same for http.serve and web.app().serve(); a golden for each is updated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:55.999Z"
+          "at": "2026-11-09T20:15:39.211Z"
         },
         {
           "n": 6,
-          "text": "(was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture Proof: a new tests/cases/http_server_lifecycle case that sets two HTTPResponse.header values and prints the response, with identical stdout on O0, O1 and O2 (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:48:50.972Z"
+          "at": "2026-11-09T20:15:41.928Z"
         },
         {
           "n": 7,
@@ -51718,7 +51732,7 @@
       "parentId": "c086hhzb",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-09T19:22:33.720Z",
+      "updated": "2026-11-09T20:15:43.256Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -52021,12 +52035,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-WEB-IMAGE1=A: web.image registers real asset graph nodes; build variants cached by all five chosen identity inputs; picture markup includes original fallback; hashed immutable responses; dev on-demand uses same encoder and gives identical bytes to build; images formats/widths/quality/enabled settings work; source-type default flips only after D-IMAGE-ENCODE1 gate.",
+          "text": "D-WEB-IMAGE1=A: web.image registers real asset graph nodes; build variants cached by all five chosen identity inputs; picture markup includes original fallback; hashed immutable responses; dev on-demand uses same encoder and gives identical bytes to build; images formats/widths/quality/enabled settings work; source-type default flips only after D-IMAGE-ENCODE1 gate. Proof: a web example with one PNG and one JPEG builds picture markup with variants and the original fallback, `jet dev` serves the same variant bytes as `jet build` (a case compares their hashes), and each images setting changes the output (goldens on O0, O1 and O2).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:52:06.802Z"
+          "at": "2026-11-09T20:15:45.090Z"
         },
         {
           "n": 2,
@@ -52048,7 +52062,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-09T19:52:06.802Z",
+      "updated": "2026-11-09T20:15:45.090Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -60524,6 +60538,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c1 now names its proof (the 82 ledger rows owned by #5201). c19 removed (PACKAGE_EDITION is gone with the Rust compiler). c23/c24 name the exact-integer web case. Moved out: c4 to #5931 (G5, the jet dev browser host), c11/c12 to #3520 (G6, fences), c13-c17 to #3029 (G6, contracts), c22 to #6552 (typed forms). Merged: c21 into c20, c26 into c25 (D-G9-1, D-G9-2). c27 and c29 look met (section D of apply-G9.sh)."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c8: Examples/features/web -> Examples/Apps/Web."
@@ -60557,12 +60576,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "the --target web examples and UI cases pass on the Jet CLI.",
+          "text": "The --target web examples and UI cases pass on the Jet CLI: every tests/known-failing.tsv row owned by #5201 (82 on dev 6a06b917cb) passes and leaves the ledger.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:34:26.865Z"
+          "at": "2026-11-09T20:15:25.204Z"
         },
         {
           "n": 2,
@@ -60584,12 +60603,12 @@
         },
         {
           "n": 5,
-          "text": "Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web backend; no hand-written .js remains in Compiler/, and a guard refuses one.",
+          "text": "Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web backend; no hand-written .js remains in Compiler/, and a guard refuses one (42 tracked .js files under Compiler/ on dev 6a06b917cb).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:27.301Z"
+          "at": "2026-11-09T20:15:27.248Z"
         },
         {
           "n": 6,
@@ -60682,15 +60701,6 @@
           "at": "2026-11-04T23:42:54.079Z"
         },
         {
-          "n": 19,
-          "text": "(was #2251 c2) A regression test shows the compile-time child process keeps PACKAGE_EDITION.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:49.988Z"
-        },
-        {
           "n": 20,
           "text": "(was #2260 c1) web-widget jet cell green in harness: build emits .wasm, node runner.mjs matches expected.out [precut audit: failing on 9c7ddf1359: C:web_build/web_wasm_int_export_reachability_golden KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…]",
           "status": "open",
@@ -60719,21 +60729,21 @@
         },
         {
           "n": 23,
-          "text": "(was #2990 c2) The Web host reaches the canonical exact-integer decoder; no copied validation or fallback decoder remains [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2990 c2) The Web host reaches the canonical exact-integer decoder; no copied validation or fallback decoder remains Proof: tests/cases/web_build/dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens (its web builds pass; known-failing under #5454 for the native json_coerce arm) (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:42:57.145Z"
+          "at": "2026-11-09T20:15:31.414Z"
         },
         {
           "n": 24,
-          "text": "(was #2990 c3) Focused exact-integer codec cases preserve signed bounds and reject out-of-range values on every applicable execution target [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2990 c3) Focused exact-integer codec cases preserve signed bounds and reject out-of-range values on every applicable execution target Proof: tests/cases/web_build/dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens (its web builds pass; known-failing under #5454 for the native json_coerce arm) (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:42:57.750Z"
+          "at": "2026-11-09T20:15:34.158Z"
         },
         {
           "n": 25,
@@ -60779,7 +60789,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-09T19:51:49.807Z",
+      "updated": "2026-11-09T20:15:35.521Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -71294,7 +71304,7 @@
     {
       "id": "c0rtxw7u",
       "num": 6055,
-      "title": "Ladder L-17 (Web/game/GUI batteries): Three route forms (.route, #server.Get, mux().get); battery deps web/games/gui vs core.web/core.game/core.ui",
+      "title": "One route table on web.app() (D-ROUTE-ONE1=A) and the web, game and ui battery names (ladder L-17)",
       "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-17; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Three route forms (.route, #server.Get, mux().get); battery deps web/games/gui vs core.web/core.game/core.ui\n\nEvidence: Examples/features/web/battery/run.jet:27-40,70-122,158-169; battery package.jet files\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
       "kind": "task",
       "track": "epoch",
@@ -71309,6 +71319,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gate met: D-ROUTE-ONE1=A (ratified 2026-10-29) is the ballot this card waited for; c2 now states what it builds."
+        },
         {
           "at": "2026-10-29",
           "text": "All decisions ratified; advanced out of deciding."
@@ -71326,12 +71341,12 @@
         },
         {
           "n": 2,
-          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "text": "D-ROUTE-ONE1=A is built: web.app() owns the one route table and server.mux() is removed; pages, marked methods (app.mount) and single routes (app.get, app.post) share it; E2807 merges into E2804, which names both lines of a clash; `jet explain --routes` lists every row (verb, address, page or handler, form, file:line); the battery example mounts each API once; the battery dependencies are core.web, core.game and core.ui (games and gui are gone). Each rung has a golden or UI snapshot on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T18:07:14.888Z"
+          "at": "2026-11-09T20:15:48.842Z"
         }
       ],
       "refs": [],
@@ -71342,7 +71357,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:14.888Z",
-      "updated": "2026-11-04T18:10:04.846Z",
+      "updated": "2026-11-09T20:15:50.315Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -87642,7 +87657,9 @@
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
-      "blockedBy": [],
+      "blockedBy": [
+        "c0m58g8t"
+      ],
       "assignee": null,
       "log": [
         {
@@ -87674,7 +87691,7 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:41.628Z",
-      "updated": "2026-11-07T03:29:34.181Z",
+      "updated": "2026-11-09T20:16:15.670Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -89355,7 +89372,7 @@
       "id": "c0vxf4u0",
       "num": 6552,
       "title": "Jet web framework: full breadth and depth parity with the best frameworks, with their downsides designed out",
-      "body": "## Outcome\n\nOwner direction: Jet ships a first-class, native web framework (the Core web modules, compiled by Jet, with no JavaScript runtime or wrapped library). It has full breadth and depth parity with every element of the best frameworks, and every known downside of those elements is engineered away in the Jet design rather than inherited. The framework gets its own Jet name; no repository path or user-facing text keeps a third-party framework's name.\n\n## Scope\n\nParity is judged element by element against the best framework for that element, not against one framework. The reference set covers at least: TanStack (Start, Router, Query, Form, Table, Virtual, Store, DB, devtools), Next.js, Remix / React Router, SvelteKit, SolidStart, Qwik, Astro, Nuxt, Angular, Phoenix LiveView, Rails (Hotwire), Laravel (Livewire), Django, Leptos and Dioxus, htmx and Elysia/Hono. Elements include routing and typed search params, data loading and caching, mutations and optimistic updates, forms and validation, tables and virtualization, state stores, rendering modes (SSR, SSG, ISR, streaming, islands, resumability, CSR), server functions and actions, real-time and live views, auth and sessions, i18n, images and assets, styling, testing, devtools, error boundaries, deployment and edge targets, and the dev loop.\n\n## Method\n\n1. A dated audit (Docs/audits) with one row per element: the best framework for it, what Jet has (by code path and executable example, not prose), the gap, and each known downside of the best implementation with the Jet design that removes it.\n2. One ballot per owner choice the audit raises (new syntax, public API, product behavior), with same-program alternatives.\n3. One child card per gap, each closing with an executable example and golden output on every applicable tier (I5, I9), and a performance cell where the element is performance-relevant.\n\n## Known downsides to design out (seed list, the audit extends it)\n\nHydration cost and mismatch bugs; client bundle growth; waterfalls between nested loaders; cache invalidation by hand; stringly-typed routes and search params; server/client boundary leaks of secrets; framework lock-in to one host; slow dev rebuilds; runtime-only type errors in forms and APIs; opaque magic in file conventions; duplicated validation between client and server.\n\n## Current state\n\nExamples/features/web/tanstack_start/run.jet is a reference app over the Core web modules (router, query, forms, table, virtual, store). Its web build is being repaired under #5990 c13. It is evidence of coverage breadth only; depth parity is unaudited.",
+      "body": "## Outcome\n\nOwner direction: Jet ships a first-class, native web framework (the Core web modules, compiled by Jet, with no JavaScript runtime or wrapped library). It has full breadth and depth parity with every element of the best frameworks, and every known downside of those elements is engineered away in the Jet design rather than inherited. The framework has no brand of its own (D-WEB-NAME1=C, 2026-11-04): it is Jet's web library, named by its module; no repository path or user-facing text keeps a third-party framework's name.\n\n## Scope\n\nParity is judged element by element against the best framework for that element, not against one framework. The reference set covers at least: TanStack (Start, Router, Query, Form, Table, Virtual, Store, DB, devtools), Next.js, Remix / React Router, SvelteKit, SolidStart, Qwik, Astro, Nuxt, Angular, Phoenix LiveView, Rails (Hotwire), Laravel (Livewire), Django, Leptos and Dioxus, htmx and Elysia/Hono. Elements include routing and typed search params, data loading and caching, mutations and optimistic updates, forms and validation, tables and virtualization, state stores, rendering modes (SSR, SSG, ISR, streaming, islands, resumability, CSR), server functions and actions, real-time and live views, auth and sessions, i18n, images and assets, styling, testing, devtools, error boundaries, deployment and edge targets, and the dev loop.\n\n## Method\n\n1. A dated audit (Docs/audits) with one row per element: the best framework for it, what Jet has (by code path and executable example, not prose), the gap, and each known downside of the best implementation with the Jet design that removes it.\n2. One ballot per owner choice the audit raises (new syntax, public API, product behavior), with same-program alternatives.\n3. One child card per gap, each closing with an executable example and golden output on every applicable tier (I5, I9), and a performance cell where the element is performance-relevant.\n\n## Known downsides to design out (seed list, the audit extends it)\n\nHydration cost and mismatch bugs; client bundle growth; waterfalls between nested loaders; cache invalidation by hand; stringly-typed routes and search params; server/client boundary leaks of secrets; framework lock-in to one host; slow dev rebuilds; runtime-only type errors in forms and APIs; opaque magic in file conventions; duplicated validation between client and server.\n\n## Current state\n\nExamples/features/web/tanstack_start/run.jet is a reference app over the Core web modules (router, query, forms, table, virtual, store). Its web build is being repaired under #5990 c13. It is evidence of coverage breadth only; depth parity is unaudited.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -89369,6 +89386,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Body: D-WEB-NAME1=C (2026-11-04) chose no brand, so \"its own Jet name\" is gone. Owner gates: c14 waits for a browser-test ballot (scaffold, UI mode, trace viewer) that is not drafted; c2 is the standing rule that every audit choice gets a ballot. c30's ballots are ratified and archived with #4282: D-WEBAPP-SERVE1=D (2026-07-28) and D-WEBRUN1=A (2026-08-27). Merged: c21 into c22, c23-c27 into c28, c19 into c29 (D-G9-4, D-G9-5). Gained #5201 c22 (typed forms). New row: the study rerun from the goal body."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -89446,21 +89468,21 @@
         },
         {
           "n": 9,
-          "text": "(was #2472 c2) Convention and explicit routes feed the same checked App graph and web-graph explanation source, without a second browser registration graph [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2472 c2) Convention and explicit routes feed the same checked App graph and web-graph explanation source, without a second browser registration graph Proof: a golden where a convention page and an explicit route at one address fail jet check with E2804 naming both lines, and `jet explain --routes` lists both forms (D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed.) (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:59.921Z"
+          "at": "2026-11-09T20:15:56.925Z"
         },
         {
           "n": 10,
-          "text": "(was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer Proof: a golden on O0, O1, O2 and web where a route loader's pending, error and not-found boundaries render and an aborted navigation cancels its preload (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:45:00.498Z"
+          "at": "2026-11-09T20:16:01.211Z"
         },
         {
           "n": 11,
@@ -89641,6 +89663,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:34:47.975Z"
+        },
+        {
+          "n": 31,
+          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells are G11 (#2858).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:16:03.269Z"
         }
       ],
       "refs": [],
@@ -89655,9 +89686,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-09T19:51:55.333Z",
+      "updated": "2026-11-09T20:16:05.202Z",
       "updatedBy": "Main",
-      "criteriaLastN": 30
+      "criteriaLastN": 31
     },
     {
       "id": "c00ii3d5",
@@ -91593,47 +91624,6 @@
       "updated": "2026-11-07T03:30:28.030Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
-    },
-    {
-      "id": "c0tte6nb",
-      "num": 6578,
-      "title": "Unsafe-site baseline in safety.md is stale: 1127 recorded, 1335 actual on dev",
-      "body": "TestProfiles found (dev 377c6b4364) that the recorded unsafe baseline in safety.md says 1127 sites while the repo has 1335. Either the counter drifted or about 208 unsafe sites landed without the ratchet failing. Find which gate owns the baseline and why it did not fail, attribute the new sites, move each one into an audited #Unsafe(\"reason\") block or vetted stdlib/memory internals (I1), and make the gate fail on any increase.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Docs/spec/safety.md records the unsafe-region baseline that UnsafeRatchet --check counts on dev",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "1574669b9f regenerated the baseline: safety.md total 1336 (lines 217 and 9595); UnsafeRatchet --check at 529e9d9ddd rc 0, '1336 regions; baseline unchanged' (Main, #6605 proof)",
-          "at": "2026-11-06T20:12:02.178Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G10"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T22:14:16.123Z",
-      "updated": "2026-11-06T20:12:03.604Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T20:12:03.604Z"
     },
     {
       "id": "c0iqh0og",
@@ -102835,12 +102825,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jet run of a web app prints one ready line naming the clickable URL (for example 'Serving AppHello at http://127.0.0.1:8080 (Ctrl+C to stop)') once the socket is listening, on every tier, with a cases row and the golden updated.",
+          "text": "jet run of a web app prints one ready line naming the clickable URL (D-WEBAPP-SERVE1=D: 'serving http://127.0.0.1:8080'; jet dev adds ' (live reload)') once the socket is listening, on every tier, with a cases row and the golden updated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:15:04.017Z"
+          "at": "2026-11-09T20:16:09.801Z"
         },
         {
           "n": 2,
@@ -102850,6 +102840,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T17:15:05.004Z"
+        },
+        {
+          "n": 3,
+          "text": "jet run and jet dev (#5931 c3) print the D-WEBAPP-SERVE1=D ready line and pick or refuse a port through one shared helper; a case shows each command's line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:16:11.971Z"
         }
       ],
       "refs": [],
@@ -102860,9 +102859,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T17:15:03.069Z",
-      "updated": "2026-11-09T17:15:07.200Z",
+      "updated": "2026-11-09T20:16:11.971Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -193035,6 +193034,174 @@
   ],
   "events": [
     {
+      "at": "2026-11-09T20:16:15.670Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015lbud",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-11-09T20:16:11.971Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r9aivl",
+      "note": "#3 jet run and jet dev (#5931 c3) print the D-WEBAPP-SERVE1=D r"
+    },
+    {
+      "at": "2026-11-09T20:16:09.802Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r9aivl",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The ready line is ratified: D-WEBAPP-SERVE1=D (2026-07-28, archived with #4282).; was: jet run of a web app prints one ready line naming the clickable URL (for example 'Serving AppHello at http://127.0.0.1:8080 (Ctrl+C to stop)') once the socket is listening, on every tier, with a cases"
+    },
+    {
+      "at": "2026-11-09T20:16:07.154Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hs3czc",
+      "note": "#139 Web dev study timing (G9 #6552): the timing cells of the 202"
+    },
+    {
+      "at": "2026-11-09T20:16:05.202Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vxf4u0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:16:03.269Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vxf4u0",
+      "note": "#31 The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-in"
+    },
+    {
+      "at": "2026-11-09T20:16:01.211Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#10: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer [precut audit: no dev test, golden, case o"
+    },
+    {
+      "at": "2026-11-09T20:15:56.925Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#9: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #2472 c2) Convention and explicit routes feed the same checked App graph and web-graph explanation source, without a second browser registration graph [precut audit: no dev test, golden, case or "
+    },
+    {
+      "at": "2026-11-09T20:15:53.163Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vxf4u0",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-09T20:15:50.315Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rtxw7u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:15:48.842Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0rtxw7u",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The chosen spelling is now ratified: D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed.; was: The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot."
+    },
+    {
+      "at": "2026-11-09T20:15:47.057Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rtxw7u",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T20:15:45.090Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0q6gm05",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof.; was: D-WEB-IMAGE1=A: web.image registers real asset graph nodes; build variants cached by all five chosen identity inputs; picture markup includes original fallback; hashed immutable responses; dev on-dema"
+    },
+    {
+      "at": "2026-11-09T20:15:43.256Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:15:41.928Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04es5yq",
+      "note": "#6: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture [precut audit: no dev test, golden, case or snapshot "
+    },
+    {
+      "at": "2026-11-09T20:15:39.211Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04es5yq",
+      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. Two serve spellings remain.; was: Keep-alive behavior is the same for every serve spelling; goldens for each spelling are updated."
+    },
+    {
+      "at": "2026-11-09T20:15:37.342Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04es5yq",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. The mux serve spelling is gone.; was: http.serve(addr, lambda), router serve and mux serve run through one server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep"
+    },
+    {
+      "at": "2026-11-09T20:15:35.522Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m58g8t",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:15:34.158Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#24: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #2990 c3) Focused exact-integer codec cases preserve signed bounds and reject out-of-range values on every applicable execution target [precut audit: no dev test, golden, case or snapshot proves "
+    },
+    {
+      "at": "2026-11-09T20:15:31.414Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#23: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #2990 c2) The Web host reaches the canonical exact-integer decoder; no copied validation or fallback decoder remains [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-09T20:15:28.765Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0m58g8t",
+      "note": "#19: BoardPlanner review 2026-11-09 (dev 6a06b917cb). PACKAGE_EDITION was an environment variable of the retired Rust compile-time child; no Compiler, Jetpack or tests/cases file on dev reads it, and the greenfield order (2026-11-06) keeps no editions.; was [open]: (was #2251 c2) A regression test shows the compile-time child process keeps PACKAGE_EDITION."
+    },
+    {
+      "at": "2026-11-09T20:15:27.248Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Counted the hand-written JavaScript the cutover removes.; was: Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web back"
+    },
+    {
+      "at": "2026-11-09T20:15:25.204Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the ledger rows owned by this card are the web examples and UI cases it means.; was: the --target web examples and UI cases pass on the Jet CLI."
+    },
+    {
+      "at": "2026-11-09T20:15:22.579Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G9",
+      "note": "body"
+    },
+    {
       "at": "2026-11-09T20:12:01.132Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -198951,11 +199118,11 @@
     {
       "id": "G9",
       "title": "Web, end to end, re-measured against competitors",
-      "body": "The web target, server runtime, jet dev experience and framework are fully built, then the 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel with every gap closed or explained. #6553-#6558 are owner-paused. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is eighth.",
+      "body": "The web target, server runtime, jet dev experience and framework are fully built, then the 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel with every gap closed or explained (a #6552 criterion; the study's timing cells are G11, on #2858). #6553-#6558 are owner-paused. Owner order 2026-11-09: all speed and size work is G11. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is eighth.\n\nOne card per stream: web target on JetIR #5201 (its jet dev browser host is G5 #5931), Jet-owned server runtime #4635, web framework #6552 (design children #6553-#6558, owner-paused), one route table and battery names #6055 (D-ROUTE-ONE1=A), image assets #4695 (the WebP codec is G3 #5976), jet run ready line and busy port #6751, JavaScript FFI gallery #6512, portable target design #6345.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:58.998Z",
-      "updated": "2026-11-08T13:53:35.047Z",
+      "updated": "2026-11-09T20:15:22.579Z",
       "updatedBy": "Main"
     },
     {
