@@ -255,8 +255,9 @@ paths and one named close owner. The repository's working branches are
 `master` and `dev`. At the Rust cutover, the last
 commit that still contains the Rust implementation becomes the `rust` branch: a
 frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
-commits to it or merges it into `dev` or `master`. Only the orchestrator
-commits, directly on `dev` in the dev worktree, one commit per landed
+commits to it or merges it into `dev` or `master`. Only the orchestrator, or
+the one Lander it names (see Delegation), commits, directly on `dev` in the
+dev worktree, one commit per landed
 submission that stages only that submission's paths.
 Besides the master checkout, at most three worktrees may exist: the dev worktree
 and up to two more that the orchestrator creates as detached checkouts of
@@ -331,6 +332,10 @@ may call a design better only where a passing review backs that exact claim.
 Use the most specific agent available for each role. Workers do not spawn
 workers.
 
+This is a standing owner order. Every agent does its work on Claude Opus, and
+only the owner chooses another model for any role. The one standing exception
+is the adversarial ballot review, which a different model family performs.
+
 Workers are never idle or stalled. Each worker runs one continuous loop: write
 the code to the card's spec, run only the touched files' source checks,
 submit the patch to the orchestrator's inbox, and start its next task at once.
@@ -338,6 +343,13 @@ Workers never commit, build the compiler, or run suites, A/B comparisons,
 chains, censuses, or releases. When a spec or criterion exists, the code comes
 first: no worker stops to prove rows or waits for review or a test result.
 While the orchestrator's batches run, every worker keeps coding to spec.
+
+A worker's unit of work is one open criterion, read from the card before any
+code is written. If its proof already passes, the worker sends the command and
+its output and takes the next criterion. A criterion with no passing proof
+after 45 minutes is written up as a blocker and the worker moves on; the
+orchestrator routes the blocker. A worker never ends its turn to wait on its
+own job.
 
 This is a hard owner requirement. The orchestrator never lets a worker idle.
 No worker waits on a landing, a batch, a seed, a review, or a proof: it stacks
@@ -356,6 +368,13 @@ to the worker that owns it, as one list and that worker's top priority. The
 orchestration skill's intake reference defines the submission format, batch
 integration, and landing; the skill also covers briefs, liveness, proof
 cadence, recovery, and closure.
+
+The orchestrator may name one Lander and one Closer. The Lander runs the
+batch, landing and seed loop in the orchestrator's place, as a rolling train
+that lands whatever passed and sets a failing submission aside. The Closer
+takes the cards with the fewest open criteria, runs each criterion's proof,
+and hands the orchestrator the evidence. Tower writes, owner gates and
+dispatch stay with the orchestrator.
 
 The orchestrator evaluates its own plan continuously, not only when something
 fails. Before each step and whenever a result arrives, it asks whether this is

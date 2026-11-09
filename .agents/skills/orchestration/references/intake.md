@@ -40,8 +40,14 @@ that moves a line of a Core file regenerates every golden citing
 
 ## A batch
 
-The orchestrator runs a batch whenever a heavy slot is free, with every ready
-submission that is not waiting on a seed, in stack order:
+Batches run as a rolling train. A train leaves about every 45 minutes, or
+sooner when a heavy slot is free, with every ready submission that is not
+waiting on a seed, in stack order. It lands whatever passed. One failing
+submission is set aside and the rest land in the same cycle; a train is never
+rebuilt from the start for one submission. A submission whose patch changes no
+build input of the compiler, the runtime or Core is tested with the last
+train's compiler and lands without a census. The orchestrator may hand the
+train to the Lander it names (AGENTS.md, Delegation):
 
 1. Export `dev` and apply each submission with a three-way merge, excluding
    generated files. A conflict inside a generated region keeps the base side
@@ -64,3 +70,8 @@ submission that is not waiting on a seed, in stack order:
 
 Part b submissions join the first batch after a seed carrying their part a is
 published.
+
+A train that changes the version, the engine protocol or a C dependency makes
+the admitted seed's `jetpack` disagree with the batch compiler. The batch then
+tests with the `jetpack` its own census built, placed beside the batch
+compiler, never with the seed's.
