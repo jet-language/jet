@@ -90,7 +90,7 @@ use jet_foundation.[
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
-    type_with_effective_fn_returns,
+    type_with_effective_parameter_fn_return,
     CodeModule,
     EnumDef,
     ImplDef,
@@ -2055,7 +2055,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     loop param_index < func.params.len() {
         // The parameter is read in place (`func.params[param_index]`): a
         // binding of it copied the whole parameter, default expression included.
-        parameter_ty := type_with_effective_fn_returns(func.params[param_index].ty)
+        parameter_ty := type_with_effective_parameter_fn_return(func.params[param_index].ty)
         if param_index == 0 && func.params[param_index].name == "self" {
             if function_kind == {
                 .Method(_, receiver_type) -> parameter_ty = receiver_type

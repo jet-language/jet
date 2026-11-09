@@ -458,12 +458,87 @@ sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never!
     false
 }
 
+// E0638 (#6281 c123): the first function type held inside the slot's type (a
+// list's element, an optional's payload, a tuple field, a parameter or the
+// return of a function type) that differs from the offered value's at the
+// same place in whether it can fail; the answer is whether the slot's can.
+// The fn-value adapter (IR ir_fn_widen) converts a standalone function value
+// between its failing and non-failing forms, but nothing converts the
+// functions a collection or another function already holds, so such a value
+// can't fill the slot. `nested` is false for the slot itself, where the two
+// forms convert.
+sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool) -> Bool? Never! {
+    if required == {
+        .Fn(required_params, required_ret, _, _, _, _) -> if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+            required_fails: sema_fn_return_fails(required_ret)
+            if nested && !sema_fn_return_is_never(required_ret) && !sema_fn_return_is_never(offered_ret) && required_fails != sema_fn_return_fails(offered_ret) -> return Val(required_fails)
+            if required_params.len() == offered_params.len() {
+                loop (index, required_param) in required_params {
+                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) -> return Val(found)
+                }
+            }
+            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+        }
+        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) {
+            if sema_type_nested_fn_failure_gap(required_key, offered_key, true) == .Val(found) -> return Val(found)
+            return sema_type_nested_fn_failure_gap(required_value, offered_value, true)
+        }
+        .FixedList(required_element, _) -> if offered == .FixedList(offered_element, _) -> return sema_type_nested_fn_failure_gap(required_element, offered_element, true)
+        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
+            if required_fields.len() != offered_fields.len() -> return None
+            loop (index, required_field) in required_fields {
+                if sema_type_nested_fn_failure_gap(required_field.ty, offered_fields[index].ty, true) == .Val(found) -> return Val(found)
+            }
+        }
+        .Union(required_members) -> if offered == .Union(offered_members) {
+            if required_members.len() != offered_members.len() -> return None
+            loop (index, required_member) in required_members {
+                if sema_type_nested_fn_failure_gap(required_member, offered_members[index], true) == .Val(found) -> return Val(found)
+            }
+        }
+        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) {
+            if sema_type_nested_fn_failure_gap(required_ok, offered_ok, true) == .Val(found) -> return Val(found)
+            return sema_type_nested_fn_failure_gap(required_err, offered_err, true)
+        }
+        .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
+            if required_name != offered_name || required_args.len() != offered_args.len() -> return None
+            loop (index, required_arg) in required_args {
+                if sema_type_nested_fn_failure_gap(required_arg, offered_args[index], true) == .Val(found) -> return Val(found)
+            }
+        }
+        // A tag keeps its payload's representation; one tag over the slot
+        // keeps the slot's own nesting.
+        .Tagged(_, required_inner) -> return sema_type_nested_fn_failure_gap(required_inner, sema_expr_unwrap_tag(offered), nested)
+        else -> {}
+    }
+    None
+}
+
+// A function type's return is its Result box: the representation a caller
+// of the value reads (IR ir_fn_widens).
+sema_fn_return_fails: fn(ret: Type?) -> Bool Never! {
+    if ret == .Val(value) -> return sema_expr_unwrap_tag(value) == .Result(_, _)
+    false
+}
+
+sema_fn_return_success: fn(value: Type) -> Type Never! {
+    if value == .Result(ok, _) -> return ok
+    value
+}
+
 // State-free assignment cases. Nominal aliases, trait implementation, and
 // knowledge-loss gates require the module registries owned by the full checker.
 sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
     // Value-slot comparison is recursive: callable metadata may differ at any
     // container depth, but required labels, effects and view origins still hold.
-    if sema_type_carrier_compatible(required, offered) -> return sema_type_obligations_satisfy(required, offered)
+    if sema_type_carrier_compatible(required, offered) {
+        // A nested function differs in failure, which no adapter converts (E0638).
+        if sema_type_nested_fn_failure_gap(required, offered, false) != None -> return false
+        return sema_type_obligations_satisfy(required, offered)
+    }
     if sema_type_compute_tensor_compatible(required, offered) -> return true
     if required == {
         .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)

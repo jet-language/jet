@@ -921,6 +921,17 @@ aggregate slots: a named function's declaration call metadata does not make
 parameter zones, effects, and returned-view provenance remain directional
 obligations at every container depth; storage never erases those requirements.
 
+Whether a function type's functions can fail is part of its value type wherever
+it appears inside another type. A single function value converts between its
+failing and non-failing forms where it is passed, stored or returned: a
+function-typed parameter `f: fn(Int) -> Int` takes the implicit `Err`
+contract, and a named function of either form fills it. The functions a list,
+map, optional, tuple or function type already holds keep the form they were
+made with, so `[fn(Int) -> Int]` and `[fn(Int) -> Int Err!]` are different
+value types, and passing one where the other is required reports **E0638**.
+A function type nested in a parameter's type keeps its written contract, as the
+same type does on a binding or a typed literal (#6281 c123).
+
 Direct named and method calls keep their ordinary syntax. A function-valued
 expression is invoked with `.call(...)`; a struct field or method actually
 named `call` shadows that built-in projection. Direct calls on names, fields,

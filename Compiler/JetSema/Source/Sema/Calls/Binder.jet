@@ -21,7 +21,7 @@ use jet_foundation.[
     Span,
     Type,
     ast_empty_call_arg_flags,
-    type_with_effective_fn_returns,
+    type_with_effective_parameter_fn_return,
 ]
 
 SemaCallParam: struct {
@@ -76,7 +76,7 @@ sema_call_param_label: fn(param: Param) -> String Never! {
 
 sema_call_params_from_func: fn(func: Func) -> [SemaCallParam] Never! {
     params: loop parameter_index in 0..<func.params.len() -> {
-        effective_ty: type_with_effective_fn_returns(func.params[parameter_index].ty)
+        effective_ty: type_with_effective_parameter_fn_return(func.params[parameter_index].ty)
         parameter_ty: if func.params[parameter_index].variadic -> Type.List{element: effective_ty} else -> effective_ty
         SemaCallParam{
             label: sema_call_param_label(func.params[parameter_index]),

@@ -1103,6 +1103,29 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
     }
 }
 
+// A parameter's written type as its callee holds it. A function-typed
+// parameter (`f: fn(Int) -> Int`), and each function-typed parameter of that
+// type, carries the inferred failure contract, so a declared function and a
+// written function type agree on how they fail. A function type inside a
+// container (`[fn(Int) -> Int]`, `(fn(Int) -> Int)?`) or returned by one
+// keeps its written return, as the same type does on a binding or a typed
+// literal. The fn-value adapter converts one function value between its
+// failing and non-failing forms; it never converts the functions a
+// collection already holds (#6281 c123).
+type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
+    if ty == {
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            normalized_params := [Type]{}
+            loop param in params -> normalized_params.push(type_with_effective_parameter_fn_return(param))
+            normalized_ret := ret.map(value -> effective_callable_return(value))
+            Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+        }
+        // copy: `marker` and `inner` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker` and `inner`
+        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_parameter_fn_return(inner)}
+        else -> ty
+    }
+}
+
 effective_callable_return: fn(ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> if name == "Never" -> ty else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
