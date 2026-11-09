@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6738,
-    "rev": 96550,
+    "rev": 96556,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99730,6 +99730,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3. New cards: #6735 (G3 math), #6736 (G11 speed), #6737 (G3 DTLS); #6700 moved to G3."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Owner ruling 2026-11-08 ~14:10: a new public API does not need a ballot or owner approval for now. Agents follow best practices and idiomatic Jet, using Jet API-building features (typed records with defaults, traits and derives, typed config, Result errors), in the shape of existing Core modules. Other owner gates (syntax, commands, dependencies, invariant exceptions, scope) stay."
@@ -99800,7 +99805,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-08T19:03:16.789Z",
+      "updated": "2026-11-09T15:59:16.096Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -99979,15 +99984,6 @@
           "at": "2026-11-08T15:46:57.113Z"
         },
         {
-          "n": 3,
-          "text": "Spawn and join cost is measured against the pthread build, and the Jet build is not slower.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T15:46:58.114Z"
-        },
-        {
           "n": 4,
           "text": "setuid, setgid and setgroups (and initgroups, ported to Jet with /etc/group plus the nscd GETINITGR query) apply to every thread in the process through a Jet synccall over the thread registry, as POSIX and musl define. Today the raw per-thread setuid and setgid in HostProcess.jet change only the calling carrier, a privilege-drop defect. A case drops privileges with tasks on several carriers and checks every /proc/self/task/*/status.",
           "status": "met",
@@ -100009,7 +100005,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T07:52:21.089Z",
+      "updated": "2026-11-09T15:59:13.494Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100431,24 +100427,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T15:47:19.685Z"
-        },
-        {
-          "n": 5,
-          "text": "Handshake and bulk throughput are measured against mbedtls, and Jet is not slower.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T15:47:20.743Z"
-        },
-        {
-          "n": 6,
-          "text": "U64.mul_wide(other) -> (U64, U64) returns the high and low words of the full 128-bit product, lowered to one widening multiply instruction on O0, O1 and O2 and with the same meaning on web; registered in the Prelude with #Tests, an example plus golden, and the bignum leaves use it (owner ruling 2026-11-08, Q10 A).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T18:50:03.431Z"
         }
       ],
       "refs": [],
@@ -100463,7 +100441,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-09T15:59:09.197Z",
+      "updated": "2026-11-09T15:59:11.496Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -100543,15 +100521,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T15:47:25.076Z"
-        },
-        {
-          "n": 4,
-          "text": "Speedtest1 and the db perf cells are measured against C SQLite, and Jet is not slower.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T15:47:26.212Z"
         }
       ],
       "refs": [],
@@ -100565,7 +100534,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-09T11:23:38.329Z",
+      "updated": "2026-11-09T15:59:12.479Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100813,12 +100782,12 @@
         "accuracy"
       ],
       "goals": [
-        "G1"
+        "G3"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-09T13:30:57.594Z",
+      "updated": "2026-11-09T15:59:15.142Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -191564,6 +191533,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T15:59:16.096Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T15:59:15.142Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c028lxdd",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T15:59:13.494Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0x92nsv",
+      "note": "#3: Moved to #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: Spawn and join cost is measured against the pthread build, and the Jet build is not slower."
+    },
+    {
+      "at": "2026-11-09T15:59:12.479Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ajhpeh",
+      "note": "#4: Moved to #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: Speedtest1 and the db perf cells are measured against C SQLite, and Jet is not slower."
+    },
+    {
+      "at": "2026-11-09T15:59:11.496Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bnp1zw",
+      "note": "#5: Moved to #6737 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: Handshake and bulk throughput are measured against mbedtls, and Jet is not slower."
+    },
+    {
+      "at": "2026-11-09T15:59:10.500Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bnp1zw",
+      "note": "#6: Moved to #6737 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: U64.mul_wide(other) -> (U64, U64) returns the high and low words of the full 128-bit product, lowered to one widening multiply instruction on O0, O1 and O2 and with the same meaning on web; registered"
+    },
     {
       "at": "2026-11-09T15:59:09.197Z",
       "by": "Main",
