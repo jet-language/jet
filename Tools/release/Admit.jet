@@ -986,6 +986,16 @@ rows_json: fn(rows: [SuiteRow]) -> String Never! {
     json.dumps(Dyn.Array(items)) ?? "[]"
 }
 
+// The environment of a side's suite run. Its runner (Tools/agent/JetEnv.jet,
+// then `jet test`) is the candidate, built from `tree`, and reads that tree's
+// Core (JET_TOOLCHAIN_ROOT). The rows are `jet`, the side's jet, and read the
+// side's own tree, `rows_tree` (JET_TEST_TOOLCHAIN_ROOT, which the testkit
+// hands them as their JET_TOOLCHAIN_ROOT). An older release tree that lacks a
+// Core file the candidate names still runs.
+suite_vars: fn(base: [Var], tree: String, rows_tree: String, identity: String, jet: String) -> [Var] Never! {
+    with_vars(base, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", tree), set_var("JET_TEST_TOOLCHAIN_ROOT", rows_tree), set_var("JET", jet)})
+}
+
 // One side's run of one suite: --shards `jet test Compiler --profile <suite>`
 // processes at once, merged. s2 runs every one, and `--compiler` names the
 // side's jet that builds and runs the rows; the jetpack beside that jet
@@ -1002,7 +1012,7 @@ suite_run: fn(ctx: &Ctx, side: String, suite: String, label_tag: String, extra: 
     jobs := [Job]{}
     loop index in 1..<shards + 1 {
         label: "{side}-{suite}{if retry -> "-{label_tag}" else -> ""}-{index}"
-        vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JET", jet)})
+        vars: suite_vars(ctx.vars, ctx.tree, root, identity, jet)
         // Suite rows run host tools (C compilers, interpreters) that only
         // the dev shell supplies until jet does.
         argv := in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", suite.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})

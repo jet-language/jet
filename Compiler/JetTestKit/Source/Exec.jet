@@ -97,12 +97,17 @@ kit_exec_home_refusal: fn(env: KitEnv, cwd: String, scratch: String, overlay: [K
     None
 }
 
-// The toolchain tree whose Core the `jet` under test reads: JET_TOOLCHAIN_ROOT
-// when set, else the nearest directory at or above the kit's own working
-// directory, then at or above the run's root, that holds `Core/` and
-// `Compiler/Prelude/` (the `jet` CLI's rule). A case's scratch root is never
-// one. None: there is no tree, and the child finds its own Core.
+// The toolchain tree whose Core the `jet` under test reads:
+// JET_TEST_TOOLCHAIN_ROOT when set, then JET_TOOLCHAIN_ROOT, else the nearest
+// directory at or above the kit's own working directory, then at or above the
+// run's root, that holds `Core/` and `Compiler/Prelude/` (the `jet` CLI's
+// rule). A case's scratch root is never one. None: there is no tree, and the
+// child finds its own Core. JET_TEST_TOOLCHAIN_ROOT separates the two trees
+// when the jet under test is older than the one running the kit (a release
+// gate's release side): the runner reads its own Core through
+// JET_TOOLCHAIN_ROOT, and the rows read the older tree's.
 kit_exec_toolchain_root: fn(root: String) -> String? {
+    if sys.get("JET_TEST_TOOLCHAIN_ROOT") == .Val(set) && set != "" -> return Val(set)
     if sys.get("JET_TOOLCHAIN_ROOT") == .Val(set) && set != "" -> return Val(set)
     loop start in [files.cwd() ?? "", root] {
         if start == "" -> next
@@ -196,6 +201,9 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             .env("JET_CC_PACK_ROOT", kit_exec_base_value("JET_CC_PACK_ROOT", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
         // With no toolchain tree the variable is removed: an empty one names `/`.
+        // The child gets the resolved tree as JET_TOOLCHAIN_ROOT alone, so a
+        // kit it runs resolves it the same way.
+        spec = spec.env_remove("JET_TEST_TOOLCHAIN_ROOT")
         if kit_exec_base_value("JET_TOOLCHAIN_ROOT", env, scratch) == {
             .Val(toolchain) -> spec = spec.env("JET_TOOLCHAIN_ROOT", toolchain)
             .None -> spec = spec.env_remove("JET_TOOLCHAIN_ROOT")

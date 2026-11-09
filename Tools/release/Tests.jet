@@ -721,6 +721,11 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(shard_pool(parse_admit_args([String]{"abc", "--jobs", "3"}), 4, "64G"), [String]{"--memory=16G", "--jobs=3"})
 }
 
+#Test("a suite's runner reads the candidate's tree and its rows read their side's tree") {
+    vars: suite_vars([Var]{set_var("TMPDIR", "/tmp/x")}, "/work/tree", "/work/release-tree", "jet@0.0.1#aa", "/release/jet")
+    assert_eq((loop found in vars -> "{found.name}={found.value}"), [String]{"TMPDIR=/tmp/x", "JET_COMPILER_IDENTITY=jet@0.0.1#aa", "JET_TOOLCHAIN_ROOT=/work/tree", "JET_TEST_TOOLCHAIN_ROOT=/work/release-tree", "JET=/release/jet"})
+}
+
 #Test("a lost row is one the release passes and the candidate fails on both runs") {
     before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "FAIL"), kit_row("d.jet", "o1", "UNEXPECTED-PASS")}
     after: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "FAIL"), kit_row("c.jet", "o0", "PASS"), kit_row("e.jet", "o0", "PASS")}
