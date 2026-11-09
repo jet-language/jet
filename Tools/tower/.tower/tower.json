@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6733,
-    "rev": 96525,
+    "nextNum": 6735,
+    "rev": 96532,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102495,6 +102495,108 @@
       "created": "2026-11-09T15:52:44.613Z",
       "updated": "2026-11-09T15:52:44.613Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c07k91t6",
+      "num": 6733,
+      "title": "Acronyms in caps in every file and folder name (Core/Net/TLS.jet, not Tls.jet): one cutover plus a guard",
+      "body": "OWNER HARD REQUIREMENT (2026-11-09): acronyms are all caps in types AND file names, Title Case otherwise (Core/Net/TLS.jet, not Core/Net/Tls.jet). S66 and D-ONCE-CASE1 already require this for type names (E0358) and name the lexicon for file names, but nothing enforces file names. A census of dev (lexicon Compiler/JetFoundation/Data/Syntax/Acronyms.jet) finds 156 distinct file and folder names with a word-cased acronym (642 path hits), e.g. Ast.jet, Cbor.jet, Cli/, Db/, Http/, Tls.jet, CanonicalJson.jet. Greenfield cutover: rename every one and migrate every import, module path mapping, reference, generated artifact and doc in one commit stack; no aliases.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner: 'That is a hard requirement.' Starts after the post-a0_042 held-SUB batch lands, so the renames don't conflict with the held stacks."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A committed guard (a closed-list check beside tests/guards/closed_lists) fails on any tracked path whose PascalCase file or folder word spells a lexicon acronym in any other case, and the guard's census over dev is empty (receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:56:50.283Z"
+        },
+        {
+          "n": 2,
+          "text": "Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-host chain reaches its fixed point.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:56:51.507Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:56:40.028Z",
+      "updated": "2026-11-09T15:57:04.476Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0cnf5w8",
+      "num": 6734,
+      "title": "User-visible text is never all lowercase, and every text is American English",
+      "body": "OWNER HARD REQUIREMENTS (2026-11-09): (1) The owner hates all-lowercase text in readouts, UI and anything a user sees (CLI output such as jet --version's 'release status: prerelease', HUD labels, reports, help). User-visible labels and readouts use Title Case or sentence case; acronyms in caps. Identifiers, paths, flags, code and machine formats (JSON keys) keep their spelling. (2) American English everywhere, never British: behavior not behaviour, color not colour, initialize not initialise, license not licence, and so on. A census of dev finds 129 files with British spellings.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census over dev is empty (receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:57:01.529Z"
+        },
+        {
+          "n": 2,
+          "text": "Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagnostic registry and Core.Ui label sources holds it, and the UI snapshots and goldens are regenerated in the same stack.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:57:02.971Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:56:53.397Z",
+      "updated": "2026-11-09T15:57:02.971Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -191330,6 +191432,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T15:57:04.477Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T15:57:02.971Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cnf5w8",
+      "note": "#2 Every CLI readout, diagnostic heading, report, help text and"
+    },
+    {
+      "at": "2026-11-09T15:57:01.529Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cnf5w8",
+      "note": "#1 A committed spelling guard (a British-to-American word list "
+    },
+    {
+      "at": "2026-11-09T15:56:53.397Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0cnf5w8",
+      "note": "User-visible text is never all lowercase, and every text is American English"
+    },
+    {
+      "at": "2026-11-09T15:56:51.507Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#2 Every in-repository import, module mapping, test, example, g"
+    },
+    {
+      "at": "2026-11-09T15:56:50.283Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#1 A committed guard (a closed-list check beside tests/guards/c"
+    },
+    {
+      "at": "2026-11-09T15:56:40.029Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c07k91t6",
+      "note": "Acronyms in caps in every file and folder name (Core/Net/TLS.jet, not Tls.jet): one cutover plus a guard"
+    },
     {
       "at": "2026-11-09T15:52:44.613Z",
       "by": "Main",
