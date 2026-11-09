@@ -8,6 +8,9 @@ use {
 }
 
 RSQRT: comptime { embed_file("corpus/rsqrt.txt") }
+SIN_PI: comptime { embed_file("corpus/sinpi.txt") }
+COS_PI: comptime { embed_file("corpus/cospi.txt") }
+TAN_PI: comptime { embed_file("corpus/tanpi.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -43,6 +46,9 @@ is_nan_word: fn(word: Int) -> Bool {
 // The result of `name` on arguments `a`.
 value: fn(name: String, a: [Float]) -> Float {
     if name == "rsqrt" -> return math.rsqrt(a[0])
+    if name == "sinpi" -> return math.sin_pi(a[0])
+    if name == "cospi" -> return math.cos_pi(a[0])
+    if name == "tanpi" -> return math.tan_pi(a[0])
     panic("no corpus function {name}")
 }
 
@@ -83,4 +89,7 @@ check: fn(name: String, corpus: String) {
 
 run: fn() {
     check("rsqrt", RSQRT)
+    check("sinpi", SIN_PI)
+    check("cospi", COS_PI)
+    check("tanpi", TAN_PI)
 }

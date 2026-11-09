@@ -14,6 +14,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [FloatExactOps](FloatExactOps.jet) — IEEE 754 exact operations: ties-to-even rounding, rounding into a fixed width, the IEEE remainder, signed-zero min and max, total order and NaN payloads.
 - [FloorDiv](FloorDiv.jet) — Floor division: infix `/%` divides and rounds the answer down, and `/%=` divides a mutable binding in place.
 - [Fraction](Fraction.jet)
+- [HalfTurnTrig](HalfTurnTrig.jet) — sin, cos and tan of pi * x, correctly rounded. They give the same bits on every tier, and exact answers stay exact.
 - [IntDiv](IntDiv.jet) — What `/` answers: the true quotient, always.
 - [IntExact](IntExact.jet) — Default Int is exact, with a machine-word fast path and spill.
 - [IntPowNegativeStop](IntPowNegativeStop.jet) — A negative runtime exponent stops; it never returns a sentinel.
