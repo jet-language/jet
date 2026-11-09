@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6748,
-    "rev": 96610,
+    "rev": 96611,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93483,47 +93483,6 @@
       "completedAt": "2026-11-07T04:53:53.581Z"
     },
     {
-      "id": "c0e28xlx",
-      "num": 6600,
-      "title": "Publish-time SemVer gate (E1218): sema produces the public API snapshot that jet registry publish compares",
-      "body": "Found by JetpackEngine on #6418 c7 (a6b917e72e). PackageFiles.jet:356 says publish writes .jet/cache/api/<pkg>.api and compares it with the previous version's snapshot to enforce the SemVer bump (E1218). No sema producer of public signatures exists, so the snapshot is never written and E1218 can't fire. Scope: one sema-owned producer of the package's public surface (pub fn signatures, types, fields, trait impls, effects, unit-family metadata per D-QUAL3's semver-visible rule), stable and deterministic; publish writes it and compares against the prior version; a breaking change without a major bump is E1218 with its UI snapshot. One mechanism: the same snapshot feeds any API-diff tooling.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet registry publish writes a deterministic sema-produced public API snapshot, and publishing a breaking change without a major bump fails with E1218 (UI snapshot), while an additive change under a minor bump passes",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "1457584ce4; vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: tests/cases/pkg/cli_publish_semver_gate_e1218.case PASS (deterministic apis/semkit/1.0.0.api snapshot bytes, E1218 stderr snapshot with registry untouched, additive minor passes, breaking major passes)",
-          "at": "2026-11-06T16:35:47.496Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T07:09:16.180Z",
-      "updated": "2026-11-06T16:35:54.647Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T16:35:54.647Z"
-    },
-    {
       "id": "c018jg16",
       "num": 6604,
       "title": "jet os engine verbs (plan and the rest of the jetos dispatcher) are not built in the Jet engine",
@@ -99561,6 +99520,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Owner refinement 2026-11-09: G4 and G8, and possibly G6, can run in parallel with each other. G1 keeps first claim on slots until it is finished."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Owner ruling 2026-11-09: goal order. Finish G1 first, then G4 (Best scripting language), then G8 (Effects on types), then G6 (Declarations as types and metaprogramming). The JetDevserver port (#5931, G5) is to be finished, not deleted, but not before these."
         },
         {
@@ -99649,7 +99613,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-09T16:35:43.399Z",
+      "updated": "2026-11-09T16:35:55.827Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -191557,6 +191521,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:35:55.828Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T16:35:43.399Z",
       "by": "Main",
