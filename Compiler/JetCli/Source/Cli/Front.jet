@@ -2570,10 +2570,12 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         // `jet dev`: the program rebuilt and rerun on every source change, from
         // the `dev: fn` its command home declares, else the stock `jet run` entry.
         // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
+        // A bare `jet dev` in a role-file project runs inside its environment.
         "dev" -> {
             if jet_argv.contains("--canvas") -> return jet_cli_not_ported("dev --canvas", color)
             if jet_cli_has(jet_argv, "--app") -> return jet_cli_not_ported("dev --app", color)
             if jet_cli_has(jet_argv, "--share") -> return jet_cli_not_ported("dev --share", color)
+            if jet_cli_dev_environment_plan(cli_files.cwd() ?? ".", raw) == .Val(plan) -> return plan
             return jet_cli_run(jet_argv, args, passthrough, false, true, color, quiet, verbose, threads)
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)

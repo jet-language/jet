@@ -7,6 +7,7 @@
 JetpackVerb: enum {
     Doctor
     Env
+    Dev
     Use
     Config
     Trust
@@ -41,6 +42,7 @@ JetpackVerb: enum {
         if text == {
             "doctor" -> Val(JetpackVerb.Doctor)
             "env" -> Val(JetpackVerb.Env)
+            JETPACK_DEV_VERB -> Val(JetpackVerb.Dev)
             "use" -> Val(JetpackVerb.Use)
             CONFIG_SUBCOMMAND -> Val(JetpackVerb.Config)
             TRUST_SUBCOMMAND -> Val(JetpackVerb.Trust)
@@ -139,6 +141,7 @@ cli_dispatch_verb: fn(verification: &StoreVerification, verb: JetpackVerb, theme
     if verb == {
         .Doctor -> cli_cmd_doctor(verification, theme, parsed)
         .Env -> cli_cmd_env(verification, theme, parsed)
+        .Dev -> cli_cmd_dev(verification, theme, parsed)
         .Use -> cli_cmd_use(verification, theme, parsed)
         .Config -> cli_cmd_config(theme, parsed)
         .Trust -> cli_cmd_trust(theme, parsed)

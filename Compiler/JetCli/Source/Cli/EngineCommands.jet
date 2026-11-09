@@ -23,6 +23,64 @@ jet_cli_engine_commands: fn(command: String, raw: [String]) -> JetCLIPlan? Never
     None
 }
 
+// The hidden engine host of a bare `jet dev` in a role-file project
+// (Jetpack/CLI EnvCommand.jet `cli_cmd_dev`).
+JET_CLI_DEV_ENGINE_VERB: "__dev"
+
+// A bare `jet dev` at `start` in a role-file project (an `env.jet` and no
+// `package.jet` here or above) runs inside the project environment: the
+// engine gates trust, checks the declared secrets, composes the environment,
+// starts the dev services, then runs `jet dev <entry>` there. The engine gets
+// its own flags, then `--` and every word of that `jet dev <entry>`; a color
+// flag goes to both. None outside such a project, or when `jet dev` names a
+// file.
+jet_cli_dev_environment_plan: fn(start: String, raw: [String]) -[FS, Env]> JetCLIPlan? Never! {
+    if jet_cli_find_package_root(start, false) == {
+        .Absent -> {}
+        else -> return None
+    }
+    if jet_cli_find_env_root(start) == None -> return None
+    engine := [String]{JET_CLI_DEV_ENGINE_VERB}
+    dev := [String]{}
+    named := false
+    value_next := false
+    separated := false
+    loop word in raw {
+        if !named && word == "dev" {
+            named = true
+            next
+        }
+        if separated {
+            dev.push(word.copy())
+            next
+        }
+        if value_next {
+            engine.push(word.copy())
+            value_next = false
+            next
+        }
+        if word == {
+            "--" -> {
+                separated = true
+                dev.push(word.copy())
+            }
+            "--trust" | "--offline" | "--yes" | "-y" -> engine.push(word.copy())
+            "--env" | "--preset" | "--fixtures" | "--local-nix-catalog" -> {
+                engine.push(word.copy())
+                value_next = true
+            }
+            else -> {
+                if !word.starts_with("-") -> return None
+                if word == "--no-color" || word.starts_with("--color=") -> engine.push(word.copy())
+                dev.push(word.copy())
+            }
+        }
+    }
+    engine.push("--")
+    loop word in dev -> engine.push(word)
+    Val(JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: "dev", argv: engine}})
+}
+
 // The hidden engine host of the package-dependency commands (Jetpack/CLI
 // Hosts/PackageDependencyHost.jet); its version is part of the protocol.
 JET_CLI_PACKAGE_ENGINE_VERB: "__package-v1"
