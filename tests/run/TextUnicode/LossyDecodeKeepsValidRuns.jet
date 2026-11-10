@@ -1,0 +1,55 @@
+// String.from_bytes_lossy copies each valid UTF-8 run whole and puts one
+// U+FFFD for each invalid sequence (the WHATWG maximal-subpart rule). The
+// inputs mix ASCII runs longer than a machine word, two- to four-byte
+// characters, stray continuation bytes, overlong forms, surrogates, values
+// past U+10FFFF and sequences cut short at the end and in the middle. Each
+// result prints as its bytes in hex, so U+FFFD shows as EF BF BD.
+hex_bytes: fn(text: String) -> String {
+    words := [String]{}
+    loop byte in text.bytes() {
+        code: Int.from_u8(byte)
+        words.push("{code:Hex(2)}")
+    }
+    words.join(" ")
+}
+
+show: fn(label: String, bytes: [U8]) {
+    print("{label}: {hex_bytes(String.from_bytes_lossy(bytes))}")
+}
+
+count: fn(text: String, part: String) -> Int { text.split(part).to_list().len() - 1 }
+
+run: fn() {
+    ascii: "The quick brown fox jumps".bytes()
+    show("empty", [U8]{})
+    show("ascii", ascii)
+    show("mixed valid", "aébc€d😀e".bytes())
+    stray := ascii.copy()
+    stray.push(0x80)
+    loop byte in ascii -> stray.push(byte)
+    show("stray continuation", stray)
+    show("overlong two", [U8]{0x41, 0xC0, 0xAF, 0x42})
+    show("overlong three", [U8]{0xE0, 0x80, 0xAF, 0x43})
+    show("surrogate", [U8]{0xED, 0xA0, 0x80, 0x44})
+    show("past max", [U8]{0xF4, 0x90, 0x80, 0x80, 0x45})
+    show("lead F5", [U8]{0xF5, 0x46})
+    show("cut three", [U8]{0xE2, 0x82, 0x47})
+    show("cut four", [U8]{0xF0, 0x9F, 0x98, 0x48})
+    tail := ascii.copy()
+    tail.push(0xF0)
+    tail.push(0x9F)
+    show("cut at end", tail)
+    show("all bad", [U8]{0xFF, 0xFE, 0x80, 0xBF})
+    long := [U8]{}
+    loop index in 0..<200 {
+        loop byte in ascii -> long.push(byte)
+        if index % 7 == 0 -> long.push(0xC8)
+        if index % 11 == 0 {
+            long.push(0xE2)
+            long.push(0x82)
+            long.push(0xAC)
+        }
+    }
+    text: String.from_bytes_lossy(long)
+    print("long: {long.len()} bytes in, {text.bytes().len()} bytes out, {count(text, "�")} replaced, {count(text, "€")} euro signs")
+}
