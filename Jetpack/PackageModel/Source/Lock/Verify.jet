@@ -184,8 +184,9 @@ pkg_lock_verify_locked_generated_inputs: fn(project_root: String, generated: [Co
     }
 }
 
-// Record generated-module output hashes in the unified lock,
-// upserting by managed path so a rebuild replaces drift instead of
+// Record comptime input hashes in the unified lock: generated-module outputs,
+// and the files a build read through `embed_file`, `embed_bytes` or `find`.
+// Rows are upserted by path, so a rebuild replaces drift instead of
 // appending.
 pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
     lock_was_present: files.exists(pkg_lock_file_path(project_root))
@@ -195,10 +196,16 @@ pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeI
 // Record generated provenance while preserving whether the build started
 // with a lock. The driver captures that state before its runtime reload can
 // publish any lock update, so a first build bootstraps dependencies once.
+// `locked` checks the `.jet/generated/` rows alone; the rows of the files a
+// compile read are the compile's own.
 pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) LockError! -[FS, Env, Time]> {
     lock := pkg_lock_load_or_empty(project_root)
     if locked {
-        expected: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(lock.comptime_inputs))
+        managed := [ComptimeInput]{}
+        loop input in lock.comptime_inputs {
+            if input.path.starts_with(".jet/generated/") -> managed.push(input.copy())
+        }
+        expected: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(managed))
         actual: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(generated))
         if expected == actual -> return
         path := "<unknown>"

@@ -601,6 +601,29 @@ jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, snaps
     recorded
 }
 
+// After a build's checks pass: record each file the compile read through
+// `embed_file`, `embed_bytes` or `find` (the compile's `comptime_inputs`) as a
+// `[[comptime_inputs]]` row of the lock of `file`'s project, its path relative
+// to the project root and its SHA-256, upserted by path so an edited file's
+// row takes its new digest (pkg_lock_record_generated_inputs). A loose file,
+// a compile that read none and a `locked` build record nothing.
+jet_cli_lock_comptime_inputs: fn(file: String, result: JetDriverCompileResult, locked: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
+    recorded := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if locked || result.comptime_inputs.len() == 0 -> return recorded
+    root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
+    physical: build_files.realpath(root) ?? root.copy()
+    inputs := [ComptimeInput]{}
+    loop input in result.comptime_inputs {
+        read: build_files.realpath(input.file) ?? input.file.copy()
+        if !read.starts_with("{physical}/") -> next
+        inputs.push(ComptimeInput{path: read.slice(physical.len() + 1..<read.len()), hash: "sha256:{input.sha256}"})
+    }
+    if inputs.len() == 0 -> return recorded
+    stamp: pkg_lock_build_stamp(root, false) ?? return jet_cli_lock_refusal(err, color)
+    if pkg_lock_record_generated_inputs(root, inputs, false, stamp) == .Err(error) -> return jet_cli_lock_refusal(error, color)
+    recorded
+}
+
 // fn build's layer of the build options: each option `selected` set, placed
 // at its call in `file` (`at build.jet:3`, relative to the package root).
 jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {

@@ -1616,6 +1616,8 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     if built.exit_code == JET_DRIVER_EXIT_OK {
         rows: if options.locked -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_effect_rows(file, result, snapshot, false, color, json)
         if rows.exit_code != JET_DRIVER_EXIT_OK -> return rows
+        read_inputs: jet_cli_lock_comptime_inputs(file, result, options.locked, color)
+        if read_inputs.exit_code != JET_DRIVER_EXIT_OK -> return read_inputs
         if json {
             built.stdout = jet_cli_build_effects_json(authority)
         } else {
