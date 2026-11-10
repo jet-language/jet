@@ -209,7 +209,7 @@ compile-time name of the items.
 
 Jet has two related reflection paths:
 
-1. A compile-time fact read uses the `@` member form. Examples include
+1. A compile-time fact read is a `$` member of its subject. Examples include
    `Severity.$range`, `send_report.$effects`, `T.$layout`, and
    `$package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
@@ -264,11 +264,14 @@ spelling until a ballot names their `$` root.
 $build  $package  $phase  $program
 ```
 
-`$phase` reports the evaluation-site `Phase` value. The shared AST contract
-contains exactly `Preparation`, `Build`, and `Runtime`. Do not confuse that
-language phase with `CompilerStage`, which contains `Parsed`, `Resolved`,
-`Typed`, `Prepared`, and `Emitted` and describes when a checked fact becomes
-available.
+`$phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
+exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
+block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
+program. The evaluation site decides it, so `print($phase)` in `run` prints
+`Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
+shows both sites. Do not confuse that language phase with `CompilerStage`,
+which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and
+describes when a checked fact becomes available.
 
 Metadata queries use typed records and typed failure. The closed failure
 variants are:

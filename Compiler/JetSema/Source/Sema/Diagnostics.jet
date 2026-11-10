@@ -300,8 +300,15 @@ sema_unknown_name: fn(name: String, span: Span) -> Diagnostic {
         span,
         "nothing named `{name}` exists here",
         "a name must be declared before it's used",
-        "declare it first: `{name}: ...`",
+        sema_unknown_name_declare_fix(name),
     )
+}
+
+// A `$` name is a compiler fact, which no declaration can make, so its fix
+// names the fact forms instead of a declaration.
+sema_unknown_name_declare_fix: fn(name: String) -> String Never! {
+    if name.starts_with("$") -> return "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`"
+    "declare it first: `{name}: ...`"
 }
 
 // E0107 with the most useful fix: the Core import a module-style name
@@ -312,7 +319,7 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     why: "a name must be declared before it's used"
     if core_module_for_alias(name) == .Val(owner) -> return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")
     if sema_scope_closest_visible_name(scopes, name) == .Val(near) -> return diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean `{near}`?"), TextEdit{span: span, new_text: near})
-    sema_error("E0107", span, what, why, "declare it first: `{name}: ...`")
+    sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
 }
 
 // E0107 for a name an unresolved read or write spells in a function of an

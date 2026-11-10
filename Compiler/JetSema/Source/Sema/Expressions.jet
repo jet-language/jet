@@ -4131,14 +4131,24 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
 
 // `$here` is the `SourceLocation` of where it is written. `$caller` reaches
 // here only outside a parameter default (call sites and declarations replace
-// it there), which is E2427.
+// it there), which is E2427. `$phase` is the `Phase` of where it is
+// evaluated: `.Preparation` in comptime code, `.Build` in `fn build`, and
+// `.Runtime` anywhere else, so every tier reads the same constant.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if name == "$caller" {
         row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
     }
+    if name == "$phase" {
+        phase: if scopes.comptime_execution_depth > 0 -> "Preparation" else if (scopes.location_function ?? environment.function_name) == "build" -> "Build" else -> "Runtime"
+        return sema_check_expression(Expr.EnumLit{type_name: "Phase", variant: phase, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     sema_check_expression(sema_site_location_expr("SourceLocation", environment, program, scopes, span), expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+sema_site_root_name: fn(name: String) -> Bool Never! {
+    name == "$here" || name == "$caller" || name == "$phase"
 }
 
 sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -5586,7 +5596,7 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Bool(value, span, _) -> sema_expr_expected_owned(sema_node(context, Type.Bool, NodeKind.BoolLit{value: value}, span), expected, environment, program, diagnostics)
         .Unit(span, _) -> sema_expr_expected_owned(sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span), expected, environment, program, diagnostics)
         .Str(parts, span, _) -> sema_expr_check_string(parts, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5626,7 +5636,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             None
         }
         .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, context, diagnostics)
-        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> {
             checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None

@@ -3660,8 +3660,8 @@ physical layout is not guaranteed. Completion visibly groups
 `derive Wire for T` is E2714); the header names the provider and target, and
 the body contains typed Jet members. `@` holes are filled at expansion and the
 resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
-never inject unchecked AST or re-lex emitted text). `@loop` over
-`T.@fields` contributes one checked member per field. Local-only orphan rule.
+never inject unchecked AST or re-lex emitted text). `comptime loop` over
+`T.$fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
 **D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
