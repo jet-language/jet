@@ -93,18 +93,21 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
     e: derive_mpi(grp, hash)
     sign_tries := 0
     loop {
-        if sign_tries > 10 -> return Err(.RandomFailed)
+        if sign_tries > 10 -> return Err(sign_failed(dl, work, .RandomFailed))
         sign_tries += 1
+        // The attempt's outputs, allocated before any secret of it exists.
+        kt := bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
+        s := bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
         // Steps 1-3: an ephemeral key pair (k, k G) and r = x(k G) mod N.
         key_tries := 0
         k := bn.mpi()
         r := bn.mpi()
         loop {
-            if key_tries > 10 -> return Err(.RandomFailed)
+            if key_tries > 10 -> return Err(sign_failed(dl, work, wiped(k.p, .RandomFailed)))
             key_tries += 1
             k = ecp.gen_privkey(grp, rng)
             pt: if shared_rng -> ecp.ecp_mul(grp, k, grp.g, rng) else -> ecp.ecp_mul(grp, k, grp.g, blind)
-            r = bn.mod_ct(pt.x, grp.n, rr) ?? return Err(.Mpi(err))
+            r = bn.mod_ct(pt.x, grp.n, rr) ?? return Err(sign_failed(dl, work, wiped(k.p, .Mpi(err))))
             if signature_part_nonzero(r) -> break
         }
         // Step 5: e from the hash, and the draw t that blinds the inverse.
@@ -112,32 +115,55 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
         t := if shared_rng -> ecp.gen_privkey(grp, rng) else -> ecp.gen_privkey(grp, blind)
         tl := bn.limbs_of(t, nl)
         kl := bn.limbs_of(k, nl)
+        bn.core_mul_mod(kt.p, kl, tl, grp.n.p, nl, mm, rr.p, work)
+        inv := bn.gcd_modinv_odd(kt, grp.n, inverse: true) ?? return Err(sign_failed(dl, work, attempt_failed(k, kl, t, tl, kt, .Mpi(err))))
         rd := cipher.words(nl)
         bn.core_mul_mod(rd, r.p, dl, grp.n.p, nl, mm, rr.p, work)
         sum := cipher.words(nl)
         bn.core_add_mod(sum, e.p, rd, grp.n.p, nl)
         sum_t := cipher.words(nl)
         bn.core_mul_mod(sum_t, sum, tl, grp.n.p, nl, mm, rr.p, work)
-        kt := bn.zeros(nl) ?? return Err(.Mpi(err))
-        bn.core_mul_mod(kt.p, kl, tl, grp.n.p, nl, mm, rr.p, work)
-        inv := bn.gcd_modinv_odd(kt, grp.n, inverse: true) ?? return Err(.Mpi(err))
-        s := bn.zeros(nl) ?? return Err(.Mpi(err))
         bn.core_mul_mod(s.p, inv.i.p, sum_t, grp.n.p, nl, mm, rr.p, work)
         cipher.wipe_words(rd)
         cipher.wipe_words(sum)
         cipher.wipe_words(sum_t)
-        cipher.wipe_words(kt.p)
         cipher.wipe_words(inv.i.p)
-        cipher.wipe_words(tl)
-        cipher.wipe_words(t.p)
-        cipher.wipe_words(kl)
-        cipher.wipe_words(k.p)
+        wipe_attempt(k, kl, t, tl, kt)
         if signature_part_nonzero(s) {
             cipher.wipe_words(dl)
             cipher.wipe_words(work)
             return Ok(ECDSASignature{r: r, s: s})
         }
     }
+}
+
+/// `err`, once the signing loop's private key limbs and Montgomery scratch
+/// are wiped: every return of sign_core leaves neither behind.
+sign_failed: fn(dl: &[U64], work: &[U64], err: &&ecp.EcpError) -> ecp.EcpError Never! {
+    cipher.wipe_words(dl)
+    cipher.wipe_words(work)
+    err
+}
+
+/// `err`, once `w` is wiped.
+wiped: fn(w: &[U64], err: &&ecp.EcpError) -> ecp.EcpError Never! {
+    cipher.wipe_words(w)
+    err
+}
+
+/// Wipes a signing attempt's nonce, blinding and their product.
+wipe_attempt: fn(k: &bn.Mpi, kl: &[U64], t: &bn.Mpi, tl: &[U64], kt: &bn.Mpi) Never! {
+    cipher.wipe_words(k.p)
+    cipher.wipe_words(kl)
+    cipher.wipe_words(t.p)
+    cipher.wipe_words(tl)
+    cipher.wipe_words(kt.p)
+}
+
+/// `err`, once a signing attempt's secrets are wiped (wipe_attempt).
+attempt_failed: fn(k: &bn.Mpi, kl: &[U64], t: &bn.Mpi, tl: &[U64], kt: &bn.Mpi, err: &&ecp.EcpError) -> ecp.EcpError Never! {
+    wipe_attempt(k, kl, t, tl, kt)
+    err
 }
 
 /// Sign hash with private key d, drawing the nonce and the blinding from
@@ -159,11 +185,16 @@ ecdsa_sign_blinded: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8],
 /// from blind (mbedtls_ecdsa_sign_det_ext).
 ecdsa_sign_det: fn<B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], md: hashes.Md, blind: &B) -> ECDSASignature ecp.EcpError! {
     grp_len: (grp.nbits + 7) /% 8
-    // HMAC_DRBG seeded with the private key and the reduced hash.
-    data := bn.write_binary(d, grp_len) ?? return Err(.Mpi(err))
+    // HMAC_DRBG seeded with the private key and the reduced hash, built at
+    // its final size so no growth leaves a copy of the key behind.
     h: derive_mpi(grp, hash)
     hb := bn.write_binary(h, grp_len) ?? return Err(.Mpi(err))
+    db := bn.write_binary(d, grp_len) ?? return Err(.Mpi(err))
+    data := [U8]{}
+    cipher.reserve(data, db.len() + hb.len())
+    loop b in db -> data.push(b)
     loop b in hb -> data.push(b)
+    core.crypto.wipe(db)
     nonces := drbg.hmac_drbg_new(md)
     drbg.hmac_drbg_seed_buf(nonces, data)
     core.crypto.wipe(data)

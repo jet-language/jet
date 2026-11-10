@@ -13,6 +13,7 @@ use {
     drbg: __core_crypto_drbg
     hashes: __core_crypto_md
     suites: __core_net_ssl_ciphersuites
+    cipher: __core_crypto_cipher
 }
 
 // core.net.tls — TLS 1.2/1.3 byte streams over the Jet port of Mbed TLS
@@ -605,17 +606,26 @@ ascii_lower: fn(text: String) -> String Never! {
 // A fresh configuration for `endpoint` (SSL_IS_CLIENT or SSL_IS_SERVER)
 // whose generator is seeded from the system entropy source.
 __context_new: fn(endpoint: Int) -> __TLSContext __TLSFailure! {
-    seed: core.net.tls.__host_entropy(C_SEED_BYTES) ?? return Err(__fail("TLS could not create a context: the system entropy source failed"))
-    if seed.len() != C_SEED_BYTES -> return Err(__fail("TLS could not create a context: the system entropy source failed"))
+    seed := core.net.tls.__host_entropy(C_SEED_BYTES) ?? return Err(__fail("TLS could not create a context: the system entropy source failed"))
+    if seed.len() != C_SEED_BYTES {
+        crypto.wipe(seed)
+        return Err(__fail("TLS could not create a context: the system entropy source failed"))
+    }
     __context_seeded(endpoint, seed)
 }
 
 // A fresh configuration whose HMAC_DRBG-SHA-256 generator is seeded from
 // `seed` and the personalization string "jet_tls"
-// (mbedtls_hmac_drbg_seed_buf over entropy || nonce || custom).
-__context_seeded: fn(endpoint: Int, seed: [U8]) -> __TLSContext __TLSFailure! {
-    material := seed.copy()
-    material.extend("jet_tls".bytes())
+// (mbedtls_hmac_drbg_seed_buf over entropy || nonce || custom). `seed` is
+// wiped, and the material is built at its final size, so no growth leaves a
+// copy behind.
+__context_seeded: fn(endpoint: Int, seed: &[U8]) -> __TLSContext __TLSFailure! {
+    custom: "jet_tls".bytes()
+    material := [U8]{}
+    cipher.reserve(material, seed.len() + custom.len())
+    loop b in seed -> material.push(b)
+    crypto.wipe(seed)
+    loop b in custom -> material.push(b)
     rng := drbg.hmac_drbg_new(hashes.Md.SHA256)
     drbg.hmac_drbg_seed_buf(rng, material)
     crypto.wipe(material)
@@ -884,10 +894,11 @@ __identity_validate: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity _
     key: String.from_bytes(private_key) ?? return Err(__fail("TLS private key PEM must be UTF-8 text"))
     _: __private_key_check(key.bytes()) ?? return Err(err)
     if __has_nul(cert) || __has_nul(key) -> return Err(__fail("TLS client identity is invalid: PEM text contains a NUL byte"))
-    seed := private_key.copy()
-    seed.extend(cert_chain.copy())
+    seed := [U8]{}
+    cipher.reserve(seed, private_key.len() + cert_chain.len())
+    loop b in private_key -> seed.push(b)
+    loop b in cert_chain -> seed.push(b)
     context := __context_seeded(ssldefs.SSL_IS_CLIENT, seed) ?? return Err(err)
-    crypto.wipe(seed)
     status: __own_identity(context, cert, key)
     if status != 0 -> return Err(__fail(__identity_message(status)))
     Ok(ClientIdentity{cert: cert, key: key})
@@ -1323,6 +1334,23 @@ __utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
     assert(!__utf8_cut([U8]{255, 98}))
     assert(!__utf8_cut([U8]{226, 130, 65}))
     assert_eq(__utf8_valid([U8]{226, 130, 172, 33}), 4)
+}
+
+#Test("Seeding a TLS context wipes the seed it was given, after the generator took it") {
+    seed := [U8]{}
+    loop i in 0..<C_SEED_BYTES -> seed.push(U8{i + 1})
+    first := __context_seeded(ssldefs.SSL_IS_CLIENT, seed) ?? panic("context: {err}")
+    assert_eq(seed.len(), C_SEED_BYTES)
+    assert(__test_zero(seed))
+    // The same seed again gives the same stream; the zeroed one another.
+    again := [U8]{}
+    loop i in 0..<C_SEED_BYTES -> again.push(U8{i + 1})
+    second := __context_seeded(ssldefs.SSL_IS_CLIENT, again) ?? panic("context: {err}")
+    zeroed := __context_seeded(ssldefs.SSL_IS_CLIENT, seed) ?? panic("context: {err}")
+    none := drbg.NoEntropy{}
+    drawn: drbg.hmac_drbg_random(first.rng, none, 16) ?? panic("{err:Debug}")
+    assert_eq(drawn, drbg.hmac_drbg_random(second.rng, none, 16) ?? panic("{err:Debug}"))
+    assert(drawn != (drbg.hmac_drbg_random(zeroed.rng, none, 16) ?? panic("{err:Debug}")))
 }
 
 // Moves what one engine queued for the network to the other's input, so a

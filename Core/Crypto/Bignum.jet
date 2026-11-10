@@ -1445,9 +1445,11 @@ gcd_modinv_odd: fn(a: Mpi, n: Mpi, inverse: Bool) -> (g: Mpi, i: Mpi) MpiError! 
     if !modinv_args_ok(a, n, inverse) -> return Err(.BadInput)
     g := zeros(n.p.len()) ?? return Err(err)
     i := if inverse -> zeros(n.p.len()) ?? return Err(err) else -> mpi()
-    ap: if a.p.len() == 0 -> [U64]{U64{0}} else -> a.p.copy()
+    // The working copy of a is wiped: a may be a blinded nonce or key.
+    ap := if a.p.len() == 0 -> [U64]{U64{0}} else -> a.p.copy()
     an: if a.p.len() >= n.p.len() -> n.p.len() else if a.p.len() != 0 -> a.p.len() else -> 1
     core_gcd_modinv_odd(g.p, i.p, inverse, ap, an, n.p, n.p.len())
+    cipher.wipe_words(ap)
     Ok((g: g, i: i))
 }
 
