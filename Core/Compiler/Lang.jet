@@ -195,6 +195,26 @@ TaintKind: enum {
     Credential
 }
 
+/// A tag's timing (`timing:` in a `tag` body). A `.Fixed`
+/// value's time and memory addresses must not depend on it: sema refuses a
+/// branch, index, division, shift, allocation size or call target on it
+/// (E0737), an `Int` or `Float` holding it (E0738), and arithmetic that
+/// could stop on it (E0739). `Secret` is `.Fixed`; every other tag, and a
+/// declared tag without `timing:`, is `.Free`.
+TagTiming: enum {
+    Free
+    Fixed
+}
+
+/// What a tag protects (`protects:` in a `tag` body): `.Secrecy`, where its
+/// value may flow, or `.Integrity`, what may flow into a place that needs a
+/// trusted value. `Input` is `.Integrity`; every other tag, and a declared
+/// tag without `protects:`, is `.Secrecy`.
+TagProtects: enum {
+    Secrecy
+    Integrity
+}
+
 /// Codegen target family.
 Target: enum {
     Native

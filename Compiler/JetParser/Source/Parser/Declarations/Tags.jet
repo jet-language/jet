@@ -29,6 +29,8 @@ parser_parse_tag_policy: fn(state: &JetParserState, modifiers: ParsedItemModifie
     name: parser_expect_name(state, "after `tag`")
     deny := [NamedSpan]{}
     from := [NamedSpan]{}
+    timing := NamedSpan?{None}
+    protects := NamedSpan?{None}
     if parser_current_kind(state) != TOKEN_LBRACE {
         tag_name: parser_value(state, name)
         parser_tag_error(state, name.span, "tag `{tag_name}` needs a policy body", "a tag declares a dataflow fact, including where that fact is denied", "write `{tag_name}: tag {{ deny: [Effect] }}`")
@@ -50,23 +52,37 @@ parser_parse_tag_policy: fn(state: &JetParserState, modifiers: ParsedItemModifie
         }
         field: parser_expect_name(state, "for a tag policy field")
         parser_expect(state, TOKEN_COLON, "after a tag policy field")
-        values: parser_tag_path_list(state)
         if parser_value(state, field) == {
             "deny" -> {
+                values: parser_tag_path_list(state)
                 if deny.len() > 0 -> parser_tag_error(state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
                 deny = values
             }
             "from" -> {
+                values: parser_tag_path_list(state)
                 if from.len() > 0 -> parser_tag_error(state, field.span, "tag `from` is repeated", "each tag policy field is declared once", "keep one `from: [...]` field")
                 from = values
             }
-            else -> parser_tag_error(state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths", "write `deny: [...]` or `from: [...]`")
+            "timing" -> {
+                value: parser_tag_case(state, "timing", "Free", "Fixed")
+                if timing != None -> parser_tag_error(state, field.span, "tag `timing` is repeated", "each tag policy field is declared once", "keep one `timing: .Free` or `timing: .Fixed` field")
+                timing = value
+            }
+            "protects" -> {
+                value: parser_tag_case(state, "protects", "Secrecy", "Integrity")
+                if protects != None -> parser_tag_error(state, field.span, "tag `protects` is repeated", "each tag policy field is declared once", "keep one `protects: .Secrecy` or `protects: .Integrity` field")
+                protects = value
+            }
+            else -> {
+                _ := parser_tag_path_list(state)
+                parser_tag_error(state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths, and the timing and protects cases", "write `deny: [...]`, `from: [...]`, `timing: .Fixed` or `protects: .Integrity`")
+            }
         }
         if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after a tag policy")
     if deny.len() == 0 -> parser_tag_error(state, name.span, "a tag needs at least one denied destination", "an empty tag policy has no enforceable effect", "add a path to `deny: [...]`")
-    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)}}
+    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span), timing: timing, protects: protects}}
 }
 
 parser_tag_path_list: fn(state: &JetParserState) -> [NamedSpan] {
@@ -87,6 +103,19 @@ parser_tag_path_list: fn(state: &JetParserState) -> [NamedSpan] {
     }
     parser_expect(state, TOKEN_RBRACKET, "`]` after tag policy paths")
     paths
+}
+
+// `timing: .Free | .Fixed` or `protects: .Secrecy | .Integrity`: the case of
+// core.compiler.lang's TagTiming or TagProtects. Another name is E0734.
+parser_tag_case: fn(state: &JetParserState, field: String, first: String, second: String) -> NamedSpan? {
+    dot: parser_expect(state, TOKEN_DOT, "`.` before the tag `{field}` case")
+    case_token: parser_expect_name(state, "after `.` in the tag `{field}` case")
+    case_name: parser_value(state, case_token)
+    if case_name != first && case_name != second {
+        parser_tag_error(state, case_token.span, "`.{case_name}` is not a tag `{field}` case", "a tag's `{field}` is `.{first}` or `.{second}`", "write `{field}: .{first}` or `{field}: .{second}`")
+        return None
+    }
+    Val(NamedSpan{name: case_name, span: parser_cover(dot.span, case_token.span)})
 }
 
 parser_tag_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {

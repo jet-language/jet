@@ -726,6 +726,18 @@ where dispatch or method attachment is expected is E0731. Tag names are
 PascalCase. Prelude declares `Input`, `PII`, `Secret`, and `Credential`
 (D-QUAL2, D-TAG-SURFACE1, D-CASING1).
 
+A tag body may also write `timing: .Free | .Fixed` and `protects: .Secrecy |
+.Integrity` (core.compiler.lang `TagTiming`, `TagProtects`). Left out, they are
+`.Free` and `.Secrecy`; `Secret` is `.Fixed` and `Input` is `.Integrity`. A
+`.Fixed` value must not decide a branch, a loop, a `&&` or `||` right side, an
+index, a slice bound, a division, a shift amount, an exponent, an allocation
+size, an indirect call target, a `?` or a `??` (E0737); must not be held in an
+`Int` or a `Float` (E0738); and must not reach a checked `+`, `-` or `*` outside
+`wrapping(...)`, `saturating(...)` or a wrapping or saturating arithmetic mode
+(E0739); `wrapping_add`, `wrapping_sub` and `wrapping_mul` never stop. A
+list's or a string's length is public whatever its contents carry
+(D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`
