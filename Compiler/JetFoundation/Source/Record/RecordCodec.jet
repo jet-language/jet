@@ -702,12 +702,6 @@ record_section_elements: fn(reader: RecordReader, section: Int) -> Int Never! {
     next - reader.firsts[section] - 1
 }
 
-// Number of elements in a section; `None` when the section is absent.
-record_element_count: fn(reader: RecordReader, id: Int) -> Int? Never! {
-    section: record_section_index(reader, id) ?? return None
-    Val(record_section_elements(reader, section))
-}
-
 record_read_string_ref: fn(reader: RecordReader, cursor: &RecordCursor) -> String Never! {
     index: record_read_uvarint(reader.bytes, cursor)
     if cursor.problem != None -> return ""

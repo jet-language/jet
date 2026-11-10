@@ -366,21 +366,6 @@ sema_comptime_reflection_marker_views: fn(type_markers: [Marker], serde_markers:
     SemaComptimeReflectionMarkerViews{markers: markers, expanded_markers: expanded}
 }
 
-// The complete Prelude catalog is an explicit input. Marker declarations from
-// source modules are merged by ScopeMembers using the checked graph/program.
-sema_comptime_reflection_marker_views_for_program: fn(
-    graph: SemaRegistrationGraph,
-    module_identity: String,
-    program: Program,
-    type_markers: [Marker],
-    serde_markers: [Marker],
-    derives: [NamedSpan],
-    catalog: TAppliedRuleCatalog,
-) -> SemaComptimeReflectionMarkerViews? {
-    registry: sema_scope_members_build_marker_registry(graph, module_identity, program, catalog) ?? return None
-    Val(sema_comptime_reflection_marker_views(type_markers, serde_markers, derives, registry))
-}
-
 // An absent `?inner` reflection member: the clean failure every compile-time
 // Option None is (the comptime child decodes a null Option the same way), so
 // lowering, static data and host transport read one spelling.

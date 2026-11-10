@@ -164,8 +164,6 @@ sema_taskgroup_core_key: fn(suffix: String) -> String Never! {
 }
 
 sema_taskgroup_internal_receiver: fn() -> String Never! { sema_taskgroup_core_key("") }
-sema_taskgroup_internal_surface_type: fn() -> String Never! { sema_taskgroup_core_key(".surface") }
-sema_taskgroup_internal_group_surface_type: fn() -> String Never! { sema_taskgroup_core_key(".group.surface") }
 sema_taskgroup_internal_spawn_method: fn() -> String Never! { sema_taskgroup_core_key(".spawn") }
 sema_taskgroup_internal_timeout_method: fn() -> String Never! { sema_taskgroup_core_key(".timeout") }
 sema_taskgroup_internal_all_method: fn() -> String Never! { sema_taskgroup_core_key(".all") }
@@ -245,12 +243,6 @@ sema_taskgroup_note_time_effect: fn(context: &SemaCheckContext, span: Span) Neve
     context.taskgroups.time_effects.push(TEffectSpan{name: "Time", span: span})
 }
 
-sema_taskgroup_merge_time_effects: fn(context: &SemaCheckContext, effects: [TEffectSpan]) Never! {
-    loop time_effect in effects {
-        if time_effect.name == "Time" -> sema_taskgroup_note_time_effect(context, time_effect.span)
-    }
-}
-
 sema_taskgroup_register_spawn: fn(context: &SemaCheckContext, group_name: String, binding: String?, span: Span) Never! {
     index: sema_taskgroup_stack_index(context.taskgroups, group_name) ?? return
     if context.taskgroups.in_spawn && index < context.taskgroups.spawn_group_floor -> return
@@ -295,17 +287,6 @@ sema_taskgroup_mark_spawns_owned: fn(context: &SemaCheckContext, origin: SemaTas
     }
 }
 
-sema_taskgroup_mark_spawn_owned: fn(context: &SemaCheckContext, name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    loop frame in context.taskgroups.stack {
-        loop spawn in frame.pending {
-            if spawn.binding == .Val(pending) && pending == name {
-                sema_taskgroup_move_spawn_binding(name, spawn.span, scopes, state, diagnostics)
-                return
-            }
-        }
-    }
-}
-
 sema_taskgroup_receiver_ok: fn(receiver: Expr, span: Span, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     name: if receiver == {.Ident(value, _, _) -> value else -> ""}
     if name == "" {
@@ -327,50 +308,6 @@ sema_taskgroup_receiver_ok: fn(receiver: Expr, span: Span, scopes: SemaScopeTabl
     active: sema_taskgroup_active_lexical_name(context.taskgroups) ?? ""
     diagnostics.push(sema_error("E1110", span, "`task` must use the active task group `{active}`, not `{name}`", "each lexical `task.group` block owns its spawns; a helper can instead receive a `Group` parameter", "write the spawn in the active group, or pass its handle to `helper: fn(group: Group)`"))
     false
-}
-
-sema_taskgroup_rewrite_anonymous_spawn: fn(statement: Stmt, context: &SemaCheckContext) -> Stmt? {
-    expression: if statement == {.Expr(value) -> value else -> { return None }}
-    if context.taskgroups.stack.len() == 0 -> return None
-    if expression == {
-        .MethodCall(receiver, method, _, _, _, _, _) -> {
-            if method != sema_taskgroup_internal_spawn_method() -> return None
-            canonical := sema_taskgroup_is_internal_receiver(receiver)
-            if !canonical {
-                receiver_name: if receiver == {.Ident(name, _, _) -> name else -> { return None }}
-                if sema_taskgroup_stack_index(context.taskgroups, receiver_name) == None -> return None
-            }
-        }
-        else -> { return None }
-    }
-    frame_index := context.taskgroups.stack.len() - 1
-    frame := context.taskgroups.stack[frame_index]
-    serial := frame.synth_counter
-    context.taskgroups.stack[frame_index].synth_counter = serial + 1
-    span := expr_span(expression)
-    name := sema_taskgroup_core_key(".group.task.{span.start}.{serial}")
-    span_name := span
-    init := Binding{
-        mutable: false,
-        markers: [Marker]{},
-        reactive_upgrade: false,
-        meta: None,
-        name: name,
-        name_span: span_name,
-        sigil_span: None,
-        pattern: None,
-        ty: None,
-        ty_span: None,
-        init: expression,
-        is_comptime: false,
-        ct: None,
-        uninit: false,
-        arena_view: false,
-        string_view: false,
-        gc_promotion: None,
-        gc_transferred: false,
-    }
-    return Val(Stmt.Val{binding: init})
 }
 
 sema_taskgroup_check_statement: fn(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {

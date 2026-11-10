@@ -636,26 +636,6 @@ sema_expiring_secret_leaf: fn(leaf: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey"
 }
 
-// A secret-bearing `core.crypto` value: a cloned copy would be a second owned
-// credential, so an unmarked owning argument is E0201, never an implicit clone.
-sema_is_secret_bearing_crypto_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Tagged(marker, inner) -> {
-            if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
-                if inner == .Named(name) -> return sema_secret_bearing_crypto_leaf(name)
-                return false
-            }
-            sema_is_secret_bearing_crypto_type(inner)
-        }
-        .Named(name) -> sema_secret_bearing_crypto_leaf(sema_core_crypto_leaf(name) ?? "")
-        else -> false
-    }
-}
-
-sema_secret_bearing_crypto_leaf: fn(leaf: String) -> Bool Never! {
-    leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
-}
-
 // Whether a value of `ty` carries an ExpiringSecret loan anywhere a store,
 // return or escape could keep it.
 sema_contains_expiring_secret_loan: fn(ty: Type) -> Bool Never! {

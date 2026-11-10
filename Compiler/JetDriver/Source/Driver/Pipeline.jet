@@ -281,16 +281,6 @@ jet_driver_module_display: fn(relative_path: String) -> String Never! {
     parts.join("/")
 }
 
-jet_driver_find_graph_import: fn(imports: [SemaRegistrationImport], source_identity: String, span: Span) -> SemaRegistrationImport? {
-    found := SemaRegistrationImport?{None}
-    loop import in imports {
-        if import.source_module_identity == source_identity && import.declaration.span.start == span.start && import.declaration.span.end == span.end {
-            if found != None -> return None
-            found = Val(import)
-        }
-    }
-    found
-}
 // A dependency package is checked as its own package. A dependency with
 // errors fails the importer once per dependency package: its own errors are
 // reported inline, followed by one E0626 naming the package and the check

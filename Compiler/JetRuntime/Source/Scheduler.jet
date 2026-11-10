@@ -594,46 +594,6 @@ scheduler_cancel_waiter_remove: fn(control: I64, node: I64) {
     scheduler_control_drop(control)
 }
 
-scheduler_cancel_callback_register: fn(control: I64, code: I64, env: I64) -> I64 {
-    node: jet_rt_alloc(I64{40}, I64{8})
-    thread_zero(node, I64{40})
-    sync_store(wrapping(node + I64{8}), code)
-    sync_store(wrapping(node + I64{16}), env)
-    scheduler_control_retain(control)
-    sync_mutex_lock(wrapping(control + I64{72}))
-    invoke: sync_load(wrapping(control + I64{16})) != I64{0}
-    sync_store(wrapping(node + I64{24}), sync_add(wrapping(control + I64{96}), I64{1}))
-    if !invoke {
-        sync_store(node, sync_load(wrapping(control + I64{88})))
-        sync_store(wrapping(control + I64{88}), node)
-    }
-    sync_mutex_unlock(wrapping(control + I64{72}))
-    if invoke {
-        _ := coll_call1(code, env)
-        sync_store(wrapping(node + I64{32}), I64{2})
-    }
-    node
-}
-
-scheduler_cancel_callback_remove: fn(control: I64, node: I64) {
-    sync_mutex_lock(wrapping(control + I64{72}))
-    scheduler_node_unlink(control + I64{88}, node)
-    // Cancellation claims nodes under this lock, then invokes outside it.
-    // Guard destruction waits until the callback no longer borrows its env.
-    sync_mutex_unlock(wrapping(control + I64{72}))
-    loop {
-        sync_mutex_lock(wrapping(control + I64{72}))
-        if (sync_load(wrapping(node + I64{32})) != I64{1}) {
-            jet_rt_free(node, I64{40}, I64{8})
-            sync_mutex_unlock(wrapping(control + I64{72}))
-            break
-        }
-        sync_mutex_unlock(wrapping(control + I64{72}))
-        _ := sync_wait(node + I64{32}, I64{1}, I64{-1})
-    }
-    scheduler_control_drop(control)
-}
-
 scheduler_control_cancel: fn(control: I64) {
     sync_store(wrapping(control + I64{16}), I64{1})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{-1}, I64{1})

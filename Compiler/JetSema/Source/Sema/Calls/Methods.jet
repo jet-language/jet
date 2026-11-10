@@ -84,17 +84,6 @@ sema_call_try_distinct_raw_value: fn(receiver_value: TExpr, args: [CallArg], spa
     finished
 }
 
-sema_call_try_distinct_raw: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "raw" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    gate_scope: sema_call_enter_gate(scopes, SemaKnowledgeGate.RawProjection)
-    allowed: sema_scope_require_knowledge_gate(scopes, SemaKnowledgePlane.Range, SemaKnowledgeGate.RawProjection, span, diagnostics)
-    receiver_checked: sema_check_expression(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics)
-    sema_call_leave_gate(scopes, gate_scope)
-    if !allowed -> return SemaMethodSpecialCheck{handled: true, value: None}
-    receiver_value: receiver_checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_distinct_raw_finish(receiver_value, args, span, expected, environment, program, scopes, diagnostics)
-}
-
 sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Transaction"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method != "on_commit" && method != "on_rollback" -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -902,11 +891,6 @@ sema_call_check_method_candidate_from_value_owned: fn(state: &SemaOwnershipState
 sema_call_check_method_candidate_owned: fn(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     receiver_value: sema_check_expression(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     sema_call_method_checked_from_value(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
-}
-
-sema_call_check_method_candidate: fn(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_call_check_method_candidate_owned(state, receiver, candidate, args, defaults, span, expected, environment, program, scopes, tail_store, context, diagnostics) ?? return None
-    Val(checked.value)
 }
 
 sema_call_check_method: fn(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

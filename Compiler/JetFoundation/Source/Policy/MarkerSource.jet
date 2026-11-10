@@ -123,26 +123,6 @@ marker_source_flag: fn(value: String, line: String) -> Bool Never! {
     }
 }
 
-marker_source_unquote: fn(value: String, line: String) -> String Never! {
-    if !value.starts_with("\"") || !value.ends_with("\"") || value.len() < 2 -> panic("expected a quoted value, found `{value}` in {line}")
-    inner: marker_source_slice(value, 1, value.len() - 1).bytes()
-    out := [U8]{}
-    escaped := false
-    loop byte in inner {
-        if escaped {
-            out.push(byte)
-            escaped = false
-            next
-        }
-        if Int.from_u8(byte) == 92 {
-            escaped = true
-            next
-        }
-        out.push(byte)
-    }
-    String.from_bytes(out) ?? panic("a marker fact quote is not UTF-8 in {line}")
-}
-
 marker_source_unprefixed: fn(written: String) -> String Never! {
     if written.starts_with(".") -> return marker_source_slice(written, 1, written.len())
     written.copy()

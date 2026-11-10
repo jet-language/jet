@@ -728,22 +728,6 @@ sema_effect_covered: fn(inferred: [String], prohibited: [String]) -> [String] Ne
     result
 }
 
-// The effect names a policy's deny list prohibits, as a ranked set.
-sema_effect_authority_prohibited: fn(denies: [String]) -> [String] Never! {
-    prohibited := [String]{}
-    loop raw in denies {
-        effect_name := raw
-        if raw.starts_with("!") {
-            pieces: raw.split("!").to_list()
-            if pieces.len() <= 1 -> next
-            effect_name = pieces[1]
-        }
-        parsed: sema_effect_parse_name(effect_name)
-        if parsed == .Val(value) -> sema_effect_set_add(prohibited, value)
-    }
-    prohibited
-}
-
 sema_effect_show: fn(values: [String]) -> String Never! {
     values.join(", ")
 }
@@ -2852,39 +2836,6 @@ SemaEffectScopeBounds: struct {
     unknown: [String]
 }
 
-sema_effect_scope_bounds: fn(caps: [String]) -> SemaEffectScopeBounds {
-    parsed := SemaEffectScopeBounds{bounds: [String]{}, unknown: [String]{}}
-    loop raw in caps {
-        if raw.starts_with("..") -> next
-        prohibited: raw.starts_with("!")
-        name := raw
-        if prohibited {
-            pieces: raw.split("!").to_list()
-            if pieces.len() > 1 -> name = pieces[1]
-        }
-        effect_name: sema_effect_parse_name(name) ?? {
-            parsed.unknown.push(name)
-            next
-        }
-        if prohibited -> next
-        sema_effect_set_add(parsed.bounds, effect_name)
-    }
-    parsed
-}
-
-// Checks `inferred` against caps parsed by sema_effect_scope_bounds: one
-// unknown-effect report per rejected cap at `span`, then the scope report.
-sema_effect_check_scope_bounds: fn(marker: String, parsed: SemaEffectScopeBounds, inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    valid := parsed.unknown.len() == 0
-    loop name in parsed.unknown -> diagnostics.push(sema_effect_unknown(name, span))
-    over: sema_effect_uncovered(inferred, parsed.bounds)
-    if over.len() > 0 {
-        diagnostics.push(sema_effect_scope_diagnostic(marker, over, parsed.bounds, span))
-        valid = false
-    }
-    valid
-}
-
 // `e0747` for a denial: the callback reaches an effect its parameter's row
 // denies (`fn(…) -[!Panic]>`), which no grant can lift.
 sema_effect_callback_denied_diagnostic: fn(denied: [String], row: SemaEffectCallbackRow, span: Span) -> Diagnostic {
@@ -4161,69 +4112,6 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
         discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, discarded)
-}
-
-sema_effect_check_unsafe_statements: fn(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
-    valid := true
-    loop statement in statements {
-        if statement == {
-            .Unsafe(audit, audit_expr, body, span) -> {
-                if !sema_effect_check_unsafe_region(audit, audit_expr != None, span, diagnostics) -> valid = false
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .While(_, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .For(_, _, _, _, body, _, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .Switch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    if !sema_effect_check_unsafe_statements(arm.body, diagnostics) -> valid = false
-                }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .Loop(body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .CountedLoop(_, _, _, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .Impure(_, _, body, _)
-            | .Reactive(body, _)
-            | .Shield(body, _)
-            | .Switched(_, body, _)
-            | .Region(_, _, body, _)
-            | .Policy(_, body, _)
-            | .TaskGroup(_, _, _, body, _)
-            | .Layout(_, _, body, _)
-            | .Live(body, _)
-            | .Transact(_, _, body, _, _)
-            | .ComptimeBlock(body, _, _)
-            | .ContextBlock(_, body, _)
-            | .AssumeDet(_, _, body, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .AuthorityScope(_, _, _, body, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                if !sema_effect_check_unsafe_statements(then_body, diagnostics) -> valid = false
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .ComptimeSwitch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    if !sema_effect_check_unsafe_statements(arm.body, diagnostics) -> valid = false
-                }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .ScopeMember(_, _, _, _, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            else -> {}
-        }
-    }
-    valid
 }
 
 // The walkers over a checked flat body: the one a child visit continues

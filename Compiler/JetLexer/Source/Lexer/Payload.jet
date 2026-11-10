@@ -958,21 +958,6 @@ identifier_respelling: fn(source: [U8], start: Int, end: Int, allow_reserved_ide
     None
 }
 
-source_has_text: fn(source: [U8], at: Int, expected: String) -> Bool Never! {
-    wanted: expected.bytes()
-    loop offset in 0..<wanted.len() {
-        if byte_at(source, at + offset) != Int.from_u8(wanted[offset]) -> return false
-    }
-    true
-}
-
-text_in: fn(name: String, values: [String]) -> Bool Never! {
-    loop value in values {
-        if value == name -> return true
-    }
-    false
-}
-
 scalar_codepoint: fn(source: [U8], start: Int, width: Int) -> Int Never! {
     first: byte_at(source, start)
     if width == 2 -> return (first - 192) * 64 + (byte_at(source, start + 1) - 128)
@@ -1136,8 +1121,4 @@ lexed_from: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: B
 
 lex_payload: fn(source: [U8], config_surface: Bool) -> Lexed {
     lexed_from(source, config_surface, false)
-}
-
-lex_generated_payload: fn(source: [U8]) -> Lexed {
-    lexed_from(source, false, true)
 }

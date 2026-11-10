@@ -90,11 +90,6 @@ sema_inference_binding_at: fn(bindings: [SemaInferenceBinding], name: String) ->
     None
 }
 
-sema_inference_result_binding: fn(result: SemaInferenceResult, name: String) -> Type? {
-    binding: sema_inference_binding_at(result.substitutions, name) ?? return None
-    Val(binding.ty)
-}
-
 sema_inference_bounds_checked: fn(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
     required_count := 0
     loop parameter in parameters {
@@ -132,8 +127,4 @@ sema_inference_bounds_checked: fn(parameters: [SemaInferenceTypeParam], evidence
         if !parameter_found -> return false
     }
     true
-}
-
-sema_inference_result_bounds_checked: fn(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool Never! {
-    result.complete && sema_inference_bounds_checked(parameters, result.evidence, result.substitutions)
 }

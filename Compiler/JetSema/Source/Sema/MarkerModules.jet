@@ -177,21 +177,6 @@ sema_marker_module_scope: fn(items: [Item], span: Span, prefix: String) -> Strin
     prefix.copy()
 }
 
-sema_marker_module_import_declared: fn(items: [Item], scope: String, span: Span, prefix: String) -> Bool Never! {
-    loop item in items {
-        if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            path: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
-            if path == scope {
-                loop declaration in code_module.imports {
-                    if declaration.span.start == span.start && declaration.span.end == span.end -> return true
-                }
-            }
-            if scope.starts_with("{path}.") && sema_marker_module_import_declared(body, scope, span, path) -> return true
-        }
-    }
-    false
-}
-
 sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
     prefix := scope
     loop {

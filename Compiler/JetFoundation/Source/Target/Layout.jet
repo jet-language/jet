@@ -175,34 +175,6 @@ jet_target_layout_support_exact: fn(triple: String, address_bound: Int) -> Layou
     }
 }
 
-// Build an authoritative support row from a target-provided alignment set.
-// Empty rows are unknown; no caller may treat unknown as unlimited support.
-jet_target_layout_support_exact_rows: fn(alignments: [Int], max_size: Int?, max_address: Int?, provenance: String) -> LayoutSupportFacts Never! {
-    proven: alignments.len() > 0
-    LayoutSupportFacts{
-        proven: proven,
-        alignments: alignments,
-        max_size: max_size,
-        max_address: max_address,
-        abi: None,
-        provenance: provenance,
-    }
-}
-
-// Build the exact powers-of-two support row through one checked boundary.
-jet_target_layout_support_powers_through: fn(max_alignment: Int, max_size: Int?, max_address: Int?, provenance: String) -> LayoutSupportFacts Never! {
-    if max_alignment <= 0 || !jet_layout_is_power_of_two(max_alignment) -> return jet_target_layout_support_unknown()
-    alignments := [Int]{}
-    alignment := 1
-    loop {
-        alignments.push(alignment)
-        if alignment >= max_alignment -> break
-        next: jet_layout_checked_mul(alignment, 2) ?? break
-        alignment = next
-    }
-    jet_target_layout_support_exact_rows(alignments, max_size, max_address, provenance)
-}
-
 jet_target_layout_support_with_abi: fn(support: LayoutSupportFacts, abi: String) -> LayoutSupportFacts Never! {
     LayoutSupportFacts{
         proven: support.proven,
@@ -274,18 +246,6 @@ jet_target_layout_from_machine: fn(machine: TargetMachine) -> JetTargetLayout Ne
     }
 }
 
-// Same as the machine adapter for callers that retain only the selected
-// profile facts. The triple remains explicit and is never taken from the host.
-jet_target_layout_from_selected_facts: fn(triple: String, facts: LayoutCapabilityFacts) -> JetTargetLayout Never! {
-    pointer_size: jet_target_layout_pointer_size(triple)
-    JetTargetLayout{
-        triple: triple,
-        pointer_size: pointer_size,
-        pointer_alignment: pointer_size,
-        facts: facts,
-    }
-}
-
 jet_target_layout_u64_bytes: fn(value: Int) -> [U8] Never! {
     bytes := [U8]{}
     loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))).bit_and(255)})
@@ -353,85 +313,11 @@ jet_target_layout_check_alignment: fn(target: JetTargetLayout, requested: Int, n
     }}
 }
 
-jet_target_layout_alignment_error_reason: fn(error: JetLayoutAlignmentError) -> String Never! {
-    if error == {
-        .Zero -> "zero does not establish an alignment boundary"
-        .NotPowerOfTwo(_) -> "the value is not a power of two"
-        .PortableBaseline(_, baseline) -> "the portable declaration baseline is {baseline} bytes; use `align(target, N)` for a profile-specific request"
-        .MissingTypeFacts(profile) -> "target profile `{profile}` has no proved type-representation alignment facts"
-        .Unsupported(requested, effective, profile) -> "target profile `{profile}` does not support requested alignment {requested} (effective {effective})"
-    }
-}
-
-jet_target_layout_support_for_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind) -> LayoutSupportFacts Never! {
-    if kind == {
-        .Stack -> target.facts.stack_placement
-        .Global -> target.facts.global_placement
-        .Heap -> target.facts.heap_allocator
-        else -> target.facts.foreign_by_value_abi
-    }
-}
-
 jet_target_layout_storage_kind_name: fn(kind: JetLayoutStorageKind) -> String Never! {
     if kind == JetLayoutStorageKind.Stack -> return "Stack"
     if kind == JetLayoutStorageKind.Global -> return "Global"
     if kind == JetLayoutStorageKind.Heap -> return "Heap"
     "ForeignByValue"
-}
-
-jet_target_layout_storage_kind_name_lower: fn(kind: JetLayoutStorageKind) -> String Never! {
-    if kind == JetLayoutStorageKind.Stack -> return "stack"
-    if kind == JetLayoutStorageKind.Global -> return "global"
-    if kind == JetLayoutStorageKind.Heap -> return "heap"
-    "foreign by-value ABI"
-}
-
-jet_target_layout_storage_error_reason: fn(error: JetLayoutStorageError) -> String Never! {
-    if error == {
-        .MissingFacts(kind, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement facts are missing for target profile `{profile}`"
-        .UnsupportedAlignment(kind, alignment, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement does not support alignment {alignment} on target profile `{profile}`"
-        .MissingSizeBound(kind) -> "{jet_target_layout_storage_kind_name(kind)} placement has no proved size bound"
-        .SizeExceeded(kind, size, max_size) -> "{jet_target_layout_storage_kind_name(kind)} object size {size} exceeds target bound {max_size}"
-        .MissingAddressBound(kind) -> "{jet_target_layout_storage_kind_name(kind)} placement has no proved address bound"
-        .AddressOverflow(kind) -> "{jet_target_layout_storage_kind_name(kind)} address plus object size overflows"
-        .AddressExceeded(kind, end, max_address) -> "{jet_target_layout_storage_kind_name(kind)} object end {end} exceeds target address bound {max_address}"
-    }
-}
-
-jet_target_layout_check_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: Int?) -> JetLayoutStorageResult Never! {
-    support: jet_target_layout_support_for_storage(target, kind)
-    if !support.proven -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingFacts{kind: kind, profile: target.facts.target_profile}}
-    if alignment <= 0 || !jet_target_layout_supports_alignment(support, alignment) -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.UnsupportedAlignment{kind: kind, alignment: alignment, profile: target.facts.target_profile}}
-    if size < 0 -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-    max_size: support.max_size ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingSizeBound{kind: kind}}
-    if size > max_size -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.SizeExceeded{kind: kind, size: size, max_size: max_size}}
-    if address == .Val(address_value) {
-        max_address: support.max_address ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingAddressBound{kind: kind}}
-        end: jet_layout_checked_add(address_value, size) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-        if end > max_address -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressExceeded{kind: kind, end: end, max_address: max_address}}
-    }
-    JetLayoutStorageResult.Accepted
-}
-
-jet_target_layout_check_array_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: Int?) -> JetLayoutStorageResult Never! {
-    size: jet_layout_checked_mul(layout.stride, count) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-    jet_target_layout_check_storage(target, kind, layout.alignment, size, address)
-}
-
-jet_target_layout_engine_from_machine_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], machine: TargetMachine) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_machine(machine))
-}
-
-jet_target_layout_engine_from_selected_facts_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], triple: String, facts: LayoutCapabilityFacts) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_selected_facts(triple, facts))
-}
-
-jet_target_layout_engine_from_machine: fn(items: [Item], machine: TargetMachine) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_from_machine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, machine)
-}
-
-jet_target_layout_engine_from_selected_facts: fn(items: [Item], triple: String, facts: LayoutCapabilityFacts) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_selected_facts(triple, facts))
 }
 
 jet_target_layout_engine: fn(items: [Item], target: JetTargetLayout) -> TargetLayoutEngine Never! {
@@ -461,34 +347,10 @@ jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayo
     engine.target
 }
 
-jet_target_layout_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
-    jet_target_layout_struct_facts_inner_named(engine, definition, definition.name, "", query)
-}
-
 jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
-}
-
-jet_target_layout_checked_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef) -> JetCheckedLayoutResult Never! {
-    physical: jet_target_layout_struct_facts(engine, definition)
-    if definition.layout == {
-        Val(layout) -> if layout == {
-            .CAligned(alignment, target_mode) -> {
-                natural: physical.bytes.map(value -> value.alignment) ?? 1
-                checked: jet_target_layout_check_alignment(engine.target, alignment, natural, target_mode)
-                if checked == {
-                    .Accepted(value) -> return JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: Val(value)}}
-                    .Rejected(error) -> return JetCheckedLayoutResult.Rejected{error: error}
-                }
-            }
-            else -> {}
-        }
-        None -> {}
-    }
-    JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: None}}
 }
 
 // `#Layout(U8)` names the integer type that backs a
@@ -568,11 +430,6 @@ jet_layout_integer_backing_max: fn(name: String) -> Int Never! {
 jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
     if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
-}
-
-jet_target_layout_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
-    jet_target_layout_enum_facts_inner_named(engine, definition, definition.name, "", query)
 }
 
 jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {

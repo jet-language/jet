@@ -69,11 +69,6 @@ jet_cli_explain_policy: fn(query: String, color: Bool, json: Bool) -> JetCLIPlan
     Val(jet_cli_explanation_output(explanation, color, json))
 }
 
-// Rust `{:?}` of a `&str`: quoted, with `\`, `"` and line controls escaped.
-jet_cli_rust_debug_str: fn(value: String) -> String Never! {
-    "\"{value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")}\""
-}
-
 // `marker_argument_declarations`: the `core.compiler.lang` menus the signature
 // names, sorted, once each.
 jet_cli_rule_argument_declarations: fn(signature: TAppliedRuleSignature) -> String Never! {
@@ -120,23 +115,4 @@ jet_cli_rule_named: fn(rules: [TAppliedRule], name: String) -> TAppliedRule? Nev
         if rule.name == name -> return Val(rule)
     }
     None
-}
-
-// A marker syntax row with a registered rule answers from that one row, never
-// from the dictionary's placeholder, so a retired marker is never shown as
-// live. With `bare`, a query that is no syntax row but names a registered rule
-// row answers the same way (the registration-table leaf of `lookup`). None
-// leaves the query to the syntax and policy branches.
-jet_cli_explain_rule: fn(query: String, bare: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
-    syntax: jet_cli_syntax_lookup(query)
-    if syntax == None && !bare -> return None
-    name := query.trim()
-    if syntax == .Val(index) {
-        row: JET_CLI_SYNTAX_ROWS[index]
-        if row.kind != JetCLISyntaxKind.Marker -> return None
-        name = row.token
-    }
-    // The registered rule rows are the Prelude marker declarations the compiler embeds.
-    rule: jet_cli_rule_named(marker_source_read(MARKER_SOURCE), name) ?? return None
-    Val(jet_cli_explanation_output(jet_cli_rule_explanation(rule), color, json))
 }

@@ -71,25 +71,6 @@ process_execution_launch: fn(spec: I64, collect: Bool, err: I64) -> I64 {
     }
     child
 }
-process_execution_launch_input: fn(spec: I64, input: I64, collect: Bool, err: I64) -> I64 {
-    if (input == I64{0}) -> return process_execution_launch(spec, collect, err)
-    prepared: jet_rt_handle_clone_process_spec(spec)
-    dirs := fd_word(prepared, PROCESS_SPEC_DIRECTORIES)
-    if (dirs == I64{0}) {
-        dirs = data_sequence_new(I64{1}, I64{24})
-        fd_put(prepared, PROCESS_SPEC_DIRECTORIES, dirs)
-    }
-    row: data_sequence_reserve(dirs, I64{24})
-    fd_put(row, I64{0}, jet_fd_retain_raw(input))
-    fd_put(row, I64{8}, I64{0})
-    fd_put(row, I64{16}, I64{0})
-    fd_put(dirs, I64{0}, fd_word(dirs, I64{0}) + I64{1})
-    encoding_enum_drop(fd_word(prepared, PROCESS_SPEC_STDIN))
-    fd_put(prepared, PROCESS_SPEC_STDIN, process_raw_box(HOST_PROCESS_STREAM_INHERIT))
-    child: process_execution_launch(prepared, collect, err)
-    jet_rt_handle_drop_process_spec(prepared)
-    child
-}
 #Export(c) jet_process_spec_plan: fn(spec: I64, ok: I64, err: I64) -> I64 {
     if process_execution_keep_refused(spec, err) -> return I64{0}
     if !process_authority_bound(spec) -> return process_execution_invalid(spec, rt_static_text("ProcessSpec.plan() requires an authority policy from .under(...)"), err)

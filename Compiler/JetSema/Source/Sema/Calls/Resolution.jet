@@ -87,13 +87,6 @@ sema_call_type_is_function: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_call_signature_effects: fn(signature: Type) -> [EffectRowEntry]? {
-    if signature == {
-        .Fn(_, _, effects, _, _, _) -> effects
-        else -> None
-    }
-}
-
 sema_call_failure_carrier: fn(return_type: Type?) -> TFailureCarrier Never! {
     ty: return_type ?? return TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if ty == {

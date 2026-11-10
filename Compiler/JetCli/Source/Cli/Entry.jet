@@ -1450,13 +1450,6 @@ jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileRes
     jet_cli_package_run_member(root) == .None
 }
 
-// Under `CompileMode::Run`: a project check of a program needs `run: fn` in its
-// entry file (E0101). Only a cleanly parsed entry is judged; a parse error is
-// reported by the compile itself.
-jet_cli_entry_lacks_run: fn(source: String) -> Bool Never! {
-    jet_cli_entry_lacks_callable(source, "run")
-}
-
 jet_cli_entry_lacks_callable: fn(source: String, callable: String) -> Bool Never! {
     block: jet_driver_inline_package(source)
     if block.error != None -> return false

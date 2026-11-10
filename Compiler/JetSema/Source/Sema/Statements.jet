@@ -8051,18 +8051,6 @@ sema_stmt_mark_discarded_result: fn(program: SemaProgramTables, checked: TExpr, 
     }
 }
 
-// The source spelling of a scoped statement form this checker does not
-// handle yet, for its incomplete reason.
-sema_stmt_scope_form_label: fn(statement: Stmt) -> String Never! {
-    if statement == {
-        .Layout(_, _, _, _) -> "`layout`"
-        .ContextBlock(_, _, _) -> "`#Context`"
-        .Live(_, _) -> "`live`"
-        .AssumeDet(_, _, _, _) -> "`assume_deterministic`"
-        else -> "scoped statement"
-    }
-}
-
 // Rust `check_value_tail` on an unreachable value line infers it with the
 // promised type only as context (`infer_with_expected`): the value is never
 // compared against that type, handed back, or treated as a discarded result.

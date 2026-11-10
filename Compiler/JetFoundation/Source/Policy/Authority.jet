@@ -56,13 +56,6 @@ authority_holds: fn(rights: [String]) -> [String] Never! {
     out
 }
 
-// Insert one right, keeping the set sorted and duplicate-free.
-authority_holds_insert: fn(holds: &[String], right: String) {
-    if holds.contains(right) -> return
-    holds.push(right.copy())
-    holds.sort()
-}
-
 // Root segment of a dotted right (`FS.Read` -> `FS`).
 authority_root: fn(right: String) -> String Never! {
     parts: right.split(".").to_list()
@@ -135,28 +128,11 @@ authority_answer: fn(held: [String], denied: [String], right: String) -> Authori
     AuthorityVerdict.Missing
 }
 
-// An inner scope may only tighten its parent's holds.
-authority_tighten: fn(outer: [String], inner: [String]) -> Bool Never! {
-    loop right in inner {
-        if !authority_covers_any(outer, right) -> return false
-    }
-    true
-}
-
 // Rights in `used` not covered by any held right.
 authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
         if !authority_covers_any(held, right) -> out.push(right.copy())
-    }
-    authority_holds(out)
-}
-
-// Rights in `used` covered by a prohibition or other matching set.
-authority_covered: fn(used: [String], matching: [String]) -> [String] Never! {
-    out := [String]{}
-    loop right in used {
-        if authority_covers_any(matching, right) -> out.push(right.copy())
     }
     authority_holds(out)
 }

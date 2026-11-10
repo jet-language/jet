@@ -1806,11 +1806,6 @@ sema_call_check_direct_target_owned: fn(state: &SemaOwnershipState, target: Sema
     sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
 }
 
-sema_call_check_direct_target: fn(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics) ?? return None
-    Val(checked.value)
-}
-
 // The Rust direct_calls forms ahead of ordinary name resolution
 // (check_call_inner), taken first by sema_expr_check_direct_call.
 // `measurement(value, uncertainty:)` and 's `apply(policy..., f)` apply

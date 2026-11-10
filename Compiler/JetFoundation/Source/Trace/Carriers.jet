@@ -39,9 +39,6 @@ TraceAllocation: struct { count: U64, bytes: U64, symbol: JetSymbolRef }
 TraceTask: struct { id: U64, parent: U64, state: String, wait: String, cancelled: Bool, symbol: JetSymbolRef }
 TraceLock: struct { kind: String, id: U64, depth: U64, capacity: U64?, send_waiters: U64, recv_waiters: U64, closed: Bool, symbol: JetSymbolRef }
 TraceIO: struct { start_ns: U64, end_ns: U64, kind: String, task_id: U64, wait: String, symbol: JetSymbolRef }
-// A runtime wait is I/O when the runtime names it by a socket operation
-// (`tcp accept`, `udp receive`, `unix read`), a `network wait`, or `io …`.
-trace_io_is_io_wait: fn(wait: String) -> Bool Never! { trace_io_kind_for_wait(wait) != None }
 trace_io_kind_for_wait: fn(wait: String) -> String? Never! {
     if wait.contains("tcp") -> return Val("tcp")
     if wait.contains("network") || wait.starts_with("udp ") || wait.starts_with("unix ") -> return Val("network")

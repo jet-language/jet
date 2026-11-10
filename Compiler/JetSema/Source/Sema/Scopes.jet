@@ -231,22 +231,6 @@ SemaLoopBreakFlows: struct {
     paths: [SemaOwnershipState]
 }
 
-sema_loop_value_kind_effect: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Effect
-}
-
-sema_loop_value_kind_collecting: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Collecting
-}
-
-sema_loop_value_kind_result: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Result
-}
-
-sema_loop_value_set_pending: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) Never! {
-    context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: None})
-}
-
 sema_loop_value_set_pending_type: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
@@ -296,11 +280,6 @@ sema_loop_value_set_result_type: fn(context: &SemaCheckContext, frame_index: Int
     context.loop_value_frames[frame_index].ty = Val(ty)
 }
 
-sema_loop_value_result_type: fn(context: SemaCheckContext, frame_index: Int) -> Type? {
-    if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return None
-    context.loop_value_frames[frame_index].ty
-}
-
 sema_loop_value_break_flows: fn(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
     context.loop_break_flows[frame_index].paths
@@ -323,26 +302,6 @@ sema_loop_value_collecting_type: fn(context: SemaCheckContext) -> Type? {
 sema_loop_value_set_collecting_type: fn(context: &SemaCheckContext, ty: Type) Never! {
     if context.collect_item_types.len() == 0 -> return
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
-}
-
-sema_loop_value_append_collecting_item_type: fn(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if ty == (Type.Named{name: "Unit"}) {
-        diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
-        return false
-    }
-    existing: sema_loop_value_collecting_type(context)
-    if existing == None {
-        sema_loop_value_set_collecting_type(context, ty)
-        return true
-    }
-    expected: existing
-    if type_identity_equal(expected, ty) -> return true
-    joined: sema_expr_numeric_join(expected, ty) ?? {
-        diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is {type_name(ty)} instead of {type_name(expected)}", "convert every item to one type, or split the loops"))
-        return false
-    }
-    sema_loop_value_set_collecting_type(context, joined)
-    true
 }
 
 SemaScopeLoopLabel: struct {
@@ -1804,18 +1763,6 @@ sema_scope_join_hardware_paths: fn(table: &SemaScopeTable, before: SemaScopeHard
     table.hardware_transfers = sema_scope_hardware_transfers_snapshot(joined.transfers)
     table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(joined.definite)
     table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(joined.pending)
-}
-
-sema_scope_enter_existing: fn(table: &SemaScopeTable, owner: String) -> Bool Never! {
-    if table.frames[table.current].owner == owner -> return true
-    parent: table.current
-    loop (index, frame) in table.frames {
-        if frame.parent == parent && frame.owner == owner {
-            table.current = index
-            return true
-        }
-    }
-    false
 }
 
 // Module declarations share one root namespace. The declaration pass reports

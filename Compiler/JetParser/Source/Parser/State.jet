@@ -886,40 +886,6 @@ parser_recover_statement: fn(state: &JetParserState) Never! {
     }
 }
 
-// Consume one balanced `(…)`, `[…]` or `{…}` group starting at the current
-// opener, so a rejected construct does not cascade into its contents.
-parser_skip_group: fn(state: &JetParserState) Never! {
-    depth := 0
-    loop {
-        kind: parser_current_kind(state)
-        if kind == TOKEN_EOF -> break
-        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-        if parser_is_closer(kind) -> depth -= 1
-        parser_bump(state)
-        if depth <= 0 -> break
-    }
-}
-
-// S73 recovery: skip a rejected parenthesized group through its `)`, stopping
-// early at a line end or block close at the group's own depth.
-parser_skip_to_rparen: fn(state: &JetParserState) Never! {
-    depth := 0
-    loop {
-        kind: parser_current_kind(state)
-        if kind == TOKEN_EOF -> break
-        if kind == TOKEN_LPAREN -> depth += 1
-        if kind == TOKEN_RPAREN {
-            if depth == 0 {
-                parser_bump(state)
-                break
-            }
-            depth -= 1
-        }
-        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && depth == 0 -> break
-        parser_bump(state)
-    }
-}
-
 // After a failed top-level item: skip to the next plausible item start. A
 // `comptime` starts an item only at the start of a line; after `NAME:` it
 // is that binding's value, which goes with the skipped line.

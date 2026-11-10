@@ -153,10 +153,6 @@ jet_driver_has_errors: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     false
 }
 
-jet_driver_find_alias: fn(aliases: [String:Int], name: String) -> Int? {
-    aliases.get(name)
-}
-
 // An inline module, or a generic-module alias that semantic preparation
 // expands into one.
 jet_driver_program_has_inline_module: fn(program: Program, name: String) -> Bool Never! {
@@ -1755,13 +1751,6 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
         diagnostics: diagnostics,
         complete: !jet_driver_has_errors(diagnostics),
     }
-}
-
-jet_driver_source_file_index: fn(files: [SourceFile], path: String) -> Int? {
-    loop index in 0..<files.len() {
-        if files[index].path == path -> return Val(index)
-    }
-    None
 }
 
 jet_driver_add_source_file: fn(files: &[SourceFile], file: SourceFile, diagnostics: &[Diagnostic]) {

@@ -4063,10 +4063,6 @@ sema_checked_layout_engine: fn(graph: SemaRegistrationGraph, module_row: SemaReg
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, name_resolutions, jet_target_layout_from_machine(graph.target_machine))
 }
 
-sema_registration_check_declarations: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) -> TDeclarationFacts {
-    sema_registration_check_declarations_with_values(graph, module_index, diagnostics, [SemaComptimeItemValue]{}, sema_checked_program_boxed_edges(graph))
-}
-
 sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {
     if module_index < 0 || module_index >= graph.modules.len() -> return TDeclarationFacts{type_defs: [TTypeDef]{}, traits: [TTraitDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}, core_builtin_owners: [TCoreBuiltinOwner]{}}
     module_row: graph.modules[module_index]

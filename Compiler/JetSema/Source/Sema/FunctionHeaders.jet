@@ -305,32 +305,6 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
     }
 }
 
-sema_function_header_active_marker_gates: fn(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
-    gates := [SemaFunctionHeaderMarkerGate]{}
-    if function.is_unsafe -> gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
-    if function.is_replayable -> gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
-    if function.is_must_use -> gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
-    if function.is_inline -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_inline_always -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_reactive -> gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
-    gates
-}
-
-sema_function_header_check_marker_gates: fn(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
-    valid := true
-    loop gate in sema_function_header_active_marker_gates(function) {
-        allowed := false
-        loop name in function_allowed_markers {
-            if name == gate.name -> allowed = true
-        }
-        if !allowed {
-            diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
-            valid = false
-        }
-    }
-    valid
-}
-
 // The function rules whose meaning the parser projects onto `Func` fields
 // that the checker, foreign stage and lowering read, plus `#Arithmetic`,
 // which the body checker reads as the function's arithmetic policy

@@ -22,14 +22,6 @@ sema_ui_handle_unit: fn() -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-sema_ui_handle_result: fn(ok: Type, error: Type) -> Type Never! {
-    Type.Result{ok: ok, err: error}
-}
-
-sema_ui_handle_positional: fn(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
-    SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
-}
-
 sema_ui_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
     values := [TExpr]{}
     loop arg in args {

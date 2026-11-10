@@ -69,10 +69,6 @@ checked_cost_combine_bounds: fn(op: TBinaryOp, left: TIntegerBounds, right: TInt
     }
 }
 
-checked_cost_bounds_fit_inline: fn(bounds: TIntegerBounds) -> Bool Never! {
-    bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
-}
-
 checked_builtin_mutates_receiver: fn(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
@@ -88,25 +84,5 @@ checked_builtin_mutates_receiver: fn(operation: TBuiltinOp) -> Bool Never! {
         .ByteBufferWrite(_) -> return true
         .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
         else -> return false
-    }
-}
-
-checked_cost_operation: fn(kind: TCostKind) -> String Never! {
-    if kind == {
-        .ViewMaterialization -> "materializing a read-only view"
-        .CollectionCopyOnWrite -> "editing a shared map backing store"
-        .ExactIntSpill -> "an exact Int operation may spill to bigint"
-        .OutcomeConstruction -> "constructing an Outcome carrier"
-        .RepresentationFallback -> "using a generic collection representation"
-    }
-}
-
-checked_cost_fix: fn(kind: TCostKind) -> String Never! {
-    if kind == {
-        .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
-        .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
-        .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
-        .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
-        .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
     }
 }

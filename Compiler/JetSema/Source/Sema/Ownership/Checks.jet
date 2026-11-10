@@ -724,25 +724,6 @@ sema_ownership_writes_temporary_edit_guard: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// A place reached through the `.value` of a `guard_edit()` binding
-// (`guard.value.items`) is written under the guard's edit permit, so a
-// writing call on it needs no `&`, as a write through the guard needs none.
-sema_ownership_place_under_edit_guard: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
-    if expr == {
-        .Field(base, member, _, _) -> {
-            if member == "value" {
-                if base == .Ident(name, span, _) {
-                    index: sema_scope_resolve_index_at(scopes, name, span) ?? return false
-                    return sema_ownership_binding_is_edit_shared_guard(scopes.bindings[index])
-                }
-            }
-            sema_ownership_place_under_edit_guard(base, scopes)
-        }
-        .Index(base, _, _, _, _) | .Paren(base, _, _) -> sema_ownership_place_under_edit_guard(base, scopes)
-        else -> false
-    }
-}
-
 // Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
 // `.value` held by an untagged or `guard_read()` SharedGuard. A write
 // parameter root keeps its caller-granted capability. The guard type is
@@ -1736,20 +1717,6 @@ sema_ownership_record_binding_view: fn(state: &SemaOwnershipState, binding: Bind
     valid
 }
 
-sema_ownership_record_call_view: fn(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source_expr: Expr, output_path: [String], access: AccessConvention, scopes: SemaScopeTable) -> Bool {
-    places := sema_ownership_places_from_expr_in_state(source_expr, scopes, state)
-    if places.len() == 0 -> return false
-    key: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return false
-    loop index in 0..<state.views.len() {
-        if state.views[index].carrier_key == key && state.views[index].active -> state.views[index].active = false
-    }
-    valid := true
-    loop place in places {
-        if !sema_ownership_record_view_fact_inner(state, carrier, carrier_span, place, output_path, access, scopes, -1) -> valid = false
-    }
-    valid
-}
-
 sema_ownership_append_view_source_projections: fn(place: SemaOwnershipPlace, projections: [ViewSourceProjection], span: Span) -> SemaOwnershipPlace Never! {
     result := sema_ownership_place_snapshot(place)
     loop projection in projections {
@@ -2067,32 +2034,6 @@ sema_ownership_check_owner_read: fn(state: &SemaOwnershipState, expr: Expr, scop
     true
 }
 
-// Registry-backed view inference calls this hook after it has proved the
-// returned place.  Ownership stores the window and enforces overlap; it does
-// not infer view kinds or invent a second type relation.
-sema_ownership_open_reference: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    if access == AccessConvention.Write && sema_ownership_place_refuses_write(state, place, scopes) {
-        sema_ownership_report_static_write(state, place, span, diagnostics)
-        return false
-    }
-    if !sema_ownership_view_open_deferred(state, span) {
-        if sema_ownership_active_view_conflict(state, place, access) {
-            diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-            return false
-        }
-        conflict: sema_ownership_active_loan_conflict(state, place, access)
-        if conflict != None {
-            diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-            return false
-        }
-    }
-    loan_seq := sema_ownership_next_sequence(state)
-    state.loans.push(SemaOwnershipLoan{place: place, access: access, span: span, scope_depth: state.scope_depth, seq: loan_seq, carrier_fact_seq: -1, carrier_key: ""})
-    kind: if access == AccessConvention.Write -> SemaOwnershipReferenceKind.Write else -> SemaOwnershipReferenceKind.Read
-    sema_ownership_note_reference(state, place.root, span, scopes, kind)
-    true
-}
-
 sema_ownership_open_reference_for_expr: fn(state: &SemaOwnershipState, expr: Expr, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_report_invalidated_view(state, expr, scopes, span, diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
@@ -2275,11 +2216,6 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
         index += 1
     }
     true
-}
-
-sema_ownership_close_reference: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace) Never! {
-    remaining: loop loan in state.loans if !sema_ownership_places_overlap(loan.place, place) -> loan
-    state.loans = remaining
 }
 
 sema_ownership_place_moved: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
@@ -2757,13 +2693,6 @@ sema_ownership_carrier_loan_exempt: fn(state: &SemaOwnershipState, expr: Expr, p
             if fact.seq != carrier.seq && !sema_ownership_view_descends_from(state, carrier, fact.seq) -> next
             if fact.loan_seq >= 0 && loan.seq == fact.loan_seq && sema_ownership_span_same(loan.span, fact.loan_span) && loan.carrier_fact_seq == fact.seq && loan.carrier_key == fact.carrier_key && sema_ownership_place_exact(loan.place, fact.source) && sema_ownership_place_extends(fact.source, place) -> return true
         }
-    }
-    false
-}
-
-sema_ownership_active_view_conflict: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
-    loop fact in state.views {
-        if fact.active && !fact.invalidated && !fact.contested && sema_ownership_places_overlap(fact.source, place) && sema_ownership_view_access_conflicts(fact.access, access) -> return true
     }
     false
 }

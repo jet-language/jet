@@ -100,20 +100,6 @@ jet_cli_receipt_field_diff_render: fn(diff: JetCLIReceiptFieldDiff) -> String Ne
     "{jet_cli_receipt_field_path(diff)}: {jet_cli_receipt_diff_value(diff.before)} -> {jet_cli_receipt_diff_value(diff.after)}"
 }
 
-jet_cli_receipt_diff_projection: fn(diffs: [JetCLIReceiptFieldDiff]) -> CanonicalJSON Never! {
-    values := [CanonicalJSON]{}
-    loop diff in diffs {
-        fields: [CanonicalJSONField]{
-            {key: "after", value: diff.after ?? CanonicalJSON.Null},
-            {key: "before", value: diff.before ?? CanonicalJSON.Null},
-            {key: "field", value: CanonicalJSON.String(diff.field)},
-            {key: "section", value: CanonicalJSON.String(diff.section)},
-        }
-        values.push(canonical_json_object(fields) ?? panic("unique field diff keys"))
-    }
-    CanonicalJSON.Array(values)
-}
-
 jet_cli_receipt_missing_fields: fn(section: String, prefix: String, value: CanonicalJSON, removed: Bool, diffs: &[JetCLIReceiptFieldDiff]) Never! {
     if value == .Object(fields) && fields.len() > 0 {
         loop field in fields {

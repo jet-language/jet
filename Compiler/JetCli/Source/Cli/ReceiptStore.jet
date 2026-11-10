@@ -33,14 +33,6 @@ jet_cli_receipt_merge_sections: fn(original: &&JetCLIReceipt, claim: JetCLIRecei
     Ok(receipt)
 }
 
-jet_cli_receipt_section: fn(receipt: JetCLIReceipt, name: String) -> JetCLIReceiptSection? JetCLIReadError! {
-    jet_cli_receipt_section_name_validate(name)
-    loop section in receipt.sections {
-        if section.name == name -> return Ok(Val(section))
-    }
-    Ok(None)
-}
-
 // Rust bounded_redact_bytes/replace_bytes: byte-preserving, non-overlapping
 // replacements, including non-UTF8 command output, before its digest is made.
 jet_cli_receipt_redact_bytes: fn(bytes: [U8], secret_values: [String]) -> [U8] JetCLIReadError! {
@@ -173,37 +165,6 @@ jet_cli_receipt_publish: fn(project_root: String, receipt: JetCLIReceipt) -[FS, 
     if !jet_cli_receipt_inputs_current(receipt.claim.inputs) -> return Ok(false)
     held: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "objects"}, true) ?? return Err(err)
     Ok(held.publish_immutable(receipt.claim.key, bytes, None, JET_CLI_RECEIPT_MAX_BYTES) ?? return Err(err))
-}
-
-jet_cli_receipt_publish_section: fn(project_root: String, record: JetCLIReceiptSectionRecord) -[FS, Env, Time.Wait]> Bool JetCLIReadError! {
-    bytes: jet_cli_receipt_section_record_encode(record)
-    directory: if record.parent_digest == "" -> "staged" else -> "sections"
-    held: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", directory, record.claim_key}, true) ?? return Err(err)
-    id: jet_cli_receipt_section_record_identity(record)
-    Ok(held.publish_immutable(id, bytes, None, JET_CLI_RECEIPT_SECTION_RECORD_MAX) ?? return Err(err))
-}
-
-jet_cli_receipt_adopt_staged_sections: fn(project_root: String, claim: JetCLIReceiptClaim) JetCLIReadError! -[FS, Env, Time.Wait]> {
-    parent: if jet_cli_receipt_lookup(project_root, claim) == {
-        .Val(receipt) -> receipt
-        .None -> { return Err(jet_cli_read_error("cannot adopt receipt sections before parent publication")) }
-        .Err(error) -> { return Err(error) }
-    }
-    records: jet_cli_receipt_read_section_records(project_root, claim.key, "", true)
-    if records.len() == 0 -> return
-    adopted := [JetCLIReceiptSectionRecord]{}
-    loop record in records {
-        published: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: parent.digest, section: record.section}
-        adopted.push(published)
-    }
-    // Validate every conflict before publishing the first append-only record.
-    checked_parent := parent
-    _: jet_cli_receipt_merge_sections(checked_parent, claim, adopted)
-    held: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "staged", claim.key}, false) ?? return Err(err)
-    loop (index, record) in adopted {
-        _: jet_cli_receipt_publish_section(project_root, record)
-        _: held.remove(jet_cli_receipt_section_record_identity(records[index])) ?? return Err(err)
-    }
 }
 
 jet_cli_receipt_list: fn(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] JetCLIReadError! {

@@ -312,22 +312,11 @@ jfmt_bytes_have_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-jfmt_is_space_byte: fn(byte: U8) -> Bool Never! {
-    byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 11 || byte == 12
-}
-
 // Rust `char::is_whitespace` over a source range. Non-ASCII whitespace
 // (NBSP, U+2028, …) is checked by its UTF-8 lead bytes.
 jfmt_src_all_whitespace: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     text: jfmt_src_text(f, start, end)
     text.trim().len() == 0
-}
-
-jfmt_text_has_newline: fn(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        if byte == 10 -> return true
-    }
-    false
 }
 
 // The number of chars in `text` (Rust `s.chars().count()`).
@@ -1534,13 +1523,6 @@ jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
         cursor += 1
     }
     Val(String.from_bytes(out) ?? src)
-}
-
-jfmt_sort_edits_by_start: fn(edits: [TextEdit]) -> [TextEdit] Never! {
-    sorted := edits
-    sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by((left: TextEdit, right: TextEdit) -> left.span.start <=> right.span.start)
-    sorted
 }
 
 // ---- parse acceptance (Rust parse_for_check_with_source / parse_for_fmt) ----

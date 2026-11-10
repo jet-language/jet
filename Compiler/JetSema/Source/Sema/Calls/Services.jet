@@ -575,99 +575,9 @@ SemaServiceWorkerHandler: struct {
     span: Span
 }
 
-sema_services_find_handlers_expr: fn(tree: BodyTree, expression: Int, handlers: &[SemaServiceWorkerHandler]) Never! {
-    node: body_node(tree, expression)
-    if node.kind == {
-        .CoreCall(record, arguments, _, _, _, _) -> {
-            if record.module_name == "core.service" && record.member == "worker" && arguments.len() >= 5 {
-                if body_node(tree, arguments[2]).kind == {
-                    .ConstRef(symbol) -> {
-                        handler_name := ""
-                        if body_node(tree, arguments[3]).kind == .StrLit(parts) {
-                            if parts.len() == 1 {
-                                if parts[0] == .Literal(text) -> handler_name = text
-                            }
-                        }
-                        handlers.push(SemaServiceWorkerHandler{key: symbol.key, name: handler_name, span: node.span})
-                    }
-                    else -> {}
-                }
-            }
-        }
-        else -> {}
-    }
-    body_each_expr_child(tree, node, (child: Int) -> sema_services_find_handlers_expr(tree, child, handlers))
-}
-
-sema_services_find_handlers_stmt: fn(tree: BodyTree, statement: Int, handlers: &[SemaServiceWorkerHandler]) Never! {
-    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> sema_services_find_handlers_expr(tree, child, handlers))
-}
-
 // A checked function's position: its module row and its row in that module's
 // functions.
 SemaServiceFunctionRow: struct { module_index: Int, function_index: Int }
-
-// Function key -> its first row in module, then declaration, order (the
-// function a scan of every module's functions meets first), built once per
-// handler-graph validation.
-sema_services_function_rows: fn(modules: [SemaGraphModuleResult]) -> [String:SemaServiceFunctionRow] Never! {
-    rows := [String:SemaServiceFunctionRow]{}
-    loop module_index in 0..<modules.len() {
-        loop function_index in 0..<modules[module_index].functions.len() {
-            key: modules[module_index].functions[function_index].key
-            if rows.get(key) == None -> rows[key] = SemaServiceFunctionRow{module_index: module_index, function_index: function_index}
-        }
-    }
-    rows
-}
-
-sema_services_worker_reaches: fn(start: String, target: String, modules: [SemaGraphModuleResult], rows: [String:SemaServiceFunctionRow]) -> Bool Never! {
-    first: rows.get(start) ?? return false
-    pending := modules[first.module_index].functions[first.function_index].effects.call_edges
-    visited := [String:Bool]{}
-    loop pending.len() > 0 {
-        current := pending.pop() ?? break
-        if current == target -> return true
-        if visited.get(current) != None -> next
-        visited[current] = true
-        if rows.get(current) == .Val(row) {
-            loop edge in modules[row.module_index].functions[row.function_index].effects.call_edges {
-                if visited.get(edge) == None -> pending.push(edge.copy())
-            }
-        }
-    }
-    false
-}
-
-sema_validate_service_handler_graph: fn(modules: [SemaGraphModuleResult]) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
-    handlers := [SemaServiceWorkerHandler]{}
-    loop module_row in modules {
-        loop function in module_row.functions {
-            loop statement in function.body -> sema_services_find_handlers_stmt(function.tree, statement, handlers)
-        }
-    }
-    if handlers.len() == 0 -> return diagnostics
-    rows: sema_services_function_rows(modules)
-    reported_effects := [String:Bool]{}
-    reported_cycles := [String:Bool]{}
-    loop handler in handlers {
-        row: rows.get(handler.key) ?? {
-            diagnostics.push(sema_error("E0112", handler.span, "service worker handler `{handler.name}` has no checked function body", "service handlers must be known functions so their effect and recursion graphs can be validated", "provide a checked top-level function body"))
-            next
-        }
-        checked: modules[row.module_index].functions[row.function_index]
-        if (checked.effects.maximal || (checked.effects.direct.len() > 0 && checked.effects.solved.len() == 0)) && reported_effects.get(handler.key) == None {
-            reported_effects[handler.key] = true
-            diagnostics.push(sema_error("E0112", handler.span, "service worker handler `{handler.name}` has an open effect row", "service worker handlers must have a closed, checked effect summary", "remove open effects from the handler and its callees"))
-        }
-        if sema_services_worker_reaches(handler.key, handler.key, modules, rows) && reported_cycles.get(handler.key) == None {
-            reported_cycles[handler.key] = true
-            diagnostics.push(sema_error("E0112", handler.span, "service worker handler `{handler.name}` is recursive", "service worker handler call graphs must be acyclic", "break the recursive call cycle"))
-        }
-    }
-    diagnostics
-}
 
 // The checked type name of the Core nominal `leaf` that `module_name` declares:
 // its qualified source name, or the leaf for a compiler-owned nominal. The

@@ -111,26 +111,6 @@ BudgetAttachmentCatalog: struct {
 // One written Budget field: its value and the span of its name.
 BudgetFieldEntry: struct { value: Expr, span: Span }
 
-// Rust `collect_budget_specs`: elaborate every performance role of one
-// program into the canonical typed budget form.
-sema_budget_specs: fn(program: Program) -> [BudgetSpec] BudgetSpecError! {
-    diagnostics := [Diagnostic]{}
-    specs: sema_budget_elaborate_items(program.items, diagnostics)
-    located: loop spec in specs -> LocatedBudgetSpec{spec: spec, module_index: 0}
-    findings := [BudgetLocatedDiagnostic]{}
-    sema_budget_validate_resolution(located, sema_budget_attachment_catalog(program.items), findings)
-    sema_budget_validate_collisions(located, findings)
-    loop finding in findings -> diagnostics.push(finding.diagnostic)
-    if diagnostics.len() > 0 -> return Err(BudgetSpecError{diagnostics: diagnostics})
-    Ok(specs)
-}
-
-// Rust `collect_budget_specs_bundle`: the specs of a fully loaded graph.
-sema_budget_specs_graph: fn(graph: SemaRegistrationGraph) -> [BudgetSpec] BudgetSpecError! {
-    located: sema_budget_located_specs_graph(graph)
-    Ok(loop entry in located -> entry.spec)
-}
-
 // Rust `collect_located_budget_specs_bundle`: collect budgets while
 // retaining the module that owns each source span. Each diagnostic carries
 // its module's source location.

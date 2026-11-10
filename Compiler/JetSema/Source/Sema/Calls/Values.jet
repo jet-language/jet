@@ -293,8 +293,3 @@ sema_call_projection_not_callable: fn(receiver: Expr, ty: Type, method_span: Spa
     if args.len() > 0 -> end = expr_span(args[args.len() - 1].expr).end
     sema_error("E0803", Span{start: expr_span(receiver).start, end: end}, "this is {sema_type_show(ty)}, not a function", "only a function value can be called with `.call(…)`", "call a defined `fn` by name, or store a lambda in a binding before `.call(…)`")
 }
-
-sema_call_check_value: fn(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_call_check_value_owned(state, callee, args, span, [SemaCallDefaultValue]{}, expected, environment, program, scopes, tail_store, context, diagnostics) ?? return None
-    Val(checked.value)
-}

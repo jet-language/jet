@@ -210,10 +210,6 @@ marker_group_push_members: fn(output: &[Token], group: NamedMarkerGroupTokens, s
     }
 }
 
-expand_named_marker_groups: fn(tokens: [Token], tables: &TokenTables, imported: [NamedMarkerGroupTokens]) -> [Token] {
-    expand_named_marker_groups_with_uses(tokens, tables, imported).tokens
-}
-
 expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
     local: named_marker_groups(tokens, tables)
     if local.len() == 0 && imported.len() == 0 -> return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}

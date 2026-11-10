@@ -917,26 +917,6 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 // String's own data.
 #Export(c) jet_rt_string_builder_push_static: fn(target: I64, ptr: I64, len: I64) { rt_text_append(target, ptr, len) }
 
-// Pushes `len` host bytes of no known encoding, each invalid UTF-8 sequence
-// as U+FFFD (rt_text_lossy).
-rt_text_push_lossy: fn(target: I64, ptr: I64, len: I64) {
-    // An ASCII byte is one valid scalar, so the ASCII run needs no decoding.
-    at := rt_text_ascii_end(ptr, I64{0}, len)
-    loop at < len {
-        width: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
-        if (width < I64{0}) { break }
-        at += width
-    }
-    if at == len {
-        rt_text_append(target, ptr, len)
-        return
-    }
-    suffix: rt_text_lossy(ptr, len)
-    if (suffix == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
-    jet_rt_string_builder_push(target, suffix)
-    jet_rt_string_drop(suffix)
-}
-
 #Export(c) jet_rt_string_builder_finish: fn(target: I64) -> I64 { target }
 
 rt_text_after: fn(value: I64, needle: I64) -> I64 {

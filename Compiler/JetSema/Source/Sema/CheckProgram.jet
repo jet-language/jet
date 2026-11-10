@@ -597,19 +597,6 @@ sema_incremental_cache_new: fn() -> SemaIncrementalCache {
     }}
 }
 
-sema_incremental_cache_clear: fn(cache: SemaIncrementalCache) {
-    permit := cache.state.guard_edit()
-    permit.value.frozen = ""
-    permit.value.generation += 1
-    permit.value.scope_inputs = [String:String]{}
-    permit.value.scope_epochs = [String:Int]{}
-    permit.value.rows = [String:SemaCachedBody]{}
-    permit.value.frozen_bytes = 0
-    permit.value.row_bytes = 0
-    permit.value.recomputed_items = [String]{}
-    // Cumulative counters survive clear, as in the canonical QueryEngine.
-}
-
 sema_incremental_cache_clear_measurement: fn(cache: SemaIncrementalCache) {
     permit := cache.state.guard_edit()
     permit.value.recomputed_items = [String]{}
@@ -4383,14 +4370,6 @@ SemaBodyJob: enum {
     ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int)
 }
 
-sema_check_prepared_checked_count: fn(bodies: [SemaPreparedBody]) -> Int Never! {
-    count := 0
-    loop body in bodies {
-        if body == .Checked(_) -> count += 1
-    }
-    count
-}
-
 // The body's existing shared lifecycle, absent for declaration-only checks.
 SemaMethodScheduling: struct {
     shared_state: Shared<SemaCheckShared>
@@ -7629,20 +7608,6 @@ sema_comptime_modules_with_values: fn(program: SemaProgramTables, values: [SemaC
     modules.move()
 }
 
-// Checks one registered module's declarations (no bodies) with the pass
-// environment and memory plan of `shared_state`, which move in and back.
-sema_check_declarations_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, values: [SemaComptimeItemValue], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
-    environment := sema_check_shared_take_environment(shared_state)
-    program := sema_check_shared_take_program(shared_state)
-    memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    checked := sema_check_registration_module(environment, program, None, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, counter_phase, trace_sink)
-    restored_environment := checked.environment.move()
-    restored_program := checked.program.move()
-    restored_memory_plan := checked.memory_plan.move()
-    sema_check_shared_fill(shared_state, restored_environment, restored_program, restored_memory_plan)
-    checked.module_result.move()
-}
-
 // A compiler thread is admitted for at least this many bytes of module item
 // source to check declarations in.
 SEMA_DECLARATION_MIN_BYTES_PER_THREAD: 65536
@@ -7882,14 +7847,6 @@ sema_comptime_environment_publish_body_values: fn(environment: &SemaScopeEnviron
     if from < 0 || from > values.len() || from != environment.comptime_body_publication.item_frontier -> panic("body publication lost its authenticated item frontier")
     if body_values_changed -> sema_comptime_body_values_append_items(environment.comptime_body_publication, values, from)
     environment.comptime_body_publication.item_frontier = values.len()
-}
-
-// Adds the `module\nkey` of every constant value of `values` to `staged`
-// (sema_comptime_staged_constant_rows).
-sema_comptime_staged_keys: fn(values: [SemaComptimeItemValue], staged: &[String:Bool]) Never! {
-    loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant -> staged["{value.module_identity}\n{value.key}"] = true
-    }
 }
 
 // The program tables of a staging run: they own `graph` (moved in, never
@@ -8159,12 +8116,6 @@ sema_comptime_layer_exceeds: fn(actual: RuntimeLayer, ceiling: RuntimeLayer) -> 
     if ceiling == RuntimeLayer.Core -> return actual != RuntimeLayer.Core
     if ceiling == RuntimeLayer.Alloc -> return actual == RuntimeLayer.Std
     false
-}
-
-sema_comptime_layer_name: fn(layer: RuntimeLayer) -> String Never! {
-    if layer == RuntimeLayer.Core -> return "Core"
-    if layer == RuntimeLayer.Alloc -> return "Alloc"
-    "Std"
 }
 
 sema_comptime_runtime_ceiling_diagnostic: fn(subject: String, needed: RuntimeLayer, ceiling: RuntimeLayer, span: Span?, chain: String) -> Diagnostic {

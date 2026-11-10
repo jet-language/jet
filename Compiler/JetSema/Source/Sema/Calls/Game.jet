@@ -121,33 +121,6 @@ sema_call_try_game_static: fn(receiver: Expr, method: String, args: [CallArg], s
     sema_game_static_call(target, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// Canonical Core-owned fields are projected by exact owner identity, never by
-// a same-spelled user field.
-sema_game_core_field_type: fn(owner: Type, field: String) -> Type? {
-    if owner == {
-        .Named(name) -> {
-            if name == "GameScene" {
-                if field == "assets" {
-                    return Val(Type.Named{name: "GameAssets"})
-                }
-                if field == "input" {
-                    return Val(Type.Named{name: "GameInputMap"})
-                }
-            }
-            if name == "GameFrame" {
-                if field == "index" {
-                    return Val(Type.Int)
-                }
-                if field == "input" {
-                    return Val(Type.Named{name: "GameInputSnapshot"})
-                }
-            }
-            return None
-        }
-        else -> None
-    }
-}
-
 sema_game_check_typed_argument: fn(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
 }

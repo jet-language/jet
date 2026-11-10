@@ -357,13 +357,6 @@ semindex_method_fact: fn(ctx: SemWalk, owner: String, function: Func, origin: St
 // ---------------------------------------------------------------------------
 // References (`scoped_ref`, `declaration_ref`).
 
-semindex_reference_kind: fn(kind: String) -> String Never! {
-    if kind == "type" -> return "struct"
-    // copy: `kind` stays with the caller (`kind` is a read parameter: no move out of it, E0201) and
-    // the returned value owns its own.
-    kind.copy()
-}
-
 semindex_scoped_ref: fn(name: String, span: Span, ctx: SemWalk) -> SemRef {
     target := SemAnchor?{None}
     loop reference in ctx.references {

@@ -241,111 +241,11 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
     Val(registry)
 }
 
-sema_scope_members_rule_index: fn(registry: SemaScopeMembersMarkerRegistry, name: String) -> Int? {
-    index := 0
-    loop index < registry.marker_rules.len() {
-        if registry.marker_rules[index].name == name -> return Val(index)
-        index += 1
-    }
-    None
-}
-
-sema_scope_members_applied_rule_index: fn(registry: SemaScopeMembersMarkerRegistry, name: String) -> Int? {
-    index := 0
-    loop index < registry.applied_rules.len() {
-        if registry.applied_rules[index].name == name -> return Val(index)
-        index += 1
-    }
-    None
-}
-
 sema_scope_members_has_name: fn(values: [String], name: String) -> Bool Never! {
     loop existing in values {
         if existing == name -> return true
     }
     false
-}
-
-sema_scope_members_rule_fact_at: fn(program: Program, name: String, name_span: Span) -> AppliedRuleApplication? {
-    loop fact in program.rule_facts {
-        if fact.marker.name == name && fact.marker.name_span.start == name_span.start && fact.marker.name_span.end == name_span.end -> return Val(fact)
-    }
-    None
-}
-
-sema_scope_members_is_applied_rule_at: fn(program: Program, name: String, name_span: Span) -> Bool Never! {
-    loop application in program.applied_rules {
-        if application.marker.name == name && application.marker.name_span.start == name_span.start && application.marker.name_span.end == name_span.end -> return true
-    }
-    sema_scope_members_rule_fact_at(program, name, name_span) != None
-}
-
-sema_scope_members_dsl_args_valid: fn(name: String, args: [Expr]) -> Bool Never! {
-    if name == "HTML" -> return args.len() == 0
-    if args.len() == 0 -> return true
-    if args.len() != 1 -> return false
-    return if args[0] == {
-        .Ident(_, _, _) -> true
-        else -> false
-    }
-}
-
-sema_scope_members_dsl_argument_shape_diagnostic: fn(name: String, args_span: Span?, span: Span) -> Diagnostic {
-    at := args_span ?? span
-    expected := if {
-        name == "SQL" -> "`#SQL {{ … }}` or `#SQL<Row> {{ … }}`"
-        name == "HTML" -> "`#HTML {{ … }}`"
-        else -> "the declared checked text-block header"
-    }
-    sema_error("E0617", at, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}")
-}
-
-sema_scope_members_check_dsl_header: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: Span?, span: Span) -> SemaScopeMembersDSLHeaderResult {
-    result := SemaScopeMembersDSLHeaderResult{
-        known: sema_scope_members_has_name(registry.known_marker_names, name),
-        block_allowed: sema_scope_members_has_name(registry.block_allowed_markers, name),
-        args_valid: false,
-        declared_type_argument: None,
-        diagnostics: [Diagnostic]{},
-    }
-    if !result.known {
-        result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `{name}: struct {{ impl Marker {{ sites: [.Block] }} }}` before using `#{name} {{ … }}"))
-        return result
-    }
-    if !result.block_allowed {
-        result.diagnostics.push(sema_error("E0355", args_span ?? span, "`#{name}` cannot open a checked text block", "a checked text block must declare `.Block` as a legal site", "add `.Block` to the rule declaration or use the rule at its declared site"))
-        return result
-    }
-    result.args_valid = sema_scope_members_dsl_args_valid(name, args)
-    if !result.args_valid {
-        result.diagnostics.push(sema_scope_members_dsl_argument_shape_diagnostic(name, args_span, span))
-        return result
-    }
-    if sema_scope_members_is_applied_rule_at(program, name, name_span) && args.len() == 1 {
-        if args[0] == {
-            .Ident(type_name, type_span, _) -> {
-                has_type_parameter := false
-                if sema_scope_members_applied_rule_index(registry, name) == {
-                    .Val(index) -> {
-                        has_type_parameter = registry.applied_rules[index].signature.params.len() > 0 && registry.applied_rules[index].signature.params[0].source_type == "Type"
-                    }
-                    else -> {
-                        if sema_scope_members_rule_index(registry, name) == {
-                            .Val(index) -> {
-                                has_type_parameter = registry.marker_rules[index].first_parameter_is_type
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-                if has_type_parameter {
-                    result.declared_type_argument = Val(SemaScopeMembersDeclaredTypeArgument{name: type_name, ty: Type.Named{name: type_name}, span: type_span})
-                }
-            }
-            else -> {}
-        }
-    }
-    result
 }
 
 // `scope_members` the member vocabulary an applied-rule block declares; `#Test`

@@ -361,24 +361,6 @@ json_int_field: fn(text: String, key: String) -> Int? Never! {
     leading_digits(value).to_int() ?? return None
 }
 
-json_int_array: fn(text: String, key: String) -> [Int] Never! {
-    out := [Int]{}
-    value: json_field_value(text, key) ?? return out
-    if !value.starts_with("[") -> return out
-    rest := value.remove_prefix("[")
-    loop {
-        rest = rest.trim_start()
-        if rest.starts_with("]") -> break
-        digits: leading_digits(rest)
-        if digits == "" -> break
-        number: digits.to_int() ?? break
-        out.push(number)
-        rest = rest.slice(digits.len(), rest.len()).trim_start()
-        if rest.starts_with(",") -> rest = rest.remove_prefix(",")
-    }
-    out
-}
-
 json_string_array: fn(text: String, key: String) -> [String] Never! {
     out := [String]{}
     value: json_field_value(text, key) ?? return out

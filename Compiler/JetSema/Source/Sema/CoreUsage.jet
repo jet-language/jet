@@ -878,16 +878,6 @@ sema_core_import_usage: fn(row: SemaCoreImport, fallback: String) -> String Neve
     }
 }
 
-sema_core_helper_import_chain: fn(usage: String, imports: [SemaCoreImport]) -> String Never! {
-    if usage == "core.term::__input_lines" -> return "ambient `input` (helper `{usage}`)"
-    parts := usage.split("::").to_list()
-    module_name := if parts.len() > 0 -> parts[0] else -> usage
-    loop row in imports {
-        if row.module_name == module_name -> return "`use {row.alias}: {row.module_name}` → `{usage}`"
-    }
-    "prelude helper `{usage}`"
-}
-
 sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if body == {
         .Fields(fields) -> loop field in fields -> sema_core_collect_expr(field.value, imports, registered, used, spans, callbacks)

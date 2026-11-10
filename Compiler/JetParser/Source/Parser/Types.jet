@@ -233,18 +233,6 @@ parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Ne
     out
 }
 
-// Source text of a type written before a suffix mark,
-// grouped when the mark would otherwise bind to its last member.
-parser_marked_type_text: fn(state: JetParserState, ty: Type, first: Int, end: Int) -> String Never! {
-    text: parser_tokens_text(state, first, end)
-    grouped: if ty == {
-        .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
-        else -> false
-    }
-    if grouped && !text.starts_with("(") -> return "({text})"
-    text
-}
-
 parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
     state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))

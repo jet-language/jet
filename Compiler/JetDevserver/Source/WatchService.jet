@@ -718,7 +718,6 @@ WATCH_COALESCE_MS: U64{4}
 WATCH_SETTLE_MAX_MS: U64{250}
 EDIT_TO_VISIBLE_BUDGET_MS: U64{2000}
 within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
-any_stamp_changed: fn(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { now: PathStamp.capture(node.path); node.stamp.changed_since(now) }) }
 SessionBroker: struct {
     source_transactions: Mutex<()>
     default: fn() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }

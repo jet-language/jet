@@ -207,19 +207,6 @@ sema_marker_rules_metadata_expr: fn(declaration: MarkerDecl, name: String) -> Ex
     None
 }
 
-sema_marker_rules_string_value: fn(value: Expr) -> String? {
-    if value == .Str(parts, _, _) {
-        if parts.len() != 1 {
-            return None
-        }
-        if parts[0] == .Lit(text) {
-            return Val(text)
-        }
-        return None
-    }
-    None
-}
-
 sema_marker_rules_bool_fact: fn(declaration: MarkerDecl, name: String) -> Bool? {
     found := false
     loop parameter_index in 0..<declaration.params.len() {
@@ -1958,34 +1945,6 @@ sema_marker_rules_builtin_type: fn(name: String) -> Type? {
         return Val(Type.Named{name: name})
     }
     None
-}
-
-sema_marker_rules_check_declared_type_argument: fn(argument: SemaScopeMembersDeclaredTypeArgument, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMarkerRulesDeclaredTypeCheck {
-    if argument.ty != (Type.Named{name: argument.name}) {
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
-    }
-    builtin := sema_marker_rules_builtin_type(argument.name)
-    if builtin != None {
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: builtin, diagnostics: [Diagnostic]{}, complete: true}
-    }
-    if program.registration_graph == .Val(graph) {
-        if sema_type_name_is_generic(environment.generic_params, argument.name) {
-            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(argument.ty), diagnostics: [Diagnostic]{}, complete: true}
-        }
-        resolved := sema_registration_lookup_name(graph, environment.module_identity, argument.name)
-        if resolved == None {
-            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{sema_unknown_name(argument.name, argument.span)}, complete: true}
-        }
-        resolved_value: resolved ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
-        kind: sema_resolved_kind(graph, resolved_value)
-        if kind != SymbolKind.Type && kind != SymbolKind.Trait {
-            diagnostic := sema_error("E0107", argument.span, "`{argument.name}` doesn't name a type", "a checked type argument must resolve to a declared type or trait", "use a type name here")
-            return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{diagnostic}, complete: true}
-        }
-        resolved_type := sema_type_resolve_declared_with_generics(graph, argument.ty, environment.module_identity, environment.generic_params)
-        return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(resolved_type), diagnostics: [Diagnostic]{}, complete: true}
-    }
-    SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
 }
 
 // `#Inline(Always)` is a checked promise. A function that

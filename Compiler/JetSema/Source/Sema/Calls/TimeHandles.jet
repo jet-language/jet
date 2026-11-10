@@ -330,14 +330,6 @@ sema_time_civil_value: fn(receiver_value: TExpr, owner: String, method: String, 
     sema_time_finish_handle(receiver_value, operation, values, result, "", "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }
 
-sema_time_civil_finish: fn(receiver: Expr, receiver_value: TExpr, owner: String, method: String, values: [TExpr], result: Type, args: [CallArg], params: [SemaCallParam], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    updated_args := args
-    ownership: sema_ownership_check_method_call(state, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    operation: THandleOp.DurationRound
-    sema_time_finish_handle(receiver_value, operation, values, result, "", "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
-}
-
 sema_time_civil_method: fn(receiver: Expr, receiver_value: TExpr, owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     contract: sema_time_civil_contract(owner, method, span)
     if contract == .Val(params) {

@@ -1396,19 +1396,6 @@ sema_expression_lambda_type_is_result: fn(ty: Type) -> Bool Never! {
     false
 }
 
-sema_expression_lambda_apply_capture_facts: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    if !sema_ownership_check_lambda_captures(state, lambda, scopes, diagnostics) -> return false
-    moved := [String]{}
-    loop capture in lambda.take_names -> sema_expression_lambda_append_name(moved, capture.name)
-    loop name in lambda.meta.moved_captures {
-        if sema_expression_lambda_name_contains(moved, name) -> next
-        binding_index: sema_scope_resolve_index(scopes, name) ?? return false
-        binding: scopes.bindings[binding_index]
-        if !sema_ownership_mark_move(state, Expr.Ident{name: binding.symbol.name, span: binding.symbol.span, id: AST_NODE_GENERATED}, scopes, "an escaping lambda", diagnostics) -> return false
-    }
-    true
-}
-
 sema_expression_lambda: fn(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expression_lambda_expects_http_handler(expected, environment, program) -> return sema_expression_lambda_http_handler(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     sema_expression_lambda_with_host(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics, false, false, false, false)

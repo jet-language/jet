@@ -31,13 +31,6 @@ sema_call_collections_arity_error: fn(method: String, expected: SemaCollectionMe
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
 
-sema_call_collections_success_type: fn(ty: Type) -> Type Never! {
-    return if ty == {
-        .Result(ok, _) | .Option(ok) -> ok
-        else -> ty
-    }
-}
-
 // Rust builtin-method argument inference: every argument is inferred under its contract parameter
 // type, so leading-dot variants and anonymous records (`rows.push(.Ready)`, `map.add(key, {x:
 // 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a

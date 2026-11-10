@@ -57,13 +57,6 @@ use jet_foundation.[
     is_compute_tensor_family,
 ]
 
-sema_type_is_core_view_generic: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, _) -> name == "View" || name == "ViewMut" || name == "Pin" || name == "ViewIter"
-        else -> false
-    }
-}
-
 sema_type_arguments_have_open_shape: fn(types: [Type]) -> Bool Never! {
     loop ty in types {
         if sema_union_member_has_open_shape(ty) -> return true

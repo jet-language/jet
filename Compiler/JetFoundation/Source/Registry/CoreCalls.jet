@@ -109,10 +109,6 @@ core_call_coverage_contains: fn(coverage: CoreCallCoverage, projection: Int) -> 
     coverage.bits.bit_and(projection) == projection
 }
 
-core_call_coverage_is_complete: fn(coverage: CoreCallCoverage) -> Bool Never! {
-    coverage.bits == CORE_CALL_COVERAGE_KNOWN
-}
-
 core_call_source_member: fn(row: CoreCallRecord) -> String? Never! {
     if row.symbol != CoreCallSymbol.SourceOwned -> return None
     Val(row.source_target ?? row.member)
@@ -131,27 +127,6 @@ core_call_authority_boundary_at: fn(row: CoreCallRecord, index: Int) -> Bool Nev
     wire: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
     assert_eq(core_call_authority_boundary_at(wire, 1), false)
     assert_eq(wire.effect_kind, None)
-}
-
-core_call_capability_is_well_formed: fn(capability: CoreCapabilityContract) -> Bool Never! {
-    provider_present: if capability.provider == {
-        .Val(value) -> value != ""
-        .None -> false
-    }
-    fallback_present: if capability.fallback == {
-        .Val(value) -> value != ""
-        .None -> false
-    }
-    failure_present: if capability.failure == {
-        .Val(value) -> value != ""
-        .None -> false
-    }
-    if capability.kind == {
-        .Pure -> capability.provider == None && capability.fallback == None && capability.failure == None
-        .NativeRequired -> provider_present && capability.fallback == None && failure_present
-        .PortableFallback -> provider_present && fallback_present && failure_present
-        .ExplicitSimulation -> provider_present && capability.fallback == None && failure_present
-    }
 }
 
 core_call_is_receiver: fn(row: CoreCallRecord) -> Bool Never! {

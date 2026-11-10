@@ -1144,16 +1144,6 @@ compute_dimension_type: fn(value: Int) -> Type Never! {
     Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
-compute_dimension_value: fn(ty: Type) -> Int? {
-    if ty == {
-        .Measure(value) -> {
-            if measure_kind(value) != "shape" -> return None
-            measure_literal_value(value)
-        }
-        else -> None
-    }
-}
-
 // The number a `<comptime N: Int>` argument holds: a literal length
 // measure (`Packet<4>`, or a constant sema folded to one).
 number_argument_value: fn(ty: Type) -> Int? Never! {
@@ -1227,13 +1217,6 @@ is_compute_tensor_application: fn(name: String, args: [Type]) -> Bool Never! {
         if arg != Type.Int -> return false
     }
     true
-}
-
-is_compute_view_mut: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, args) -> name == "ComputeViewMut" && args.len() == 1 && args[0] == Type.Float
-        else -> false
-    }
 }
 
 is_measure_type: fn(ty: Type) -> Bool Never! {

@@ -347,12 +347,6 @@ x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
     child.errors = -1
 }
 
-// The child's end: an exit status, or 128 + the signal that ended it.
-x64_comptime_exit_code: fn(child: X64ComptimeChild) -> Int Never! {
-    signal: child.status.bit_and(127)
-    if signal == 0 -> (child.status >> 8).bit_and(255) else -> 128 + signal
-}
-
 // Ends a live child and releases its buffers.
 x64_comptime_close: fn(child: &X64ComptimeChild) {
     if child.pid > 0 {

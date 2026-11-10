@@ -465,15 +465,6 @@ scheduler_closure_drop: fn(closure: I64) {
     release: sync_load(wrapping(closure + I64{16}))
     if (count == I64{0} && release != I64{0}) -> coll_call1_unit(release, closure)
 }
-scheduler_task_completion_register: fn(closure: I64) {
-    stack: sync_load(wrapping(thread_base() + I64{80}))
-    if (stack == I64{0} || sync_load(stack) == I64{0}) {
-        scheduler_cleanup_closure_drop(closure)
-        return
-    }
-    frame: sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + (sync_load(stack) - I64{1}) * I64{8}))
-    scheduler_words_push(frame, closure)
-}
 
 scheduler_cleanup_closure_drop: fn(closure: I64) {
     saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())

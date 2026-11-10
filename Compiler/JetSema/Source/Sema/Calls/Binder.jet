@@ -70,28 +70,6 @@ sema_call_param_optional: fn(param: SemaCallParam) -> Bool Never! {
     param.variadic || param.default != None || param.default_ref != None
 }
 
-sema_call_param_label: fn(param: Param) -> String Never! {
-    param.public_label.map((label) -> label.name) ?? param.name
-}
-
-sema_call_params_from_func: fn(func: Func) -> [SemaCallParam] Never! {
-    params: loop parameter_index in 0..<func.params.len() -> {
-        effective_ty: type_with_effective_parameter_fn_return(func.params[parameter_index].ty)
-        parameter_ty: if func.params[parameter_index].variadic -> Type.List{element: effective_ty} else -> effective_ty
-        SemaCallParam{
-            label: sema_call_param_label(func.params[parameter_index]),
-            name: func.params[parameter_index].name,
-            zone: func.params[parameter_index].zone,
-            default: func.params[parameter_index].default,
-            default_ref: None,
-            convention: func.params[parameter_index].convention,
-            ty: Val(parameter_ty),
-            variadic: func.params[parameter_index].variadic,
-        }
-    }
-    params
-}
-
 sema_call_fn_param_label: fn(contract: [CallContractRow]?, metadata: FunctionCallMetadata?, index: Int, fallback_name: Bool) -> String Never! {
     if contract == .Val(rows) {
         if index >= 0 && index < rows.len() && rows[index].label != "" -> return rows[index].label
@@ -185,10 +163,6 @@ sema_call_type_from_declaration: fn(ty: Type) -> Bool Never! {
 
 sema_call_params_from_type_after: fn(ty: Type, offset: Int) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, offset, true)
-}
-
-sema_call_params_from_value_type_after: fn(ty: Type, offset: Int) -> [SemaCallParam]? {
-    sema_call_params_from_type_range(ty, offset, sema_call_type_from_declaration(ty))
 }
 
 sema_call_diag_unknown_label: fn(callee: String, label: String, params: [SemaCallParam], span: Span) -> Diagnostic {
@@ -545,15 +519,6 @@ sema_call_bind_method: fn(method: String, signature: Type, receiver_offset: Int,
     sema_call_bind_signature(method, signature, receiver_offset, args, call_span, diagnostics)
 }
 
-sema_call_binding_has_default_refs: fn(binding: SemaCallBinding) -> Bool Never! {
-    binding.default_refs.len() > 0
-}
-
-sema_call_binding_slot: fn(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int Never! {
-    if arg.flags.binder_slot == .Val(slot) -> return slot
-    if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
-}
-
 // Memory marks live in signatures, so a call passes its
 // arguments plain. An unmarked place a write parameter receives is that
 // parameter's write access (sema_call_unmarked_write_place). An unmarked bare
@@ -608,18 +573,6 @@ sema_call_method_receiver_type: fn(signature: Type, receiver_offset: Int) -> Typ
             receiver_index: receiver_offset - 1
             if receiver_index < 0 || receiver_index >= params.len() -> return None
             Val(params[receiver_index])
-        }
-        else -> None
-    }
-}
-
-sema_call_method_receiver_convention: fn(signature: Type, receiver_offset: Int) -> AccessConvention? {
-    if receiver_offset <= 0 -> return None
-    if signature == {
-        .Fn(_, _, _, _, metadata, _) -> {
-            metadata_value: metadata ?? return None
-            if receiver_offset - 1 < 0 || receiver_offset - 1 >= metadata_value.conventions.len() -> return None
-            Val(metadata_value.conventions[receiver_offset - 1])
         }
         else -> None
     }

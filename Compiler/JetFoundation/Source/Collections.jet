@@ -703,27 +703,9 @@ sema_collection_is_list: fn(receiver: Type) -> Bool Never! {
     sema_collection_family(kind) == CollectionReceivers.List
 }
 
-sema_collection_is_iter: fn(receiver: Type) -> Bool Never! {
-    kind: sema_collection_kind(receiver) ?? return false
-    sema_collection_family(kind) == CollectionReceivers.Iter
-}
-
-sema_collection_is_view_iter: fn(receiver: Type) -> Bool Never! {
-    kind: sema_collection_kind(receiver) ?? return false
-    if kind == {
-        .ViewIter(_) -> true
-        else -> false
-    }
-}
-
 sema_collection_is_map: fn(receiver: Type) -> Bool Never! {
     kind: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Map
-}
-
-sema_collection_is_set: fn(receiver: Type) -> Bool Never! {
-    kind: sema_collection_kind(receiver) ?? return false
-    sema_collection_family(kind) == CollectionReceivers.Set
 }
 
 // The one lookup: the checked row for this receiver and method, with its

@@ -782,12 +782,6 @@ sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args:
     sema_call_bind_direct("{record.module_name}.{record.member}", signature, local_args, span, diagnostics)
 }
 
-sema_call_core_check_typed_argument: fn(value: TExpr, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
-    typed := value
-    typed.span = span
-    sema_expr_expected(typed, Val(expected), environment, program, diagnostics)
-}
-
 // `("core.math", "abs")`: `abs` takes Int, Float, F32, I64 and Complex,
 // returning the argument type (Float for Complex). The Int form stays the
 // routed source `abs`; any other argument is the MathBuiltin `abs`, which
@@ -1573,18 +1567,6 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     // `table.column("name", …)` checks its literal column against the row schema (E2475).
     if target.symbol.name == "column" && sema_call_core_module_identity(environment, program, "core.web.table") == (Val(target.symbol.module_name)) -> sema_call_web_table_column_schema(args, checked.value, environment, program, diagnostics)
     Val(checked.value)
-}
-
-// `core.prelude.keep` is an erased identity: its checked argument is the call
-// result, with an optional explicit type argument constraining that value.
-sema_call_core_identity_value: fn(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_call_core_check_type_args("core.prelude", "keep", 1, true, type_args, value.span, diagnostics) -> return None
-    result := value
-    if type_args.len() == 1 {
-        required := sema_expr_expected_type(type_args[0], environment, program)
-        result = sema_expr_expected(value, Val(required), environment, program, diagnostics) ?? return None
-    }
-    sema_expr_expected(result, expected, environment, program, diagnostics)
 }
 
 #Test("worker checked-function inference changes no other Core route") {

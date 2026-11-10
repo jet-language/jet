@@ -95,18 +95,6 @@ parse_generated_source: fn(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
-parse_source_with_marker_groups: fn(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, lexed.tables, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
-}
-
-parse_generated_source_with_marker_groups: fn(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex_generated(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, lexed.tables, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
-}
-
 // The parse entry points take the caller's tokens: they move into the parser
 // instead of being copied.
 parse_lexed: fn(lexed: &&Lexed) -> ParseResult {
