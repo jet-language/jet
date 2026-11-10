@@ -1,10 +1,11 @@
 // `jet run` keeps its program (Compiler/JetCli/Source/Cli/ScriptCache.jet).
 // A rerun reuses the `none` program with identical output, and marks it used
 // only when its last mark is past the ten-minute use grain; no rerun builds
-// it again at another level. A source edit, a Core change and a compiler
-// change each compile again and replace it. A run at `-O2` keeps its `full`
-// program in a slot of its own. The cache holds 64 programs and drops the
-// least recently run one. Runs against copies: the compiler (beside its
+// it again at another level. A source edit, a change to a Core file the
+// compile read and a compiler change each compile again and replace it; a
+// change to a Core file it never read does not. A run at `-O2` keeps its
+// `full` program in a slot of its own. The cache holds 64 programs and drops
+// the least recently run one. Runs against copies: the compiler (beside its
 // jet-runtime), a toolchain root holding only Core, and its own XDG caches.
 // Usage: jet run Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet -- <jet> <scratch>
 // Run from the repository root: Core is copied from the working directory.
@@ -14,7 +15,6 @@ use {
     process: core.process
     term: core.term
     sys: core.sys
-    time: core.time
 }
 
 fail: fn(message: String) -> Never {
@@ -172,6 +172,17 @@ greeting: fn(word: String) -> String {
     "run: fn() {{\n    print(\"hello {word}\")\n}}\n"
 }
 
+// A greeting that reads core.time, so its compile reads Core/Time/Time.jet.
+timed_greeting: fn(word: String) -> String {
+    "use {{\n    time: core.time\n}}\n\nrun: fn() {{\n    if time.duration_ms(1).ns < 0 -> print(\"never\")\n    print(\"hello {word}\")\n}}\n"
+}
+
+// Whether the slot record `state` names the Core file `path` as one its
+// compile read.
+reads_core: fn(state: Slot, path: String) -> Bool {
+    state.text.split("\n").to_list().any(line -> line.starts_with("{path} "))
+}
+
 // A cap cache's slot records and its programs (one beside each record).
 Cap: struct {
     records: [String]
@@ -243,7 +254,22 @@ run: fn() {
     check("non-source file beside the entry", run_ok(keep, file, keep.cache), "hello two\n")
     state = reused(kept, "non-source file beside the entry", state)
 
-    files.append_all("{keep.root}/Core/Time/Time.jet", "\n// run-keep: a Core change\n") ?? fail("cannot change Core: {err}")
+    // hello reads no Core file, so a change to one is no input of it.
+    time_file: "{keep.root}/Core/Time/Time.jet"
+    files.append_all(time_file.copy(), "\n// run-keep: a change to a Core file hello never read\n") ?? fail("cannot change Core: {err}")
+    check("change of a Core file it never read", run_ok(keep, file, keep.cache), "hello two\n")
+    state = reused(kept, "change of a Core file it never read", state)
+    if reads_core(state, "Core/Time/Time.jet") -> fail("change of a Core file it never read: the record names Core/Time/Time.jet")
+
+    // A program that reads core.time names Time.jet in its record, and a
+    // change to Time.jet compiles it again.
+    write(file, timed_greeting("two"))
+    check("source that reads Core", run_ok(keep, file, keep.cache), "hello two\n")
+    state = rebuilt(kept, "source that reads Core", state)
+    if !reads_core(state, "Core/Time/Time.jet") -> fail("source that reads Core: the record names no Core/Time/Time.jet row")
+    check("rerun of the Core reader", run_ok(keep, file, keep.cache), "hello two\n")
+    state = reused(kept, "rerun of the Core reader", state)
+    files.append_all(time_file.copy(), "\n// run-keep: a Core change\n") ?? fail("cannot change Core: {err}")
     check("Core change", run_ok(keep, file, keep.cache), "hello two\n")
     state = rebuilt(kept, "Core change", state)
 
