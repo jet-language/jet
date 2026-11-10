@@ -6,57 +6,25 @@
 // installers live in RubyGemsRegistry.jet, CpanRegistry.jet, and
 // PackagistRegistry.jet.
 
-// Which scripting registry a provider instance serves.
-ScriptRegistryKind: enum {
-    RubyGems
-    Cpan
-    Packagist
+// Which scripting registry a provider instance serves: its provider family
+// and the registry facts that differ between families.
+ScriptRegistryKind: struct {
+    family: ProviderFamily
+    title: String
+    recipe: String
+    repository: String
+    fetch_authorities: [String]
+    archive_suffix: String
+    // File-name suffixes that mark native code or executable plugins.
+    native_suffixes: [String]
 
     // The ref source label and lock registry name.
-    label: fn(self) -> String Never! {
-        if self == {
-            .RubyGems -> "ruby"
-            .Cpan -> "perl"
-            .Packagist -> "php"
-        }
-    }
-
-    title: fn(self) -> String Never! {
-        if self == {
-            .RubyGems -> "RubyGems"
-            .Cpan -> "CPAN"
-            .Packagist -> "Packagist"
-        }
-    }
-
-    recipe: fn(self) -> String Never! {
-        if self == {
-            .RubyGems -> "rubygems-provider-v1"
-            .Cpan -> "cpan-provider-v1"
-            .Packagist -> "packagist-provider-v1"
-        }
-    }
-
-    repository: fn(self) -> String Never! {
-        if self == {
-            .RubyGems -> "https://index.rubygems.org"
-            .Cpan -> "https://fastapi.metacpan.org"
-            .Packagist -> "https://repo.packagist.org"
-        }
-    }
-
-    fetch_authorities: fn(self) -> [String] Never! {
-        if self == {
-            .RubyGems -> [String]{"index.rubygems.org"}
-            .Cpan -> [String]{"fastapi.metacpan.org", "cpan.metacpan.org"}
-            .Packagist -> [String]{"repo.packagist.org", "api.github.com", "codeload.github.com", "github.com"}
-        }
-    }
+    label: fn(self) -> String Never! { self.family.label() }
 
     // Registry-specific package name law: a gem name, a `A::B` CPAN module
     // or distribution, or a `vendor/package` Composer name.
     valid_name: fn(self, name: String) -> Bool Never! {
-        if self == {
+        if self.family == {
             .RubyGems -> provider_script_safe_piece(name, "_-.") && !name.contains("/")
             .Cpan -> {
                 if name == "" || name.contains("/") -> return false
@@ -70,29 +38,27 @@ ScriptRegistryKind: enum {
                 pieces: name.split("/").to_list()
                 pieces.len() == 2 && provider_script_safe_piece(pieces[0], "_-.") && provider_script_safe_piece(pieces[1], "_-.")
             }
-        }
-    }
-
-    archive_suffix: fn(self) -> String Never! {
-        if self == {
-            .RubyGems -> ".gem"
-            .Cpan -> ".tar.gz"
-            .Packagist -> ".zip"
-        }
-    }
-
-    // File-name suffixes that mark native code or executable plugins.
-    native_suffixes: fn(self) -> [String] Never! {
-        if self == {
-            .RubyGems -> [String]{".so", ".bundle", ".dll", ".dylib", ".o", ".a"}
-            .Cpan -> [String]{".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib", ".bs", ".o", ".a"}
-            .Packagist -> [String]{".so", ".bundle", ".dll", ".dylib", ".phar"}
+            else -> false
         }
     }
 
     error_kind: fn(self) -> RegistryErrorKind Never! {
-        RegistryErrorKind.Registry(self.title())
+        RegistryErrorKind.Registry(self.title)
     }
+}
+
+SCRIPT_REGISTRY_KINDS: [ScriptRegistryKind]{
+    ScriptRegistryKind{family: ProviderFamily.RubyGems, title: "RubyGems", recipe: "rubygems-provider-v1", repository: "https://index.rubygems.org", fetch_authorities: [String]{"index.rubygems.org"}, archive_suffix: ".gem", native_suffixes: [String]{".so", ".bundle", ".dll", ".dylib", ".o", ".a"}},
+    ScriptRegistryKind{family: ProviderFamily.Cpan, title: "CPAN", recipe: "cpan-provider-v1", repository: "https://fastapi.metacpan.org", fetch_authorities: [String]{"fastapi.metacpan.org", "cpan.metacpan.org"}, archive_suffix: ".tar.gz", native_suffixes: [String]{".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib", ".bs", ".o", ".a"}},
+    ScriptRegistryKind{family: ProviderFamily.Packagist, title: "Packagist", recipe: "packagist-provider-v1", repository: "https://repo.packagist.org", fetch_authorities: [String]{"repo.packagist.org", "api.github.com", "codeload.github.com", "github.com"}, archive_suffix: ".zip", native_suffixes: [String]{".so", ".bundle", ".dll", ".dylib", ".phar"}},
+}
+
+// The scripting registry that serves `family`.
+provider_script_registry: fn(family: ProviderFamily) -> ScriptRegistryKind Never! {
+    loop kind in SCRIPT_REGISTRY_KINDS {
+        if kind.family == family -> return kind
+    }
+    panic("`{family.label()}` is not a scripting registry")
 }
 
 // One dependency edge: a package name and its registry-syntax requirement.
@@ -136,14 +102,14 @@ ScriptRegistryProvider: struct {
         project: ctx.project_dir ?? return
         locked: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return
         current: provider_script_registry_cache_authority(self.kind, ctx)
-        provider_ensure_locked_authority(self.kind.title(), locked.repository, locked.authority, current)
+        provider_ensure_locked_authority(self.kind.title, locked.repository, locked.authority, current)
     }
 
     cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project: ctx.project_dir ?? return None
         locked: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return None
         authority: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
-        identity := provider_cache_identity(locked.source_hash, self.kind.recipe(), ctx, authority.provenance())
+        identity := provider_cache_identity(locked.source_hash, self.kind.recipe, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
         Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
@@ -155,14 +121,14 @@ ScriptRegistryProvider: struct {
     }
 
     realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title()} metadata or source fetches"))
+        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title} metadata or source fetches"))
         realized: provider_script_realize(self.kind, spec, ctx) ?? return Err(err.into_provider(self.kind.error_kind()))
         Ok(realized)
     }
 }
 
 provider_script_authority: fn(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
-    RegistryAuthority.load(ctx, kind.label(), kind.repository(), kind.fetch_authorities())
+    RegistryAuthority.load(ctx, kind.label(), kind.repository, kind.fetch_authorities)
 }
 
 provider_script_registry_cache_authority: fn(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
@@ -181,7 +147,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     packages: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String: [RegistryPackage]]{})
     artifacts := [RegistryArtifact]{}
     loop package in packages {
-        path: files.join(scratch, "{provider_script_safe_filename(package.name)}-{provider_script_safe_filename(package.version)}{kind.archive_suffix()}")
+        path: files.join(scratch, "{provider_script_safe_filename(package.name)}-{provider_script_safe_filename(package.version)}{kind.archive_suffix}")
         authority.to_path(package.url, path, scratch)
         bytes: provider_registry_read_bytes(path, "could not read fetched source")
         provider_script_verify_integrity(package, bytes)
@@ -193,7 +159,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
             if pkg_lock_registry_realization(project, kind.label(), spec.raw) == {
                 .Val(locked) -> {
                     if locked.source_hash != source_hash || locked.repository != repository || locked.authority != fetch_authority {
-                        return Err(RegistryError.Reason("locked {kind.title()} source integrity changed for `{spec.raw}` (expected {locked.source_hash} from {locked.repository}, got {source_hash} from {repository})"))
+                        return Err(RegistryError.Reason("locked {kind.title} source integrity changed for `{spec.raw}` (expected {locked.source_hash} from {locked.repository}, got {source_hash} from {repository})"))
                     }
                 }
                 .None -> {}
@@ -214,14 +180,14 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     provider_registry_write_text(files.join(out_dir, "{kind.label()}.provenance"), provider_script_render_provenance(kind, repository, fetch_authority, source_hash, artifacts), "could not write provenance")
     provider_registry_seal(out_dir, "could not seal provider output")
 
-    envelope: Envelope.for_output(out_dir, spec.raw, kind.recipe())
+    envelope: Envelope.for_output(out_dir, spec.raw, kind.recipe)
     dependencies := [String]{}
     loop index in 0..<(artifacts.len() - 1) -> dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
     if ctx.project_dir == {
         .Val(project) -> pkg_lock_record_registry_realization(project, kind.label(), root.package.name, root.package.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
         .None -> {}
     }
-    identity: provider_cache_identity(source_hash, kind.recipe(), ctx, fetch_authority)
+    identity: provider_cache_identity(source_hash, kind.recipe, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
     loop artifact in artifacts -> objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
     edges: provider_registry_dependency_objects(root.package.name, objects)
@@ -229,7 +195,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
     extra: [String: String]{"scripts": "disabled", "plugins": "disabled"}
-    producer: provider_registry_producer(kind.label(), "{kind.label()}-install", source_hash, repository, fetch_authority, root.package.version, extra, kind.recipe(), identity, facts)
+    producer: provider_registry_producer(kind.label(), "{kind.label()}-install", source_hash, repository, fetch_authority, root.package.version, extra, kind.recipe, identity, facts)
     Ok(Realized{
         name: provider_script_safe_filename(root.package.name),
         version: root.package.version,
@@ -257,10 +223,10 @@ provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> (name: S
         .Val(pair) -> pair.after
         .None -> ""
     }
-    if !kind.valid_name(name) -> return Err(RegistryError.Reason("invalid {kind.title()} package name `{name}`"))
+    if !kind.valid_name(name) -> return Err(RegistryError.Reason("invalid {kind.title} package name `{name}`"))
     version: if selector.starts_with("version=") -> selector.removeprefix("version=") else -> ""
     if version == "" || !provider_script_safe_piece(version, "+_-.") {
-        return Err(RegistryError.Reason("{kind.title()} ref `{raw}` is mutable; use `{name}#version=<exact>`"))
+        return Err(RegistryError.Reason("{kind.title} ref `{raw}` is mutable; use `{name}#version=<exact>`"))
     }
     Ok((name: name, version: version))
 }
@@ -365,28 +331,31 @@ ScriptRegistryOrderWalk: struct {
 }
 
 provider_script_fetch_candidates: fn(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
-    if kind == {
+    if kind.family == {
         .RubyGems -> provider_rubygems_fetch(authority, scratch, name)
         .Cpan -> provider_cpan_fetch(authority, scratch, name)
         .Packagist -> provider_packagist_fetch(authority, scratch, name)
+        else -> Err(RegistryError.Reason("{kind.title} has no metadata reader"))
     }
 }
 
 // ── Installation ──
 
 provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
-    if kind == {
+    if kind.family == {
         .RubyGems -> provider_rubygems_install(artifact, out, scratch)
         .Cpan -> provider_cpan_install(artifact, out, scratch)
         .Packagist -> provider_packagist_install(artifact, out, scratch)
+        else -> Err(RegistryError.Reason("{kind.title} has no installer"))
     }
 }
 
 provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
-    if kind == {
+    if kind.family == {
         .RubyGems -> provider_rubygems_write_projection(artifacts, out)
         .Cpan -> provider_registry_write_text(files.join(out, "perl5lib"), "lib\n", "could not write Perl runtime projection")
         .Packagist -> provider_packagist_write_autoloader(artifacts, out)
+        else -> Err(RegistryError.Reason("{kind.title} has no runtime projection"))
     }
 }
 
@@ -395,7 +364,7 @@ provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts
 provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String, forbidden: [String]) RegistryError! -[FS]> {
     entries: files.list_dir(root) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
     markers := forbidden
-    loop suffix in kind.native_suffixes() -> markers.push(suffix)
+    loop suffix in kind.native_suffixes -> markers.push(suffix.copy())
     loop entry in entries {
         stat: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
         if stat.is_symlink -> return Err(RegistryError.Reason("installed source contains a symbolic link"))
@@ -562,7 +531,7 @@ provider_script_json_string: fn(value: Dyn, field: String) -> String RegistryErr
 // ── Version constraints ──
 
 provider_script_version_satisfies: fn(kind: ScriptRegistryKind, actual: String, requirement: String) -> Bool Never! {
-    if kind == {
+    if kind.family == {
         .Packagist -> provider_script_composer_satisfies(actual, requirement)
         else -> provider_script_basic_satisfies(actual, requirement)
     }

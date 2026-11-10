@@ -44,6 +44,18 @@ RefSource: enum {
     PyPI
     // A package from Swift Package Manager.
     SwiftPM
+    // A package from Maven.
+    Maven
+    // A package from NuGet.
+    NuGet
+    // A package from Conan.
+    Conan
+    // A port from vcpkg.
+    Vcpkg
+    // A formula or cask from Homebrew.
+    Homebrew
+    // A verified binary artifact named by URL and digest.
+    Binary
     // A verified release artifact admitted directly by Jetpack (card #2166).
     Releases
     // A pack-declared named source, e.g. `stable` -> a pinned nixpkgs.
@@ -91,6 +103,23 @@ RefSource: enum {
         row: pkg_provider_row(name) ?? return None
         row.source
     }
+
+    // The provider kind a direct `package@source` ref realizes through
+    // without consulting a source table: the kind of this source's provider
+    // row, unless that row realizes through the `nix` compatibility provider
+    // or infers its kind from the target.
+    direct_kind: fn(self) -> ProviderKind? Never! {
+        loop row in PROVIDER_ROWS {
+            if row.source == .Val(source) {
+                if source == self {
+                    kind: row.kind ?? return None
+                    if kind == ProviderKind.Nix -> return None
+                    return Val(kind)
+                }
+            }
+        }
+        None
+    }
 }
 
 // Which backend realizes a source: the `nix` compatibility provider, the
@@ -114,6 +143,12 @@ ProviderKind: enum {
     Cargo
     PyPI
     SwiftPM
+    Maven
+    NuGet
+    Conan
+    Vcpkg
+    Homebrew
+    Binary
     // A native Jetpack release-artifact recipe.
     JetPackage
     // Decide `Nix` vs `Core` at realize time by peeking the source's
@@ -148,6 +183,12 @@ ProviderKind: enum {
             .Cargo -> "Cargo"
             .PyPI -> "PyPI"
             .SwiftPM -> "SwiftPM"
+            .Maven -> "Maven"
+            .NuGet -> "NuGet"
+            .Conan -> "Conan"
+            .Vcpkg -> "Vcpkg"
+            .Homebrew -> "Homebrew"
+            .Binary -> "Binary"
             .JetPackage -> "JetPackage"
             .Infer -> "Infer"
         }
@@ -181,21 +222,29 @@ ProviderFamily: enum {
     Vcpkg
     Homebrew
     Binary
+    Cran
+    LuaRocks
+    RubyGems
+    Cpan
+    Packagist
+    JetPackage
 
+    // The first provider row holding this family.
     label: fn(self) -> String Never! {
         loop row in PROVIDER_ROWS {
             if row.family == .Val(family) {
                 if family == self -> return row.name
             }
         }
-        panic("every provider family has one provider row")
+        panic("every provider family has a provider row")
     }
 
-    // Every family, in provider-row order.
+    // Every family once, in provider-row order.
     all: fn() -> [ProviderFamily] Never! {
         families := [ProviderFamily]{}
         loop row in PROVIDER_ROWS {
-            if row.family == .Val(family) -> families.push(family)
+            family: row.family ?? next
+            if !families.contains(family) -> families.push(family.copy())
         }
         families
     }

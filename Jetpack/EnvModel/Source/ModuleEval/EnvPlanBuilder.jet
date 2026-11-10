@@ -157,21 +157,14 @@ envmodel_evaluate_package_profile: fn(src: String, base_dir: String, name: Strin
     Ok(plan.finalize())
 }
 
+// The provider label a profile records for a source: the provider the
+// source realizes through. The `jetpack` index realizes through `nix`, a
+// bare path through `core`, and release artifacts through `jetpackage`;
+// every other built-in source is its own provider.
 envmodel_profile_provider_label: fn(source: RefSource, source_name: String, table: SourceTable) -> String Never! {
     if source == {
         .Jetpack | .Nixpkgs -> "nix"
-        .Github -> "github"
         .Path -> "core"
-        .Cran -> "cran"
-        .LuaRocks -> "luarocks"
-        .RubyGems -> "ruby"
-        .Cpan -> "perl"
-        .Packagist -> "php"
-        .JetRegistry -> "jet-registry"
-        .Npm -> "npm"
-        .Cargo -> "cargo"
-        .PyPI -> "pypi"
-        .SwiftPM -> "swiftpm"
         .Releases -> "jetpackage"
         .Named(_) -> {
             upstream: table.upstream(source_name) ?? ""
@@ -179,6 +172,7 @@ envmodel_profile_provider_label: fn(source: RefSource, source_name: String, tabl
             if provider != "" -> return provider
             table.provider(source_name).label()
         }
+        else -> source.label()
     }
 }
 

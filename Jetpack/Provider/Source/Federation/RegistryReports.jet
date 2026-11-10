@@ -1,0 +1,275 @@
+// Metadata documents of the native registry providers: a CRAN `DESCRIPTION`
+// paragraph, a LuaRocks rockspec, a RubyGems gem record, a MetaCPAN release,
+// and Packagist `p2` metadata. Each document reads through the readers its
+// provider realizes with, so federation and realization agree on what a
+// document says.
+
+impl ProviderFactReport {
+    // A CRAN `DESCRIPTION` file, or one paragraph of a `PACKAGES` index.
+    cran_document: fn(document: String) -> ProviderFactReport Never! {
+        paragraphs := [String]{}
+        loop paragraph in provider_registry_crlf_to_lf(document).split("\n\n").to_list() {
+            if paragraph.trim() != "" -> paragraphs.push(paragraph)
+        }
+        if paragraphs.len() == 0 -> return ProviderFactReport.unreadable(ProviderFamily.Cran, REF_SOURCE_CRAN, "CRAN DESCRIPTION has no fields")
+        fields: provider_cran_dcf_fields(paragraphs[0])
+        losses := [String]{}
+        if paragraphs.len() > 1 -> losses.push("CRAN document holds {paragraphs.len()} package paragraphs; exactly one is needed")
+        facts := MetadataFacts.empty(ProviderFamily.Cran, fields.get("Package") ?? "")
+        facts.version = fields.get("Version") ?? ""
+        if facts.name != "" && !provider_cran_valid_component(facts.name) -> losses.push("CRAN package name `{facts.name}` is unsafe")
+        if facts.version != "" && !provider_cran_valid_component(facts.version) -> losses.push("CRAN version `{facts.version}` is unsafe")
+        facts.license = fields.get("License") ?? ""
+        loop key in fields.keys().to_list() -> facts.add_typed_text("provider.cran.native.{key}", fields[key])
+        loop dependency in provider_cran_record_dependencies(fields) {
+            facts.dependencies.push(dependency.name)
+            if dependency.requirement == {
+                .Val(requirement) -> facts.add_typed_text("provider.cran.requirement.{dependency.name}", "{requirement.operator} {requirement.wanted}")
+                .None -> {}
+            }
+        }
+        facts.source_identity = "{REF_SOURCE_CRAN}:{facts.name}@{facts.version}"
+        report := provider_graph_finish(facts, losses, [String]{})
+        if report.facts.version != "" && !provider_exact_version(report.facts.version) -> report.losses.push("CRAN package version is not an exact identity")
+        report
+    }
+
+    // A LuaRocks rockspec. Only quoted scalar and table fields are read; no
+    // Lua code runs.
+    luarocks_document: fn(document: String) -> ProviderFactReport Never! {
+        name: provider_luarocks_assignment_string(document, "package") ?? return ProviderFactReport.unreadable(ProviderFamily.LuaRocks, REF_SOURCE_LUAROCKS, "rockspec `package`: {err.message()}")
+        losses := [String]{}
+        facts := MetadataFacts.empty(ProviderFamily.LuaRocks, name)
+        if !provider_luarocks_valid_component(name) -> losses.push("LuaRocks package name `{name}` is unsafe")
+        if provider_luarocks_assignment_string(document, "version") == {
+            .Ok(version) -> {
+                facts.version = version
+                if !provider_luarocks_valid_component(version) -> losses.push("LuaRocks version `{version}` is unsafe")
+            }
+            .Err(error) -> losses.push("rockspec `version`: {error.message()}")
+        }
+        if provider_luarocks_assignment_table_optional(document, "source") == {
+            .Val(source) -> {
+                if provider_luarocks_table_string(source, "url") == {
+                    .Ok(url) -> facts.add_typed_text("provider.luarocks.source.url", url)
+                    .Err(error) -> losses.push("rockspec `source.url`: {error.message()}")
+                }
+                if provider_luarocks_table_string(source, "sha256") == {
+                    .Ok(hash) -> {
+                        if provider_registry_valid_hex(hash, 64) -> facts.integrity_hash = pkg_ascii_lower(hash) else -> losses.push("rockspec `{name}` source hash is not a SHA-256 digest")
+                    }
+                    .Err(_) -> losses.push("rockspec `{name}` needs a SHA-256 source hash")
+                }
+            }
+            .None -> losses.push("rockspec `{name}` has no `source` table")
+        }
+        if provider_luarocks_assignment_table_optional(document, "dependencies") == {
+            .Val(table) -> {
+                if provider_luarocks_parse_dependencies(table) == {
+                    .Ok(dependencies) -> {
+                        loop dependency in dependencies {
+                            facts.dependencies.push(dependency.name)
+                            constraints := [String]{}
+                            loop requirement in dependency.requirements -> constraints.push("{requirement.operator} {requirement.wanted}")
+                            if constraints.len() > 0 -> facts.add_typed_text("provider.luarocks.requirement.{dependency.name}", constraints.join(", "))
+                        }
+                    }
+                    .Err(error) -> losses.push("rockspec `dependencies`: {error.message()}")
+                }
+            }
+            .None -> {}
+        }
+        if provider_luarocks_assignment_table_optional(document, "supported_platforms") == {
+            .Val(table) -> {
+                if provider_luarocks_string_values(table) == {
+                    .Ok(platforms) -> facts.platforms = platforms
+                    .Err(error) -> losses.push("rockspec `supported_platforms`: {error.message()}")
+                }
+            }
+            .None -> {}
+        }
+        if provider_luarocks_assignment_table_optional(document, "description") == {
+            .Val(description) -> {
+                if provider_luarocks_table_string(description, "license") == {
+                    .Ok(license) -> facts.license = license
+                    .Err(_) -> {}
+                }
+            }
+            .None -> {}
+        }
+        if provider_luarocks_assignment_table_optional(document, "build") == {
+            .Val(build) -> {
+                if provider_luarocks_table_string(build, "type") == {
+                    .Ok(kind) -> {
+                        facts.add_typed_text("provider.luarocks.build.type", kind)
+                        if kind != "builtin" -> facts.scripts.push("build.type={kind}")
+                    }
+                    .Err(error) -> losses.push("rockspec `build.type`: {error.message()}")
+                }
+            }
+            .None -> losses.push("rockspec `{name}` has no `build` table")
+        }
+        facts.source_identity = "{REF_SOURCE_LUAROCKS}:{facts.name}@{facts.version}"
+        provider_graph_finish(facts, losses, [String]{})
+    }
+
+    // A RubyGems gem record (`/api/v1/gems/<name>.json` or
+    // `/api/v2/rubygems/<name>/versions/<version>.json`).
+    rubygems_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.RubyGems, REF_SOURCE_RUBY, "gem metadata is not a JSON object")
+        losses := [String]{}
+        facts := MetadataFacts.empty(ProviderFamily.RubyGems, provider_graph_json_string(object, "name") ?? "")
+        facts.add_json_projection("provider.ruby.native", object)
+        if facts.name != "" && !provider_script_registry(ProviderFamily.RubyGems).valid_name(facts.name) -> losses.push("gem name `{facts.name}` is unsafe")
+        facts.version = provider_graph_json_string(object, "version") ?? ""
+        if facts.version != "" && !provider_script_safe_piece(facts.version, "+_-.") -> losses.push("gem version `{facts.version}` is unsafe")
+        if object.get("sha") == {
+            .Val(sha) -> {
+                hash: pkg_json_text(sha) ?? ""
+                if provider_registry_valid_hex(hash, 64) -> facts.integrity_hash = pkg_ascii_lower(hash) else -> losses.push("gem `sha` must be a SHA-256 digest")
+            }
+            .None -> {}
+        }
+        if object.get("licenses") == {
+            .Val(licenses) -> {
+                if provider_registry_record_licenses(facts, licenses) == {
+                    .Val(loss) -> losses.push("gem `licenses`: {loss}")
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        platform: provider_graph_json_string(object, "platform") ?? ""
+        if platform != "" -> facts.platforms.push(platform)
+        if object.get("dependencies") == {
+            .Val(raw_groups) -> {
+                groups: pkg_json_object(raw_groups) ?? [String: Dyn]{}
+                if pkg_json_object(raw_groups) == None -> losses.push("gem `dependencies` must be an object of runtime and development lists")
+                loop group in groups.keys().to_list() {
+                    entries: pkg_json_array(groups[group]) ?? {
+                        losses.push("gem `dependencies.{group}` must be an array")
+                        next
+                    }
+                    loop entry in entries {
+                        fields: pkg_json_object(entry) ?? {
+                            losses.push("gem `dependencies.{group}` entries must be objects")
+                            next
+                        }
+                        dependency: provider_graph_json_string(fields, "name") ?? {
+                            losses.push("gem `dependencies.{group}` entry has no name")
+                            next
+                        }
+                        if !provider_script_registry(ProviderFamily.RubyGems).valid_name(dependency) -> losses.push("gem dependency `{dependency}` is unsafe")
+                        if group == {
+                            "runtime" -> facts.dependencies.push(dependency.copy())
+                            "development" -> facts.dev_dependencies.push(dependency.copy())
+                            else -> losses.push("gem dependency group `{group}` is unknown")
+                        }
+                        requirement: provider_graph_json_string(fields, "requirements") ?? ""
+                        if requirement != "" -> facts.add_typed_text("provider.ruby.requirement.{group}.{dependency}", requirement)
+                    }
+                }
+            }
+            .None -> {}
+        }
+        facts.source_identity = "{REF_SOURCE_RUBY}:{facts.name}@{facts.version}"
+        provider_graph_finish(facts, losses, [String]{})
+    }
+
+    // A MetaCPAN release, bare or as a search hit's `_source`.
+    cpan_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Cpan, REF_SOURCE_PERL, "MetaCPAN release is not a JSON object")
+        release: object.get("_source") ?? Dyn.Object(object)
+        fields: pkg_json_object(release) ?? return ProviderFactReport.unreadable(ProviderFamily.Cpan, REF_SOURCE_PERL, "MetaCPAN `_source` is not a JSON object")
+        package: provider_cpan_parse_release(provider_script_registry(ProviderFamily.Cpan).repository, release) ?? return ProviderFactReport.unreadable(ProviderFamily.Cpan, provider_graph_json_string(fields, "distribution") ?? REF_SOURCE_PERL, err.message())
+        losses := [String]{}
+        facts := provider_registry_package_facts(ProviderFamily.Cpan, package)
+        facts.add_json_projection("provider.perl.native", fields)
+        if fields.get("license") == {
+            .Val(licenses) -> {
+                if provider_registry_record_licenses(facts, licenses) == {
+                    .Val(loss) -> losses.push("MetaCPAN `license`: {loss}")
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        provider_graph_finish(facts, losses, [String]{})
+    }
+
+    // Packagist `p2` metadata for one package with exactly one release.
+    packagist_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Packagist, REF_SOURCE_PHP, "Packagist metadata is not a JSON object")
+        names: provider_graph_json_keys(object, "packages")
+        if names.len() != 1 -> return ProviderFactReport.unreadable(ProviderFamily.Packagist, REF_SOURCE_PHP, "Packagist metadata must list exactly one package, found {names.len()}")
+        name: names[0]
+        releases: provider_packagist_parse_metadata(provider_script_registry(ProviderFamily.Packagist).repository, name, document) ?? return ProviderFactReport.unreadable(ProviderFamily.Packagist, name, err.message())
+        if releases.len() != 1 {
+            versions := [String]{}
+            loop release in releases -> versions.push(release.version)
+            return ProviderFactReport.unreadable(ProviderFamily.Packagist, name, "Packagist metadata lists {releases.len()} releases of `{name}` ({versions.join(", ")}); exactly one is needed for an exact identity")
+        }
+        losses := [String]{}
+        facts := provider_registry_package_facts(ProviderFamily.Packagist, releases[0])
+        prefixes := releases[0].psr4.keys().to_list()
+        prefixes.sort()
+        loop prefix in prefixes -> facts.typed["provider.php.psr4.{prefix}"] = releases[0].psr4[prefix]
+        listed: object.get("packages") ?? Dyn.Null
+        packages: pkg_json_object(listed) ?? [String: Dyn]{}
+        raw_releases: pkg_json_array(packages.get(name) ?? Dyn.Null) ?? [Dyn]{}
+        if raw_releases.len() > 0 {
+            if pkg_json_object(raw_releases[0]) == {
+                .Val(release) -> {
+                    facts.add_json_projection("provider.php.native", release)
+                    if release.get("license") == {
+                        .Val(licenses) -> {
+                            if provider_registry_record_licenses(facts, licenses) == {
+                                .Val(loss) -> losses.push("Packagist `license`: {loss}")
+                                .None -> {}
+                            }
+                        }
+                        .None -> {}
+                    }
+                }
+                .None -> {}
+            }
+        }
+        provider_graph_finish(facts, losses, [String]{})
+    }
+}
+
+// The shared facts of one registry release: its identity, archive digest or
+// immutable reference, and dependencies with their registry requirements.
+provider_registry_package_facts: fn(family: ProviderFamily, package: RegistryPackage) -> MetadataFacts Never! {
+    label: family.label()
+    facts := MetadataFacts.empty(family, package.name)
+    facts.version = package.version
+    facts.integrity_hash = if package.integrity == {
+        .SHA256(hash) -> hash
+        .SHA1(hash) -> hash
+        .ImmutableGit(repository, reference) -> {
+            facts.add_typed_text("provider.{label}.source.repository", repository)
+            reference
+        }
+    }
+    facts.add_typed_text("provider.{label}.source.url", package.url)
+    loop dependency in package.dependencies {
+        facts.dependencies.push(dependency.name)
+        if dependency.requirement != "" -> facts.add_typed_text("provider.{label}.requirement.{dependency.name}", dependency.requirement)
+    }
+    facts.source_identity = "{label}:{package.name}@{package.version}"
+    facts
+}
+
+// Record a registry license field: one license is the package license.
+// Several stay a typed list, because registries differ on whether a list
+// means any or all of them. Returns the loss when the field is malformed.
+provider_registry_record_licenses: fn(facts: &MetadataFacts, value: Dyn) -> String? Never! {
+    licenses: provider_graph_json_string_list(value) ?? return Val("must be a string or an array of strings")
+    if licenses.len() == 1 {
+        facts.license = licenses[0]
+    } else if licenses.len() > 1 {
+        facts.typed["provider.{facts.family.label()}.licenses"] = licenses
+    }
+    None
+}

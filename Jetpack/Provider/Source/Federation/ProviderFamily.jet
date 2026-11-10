@@ -6,11 +6,23 @@
 // owner-gated. A contract records the surface this build actually owns.
 
 impl ProviderFamily {
-    // Core, Nix, Path, and the Jet registry are local or first party.
+    // Core, Nix, Path, the Jet registry, and native Jet release artifacts
+    // are local or first party.
     is_local_or_first_party: fn(self) -> Bool Never! {
         if self == {
-            .Core | .Nix | .Path | .JetRegistry -> true
+            .Core | .Nix | .Path | .JetRegistry | .JetPackage -> true
             else -> false
+        }
+    }
+
+    // Whether a native provider adapter fetches and verifies this family's
+    // bytes: its provider row's kind dispatches to a realizing adapter.
+    has_realizing_adapter: fn(self) -> Bool Never! {
+        row: pkg_provider_row(self.label()) ?? return false
+        kind: row.kind ?? return false
+        if provider_for(kind) == {
+            .Unsupported(_) -> false
+            else -> true
         }
     }
 }
@@ -30,7 +42,7 @@ ProviderFamilyContract: struct {
     // capabilities stay false until a real provider adapter supplies them.
     for_family: fn(family: ProviderFamily) -> ProviderFamilyContract Never! {
         first_party: family.is_local_or_first_party()
-        byte_owner: first_party || family == ProviderFamily.Binary
+        byte_owner: first_party || family == ProviderFamily.Binary || family.has_realizing_adapter()
         ProviderFamilyContract{
             family: family,
             parses_refs: true,

@@ -2776,6 +2776,9 @@ recorded in `.jet/lock`. Mutable refs, unsupported native-build metadata,
 cycles, unsafe archive paths, source drift, and cache tampering fail closed.
 Offline reuse verifies sealed Hangar output without contacting the repository
 (D-JPK-PROVIDERS2).
+Every provider whose metadata Jetpack federates is also a `@source` word. A
+direct root without a native realization path, such as `@maven` or
+`@homebrew`, fails closed instead of falling through to Nix.
 
 Core and adapted packages can be realized without an installed Nix executable.
 A reference without a pinned compatibility output reports **E1272**; foreign

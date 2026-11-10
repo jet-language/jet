@@ -55,7 +55,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
                         .None -> ">= 0"
                     }
                     if dependency_name == "ruby" || dependency_name == "rubygems" -> next
-                    if !(ScriptRegistryKind.RubyGems).valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
+                    if !provider_script_registry(ProviderFamily.RubyGems).valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
                     dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
                 }
             }
@@ -88,7 +88,7 @@ provider_rubygems_install: fn(artifact: RegistryArtifact, out: String, scratch: 
     gem_root: files.join(files.join(out, "gems"), "{artifact.package.name}-{artifact.package.version}")
     provider_registry_create_dir_all(gem_root, "could not create gem home")
     provider_registry_extract_tar(data, true, gem_root) ?? return Err(RegistryError.Reason("could not unpack gem payload"))
-    provider_script_reject_tree_features(ScriptRegistryKind.RubyGems, gem_root, [String]{"ext", "extensions", "plugins", "rubygems_plugin.rb"})
+    provider_script_reject_tree_features(provider_script_registry(ProviderFamily.RubyGems), gem_root, [String]{"ext", "extensions", "plugins", "rubygems_plugin.rb"})
 }
 
 // `gem-home`, `gem-path`, and `ruby-lib` (every installed gem's `lib`,

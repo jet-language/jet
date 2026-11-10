@@ -50,7 +50,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
     version: provider_script_json_string(value, "version")
     url: provider_script_json_string(value, "download_url")
     checksum: provider_script_json_string(value, "checksum_sha256")
-    if !(ScriptRegistryKind.Cpan).valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
+    if !provider_script_registry(ProviderFamily.Cpan).valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
         return Err(RegistryError.Reason("MetaCPAN release identity is unsafe or unhashed"))
     }
     dependencies := [RegistryDependency]{}
@@ -63,7 +63,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
                 if relationship != "requires" || phase != "runtime" -> next
                 dependency_name: provider_script_json_string(item, "module")
                 if dependency_name == "perl" -> next
-                if !(ScriptRegistryKind.Cpan).valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
+                if !provider_script_registry(ProviderFamily.Cpan).valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
                 minimum := "0"
                 if provider_script_json_field(item, "version") == {
                     .Val(written) -> {
@@ -95,7 +95,7 @@ provider_cpan_install: fn(artifact: RegistryArtifact, out: String, scratch: Stri
     provider_registry_create_dir_all(unpack, "could not create CPAN scratch")
     provider_registry_extract_tar(artifact.path, true, unpack) ?? return Err(RegistryError.Reason("could not unpack CPAN distribution"))
     root: provider_registry_archive_root(unpack)
-    provider_script_reject_tree_features(ScriptRegistryKind.Cpan, root, [String]{})
+    provider_script_reject_tree_features(provider_script_registry(ProviderFamily.Cpan), root, [String]{})
     library: files.join(root, "lib")
     if !files.is_dir(library) -> return Err(RegistryError.Reason("CPAN distribution `{artifact.package.name}` has no pure-Perl lib directory"))
     provider_script_copy_tree(library, files.join(out, "lib"))
