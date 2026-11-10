@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98950,
+    "rev": 98964,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -45494,6 +45494,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed G6Lead-4276c1 (53805444ba..01b86931e7): the compiler reads #here/#caller beside $here/$caller, the bootstrap step for 4276c2 (in t15)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Disk cleanup (owner order, 2026-11-10 ~13:25): 16 worktrees of ended agents were removed (G6Lead ×13, G8Lead2, OwnerDesk, TlsLead), and 2 remain. Each one's tracked-file diff was saved first as $JET_SCRATCH_ROOT/lanes/<lane>/unlanded-<name>.patch (G6Lead: cg, h3, h4, h5, h6, h9, h10, hts, hx, q-bt; OwnerDesk: dev; TlsLead: t42), and the base commit is in each patch's index lines. The work these lanes submitted went through inbox SUBs. These patches are for recovery only."
         },
         {
@@ -46277,7 +46282,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-10T18:24:38.896Z",
+      "updated": "2026-11-10T19:45:09.798Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -56541,6 +56546,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed PerfLead-5072c26a + c26afix (53805444ba..01b86931e7): c26 part a (toolchain: comptime inputs, E0945). c26 stays open for part b (c26b1r rides t15)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "D-EMBED-WALK1 is on the board (it unblocks c28). The draft recommends A; a different-family review added option E (computed embeds with literal globs) and recommends A only conditionally (E meets c28 with less change). The review gave 22 claim verdicts; the audit lands as Docs/audits/2026-11-10-embed-walk-review.md. Gaps under every option, for c28 to clear before the cutover: (1) jet run keeps a cached find-only program after its first match appears, because an empty find leaves no file-log record (ScriptCache.jet:530); (2) no lock record for a comptime find plus embed_file, and a build fn lock misses b.find and b.embed reads; (3) jet dev misses new non-.jet and toolchain: files (Host.jet:3718-3750); (4) Assemble rebase_embeds handles only literal embed_file; (5) no comptime value cache (about 3.3 s of CPU per compile for the 12 views against 1 s for the generator)."
         },
         {
@@ -56916,11 +56926,11 @@
         {
           "n": 25,
           "text": "D-EMBED-TOOLCHAIN1=A, first build step: `.jet/lock` records a `[[comptime_inputs]]` row with the SHA-256 of every file a build reads through embed_file or find, as Docs/spec/spec.md:539 says. Today, on a0.0.43, the CLI fills these rows only for generated sources (Compiler/JetCli/Source/Cli/InspectBuild.jet:267-275). A case builds a package with an embed and checks the row, then edits the file and checks that the digest changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T16:32:27.966Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB PerfLead-5072c25. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). jet build records each embed_file/embed_bytes/find input's SHA-256 as a [[comptime_inputs]] lock row, and an edit replaces the digest; the PackageModel line reruns rc=0 with the built jetpack.",
+          "at": "2026-11-10T19:45:00.112Z"
         },
         {
           "n": 26,
@@ -57068,7 +57078,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T19:14:18.899Z",
+      "updated": "2026-11-10T19:45:08.726Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -70583,6 +70593,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed PerfLead-w14rot and PerfLead-w03stream (53805444ba..01b86931e7). w14 went from 420.0M to 360.0M instructions:u (luajit 360.7M), and w03's peak RSS from 196.7 MB to 1.1 MB. c2 stays open: w03's wall and CPU time still trail bash and php."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "t12c landed (4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)): PerfLead-w14, w14v, nonneg (w14 810M -> 420M instructions; LuaJIT 360.7M, still a loss), rxpf, packnames and lazylines (w03 6.517G -> 2.721G instructions, 196 MB -> 1 MB RSS). c2 stays open: w14 still loses to LuaJIT."
         },
         {
@@ -70754,7 +70769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-10T16:29:35.609Z",
+      "updated": "2026-11-10T19:45:05.245Z",
       "updatedBy": "Main",
       "goals": [
         "G4",
@@ -72204,20 +72219,20 @@
         {
           "n": 23,
           "text": "(from #6138 Effects on types: build targets are typed declarations with ) One `fn build` builds the same source for two targets and each artifact is checked against its own row; an example with golden output proves it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:55:23.256Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). golden Metaprogramming/BuildTime/TwoTargets on O0/O1/O2, plus case cross/build_fn_checks_each_target_against_its_own_row.",
+          "at": "2026-11-10T19:44:53.295Z"
         },
         {
           "n": 24,
           "text": "(from #6138 Effects on types: build targets are typed declarations with ) `$build.target.<fact>` reads work in `comptime if` and in code, with a test.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:55:24.869Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). case cross/build_target_facts_read_in_comptime_and_code.",
+          "at": "2026-11-10T19:44:54.516Z"
         },
         {
           "n": 25,
@@ -72492,11 +72507,11 @@
         {
           "n": 56,
           "text": "(split from c30) An expert example (module, type, trait and target rows) has golden output on every tier. Waits on D-TARGET-DECL1 for the target rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T05:48:50.269Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). As named in the SUB's cards file; its test lines pass on the landed tree.",
+          "at": "2026-11-10T19:44:55.998Z"
         },
         {
           "n": 57,
@@ -72543,7 +72558,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-10T19:44:51.048Z",
+      "updated": "2026-11-10T19:44:55.998Z",
       "updatedBy": "Main",
       "criteriaLastN": 60
     },
@@ -74128,6 +74143,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed G8Fix-2 + G8Fix-2fix (c37 partly: Method.custom and the message statics are Core source functions) and G6LeadC-9a1 (c21 part 1 of 2, the compiler half; 9a2 rides t15) (53805444ba..01b86931e7). c36 and c38 are met."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "c21 lands in two SUBs. SUB-9a moves SQL, HTML, Sh, URL and DateTime to CheckedText impls, leaving only Path in TypedHeadKind. SUB-9b adds one registration rule for Core-source impls on runtime-handle types (no Path special case, in line with D-HOST-LEAF1=E), writes impl Path.CheckedText and deletes TypedHeadKind. c21 is met only after 9b. c22 (SUB-8): golden CheckedText passes 21/21 on O0, O1 and O2, including the new CheckedTextBoundHoles."
         },
         {
@@ -74445,11 +74465,11 @@
         {
           "n": 36,
           "text": "web.openapi on a mux with a CONNECT route reports \"unsupported OpenAPI HTTP method\" as a registered user-facing error or emits the operation. It never exits 101 with the message hidden (Core/Web/Web.jet:1104, Compiler/JetRuntime/Source/RouteWeb.jet:3-15). Found by the D-ROUTE-METHOD1 probe r05.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T15:24:24.753Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-3. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). web.openapi on a mux with a CONNECT route renders it under OpenAPI 3.2 additionalOperations.CONNECT and no longer exits 101.",
+          "at": "2026-11-10T19:44:58.767Z"
         },
         {
           "n": 37,
@@ -74463,11 +74483,11 @@
         {
           "n": 38,
           "text": "E2805 and the router agree on paths: either a module String constant is accepted as a router path, as the E2805 fix text promises, or the fix text is corrected. A UI snapshot proves the result (probe r07).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T15:24:26.633Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-1. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). UI snapshot tests/ui/http_route_constant_path: a module String constant (or a chain of them) is accepted as an HTTPRouter route path.",
+          "at": "2026-11-10T19:44:57.376Z"
         }
       ],
       "refs": [],
@@ -74478,7 +74498,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-10T17:36:10.135Z",
+      "updated": "2026-11-10T19:45:07.577Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -74892,6 +74912,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t14a landed (53805444ba..01b86931e7): c40 is met. G1Lead-4-c42b was dropped: its E0905 is vaguer than E0112 (the span is on abs, it names neither abs nor the argument, and the Fix says impl String.Numeric). c42b v2 rides t15, and c42 stays open."
+        },
         {
           "at": "2026-11-10",
           "by": "Main",
@@ -76236,7 +76261,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T19:44:47.680Z",
+      "updated": "2026-11-10T19:45:02.863Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -79911,6 +79936,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed PerfLead-6403c6a (53805444ba..01b86931e7): c6 stage 1 of 2 (TaskGroup stack:, per-size fiber pools, E3012 names stack:). c6 stays open for stage 2. JetParser/Tests have 2 fails that the base shares (generated_jet_call_arguments_match_native_parser_contract, derive_generic_type_holes_stay_in_the_template_ast)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Sizing by G1Lead-3 on 973d760c89. c2 is open on both paths: 96 tasks in libc sleep(1) through #Import c.c delay the quick task 2898 ms on 32 carriers and 11901 ms on 8, and 96 FIFO readers deadlock (rc 124, 60 s timeout), because foreign calls and raw host reads hold the carrier. There is no hand-off today. Plan (runtime-only, no API): a monitor thread is armed only when work is queued and no idle carrier is left. It marks a carrier blocked when the carrier fiber-switch counter and its thread CPU clock have both stood still for ~5-10 ms, then starts one compensation carrier per blocked carrier; extra carriers retire when idle. CPU-bound tasks are not compensated. This costs nothing on the C-call path, so c3 should hold at ≤1.00. Estimate 3-4 h; G1Lead-3 owns it after 6281f."
         },
         {
@@ -80027,8 +80057,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-10T14:26:25.341Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-10T19:45:04.087Z",
+      "updatedBy": "Main",
       "criteriaLastN": 8
     },
     {
@@ -95328,11 +95358,11 @@
         {
           "n": 5,
           "text": "A jet cc whose project input set is over its 512 MiB cap reports a registered error of its own, naming the project root it inferred, the size and the cap, and saying how to narrow it (--project-root). Today it reports E2102 'Invalid arguments for jet cc' (kind UnknownFlag) with only the usage line as the fix. Found on dev 00a2b37a42 when jet cc hello.c ran in a directory that held a Hangar. Proof: a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T16:37:48.428Z"
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-4. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). An over-cap jet cc project input set is E2118 jet.CcProjectInputsTooLarge, naming the root, the size and the cap, with a UI snapshot; it reruns rc=0 with the built jetpack.",
+          "at": "2026-11-10T19:45:01.526Z"
         }
       ],
       "refs": [],
@@ -95347,7 +95377,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:40:30.554Z",
-      "updated": "2026-11-10T16:46:53.375Z",
+      "updated": "2026-11-10T19:45:01.526Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -96076,6 +96106,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t14a landed TlsLead-65 (53805444ba..01b86931e7): the c10a emission case parses private keys, and their secret flows are fixed. c10 stays open for D-SECRET-CT1 B1-B5 (66r, 67, 68 and 69 ride t15 and t16)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "t12c landed (4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)): TlsLead-59r (c4 I-4b error-exit wipes), 60r (c10(a) emission coverage for RSA-PSS and core.crypto, c4 dudect rows), 62r (c10 TLS 1.2 RSA premaster under the emission case, c4 dudect rows). c4 waits for TlsLead-63 (t13a); c10 waits for part (b), D-SECRET-CT1."
         },
         {
@@ -96338,7 +96373,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-10T17:36:08.504Z",
+      "updated": "2026-11-10T19:45:06.417Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -200615,6 +200650,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T19:45:09.798Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0699zei",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:08.727Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:07.577Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:06.417Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:05.245Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a0gmpl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:04.087Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:02.863Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oev2ib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:45:01.526Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c086wraw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-10T19:45:00.112Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-10T19:44:58.768Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0scf8mn",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-10T19:44:57.377Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0scf8mn",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-10T19:44:55.998Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#56"
+    },
+    {
+      "at": "2026-11-10T19:44:54.516Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-10T19:44:53.295Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#23"
+    },
     {
       "at": "2026-11-10T19:44:51.048Z",
       "by": "Main",
