@@ -88,7 +88,7 @@ pkg_bridge_compile_scalar_sidecar_with_identity: fn(cache: String, identity: Str
 pkg_bridge_spawn_error: fn(tool: String, error: IOError) -> String Never! {
     if error == {
         .NotFound(_) -> "the provisioned {tool} tool was not found"
-        else -> "could not start {tool}: {error}"
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "could not start {tool}: {error}"
     }
 }
 
@@ -302,7 +302,7 @@ pkg_bridge_scalar_parse_line: fn(scalar: ForeignScalar) -> String? Never! {
         .Int -> Val("long long value = strtoll(output + 3, &end, 10); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
         .Float -> Val("double value = strtod(output + 3, &end); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
         .Bool -> Val("bool value; if (strncmp(output + 3, \"true\", 4) == 0) {{ value = true; end = output + 7; }} else if (strncmp(output + 3, \"false\", 5) == 0) {{ value = false; end = output + 8; }} else {{ jet_failed = 4; return false; }}\n")
-        else -> None
+        .Char | .String | .Unsupported -> None
     }
 }
 
@@ -311,7 +311,7 @@ pkg_bridge_scalar_c_type: fn(scalar: ForeignScalar) -> String? Never! {
         .Int -> Val("int64_t")
         .Float -> Val("double")
         .Bool -> Val("bool")
-        else -> None
+        .Char | .String | .Unsupported -> None
     }
 }
 
@@ -320,7 +320,7 @@ pkg_bridge_scalar_format_spec: fn(scalar: ForeignScalar) -> String? Never! {
         .Int -> Val(" %lld")
         .Float -> Val(" %.17g")
         .Bool -> Val(" %s")
-        else -> None
+        .Char | .String | .Unsupported -> None
     }
 }
 
@@ -329,7 +329,7 @@ pkg_bridge_scalar_format_arg: fn(scalar: ForeignScalar, index: Int) -> String? N
         .Int -> Val("(long long)arg{index}")
         .Float -> Val("arg{index}")
         .Bool -> Val("arg{index} ? \"true\" : \"false\"")
-        else -> None
+        .Char | .String | .Unsupported -> None
     }
 }
 
@@ -338,7 +338,7 @@ pkg_bridge_scalar_zero_value: fn(scalar: ForeignScalar) -> String? Never! {
         .Int -> Val("0")
         .Float -> Val("0.0")
         .Bool -> Val("false")
-        else -> None
+        .Char | .String | .Unsupported -> None
     }
 }
 
@@ -359,7 +359,7 @@ pkg_bridge_validate_scalar_bridge: fn(abi: String, descriptor: BinderDescriptor,
         loop scalar in scalars {
             if scalar == {
                 .Int | .Float | .Bool -> {}
-                else -> return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
+                .Char | .String | .Unsupported -> return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
             }
         }
     }

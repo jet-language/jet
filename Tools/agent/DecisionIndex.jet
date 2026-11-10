@@ -46,7 +46,7 @@ field_text: fn(fields: [(key: String, value: Dyn)], key: String) -> String Never
         if field.key != key -> next
         if field.value == {
             .Text(text) -> return text
-            else -> return ""
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return ""
         }
     }
     ""
@@ -92,12 +92,12 @@ ratified_decisions: fn(raw: String) -> [RatifiedDecision] IndexError! {
                         items = rows
                         found = true
                     }
-                    else -> {}
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
                 }
             }
             if !found -> return Err(index_fail("tower decision list --json returned no decision array"))
         }
-        else -> return Err(index_fail("tower decision list --json returned no decision array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(index_fail("tower decision list --json returned no decision array"))
     }
     rows := [RatifiedDecision]{}
     loop item in items {
@@ -106,7 +106,7 @@ ratified_decisions: fn(raw: String) -> [RatifiedDecision] IndexError! {
                 if field_text(fields, "status") != "ratified" -> next
                 rows.push(RatifiedDecision{id: field_text(fields, "id"), outcome: field_text(fields, "outcome"), card: field_text(fields, "cardId")})
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
         }
     }
     rows.sort_by((left: RatifiedDecision, right: RatifiedDecision) -> left.id <=> right.id)

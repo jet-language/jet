@@ -5,12 +5,12 @@ kit_steps_json_any_contains: fn(value: Dyn, needle: String) -> String? {
             loop item in items {
                 if item == {
                     .Text(text) -> { if text.contains(needle) -> return None }
-                    else -> {}
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
                 }
             }
             return Val("JSON array has no string containing the expected substring")
         }
-        else -> return Val("JSON any ~ needs an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("JSON any ~ needs an array")
     }
 }
 

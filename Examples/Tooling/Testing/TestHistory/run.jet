@@ -149,7 +149,6 @@ booking_model: fn(commands: [BookingCommand]) -> Dyn {
                 states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
-            else -> {}
         }
     }
     booking_public_state(states)
@@ -171,7 +170,6 @@ booking_actual_bug: fn(commands: [BookingCommand]) -> Dyn {
                 }
                 states[booking_key(creates)] = "active"
             }
-            else -> {}
         }
     }
     booking_public_state(states)
@@ -190,7 +188,6 @@ booking_actual_correct: fn(commands: [BookingCommand]) -> Dyn {
                 states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
-            else -> {}
         }
     }
     booking_public_state(states)
@@ -200,7 +197,7 @@ booking_handle: fn(operation: testing.HistoryOperation) -> testing.HandleID? {
     if operation.arguments.len() != 1 -> return None
     if operation.arguments[0] == {
         .Handle(handle) -> return Val(handle)
-        else -> return None
+        .Integer(_) | .Boolean(_) | .Text(_) | .Redacted(_) -> return None
     }
     None
 }
@@ -246,7 +243,7 @@ booking_has_handle_live: fn(
             .HandleLive(found) -> {
                 if found == handle -> return true
             }
-            else -> {}
+            .HandleState(_, _) | .TaskCompleted(_) | .EventAvailable(_) -> {}
         }
     }
     false
@@ -262,7 +259,7 @@ booking_has_handle_state: fn(
             .HandleState{handle: found, state: expected} -> {
                 if found == handle && expected == state -> return true
             }
-            else -> {}
+            .HandleLive(_) | .TaskCompleted(_) | .EventAvailable(_) -> {}
         }
     }
     false
@@ -283,7 +280,7 @@ booking_has_task_event: fn(
             .EventAvailable(found) -> {
                 if found == event -> event_seen = true
             }
-            else -> {}
+            .HandleLive(_) | .HandleState(_, _) -> {}
         }
     }
     task_seen && event_seen
@@ -584,7 +581,6 @@ counter_model: fn(commands: [CounterCommand]) -> Dyn {
         if command == {
             .Add(delta) -> value += delta
             .Reset -> value = 0
-            else -> {}
         }
     }
     Dyn.Int(value)
@@ -596,7 +592,6 @@ counter_actual: fn(commands: [CounterCommand]) -> Dyn {
         if command == {
             .Add(delta) -> value += delta
             .Reset -> value = 0
-            else -> {}
         }
     }
     Dyn.Int(value)

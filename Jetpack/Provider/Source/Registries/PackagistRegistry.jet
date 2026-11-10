@@ -115,7 +115,7 @@ provider_packagist_psr4_paths: fn(value: Dyn) -> [String] RegistryError! {
             loop item in items -> paths.push(provider_script_json_str(item))
             Ok(paths)
         }
-        else -> Err(RegistryError.Reason("PSR-4 path must be a string or ordered string array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(RegistryError.Reason("PSR-4 path must be a string or ordered string array"))
     }
 }
 

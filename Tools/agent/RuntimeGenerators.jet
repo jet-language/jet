@@ -2542,7 +2542,7 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
 dyn_text: fn(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
-        else -> ""
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
     }
 }
 
@@ -2559,7 +2559,7 @@ manifest_sha256: fn(manifest: Dyn, name: String) -> String Never! {
             }
             ""
         }
-        else -> ""
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> ""
     }
 }
 

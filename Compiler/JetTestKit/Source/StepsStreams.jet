@@ -299,11 +299,11 @@ kit_steps_string_array: fn(text: String) -> [String]? {
             loop item in items {
                 if item == {
                     .Text(value) -> result.push(value)
-                    else -> return None
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
                 }
             }
             return Val(result)
         }
-        else -> return None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return None
     }
 }

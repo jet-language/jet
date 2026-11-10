@@ -216,7 +216,7 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
     callable: if def.kind == {
         .Function(callable) -> callable
-        else -> { return lsp_response(id, "null") }
+        .Module | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> { return lsp_response(id, "null") }
     }
     label := def.qualified_name
     documentation := ""

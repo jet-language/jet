@@ -38,7 +38,7 @@ ssl_get_actual_mode: fn(mode: layer.CipherMode, encrypt_then_mac: Int) -> SSLMod
             SSLMode.CBC
         }
         .GCM | .CCM | .ChaChaPoly -> SSLMode.AEAD
-        else -> SSLMode.Stream
+        .ECB | .CFB | .OFB | .CTR | .Stream | .CCMStarNoTag | .XTS | .KW | .KWP -> SSLMode.Stream
     }
 }
 
@@ -1061,7 +1061,7 @@ ssl_get_record_expansion: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLError! {
                     block_size: ctx.info.block_size
                     transform_expansion = ssl.tpool[tix].maclen + block_size + block_size
                 }
-                else -> return Err(.InternalError)
+                .ECB | .CFB | .OFB | .CTR | .CCMStarNoTag | .XTS | .KW | .KWP -> return Err(.InternalError)
             }
         }
         // A context with no cipher has no mode.
@@ -1323,7 +1323,7 @@ ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8
             check: cb.call
             if check(cookie, cli_id) == {
                 .Ok(ok) -> valid = ok
-                else -> valid = false
+                .Err(_) -> valid = false
             }
         }
         None -> return Err(.InternalError)
@@ -1471,11 +1471,11 @@ ssl_prepare_record_content: fn(ssl: &ssldefs.SSLContext, rec: &ssldefs.SSLRecord
                     .UnexpectedCID -> {
                         if ssl.conf.ignore_unexpected_cid == ssldefs.SSL_UNEXPECTED_CID_IGNORE -> return Err(.ContinueProcessing)
                     }
-                    else -> {}
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
                 }
                 return Err(e)
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         // A CID record's content type is in its plaintext: check it again,
         // fatally this time.
@@ -1533,10 +1533,10 @@ ssl_read_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, update_hs_digest: Bool, rn
                     .Err(e) -> {
                         if e == {
                             .ContinueProcessing -> next
-                            else -> return Err(e)
+                            .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
                         }
                     }
-                    else -> {}
+                    .Ok(_) -> {}
                 }
             }
         }
@@ -1546,10 +1546,10 @@ ssl_read_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, update_hs_digest: Bool, rn
                     // A future message is buffered.
                     .EarlyMessage -> ssl_buffer_message(ssl) ?? return Err(err)
                     .NonFatal | .ContinueProcessing -> {}
-                    else -> return Err(e)
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .IllegalParameter | .AsyncInProgress | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
                 }
             }
-            else -> break
+            .Ok(_) -> break
         }
     }
     if ssl.in_msgtype == ssldefs.SSL_MSG_HANDSHAKE && update_hs_digest -> ssl_update_handshake_status(ssl)
@@ -1746,7 +1746,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLEr
                     unexpected = true
                 }
                 .UnexpectedRecord -> unexpected = true
-                else -> {}
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
             }
             // A server waiting for the first ClientHello rejects invalid
             // and unexpected records rather than wait past them.
@@ -1773,7 +1773,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLEr
             }
             return Err(.ContinueProcessing)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if dtls {
         // Where the next record of the datagram starts.
@@ -1787,7 +1787,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLEr
             bad_mac := false
             if e == {
                 .InvalidMac -> bad_mac = true
-                else -> {}
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
             }
             if dtls && bad_mac {
                 // A bad MAC on Finished probably means the handshake went
@@ -1815,7 +1815,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLEr
             }
             return Err(e)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     // The pointers of an unprotected record with the record's CID; the
     // content type may change in decryption.
@@ -1933,7 +1933,7 @@ ssl_check_record_in: fn(ssl: &ssldefs.SSLContext, buf: [U8], buflen: Int) ssldef
                 ssldefs.ssl_wipe(scratch)
                 return Err(e)
             }
-            else -> ssldefs.ssl_wipe(scratch)
+            .Ok(_) -> ssldefs.ssl_wipe(scratch)
         }
     }
 }
@@ -1948,10 +1948,10 @@ ssl_check_record: fn(ssl: &ssldefs.SSLContext, buf: &[U8], buflen: Int) ssldefs.
             ssldefs.ssl_fill(buf, 0, buflen, U8{0})
             if e == {
                 .UnexpectedCID | .EarlyMessage -> return Err(.UnexpectedRecord)
-                else -> return Err(e)
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
             }
         }
-        else -> ssldefs.ssl_fill(buf, 0, buflen, U8{0})
+        .Ok(_) -> ssldefs.ssl_fill(buf, 0, buflen, U8{0})
     }
 }
 
@@ -2027,10 +2027,10 @@ ssl_tls12_handle_hs_message_post_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext,
         .Err(e) -> {
             if e == {
                 .WaitingServerHelloRenego -> {}
-                else -> return Err(e)
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
             }
         }
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -2075,20 +2075,20 @@ ssl_read: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int, rng: &R) ->
         .Err(e) -> {
             if e == {
                 .WaitingServerHelloRenego -> {}
-                else -> return Err(e)
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
             }
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
         if ssltls.ssl_handshake(ssl, rng) == {
             .Err(e) -> {
                 if e == {
                     .WaitingServerHelloRenego -> {}
-                    else -> return Err(e)
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
     }
     loop ssl.in_offt < 0 {
@@ -2097,10 +2097,10 @@ ssl_read: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int, rng: &R) ->
             .Err(e) -> {
                 if e == {
                     .ConnEOF -> return 0
-                    else -> return Err(e)
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         // OpenSSL sends empty records to randomize the IV.
         if ssl.in_msglen == 0 && ssl.in_msgtype == ssldefs.SSL_MSG_APPLICATION_DATA {
@@ -2108,10 +2108,10 @@ ssl_read: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int, rng: &R) ->
                 .Err(e) -> {
                     if e == {
                         .ConnEOF -> return 0
-                        else -> return Err(e)
+                        .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return Err(e)
                     }
                 }
-                else -> {}
+                .Ok(_) -> {}
             }
         }
         if ssl.in_msgtype == ssldefs.SSL_MSG_HANDSHAKE {
@@ -2238,11 +2238,11 @@ ssl_handle_pending_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
         .Err(e) -> {
             if e == {
                 .WantWrite -> {}
-                else -> ssl.send_alert = 0
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> ssl.send_alert = 0
             }
             return Err(e)
         }
-        else -> ssl.send_alert = 0
+        .Ok(_) -> ssl.send_alert = 0
     }
     if ssl.alert_reason == {
         .Val(reason) -> return Err(reason)

@@ -197,11 +197,11 @@ RecipeError: enum {
             .IO(inner) -> {
                 if inner == {
                     .NotFound(_) -> true
-                    else -> false
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
                 }
             }
             .NotFound(_) -> true
-            else -> false
+            .InvalidInput(_) | .InvalidData(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .Update(_) -> false
         }
     }
 
@@ -211,11 +211,11 @@ RecipeError: enum {
             .IO(inner) -> {
                 if inner == {
                     .AlreadyExists(_) -> true
-                    else -> false
+                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
                 }
             }
             .AlreadyExists(_) -> true
-            else -> false
+            .InvalidInput(_) | .InvalidData(_) | .PermissionDenied(_) | .NotFound(_) | .Other(_) | .Update(_) -> false
         }
     }
 }

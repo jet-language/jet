@@ -69,7 +69,7 @@ sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_in
     found: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
     if found.place == {
         .Imported(_, _, _) -> !found.source_module_identity.starts_with("<corelib>/")
-        else -> false
+        .Declared(_, _) | .Nominal(_, _) | .Detached(_) -> false
     }
 }
 
@@ -140,7 +140,7 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
         .Union(members) -> Type.Union{members: loop member in members -> sema_registration_canonical_heads(member, keys)}
         // copy: `dimension` is a payload of read parameter `ty`; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_registration_canonical_heads(base, keys), dimension: dimension.copy()}
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
 }
 
@@ -169,7 +169,7 @@ sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> sema_registration_type_qualified_names(field.ty, names)
         .Union(members) -> loop member in members -> sema_registration_type_qualified_names(member, names)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
 

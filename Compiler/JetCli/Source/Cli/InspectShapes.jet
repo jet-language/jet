@@ -101,7 +101,7 @@ jet_cli_shape_type: fn(source: String, ty: Type) -> JetCLIShapeType Never! {
         }
         .Apply(name, _) -> JetCLIShapeType.Unknown{name: name}
         .Map(_, _, _) -> JetCLIShapeType.Unknown{name: "Map"}
-        else -> JetCLIShapeType.Unknown{name: type_name(ty)}
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Union(_) | .Measure(_) -> JetCLIShapeType.Unknown{name: type_name(ty)}
     }
 }
 
@@ -153,7 +153,7 @@ jet_cli_shape_default: fn(value: CtValue) -> JetCLIStatusValue? Never! {
         .Str(text) -> Val(jet_cli_status_text(text))
         .Bytes(bytes) -> Val(jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte))))
         .Present(inner) -> jet_cli_shape_default(inner)
-        else -> None
+        .BigInt(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 

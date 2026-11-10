@@ -233,6 +233,7 @@ parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Ne
     out
 }
 
+
 parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
     state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))
@@ -267,7 +268,7 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
     mark: parser_bump(state)
     already_optional: if base.ty == {
         .Option(_) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     span: parser_cover(base.span, mark.span)
     if kind == TOKEN_QUESTION_QUESTION || already_optional {

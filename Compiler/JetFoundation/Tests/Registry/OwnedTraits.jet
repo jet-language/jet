@@ -59,7 +59,7 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
                 }
                 if shares == .Val(other) && owned_trait(other) == None -> violations.push("`{owned.name}` shares the associated types of `{other}`, which has no row")
             }
-            else -> {}
+            .Codec(_) | .Literal(_) | .CheckedText | .Derived -> {}
         }
         if !hooked && owned.operators.len() > 0 -> violations.push("`{owned.name}` has operators and no hook")
         if owned.auto_derive_family == .Val(family) && owned_trait(family) != None -> violations.push("`{owned.name}`'s derive family `{family}` is also a trait")

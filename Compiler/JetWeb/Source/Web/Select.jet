@@ -703,7 +703,7 @@ web_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables
             web_fail(e, st, f, at, "String operands take Concat or a comparison")
         }
         .Word | .Bool | .Char | .Pointer -> web_word_binary(e, st, m, f, tables, at, ty)
-        else -> web_fail(e, st, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
+        .Unit | .Aggregate -> web_fail(e, st, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -719,7 +719,7 @@ web_compare_op: fn(op: IROp, unsigned: Bool) -> Int Never! {
         .Lt -> if unsigned -> 0x54 else -> 0x53
         .Gt -> if unsigned -> 0x56 else -> 0x55
         .Le -> if unsigned -> 0x58 else -> 0x57
-        else -> if unsigned -> 0x5a else -> 0x59
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> if unsigned -> 0x5a else -> 0x59
     }
 }
 
@@ -915,7 +915,7 @@ web_division_symbol: fn(op: IROp) -> String Never! {
         .Div -> "jet_int_div"
         .Rem -> "jet_int_rem"
         .FloorDiv -> "jet_int_floor_div"
-        else -> "jet_int_mod"
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> "jet_int_mod"
     }
 }
 
@@ -1037,7 +1037,7 @@ web_word_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, t
         .BitAnd -> web_op(e, 0x83)
         .BitOr -> web_op(e, 0x84)
         .BitXor -> web_op(e, 0x85)
-        else -> return web_fail(e, st, f, at, "no fixed-width form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return web_fail(e, st, f, at, "no fixed-width form")
     }
     web_store(e, dst)
 }
@@ -1218,7 +1218,7 @@ web_float_binary: fn(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, ty: 
             .Lt -> 0x63
             .Gt -> 0x64
             .Le -> 0x65
-            else -> 0x66
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> 0x66
         }
         web_op(e, if single -> code - 0x06 else -> code)
         return web_store_truth(e, dst)
@@ -1229,7 +1229,7 @@ web_float_binary: fn(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, ty: 
         .Sub -> web_op(e, base + 1)
         .Mul -> web_op(e, base + 2)
         .Div | .FloorDiv -> web_op(e, base + 3)
-        else -> return web_fail(e, st, f, at, "no Float form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Rem | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return web_fail(e, st, f, at, "no Float form")
     }
     if op == .FloorDiv -> web_op(e, if single -> 0x8e else -> 0x9c)
     web_store(e, dst)
@@ -1298,7 +1298,7 @@ web_neg: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: I
             web_narrow(e, ty.signed, bits)
             web_store(e, dst)
         }
-        else -> web_fail(e, st, f, at, "no negation of {ir_kind_name(ty.kind)}")
+        .Unit | .Bool | .Char | .String | .Pointer | .Aggregate -> web_fail(e, st, f, at, "no negation of {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -1362,7 +1362,7 @@ web_not: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) 
             web_store(e, dst)
             web_end(e)
         }
-        else -> web_fail(e, st, f, at, "no `not` of {ir_kind_name(ty.kind)}")
+        .Unit | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> web_fail(e, st, f, at, "no `not` of {ir_kind_name(ty.kind)}")
     }
 }
 

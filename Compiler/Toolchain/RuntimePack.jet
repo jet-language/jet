@@ -251,7 +251,7 @@ field: fn(value: Dyn, key: String) -> Dyn {
                 if entry.key == key -> return entry.value.copy()
             }
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
     }
     Dyn.Null
 }
@@ -259,14 +259,14 @@ field: fn(value: Dyn, key: String) -> Dyn {
 text_of: fn(value: Dyn) -> String {
     if value == {
         .Text(found) -> found
-        else -> ""
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
     }
 }
 
 items_of: fn(value: Dyn) -> [Dyn] {
     if value == {
         .Array(items) -> items
-        else -> [Dyn]{}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
     }
 }
 

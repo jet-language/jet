@@ -13,7 +13,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     assert(row.aot_direct)
     if row.symbol == {
         .Prelude(symbol) -> assert(symbol == key)
-        else -> panic("raw host route retains its Prelude symbol")
+        .SourceOwned -> panic("raw host route retains its Prelude symbol")
     }
     actual_effect: row.effect_kind ?? panic("raw host authority is registered")
     assert(actual_effect == effect_kind)

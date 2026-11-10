@@ -378,7 +378,7 @@ diagnostic_registry_static_edit: fn(row: DiagnosticRegistryRow, span: Span) -> T
     if fix == {
         .Replace(_, replacement) -> Val(TextEdit{span: span, new_text: replacement})
         .Remove(_) -> Val(TextEdit{span: span, new_text: ""})
-        else -> None
+        .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedCallValue | .GeneratedRedundantTailReturn -> None
     }
 }
 
@@ -387,7 +387,7 @@ diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool
     safety: row.fix_safety ?? return None
     if safety == {
         .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
-        else -> Val(DiagnosticFixApplicability.Suggested)
+        .APIChanging | .TargetChanging | .NeedsReview -> Val(DiagnosticFixApplicability.Suggested)
     }
 }
 
@@ -442,7 +442,10 @@ diagnostic_registry_with_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> D
 }
 
 diagnostic_registry_is_source_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
-    if fix == {.SourceEdit | .SuggestedSourceEdit -> true else -> false}
+    if fix == {
+        .SourceEdit | .SuggestedSourceEdit -> true
+        .CryptoMisuse | .Replace(_, _) | .Remove(_) | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedCallValue | .GeneratedRedundantTailReturn -> false
+    }
 }
 
 diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
@@ -452,14 +455,14 @@ diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Ne
         | .GeneratedScriptRun
         | .GeneratedCallValue
         | .GeneratedRedundantTailReturn -> true
-        else -> false
+        .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .Replace(_, _) | .Remove(_) -> false
     }
 }
 
 diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool Never! {
     if safety == {
         .Formatting | .BehaviorPreserving -> true
-        else -> false
+        .APIChanging | .TargetChanging | .NeedsReview -> false
     }
 }
 
@@ -516,7 +519,7 @@ diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: Te
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated
         }
-        else -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
+        .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
     }
 }
 

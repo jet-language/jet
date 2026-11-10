@@ -74,11 +74,11 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
                         value: pair[1].text() ?? panic("Canvas bootstrap {scenario}: global {name} was set to a non-string")
                         writes.push((name: name, value: value))
                     }
-                    else -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
                 }
             }
         }
-        else -> panic("Canvas bootstrap {scenario}: the engine output is not a list of writes")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("Canvas bootstrap {scenario}: the engine output is not a list of writes")
     }
     writes
 }

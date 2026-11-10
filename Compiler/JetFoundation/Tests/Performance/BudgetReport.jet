@@ -81,11 +81,11 @@ br_decision: fn(actual: PerfEvaluation) -> CanonicalJSON Never! {
     }
     lower: if actual.lower95 == {
         .Val(q) -> perf_rational_to_json(q)
-        else -> CanonicalJSON.Null
+        .None -> CanonicalJSON.Null
     }
     upper: if actual.upper95 == {
         .Val(q) -> perf_rational_to_json(q)
-        else -> CanonicalJSON.Null
+        .None -> CanonicalJSON.Null
     }
     br_o([CanonicalJSONField]{br_f("evidence", br_s(evidence)), br_f("reason", CanonicalJSON.Null), br_f("point", perf_rational_to_json(actual.point)), br_f("lower95", lower), br_f("upper95", upper), br_f("trend", br_trend()), br_f("policy_outcome", br_s(outcome))})
 }
@@ -166,11 +166,11 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     spaced: text.replace("{{\"content\"", "{{ \"content\"")
     if perf_verify_budget_report(spaced.bytes()) == {
         .Err(_) -> {}
-        else -> panic("accepted noncanonical report")
+        .Ok(_) -> panic("accepted noncanonical report")
     }
     if perf_verify_budget_report(text.replace("\"pass\"", "\"fail\"").bytes()) == {
         .Err(_) -> {}
-        else -> panic("accepted corrupt report")
+        .Ok(_) -> panic("accepted corrupt report")
     }
     br_read_error(CanonicalJSON.Null, "budget report wrapper is not an object")
     br_read_error(br_o([CanonicalJSONField]{}), "budget report wrapper has missing or unknown keys")
@@ -218,35 +218,35 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     br_error(perf_report_one_of(br_s("wat"), "x", [String]{"ok"}), "x has unknown value `wat`")
     if perf_report_text(br_i(0), "x") == {
         .Err(e) -> assert_eq(e.message, "x is not text")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_integer(br_s("0"), "x") == {
         .Err(e) -> assert_eq(e.message, "x is not an integer")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_integer(CanonicalJSON.Integer("01"), "x") == {
         .Err(e) -> assert_eq(e.message, "x is not a canonical integer")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_unsigned(br_i(-1), "x") == {
         .Err(e) -> assert_eq(e.message, "x is negative")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_boolean(br_i(0), "x") == {
         .Err(e) -> assert_eq(e.message, "x is not boolean")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     assert_eq(perf_report_usize_wire(br_i(18446744073709551615), "x") ?? panic(err.message), 18446744073709551615)
     if perf_report_usize_wire(br_i(18446744073709551616), "x") == {
         .Err(e) -> assert_eq(e.message, "x exceeds implementation resource limit")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     assert_eq(perf_report_unsigned(br_i((10).pow(100)), "x") ?? panic(err.message), (10).pow(100))
     bad: [String]{"A".repeat(64), "g".repeat(64), "é".repeat(32), "0".repeat(63), "0".repeat(65)}
     loop value in bad {
         if perf_report_hex64(br_s(value), "x") == {
             .Err(e) -> assert_eq(e.message, "x is not lowercase Hex64")
-            else -> panic("expected error")
+            .Ok(_) -> panic("expected error")
         }
     }
 }
@@ -321,16 +321,16 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     }
     if perf_validate_phase_totals(CanonicalJSON.Array([CanonicalJSON]{}), "phase") == {
         .Err(e) -> assert_eq(e.message, "phase is empty")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_validate_phase_totals(CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("")), br_f("ns", br_i(1))})}), "phase") == {
         .Err(e) -> assert_eq(e.message, "phase is not sorted by phase name")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     duplicate: CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))}), br_o([CanonicalJSONField]{br_f("name", br_s("a")), br_f("ns", br_i(1))})})
     if perf_validate_phase_totals(duplicate, "phase") == {
         .Err(e) -> assert_eq(e.message, "phase is not sorted by phase name")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
 }
 #Test("report sort privacy and framing semantics") {
@@ -357,53 +357,53 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     assert_eq(br_get(sanitized, "samples"), br_get(br_wire(), "samples"))
     if perf_sanitize_measurement(CanonicalJSON.Null) == {
         .Err(e) -> assert_eq(e.message, "measurement is not object")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
 }
 #Test("parse helpers reject exact unknown enum and shape errors") {
     if perf_report_parse_percentile(br_i(1)) == {
         .Err(e) -> assert_eq(e.message, "percentile is not text or null")
-        else -> panic("expected error")
+        .Val(_) | .None -> panic("expected error")
     }
     if perf_report_parse_percentile(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown percentile")
-        else -> panic("expected error")
+        .Val(_) | .None -> panic("expected error")
     }
     if perf_report_parse_direction(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown direction")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_parse_enforcement(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown enforcement")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_parse_comparison(CanonicalJSON.Null) == {
         .Err(e) -> assert_eq(e.message, "comparison is not object")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_parse_comparison(br_o([CanonicalJSONField]{br_f("kind", br_s("wat"))})) == {
         .Err(e) -> assert_eq(e.message, "unknown comparison kind")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_parse_policy(br_i(1)) == {
         .Err(e) -> assert_eq(e.message, "policy is not object")
-        else -> panic("expected error")
+        .Val(_) | .None -> panic("expected error")
     }
     if perf_report_history_ids(br_i(1)) == {
         .Err(e) -> assert_eq(e.message, "history is not object")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_evidence_enum(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown evidence")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_outcome_enum(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown policy outcome")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_trend_label_enum(br_s("wat")) == {
         .Err(e) -> assert_eq(e.message, "unknown trend label")
-        else -> panic("expected error")
+        .Ok(_) -> panic("expected error")
     }
     if perf_report_parse_policy(CanonicalJSON.Null) == {
         .Ok(value) -> assert(value == None)
@@ -453,12 +453,12 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     absolute: br_o([CanonicalJSONField]{br_f("kind", br_s("absolute")), br_f("limit", br_q(10)), br_f("direction", br_s("wat"))})
     if perf_report_parse_comparison(absolute) == {
         .Err(e) -> assert_eq(e.message, "unknown limit direction")
-        else -> panic("accepted invalid limit direction")
+        .Ok(_) -> panic("accepted invalid limit direction")
     }
     relative: br_o([CanonicalJSONField]{br_f("kind", br_s("relative_to")), br_f("baseline", br_s("main")), br_f("limit_basis_points", br_i(500)), br_f("goal", br_s("wat")), br_f("direction", br_s("lower_is_better"))})
     if perf_report_parse_comparison(relative) == {
         .Err(e) -> assert_eq(e.message, "unknown relative goal")
-        else -> panic("accepted invalid relative goal")
+        .Ok(_) -> panic("accepted invalid relative goal")
     }
     br_error(perf_validate_comparison(absolute), "comparison.direction has unknown value `wat`")
     br_error(perf_validate_comparison(relative), "comparison.goal has unknown value `wat`")

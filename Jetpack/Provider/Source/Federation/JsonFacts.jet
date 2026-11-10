@@ -96,7 +96,7 @@ provider_graph_json_array_strings: fn(object: [String: Dyn], key: String) -> [St
 provider_graph_json_value_text: fn(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
-        else -> pkg_json_render(value)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> pkg_json_render(value)
     }
 }
 

@@ -767,7 +767,7 @@ query: fn<T>(rows: [T]) -> Query<T> Never! {
 __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     limits: if source.__source == {
         .Val(pull) -> pull.guard_read().value.limits.copy()
-        else -> DataLimits.safe()
+        .None -> DataLimits.safe()
     }
     __query_make<T>([String]{"stream"}, true, limits.copy(), () -> {
         reader := source.copy()
@@ -807,7 +807,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
             }
             if cell.value.terminal == {
                 .Val(failure) -> return Err(failure.copy())
-                else -> {}
+                .None -> {}
             }
             if cell.value.done -> return Ok(None)
             if cell.value.pull() == {
@@ -824,7 +824,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
                 }
             }
         }
-        else -> return Ok(None)
+        .None -> return Ok(None)
     }
 }
 
@@ -834,7 +834,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
 __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
     limit: if stream.__source == {
         .Val(source) -> source.guard_read().value.limits.max_output_rows
-        else -> -1
+        .None -> -1
     }
     out := [T]{}
     loop {
@@ -847,7 +847,7 @@ __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
                     cell := source.guard_edit()
                     cell.value.terminal = Val(failure.copy())
                 }
-                else -> {}
+                .None -> {}
             }
             return Err(failure)
         }
@@ -869,14 +869,14 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
             reading := !cell.value.done
             if cell.value.terminal == {
                 .Val(_) -> reading = false
-                else -> {}
+                .None -> {}
             }
             loop reading {
                 if cell.value.pull() == {
                     .Ok(item) -> {
                         if item == {
                             .Val(row) -> cell.value.ahead.push(row)
-                            else -> {
+                            .None -> {
                                 cell.value.done = true
                                 reading = false
                             }
@@ -890,7 +890,7 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
             }
             remaining = remaining + cell.value.ahead.len() - cell.value.ahead_index
         }
-        else -> {}
+        .None -> {}
     }
     remaining
 }
@@ -1432,7 +1432,7 @@ __query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
             .Float(number) -> core.db.__float_text(number)
             .Bool(flag) -> "{flag}"
             .Null -> ""
-            else -> json_codec.to_string(entry.value) ?? ""
+            .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json_codec.to_string(entry.value) ?? ""
         })
     }
     None
@@ -1768,7 +1768,7 @@ data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> Da
         .Limit -> DataErrorKind.Limit
         .IO -> DataErrorKind.IO
         .State -> DataErrorKind.State
-        else -> DataErrorKind.Decode
+        .Syntax | .Truncated | .Unsupported -> DataErrorKind.Decode
     }
     DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
 }
@@ -3388,7 +3388,7 @@ data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
             out.push(U8{125})
         }
         .DateTime(_) -> data_loader_quote(out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
-        else -> panic("unknown native Dyn carrier")
+        .Number(_) | .Bytes(_) -> panic("unknown native Dyn carrier")
     }
 }
 
@@ -3638,7 +3638,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
                 rows_seen += 1
             }
         }
-        else -> data_schema_absorb(fields, "$", tree, tree == .Null)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> data_schema_absorb(fields, "$", tree, tree == .Null)
     }
     fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
     format_name: data_format_text(format)
@@ -3692,7 +3692,7 @@ data_schema_value_type: fn(value: Dyn) -> String Never! {
         .DateTime(_) -> "datetime"
         .Array(_) -> "array"
         .Object(_) -> "object"
-        else -> panic("unknown native Dyn carrier")
+        .Number(_) | .Bytes(_) -> panic("unknown native Dyn carrier")
     }
 }
 
@@ -3748,7 +3748,7 @@ DataLoaderPortRecord: struct {
             assert_eq(error.operation, "data.value")
             assert_eq(error.reason, "payload is 3 bytes; max_item_bytes is 1")
         }
-        else -> panic("value payload limit must precede constructor validation")
+        .Ok(_) -> panic("value payload limit must precede constructor validation")
     }
 }
 
@@ -3762,11 +3762,11 @@ DataLoaderPortRecord: struct {
 #Test("data CSV and JSON preserve malformed input field-error strings") {
     if csv<Int>("n\n\"7\"x") == {
         .Err(error) -> assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
-        else -> panic("malformed CSV accepted")
+        .Ok(_) -> panic("malformed CSV accepted")
     }
     if json<Int>("[1e]") == {
         .Err(error) -> assert_eq(error.reason, "invalid JSON (line 1): exponent must contain a digit")
-        else -> panic("malformed JSON accepted")
+        .Ok(_) -> panic("malformed JSON accepted")
     }
 }
 

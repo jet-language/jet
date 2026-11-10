@@ -112,7 +112,7 @@ pkg_source_store_ensure: fn(name: String, version: String, fingerprint: String, 
         }
         .Err(error) -> if error == {
             .NotFound(_) -> {}
-            else -> { return Err(pkg_source_store_io("checking store entry", destination, error)) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(pkg_source_store_io("checking store entry", destination, error)) }
         }
     }
     stage: parent.private_child("entry") ?? return Err(pkg_source_store_io("creating store staging entry", root, err))
@@ -129,7 +129,7 @@ pkg_source_store_publish_copy: fn(parent: FoundationDirectoryAuthority, stage: F
     parent.rename(stage_name, destination_name) ?? {
         if err == {
             .AlreadyExists(_) -> {}
-            else -> { return Err(pkg_source_store_io("publishing store entry", destination, err)) }
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(pkg_source_store_io("publishing store entry", destination, err)) }
         }
         winner: parent.child(destination_name) ?? return Err(pkg_source_store_io("opening concurrent store entry", destination, err))
         winner_hash: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent store entry", destination, err))
@@ -173,7 +173,7 @@ pkg_source_store_link_into_project: fn(store_entry: String, link_root: String) P
         }
         .Err(error) -> if error == {
             .NotFound(_) -> {}
-            else -> { return Err(pkg_source_store_io("checking dependency link", link_root, error)) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(pkg_source_store_io("checking dependency link", link_root, error)) }
         }
     }
     stage: parent.private_child("dep-link") ?? return Err(pkg_source_store_io("creating dep link staging dir", parent_path, err))
@@ -190,7 +190,7 @@ pkg_source_store_publish_link: fn(parent: FoundationDirectoryAuthority, stage: F
     parent.rename(stage_name, link_name) ?? {
         if err == {
             .AlreadyExists(_) -> {}
-            else -> { return Err(pkg_source_store_io("publishing dependency link", link_root, err)) }
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(pkg_source_store_io("publishing dependency link", link_root, err)) }
         }
         winner: parent.child(link_name) ?? return Err(pkg_source_store_io("opening concurrent dependency link", link_root, err))
         winner_hash: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent dependency link", link_root, err))

@@ -354,7 +354,7 @@ jet_cli_workspace_index_of: fn(file: String, color: Bool) -[FS]> JetCLIWorkspace
             if (build_files.realpath(path) ?? path) != canonical -> return None
             return Val(JetCLIWorkspaceIndex{root: root, path: path})
         }
-        else -> return None
+        .Absent | .Authority(_) | .Failed(_) -> return None
     }
 }
 
@@ -555,7 +555,7 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
         .Char(character) -> Val(FactValue.Char{value: character})
         .Text(text) -> Val(FactValue.Text{value: text.copy()})
         .Enum(variant) -> Val(FactValue.Enum{variant: variant.copy()})
-        else -> None
+        .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> None
     }
 }
 

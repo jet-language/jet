@@ -91,7 +91,7 @@ pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, 
                     assert_eq(first.source, "env-a")
                     assert_eq(second.source, "env-b")
                 }
-                else -> panic("expected FactError.Conflict")
+                .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> panic("expected FactError.Conflict")
             }
         }
     }
@@ -116,10 +116,10 @@ pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, 
                 .FactConflict(fact_error) -> {
                     if fact_error == {
                         .Conflict(key, _, _, _) -> assert_eq(key, "host")
-                        else -> panic("expected FactError.Conflict")
+                        .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> panic("expected FactError.Conflict")
                     }
                 }
-                else -> panic("expected MergeError.FactConflict")
+                .SourceConflict(_, _, _) -> panic("expected MergeError.FactConflict")
             }
         }
     }

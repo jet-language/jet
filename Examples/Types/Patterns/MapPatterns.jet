@@ -21,7 +21,7 @@ route: fn(event: Dyn) -> String {
         .Object(["type": .Text("push"), "ref": .Text(ref), ..]) -> "deploy {ref}"
         .Object(["type": .Text("push"), ..]) -> "push without ref"
         .Object(["type": .Text(kind), ..]) -> "ignored {kind}"
-        else -> "not an event"
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> "not an event"
     }
 }
 

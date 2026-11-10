@@ -22,7 +22,10 @@ entry02_alias: fn(program: Program, name: String) -> TypeAliasDef {
 entry02_diag: fn(diagnostics: [Diagnostic], code: String) -> Diagnostic { parser_test_diagnostic(diagnostics, code) }
 entry02_format: fn(source: String) -> String { parser_test_format(source) }
 entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
-    if ty == { .Val(.Result(.Named(unit), .Named(error))) -> unit == "Unit" && error == error_name else -> false }
+    if ty == {
+        .Val(.Result(.Named(unit), .Named(error))) -> unit == "Unit" && error == error_name
+        .Val(_) | .None -> false
+    }
 }
 
 #Test("task_combinators_nest_and_accept_block_branches") {
@@ -32,8 +35,22 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
         assert(method == parser_test_task_name("race"))
         if args[0].expr == .ListLit(branches, _, _) {
             assert(branches.len() == 2)
-            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _, _)) -> inner == parser_test_task_name("all") else -> false } else -> false } else -> false })
-            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == { .Block(_) -> true else -> false } else -> false } else -> false })
+            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == {
+                .Expr(.MethodCall(_, inner, _, _, _, _, _)) -> inner == parser_test_task_name("all")
+                .Expr(_) | .Block(_) -> false
+            }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+            }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+            })
+            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == {
+                .Block(_) -> true
+                .Expr(_) -> false
+            }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+            }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+            })
         } else { panic("expected task.race branch list") }
     } else { panic("expected task.race method call") }
 }
@@ -246,7 +263,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     p: entry02_program("double: fn(value: Int) -> Int {{\n    adjusted: value + 1\n    adjusted * 2\n}}\n")
     body: entry02_func(p, "double").body
     assert(!body.is_empty())
-    assert(if body[body.len() - 1] == { .Expr(_) -> true else -> false })
+    assert(if body[body.len() - 1] == {
+        .Expr(_) -> true
+        .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
+    })
 }
 #Test("lambda_interface_lookahead_preserves_grouped_multiplication") {
     _: entry02_program("run: fn() {{ print((2) * 3) }}\n")
@@ -257,25 +277,45 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 #Test("return_type_question_spacing_disambiguates_option_vs_result") {
     opt: entry02_program("a: fn() -> Int? {{ None }}\nrun: fn() {{}}\n")
-    assert(if entry02_func(opt, "a").return_type == { .Val(.Option(_)) -> true else -> false })
+    assert(if entry02_func(opt, "a").return_type == {
+        .Val(.Option(_)) -> true
+        .Val(_) | .None -> false
+    })
     res: entry02_program("b: fn() -> Int Err! {{ Ok(1) }}\nrun: fn() {{}}\n")
-    assert(if entry02_func(res, "b").return_type == { .Val(.Result(_, _)) -> true else -> false })
+    assert(if entry02_func(res, "b").return_type == {
+        .Val(.Result(_, _)) -> true
+        .Val(_) | .None -> false
+    })
     paren: entry02_program("c: fn() -> (Int?) {{ None }}\nrun: fn() {{}}\n")
-    assert(if entry02_func(paren, "c").return_type == { .Val(.Option(_)) -> true else -> false })
+    assert(if entry02_func(paren, "c").return_type == {
+        .Val(.Option(_)) -> true
+        .Val(_) | .None -> false
+    })
 }
 #Test("fallible_type_sigil_is_valid_in_all_type_positions") {
     p: entry02_program("Holder: struct {{\nvalue: Int? IOError!\nnested: [Int (DbError | TimeoutError)!]\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n}}\nBox<T>: T? IOError!\nfetch: fn(value: Int? IOError!) -> Box<Int? IOError!> {{ value }}\nrun: fn() {{}}\n")
     assert(loop item in p.items { if item == .Struct(_) -> break true } ?? false)
     holder: entry02_struct(p, "Holder")
     assert(holder.fields[0].ty == Type.Result{ok: Type.Option{inner: Type.Int}, err: Type.Named{name: "IOError"}})
-    assert(if holder.fields[1].ty == { .List(.Result(.Int, .Union(members))) -> members.len() == 2 else -> false })
-    assert(if holder.fields[2].ty == { .Fn(params, .Val(.Result(.Int, .Union(members))), _, _, _, _) -> !params.is_empty() && if params[0] == { .Result(_, _) -> members.len() == 2 else -> false } else -> false })
+    assert(if holder.fields[1].ty == {
+        .List(.Result(.Int, .Union(members))) -> members.len() == 2
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if holder.fields[2].ty == { .Fn(params, .Val(.Result(.Int, .Union(members))), _, _, _, _) -> !params.is_empty() && if params[0] == {
+        .Result(_, _) -> members.len() == 2
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
     assert(entry02_alias(p, "Box").target == Type.Result{ok: Type.Option{inner: Type.Named{name: "T"}}, err: Type.Named{name: "IOError"}})
 }
 #Test("failure_contracts_compose_optional_success_and_error_union") {
     p: entry02_program("Holder: struct {{ value: Int? IOError! }}\nfetch: fn(value: Int? IOError!) -> Int (DbError | TimeoutError)! {{ value }}\ninvoke: fn(callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!) -> Int? IOError! {{ None }}\nrun: fn() {{}}\n")
     assert(entry02_struct(p, "Holder").fields[0].ty == Type.Result{ok: Type.Option{inner: Type.Int}, err: Type.Named{name: "IOError"}})
-    assert(if entry02_func(p, "fetch").return_type == { .Val(.Result(.Int, .Union(members))) -> members.len() == 2 else -> false })
+    assert(if entry02_func(p, "fetch").return_type == {
+        .Val(.Result(.Int, .Union(members))) -> members.len() == 2
+        .Val(_) | .None -> false
+    })
 }
 #Test("unit_fallible_signatures_use_the_error_prefix") {
     p: entry02_program("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() IOError! -[FS]> {{}}\nload: fn() -> Config IOError! {{}}\n")
@@ -287,10 +327,24 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("suffix_contract_reaches_nested_general_type_positions") {
     p: entry02_program("Holder: struct {{\nmap: [String: IOError!]\ntuple: (entry: Entry? StoreError!, failure: Err!)\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
     holder: entry02_struct(p, "Holder")
-    assert(if holder.fields[0].ty == { .Map(_, _, value) -> entry02_unit_result(Val(value), "IOError") else -> false })
-    assert(if holder.fields[1].ty == { .Tuple(fields) -> fields.len() >= 2 && fields[0].name == "entry" && if fields[0].ty == { .Result(_, _) -> fields[1].name == "failure" && entry02_unit_result(Val(fields[1].ty), "Err") else -> false } else -> false })
-    assert(if holder.fields[2].ty == { .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "IOError") else -> false })
-    assert(if entry02_alias(p, "Callback").target == { .Fn(_, _, _, _, _, _) -> true else -> false })
+    assert(if holder.fields[0].ty == {
+        .Map(_, _, value) -> entry02_unit_result(Val(value), "IOError")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if holder.fields[1].ty == { .Tuple(fields) -> fields.len() >= 2 && fields[0].name == "entry" && if fields[0].ty == {
+        .Result(_, _) -> fields[1].name == "failure" && entry02_unit_result(Val(fields[1].ty), "Err")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if holder.fields[2].ty == {
+        .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "IOError")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if entry02_alias(p, "Callback").target == {
+        .Fn(_, _, _, _, _, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
 }
 #Test("explicit_error_contract_does_not_consume_the_next_struct_field") {
     p: entry02_program("Holder: struct {{\nfirst: Int Err!\ncallback: fn() Err!\nvalue: fn(self) -> Int {{ 1 }}\nsecond: String\n}}\nrun: fn() {{}}\n")
@@ -298,7 +352,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert(holder.fields.len() == 3)
     assert(holder.methods.len() == 1)
     assert(holder.fields[0].ty == Type.Result{ok: Type.Int, err: Type.Named{name: "Err"}})
-    assert(if holder.fields[1].ty == { .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "Err") else -> false })
+    assert(if holder.fields[1].ty == {
+        .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "Err")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
 }
 #Test("retired_infix_failure_spelling_is_not_accepted") {
     _: entry02_errors("Old: Int? ! IOError\n")
@@ -329,13 +386,22 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 // A bodiless `name: fn(…)` at file level is a function type.
 #Test("bodiless_file_level_fn_is_a_function_type") {
     p: entry02_program("Pick: fn(Int) -> Int\nhost_open: fn(path: String) -[FS]> Int\nrun: fn() {{}}\n")
-    assert(if entry02_alias(p, "Pick").target == { .Fn(_, _, _, _, _, _) -> true else -> false })
-    assert(if entry02_alias(p, "host_open").target == { .Fn(_, _, _, _, _, _) -> true else -> false })
+    assert(if entry02_alias(p, "Pick").target == {
+        .Fn(_, _, _, _, _, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if entry02_alias(p, "host_open").target == {
+        .Fn(_, _, _, _, _, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
 }
 #Test("member_spread_parses") {
     p: entry02_program("run: fn() {{ x: a.[b, c] }}")
     val: entry02_binding(entry02_func(p, "run"))
-    assert(if val.init == { .MemberSpread(_, _, _, _) -> true else -> false })
+    assert(if val.init == {
+        .MemberSpread(_, _, _, _) | .TypeValue(_, _, _) -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> false
+    })
 }
 
 // Named groups keep the original expansion rules while importing table-local

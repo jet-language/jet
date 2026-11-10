@@ -237,7 +237,7 @@ semindex_symbol_is_numeric: fn(ty: Type) -> Bool Never! {
         .Int | .Float | .Float32 -> return true
         .IntN(_, _) -> return true
         .Tagged(_, inner) -> return semindex_symbol_is_numeric(inner)
-        else -> {}
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -306,7 +306,7 @@ semindex_symbol_checked_text_error: fn(items: [Item], owner: String) -> String? 
             .GenericModule(generic) -> {
                 if semindex_symbol_checked_text_error(generic.body, owner) == .Val(error) -> return Val(error)
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -395,7 +395,7 @@ semindex_symbol_collect_conversions: fn(index: SemIndex, items: [Item], module_p
                     semindex_symbol_collect_conversions(index, body, module_path, scope.identity, Val(scope), symbols)
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -453,7 +453,7 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
                 spans.push(def.def_span)
                 queries[def.module_path] = spans
             }
-            else -> {}
+            .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
     }
     module_nodes := [String: [SemNode]]{}
@@ -732,7 +732,7 @@ semindex_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: J
                 }
                 return None
             }
-            else -> {}
+            .Unqualified(_, _, _, _, _) -> {}
         }
     }
     None
@@ -779,7 +779,7 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
                     symbols.push(symbol)
                 }
             }
-            else -> {
+            .File(_, _) | .Module(_, _) -> {
                 alias_name: import.alias
                 symbols.push(SemSymbol{
                     identity: semindex_symbol_alias_identity(doc_module.path, import.alias_span) ?? semindex_symbol_import_identity(doc_module.path, scope, alias_name),
@@ -866,7 +866,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
             if def.kind == {
                 .Field(_, parent) -> owner = Val(parent)
                 .EnumVariant(parent) -> owner = Val(parent)
-                else -> {}
+                .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .Local(_, _) | .Param(_) -> {}
             }
         }
         display_name: semindex_symbol_display(modules, def.module_path, def.name)
@@ -890,7 +890,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
             }
             .Param(_) -> scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
-            else -> {}
+            .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
         identity: if scope != None -> "{def.identity}@{def.def_span.start}" else -> def.identity
         symbols.push(SemSymbol{

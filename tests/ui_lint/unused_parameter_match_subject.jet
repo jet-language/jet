@@ -5,7 +5,7 @@ Format: enum { JSON CSV MsgPack }
 #Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") extension: fn(format: Format) -> String {
     if format == {
         .MsgPack -> return "msgpack"
-        else -> return "other"
+        .JSON | .CSV -> return "other"
     }
 }
 
@@ -14,10 +14,10 @@ Format: enum { JSON CSV MsgPack }
         .JSON -> {
             if inner == {
                 .CSV -> return "json/csv"
-                else -> return "json/other"
+                .JSON | .MsgPack -> return "json/other"
             }
         }
-        else -> return "other"
+        .CSV | .MsgPack -> return "other"
     }
 }
 
@@ -32,7 +32,7 @@ early: fn(ready: Bool, value: Int, unused: Int) -> Int {
     format: if ready -> Format.MsgPack else -> Format.CSV
     if format == {
         .MsgPack -> return "msgpack"
-        else -> return "other"
+        .JSON | .CSV -> return "other"
     }
 }
 

@@ -304,7 +304,7 @@ nixeval_builtin_native: fn(field: String) -> NixEvalNative? Never! {
 nixeval_integer: fn(value: NixEvalValue, expected: String) -> Int NixEvalError! {
     if value == {
         .Integer(number) -> Ok(number)
-        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
     }
 }
 
@@ -312,7 +312,7 @@ nixeval_integer: fn(value: NixEvalValue, expected: String) -> Int NixEvalError! 
 nixeval_predicate: fn(value: NixEvalValue) -> Bool NixEvalError! {
     if value == {
         .Bool(keep) -> Ok(keep)
-        else -> Err(NixEvalError.TypeMismatch{expected: "boolean predicate result", actual: value.type_name()})
+        .Null | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected: "boolean predicate result", actual: value.type_name()})
     }
 }
 
@@ -340,42 +340,42 @@ impl NixEvalBuiltin {
             .IsAttrs -> {
                 if value == {
                     .AttrSet(_) | .Packages(_) | .CrossPackages(_) -> true
-                    else -> false
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
                 }
             }
             .IsBool -> {
                 if value == {
                     .Bool(_) -> true
-                    else -> false
+                    .Null | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
                 }
             }
             .IsFunction -> {
                 if value == {
                     .Function(_, _) | .Native(_) -> true
-                    else -> false
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) -> false
                 }
             }
             .IsInt -> {
                 if value == {
                     .Integer(_) -> true
-                    else -> false
+                    .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
                 }
             }
             .IsList -> {
                 if value == {
                     .List(_) -> true
-                    else -> false
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
                 }
             }
             .IsNull -> value == NixEvalValue.Null
             .IsPath -> {
                 if value == {
                     .Path(_) -> true
-                    else -> false
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
                 }
             }
             .IsString -> value.text() != None
-            else -> false
+            .AttrNames | .AttrValues | .GetAttr | .HasAttr | .Length | .Head | .Tail | .ConcatLists | .ConcatStringsSep | .Map | .Filter | .ReplaceStrings | .Substring | .BaseNameOf | .DirOf | .StringLength | .ToJSON | .FromJSON | .StorePath | .Throw -> false
         }
     }
 }
@@ -384,7 +384,7 @@ impl NixEvalBuiltin {
 nixeval_attribute_set: fn(value: NixEvalValue, expected: String) -> [String: Int] NixEvalError! {
     if value == {
         .AttrSet(fields) -> Ok(fields)
-        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
     }
 }
 
@@ -392,7 +392,7 @@ nixeval_attribute_set: fn(value: NixEvalValue, expected: String) -> [String: Int
 nixeval_list: fn(value: NixEvalValue, expected: String) -> [Int] NixEvalError! {
     if value == {
         .List(items) -> Ok(items)
-        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
     }
 }
 

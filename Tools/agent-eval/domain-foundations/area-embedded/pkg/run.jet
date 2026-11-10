@@ -239,7 +239,7 @@ stage_and_boot: fn(slots: &FlashSlots, image_digest: Int, signature_ok: Bool) {
     }
     if slots.trial == {
         .Pending(_) -> slots.trial = SlotState.Confirmed(image_digest)
-        else -> slots.rollback_count += 1
+        .Empty | .Confirmed(_) | .Rejected(_) -> slots.rollback_count += 1
     }
     if slots.trial == .Confirmed(value) -> slots.active = value
 }

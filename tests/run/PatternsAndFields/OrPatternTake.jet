@@ -23,7 +23,7 @@ make: fn(k: Int) -> Shape {
 from_call: fn(k: Int) -> Blob {
     if make(k) == {
         .Circle(blob, _) | .Square(blob, _) -> return blob
-        else -> return Blob{data: [Int]{}, text: "none"}
+        .Empty -> return Blob{data: [Int]{}, text: "none"}
     }
 }
 
@@ -31,7 +31,7 @@ from_local: fn(k: Int) -> Blob {
     shape: make(k)
     if shape == {
         .Circle(blob, _) | .Square(blob, _) -> return blob
-        else -> return Blob{data: [Int]{}, text: "none"}
+        .Empty -> return Blob{data: [Int]{}, text: "none"}
     }
 }
 
@@ -39,7 +39,7 @@ first_size: fn(shapes: [Shape]) -> Int {
     total := 0
     if shapes[0] == {
         .Circle(_, size) | .Square(_, size) -> total = size
-        else -> total = -1
+        .Empty -> total = -1
     }
     total
 }

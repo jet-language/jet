@@ -127,7 +127,7 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String: HandleOverl
             }
             .CodeModule(definition) -> jet_cli_c_bind_admit_overlays(definition.body ?? [Item]{}, overlays)
             .GenericModule(definition) -> jet_cli_c_bind_admit_overlays(definition.body, overlays)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -170,7 +170,7 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
                 }
             }
             .GenericModule(definition) -> jet_cli_c_bind_collect_imports(relative_path, definition.imports, definition.body, headers, modules)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

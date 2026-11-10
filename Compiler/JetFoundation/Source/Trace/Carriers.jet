@@ -63,13 +63,13 @@ jettrace_uint: fn(value: U64) -> CanonicalJSON Never! { CanonicalJSON.Integer("{
 jettrace_optional_uint: fn(value: U64?) -> CanonicalJSON Never! {
     return if value == {
         .Val(number) -> jettrace_uint(number)
-        else -> CanonicalJSON.Null
+        .None -> CanonicalJSON.Null
     }
 }
 jettrace_optional_text: fn(value: String?) -> CanonicalJSON Never! {
     return if value == {
         .Val(text) -> CanonicalJSON.String(text.copy())
-        else -> CanonicalJSON.Null
+        .None -> CanonicalJSON.Null
     }
 }
 trace_toolchain_to_json: fn(value: TraceToolchain) -> CanonicalJSON JetTraceError! {
@@ -130,7 +130,7 @@ trace_game_function_to_json: fn(value: TraceGameFunction) -> CanonicalJSON JetTr
 trace_game_frame_to_json: fn(value: TraceGameFrame) -> CanonicalJSON JetTraceError! {
     function: if value.responsible_function == {
         .Val(item) -> trace_game_function_to_json(item)
-        else -> CanonicalJSON.Null
+        .None -> CanonicalJSON.Null
     }
     jettrace_object([CanonicalJSONField]{jettrace_field("build", .String(value.build.copy())), jettrace_field("cpu_ns", jettrace_uint(value.cpu_ns)), jettrace_field("frame_id", jettrace_uint(value.frame_id)), jettrace_field("frame_index", jettrace_uint(value.frame_index)), jettrace_field("gpu_ns", jettrace_optional_uint(value.gpu_ns)), jettrace_field("responsible_function", function), jettrace_field("revision", .String(value.revision.copy())), jettrace_field("scene", .String(value.scene.copy())), jettrace_field("sequence", jettrace_uint(value.sequence)), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("trace_id", .String(value.trace_id.copy()))})
 }

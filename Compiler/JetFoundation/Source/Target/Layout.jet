@@ -327,6 +327,7 @@ jet_target_layout_check_alignment: fn(target: JetTargetLayout, requested: Int, n
     }}
 }
 
+
 jet_target_layout_storage_kind_name: fn(kind: JetLayoutStorageKind) -> String Never! {
     if kind == JetLayoutStorageKind.Stack -> return "Stack"
     if kind == JetLayoutStorageKind.Global -> return "Global"
@@ -367,6 +368,7 @@ jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definit
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
 }
 
+
 // `#Layout(U8)` names the integer type that backs a
 // payload-free enum; these are the accepted backing types.
 jet_layout_integer_backing_name: fn(name: String) -> Bool Never! {
@@ -394,12 +396,15 @@ jet_target_layout_enum_c_tag: fn(definition: EnumDef) -> CEnumTag? {
         if candidate.name == "Layout" -> break candidate
     } ?? return None
     layout_expr: jet_target_layout_marker_expression(marker, 0) ?? return None
-    layout_name: if layout_expr == { .Ident(name, _, _) -> name else -> "" }
+    layout_name: if layout_expr == {
+        .Ident(name, _, _) -> name
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
+    }
     if jet_target_layout_ascii_lower(layout_name) != "c" -> return None
     enum_tag: jet_target_layout_marker_expression(marker, 1) ?? return Val(CEnumTag.CInt)
     if enum_tag == {
         .Ident(name, _, _) -> jet_layout_integer_backing_tag(name)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -413,7 +418,7 @@ jet_target_layout_enum_backing: fn(definition: EnumDef) -> String? {
     layout_expr: jet_target_layout_marker_expression(marker, 0) ?? return None
     if layout_expr == {
         .Ident(name, _, _) -> if jet_layout_integer_backing_name(name) -> Val(name) else -> None
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -443,7 +448,10 @@ jet_layout_integer_backing_max: fn(name: String) -> Int Never! {
 
 jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
-    if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
+    if marker.args[index] == {
+        .Expr(value) -> Val(value)
+        .EffectRow(_, _) -> None
+    }
 }
 
 jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
@@ -473,7 +481,7 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
     query.active[identity] = false
     if layout == {
         .CAligned(alignment, _) -> jet_target_layout_aligned_struct_facts(facts, alignment)
-        else -> facts
+        .C | .Columnar -> facts
     }
 }
 
@@ -547,7 +555,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
         .Apply(name, args) -> if name == "Ptr" && args.len() == 1 -> Val(jet_target_layout_scalar(8)) else -> None
-        else -> None
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
     }
 }
 
@@ -585,7 +593,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
             query.active[identity] = false
             bytes
         }
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -777,7 +785,7 @@ jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identit
             query.active[identity] = false
             bytes
         }
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
     if cycle_hits == query.cycle_hits && query.completed_positions.get(key) == None {
         query.completed_positions[key] = query.completed.len()
@@ -834,7 +842,7 @@ jet_target_layout_item_name: fn(item: Item) -> String Never! {
         .Enum(definition) -> definition.name
         .Distinct(definition) -> definition.name
         .TypeAlias(definition) -> definition.name
-        else -> ""
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
 }
 
@@ -892,7 +900,7 @@ jet_target_layout_atomic_scalar_type: fn(ty: Type) -> Bool Never! {
             numeric: jet_target_layout_numeric_type(name) ?? return false
             jet_target_layout_atomic_scalar_type(numeric)
         }
-        else -> false
+        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -901,7 +909,7 @@ jet_target_layout_atomic_add_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Bool -> false
         .Named(name) -> name != "Bool"
-        else -> true
+        .Int | .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 

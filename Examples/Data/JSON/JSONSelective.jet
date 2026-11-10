@@ -84,7 +84,7 @@ first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
     key: events.next() ?? return Ok()
     if key == {
         .Key(name) -> print("{label} reader: stopped after first key `{name}`; the rest is unread")
-        else -> print("{label} reader: the first event after the root is not a key")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .ObjectEnd -> print("{label} reader: the first event after the root is not a key")
     }
     Ok()
 }

@@ -76,7 +76,7 @@ impl NixEvalOperation {
     arity: fn(self) -> Int Never! {
         if self == {
             .ReplaceStrings | .Substring -> 3
-            else -> 2
+            .GetAttr | .HasAttr | .Map | .Filter | .ConcatStringsSep -> 2
         }
     }
 }
@@ -137,28 +137,28 @@ impl NixEvalValue {
         if self == {
             .Str(value) -> Val(value)
             .Contextual(value, _) -> Val(value)
-            else -> None
+            .Null | .Bool(_) | .Integer(_) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> None
         }
     }
 
     is_function: fn(self) -> Bool Never! {
         if self == {
             .Function(_, _) -> true
-            else -> false
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Native(_) -> false
         }
     }
 
     attr_fields: fn(self) -> [String: Int]? Never! {
         if self == {
             .AttrSet(fields) -> Val(fields)
-            else -> None
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> None
         }
     }
 
     list_items: fn(self) -> [Int]? Never! {
         if self == {
             .List(items) -> Val(items)
-            else -> None
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> None
         }
     }
 
@@ -172,7 +172,7 @@ impl NixEvalValue {
                     if nixeval_has_prefix(context, "path:") -> return Err(NixEvalError.Unsupported("path string contexts are not devShell packages"))
                 }
             }
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
         }
         text: self.text() ?? return Err(NixEvalError.Unsupported("package expression has type {self.type_name()}"))
         Ok(text)
@@ -186,7 +186,7 @@ impl NixEvalValue {
             .Integer(value) -> return Ok(NixEvalText{value: "{value}", contexts: [String]{}})
             .Package(name) -> return Ok(NixEvalText{value: name.copy(), contexts: [String]{"package:{name}"}})
             .Path(path) -> return Ok(NixEvalText{value: path.copy(), contexts: [String]{"path:{path}"}})
-            else -> {}
+            .Null | .Bool(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))
     }
@@ -206,16 +206,16 @@ impl NixEvalValue {
             .Package(package) -> {
                 if other == {
                     .Package(right) -> package == right
-                    else -> nixeval_package_named(package, other.text())
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_package_named(package, other.text())
                 }
             }
             .Str(left) | .Contextual(left, _) -> {
                 if other == {
                     .Package(package) -> nixeval_package_named(package, Val(left))
-                    else -> nixeval_same_text(other.text(), left)
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_same_text(other.text(), left)
                 }
             }
-            else -> false
+            .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
         }
     }
 }

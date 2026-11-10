@@ -225,7 +225,7 @@ jet_cli_solver_normalize: fn(node: JetCLISolverBool) -> JetCLISolverBool Never! 
     if node == {
         .And(children) -> jet_cli_solver_normalize_list(true, children)
         .Or(children) -> jet_cli_solver_normalize_list(false, children)
-        else -> node.copy()
+        .Constant(_) | .Atom(_) -> node.copy()
     }
 }
 
@@ -249,7 +249,7 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
             text: jet_cli_solver_bool_json(item)
             if item == {
                 .Atom(atom) -> keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
-                else -> keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
+                .Constant(_) | .And(_) | .Or(_) -> keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
             }
             nodes.push(item.copy())
         }
@@ -739,7 +739,7 @@ jet_cli_solver_fields: fn(value: CanonicalJSON, keys: [String]) -> [CanonicalJSO
             }
             Val(loop field in fields -> field.value.copy())
         }
-        else -> None
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> None
     }
 }
 

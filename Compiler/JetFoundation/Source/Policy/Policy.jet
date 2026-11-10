@@ -65,7 +65,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes -> false
-        else -> true
+        .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride -> true
     }
 }
 
@@ -362,7 +362,7 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Default || outer == PolicyValue.GateOnly || outer == PolicyValue.Relaxed {
         if inner == {
             .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> return false
-            else -> {}
+            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> {}
         }
     }
     if outer == PolicyValue.Track && inner == PolicyValue.Track -> return false

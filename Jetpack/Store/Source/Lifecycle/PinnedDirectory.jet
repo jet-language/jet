@@ -157,13 +157,13 @@ store_pinned_valid_name: fn(name: String) StoreError! {
 store_io_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 
 store_io_is_already_exists: fn(error: IOError) -> Bool Never! {
     if error == {
         .AlreadyExists(_) -> true
-        else -> false
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
     }
 }

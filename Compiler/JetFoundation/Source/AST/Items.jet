@@ -42,8 +42,8 @@ Program: struct {
     user_policy_declarations: [UserPolicyDecl]
     applied_rules: [AppliedRuleApplication]
     rule_facts: [AppliedRuleApplication]
-    // L0303 (#3716): each dispatch table's authored `else` arm, so sema can
-    // point at an arm that can never run and delete it.
+    // E0641: each dispatch table's authored `else` arm, so sema can point at
+    // an `else` over a closed set and rewrite or delete it.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // L0103 the local names of this file's imports that the
     // file spells outside its import declarations, so sema can report an
@@ -80,6 +80,23 @@ ElseArmSpan: struct {
     arm: Span
     // The arm plus the line break and indentation before it.
     delete: Span
+    // The `else` shares its line with the arm before it (`{ .A -> 1 else -> 2 }`).
+    one_line: Bool
+    // A one-line table's layout, which sema rewrites one arm per line: a
+    // one-line table holds one arm and its `else`, so the cases the `else`
+    // stands for take a line of their own.
+    layout: ElseArmLayout?
+}
+
+ElseArmLayout: struct {
+    // From just after the table's `{` up to its `}`.
+    span: Span
+    // The arms before `else`, as written.
+    head: String
+    // The `else` arm after its keyword (` -> body`), as written.
+    tail: String
+    // The indentation of the line the table starts on.
+    indent: String
 }
 
 FencedStatement: struct {
@@ -996,7 +1013,7 @@ type_is_app: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "App"
         .Result(ok, _) -> ok == Type.Named{name: "App"}
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1012,7 +1029,7 @@ app_entry_run_fn: fn(items: [Item]) -> Func? Never! {
                     if app_entry_run_fn(body) == .Val(function) -> return Val(function)
                 }
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None

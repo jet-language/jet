@@ -492,7 +492,7 @@ ir_c_primitive: fn(ty: Type) -> String? Never! {
         .IntN(signed, bits) -> {
             if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> return Val(if signed -> "I{bits}" else -> "U{bits}")
         }
-        else -> {}
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -500,14 +500,14 @@ ir_c_primitive: fn(ty: Type) -> String? Never! {
 ir_top_level: fn(function: FnBody) -> Bool Never! {
     if function.kind == {
         .TopLevel -> true
-        else -> false
+        .Method(_, _) | .TraitMethod(_, _, _, _, _) -> false
     }
 }
 
 ir_infallible: fn(function: FnBody) -> Bool Never! {
     if function.failure_carrier == {
         .Infallible -> true
-        else -> false
+        .Result(_, _) | .Optional(_) | .Diverges(_) -> false
     }
 }
 
@@ -517,7 +517,7 @@ ir_infallible: fn(function: FnBody) -> Bool Never! {
 ir_c_export_has_result: fn(function: FnBody) -> Bool Never! {
     if function.failure_carrier == {
         .Infallible | .Result(_, _) -> true
-        else -> false
+        .Optional(_) | .Diverges(_) -> false
     }
 }
 
@@ -529,7 +529,7 @@ ir_c_export_result: fn(function: FnBody) -> Type? Never! {
             if ir_unit_type(success) -> return None
             return Val(success)
         }
-        else -> {}
+        .Infallible | .Optional(_) | .Diverges(_) -> {}
     }
     ty: ir_executable_return(function) ?? return None
     if ir_unit_type(ty) -> return None
@@ -617,7 +617,7 @@ ir_float_type: fn(ty: Type?) -> Bool Never! {
     written: ty ?? return false
     if ir_untag(written) == {
         .Float -> true
-        else -> false
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -682,7 +682,7 @@ ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCa
     if args.len() != 1 -> return ir_fail_slot(b, span, "rt_static_text is literal-only")
     parts: if ir_body_node(p, b, args[0].value).kind == {
         .StrLit(written) -> written
-        else -> { return ir_fail_slot(b, span, "rt_static_text is literal-only") }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> { return ir_fail_slot(b, span, "rt_static_text is literal-only") }
     }
     literal := ""
     loop part in parts {

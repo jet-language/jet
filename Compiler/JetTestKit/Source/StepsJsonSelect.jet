@@ -70,7 +70,10 @@ kit_steps_json_filter_matches: fn(value: Dyn, filter: KitJSONFilter) -> Bool {
         expected = other[0]
     }
     op: if filter.op == "~=" -> "~" else if filter.op == "!~=" -> "!~" else -> filter.op
-    text: if expected == { .Text(needle) -> needle else -> "" }
+    text: if expected == {
+        .Text(needle) -> needle
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
+    }
     loop actual in values {
         if kit_steps_json_leaf(actual, op, expected, text, 0) == None -> return true
     }
@@ -84,14 +87,17 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
         key := if part.starts_with(".") -> kit_steps_byte_slice(part, 1, part.count_bytes()) else -> ""
         if part.starts_with("\"") {
             decoded: json.parse(part) ?? return None
-            key = if decoded == { .Text(text) -> text else -> { return None } }
+            key = if decoded == {
+                .Text(text) -> text
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return None }
+            }
         }
         if value == {
             .Object(_) -> {
                 child: value.get(key) ?? return None
                 return kit_steps_json_select(child, parts, depth + 1)
             }
-            else -> return None
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return None
         }
     }
     if part.starts_with("{{") {
@@ -105,7 +111,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 }
                 return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
             }
-            else -> return None
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return None
         }
     }
     if value == {
@@ -133,7 +139,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
             if index < 0 || index >= items.len() -> return None
             return kit_steps_json_select(items[index], parts, depth + 1)
         }
-        else -> return None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return None
     }
 }
 
@@ -164,7 +170,7 @@ kit_steps_json_size: fn(value: Dyn) -> Int? {
     if value == {
         .Array(items) -> Val(items.len())
         .Object(fields) -> Val(fields.len())
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> None
     }
 }
 
@@ -217,6 +223,6 @@ kit_steps_json_scalar: fn(text: String, mode: String, path: String) -> String Er
             encoded: json.to_string(value) ?? return Err("capture JSON encode: {err}")
             Ok(encoded)
         }
-        else -> Err("capture JSON path missing or not scalar")
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err("capture JSON path missing or not scalar")
     }
 }

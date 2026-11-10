@@ -65,7 +65,7 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
         variant_name := String?{None}
         if pattern == {
             .Variant(name, _, _, _) -> variant_name = Val(name)
-            else -> {}
+            .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
         }
         if variant_name == None {
             diagnostics.push(sema_error("E0305", pattern_span, "a multi-head declaration needs an enum variant head", "multi-head coverage is proved by the enum pattern table", "write a variant head such as `Circle(radius: Float)`"))
@@ -179,7 +179,7 @@ sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Ne
             .Func(function) -> {
                 if function.head_pattern != None -> has_heads = true
             }
-            else -> {}
+            .Struct(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     if !has_heads -> return

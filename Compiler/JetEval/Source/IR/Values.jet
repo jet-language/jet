@@ -242,7 +242,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             name: if checked == {
                 .Named(name) -> name
                 .Apply(name, _) -> name
-                else -> { return jet_eval_ir_transport_fail(s, checked) }
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return jet_eval_ir_transport_fail(s, checked) }
             }
             definition: ir_type_def(p, name) ?? return jet_eval_ir_transport_fail(s, checked)
             members: ir_struct_members(m, p, definition, ir_type_args(checked)) ?? return jet_eval_ir_transport_fail(s, checked)
@@ -500,7 +500,7 @@ jet_eval_ir_key: fn(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) 
             if ir_untag(ty) == .Tuple(_) -> return Val(TComptimeKey.Tuple{fields: keys})
             return Val(TComptimeKey.Struct{type_name: name, fields: keys})
         }
-        else -> return None
+        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> return None
     }
 }
 
@@ -514,7 +514,7 @@ jet_eval_ir_type_display: fn(ty: Type) -> String Never! {
             names: loop arg in args -> jet_eval_ir_type_display(arg)
             "{name}<{names.join(", ")}>"
         }
-        else -> type_name(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 

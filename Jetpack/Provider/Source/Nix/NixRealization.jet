@@ -414,7 +414,7 @@ provider_locked_nix_index_key_for_project: fn(spec: RefSpec, table: SourceTable,
     source_name: if spec.source == {
         .Named(name) -> name
         .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
-        else -> { return Err(ProviderError.Unsupported("Nix index lookup does not support `{spec.source.label()}` as a Nix source")) }
+        .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> { return Err(ProviderError.Unsupported("Nix index lookup does not support `{spec.source.label()}` as a Nix source")) }
     }
     project: project_dir ?? return Err(ProviderError.Channel("Nix source `{source_name}` has no project lock containing an exact channel pin"))
     locked: pkg_lock_locked_source_channel(project, source_name) ?? (pkg_lock_locked_source_channel(project, REF_SOURCE_NIXPKGS) ?? return Err(ProviderError.Channel("Nix source `{source_name}` has no exact lock entry; run `jetpack update` first")))
@@ -488,7 +488,7 @@ provider_realize_from_local_nix: fn(verification: &StoreVerification, spec: RefS
     source_name: if spec.source == {
         .Named(name) -> name
         .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
-        else -> { return Err(ProviderError.Unsupported("local Nix fallback requires a Jetpack-backed Nix source")) }
+        .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> { return Err(ProviderError.Unsupported("local Nix fallback requires a Jetpack-backed Nix source")) }
     }
     invocation: nix_fallback_run(project, source_name, key.revision, key.system, key.attrpath, ctx.offline) ?? return Err(ProviderError.BuildFailed("local Nix fallback failed: {err.message()}"))
     realized := provider_parse_realization(spec, invocation.stdout)

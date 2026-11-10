@@ -128,6 +128,7 @@ sema_job_schedule_error: fn(reason: EveryScheduleError, span: Span) -> Diagnosti
     }
 }
 
+
 /// Sema and help read the same command registry.
 sema_job_is_reserved: fn(name: String) -> Bool Never! {
     loop command in JET_CLI_COMMANDS {
@@ -233,7 +234,7 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                 seen_names.push(function.name)
                 seen_scopes.push(scope)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     diagnostics
@@ -254,7 +255,7 @@ sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, p
                 resolution: sema_job_resolve_every_arg(marker.arg, environment, program)
                 if resolution.error == .Val(reason) -> diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     diagnostics

@@ -77,7 +77,7 @@ publication_metadata_test_refusal: fn(text: String, detail: String) Never! {
         .Ok(_) -> panic("invalid metadata accepted")
         .Err(error) -> if error == {
             .InvalidInput(context) -> assert_eq(context.cause, Val(detail))
-            else -> panic("wrong metadata error kind")
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("wrong metadata error kind")
         }
     }
 }
@@ -225,7 +225,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("oversized metadata accepted")
         .Err(error) -> if error == {
             .InvalidInput(context) -> assert_eq(context.cause, Val("registry.json exceeds its size limit"))
-            else -> panic("wrong bound error kind")
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("wrong bound error kind")
         }
     }
     files.write_bytes(path, [U8]{255}) ?? panic("invalid UTF8")
@@ -233,7 +233,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("invalid UTF8 accepted")
         .Err(error) -> if error == {
             .InvalidInput(context) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
-            else -> panic("wrong UTF8 error kind")
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("wrong UTF8 error kind")
         }
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -246,7 +246,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("directory accepted")
         .Err(error) -> if error == {
             .InvalidInput(context) -> assert_eq(context.cause, Val("registry.json is not a regular file"))
-            else -> panic("wrong directory error kind")
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("wrong directory error kind")
         }
     }
     files.remove_all(path) ?? panic("remove directory")
@@ -283,7 +283,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> panic("cyclic default feature closure published")
         .Err(error) -> if error == {
             .InvalidInput(context) -> assert_eq(context.cause, Val("registry feature closure contains a cycle"))
-            else -> panic("wrong publish refusal")
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("wrong publish refusal")
         }
     }
     assert(!files.exists(publication_artifact_path(repo, "cycle-kit", "1.0.0") ?? panic("artifact path")))
@@ -301,7 +301,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
     entry.content_hash = "sha256-not-the-tree"
     if publication_verify_artifact(repo, entry) == {
         .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("failed its content hash"))
-        else -> panic("corrupt artifact accepted or wrong refusal")
+        .Ok(_) | .Err(_) -> panic("corrupt artifact accepted or wrong refusal")
     }
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -318,7 +318,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.write(files.join(source, "embedded.bin"), "tampered asset") ?? panic("tamper")
     if publication_publish_artifact(repo, source, "asset-kit", "1.0.0", expected) == {
         .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("source hash changed"))
-        else -> panic("changed auxiliary artifact accepted or wrong refusal")
+        .Ok(_) | .Err(_) -> panic("changed auxiliary artifact accepted or wrong refusal")
     }
     assert(!files.exists(publication_artifact_path(repo, "asset-kit", "1.0.0") ?? panic("path")))
     files.remove_all(root) ?? panic("cleanup")
@@ -336,7 +336,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         entry.content_hash = "sha256-unchecked"
         if publication_verify_artifact(repo, entry) == {
             .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("not a real directory"))
-            else -> panic("artifact ancestor link accepted or wrong refusal")
+            .Ok(_) | .Err(_) -> panic("artifact ancestor link accepted or wrong refusal")
         }
         assert(files.is_file(files.join(outside, "escape-kit/1.0.0/package.jet")))
         files.remove_all(root) ?? panic("cleanup")
@@ -358,7 +358,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
             .Ok(_) -> panic("unsupported source nodes must abort the staged publication")
             .Err(error) -> if error == {
                 .InvalidInput(_) -> {}
-                else -> panic("unsupported source nodes aborted with the wrong error kind")
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("unsupported source nodes aborted with the wrong error kind")
             }
         }
         assert(!files.exists(publication_artifact_path(repo, "atomic-kit", "1.0.0") ?? panic("artifact path")))

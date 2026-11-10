@@ -43,7 +43,7 @@ perf_report_index: fn(fields: [CanonicalJSONField], key: String) -> Int Never! {
 perf_report_text: fn(value: CanonicalJSON, name: String) -> String PerfBudgetError! {
     if value == {
         .String(v) -> Ok(v.copy())
-        else -> Err(perf_error("{name} is not text"))
+        .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> Err(perf_error("{name} is not text"))
     }
 }
 perf_report_integer: fn(value: CanonicalJSON, name: String) -> Int PerfBudgetError! {
@@ -58,7 +58,7 @@ perf_report_unsigned: fn(value: CanonicalJSON, name: String) -> Int PerfBudgetEr
 perf_report_boolean: fn(value: CanonicalJSON, name: String) -> Bool PerfBudgetError! {
     if value == {
         .Bool(v) -> Ok(v)
-        else -> Err(perf_error("{name} is not boolean"))
+        .Null | .Integer(_) | .String(_) | .Array(_) | .Object(_) -> Err(perf_error("{name} is not boolean"))
     }
 }
 perf_report_array: fn(value: CanonicalJSON, name: String) PerfBudgetError! {
@@ -392,7 +392,7 @@ perf_report_wire_text: fn(value: CanonicalJSON) -> String Never! {
         .String(v) -> v.copy()
         .Integer(v) -> v.copy()
         .Null -> ""
-        else -> {
+        .Bool(_) | .Array(_) | .Object(_) -> {
             bytes: canonical_json_bytes(value)
             String.from_bytes(bytes[0..<bytes.len() - 1]) ?? panic("canonical JSON UTF-8")
         }

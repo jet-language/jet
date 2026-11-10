@@ -16,7 +16,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .WrongAudience(expected, actual) -> { print("wrong:{expected}:{actual}") }
-                else -> { print("wrong:wrong-error") }
+                .MalformedToken(_) | .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) | .TokenNotYetValid -> { print("wrong:wrong-error") }
             }
         }
     }
@@ -25,7 +25,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .MalformedToken(_) -> { print("empty:malformed") }
-                else -> { print("empty:wrong-error") }
+                .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) | .TokenNotYetValid -> { print("empty:wrong-error") }
             }
         }
     }
@@ -34,7 +34,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .MalformedToken(_) -> { print("mixed:malformed") }
-                else -> { print("mixed:wrong-error") }
+                .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) | .TokenNotYetValid -> { print("mixed:wrong-error") }
             }
         }
     }
@@ -43,7 +43,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .MalformedToken(_) -> { print("nested:malformed") }
-                else -> { print("nested:wrong-error") }
+                .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) | .TokenNotYetValid -> { print("nested:wrong-error") }
             }
         }
     }
@@ -52,7 +52,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .TokenNotYetValid -> { print("future-nbf:not-yet-valid") }
-                else -> { print("future-nbf:wrong-error") }
+                .MalformedToken(_) | .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) -> { print("future-nbf:wrong-error") }
             }
         }
     }
@@ -60,7 +60,7 @@ run: fn() {
         .Ok(claims) -> {
             if claims.not_before == {
                 .Val(value) -> { print("past-nbf:{value}") }
-                else -> { print("past-nbf:none") }
+                .None -> { print("past-nbf:none") }
             }
         }
         .Err(_) -> { print("past-nbf:rejected") }
@@ -79,7 +79,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .WrongAudience(expected, actual) -> { print("paseto-wrong:{expected}:{actual}") }
-                else -> { print("paseto-wrong:wrong-error") }
+                .MalformedToken(_) | .UnsupportedToken(_) | .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongIssuer(_, _) | .TokenExpired | .DecodeError(_) | .TokenNotYetValid -> { print("paseto-wrong:wrong-error") }
             }
         }
     }

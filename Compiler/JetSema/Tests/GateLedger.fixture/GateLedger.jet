@@ -98,7 +98,7 @@ run: fn() Never! {
             .Structure -> { structure_count += 1 }
             .PrecisionDemotion -> precision_count += 1
             .BuildFlag | .SessionFlag -> invocation_count += 1
-            else -> {}
+            .Impure | .DependencyGrant | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .Nondeterministic | .LintAllow | .CheckRemoval | .LinkOverride -> {}
         }
     }
     gate_test_require(unsafe_count == 1 && structure_count == 3 && precision_count == 1 && invocation_count == 2, "source and invocation rows")

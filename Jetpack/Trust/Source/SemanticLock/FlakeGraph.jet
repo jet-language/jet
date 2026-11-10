@@ -454,7 +454,7 @@ FlakeGraph: struct {
             .Ok(content) -> lock_text = Val(content)
             .Err(error) -> if error == {
                 .NotFound(_) -> {}
-                else -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
             }
         }
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
@@ -645,7 +645,7 @@ trust_flake_lock_has_facts: fn(lock: SemanticLockFile) -> Bool Never! {
     loop record in lock.records {
         flake_kind: if record.identity.kind == {
             .SourceRef | .AdapterOutput | .FlakeComposition | .FlakeUnsupported -> true
-            else -> false
+            .Package | .WorkspaceMember | .SourceBuild | .CacheObject | .Toolchain | .SecretReference | .ServicePackage | .ImageInput | .ReplacementOverlay | .PackageOverlay | .FlakeEvaluator | .Variant | .Future(_) -> false
         }
         if !flake_kind -> next
         key: record.identity.key

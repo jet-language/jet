@@ -85,7 +85,7 @@ NixEvalParser: struct {
         lambda: self.try_lambda()
         node: if lambda == {
             .Val(parsed) -> parsed
-            else -> self.equality()
+            .None -> self.equality()
         }
         Ok(self.leave(node))
     }
@@ -107,7 +107,7 @@ NixEvalParser: struct {
                     return Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Name(name), body})))
                 }
             }
-            else -> {}
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> {}
         }
         self.position = saved
         if self.peek() != NixEvalToken.LeftBrace -> return Ok(None)
@@ -126,7 +126,7 @@ NixEvalParser: struct {
                         else -> fields.push(NixEvalPatternField{name, default: None})
                     }
                 }
-                else -> {
+                .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .End -> {
                     self.position = saved
                     return Ok(None)
                 }
@@ -134,7 +134,7 @@ NixEvalParser: struct {
             if self.peek() == {
                 .Comma -> self.position += 1
                 .RightBrace -> {}
-                else -> {
+                .Identifier(_) | .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Question | .Ellipsis | .End -> {
                     self.position = saved
                     return Ok(None)
                 }
@@ -158,7 +158,7 @@ NixEvalParser: struct {
             if token == {
                 .EqualEqual -> positive = true
                 .NotEqual -> positive = false
-                else -> return Ok(self.leave(expression))
+                .Identifier(_) | .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Ok(self.leave(expression))
             }
             self.position += 1
             right: self.merge()
@@ -195,7 +195,7 @@ NixEvalParser: struct {
             token: self.bump()
             if token == {
                 .Identifier(field) -> expression = self.add(NixEvalExpr.Select{value: expression, field})
-                else -> return Err(NixEvalError.Syntax("field selector requires an identifier"))
+                .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("field selector requires an identifier"))
             }
         }
         Ok(self.leave(expression))
@@ -232,7 +232,7 @@ NixEvalParser: struct {
                 self.expect_right_paren()
                 expression
             }
-            else -> nixeval_unexpected_token(token)
+            .RightBrace | .RightBracket | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> nixeval_unexpected_token(token)
         }
     }
 
@@ -271,7 +271,7 @@ NixEvalParser: struct {
             if self.peek() == {
                 .Semicolon | .Comma -> self.position += 1
                 .RightBrace -> {}
-                else -> return Err(NixEvalError.Syntax("attribute values require `;`"))
+                .Identifier(_) | .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Dot | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("attribute values require `;`"))
             }
         }
         self.position += 1
@@ -299,7 +299,7 @@ NixEvalParser: struct {
             name := ""
             if token == {
                 .Identifier(identifier) -> name = identifier
-                else -> return Err(NixEvalError.Syntax("let binding requires a name"))
+                .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("let binding requires a name"))
             }
             self.expect_equal()
             value: self.expression()
@@ -341,14 +341,14 @@ NixEvalParser: struct {
         key := ""
         if first == {
             .Identifier(name) -> key = name
-            else -> return Err(NixEvalError.Syntax("attribute key requires an identifier"))
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("attribute key requires an identifier"))
         }
         loop self.peek() == NixEvalToken.Dot {
             self.position += 1
             part: self.bump()
             if part == {
                 .Identifier(name) -> key = "{key}.{name}"
-                else -> return Err(NixEvalError.Syntax("attribute key path requires an identifier"))
+                .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("attribute key path requires an identifier"))
             }
         }
         Ok(key)
@@ -358,14 +358,14 @@ NixEvalParser: struct {
         if self.peek() == {
             .Identifier(name) -> !(name == "in" || name == "then" || name == "else")
             .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .LeftBracket | .LeftParen -> true
-            else -> false
+            .RightBrace | .RightBracket | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> false
         }
     }
 
     word: fn(self, expected: String) -> Bool Never! {
         if self.peek() == {
             .Identifier(name) -> name == expected
-            else -> false
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> false
         }
     }
 

@@ -255,7 +255,7 @@ retryable_method: fn(method: String) -> Bool Never! {
 retryable_error: fn(error: HTTPError) -> Bool Never! {
     if error == {
         .IO(_) -> true
-        else -> false
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> false
     }
 }
 
@@ -797,7 +797,7 @@ __build_net_portable: fn(err: NetError) -> String Never! {
         .Cancelled(_) -> "interrupted"
         .Closed(detail) -> __build_errno_portable(detail.os_code)
         .Other(detail) -> __build_errno_portable(detail.os_code)
-        else -> "unmapped"
+        .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> "unmapped"
     }
 }
 
@@ -809,7 +809,7 @@ __build_io_portable: fn(err: IOError) -> String Never! {
         .Cancelled(_) -> "interrupted"
         .Closed(context) -> __build_errno_portable(context.os_code)
         .Other(context) -> __build_errno_portable(context.os_code)
-        else -> "unmapped"
+        .InvalidInput(_) | .NotFound(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "unmapped"
     }
 }
 

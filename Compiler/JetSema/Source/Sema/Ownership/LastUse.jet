@@ -83,7 +83,7 @@ sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
                 .Elements(elements) -> loop index in 0..<elements.len() { if sema_ownership_last_use_expr(elements[index], name) -> return true }
                 .Entries(entries) -> loop index in 0..<entries.len() { if sema_ownership_last_use_expr(entries[index].key, name) || sema_ownership_last_use_expr(entries[index].value, name) -> return true }
                 .Value(value) -> return sema_ownership_last_use_expr(value, name)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
@@ -106,7 +106,7 @@ sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
                 }
                 .Return(fallback_value, _) -> if fallback_value != None -> return sema_ownership_last_use_expr(fallback_value, name)
                 .Panic(_, _) -> {}
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
@@ -128,7 +128,7 @@ sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
                 }
             }
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     false
 }
@@ -203,7 +203,7 @@ sema_ownership_last_use_statement: fn(statement: Stmt, name: String) -> Bool {
             return sema_ownership_last_use_statements(body, name)
         }
         .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_ownership_last_use_statements(body, name)
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
     false
 }
@@ -252,7 +252,7 @@ sema_ownership_last_use_pattern: fn(pattern: Pattern, name: String) -> Bool Neve
                 .Nested(_, _, nested) -> {
                     if sema_ownership_last_use_pattern(nested, name) -> return true
                 }
-                else -> {}
+                .Bind(_, _, _, _) -> {}
             }
         }
         .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots {
@@ -267,7 +267,7 @@ sema_ownership_last_use_pattern: fn(pattern: Pattern, name: String) -> Bool Neve
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> return sema_ownership_last_use_pattern(nested, name)
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
     false
 }
@@ -277,6 +277,6 @@ sema_ownership_last_use_slot: fn(slot: PatSlot, name: String) -> Bool Never! {
         .Value(value) -> sema_ownership_last_use_expr(value, name)
         .Nested(pattern) -> sema_ownership_last_use_pattern(pattern, name)
         .Named(_, _, inner) -> sema_ownership_last_use_slot(inner, name)
-        else -> false
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> false
     }
 }

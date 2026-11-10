@@ -109,7 +109,7 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     if field(tree, name) == {
         .Int(value) -> Val(value)
         .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 

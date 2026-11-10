@@ -613,6 +613,6 @@ store_test_assert_other_read_error: fn(error: IOError, cause: String) {
             assert(context.os_code == None)
             assert_eq(context.cause, Val(cause))
         }
-        else -> panic("expected the Other read error \"{cause}\"")
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("expected the Other read error \"{cause}\"")
     }
 }

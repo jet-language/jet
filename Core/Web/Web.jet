@@ -893,14 +893,14 @@ __openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
 __openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] __OpenAPIFault! {
     if value == {
         .Object(members) -> return Ok(members)
-        else -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
     }
 }
 
 __openapi_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
 }
 
@@ -920,7 +920,7 @@ __openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String 
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
     }
 }
 
@@ -929,7 +929,7 @@ __openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -
     if value == {
         .Null -> return Ok(String?{None})
         .Text(text) -> return Ok(Val(text))
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
     }
 }
 
@@ -937,7 +937,7 @@ __openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool __
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
     }
 }
 
@@ -945,7 +945,7 @@ __openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] 
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
     }
 }
 
@@ -957,7 +957,7 @@ __openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int 
             number: Int.parse(text) ?? return Err(__openapi_fault("OpenAPI route contract field `{name}` is out of range"))
             return Ok(number)
         }
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
     }
 }
 
@@ -970,7 +970,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
     if __openapi_member(fields, "anyOf") == .Val(any_of) {
         items: if any_of == {
             .Array(entries) -> entries
-            else -> { return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array")) }
         }
         if items.len() == 2 && __openapi_is_object(items[1]) {
             probe := [String]{}
@@ -984,7 +984,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
     if __openapi_member(fields, "oneOf") == .Val(one_of) {
         items: if one_of == {
             .Array(entries) -> entries
-            else -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
         }
         if items.len() == 0 -> errors.push(__openapi_problem(path, "oneOf needs at least one schema"))
         rendered := [String]{}
@@ -999,7 +999,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
 __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String __OpenAPIFault! {
     name: if kind == {
         .Text(text) -> text
-        else -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
     }
     if name == "null" -> return Ok("{{\"type\":\"null\"}}")
     if name == "boolean" -> return Ok("{{\"type\":\"boolean\"}}")
@@ -1015,25 +1015,25 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
     declared: __openapi_field(fields, "properties") ?? return Err(err)
     properties := if declared == {
         .Object(members) -> members
-        else -> { return Err(__openapi_fault("OpenAPI object schema `properties` must be an object")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(__openapi_fault("OpenAPI object schema `properties` must be an object")) }
     }
     required := [String]{}
     if __openapi_member(fields, "required") == .Val(listed) {
         entries: if listed == {
             .Array(items) -> items
-            else -> { return Err(__openapi_fault("OpenAPI schema `required` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `required` must be an array")) }
         }
         loop entry in entries {
             if entry == {
                 .Text(text) -> required.push(text)
-                else -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
             }
         }
     }
     additional: __openapi_field(fields, "additionalProperties") ?? return Err(err)
     open: if additional == {
         .Bool(flag) -> flag
-        else -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
     }
     properties.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
     rendered := [String]{}
@@ -1094,7 +1094,7 @@ __openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
     loop scope in listed {
         if scope == {
             .Text(text) -> scopes.push(text)
-            else -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
         }
     }
     scheme: __openapi_text(fields, "scheme") ?? return Err(err)

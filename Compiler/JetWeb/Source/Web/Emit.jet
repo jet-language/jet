@@ -159,7 +159,7 @@ web_kind_type: fn(kind: IRTypeKind) -> Int Never! {
         .Unit -> 0
         .Float -> WASM_F64
         .Float32 -> WASM_F32
-        else -> WASM_I64
+        .Bool | .Int | .Word | .Char | .String | .Pointer | .Aggregate -> WASM_I64
     }
 }
 
@@ -205,7 +205,7 @@ web_value_width: fn(ty: IRType) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> if ty.size == 1 || ty.size == 2 || ty.size == 4 -> ty.size else -> 8
-        else -> 8
+        .Unit | .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 
@@ -214,7 +214,7 @@ web_unsigned: fn(ty: IRType) -> Bool Never! {
     if ty.kind == {
         .Word -> !ty.signed
         .Bool | .Char | .Pointer | .String -> true
-        else -> false
+        .Unit | .Int | .Float | .Float32 | .Aggregate -> false
     }
 }
 

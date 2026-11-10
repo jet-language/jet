@@ -30,7 +30,7 @@ foundation_fetch_test_redirect_error: fn(current: String, location: String, deta
             assert_eq(kind, FoundationFetchErrorKind.General)
             assert_eq(actual, detail)
         }
-        else -> panic("redirect failure must be HTTP")
+        .IO(_) | .Scheme(_) -> panic("redirect failure must be HTTP")
     }
 }
 
@@ -48,7 +48,7 @@ foundation_fetch_test_redirect_error: fn(current: String, location: String, deta
             assert_eq(kind, FoundationFetchErrorKind.TLSCertificate)
             assert_eq(actual, detail)
         }
-        else -> panic("HTTP error lost its carrier")
+        .IO(_) | .Scheme(_) -> panic("HTTP error lost its carrier")
     }
 }
 

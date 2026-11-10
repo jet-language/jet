@@ -23,7 +23,7 @@ pkg_dep_display: fn(source: DepSource) -> String Never! {
         .Version(value) -> value
         .Provider(provider, target) -> if provider == {
             .Path -> target
-            else -> "{target}{REF_PROVIDER_AT}{provider.label()}"
+            .Jetpack | .Nixpkgs | .Github | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> "{target}{REF_PROVIDER_AT}{provider.label()}"
         }
         .Git(url, selector) -> "{{ git: {pkg_debug_str(url)}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
         .CLib(target) -> "lib: {target}"
@@ -36,7 +36,7 @@ pkg_dep_display: fn(source: DepSource) -> String Never! {
 pkg_dep_display_redacted: fn(source: DepSource) -> String Never! {
     if source == {
         .Git(url, selector) -> "{{ git: {pkg_debug_str(pkg_redact_dependency_url(url))}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
-        else -> pkg_dep_display(source)
+        .Version(_) | .Provider(_, _) | .CLib(_) | .Foreign(_, _) -> pkg_dep_display(source)
     }
 }
 

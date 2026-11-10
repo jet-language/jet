@@ -88,7 +88,7 @@ NativeRuntimeIdentityCache: struct {
         identity_key: pkg_sha256_hex(framed)
         if self.identities.get(identity_key) == {
             .Val(identity) -> return Ok(identity)
-            else -> {}
+            .None -> {}
         }
         version: store_runtime_rustc_query(rustc, rustc_env, [String]{"-vV"})
         identity := version
@@ -181,7 +181,7 @@ PreparedRuntime: struct {
     add_rustc_args: fn(self, spec: ProcessSpec) -> ProcessSpec Never! {
         if self.runtime_rlib == {
             .Val(rlib) -> spec.arg("--extern").arg("{STORE_RUNTIME_CRATE_NAME}={rlib}")
-            else -> spec
+            .None -> spec
         }
     }
 }
@@ -190,11 +190,11 @@ impl PreparedRuntime.Close {
     close: fn(&&self) -[FS]> {
         if self.lease == {
             .Val(lease) -> close(lease)
-            else -> {}
+            .None -> {}
         }
         if self.materialized_root == {
             .Val(root) -> close(root)
-            else -> {}
+            .None -> {}
         }
     }
 }
@@ -222,7 +222,7 @@ store_runtime_prepare: fn(store: ArtifactStore, identities: &NativeRuntimeIdenti
                 materialized_root: None,
             })
         }
-        else -> {}
+        .None -> {}
     }
     materialized_root: NativeRuntimeMaterializedRoot.new(store)
     runtime: store_runtime_compile_artifact(store, runtime_key, exported_runtime, rustc, compile_flags, rustc_env, materialized_root.path())
@@ -267,14 +267,14 @@ store_runtime_export_prebuilt: fn(key: String, rlib: String) NativeRuntimeError!
             files.remove(staged).drop("the partial copy is scratch")
             return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if files.rename(staged, target) == {
         .Err(error) -> {
             files.remove(staged).drop("the unpublished copy is scratch")
             return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -324,7 +324,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
     lookup: store.lookup_artifact(key)
     repaired: if lookup == {
         .Corrupt -> true
-        else -> false
+        .Missing | .Hit(_) -> false
     }
     if lookup == {
         .Hit(artifact) -> {
@@ -333,7 +333,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
             lease: store.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(hit.action), LeaseTarget.Blob(hit.object)})
             return Ok(Val(NativeRuntimeCompiledArtifact{artifact: hit, cache_hit: true, repaired, lease}))
         }
-        else -> {}
+        .Missing | .Corrupt -> {}
     }
 
     staging: files.join(files.join(store.root(), "staging"), "{STORE_RUNTIME_CRATE_NAME}-{sys.pid()}-{store_artifact_unique_token()}")
@@ -345,7 +345,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
             files.remove_all(staging).drop("the failed write is reported; staging is scratch")
             return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
 
     argv := [String]{rustc, "--edition", "2021", "--crate-name", STORE_RUNTIME_CRATE_NAME, "--crate-type", "rlib"}
@@ -357,7 +357,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
             argv.push("--remap-path-prefix")
             argv.push("{prefix}=/jet/build")
         }
-        else -> {}
+        .Err(_) -> {}
     }
     argv.push(source.copy())
     argv.push("-o")
@@ -380,19 +380,19 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
         .Err(error) -> {
             if error == {
                 .Conflict(_) -> {}
-                else -> {
+                .IO(_) | .Config(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Locked(_, _, _) | .Capacity(_, _, _, _) -> {
                     files.remove_all(staging).drop("the publish failure is reported; staging is scratch")
                     return Err(NativeRuntimeError.Cache(error))
                 }
             }
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     files.remove_all(staging).drop("the rlib now lives in the store; staging is scratch")
     published: store.lookup_artifact(key)
     artifact := if published == {
         .Hit(found) -> found
-        else -> {
+        .Missing | .Corrupt -> {
             return Ok(None)
         }
     }
@@ -406,7 +406,7 @@ store_runtime_materialize_artifact: fn(store: ArtifactStore, key: String, root: 
     path: files.join(root, "lib{STORE_RUNTIME_CRATE_NAME}.rlib")
     if store.restore_file(key, path) == {
         .Hit(_, _) -> Ok(path)
-        else -> Err(NativeRuntimeError.Cache(ArtifactStoreError.Corrupt{path: path, reason: "published runtime artifact disappeared before linking"}))
+        .Missing | .Corrupt -> Err(NativeRuntimeError.Cache(ArtifactStoreError.Corrupt{path: path, reason: "published runtime artifact disappeared before linking"}))
     }
 }
 

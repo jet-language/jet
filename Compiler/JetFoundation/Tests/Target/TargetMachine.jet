@@ -448,7 +448,7 @@ target_test_set_provider: fn(capability: TargetCapability, provider: ProviderCon
         .PanicReport -> machine.byte_sink = .Provider{read: Val(read), write: Val(write), report: Val(provider)}
         .Allocator -> machine.allocator = .Provider{provider: provider}
         .Startup -> machine.startup = .Generated{provider: provider}
-        else -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+        .Atomic64 | .Hardware | .Memory | .Panic -> panic("no provider fact case for {jet_target_capability_name(capability)}")
     }
     machine
 }
@@ -471,7 +471,7 @@ target_test_clear_provider: fn(capability: TargetCapability) -> TargetMachine Ne
         .PanicReport -> machine.byte_sink = .Provider{read: read, write: write, report: None}
         .Allocator -> machine.allocator = .NoAllocator
         .Startup -> machine.startup = .Unspecified
-        else -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+        .Atomic64 | .Hardware | .Memory | .Panic -> panic("no provider fact case for {jet_target_capability_name(capability)}")
     }
     machine
 }

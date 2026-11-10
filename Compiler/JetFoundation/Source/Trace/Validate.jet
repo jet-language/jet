@@ -19,13 +19,13 @@ jettrace_wrapper_fields: fn(value: CanonicalJSON) -> View<CanonicalJSONField> Je
 jettrace_object_view: fn(value: CanonicalJSON, label: String) -> View<CanonicalJSONField> JetTraceError! from value {
     if value == {
         .Object(items) -> return Ok(items[0..<items.len()])
-        else -> return Err(jettrace_error("{label} is not an object"))
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> return Err(jettrace_error("{label} is not an object"))
     }
 }
 jettrace_integer_text: fn(value: CanonicalJSON, label: String) -> String JetTraceError! {
     if value == {
         .Integer(number) -> return Ok(number)
-        else -> return Err(jettrace_error("{label} is not an integer"))
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("{label} is not an integer"))
     }
 }
 jettrace_object_keys: fn(value: CanonicalJSON, label: String, keys: [String]) -> View<CanonicalJSONField> JetTraceError! from value {
@@ -36,19 +36,19 @@ jettrace_object_keys: fn(value: CanonicalJSON, label: String, keys: [String]) ->
 jettrace_text: fn(value: CanonicalJSON, label: String) -> String JetTraceError! {
     if value == {
         .String(text) -> return Ok(text)
-        else -> return Err(jettrace_error("{label} is not text"))
+        .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("{label} is not text"))
     }
 }
 jettrace_array: fn(value: CanonicalJSON, label: String) -> View<CanonicalJSON> JetTraceError! from value {
     if value == {
         .Array(items) -> return Ok(items[0..<items.len()])
-        else -> return Err(jettrace_error("{label} is not an array"))
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Object(_) -> return Err(jettrace_error("{label} is not an array"))
     }
 }
 jettrace_bool: fn(value: CanonicalJSON, label: String) -> Bool JetTraceError! {
     if value == {
         .Bool(flag) -> return Ok(flag)
-        else -> return Err(jettrace_error("{label} is not a boolean"))
+        .Null | .Integer(_) | .String(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("{label} is not a boolean"))
     }
 }
 jettrace_unsigned: fn(value: CanonicalJSON, label: String) -> U64 JetTraceError! {
@@ -115,7 +115,7 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
         .Integer(number) -> {
             if number != CAPTURE_POLICY_SCHEMA -> return Err(jettrace_error("unsupported capture_policy schema"))
         }
-        else -> return Err(jettrace_error("capture_policy schema is not an integer"))
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("capture_policy schema is not an integer"))
     }
     fields: jettrace_object_keys(value, "capture_policy", [String]{"allowlist", "browser_row_limit", "browser_rows_truncated", "default_exclusions", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "schema", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"})
     exclusions: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
@@ -142,7 +142,7 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
             .Val(previous) -> {
                 if previous > text -> return Err(jettrace_error("capture_policy.allowlist is not sorted"))
             }
-            else -> {}
+            .None -> {}
         }
         prior = Val(text.copy())
     }
@@ -261,7 +261,7 @@ jettrace_validate_receipt_section: fn(value: CanonicalJSON, label: String) -> St
     body: fields[jettrace_get(fields, "value")].value
     if body == {
         .Object(_) -> {}
-        else -> return Err(jettrace_error("{label}.value must be a canonical JSON object"))
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> return Err(jettrace_error("{label}.value must be a canonical JSON object"))
     }
     if digest != canonical_json_sha256(body) -> return Err(jettrace_error("{label}.digest does not match value"))
     Ok(name)
@@ -284,7 +284,7 @@ jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {
                 if previous > name -> return Err(jettrace_error("content.receipt_sections is not sorted by name"))
                 if previous == name -> return Err(jettrace_error("{label}.name duplicates receipt section `{name}`"))
             }
-            else -> {}
+            .None -> {}
         }
         prior = Val(name.copy())
     }
@@ -326,7 +326,7 @@ jettrace_validate_source_maps: fn(value: CanonicalJSON) JetTraceError! {
             .Val(previous) -> {
                 if previous > path -> return Err(jettrace_error("content.source_maps is not sorted by path"))
             }
-            else -> {}
+            .None -> {}
         }
         prior = Val(path.copy())
         // Match the retained node directly: returning the potentially large map
@@ -339,7 +339,7 @@ jettrace_validate_source_maps: fn(value: CanonicalJSON) JetTraceError! {
                 actual: sha256_bytes(raw[0..<raw.len()])
                 if hash != sha256_hex_bytes(actual[0..<actual.len()]) -> return Err(jettrace_error("{label}.sha256 does not match map bytes"))
             }
-            else -> return Err(jettrace_error("{label}.map is not text"))
+            .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("{label}.map is not text"))
         }
     }
     return

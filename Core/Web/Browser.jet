@@ -899,7 +899,7 @@ browser_ws_error: fn(error: WsError) -> BrowserError Never! {
     if error == {
         .Timeout -> BrowserError{kind: "timeout"}
         .Closed -> BrowserError{kind: "closed"}
-        else -> BrowserError{kind: "transport"}
+        .InvalidURL | .InvalidHandshake | .Protocol | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> BrowserError{kind: "transport"}
     }
 }
 

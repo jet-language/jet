@@ -354,7 +354,7 @@ compare_sql_cell: fn(left: String, operator: String, right: String) -> Bool Neve
             if left == "true" -> value = Val(.Bool(true))
             if left == "false" -> value = Val(.Bool(false))
         }
-        else -> {}
+        .Null | .Text(_) -> {}
     }
     sql_compare(value ?? JetSQLValue.Text(left.copy()), operator, literal)
 }
@@ -395,7 +395,7 @@ sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?,
                     all_int = false
                     float_sum += real
                 }
-                else -> {}
+                .Null | .Bool(_) | .Text(_) -> {}
             }
         } else {
             if function != .Min && function != .Max -> next
@@ -546,7 +546,7 @@ priv internal: module {
         if value == {
             .Int(number) -> Val(approx(number))
             .Float(number) -> Val(number)
-            else -> None
+            .Null | .Bool(_) | .Text(_) -> None
         }
     }
     value_key: fn(value: JetSQLValue) -> String Never! {

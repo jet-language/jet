@@ -145,7 +145,7 @@ pkg_lock_test_project: fn(label: String) -[FS]> TempDir Never! {
     back: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("canonical lock parses")
     if back.packages[0].source == {
         .Nix(reference, _) -> assert_eq(reference, canonical)
-        else -> panic("package stays a Nix record")
+        .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> panic("package stays a Nix record")
     }
     assert_eq(back.source_channels[0].exact, canonical)
 }

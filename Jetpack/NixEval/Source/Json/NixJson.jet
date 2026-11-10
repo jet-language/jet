@@ -32,7 +32,7 @@ NixEvalJSONNumber: struct {
     is_integer: fn(self, expected: Int) -> Bool Never! {
         if self.integer() == {
             .Val(value) -> value == expected
-            else -> false
+            .None -> false
         }
     }
 }
@@ -66,28 +66,28 @@ NixEvalJSON: struct {
     object: fn(self, index: Int) -> [String: Int]? Never! {
         if self.nodes[index] == {
             .Object(fields) -> Val(fields)
-            else -> None
+            .Null | .Bool(_) | .Num(_) | .Str(_) | .Array(_) -> None
         }
     }
 
     array: fn(self, index: Int) -> [Int]? Never! {
         if self.nodes[index] == {
             .Array(items) -> Val(items)
-            else -> None
+            .Null | .Bool(_) | .Num(_) | .Str(_) | .Object(_) -> None
         }
     }
 
     string: fn(self, index: Int) -> String? Never! {
         if self.nodes[index] == {
             .Str(text) -> Val(text)
-            else -> None
+            .Null | .Bool(_) | .Num(_) | .Array(_) | .Object(_) -> None
         }
     }
 
     number: fn(self, index: Int) -> NixEvalJSONNumber? Never! {
         if self.nodes[index] == {
             .Num(value) -> Val(value)
-            else -> None
+            .Null | .Bool(_) | .Str(_) | .Array(_) | .Object(_) -> None
         }
     }
 
@@ -112,7 +112,7 @@ NixEvalJSON: struct {
                 }
                 true
             }
-            else -> self.nodes[index] == right
+            .Null | .Bool(_) | .Num(_) | .Str(_) -> self.nodes[index] == right
         }
     }
 }

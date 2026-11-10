@@ -434,8 +434,9 @@ or any `Bool` expression; unrelated head forms may coexist. The first match or
 true guard wins. Chained `else if` remains legal, but an arm table is the
 preferred teaching form. `->` introduces a one-statement arm or value; braces
 hold multiple statements and make a scope. Arm tables can yield `()`; value
-branches require `else` unless a closed subject is exhaustive, and all arm
-results unify (D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, D-IFDIST1=A).
+branches over an open subject require `else`, a closed subject's table names
+every case instead (E0641), and all arm results unify (D-IF1, D-IF2, D-IF3,
+D-IFGUARD1=A, D-IFDIST1=A).
 
 `if subject == { head -> body }` compares a bare value head with the subject.
 A range head `lo..hi` tests inclusive membership. The subject and both bounds
@@ -638,7 +639,12 @@ outside a type body or `impl`, an inline module's included, can't take `self`
 
 Multiple construction shapes use distinctly named no-`self` statics such as
 `Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name
-is E0105. Enum `if subject == { … }` tables must be exhaustive.
+is E0105. Enum `if subject == { … }` tables must be exhaustive, and they name
+every case: an `else` over a closed set (an enum, `T?`, `T E!`, or a union) is
+E0641, whose edit writes the cases the `else` stood for, or deletes an `else`
+that can never run. A table whose arms are not all pattern tests of the subject
+(a Bool or comparison arm), and a table over an open set (numbers, text,
+structs), keep `else`.
 
 Traits contain signatures and implementations contain behavior. Implement a trait
 inside its type or with `impl Type.Trait { … }`; qualify a foreign type when the

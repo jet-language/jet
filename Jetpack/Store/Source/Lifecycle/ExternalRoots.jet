@@ -100,7 +100,7 @@ store_external_root_targets: fn(verification: &StoreVerification, roots: HangarR
 store_external_root_is_missing_reference: fn(error: StoreError, reference: String) -> Bool Never! {
     if error == {
         .NotFound(message) -> message == ("no Hangar entry matches `{reference}`")
-        else -> false
+        .IO(_) | .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .LifecycleConflict(_, _) | .Other(_) -> false
     }
 }
 
@@ -125,7 +125,7 @@ store_external_root_view: fn(root: LifecycleRoot) -> ExternalRootView StoreError
 store_external_root_map_error: fn(label: String, error: StoreError) -> ExternalRootError Never! {
     if error == {
         .LifecycleConflict(expected, current) -> ExternalRootError.Conflict{label, expected, current}
-        else -> ExternalRootError.Store(error)
+        .IO(_) | .NotFound(_) | .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .Other(_) -> ExternalRootError.Store(error)
     }
 }
 

@@ -92,7 +92,7 @@ store_lifecycle_test_os_code: fn(error: StoreError) -> Int? Never! {
 store_lifecycle_test_io_code: fn(error: IOError) -> Int? Never! {
     if error == {
         .Other(context) -> context.os_code
-        else -> None
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> None
     }
 }
 

@@ -19,39 +19,39 @@ failed: fn<T, E>(reason: E) -> Loadable<T, E> Never! { Loadable.Failed(reason) }
 is_idle: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Idle -> true
-        else -> false
+        .Loading | .Loaded(_) | .Failed(_) -> false
     }
 }
 is_loading: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loading -> true
-        else -> false
+        .Idle | .Loaded(_) | .Failed(_) -> false
     }
 }
 is_loaded: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loaded(_) -> true
-        else -> false
+        .Idle | .Loading | .Failed(_) -> false
     }
 }
 is_failed: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Failed(_) -> true
-        else -> false
+        .Idle | .Loading | .Loaded(_) -> false
     }
 }
 
 value: fn<T, E>(state: Loadable<T, E>) -> T? Never! {
     if state == {
         .Loaded(value) -> Val(value)
-        else -> None
+        .Idle | .Loading | .Failed(_) -> None
     }
 }
 
 reason: fn<T, E>(state: Loadable<T, E>) -> E? Never! {
     if state == {
         .Failed(message) -> Val(message)
-        else -> None
+        .Idle | .Loading | .Loaded(_) -> None
     }
 }
 

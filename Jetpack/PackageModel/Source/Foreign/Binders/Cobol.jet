@@ -78,14 +78,14 @@ CobolFieldKind: enum {
     is_packed: fn(self) -> Bool Never! {
         if self == {
             .PackedDecimal(_, _, _) -> true
-            else -> false
+            .FixedText(_) | .NativeInt(_, _) -> false
         }
     }
 
     is_native_int: fn(self) -> Bool Never! {
         if self == {
             .NativeInt(_, _) -> true
-            else -> false
+            .FixedText(_) | .PackedDecimal(_, _, _) -> false
         }
     }
 }
@@ -295,7 +295,7 @@ pkg_cobol_prove_link: fn(argv: [String]) ForeignBindError! -[Exec, Time.Wait]> {
         .Err(error) -> {
             if error == {
                 .ToolFailed(_, _, detail) -> return Err(ForeignBindError.ABIMismatch(detail))
-                else -> return Err(error)
+                .Source(_) | .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> return Err(error)
             }
         }
     }
@@ -375,7 +375,7 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
             min: if signed -> -max else -> 0
             out = "{out}    if {packed.name}_minor < {min} || {packed.name}_minor > {max} -> return Err(CobolError.Range)\n"
         }
-        else -> {}
+        .FixedText(_) | .NativeInt(_, _) -> {}
     }
     if input == {
         .Val(field) -> {
@@ -385,7 +385,7 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
                     min: if signed -> -max else -> 0
                     out = "{out}    if record_id < {min} || record_id > {max} -> return Err(CobolError.Range)\n"
                 }
-                else -> {}
+                .FixedText(_) | .PackedDecimal(_, _, _) -> {}
             }
         }
         .None -> {}

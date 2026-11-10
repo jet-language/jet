@@ -177,7 +177,7 @@ build_key_contribution: fn(value: BuildSessionValue) -> String Never! {
         .Char(data) -> "Char('{data}')"
         .Text(data) -> "Text({build_key_debug_text(data)})"
         .Enum(data) -> "Enum({build_key_debug_text(data)})"
-        else -> panic("invalid checked build contribution")
+        .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> panic("invalid checked build contribution")
     }
 }
 build_session_action_target: fn(state: BuildSessionState, action: Int) -> Int? Never! {

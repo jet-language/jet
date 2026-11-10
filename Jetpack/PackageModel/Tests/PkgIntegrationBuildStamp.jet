@@ -40,7 +40,7 @@ use {
         .Ok(_) -> panic("missing stamp must fail locked")
         .Err(error) -> if error == {
             .Invalid(detail) -> assert(detail.contains("[build.stamp]"))
-            else -> panic("missing stamp error lost detail")
+            .UnsupportedVersion(_) | .IO(_) | .Incomplete(_) | .Reported(_) -> panic("missing stamp error lost detail")
         }
     }
     files.remove_all(root).drop("cleanup")

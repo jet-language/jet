@@ -768,7 +768,7 @@ jet_driver_selected_target_machine: fn(
     if target_os_parse(request.build_os) == {
         .Val(.Web) -> return Val(jet_target_machine_wasm_browser(compiler_version))
         .Val(.Wasm) -> return Val(jet_target_machine_wasm_wasi(compiler_version))
-        else -> {}
+        .Val(_) | .None -> {}
     }
     Val(jet_target_machine_for_facts(false, false, target_triple, compiler_version))
 }
@@ -1772,7 +1772,7 @@ jet_driver_checked_text_reason: fn(report: TComptimeReport) -> String? {
                 if args[0].value == .String(text) -> return Val(text.copy())
             }
         }
-        else -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> {}
     }
     None
 }
@@ -2441,7 +2441,7 @@ JetDriverComptimeReach: struct {
 jet_driver_comptime_reach_type: fn(reach: &JetDriverComptimeReach, ty: Type) Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> {}
-        else -> reach.everything = true
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> reach.everything = true
     }
 }
 
@@ -2460,11 +2460,11 @@ jet_driver_comptime_reach_expr: fn(reach: &JetDriverComptimeReach, tree: BodyTre
                     .Interpolation(value, format) -> {
                         if format == {
                             .Display -> {}
-                            else -> reach.everything = true
+                            .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> reach.everything = true
                         }
                         jet_driver_comptime_reach_expr(reach, tree, value)
                     }
-                    else -> {}
+                    .Literal(_) -> {}
                 }
             }
         }
@@ -2483,7 +2483,7 @@ jet_driver_comptime_reach_expr: fn(reach: &JetDriverComptimeReach, tree: BodyTre
         .InlineBlock(body) -> {
             loop statement in body -> jet_driver_comptime_reach_stmt(reach, tree, statement)
         }
-        else -> reach.everything = true
+        .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> reach.everything = true
     }
 }
 
@@ -2493,14 +2493,14 @@ jet_driver_comptime_reach_stmt: fn(reach: &JetDriverComptimeReach, tree: BodyTre
         .Let(local, let_ty, init, gc_promotion, gc_transferred, _) -> {
             if let_ty == {
                 .Inferred -> {}
-                else -> reach.everything = true
+                .StrView | .Annotated(_, _) -> reach.everything = true
             }
             if gc_promotion != None || gc_transferred -> reach.everything = true
             jet_driver_comptime_reach_local(reach, local)
             jet_driver_comptime_reach_expr(reach, tree, init)
         }
         .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(reach, tree, value)
-        else -> reach.everything = true
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> reach.everything = true
     }
 }
 
@@ -2627,7 +2627,7 @@ jet_driver_canonical_effect_module: fn(source: String) -> SemaRegistrationModule
             .Enum(definition) -> {
                 if definition.effect_impl == None -> return None
             }
-            else -> return None
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
         }
     }
     if declarations.len() == 0 -> return None
@@ -4437,7 +4437,7 @@ jet_driver_budget_facts: fn(load: JetDriverLoadResult, graph: SemaRegistrationGr
                 .Enum(value) -> value.is_pub
                 .Trait(value) -> value.is_pub
                 .CodeModule(value) -> value.is_pub
-                else -> false
+                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
             }
             if exported -> public_items += 1
         }

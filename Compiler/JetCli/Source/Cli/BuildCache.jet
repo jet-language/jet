@@ -101,7 +101,7 @@ jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, roo
     restored: store.restore_file(key, binary) ?? return Err(err.message())
     if restored == {
         .Hit(_, _) -> {}
-        else -> return Ok(restored)
+        .Missing | .Corrupt -> return Ok(restored)
     }
     if debug.len() > 0 {
         cli_files.write_bytes("{binary}.debug", debug) ?? return Err("couldn't write {binary}.debug: {err}")

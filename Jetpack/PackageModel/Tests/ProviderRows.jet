@@ -230,7 +230,7 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
         row: pkg_provider_row(source.label()) ?? panic("source `{source.label()}` has a row")
         if source == {
             .Jetpack | .Nixpkgs | .Path | .Github -> assert(source.direct_kind() == None, "`{source.label()}` resolves through the source table or inference")
-            else -> assert(source.direct_kind() == row.kind, "`{source.label()}` realizes through its row's kind")
+            .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> assert(source.direct_kind() == row.kind, "`{source.label()}` realizes through its row's kind")
         }
     }
     assert((RefSource.Releases.direct_kind() ?? ProviderKind.Infer) == ProviderKind.JetPackage, "release artifacts realize natively")

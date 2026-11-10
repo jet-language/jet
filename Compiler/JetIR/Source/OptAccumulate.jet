@@ -114,7 +114,7 @@ ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [Str
         if f.op[k] == {
             .Block | .Loop | .If -> depth += 1
             .End -> depth -= 1
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     if depth != 0 -> return false
@@ -239,7 +239,7 @@ ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [Str
         if f.op[k] == {
             .Block | .Loop | .If -> depth += 1
             .End -> depth -= 1
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     // The next pass's parameters, read before the accumulator moves on.
@@ -317,7 +317,7 @@ ir_opt_accumulate_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
         .Add | .Mul -> exact || (word && f.c[at] == IR_OVERFLOW_WRAP)
         .BitAnd -> exact || (word && row.signed)
         .BitOr | .BitXor -> exact || word
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Sub | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
 }
 
@@ -326,7 +326,7 @@ ir_opt_accumulate_unit: fn(op: IROp) -> Int Never! {
     if op == {
         .Mul -> 1
         .BitAnd -> -1
-        else -> 0
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Div | .Rem | .FloorDiv | .Mod | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> 0
     }
 }
 
@@ -347,7 +347,7 @@ ir_opt_accumulate_pure: fn(m: IRModule, f: IRFunction, at: Int, clone: Int) -> B
             row: m.types[f.slot_type[f.a[at]]]
             row.drop == "" || row.kind == .Int
         }
-        else -> false
+        .Nop | .ConstText | .ConstBigInt | .Close | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
 }
 
@@ -404,7 +404,7 @@ ir_opt_accumulate_ends: fn(m: IRModule, f: IRFunction, call: Int) -> Bool Never!
         if f.op[k] == {
             .Block | .Loop | .If -> depth += 1
             .End -> depth -= 1
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     false

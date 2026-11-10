@@ -43,21 +43,42 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     policy: BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}
     session := build_session_new(101, "fixture", "compiler", policy)
     probe_reply: build_session_call(session, "probe", [BuildSessionValue]{BuildSessionValue.Text{value: "compiler"}, BuildSessionValue.Text{value: "find_program"}, BuildSessionValue.Text{value: "compiler"}}, None, true, 1, 2)
-    probe: if probe_reply == {.Value(value) -> value else -> panic("checked probe failed")}
+    probe: if probe_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("checked probe failed")
+    }
     found_reply: build_session_call(session, "found", [BuildSessionValue]{probe}, None, false, 1, 2)
-    found: if found_reply == {.Value(value) -> value else -> panic("checked found program failed")}
+    found: if found_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("checked found program failed")
+    }
     action_reply: build_session_call(session, "run", [BuildSessionValue]{BuildSessionValue.Text{value: "compile"}, found, BuildSessionValue.List{values: [BuildSessionValue]{}}}, None, false, 1, 2)
-    action: if action_reply == {.Value(value) -> value else -> panic("checked step failed")}
+    action: if action_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("checked step failed")
+    }
     input_reply: build_session_call(session, "action.input", [BuildSessionValue]{action, BuildSessionValue.Text{value: "main.jet"}}, None, false, 1, 2)
-    if input_reply == {.Value(_) -> {} else -> panic("checked step input failed")}
+    if input_reply == {
+        .Value(_) -> {}
+        .Failure(_) | .HostRequest(_, _) -> panic("checked step input failed")
+    }
     output_reply: build_session_call(session, "action.output", [BuildSessionValue]{action, BuildSessionValue.Text{value: "out/app"}}, None, false, 1, 2)
-    if output_reply == {.Value(_) -> {} else -> panic("checked step output failed")}
+    if output_reply == {
+        .Value(_) -> {}
+        .Failure(_) | .HostRequest(_, _) -> panic("checked step output failed")
+    }
     target_reply: build_session_call(session, "add_executable", [BuildSessionValue]{BuildSessionValue.Text{value: "app"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{action}}}, None, false, 3, 4)
-    target: if target_reply == {.Value(value) -> value else -> panic("checked target failed")}
+    target: if target_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("checked target failed")
+    }
     // `build: fn(b: Build)` names its default with `b.default(app)` and returns
     // nothing; the configured session is the plan (Graph.jet build_session_finish).
     default_reply: build_session_call(session, "default", [BuildSessionValue]{target}, None, false, 5, 6)
-    if default_reply == {.Value(_) -> {} else -> panic("checked default failed")}
+    if default_reply == {
+        .Value(_) -> {}
+        .Failure(_) | .HostRequest(_, _) -> panic("checked default failed")
+    }
     finished: build_session_finish(session, BuildSessionValue.Unit)
     plan: finished.plan ?? panic("checked finish failed")
     graph: build_plan_graph(plan)

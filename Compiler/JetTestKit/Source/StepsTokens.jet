@@ -54,7 +54,7 @@ kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepSt
         binding: state.bindings[count - 1 - offset]
         if binding.value == {
             .Text(value) -> expanded = expanded.replace("{{{binding.name}}}", value)
-            else -> {}
+            .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> {}
         }
     }
     expanded = kit_steps_sys_expand(expanded)
@@ -68,7 +68,7 @@ kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepSt
         token: "{{cap:{capture.name}}}"
         if capture.value == {
             .Text(value) -> expanded = expanded.replace(token, value)
-            else -> { if expanded.contains(token) -> return None }
+            .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> { if expanded.contains(token) -> return None }
         }
     }
     if expanded.contains("{{cap:") -> return None

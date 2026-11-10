@@ -98,7 +98,7 @@ ArtifactStoredEntry: struct {
     status: fn(self) -> ArtifactEntryStatus Never! {
         namespace: if self.key == {
             .LTO(namespace, _) -> Val(namespace)
-            else -> None
+            .Blob(_) | .Action(_) -> None
         }
         key: if self.key == {
             .Blob(key) | .Action(key) -> key
@@ -261,7 +261,7 @@ ArtifactStore: struct {
     limit: fn(self) -[FS, Exec, Time]> Int Never! {
         total: if store_artifact_filesystem_stats(self.root()) == {
             .Val(stats) -> Val(stats.total_bytes)
-            else -> None
+            .None -> None
         }
         self.limit_with_disk(total)
     }
@@ -350,7 +350,7 @@ ArtifactStore: struct {
                     if self.build_record(key) != Val(record) -> return Err(ArtifactStoreError.Conflict{path: pointer})
                 }
             }
-            else -> {}
+            .None -> {}
         }
         lock: self.acquire_lock() ?? return Err(err)
         defer close(lock)
@@ -631,7 +631,7 @@ ArtifactStore: struct {
         path: self.host_limit_path()
         if limit_bytes == {
             .Val(limit) -> store_artifact_atomic_write(path, "{limit}\n".bytes())
-            else -> {
+            .None -> {
                 if files.remove(path) == {
                     .Ok(_) -> store_artifact_sync_dir(self.root())
                     .Err(error) -> {
@@ -649,7 +649,7 @@ ArtifactStore: struct {
         defer close(lock)
         target: if target_bytes == {
             .Val(bytes) -> bytes
-            else -> self.limit()
+            .None -> self.limit()
         }
         self.prune_locked(target)
     }
@@ -713,7 +713,7 @@ ArtifactStore: struct {
         }
         decoded: if store_artifact_decode_record(record) == {
             .Val(found) -> found
-            else -> {
+            .None -> {
                 self.quarantine_after_read(action_key, action_path, "artifact record has an unknown version or short header")
                 return Ok(ArtifactLookup.Corrupt)
             }
@@ -814,11 +814,11 @@ ArtifactStore: struct {
         disk: store_artifact_filesystem_stats(self.root())
         total: if disk == {
             .Val(stats) -> Val(stats.total_bytes)
-            else -> None
+            .None -> None
         }
         available: if disk == {
             .Val(stats) -> Val(stats.available_bytes)
-            else -> None
+            .None -> None
         }
         statuses := [ArtifactEntryStatus]{}
         loop entry in entries -> statuses.push(entry.status())
@@ -885,11 +885,11 @@ ArtifactStore: struct {
         disk: store_artifact_filesystem_stats(self.root())
         total: if disk == {
             .Val(stats) -> Val(stats.total_bytes)
-            else -> None
+            .None -> None
         }
         available: if disk == {
             .Val(stats) -> Val(stats.available_bytes)
-            else -> None
+            .None -> None
         }
         limit: self.limit_with_disk(total)
         if incoming > limit {
@@ -905,7 +905,7 @@ ArtifactStore: struct {
         disk_needed: store_artifact_saturating_add(store_artifact_saturating_mul(incoming, 2), self.config_value.reserve_bytes())
         disk_ok: if available == {
             .Val(free) -> free >= disk_needed
-            else -> true
+            .None -> true
         }
         if store_artifact_saturating_add(after, incoming) > limit || !disk_ok {
             return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
@@ -945,7 +945,7 @@ ArtifactStore: struct {
                 capped: if tenth < STORE_ARTIFACT_DEFAULT_CAP_BYTES -> tenth else -> STORE_ARTIFACT_DEFAULT_CAP_BYTES
                 if capped < 1 -> 1 else -> capped
             }
-            else -> STORE_ARTIFACT_DEFAULT_CAP_BYTES
+            .None -> STORE_ARTIFACT_DEFAULT_CAP_BYTES
         }
         configured: self.config_value.cap_bytes() ?? adaptive
         host: if self.host_limit() == {
@@ -954,7 +954,7 @@ ArtifactStore: struct {
         }
         if host == {
             .Val(limit) -> if limit < configured -> limit else -> configured
-            else -> configured
+            .None -> configured
         }
     }
 
@@ -996,7 +996,7 @@ ArtifactStore: struct {
                 store_artifact_sync_dir(quarantine)
                 length: if files.stat(destination) == {
                     .Ok(info) -> info.size
-                    else -> 0
+                    .Err(_) -> 0
                 }
                 self.append_journal_locked("remove", key, length, durable: true)
             }
@@ -1067,7 +1067,7 @@ ArtifactStore: struct {
                     if alive -> live.push(record)
                     if !alive && clean_stale -> store_artifact_try_remove(path)
                 }
-                else -> live.push(record)
+                .None -> live.push(record)
             }
         }
         Ok(live)
@@ -1115,21 +1115,21 @@ ArtifactStore: struct {
                     // #3593: only AlreadyExists is lock contention, not any IO error.
                     if error == {
                         .AlreadyExists(_) -> {}
-                        else -> return Err(ArtifactStoreError.IO(error))
+                        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(ArtifactStoreError.IO(error))
                     }
                 }
             }
             existing_owner: if files.read_bytes(path) == {
                 .Ok(bytes) -> store_artifact_parse_owner_line(bytes)
-                else -> None
+                .Err(_) -> None
             }
             owner_pid: if existing_owner == {
                 .Val(identity) -> Val(identity.pid())
-                else -> None
+                .None -> None
             }
             is_live: if existing_owner == {
                 .Val(identity) -> store_artifact_owner_liveness(identity, self.owner_value) ?? true
-                else -> true
+                .None -> true
             }
             if !is_live && store_artifact_try_remove(path) {
                 retry_ms = STORE_ARTIFACT_LOCK_RETRY_MS
@@ -1173,6 +1173,6 @@ store_artifact_scan_flat_namespace: fn(directory: String, kind: ArtifactEntryKin
 store_artifact_try_remove: fn(path: String) -[FS]> Bool Never! {
     if files.remove(path) == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
 }

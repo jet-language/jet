@@ -37,7 +37,7 @@ trust_pin_test_code: fn(result: String TrustError!) -> String {
         .Err(error) -> {
             if error == {
                 .Pin(diagnostic) -> diagnostic.code
-                else -> panic("expected a pin diagnostic, got {error.message()}")
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> panic("expected a pin diagnostic, got {error.message()}")
             }
         }
     }
@@ -104,7 +104,7 @@ TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't writ
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: \"a0.9\" }}\n")
     if trust_pin_decide(root, "a0.4.0", true) == {
         .Report(diagnostic) -> assert_eq(diagnostic.code, "E1250")
-        else -> panic("expected E1250")
+        .RunNative | .ReExec(_, _, _) -> panic("expected E1250")
     }
 }
 
@@ -140,7 +140,7 @@ TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't writ
                 assert(receipt.output.contains("passthru=carried"), "env passthrough: {receipt.output}")
             }
         }
-        else -> panic("expected ReExec")
+        .RunNative | .Report(_) -> panic("expected ReExec")
     }
 
     // Re-exec guard: with the marker set, the pinned child runs natively.
@@ -167,7 +167,7 @@ TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't writ
                     assert_eq(diagnostic.code, "E1251")
                     assert(diagnostic.what.contains("a0.4.0"))
                 }
-                else -> panic("expected a pin diagnostic")
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> panic("expected a pin diagnostic")
             }
         }
         .Ok(_) -> panic("expected E1251")

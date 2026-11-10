@@ -596,7 +596,7 @@ jet_cli_inspect_provenance_report: fn(job: JetCLIInspectJob, requirement: String
     packages := [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded
-        else -> return jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color)
+        .Missing | .Unported(_) -> return jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color)
     }
     reports: jet_cli_provenance_reports(packages, job.subject)
     if job.subject == .Val(target) {

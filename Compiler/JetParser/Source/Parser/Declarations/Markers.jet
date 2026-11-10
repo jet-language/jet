@@ -69,13 +69,19 @@ ParsedMarkerGroup: struct {
 
 parser_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
-    if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
+    if marker.args[index] == {
+        .Expr(value) -> Val(value)
+        .EffectRow(_, _) -> None
+    }
 }
 
 parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
     if index < 0 || index >= marker.arg_labels.len() -> return ""
     label: marker.arg_labels[index]
-    if label == { .Val(value) -> value.name else -> "" }
+    if label == {
+        .Val(value) -> value.name
+        .None -> ""
+    }
 }
 
 parser_fact_decl_ahead: fn(state: &JetParserState) -> Bool Never! {

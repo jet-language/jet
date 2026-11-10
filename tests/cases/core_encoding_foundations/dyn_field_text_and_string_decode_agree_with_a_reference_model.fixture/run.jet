@@ -34,7 +34,7 @@ build: fn(encoded: Dyn) -> Dyn {
             if entries.len() != 1 -> panic("encoded node")
             items: if entries[0].value == {
                 .Array(values) -> values
-                else -> panic("encoded items")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("encoded items")
             }
             if entries[0].key == "a" {
                 values: loop item in items -> build(item)
@@ -45,14 +45,14 @@ build: fn(encoded: Dyn) -> Dyn {
                 if item == .Array(pair) {
                     key: if pair[0] == {
                         .Text(k) -> k
-                        else -> panic("encoded key")
+                        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("encoded key")
                     }
                     pairs.push((key: key, value: build(pair[1])))
                 }
             }
             return Dyn.Object(pairs)
         }
-        else -> return encoded.copy()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return encoded.copy()
     }
 }
 

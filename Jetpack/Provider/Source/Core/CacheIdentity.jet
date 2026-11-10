@@ -80,7 +80,7 @@ provider_adapter_action_identity: fn(plan: AdapterPlan, recipe: BuildRecipe, sou
             identity: recipe.build_identity_for_source_with_dependencies(plan.name, plan.source, source_digest, platform, provider_adapter_identity_inputs(plan, table))
             "{identity}\nsandbox=native-required"
         }
-        else -> recipe.build_identity(plan.name, source_digest, platform)
+        .Copy | .Prebuilt(_, _) -> recipe.build_identity(plan.name, source_digest, platform)
     }
 }
 
@@ -119,7 +119,7 @@ provider_adapter_cache_expectation: fn(plan: AdapterPlan, table: SourceTable, ct
     source_fingerprint: pkg_try_output_hash_of(staged) ?? return Err(ProviderError.Adapter(err.message()))
     identity_source: if plan.recipe == {
         .Build(_) -> source_fingerprint
-        else -> source_hash
+        .Copy | .Prebuilt(_, _) -> source_hash
     }
     build_identity: provider_adapter_action_identity(plan, recipe, identity_source, pkg_host_platform(), table)
     fingerprint: pkg_sha256_hex(provider_adapter_id_input(plan, source_hash, build_identity).bytes())
@@ -156,11 +156,11 @@ provider_nix_identity_parts: fn(spec: RefSpec, table: SourceTable) -> NixIdentit
     source: if spec.source == {
         .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         .Named(name) -> table.upstream(name) ?? name
-        else -> spec.source.label()
+        .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> spec.source.label()
     }
     alias: if spec.source == {
         .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
-        else -> spec.source.label()
+        .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> spec.source.label()
     }
     NixIdentityParts{
         source: provider_normalize_nix_identity(source),
@@ -200,7 +200,7 @@ provider_flake_ref: fn(spec: RefSpec, table: SourceTable) -> String Never! {
             package: if table.provider(name) == ProviderKind.Nix -> provider_nix_package_name(spec.package) else -> spec.package
             "{upstream}#{package}"
         }
-        else -> "{spec.source.label()}:{spec.package}"
+        .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> "{spec.source.label()}:{spec.package}"
     }
 }
 

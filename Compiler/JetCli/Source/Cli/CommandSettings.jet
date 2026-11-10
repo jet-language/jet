@@ -143,7 +143,7 @@ jet_cli_setting_held: fn(value: Dyn) -> String Never! {
         .Bool(_) -> "true or false"
         .Text(text) -> if text == "" -> "an empty string" else -> "a string"
         .Array(items) -> if jet_cli_setting_strings(items) == None -> "a list with an item that isn't a string" else -> "a list"
-        else -> "not true or false, a string or a list"
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> "not true or false, a string or a list"
     }
 }
 
@@ -174,7 +174,7 @@ jet_cli_setting_value_words: fn(spec: JetCLIFlagSpec, value: Dyn) -> [String]? N
         .Bool(on) -> jet_cli_setting_on_words(spec, on)
         .Text(text) -> if text != "" && (spec.value == .Value || spec.value == .Optional) -> Val(jet_cli_setting_valued(spec.long, text)) else -> None
         .Array(items) -> jet_cli_setting_items_words(spec, jet_cli_setting_strings(items) ?? return None)
-        else -> None
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> None
     }
 }
 

@@ -1129,7 +1129,7 @@ __socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
     if err == {
         .ConnectionReset(_) -> C_NET_CONN_RESET
         .Closed(_) -> C_NET_CONN_RESET
-        else -> fallback
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> fallback
     }
 }
 
@@ -1225,14 +1225,14 @@ __want: fn(status: Int) -> NetReadyInterest Never! {
 __wants_write_only: fn(interest: NetReadyInterest) -> Bool Never! {
     if interest == {
         .Write -> true
-        else -> false
+        .Read | .ReadWrite -> false
     }
 }
 
 __wants_write: fn(interest: NetReadyInterest) -> Bool Never! {
     if interest == {
         .Read -> false
-        else -> true
+        .Write | .ReadWrite -> true
     }
 }
 
@@ -1619,7 +1619,7 @@ __close_write: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[N
 __not_connected: fn(err: NetError) -> Bool Never! {
     if err == {
         .NotConnected(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
@@ -1647,7 +1647,7 @@ __wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: S
 __timed_out: fn(err: NetError) -> Bool Never! {
     if err == {
         .Timeout(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 

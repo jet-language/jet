@@ -212,7 +212,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
                 existing_receipt = package.receipt
                 break
             }
-            else -> {}
+            .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
     }
     entry: LockedPackage{name: name, version: version, source: LockSource.Nix{reference: reference, output: output}, nix_closure: Val(nix_closure), envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
@@ -320,7 +320,7 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
                 envelope.validate_nix_catalog()
                 return Ok(Val((closure: closure, envelope: envelope, name: package.name, version: package.version)))
             }
-            else -> {}
+            .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
     }
     Ok(None)
@@ -353,9 +353,9 @@ pkg_lock_same_realized_source: fn(locked: LockSource, recorded: LockSource) -> B
     if locked == {
         .Registry(registry, reference, output, source_hash, repository, authority, _, _) -> if recorded == {
             .Registry(want_registry, want_reference, want_output, want_source_hash, want_repository, want_authority, _, _) -> registry == want_registry && reference == want_reference && output == want_output && source_hash == want_source_hash && repository == want_repository && authority == want_authority
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> false
         }
-        else -> locked == recorded
+        .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> locked == recorded
     }
 }
 
@@ -377,7 +377,7 @@ pkg_lock_cran_realization: fn(project_root: String, reference: String) -[FS]> (o
                     return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
-            else -> {}
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
     }
     None
@@ -401,7 +401,7 @@ pkg_lock_luarocks_realization: fn(project_root: String, reference: String) -[FS]
                     return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
-            else -> {}
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
     }
     None
@@ -427,7 +427,7 @@ pkg_lock_registry_realization: fn(project_root: String, registry: String, refere
                     return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
-            else -> {}
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
     }
     None

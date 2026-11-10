@@ -73,7 +73,7 @@ parser_take_pattern_head_kind: fn(ty: Type) -> Int Never! {
         .FixedList(element, _) -> {
             if parser_is_byte_type(element) -> return 2
         }
-        else -> {}
+        .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     0
 }
@@ -81,7 +81,7 @@ parser_take_pattern_head_kind: fn(ty: Type) -> Int Never! {
 parser_is_byte_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .IntN(signed, bits) -> !signed && bits == 8
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -191,7 +191,7 @@ parser_take_pattern_text_parts: fn(state: &JetParserState, parts: [StringPart]) 
         second_hole := Span?{None}
         if match_parts[adjacent_index] == {
             .Hole(_, _, span) -> first_hole = Val(span)
-            else -> {}
+            .Lit(_) -> {}
         }
         next_index := adjacent_index + 1
         if match_parts[next_index] == {
@@ -200,12 +200,12 @@ parser_take_pattern_text_parts: fn(state: &JetParserState, parts: [StringPart]) 
                     next_index += 1
                 }
             }
-            else -> {}
+            .Hole(_, _, _) -> {}
         }
         if next_index < match_parts.len() {
             if match_parts[next_index] == {
                 .Hole(_, _, span) -> second_hole = Val(span)
-                else -> {}
+                .Lit(_) -> {}
             }
         }
         if first_hole != None && second_hole != None {
@@ -335,7 +335,7 @@ parser_take_pattern_binary_parts: fn(state: &JetParserState, parts: [StringPart]
                     }
                 }
             }
-            else -> {}
+            .Lit(_) -> {}
         }
         index += 1
     }

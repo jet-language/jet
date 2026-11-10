@@ -96,7 +96,7 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), dimension: dimension.copy()}
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
 }
 
@@ -175,7 +175,7 @@ sema_inference_type_changes: fn(ty: Type, bindings: [SemaInferenceBinding], chai
             }
             return false
         }
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> return false
     }
 }
 
@@ -233,6 +233,6 @@ sema_inference_type_mentions_param: fn(ty: Type, name: String) -> Bool Never! {
             false
         }
         .Quantity(base, _) -> sema_inference_type_mentions_param(base, name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }

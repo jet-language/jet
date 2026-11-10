@@ -363,7 +363,7 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
                 report_path: store_repro_persist_report(roots, action_key, report)
                 return Err(store_repro_unreproducible_error(action_key, "conflicting bytes or provenance at `{difference.path}`; report `{report_path}`"))
             }
-            else -> {}
+            .None -> {}
         }
     }
 }
@@ -433,7 +433,7 @@ store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) 
         name: fact.key.removeprefix("nix.output.")
         digest: if entry.named_outputs.get(name) == {
             .Val(digest) -> digest
-            else -> {
+            .None -> {
                 if name != "out" -> next
                 entry.envelope.output_hash
             }

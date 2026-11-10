@@ -225,7 +225,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
                         assert_eq(diagnostic.code, "E3415")
                         assert_eq(diagnostic.what, "The `{name}` gate at `{site}` is forbidden by `{policy}`.")
                     }
-                    else -> panic("gate refusal was converted to an I/O error")
+                    .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Unsupported(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) -> panic("gate refusal was converted to an I/O error")
                 }
             }
         }

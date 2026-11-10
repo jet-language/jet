@@ -540,14 +540,14 @@ store_nix_proof_digest: fn(endpoint: String, info: NixNarInfo, fingerprint: [U8]
             bytes.push(U8{1})
             store_nix_push_field(bytes, value)
         }
-        else -> bytes.push(U8{0})
+        .None -> bytes.push(U8{0})
     }
     if info.file_size == {
         .Val(value) -> {
             bytes.push(U8{1})
             store_nix_push_u64(bytes, value)
         }
-        else -> bytes.push(U8{0})
+        .None -> bytes.push(U8{0})
     }
     store_nix_push_field(bytes, info.nar_hash)
     store_nix_push_u64(bytes, info.nar_size)

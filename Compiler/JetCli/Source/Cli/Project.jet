@@ -59,7 +59,7 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
                         }
                     }
                 }
-                else -> {}
+                .File(_, _) -> {}
             }
         }
         loop item in program.items {
@@ -72,7 +72,7 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
                     declarations.push(JetCLIProjectPart{name: declared.name, path: file.relative_path, automatic: !declared.name.starts_with("_")})
                     if !names.contains(declared.name) -> names.push(declared.name)
                 }
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }

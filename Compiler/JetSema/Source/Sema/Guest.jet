@@ -71,7 +71,7 @@ sema_guest_scalar: fn(ty: Type) -> SemaGuestScalar? Never! {
         .Float -> Val(SemaGuestScalar.Float)
         .Bool -> Val(SemaGuestScalar.Bool)
         .String -> Val(SemaGuestScalar.Text)
-        else -> None
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -124,7 +124,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
         return_span: function.return_type_span ?? function.name_span
         pointer_return: if return_type == {
             .Apply(name, _) -> name == "Ptr"
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         if {
             pointer_return -> {
@@ -156,7 +156,7 @@ sema_guest_import_bridge_compatible: fn(function: Func) -> Bool Never! {
             .Read | .Write -> {
                 if !sema_guest_import_bridge_value(function.params[parameter_index].ty) -> return false
             }
-            else -> return false
+            .Move -> return false
         }
     }
     if function.return_type == .Val(returned) -> sema_guest_import_bridge_value(returned) else -> true
@@ -171,7 +171,7 @@ sema_guest_library_component_type: fn(graph: SemaRegistrationGraph, module_ident
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_guest_library_component_type(graph, module_identity, inner, seen)
         .Result(ok, err) -> sema_guest_library_component_type(graph, module_identity, ok, seen) && sema_guest_library_component_type(graph, module_identity, err, seen)
         .Named(name) -> sema_guest_library_component_named(graph, module_identity, ty, name, seen)
-        else -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -212,7 +212,7 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
             }
             .Distinct(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.base, seen)
             .TypeAlias(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.target, seen)
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     seen[name] = false
@@ -299,7 +299,7 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
                 .CModule(c_module) -> {
                     loop foreign in c_module.functions -> sema_guest_record_symbol(symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), diagnostics)
                 }
-                else -> {}
+                .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
         if diagnostics.len() > 0 -> failed = true
@@ -322,7 +322,7 @@ sema_guest_declared_carrier: fn(return_type: Type?) -> String? Never! {
     if written == {
         .Result(ok, err) -> if err == (Type.Named{name: "Never"}) -> None else -> Val("{type_name(ok)} {type_name(err)}!")
         .Option(value) -> Val("{type_name(value)}?")
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 

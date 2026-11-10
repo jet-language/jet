@@ -12,7 +12,7 @@ run: fn() {
                 assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
                 print("Budget")
             }
-            else -> assert(false)
+            .Guest(_) | .Denied(_) | .Budget(.Memory, _) | .Budget(.Table, _) | .Budget(.Time, _) | .Budget(.Wire, _) | .Defect(_) -> assert(false)
         }
         print(err)
         return

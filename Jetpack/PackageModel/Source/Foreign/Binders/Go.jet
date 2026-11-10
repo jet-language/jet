@@ -38,7 +38,7 @@ GoScalar: enum {
     public_jet: fn(self) -> String Never! {
         if self == {
             .Handle -> "Handle"
-            else -> self.jet()
+            .Int | .Float -> self.jet()
         }
     }
 }
@@ -144,7 +144,7 @@ pkg_go_render: fn(lib: String, functions: [GoFunction]) -> String Never! {
         loop param in function.params {
             if param.scalar == {
                 .Handle -> args.push("{param.name}.value")
-                else -> args.push(param.name)
+                .Int | .Float -> args.push(param.name)
             }
         }
         call: "abi.{function.name}({args.join(", ")})"
@@ -152,7 +152,7 @@ pkg_go_render: fn(lib: String, functions: [GoFunction]) -> String Never! {
             .Val(scalar) -> {
                 body: if scalar == {
                     .Handle -> "Handle{{ value: {call} }}"
-                    else -> call
+                    .Int | .Float -> call
                 }
                 out.push("{function.name}: fn{pkg_go_params(function.params, true)} -> {scalar.public_jet()} {{\n    return {body}\n}}\n\n")
             }

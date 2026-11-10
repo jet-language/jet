@@ -41,7 +41,7 @@ sema_call_direct_gate: fn(name: String, scopes: SemaScopeTable) -> SemaKnowledge
 sema_call_is_overflow_operation: fn(op: BinOp) -> Bool Never! {
     if op == {
         .Add | .Sub | .Mul | .Div -> true
-        else -> false
+        .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> false
     }
 }
 
@@ -51,7 +51,7 @@ sema_call_overflow_operation_name: fn(op: BinOp) -> String Never! {
         .Sub -> "sub"
         .Mul -> "mul"
         .Div -> "div"
-        else -> "add"
+        .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> "add"
     }
 }
 

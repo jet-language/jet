@@ -550,7 +550,7 @@ live_tower_card: fn(root: String, board: String, owner: String) -[Env, Exec, FS,
     if field(card, "num") == {
         .Int(value) -> value == number
         .Number(lexeme) -> num(lexeme) == Float{number}
-        else -> false
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
     }
 }
 
@@ -2009,7 +2009,7 @@ dyn_text: fn(value: Dyn) -> String Never! {
         .Text(text) -> text.copy()
         .Int(number) -> "{number}"
         .Number(lexeme) -> lexeme.copy()
-        else -> ""
+        .Null | .Bool(_) | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
     }
 }
 

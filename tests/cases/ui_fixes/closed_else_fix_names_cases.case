@@ -1,0 +1,23 @@
+# #6281: E0641's fix names the cases an `else` over a closed set stands for,
+# deletes an `else` that can never run, and lays a one-line table out one arm
+# per line, since a one-line table holds one arm and its `else`. A value arm
+# ending in `)` keeps it, and a `.None` arm before the `else` (checked as a
+# swapped presence test) still counts as `.None`.
+fixture: closed_else_fix_names_cases.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "Fix: Name the cases instead: `.Green | .Blue ->`" # the else stands for the cases no arm names
+stderr: ~ "This `else` can never run; every case of `Shade` is already handled" # a dead else is the same error
+stderr: ~ "Fix: Name the cases instead: `.None ->`" # a swapped presence test still counts as `.None`
+stderr: ~ "This `else` can never run; every case of `Int?` is already handled" # an optional is a closed set
+stderr: ~ "7 problems found" # every else over a closed set is reported
+step: jet fix run.jet
+exit: 0
+stderr: ~ "applied 7 fixes" # each report carries its Safe edit
+file: run.jet = closed_else_fix_names_cases.fixed
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "not red\ntrue\n3\n4\n7\n2\n9\n"

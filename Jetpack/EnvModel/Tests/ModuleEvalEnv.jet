@@ -243,7 +243,7 @@ use {
             assert_eq(bin, "weirdctl")
             assert_eq(as_name, "weirdctl")
         }
-        else -> panic("expected a prebuilt recipe")
+        .Copy | .Build(_) -> panic("expected a prebuilt recipe")
     }
 }
 
@@ -264,12 +264,12 @@ use {
     plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
     recipe: if plan.adapters[0].recipe == {
         .Build(recipe) -> recipe
-        else -> panic("expected a finite build recipe")
+        .Copy | .Prebuilt(_, _) -> panic("expected a finite build recipe")
     }
     assert_eq(recipe.steps.len(), 4)
     if recipe.steps[0] == {
         .Fetch(_, sha256) -> assert_eq(sha256, "sha{{}}\n\t")
-        else -> panic("expected a fetch step")
+        .Exec(_, _) | .Install(_, _) | .InstallTree(_, _) -> panic("expected a fetch step")
     }
     assert(recipe.steps[1] == .Exec(_, _))
     assert(recipe.steps[2] == .Install(_, _))
@@ -600,7 +600,7 @@ use {
     override_plan: host.overrides ?? panic("the first host has typed overrides")
     options: if override_plan.fields[0].value == {
         .Options(values) -> values
-        else -> panic("the first field is options")
+        .Platform(_) | .Packages(_) | .Services(_) | .Value(_) -> panic("the first field is options")
     }
     assert_eq(options[0].value, "5")
     assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 4}})

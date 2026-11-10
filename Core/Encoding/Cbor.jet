@@ -111,7 +111,7 @@ validate: fn(value: Dyn, path: String) CBORError! {
             .Object(_) -> {
                 loop entry in stream.object_entries(value) -> validate(entry.value, "{path}[{entry.key:Debug}]") ?? return Err(err)
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
         }
     }
 }
@@ -239,7 +239,6 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
                     }
                 }
             }
-            else -> panic("CBOR validation failed to reject a private typed carrier")
         }
     }
 }
@@ -339,7 +338,7 @@ priv typed_errors: module {
             assert_eq(failure.byte_offset, 0)
             first = Val(failure)
         }
-        else -> panic("item limit must fail")
+        .Val(_) | .None -> panic("item limit must fail")
     }
     if limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
 }

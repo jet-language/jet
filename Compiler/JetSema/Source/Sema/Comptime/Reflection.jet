@@ -241,7 +241,7 @@ sema_comptime_reflection_marker_path: fn(expression: Expr) -> String? {
             return Val("{prefix}.{member}")
         }
         .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant)
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -293,7 +293,7 @@ sema_comptime_reflection_marker_argument_value: fn(argument: MarkerCallArg, sour
                         }
                         return TComptimeValue.List{values: rows}
                     }
-                    else -> {}
+                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
                 }
             }
             if sema_comptime_reflection_marker_path(expression) == .Val(path) {
@@ -308,7 +308,7 @@ sema_comptime_reflection_marker_argument_value: fn(argument: MarkerCallArg, sour
                     code: sema_checked_const_char(value) ?? return TComptimeValue.Unit
                     return TComptimeValue.Char{value: code}
                 }
-                else -> return TComptimeValue.Unit
+                .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return TComptimeValue.Unit
             }
         }
     }
@@ -409,7 +409,7 @@ sema_comptime_reflection_type_dimensions: fn(ty: Type) -> [TComptimeValue] Never
     if ty == {
         .Quantity(_, dimension) -> [TComptimeValue]{sema_comptime_reflection_dimension(dimension)}
         .Tagged(_, inner) -> sema_comptime_reflection_type_dimensions(inner)
-        else -> [TComptimeValue]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Measure(_) -> [TComptimeValue]{}
     }
 }
 
@@ -569,7 +569,7 @@ sema_comptime_reflection_layout_item_name: fn(item: Item) -> String? {
         .Enum(value) -> Val(value.name)
         .Distinct(value) -> Val(value.name)
         .TypeAlias(value) -> Val(value.name)
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -595,7 +595,7 @@ sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGrap
             loop arg in args -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, generic_params, arg, resolutions)
         }
         .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, generic_params, inner, resolutions)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
     }
 }
 
@@ -615,7 +615,7 @@ sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGrap
         }
         .Distinct(definition) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, [TypeParam]{}, definition.base, resolutions)
         .TypeAlias(definition) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, definition.type_params, definition.target, resolutions)
-        else -> {}
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -701,7 +701,7 @@ sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: Target
                 natural: facts.bytes.map((value) -> value.alignment) ?? 1
                 if jet_target_layout_check_alignment(target, alignment, natural, target_mode) == .Accepted(alignment_fact) -> effective = Val(alignment_fact.effective_alignment)
             }
-            else -> {}
+            .C | .Columnar -> {}
         }
         .None -> {}
     }
@@ -749,11 +749,11 @@ sema_comptime_reflection_marker_name: fn(value: TComptimeValue) -> String? {
             if field.name == "name" {
                 if field.value == {
                     .String(name) -> return Val(name)
-                    else -> {}
+                    .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
                 }
             }
         }
-        else -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
     }
     None
 }
@@ -774,12 +774,12 @@ sema_comptime_reflection_has_marker: fn(value: TComptimeValue, wanted: String) -
                         }
                         return Val(false)
                     }
-                    else -> return Val(false)
+                    .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return Val(false)
                 }
             }
             return Val(false)
         }
-        else -> return None
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
     }
 }
 
@@ -936,7 +936,7 @@ sema_arithmetic_binary_operation: fn(op: BinOp) -> ArithmeticOperation? Never! {
         .Sub -> Val(ArithmeticOperation.Sub)
         .Mul -> Val(ArithmeticOperation.Mul)
         .Pow -> Val(ArithmeticOperation.Pow)
-        else -> None
+        .Div | .FloorDiv | .Mod | .Rem | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
     }
 }
 
@@ -1045,7 +1045,7 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &SemaAri
                     }
                 }
                 .Value(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
@@ -1084,7 +1084,7 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &SemaAri
             sema_comptime_reflection_append_arithmetic_expr(head, values)
             loop step in steps -> sema_comptime_reflection_append_arithmetic_expr(step.value, values)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Place(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -1101,7 +1101,7 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &Sema
                         sema_comptime_reflection_append_arithmetic_expr(index, values)
                     }
                     .Field(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, values)
-                    else -> {}
+                    .Local(_, _) -> {}
                 }
                 sema_comptime_reflection_append_arithmetic_expr(value, values)
             }
@@ -1155,7 +1155,7 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &Sema
                 loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument, values)
                 sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }
-            else -> {}
+            .Break(_) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) -> {}
         }
     }
 }
@@ -1250,7 +1250,7 @@ sema_comptime_reflection_append_inherent_methods: fn(items: [Item], owner: Strin
             .Impl(implementation) -> if implementation.type_name == owner && implementation.trait_name == None -> sema_comptime_reflection_append_methods(implementation.methods, module_path, identity, registry, values)
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> sema_comptime_reflection_append_inherent_methods(body, owner, module_path, identity, registry, values)
             .GenericModule(generic_module) -> sema_comptime_reflection_append_inherent_methods(generic_module.body, owner, module_path, identity, registry, values)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1397,7 +1397,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
                         .Struct(_, fields) -> (loop field in fields {
                             if field.name == "name" && field.value == (TComptimeValue.String{value: trait_name}) -> break true
                         } ?? false)
-                        else -> false
+                        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
                     }
                     if matched -> break true
                 } ?? false
@@ -1405,7 +1405,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
             }
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> sema_comptime_reflection_trait_contracts_from_items(body, owner, module_path, identity, registry, contracts)
             .GenericModule(generic_module) -> sema_comptime_reflection_trait_contracts_from_items(generic_module.body, owner, module_path, identity, registry, contracts)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1714,6 +1714,6 @@ sema_comptime_reflection_type_info: fn(
         }
         .Enum(definition) -> return Val(sema_comptime_reflection_enum_type_info(definition, registered_module, identity, engine, registry))
         .Distinct(definition) -> return Val(sema_comptime_reflection_distinct_type_info(definition, registered_module, identity, engine, registry))
-        else -> return None
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
 }

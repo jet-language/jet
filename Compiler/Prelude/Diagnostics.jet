@@ -3775,19 +3775,14 @@ SameEnumGuardTable: struct {
 }
 
 UnreachableElseArm: struct {
-    type: String
-
     impl Diagnostic {
         code: "L0303"
         severity: .Lint
-        lint_name: "unreachable_else_arm"
-        meaning: "An `else` arm follows arms that already cover every case of a closed set"
-        edit: .SourceEdit
+        status: .Retired
         no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This `else` can never run; every case of `{self.type}` is already handled" }
-        why: fn(self) -> String { "If a case is added to `{self.type}` later, it would go to this `else` silently instead of the compiler asking you to handle it" }
-        fix: fn(self) -> String { "Delete the `else` arm" }
+        what: fn(self) -> String { "*Retired* (was: an `else` arm follows arms that already cover every case of a closed set)" }
+        why: fn(self) -> String { "No `else` may stand for cases of a closed set, so a dead `else` is the error E0641" }
+        fix: fn(self) -> String { "Do not use L0303" }
     }
 }
 
@@ -5399,6 +5394,22 @@ SelfOutsideMethod: struct {
         what: fn(self) -> String { "`{self.name}` takes `self`, but it is not a method" }
         why: fn(self) -> String { "`self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter" }
         fix: fn(self) -> String { "Move `{self.name}` into the type's body or an `impl` block to make it a method, or give the parameter another name" }
+    }
+}
+
+ClosedSetElse: struct {
+    type: String
+    cases: String
+
+    impl Diagnostic {
+        code: "E0641"
+        meaning: "An `else` arm stands for cases of a closed set: an enum, `T?`, `T E!`, or a union"
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "This `else` stands for cases of the closed set `{self.type}`" }
+        why: fn(self) -> String { "`{self.type}` is a closed set: an `else` would take any case added to `{self.type}` later silently, instead of the compiler asking you to handle it" }
+        fix: fn(self) -> String { "Name the cases instead: `{self.cases} ->`" }
     }
 }
 

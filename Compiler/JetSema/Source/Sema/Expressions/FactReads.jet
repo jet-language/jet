@@ -69,7 +69,7 @@ sema_fact_read_kind: fn(member: String) -> FactRead? Never! {
     read: fact_read_kind(member) ?? return None
     if read == {
         .BuildPackageName | .BuildPackageVersion | .BuildOS | .BuildProfile | .BuildStampGit | .BuildStampDirty | .BuildStampToolchain | .BuildStampAt -> None
-        else -> Val(read)
+        .Layout | .Name | .Fields | .Range | .Dimension | .Measure | .Exactness | .Classification | .Obligation | .States | .Effects | .Sendability | .Movedness | .Attribution | .Origin | .ViewProvenance | .UnitScaleProvenance | .Maturity | .RegisteredPlane(_) -> Val(read)
     }
 }
 
@@ -129,7 +129,7 @@ sema_fact_enum_menu: fn(ty: Type, environment: SemaScopeEnvironment, program: Se
     name := ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(value) -> name = value
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     found := sema_fact_enum_variants(name)
     if found == None -> found = sema_compiler_enum_variants(name)
@@ -485,7 +485,7 @@ sema_fact_reflected_type: fn(base: Type, read: FactRead) -> Type? {
     owner := ""
     if base == {
         .Named(name) -> owner = name
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     if owner == "TypeInfo" && read == FactRead.States -> return Val(sema_fact_list_of("StateInfo"))
     if (owner == "TypeInfo" || owner == "FieldInfo") && read == FactRead.Dimension -> return Val(sema_fact_named("DimensionInfo"))
@@ -514,7 +514,7 @@ sema_fact_value_detail: fn(value: TComptimeValue, read: FactRead) -> TComptimeVa
     kind_name := ""
     if kind == {
         .Enum(_, variant, _) -> kind_name = variant
-        else -> return None
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit -> return None
     }
     if Val(kind_name) != fact_read_reflection_kind(read) -> return None
     if sema_fact_read_is_plane(read) -> return Val(value)
@@ -556,7 +556,7 @@ sema_fact_reflected_read: fn(value: TComptimeValue, read: FactRead) -> TComptime
     owner := ""
     if value == {
         .Struct(type_name, _) -> owner = type_name
-        else -> return None
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
     }
     facts: sema_fact_struct_field(value, "facts")
     if owner == "FactInfo" -> return sema_fact_info_detail(value, read)
@@ -588,7 +588,7 @@ sema_fact_constant_path: fn(value: TExpr, context: SemaCheckContext) -> Bool Nev
         .Flat(index) -> context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(_)
         .Field(receiver, _) -> sema_fact_constant_path(receiver, context)
         .Index(base, index, _, _, _, _) -> index.kind == .IntLit(_, _) && sema_fact_constant_path(base, context)
-        else -> false
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> false
     }
 }
 
@@ -599,7 +599,7 @@ sema_fact_reflection_field: fn(base: TExpr, member: String, span: Span, context:
     owner_name := ""
     if base.ty == {
         .Named(name) -> owner_name = name
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     if !sema_fact_constant_path(base, context) -> return None
     field_ty: sema_fact_reflection_field_type(owner_name, member) ?? return None
@@ -614,7 +614,7 @@ sema_fact_path_text: fn(base: Expr, member: String) -> String? {
             prefix: sema_fact_path_text(inner, inner_member) ?? return None
             return Val("{prefix}.{member}")
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -622,7 +622,7 @@ sema_fact_expr_path: fn(expr: Expr) -> String? {
     if expr == {
         .Ident(name, _, _) -> return Val(name)
         .Field(base, member, _, _) -> return sema_fact_path_text(base, member)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -631,7 +631,7 @@ sema_fact_build_rooted: fn(base: Expr) -> Bool Never! {
     if base == {
         .Ident(name, _, _) -> return name == "#build" || name == "#package"
         .Field(inner, _, _, _) -> return sema_fact_build_rooted(inner)
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -753,7 +753,7 @@ sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environ
             if row_variant.symbol.name != variant -> next
             if row_variant.payload == {
                 .Unit -> {}
-                else -> break
+                .Single(_, _) | .Named(_) -> break
             }
             return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
         }
@@ -805,7 +805,7 @@ sema_fact_prepared_expr: fn(value: TComptimeValue, ty: Type, span: Span, environ
     if value == .Bool(flag) -> return Val(sema_node(context, ty, NodeKind.BoolLit{value: flag}, span))
     kind: if value == {
         .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
-        else -> TExprKind.CtLit{value: value}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> TExprKind.CtLit{value: value}
     }
     sema_tree_expr(ty, kind, span)
 }
@@ -836,7 +836,7 @@ sema_fact_constant_path_value: fn(value: TExpr, context: SemaCheckContext) -> TC
             }
             return None
         }
-        else -> None
+        .StrLit(_) | .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> None
     }
 }
 
@@ -953,7 +953,7 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
         .List(values) -> return TComptimeValue.List{values: loop item in values -> sema_fact_declared_value(item)}
         .Present(inner) -> return TComptimeValue.Present{value: sema_fact_declared_value(inner)}
         // copy: a scalar leaf of the read producer value; the caller keeps the original
-        else -> return value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> return value.copy()
     }
 }
 

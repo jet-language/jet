@@ -10,7 +10,7 @@ pkg_binders_test_dart_rejection: fn(source: String) -> String Never! {
         .Err(error) -> {
             if error == {
                 .Source(message) -> message
-                else -> panic("a Dart contract failed outside source validation")
+                .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolFailed(_, _, _) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> panic("a Dart contract failed outside source validation")
             }
         }
     }

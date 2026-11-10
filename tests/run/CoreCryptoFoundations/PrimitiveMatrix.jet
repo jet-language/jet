@@ -116,7 +116,7 @@ run: fn() {
     print("x25519_recipient_roundtrip {(crypto.X25519PublicKey.from_text(recipient_text) ?? crypto.X25519PublicKey{bytes: [U8]{}}).bytes == alice.public_key().bytes}")
     uppercase_rejected: if crypto.X25519PublicKey.from_text(recipient_text.to_upper()) == {
         .Err(.KeyRejected) -> true
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     print("x25519_recipient_uppercase {uppercase_rejected}")
     opened: crypto.open(alice, sealed, aad) ?? return
@@ -153,7 +153,7 @@ run: fn() {
     print("signing_public_key {derived_pk1.bytes == pk1.bytes}")
     short_verify_key: if crypto.VerifyKey.from_bytes(repeat_byte(U8{1}, 31)) == {
         .Err(.Length) -> true
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     print("verify_key_from_short {short_verify_key}")
 

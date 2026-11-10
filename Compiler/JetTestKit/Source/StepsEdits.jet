@@ -17,7 +17,10 @@ kit_steps_edits_valid: fn(words: [String]) -> Bool {
 }
 
 kit_steps_edit_field: fn(tree: Dyn, key: String) -> Dyn? {
-    if tree == { .Object(_) -> tree.get(key) else -> None }
+    if tree == {
+        .Object(_) -> tree.get(key)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
+    }
 }
 
 kit_steps_edit: fn(tree: Dyn) -> KitSourceEdit? {
@@ -26,10 +29,16 @@ kit_steps_edit: fn(tree: Dyn) -> KitSourceEdit? {
     start: kit_steps_edit_field(span, "start") ?? return None
     end: kit_steps_edit_field(span, "end") ?? return None
     text: kit_steps_edit_field(tree, "new_text") ?? return None
-    file_name: if file == { .Text(value) -> value else -> { return None } }
+    file_name: if file == {
+        .Text(value) -> value
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return None }
+    }
     start_byte: start.int() ?? return None
     end_byte: end.int() ?? return None
-    new_text: if text == { .Text(value) -> value else -> { return None } }
+    new_text: if text == {
+        .Text(value) -> value
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return None }
+    }
     if start_byte < 0 || end_byte < start_byte -> return None
     Val(KitSourceEdit{file: file_name, start: start_byte, end: end_byte, text: new_text})
 }
@@ -46,7 +55,10 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
     values: kit_steps_json_values(source, "doc", step.argv[2 + offset]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits document or path is invalid")}
     edits := [KitSourceEdit]{}
     loop value in values {
-        rows: if value == { .Array(items) -> items else -> [value] }
+        rows: if value == {
+            .Array(items) -> items
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [value]
+        }
         loop row in rows {
             edit := kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs file, span.start/end integers and new_text")}
             edit.file = kit_steps_work_path(edit.file, context.env, context.work, context.scratch, state.built) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits file escapes work directory")}

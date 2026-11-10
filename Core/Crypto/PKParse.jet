@@ -184,7 +184,7 @@ pk_parse_subpubkey: fn(data: [U8], p: &Int, end: Int) -> pk.PKContext pk.PKError
                 .Err(e) -> {
                     if e == {
                         .Asn1(a) -> return Err(.InvalidPubkey(Val(a)))
-                        else -> return Err(.InvalidPubkey(None))
+                        .BadInput(_) | .InvalidPadding | .KeyGenFailed(_) | .KeyCheckFailed(_) | .PublicFailed(_) | .PrivateFailed(_) | .VerifyFailed | .OutputTooLarge | .RNGFailed | .Mpi(_) -> return Err(.InvalidPubkey(None))
                     }
                 }
             }
@@ -196,7 +196,7 @@ pk_parse_subpubkey: fn(data: [U8], p: &Int, end: Int) -> pk.PKContext pk.PKError
             }
             pk.pk_ecc_set_pubkey(key, body)
         }
-        else -> return Err(.UnknownPKAlg)
+        .ECDSA | .RSAAlt | .RSASSAPSS | .Opaque -> return Err(.UnknownPKAlg)
     }
     p = info_end
     Ok(key)
@@ -283,7 +283,7 @@ parse_key_pkcs8_unencrypted_der: fn<R: RNG>(data: [U8], rng: &R) -> pk.PKContext
                 }
             }
         }
-        else -> return Err(.UnknownPKAlg)
+        .ECDSA | .RSAAlt | .RSASSAPSS | .Opaque -> return Err(.UnknownPKAlg)
     }
     if p + key_len != data.len() -> return Err(.KeyInvalidFormat(Val(.LengthMismatch)))
     Ok(key)

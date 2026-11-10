@@ -337,7 +337,7 @@ __server_report: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
 __accept_timed_out: fn(error: NetError) -> Bool Never! {
     if error == {
         .Timeout(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
@@ -636,7 +636,7 @@ __error_response: fn(error: HTTPError) -> HTTPResponse Never! {
         .BodyTooLarge(_) -> __empty_response(413)
         .InvalidFraming -> __empty_response(400)
         .UnsupportedEncoding -> __empty_response(415)
-        else -> response(500, "500 Internal Server Error")
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> response(500, "500 Internal Server Error")
     }
 }
 
@@ -892,7 +892,7 @@ __contract_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String
     value: __contract_member(fields, name) ?? return None
     if value == {
         .Text(text) -> return Val(text)
-        else -> return None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
     }
 }
 
@@ -916,12 +916,12 @@ __route_complete_contract: fn(method: String, pattern: String, segments: [__HTTP
     parsed: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
     fields := if parsed == {
         .Object(members) -> members
-        else -> panic("checked HTTP route descriptor is not an object")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("checked HTTP route descriptor is not an object")
     }
     inputs: __contract_member(fields, "parameters") ?? panic("checked HTTP route descriptor has no inputs")
     parameters: if inputs == {
         .Array(items) -> items
-        else -> panic("checked HTTP route descriptor inputs are not an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("checked HTTP route descriptor inputs are not an array")
     }
     loop segment in segments {
         name: if segment == {
@@ -940,7 +940,7 @@ __route_complete_contract: fn(method: String, pattern: String, segments: [__HTTP
     loop parameter in parameters {
         members := if parameter == {
             .Object(entries) -> entries
-            else -> panic("checked HTTP route input is not an object")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("checked HTTP route input is not an object")
         }
         name: __contract_text(members, "name") ?? panic("checked HTTP route input has no name")
         catch_all := Bool?{None}
@@ -975,7 +975,7 @@ __route_require_contract: fn(method: String, pattern: String, contract: String, 
     parsed: json_codec.parse(contract) ?? __route_stop("E2805", "{invalid} is not valid JSON.", at)
     fields: if parsed == {
         .Object(members) -> members
-        else -> __route_stop("E2805", "{invalid} is not an object.", at)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> __route_stop("E2805", "{invalid} is not an object.", at)
     }
     names: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
     loop field in names {
@@ -989,7 +989,7 @@ __route_require_contract: fn(method: String, pattern: String, contract: String, 
     valid: if body == {
         .Null -> true
         .Object(members) -> __contract_kind(members, "required") == "bool" && (__contract_text(members, "content_type") ?? "") != "" && __contract_kind(members, "schema") == "object"
-        else -> false
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
     if !valid -> __route_stop("E2805", "{invalid} has an invalid request body.", at)
 }
@@ -1003,7 +1003,7 @@ __contract_kind: fn(fields: [(key: String, value: Dyn)], name: String) -> String
         .Array(_) -> "array"
         .Object(_) -> "object"
         .Text(_) -> "text"
-        else -> "number"
+        .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> "number"
     }
 }
 

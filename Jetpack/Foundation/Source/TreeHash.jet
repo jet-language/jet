@@ -249,7 +249,7 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
     opened: parent.open_directory(name) ?? {
         if err == {
             .NotFound(_) -> {}
-            else -> return Err(err)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
         }
         created := true
         if parent.create_directory(name, mode: Val(448)) == {
@@ -257,7 +257,7 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
-                    else -> { return Err(error) }
+                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(error) }
                 }
                 created = false
             }
@@ -339,7 +339,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
         writer: directories[leaf].handle.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
             }
             next
         }
@@ -765,7 +765,7 @@ foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, E
                 foundation_open_directory_authority(missing, true)
                 missing
             }
-            else -> { return Err(error) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
         }
     }
     Ok(files.join(parent, name))
@@ -871,7 +871,7 @@ foundation_inspect_destination: fn(parent: Directory, name: String, links: Found
         }
         .Err(error) -> if error == {
             .NotFound(_) -> Ok(None)
-            else -> Err(error)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(error)
         }
     }
 }

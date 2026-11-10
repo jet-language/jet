@@ -827,7 +827,7 @@ jet_cli_locked_git_root: fn(project_root: String, name: String) -[FS, Env]> Stri
     package: lock.find_package(name) ?? return None
     pinned: if package.source == {
         .Git(_, _) -> package.locked != None
-        else -> false
+        .Root | .Path(_) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
     }
     if !pinned -> return None
     Val(cli_files.realpath(pkg_source_store_path(name, package.version, package.fingerprint)) ?? return None)

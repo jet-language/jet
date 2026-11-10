@@ -205,7 +205,7 @@ read_ceilings: fn(path: String) -[FS]> [Ceiling] CheckError! {
             count: if entry.value == {
                 .Int(number) -> number
                 .Number(lexeme) -> Int.parse(lexeme) ?? -1
-                else -> -1
+                .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> -1
             }
             if count < 0 -> return Err(problem("`{path}`: {entry.key} is not an error count"))
             ceilings.push(Ceiling{name: entry.key.copy(), errors: count})

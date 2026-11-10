@@ -33,7 +33,7 @@ impl NixEvaluator {
                 joined: parts.join(",")
                 return Ok("{{{joined}}}")
             }
-            else -> {}
+            .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.Unsupported("value of type {value.type_name()} cannot be encoded as JSON"))
     }

@@ -140,7 +140,7 @@ sema_frame_resource_identity: fn(expression: Expr) -> ResourceIdentity? {
             return Val(identity)
         }
         .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> return Val(ResourceIdentity.Unknown)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -203,7 +203,7 @@ sema_frame_hardware_dma_bind_start: fn(start: SemaFrameDMABinding, transfer_name
 sema_frame_hardware_dma_start: fn(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
         .Ident(name, _, _) -> name == "dma"
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     if !is_dma_receiver || args.len() != 2 -> return SemaFrameHardwareCall{operation: None, dma_start: None}
     path: sema_hardware_board_path(args[0].expr, environment, program, scopes) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
@@ -334,7 +334,7 @@ sema_frame_schedule_validate: fn(operations: [FrameOperation]) -> String? {
             .Pending(token) | .Event(token) -> {
                 if token.trim() == "" -> return Val("operation {index} is invalid: completion token must not be empty")
             }
-            else -> {}
+            .Synchronous -> {}
         }
         loop access in operation.accesses {
             if access.resource == {
@@ -347,7 +347,7 @@ sema_frame_schedule_validate: fn(operations: [FrameOperation]) -> String? {
                 .Bytes(start, length) -> {
                     if start < 0 || length <= 0 || start > 0xffffffffffffffff || length > 0xffffffffffffffff || start + length > 0xffffffffffffffff -> return Val("operation `{operation.name}` has invalid access to `{sema_frame_resource_label(access.resource)}`: byte region must be non-empty and fit its checked range")
                 }
-                else -> {}
+                .Whole | .Unknown -> {}
             }
             if access.layout != None {
                 layout: access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
@@ -370,7 +370,7 @@ sema_frame_schedule_events: fn(operations: [FrameOperation]) -> FrameEventsResul
                 if previous >= 0 -> return FrameEventsResult{events: events, error: Val("operation {index} is invalid: completion token `{token}` has duplicate events at {previous} and {index}")}
                 events.push(FrameEventIndex{token: token, index: index})
             }
-            else -> {}
+            .Synchronous | .Pending(_) -> {}
         }
     }
     loop (index, operation) in operations {
@@ -385,7 +385,7 @@ sema_frame_schedule_events: fn(operations: [FrameOperation]) -> FrameEventsResul
                     return FrameEventsResult{events: events, error: Val("operation `{operation.name}` accesses `{resource}` before completion event `{token}`")}
                 }
             }
-            else -> {}
+            .Synchronous | .Event(_) -> {}
         }
     }
     return FrameEventsResult{events: events, error: None}
@@ -412,7 +412,7 @@ sema_frame_check_async_uses: fn(operations: [FrameOperation], events: [FrameEven
                     }
                 }
             }
-            else -> {}
+            .Synchronous | .Event(_) -> {}
         }
     }
     loop (index, operation) in operations {
@@ -426,7 +426,7 @@ sema_frame_check_async_uses: fn(operations: [FrameOperation], events: [FrameEven
                             if event_index < 0 || event_index >= index -> return Val("operation `{operation.name}` accesses `{sema_frame_resource_label(access.resource)}` before completion event `{token}`")
                         }
                     }
-                    else -> {}
+                    .Synchronous | .Event(_) -> {}
                 }
             }
         }
@@ -442,7 +442,7 @@ sema_frame_retentions: fn(operations: [FrameOperation], events: [FrameEventIndex
                 completed := sema_frame_event_index(events, token) > index
                 loop access in operation.accesses -> retentions.push(FrameRetention{resource: sema_frame_resource_label(access.resource), operation: index, owner: operation.name, completion_token: Val(token), completed: completed})
             }
-            else -> {}
+            .Synchronous | .Event(_) -> {}
         }
     }
     retentions
@@ -499,7 +499,7 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
                         .Pending(_) -> {
                             if sema_frame_operation_names_resource(operation, left.resource) && index > pending_index -> pending_index = index
                         }
-                        else -> {}
+                        .Synchronous | .Event(_) -> {}
                     }
                 }
             }
@@ -511,7 +511,7 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
                             reason_text = "completion event {token} has not occurred"
                         }
                     }
-                    else -> {}
+                    .Synchronous | .Event(_) -> {}
                 }
             }
         }
@@ -580,9 +580,9 @@ sema_frame_region_overlaps: fn(left: ResourceRegion, right: ResourceRegion) -> B
     if left == {
         .Bytes(start, length) -> if right == {
             .Bytes(other_start, other_length) -> return start < other_start + other_length && other_start < start + length
-            else -> return true
+            .Whole | .Unknown -> return true
         }
-        else -> return true
+        .Whole | .Unknown -> return true
     }
 }
 

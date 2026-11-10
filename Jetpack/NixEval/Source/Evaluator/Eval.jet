@@ -134,7 +134,7 @@ NixEvaluator: struct {
         loop index >= 0 {
             if self.frames[index].bindings.get(name) == {
                 .Val(binding) -> return Ok(binding)
-                else -> {}
+                .None -> {}
             }
             scopes: self.frames[index].scopes.copy()
             position := scopes.len() - 1
@@ -143,7 +143,7 @@ NixEvaluator: struct {
                 found: self.try_select(scope, name)
                 if found == {
                     .Val(binding) -> return Ok(binding)
-                    else -> {}
+                    .None -> {}
                 }
                 position -= 1
             }
@@ -263,7 +263,7 @@ NixEvaluator: struct {
         if function == {
             .Function(lambda, closure) -> return self.apply_lambda(lambda, closure, argument)
             .Native(native) -> return self.apply_native(native, argument)
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "function", actual: function.type_name()})
     }
@@ -277,7 +277,7 @@ NixEvaluator: struct {
                 pattern = lambda_pattern
                 body = lambda_body
             }
-            else -> return Err(NixEvalError.TypeMismatch{expected: "function", actual: "expression"})
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .Bool(_) | .Null | .Identifier(_) | .AttrSet(_) | .List(_) | .Apply(_, _) | .Select(_, _) | .Let(_, _) | .With(_, _) | .If(_, _, _) | .Merge(_, _) | .Equal(_, _, _) -> return Err(NixEvalError.TypeMismatch{expected: "function", actual: "expression"})
         }
         frame: self.child_frame(closure)
         if pattern == {
@@ -288,7 +288,7 @@ NixEvaluator: struct {
                 loop field in fields {
                     if self.attr_field(arguments, field.name) == {
                         .Val(binding) -> self.frames[frame].bindings[field.name] = binding
-                        else -> {
+                        .None -> {
                             fallback: field.default ?? return Err(NixEvalError.Missing(field.name))
                             fallback_thunk: self.expression_thunk(fallback, frame)
                             self.frames[frame].bindings[field.name] = fallback_thunk
@@ -365,7 +365,7 @@ NixEvaluator: struct {
         if value == {
             .Path(path) -> return self.evaluate_import(path)
             .Packages(set) -> return Ok(NixEvalValue.Native(NixEvalNative.ImportPackage(set)))
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Package(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "path or package-set import argument", actual: value.type_name()})
     }
@@ -385,7 +385,7 @@ NixEvaluator: struct {
             .Derivation(fields, request) -> return self.derivation_field(fields, request, field)
             .LibraryNamespace -> return Ok(None)
             .BuiltinsNamespace -> return Ok(self.builtins_field(field))
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .List(_) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: value.type_name()})
     }
@@ -394,7 +394,7 @@ NixEvaluator: struct {
     attr_field: fn(&self, fields: [String: Int], field: String) -> Int? Never! {
         if fields.get(field) == {
             .Val(binding) -> return Val(binding)
-            else -> {}
+            .None -> {}
         }
         prefix: "{field}.".bytes()
         nested := [String: Int]{}
@@ -409,7 +409,7 @@ NixEvaluator: struct {
     package_field: fn(&self, set: NixEvalPackageSet, field: String) -> Int? NixEvalError! {
         if self.overlay_binding(set, field) == {
             .Val(binding) -> return Ok(Val(binding))
-            else -> {}
+            .None -> {}
         }
         if field == "crossSystem" -> return Err(NixEvalError.Unsupported("cross-system packages require an explicit target and provider authority"))
         package: if field == {
@@ -436,7 +436,7 @@ NixEvaluator: struct {
                 copied: self.overlays[table].copy()
                 NixEvalPackageSet{prefix: set.prefix, overlay: Val(self.new_overlay(copied))}
             }
-            else -> NixEvalPackageSet{prefix: set.prefix, overlay: None}
+            .None -> NixEvalPackageSet{prefix: set.prefix, overlay: None}
         }
     }
 
@@ -460,7 +460,7 @@ NixEvaluator: struct {
                     .Err(denial) -> return Err(request.refused(denial.message()))
                 }
             }
-            else -> {}
+            .None -> {}
         }
         Err(request.refused("no evaluator authority was granted"))
     }
@@ -535,11 +535,11 @@ NixEvaluator: struct {
         forced: self.force(outputs)
         projected: if forced == {
             .Function(_, _) | .Native(_) -> self.apply_flake_arguments(forced)
-            else -> forced
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) -> forced
         }
         if projected == {
             .AttrSet(_) -> projected
-            else -> NixEvalValue.AttrSet(fields)
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> NixEvalValue.AttrSet(fields)
         }
     }
 
@@ -565,7 +565,7 @@ NixEvaluator: struct {
     overlay_fields: fn(self, set: NixEvalPackageSet) -> [String: Int] Never! {
         if set.overlay == {
             .Val(table) -> self.overlays[table]
-            else -> [String: Int]{}
+            .None -> [String: Int]{}
         }
     }
 
@@ -582,7 +582,7 @@ NixEvaluator: struct {
         result: self.apply(first, current_thunk)
         if result == {
             .AttrSet(fields) -> self.extend_overlay(final_table, fields)
-            else -> return Err(NixEvalError.TypeMismatch{expected: "overlay attribute set", actual: result.type_name()})
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> return Err(NixEvalError.TypeMismatch{expected: "overlay attribute set", actual: result.type_name()})
         }
         extended: self.overlays[final_table].copy()
         snapshot: self.new_overlay(extended)
@@ -618,7 +618,7 @@ NixEvaluator: struct {
                 loop entry in additions -> merged[entry.key] = entry.value
                 return Ok(NixEvalValue.AttrSet(merged))
             }
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: left.type_name()})
     }
@@ -646,7 +646,7 @@ nixeval_package_path: fn(prefix: String, field: String) -> String Never! {
 nixeval_condition: fn(value: NixEvalValue) -> Bool NixEvalError! {
     if value == {
         .Bool(flag) -> return Ok(flag)
-        else -> {}
+        .Null | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
     }
     Err(NixEvalError.TypeMismatch{expected: "boolean", actual: value.type_name()})
 }

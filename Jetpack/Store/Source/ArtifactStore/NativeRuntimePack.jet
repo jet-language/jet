@@ -438,7 +438,7 @@ native_runtime_pack_load: fn(store: ArtifactStore, compiler: ObjectHandle) -[FS,
     _: native_pack_blob(store, compiler, census)
     selected: if (store.lookup_artifact(NativeCandidateComposition.action_key(compiler)) ?? return Err(NativeRuntimePackError.Store(err))) == {
         .Hit(artifact) -> artifact
-        else -> { return Err(NativeRuntimePackError.Invalid("candidate composition is missing or corrupt")) }
+        .Missing | .Corrupt -> { return Err(NativeRuntimePackError.Invalid("candidate composition is missing or corrupt")) }
     }
     composition: NativeCandidateComposition.from_bytes(native_pack_blob(store, selected.object, census))
     if composition.compiler != compiler -> return Err(NativeRuntimePackError.Invalid("candidate composition names another compiler"))
@@ -476,7 +476,7 @@ native_pack_true_field: fn(fields: [String: Dyn], name: String) -> Bool Never! {
     if fields.get(name) == {
         .Val(value) -> if value == {
             .Bool(flag) -> flag
-            else -> false
+            .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
         }
         .None -> false
     }
@@ -485,7 +485,7 @@ native_pack_true_field: fn(fields: [String: Dyn], name: String) -> Bool Never! {
 native_pack_fields: fn(tree: Dyn, names: [String]) -> [String: Dyn] NativeRuntimePackError! {
     members: if tree == {
         .Object(fields) -> fields
-        else -> { return Err(NativeRuntimePackError.Invalid("publication record must be an object")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(NativeRuntimePackError.Invalid("publication record must be an object")) }
     }
     values: native_pack_member_map(members) ?? return Err(err)
     if values.len() != names.len() -> return Err(NativeRuntimePackError.Invalid("publication record has missing or unknown fields"))
@@ -499,7 +499,7 @@ native_pack_text_field: fn(fields: [String: Dyn], name: String) -> String Native
     value: fields.get(name) ?? return Err(NativeRuntimePackError.Invalid("missing publication field {name}"))
     if value == {
         .Text(text) -> Ok(text)
-        else -> Err(NativeRuntimePackError.Invalid("publication field {name} must be text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(NativeRuntimePackError.Invalid("publication field {name} must be text"))
     }
 }
 
@@ -550,7 +550,7 @@ native_pack_array_field: fn(fields: [String: Dyn], name: String) -> [Dyn] Native
     value: fields.get(name) ?? return Err(NativeRuntimePackError.Invalid("missing publication field {name}"))
     if value == {
         .Array(values) -> Ok(values)
-        else -> Err(NativeRuntimePackError.Invalid("publication field {name} must be an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(NativeRuntimePackError.Invalid("publication field {name} must be an array"))
     }
 }
 
@@ -589,7 +589,7 @@ native_pack_output_roles: fn(fields: [String: Dyn]) -> [String] NativeRuntimePac
     loop value in native_pack_array_field(fields, "outputs") {
         role: if value == {
             .Text(text) -> text
-            else -> { return Err(NativeRuntimePackError.Invalid("output role must be a string")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(NativeRuntimePackError.Invalid("output role must be a string")) }
         }
         native_pack_unique(seen, role)
         result.push(role)
@@ -607,7 +607,7 @@ native_pack_rail_inputs: fn(fields: [String: Dyn], name: String, produced: [Stri
         source_tree: row.get("source") ?? return Err(NativeRuntimePackError.Invalid("missing input source"))
         source_fields: if source_tree == {
             .Object(values) -> native_pack_member_map(values) ?? return Err(err)
-            else -> { return Err(NativeRuntimePackError.Invalid("input source must be an object")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(NativeRuntimePackError.Invalid("input source must be an object")) }
         }
         kind: native_pack_text_field(source_fields, "kind")
         source: if kind == {
@@ -756,7 +756,7 @@ native_pack_check_generation: fn(bytes: [U8], subject: NativeRuntimePackSubject)
     tree: json.parse(text)
     fields: if tree == {
         .Object(values) -> native_pack_member_map(values) ?? return Err(err)
-        else -> { return Err(NativeRuntimePackError.Invalid("generation receipt must be an object")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(NativeRuntimePackError.Invalid("generation receipt must be an object")) }
     }
     if native_pack_text_field(fields, "final") != subject.runtime_source_revision || !native_pack_true_field(fields, "deterministic") {
         return Err(NativeRuntimePackError.Invalid("generation receipt is not deterministic at runtime FINAL"))

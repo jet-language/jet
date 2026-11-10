@@ -281,7 +281,7 @@ cli_report_tool_profile_error: fn(theme: Theme, error: CLIError) -[IO, Time.Wait
             theme.error_coded("E1340", message, "the tool is managed by jetpack and its projected bytes are read-only", "run `jetpack update tools -y` to move the declarative pin to the installed tool")
             return EXIT_USAGE
         }
-        else -> {}
+        .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .Store(_) | .Environment(_) | .Diagnostic(_) | .Reported(_) -> {}
     }
     theme.error("user-tools profile failed", error.message(), "repair the standalone declaration or profile state and retry")
     EXIT_USAGE
@@ -385,7 +385,7 @@ cli_tool_install: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
 cli_report_tool_install_error: fn(theme: Theme, error: CLIError) Never! -[IO, Time.Wait]> {
     if error == {
         .ManagedTool(message) -> theme.error_coded("E1340", message, "the tool is managed by jetpack and its projected bytes are read-only", "run `jetpack update tools -y` to move the declarative pin to the installed tool")
-        else -> theme.error("tool install failed", error.message(), "check permissions on `~/.jet` and retry.")
+        .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .Store(_) | .Environment(_) | .Diagnostic(_) | .Reported(_) -> theme.error("tool install failed", error.message(), "check permissions on `~/.jet` and retry.")
     }
 }
 
@@ -429,7 +429,7 @@ cli_tool_uninstall: fn(verification: &StoreVerification, theme: Theme, parsed: C
         .Err(error) -> {
             if error == {
                 .ManagedTool(_) -> return cli_report_tool_profile_error(theme, error)
-                else -> {}
+                .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .Store(_) | .Environment(_) | .Diagnostic(_) | .Reported(_) -> {}
             }
             theme.error("tool uninstall failed", error.message(), "check `~/.jet/tools` and retry.")
             EXIT_USAGE

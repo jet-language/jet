@@ -16,7 +16,7 @@ observed_connection: fn(listener: TCPListener) -> Bool {
                     if time.instant() >= deadline -> return false
                     tasks.yield_now()
                 }
-                else -> return false
+                .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> return false
             }
         }
     }

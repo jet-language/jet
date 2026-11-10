@@ -24,7 +24,7 @@ ProviderAdapter: enum {
             .Cran -> CranProvider{}.validate_cache_authority(spec, table, ctx)
             .LuaRocks -> LuaRocksProvider{}.validate_cache_authority(spec, table, ctx)
             .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.validate_cache_authority(spec, table, ctx)
-            else -> {}
+            .Core | .Native | .Unsupported(_) -> {}
         }
     }
 
@@ -46,7 +46,7 @@ ProviderAdapter: enum {
     approval_facts: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
         if self == {
             .Core -> CoreProvider{}.approval_facts(spec, table, ctx)
-            else -> Ok(None)
+            .Nix | .Cran | .LuaRocks | .ScriptRegistry(_) | .Native | .Unsupported(_) -> Ok(None)
         }
     }
 
@@ -68,7 +68,7 @@ ProviderAdapter: enum {
     can_repair: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> Bool Never! {
         if self == {
             .Nix -> NixProvider{}.can_repair(spec, table, ctx)
-            else -> false
+            .Core | .Cran | .LuaRocks | .ScriptRegistry(_) | .Native | .Unsupported(_) -> false
         }
     }
 
@@ -77,7 +77,7 @@ ProviderAdapter: enum {
     requires_acquisition: fn(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
         if self == {
             .Core -> CoreProvider{}.requires_acquisition(spec, table)
-            else -> true
+            .Nix | .Cran | .LuaRocks | .ScriptRegistry(_) | .Native | .Unsupported(_) -> true
         }
     }
 
@@ -105,7 +105,7 @@ provider_for: fn(kind: ProviderKind) -> ProviderAdapter Never! {
         .Cpan -> ProviderAdapter.ScriptRegistry(provider_script_registry(ProviderFamily.Cpan))
         .Packagist -> ProviderAdapter.ScriptRegistry(provider_script_registry(ProviderFamily.Packagist))
         .JetPackage -> ProviderAdapter.Native
-        else -> ProviderAdapter.Unsupported(kind.label())
+        .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary -> ProviderAdapter.Unsupported(kind.label())
     }
 }
 
@@ -143,7 +143,7 @@ provider_resolve_kind: fn(spec: RefSpec, table: SourceTable, offline: Bool, cach
     if provider_cc_toolchain_is_reference(spec) -> return ProviderKind.JetPackage
     name: if spec.source == {
         .Named(name) -> name
-        else -> { return ProviderKind.Nix }
+        .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> { return ProviderKind.Nix }
     }
     kind: table.provider(name)
     if kind != ProviderKind.Infer -> return kind

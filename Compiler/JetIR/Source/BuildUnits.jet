@@ -125,7 +125,7 @@ ir_unit_label: fn(p: IRProgram, ty: Type) -> String? Never! {
         .Quantity(_, dimension) -> Val(ir_quantity_label(p, dimension))
         .Named(name) -> ir_unit_member_label(p, name)
         .Tagged(_, inner) -> ir_unit_label(p, inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Measure(_) -> None
     }
 }
 
@@ -133,7 +133,7 @@ ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
     row: ir_type_def(p, name) ?? return None
     if p.types[row].kind == {
         .Distinct(_, _) -> {}
-        else -> return None
+        .Struct(_, _) | .Enum(_, _) | .Alias(_) | .UnitFamily(_, _) -> return None
     }
     owner: p.types[row].module_identity
     type_name: p.types[row].name

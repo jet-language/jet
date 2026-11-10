@@ -10,7 +10,7 @@ pkg_to_manifest: fn(facts: PackageFacts, raw: String) -> Manifest ManifestError!
     loop name in pkg_manifest_sorted(facts.deps.keys().to_list()) {
         is_clib: if facts.deps[name] == {
             .CLib(_) -> true
-            else -> false
+            .Version(_) | .Provider(_, _) | .Git(_, _) | .Foreign(_, _) -> false
         }
         if !pkg_validate_dependency_name(name) && !is_clib -> return Err(pkg_bad_dep_error(name, "dependency names must be one safe path component without `/`, `\\`, or `:`"))
         if is_clib -> next
@@ -56,7 +56,7 @@ pkg_provider_dep_spec: fn(name: String, provider: RefSource, target: String) -> 
             parts: target.cut_last("/") ?? return Err(pkg_bad_dep_error(name, "an `owner/repo/rev@github` dependency needs a pinned rev as its last segment; use the inline `{{ git: \"...\", branch/tag: \"...\" }}` form to track a moving branch or tag"))
             Ok(DepSpec.Git{url: "https://github.com/{parts.before}", selector: GitSelector.Rev(parts.after)})
         }
-        else -> Err(pkg_bad_dep_error(name, "`{provider.label()}` is not a valid source for a Jet library dependency — use a bare local path, `owner/repo/rev@github`, or an inline git struct"))
+        .Jetpack | .Nixpkgs | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> Err(pkg_bad_dep_error(name, "`{provider.label()}` is not a valid source for a Jet library dependency — use a bare local path, `owner/repo/rev@github`, or an inline git struct"))
     }
 }
 

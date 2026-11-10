@@ -120,7 +120,7 @@ sema_serde_expand_builtin_items: fn(items: &[Item]) {
                     generated.push(sema_serde_items_distinct_codec(definition, trait_name, span))
                 }
             }
-            else -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in generated -> items.push(item)
@@ -185,7 +185,7 @@ sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type
             }
             true
         }
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -203,7 +203,7 @@ sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, 
         .Distinct(definition) -> {
             if sema_derive_has_name(definition.derives, trait_name) -> return true
         }
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     auto.get(name) != None || sema_serde_items_impl_flags(facts, name, trait_name) != 0
 }
@@ -222,7 +222,7 @@ sema_serde_items_wire_params: fn(items: [Item], facts: SemaDeriveItemIndex, name
             .Enum(definition) -> {
                 if definition.name == name -> return sema_serde_items_param_flags(definition.type_params, sema_serde_items_enum_wire(definition))
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         position += 1
     }
@@ -481,7 +481,7 @@ sema_serde_items_codec_body: fn(items: [Item], position: Int, trait_name: String
             if encode -> return Val(SemaSerdeCodecBody{body: sema_serde_items_distinct_body(definition, true, span), read: [Stmt]{}, wire: wire})
             return Val(SemaSerdeCodecBody{body: sema_serde_items_tree_read_body(definition.name, [TypeParam]{}, span), read: sema_serde_items_distinct_body(definition, false, span), wire: wire})
         }
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     None
 }
@@ -718,7 +718,7 @@ sema_serde_items_zero_expr: fn(ty: Type, span: Span) -> Expr Never! {
         .List(_) | .Map(_, _, _) -> Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
         .Apply(name, args) -> sema_serde_items_struct_literal(name, args.copy(), [ExprField]{}, span)
         .Named(name) -> sema_serde_items_struct_literal(name, [Type]{}, [ExprField]{}, span)
-        else -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
+        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
     }
 }
 
@@ -1019,7 +1019,7 @@ sema_serde_items_migration_helpers: fn(definition: StructDef, items: [Item], spa
                         helpers.push(Item.Func{value: function})
                     }
                 }
-                else -> {}
+                .Rename(_, _, _, _) | .Remove(_, _) -> {}
             }
         }
     }
@@ -1121,7 +1121,7 @@ sema_serde_items_migration_unmatched: fn(span: Span) -> Stmt Never! {
 sema_serde_items_pair_type: fn() -> Type Never! {
     if sema_data_object_pairs_type() == {
         .List(element) -> element
-        else -> panic("the ordered Object payload is a list")
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("the ordered Object payload is a list")
     }
 }
 
@@ -1563,7 +1563,7 @@ sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> sema_codec_type_names(field.ty, names)
         .Union(members) -> loop member in members -> sema_codec_type_names(member, names)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -1701,7 +1701,7 @@ sema_codec_index_module: fn(items: [Item], module_index: Int, positions: &[Strin
                 trait_name: implementation.trait_name ?? next
                 key = "{module_index}|{implementation.type_name}|{trait_name}"
             }
-            else -> next
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if positions.get(key) == None -> positions[key] = position
     }

@@ -124,7 +124,10 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
     receipts: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err.message}", json)
     absolute: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
     canonical: cli_files.realpath(absolute) ?? absolute
-    directory: if cli_files.stat(canonical) == {.Ok(info) -> info.is_dir else -> false}
+    directory: if cli_files.stat(canonical) == {
+        .Ok(info) -> info.is_dir
+        .Err(_) -> false
+    }
     by_verb := [String:[JetCLIReceipt]]{}
     verbs := [String]{}
     loop receipt in receipts {

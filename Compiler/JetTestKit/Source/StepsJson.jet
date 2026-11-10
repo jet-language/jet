@@ -92,7 +92,7 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
             }
         }
         .Array(a) -> {
@@ -104,7 +104,7 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return false
             }
         }
         .Int(a) -> {
@@ -112,7 +112,7 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Int(b) -> return a == b
                 .Float(b) -> return Float{a} == b
                 .Number(_) -> return kit_steps_json_equal(right, left)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Float(a) -> {
@@ -120,7 +120,7 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Int(b) -> return a == Float{b}
                 .Float(b) -> return a == b
                 .Number(text) -> return a == (Float.parse(text) ?? return false)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Number(a) -> {
@@ -143,28 +143,28 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     return (Float.parse(a) ?? return false) == Float{b}
                 }
                 .Float(b) -> return (Float.parse(a) ?? return false) == b
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Null -> {
             if right == {
                 .Null -> return true
-                else -> return false
+                .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Bool(a) -> {
             if right == {
                 .Bool(b) -> return a == b
-                else -> return false
+                .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Text(a) -> {
             if right == {
                 .Text(b) -> return a == b
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
-        else -> return false
+        .Bytes(_) | .DateTime(_) -> return false
     }
 }
 
@@ -178,7 +178,7 @@ kit_steps_json_type: fn(value: Dyn) -> String Never! {
         .Text(_) -> "string"
         .Array(_) -> "array"
         .Object(_) -> "object"
-        else -> "non-JSON value"
+        .Bytes(_) | .DateTime(_) -> "non-JSON value"
     }
 }
 
@@ -192,13 +192,13 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
                 return Val("JSON array does not contain expected scalar")
             }
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
     }
     if expected == {
         .Text(key) -> {
             if value == {
                 .Object(_) -> { if value.get(key) == None -> return Val("JSON object key missing: {key}") }
-                else -> return Val("JSON key presence needs an object")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Val("JSON key presence needs an object")
             }
             return None
         }
@@ -222,16 +222,16 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
                                 }
                                 if matches -> return None
                             }
-                            else -> {}
+                            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
                         }
                     }
                     shown: json.to_string(expected) ?? { return Val("JSON expected value could not be encoded: {err}") }
                     return Val("JSON array has no object matching {shown}")
                 }
-                else -> return Val("JSON has needs an array")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("JSON has needs an array")
             }
         }
-        else -> return Val("JSON has needs a nonempty object")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Val("JSON has needs a nonempty object")
     }
 }
 
@@ -248,11 +248,11 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
                             .None -> {}
                         }
                     }
-                    else -> return Val("JSON key absence needs an object")
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Val("JSON key absence needs an object")
                 }
                 return None
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
         }
         if kit_steps_json_type(value) != "array" -> return Val("JSON !has needs an array")
         if kit_steps_json_has(value, expected) == None -> return Val("JSON array contains the forbidden object")
@@ -266,7 +266,7 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
                     if kit_steps_json_equal(value, choice) -> return None
                 }
             }
-            else -> return Val("JSON in needs an array")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("JSON in needs an array")
         }
         return Val("JSON value is not in the expected alternatives")
     }
@@ -276,16 +276,22 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
                 keys := [String]{}
                 loop pair in fields -> keys.push(pair.key)
                 keys.sort()
-                wanted: if expected == { .Array(items) -> items else -> { return Val("JSON keys needs an array") } }
+                wanted: if expected == {
+                    .Array(items) -> items
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Val("JSON keys needs an array") }
+                }
                 names := [String]{}
                 loop item in wanted {
-                    name: if item == { .Text(text) -> text else -> { return Val("JSON keys needs strings") } }
+                    name: if item == {
+                        .Text(text) -> text
+                        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Val("JSON keys needs strings") }
+                    }
                     names.push(name)
                 }
                 names.sort()
                 return if keys == names -> None else -> Val("JSON key sets differ")
             }
-            else -> return Val("JSON keys needs an object")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Val("JSON keys needs an object")
         }
     }
     if kit_expect_named([">", ">=", "<", "<="], op) {
@@ -311,7 +317,7 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
                 matches: if op == "~" -> text.contains(expected_type) else if op == "!~" -> !text.contains(expected_type) else if op == "^=" -> text.starts_with(expected_type) else -> text.ends_with(expected_type)
                 if matches -> return None
             }
-            else -> return Val("JSON string predicate needs a string")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Val("JSON string predicate needs a string")
         }
     }
     size: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
@@ -357,7 +363,10 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
     if op == "#distinct=" {
         values := [Dyn]{}
         loop value in selected {
-            if value == { .Array(items) -> { loop item in items -> values.push(item) } else -> values.push(value) }
+            if value == {
+                .Array(items) -> { loop item in items -> values.push(item) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> values.push(value)
+            }
         }
         return if kit_steps_json_distinct(values) == count -> None else -> Val("JSON distinct count differs")
     }
@@ -453,7 +462,7 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
                 if parsed == {
                     .Array(_) -> return None
                     .Object(fields) -> { if fields.len() == 0 -> return None }
-                    else -> {}
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
                 }
             }
         }

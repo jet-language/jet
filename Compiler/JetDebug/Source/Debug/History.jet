@@ -174,18 +174,18 @@ debug_diff_snapshots: fn(writes: &[DebugIndexedWrite], sequence: Int, line: Int,
         changed: if old_slot == {
             .Val(old) -> if new_slot == {
                 .Val(new) -> before[old].type_name != after[new].type_name || before[old].value != after[new].value
-                else -> true
+                .None -> true
             }
-            else -> new_slot != None
+            .None -> new_slot != None
         }
         if !changed -> next
         old_value: if old_slot == {
             .Val(old) -> before[old].value.copy()
-            else -> "<unbound>"
+            .None -> "<unbound>"
         }
         new_value: if new_slot == {
             .Val(new) -> after[new].value.copy()
-            else -> "<unbound>"
+            .None -> "<unbound>"
         }
         writes.push(DebugIndexedWrite{sequence: sequence, line: line, place: place.copy(), old_value: old_value, new_value: new_value})
     }
@@ -227,7 +227,7 @@ debug_writes_by_sequence: fn(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
         converted: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
         if slots.get(write.sequence) == {
             .Val(slot) -> groups[slot].push(converted)
-            else -> {
+            .None -> {
                 slots[write.sequence] = groups.len()
                 sequences.push(write.sequence)
                 groups.push([DebugWrite]{converted.move()})

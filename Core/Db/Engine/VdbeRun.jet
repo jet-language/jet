@@ -136,7 +136,7 @@ p4_int: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
     if v.ops[pc].p4 == {
         .Int32(i) -> i
         .Int64(i) -> i
-        else -> 0
+        .NotUsed | .Text(_) | .Coll(_) | .Real(_) | .Program(_) | .Table(_) | .TableRef(_) | .FuncDef(_) | .FuncCtx(_, _) | .KeyInfo(_) | .Mem(_) | .Vtab(_) | .IntArray(_) | .Expr(_) -> 0
     }
 }
 

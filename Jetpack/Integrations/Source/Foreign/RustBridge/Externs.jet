@@ -140,7 +140,7 @@ FFILink: struct {
 pkg_ffi_is_list: fn(ty: Type) -> Bool Never! {
     if ty == {
         .List(_) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -152,7 +152,7 @@ pkg_ffi_is_string: fn(ty: Type) -> Bool Never! {
 pkg_ffi_is_handle: fn(ty: Type, handle_names: [String]) -> Bool Never! {
     if ty == {
         .Named(name) -> handle_names.contains(name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -209,7 +209,7 @@ CRecordDefinitions: struct {
             .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, stack)
             .Named(name) -> self.named_rust_type(name, stack)
             .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
-            else -> None
+            .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
         }
     }
 
@@ -236,7 +236,7 @@ CRecordDefinitions: struct {
 pkg_ffi_named: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -251,7 +251,7 @@ pkg_ffi_fixed_length: fn(len: Measure) -> Int? Never! {
     if len == {
         .Literal(_, value) -> Val(value)
         .SignedLiteral(_, value) -> if value >= 0 -> Val(value) else -> None
-        else -> None
+        .Symbol(_, _) | .Combined(_, _, _, _) -> None
     }
 }
 
@@ -339,7 +339,7 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
                 }
                 .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, out)
                 .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, out)
-                else -> {}
+                .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -395,7 +395,7 @@ pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out:
 pkg_ffi_inline_asm_contract: fn(function: Func, target: String) -> InlineAsmContract? Never! {
     if inline_assembly_contract(function, target) == {
         .Checked(contract) -> return Val(contract)
-        else -> return None
+        .NotAssembly | .Incomplete(_) -> return None
     }
 }
 
@@ -447,7 +447,7 @@ pkg_ffi_c_record_rust_name: fn(key: String) -> String Never! {
 pkg_ffi_struct_layout_alignment: fn(layout: StructLayout) -> Int? Never! {
     if layout == {
         .CAligned(alignment, _) -> Val(alignment)
-        else -> None
+        .C | .Columnar -> None
     }
 }
 
@@ -473,7 +473,7 @@ pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecor
                 body: code_module.body ?? next
                 pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), records, names, aliases)
             }
-            else -> {}
+            .Func(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

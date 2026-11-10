@@ -60,7 +60,7 @@ compiler_service_test_response: fn(text: String) -> Dyn Never! {
     assert(compiler_service_comptime_request_from(compiler_service_test_response("{{\"program\":\"x\"}}")) == None, "a request without base_dir is refused")
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int{value: 3}}))) == {
         .Val(.Value(value)) -> assert(value == CtValue.Int{value: 3})
-        else -> panic("a value response reads back as the value")
+        .Val(_) | .None -> panic("a value response reads back as the value")
     }
     refusal: jet_config_eval_diagnostic(None, "this config value produced no build-time value")
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Refused{diagnostic: refusal}))) == {
@@ -72,11 +72,11 @@ compiler_service_test_response: fn(text: String) -> Dyn Never! {
             assert_eq(diagnostic.why, refusal.why)
             assert_eq(diagnostic.fix, refusal.fix)
         }
-        else -> panic("a refusal response reads back as the refusal")
+        .Val(_) | .None -> panic("a refusal response reads back as the refusal")
     }
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Failed{report: CtReport.Told{value: CtValue.Str{value: "boom"}}}}))) == {
         .Val(.Refused(diagnostic)) -> assert_eq(diagnostic.code, "E0956")
-        else -> panic("a value no wire spelling carries is refused as an unreadable result")
+        .Val(_) | .None -> panic("a value no wire spelling carries is refused as an unreadable result")
     }
     assert(compiler_service_comptime_outcome(compiler_service_test_response("{{}}")) == None, "an empty response is not an outcome")
 

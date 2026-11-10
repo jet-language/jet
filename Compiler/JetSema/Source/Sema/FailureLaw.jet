@@ -176,7 +176,7 @@ sema_error_conversion_local_types: fn(items: [Item]) -> [String] Never! {
             .Enum(definition) -> names.push(definition.name)
             .TypeAlias(definition) -> names.push(definition.name)
             .Distinct(definition) -> names.push(definition.name)
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     names
@@ -297,7 +297,7 @@ sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> F
     if parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
         .ErrorConv(definition) -> Val(sema_error_conversion_function(sema_failure_conversion_function_name(source, Type.Named{name: definition.to_ty}), definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
-        else -> None
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -342,7 +342,7 @@ sema_prelude_conversion_demands_enter: fn(state: Shared<SemaPreludeDemandWalk>, 
         .Try(_, value, _) -> Val(value.copy())
         // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
         .TryWithContext(_, _, value, _, _, _) -> Val(value.copy())
-        else -> None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> None
     }
     if conversion == .Val(value) {
         if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, node.span)
@@ -499,7 +499,7 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: String, 
                 }
                 return Val(sema_failure_domain_is_error(definition.target, inner, environment, program))
             }
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -565,7 +565,7 @@ sema_failure_domain_is_error: fn(ty: Type, seen: [String], environment: SemaScop
             return true
         }
         .List(inner) -> return inner == Type.Named{name: "FieldError"}
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -648,7 +648,7 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             sema_check_failure_contract_type(member, span, false, generic_names, environment, program, diagnostics)
         }
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, program, diagnostics)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
 
@@ -762,7 +762,7 @@ sema_union_member_open: fn(ty: Type, generic_names: [String]) -> Bool Never! {
             }
             false
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -798,7 +798,7 @@ sema_public_failure_collect_named: fn(ty: Type, out: &[String]) Never! {
             if ret == .Val(value) -> sema_public_failure_collect_named(value, out)
         }
         .Union(members) -> loop member in members -> sema_public_failure_collect_named(member, out)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
 
@@ -904,7 +904,7 @@ sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program:
             if sema_single_use_is_task(checked.ty) -> diagnostics.push(sema_single_use_diag_unjoined("this task", "`.drop()` discards the handle without joining it, so the task may outlive the function", expr_span(expr)))
             return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
         }
-        else -> return SemaDropStatement{handled: false, value: None}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return SemaDropStatement{handled: false, value: None}
     }
 }
 
@@ -920,13 +920,13 @@ sema_drop_reason_problem: fn(args: [CallArg]) -> SemaDropReasonProblem? {
     parts := [StrPart]{}
     if args[0].expr == {
         .Str(values, _, _) -> parts = values
-        else -> return Val(literal_problem)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return Val(literal_problem)
     }
     if parts.len() == 1 && parts[0] == (StrPart.Lit{text: ""}) -> return Val(SemaDropReasonProblem{what: "`.drop()` reason must not be empty", why: "the reason documents why this result is intentionally discarded", fix: "write `.drop(\"why this is fine to ignore\")` with a real explanation"})
     loop part in parts {
         if part == {
             .Lit(_) -> {}
-            else -> return Val(literal_problem)
+            .Interp(_, _) | .Byte(_) -> return Val(literal_problem)
         }
     }
     None
@@ -943,7 +943,7 @@ sema_stmt_never_return_rejected: fn(value: Expr?, return_type: Type?, function_n
             allows_failure = ok == Type.Named{name: "Never"}
             allows_failure
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !never_success -> return false
     returned: value ?? {
@@ -961,7 +961,7 @@ sema_never_return_is_err: fn(value: Expr) -> Bool {
         .Paren(inner, _, _) -> sema_never_return_is_err(inner)
         .Err(_, _, _) -> true
         .Call(call, _) -> call.name == "Err"
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -983,7 +983,7 @@ sema_never_expr_diverges: fn(expr: Expr, environment: SemaScopeEnvironment, prog
             return false
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
-        else -> return sema_stmt_refutable_expr_diverges(expr)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_stmt_refutable_expr_diverges(expr)
     }
 }
 
@@ -994,7 +994,7 @@ sema_never_callee_return_diverges: fn(ret: Type) -> Bool Never! {
     declared: sema_expr_unwrap_tag(ret)
     if declared == {
         .Result(ok, err) -> ok == never && err == never
-        else -> declared == never
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> declared == never
     }
 }
 
@@ -1043,7 +1043,7 @@ sema_function_promises_never: fn(func: Func) -> Bool {
     if declared == {
         .Named(name) -> name == "Never"
         .Result(ok, _) -> ok == Type.Named{name: "Never"}
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1077,6 +1077,7 @@ sema_lint_inferred_never_return: fn(func: Func, owner_key: String, environment: 
     diagnostics.push(sema_lint("L2421", func.name_span, "Public function `{name}` always diverges but does not declare `Never`", "Inferred divergence is useful to callers but is not part of the written API contract", "Write `-> Never` as the return type, for example `{name}: fn() -> Never`"))
 }
 
+
 // E0408/E0409: `err` names a failure report; an optional fallback or a pure
 // pattern miss has none, so the name is denied instead of resolving outward.
 sema_fallback_err_denied: fn(code: String, span: Span) -> Diagnostic {
@@ -1091,6 +1092,6 @@ sema_fallback_err_denial_for: fn(subject: Type) -> String? {
     if sema_expr_unwrap_tag(subject) == {
         .Result(_, _) -> None
         .Option(_) -> Val("E0408")
-        else -> Val("E0409")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val("E0409")
     }
 }

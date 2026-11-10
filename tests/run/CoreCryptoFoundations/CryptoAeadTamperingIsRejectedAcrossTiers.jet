@@ -19,7 +19,7 @@ run: fn() {
         tampered[0] = U8{Int.from_u8(tampered[0]).bit_xor(1)}
         if expert.xchacha20poly1305_open(key, nonce, tampered, [U8]{4, 5}) == {
             .Err(_) -> print("tamper:rejected")
-            else -> print("tamper:wrong-error")
+            .Ok(_) -> print("tamper:wrong-error")
         }
     }
 }

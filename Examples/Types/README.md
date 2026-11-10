@@ -67,6 +67,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 ## Traits
 
 - [AssociatedTypes](Traits/AssociatedTypes.jet) — associated types on a trait.
+- [BuiltinTargets](Traits/BuiltinTargets.jet) — `impl Int.Named`: a trait the module declares, implemented for built-in types.
 - [DisplayDebug](Traits/DisplayDebug.jet) — Display vs Debug interpolation + #Redact
 - [ExternalMethods](Traits/ExternalMethods.jet)
 - [TagsAndTraits](Traits/TagsAndTraits.jet) — Methods → trait; no methods → tag.

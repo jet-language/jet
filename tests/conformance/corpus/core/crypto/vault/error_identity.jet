@@ -20,7 +20,7 @@ error_name: fn(error: vault.VaultError) -> String Never! {
         .Crypto(cause) -> {
             if cause == {
                 .Unavailable -> "Crypto"
-                else -> panic("Crypto must contain the public CryptoError case")
+                .OpenFailed | .VerifyFailed | .KeyRejected | .Length -> panic("Crypto must contain the public CryptoError case")
             }
         }
         .IO{operation, redacted_path} -> {

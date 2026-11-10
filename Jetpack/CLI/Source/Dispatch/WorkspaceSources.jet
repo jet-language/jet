@@ -39,7 +39,7 @@ cli_report_authority_error: fn(diagnostic: Diagnostic) -[IO, Exec, Time.Wait]> N
 cli_discovery_diagnostic: fn(error: CLIError) -> Diagnostic Never! {
     if error == {
         .Diagnostic(diagnostic) -> diagnostic
-        else -> diagnostic_from_registry("E1340", None, "couldn't discover the project root", error.message(), "repair the project authority files and retry")
+        .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .ManagedTool(_) | .Store(_) | .Environment(_) | .Reported(_) -> diagnostic_from_registry("E1340", None, "couldn't discover the project root", error.message(), "repair the project authority files and retry")
     }
 }
 

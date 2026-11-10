@@ -18,7 +18,7 @@ FoundationFetchError: enum {
             .HTTP(.TLSHandshake, _) -> "E4201"
             .HTTP(.TLSCertificate, _) -> "E4202"
             .HTTP(.TLSTrustRoots, _) -> "E4203"
-            else -> "E3414"
+            .IO(_) | .HTTP(_, _) | .Scheme(_) -> "E3414"
         }
     }
 
@@ -28,7 +28,7 @@ FoundationFetchError: enum {
             .HTTP(.TLSHandshake, _) -> "TLS handshake with `{host}` failed"
             .HTTP(.TLSCertificate, _) -> "TLS certificate for `{host}` could not be trusted"
             .HTTP(.TLSTrustRoots, _) -> "HTTPS could not find system certificate roots"
-            else -> "fetch failed: {self.to_string()}"
+            .IO(_) | .HTTP(_, _) | .Scheme(_) -> "fetch failed: {self.to_string()}"
         }
     }
 
@@ -37,7 +37,7 @@ FoundationFetchError: enum {
             .HTTP(.TLSHandshake, _) -> "`{url}` reached the server, but the connection did not complete a secure HTTPS handshake"
             .HTTP(.TLSCertificate, _) -> "`{url}` presented a certificate Jet could not verify for that host"
             .HTTP(.TLSTrustRoots, _) -> "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available"
-            else -> "could not retrieve `{url}`"
+            .IO(_) | .HTTP(_, _) | .Scheme(_) -> "could not retrieve `{url}`"
         }
     }
 
@@ -46,7 +46,7 @@ FoundationFetchError: enum {
             .HTTP(.TLSHandshake, _) -> "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server"
             .HTTP(.TLSCertificate, _) -> "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly"
             .HTTP(.TLSTrustRoots, _) -> "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it"
-            else -> "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory"
+            .IO(_) | .HTTP(_, _) | .Scheme(_) -> "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory"
         }
     }
 

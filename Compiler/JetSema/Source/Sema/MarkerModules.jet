@@ -115,7 +115,7 @@ sema_marker_module_items: fn(items: [Item], segments: [String], position: Int, e
             .CodeModule(code_module) -> {
                 if position + 1 < segments.len() && sema_casing_marker_qualifier(code_module.name) == segments[position] && code_module.body == .Val(body) -> sema_marker_module_items(body, segments, position + 1, exported && code_module.is_pub, rows)
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -150,7 +150,7 @@ sema_marker_module_declaration_by_span: fn(items: [Item], span: Span) -> MarkerD
                     if declaration != None -> return declaration
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -222,7 +222,7 @@ sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only
                     loop row in sema_marker_module_declarations(body, name, exported_only) -> declarations.push(row)
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     declarations
@@ -330,7 +330,7 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 if code_module.body == .Val(body) -> row.body = Val(sema_marker_module_bind_items(body, bindings))
                 value = Item.CodeModule{value: row}
             }
-            else -> {}
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         bound.push(value)
     }
@@ -620,7 +620,7 @@ sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: M
                 return true
             }
             .StringOrMenu -> return !sema_marker_rules_names_menu_word(argument)
-            else -> return true
+            .String | .Path | .Bool | .Int -> return true
         }
     }
     true

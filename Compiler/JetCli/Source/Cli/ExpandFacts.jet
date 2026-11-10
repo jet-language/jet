@@ -19,7 +19,7 @@ jet_cli_expand_checked_json: fn(value: TComptimeValue) -> JetCLIStatusValue Neve
         .Failed(.Clean(_)) -> JetCLIStatusValue.Null
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_expand_checked_json(entry))
         .Struct(_, fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.name, jet_cli_expand_checked_json(field.value)))
-        else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
+        .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> jet_cli_status_text(jet_cli_expand_checked_show(value))
     }
 }
 jet_cli_expand_checked_field: fn(value: TComptimeValue, name: String) -> TComptimeValue? Never! {
@@ -34,7 +34,7 @@ jet_cli_expand_checked_display: fn(value: TComptimeValue?) -> String Never! {
         .String(text) -> text
         .Int(number) -> "{number}"
         .Failed(.Clean(_)) -> "unknown"
-        else -> jet_cli_expand_checked_show(checked)
+        .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> jet_cli_expand_checked_show(checked)
     }
 }
 jet_cli_expand_location: fn(fields: &[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {

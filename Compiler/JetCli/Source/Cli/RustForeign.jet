@@ -206,26 +206,26 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
     packages_value: jet_cli_rust_foreign_json_field(document, "packages") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata has no packages"))
     packages: if packages_value == {
         .Array(values) -> values
-        else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array")) }
     }
     present := false
     loop package in packages {
         name_value: jet_cli_rust_foreign_json_field(package, "name") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no name"))
         name: if name_value == {
             .Text(value) -> value
-            else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string")) }
         }
         if name == crate_name -> next
         targets_value: jet_cli_rust_foreign_json_field(package, "targets") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no targets"))
         targets: if targets_value == {
             .Array(values) -> values
-            else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array")) }
         }
         loop target in targets {
             kinds_value: jet_cli_rust_foreign_json_field(target, "kind") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata target has no kind"))
             kinds: if kinds_value == {
                 .Array(values) -> values
-                else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array")) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array")) }
             }
             loop kind in kinds {
                 if kind == .Text(value) {

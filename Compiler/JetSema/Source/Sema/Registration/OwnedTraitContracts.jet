@@ -36,7 +36,7 @@ sema_owned_unbound: fn(trait_name: String, missing: [String], span: Span) -> Dia
 sema_owned_owner_name: fn(owner_type: Type) -> String Never! {
     if owner_type == {
         .Named(name) | .Apply(name, _) -> name.copy()
-        else -> type_name(owner_type)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(owner_type)
     }
 }
 
@@ -182,7 +182,7 @@ sema_owned_check_operator: fn(trait_name: String, hook: String, result: Type?, r
 sema_owned_codec_data: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -211,11 +211,11 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
                 ok_owner: if ok == {
                     .Named(name) -> name == owner || name == "Self"
                     .Apply(name, _) -> name == owner
-                    else -> false
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
                 }
                 err_fields: if err == {
                     .List(inner) -> inner == (Type.Named{name: "FieldError"})
-                    else -> false
+                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
                 }
                 returns_owner = ok_owner && err_fields
             }
@@ -253,7 +253,7 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
         success: if returned == .Result(ok, _) -> ok else -> returned
         valid = if success == {
             .Named(name) | .Apply(name, _) -> name == owner
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`comptime from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))

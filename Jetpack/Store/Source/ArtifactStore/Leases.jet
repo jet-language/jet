@@ -28,7 +28,7 @@ ArtifactProcessIdentity: struct {
         pid: sys.pid()
         if store_artifact_lookup_process_start(pid) == {
             .Found(start) -> Ok(ArtifactProcessIdentity.new(pid, start))
-            else -> Ok(ArtifactProcessIdentity.new(pid, "fallback-{pid}-{store_artifact_unique_token()}"))
+            .Missing | .Unknown -> Ok(ArtifactProcessIdentity.new(pid, "fallback-{pid}-{store_artifact_unique_token()}"))
         }
     }
 

@@ -14,7 +14,7 @@ evidence_schedule_object: fn(value: Dyn, what: String) -> [String:Dyn] EvidenceC
             }
             Ok(values)
         }
-        else -> Err(evidence_codec_error("expected {what} object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Err(evidence_codec_error("expected {what} object"))
     }
 }
 
@@ -25,28 +25,28 @@ evidence_schedule_field: fn(fields: [String:Dyn], name: String) -> Dyn EvidenceC
 evidence_schedule_array: fn(value: Dyn, what: String) -> [Dyn] EvidenceCodecError! {
     if value == {
         .Array(values) -> Ok(values)
-        else -> Err(evidence_codec_error("expected {what} array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(evidence_codec_error("expected {what} array"))
     }
 }
 
 evidence_schedule_text: fn(value: Dyn, what: String) -> String EvidenceCodecError! {
     if value == {
         .Text(text) -> Ok(text)
-        else -> Err(evidence_codec_error("expected {what} text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(evidence_codec_error("expected {what} text"))
     }
 }
 
 evidence_schedule_bool: fn(value: Dyn, what: String) -> Bool EvidenceCodecError! {
     if value == {
         .Bool(flag) -> Ok(flag)
-        else -> Err(evidence_codec_error("expected {what} boolean"))
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(evidence_codec_error("expected {what} boolean"))
     }
 }
 
 evidence_schedule_unsigned: fn(value: Dyn, what: String) -> Int EvidenceCodecError! {
     text: if value == {
         .Text(text) -> text
-        else -> {
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             number: foundation_json_integer(value) ?? return Err(evidence_codec_error("expected {what} unsigned integer"))
             if number < 0 -> return Err(evidence_codec_error("expected {what} unsigned integer"))
             number.to_string()
@@ -72,7 +72,7 @@ evidence_schedule_unsigned: fn(value: Dyn, what: String) -> Int EvidenceCodecErr
 evidence_schedule_optional: fn(value: Dyn, what: String) -> String? EvidenceCodecError! {
     if value == {
         .Null -> Ok(None)
-        else -> Ok(Val(evidence_schedule_text(value, what)))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Ok(Val(evidence_schedule_text(value, what)))
     }
 }
 
@@ -100,7 +100,7 @@ evidence_schedule_region: fn(value: Dyn) -> ResourceRegion EvidenceCodecError! {
 evidence_schedule_layout: fn(value: Dyn) -> ResourceLayout? EvidenceCodecError! {
     if value == {
         .Null -> return Ok(None)
-        else -> {}
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
     }
     fields: evidence_schedule_object(value, "resource layout")
     Ok(Val(ResourceLayout{size: evidence_schedule_unsigned(evidence_schedule_field(fields, "size"), "layout size"), align: evidence_schedule_unsigned(evidence_schedule_field(fields, "align"), "layout alignment"), layout: evidence_schedule_text(evidence_schedule_field(fields, "layout"), "layout identity"), device: evidence_schedule_text(evidence_schedule_field(fields, "device"), "layout device")}))

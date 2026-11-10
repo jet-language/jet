@@ -81,7 +81,7 @@ ContributionLayer: enum {
     can_force: fn(self) -> Bool Never! {
         if self == {
             .System | .Fleet -> true
-            else -> false
+            .Declaration | .OptimizationBundle | .Workspace | .Environment | .CommandLine -> false
         }
     }
 }
@@ -172,7 +172,7 @@ FactValue: enum {
             .Policy(value) -> {
                 if value == {
                     .Limit(limit) -> "Policy(Limit({limit:Debug}))"
-                    else -> "Policy({value:Debug})"
+                    .Enabled | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> "Policy({value:Debug})"
                 }
             }
         }
@@ -184,22 +184,22 @@ FactValue: enum {
             .Bool(outer) -> {
                 if next == {
                     .Bool(inner) -> { return if outer && !inner -> SafetyRelation.Tighten else -> SafetyRelation.Widen }
-                    else -> {}
+                    .Int(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> {}
                 }
             }
             .Int(outer) -> {
                 if next == {
                     .Int(inner) -> { return if inner < outer -> SafetyRelation.Tighten else -> SafetyRelation.Widen }
-                    else -> {}
+                    .Bool(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> {}
                 }
             }
             .Policy(outer) -> {
                 if next == {
                     .Policy(inner) -> { return if pkg_policy_gate_widens(outer, inner) -> SafetyRelation.Widen else -> SafetyRelation.Tighten }
-                    else -> {}
+                    .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) -> {}
                 }
             }
-            else -> {}
+            .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) -> {}
         }
         SafetyRelation.Incomparable
     }
@@ -243,14 +243,14 @@ pkg_policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never
         .Default | .GateOnly | .Relaxed -> {
             if inner == {
                 .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> false
-                else -> true
+                .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> true
             }
         }
         .Track -> inner != PolicyValue.Track
         .Skip -> inner != PolicyValue.Skip
         .On -> inner != PolicyValue.On && inner != PolicyValue.Off
         .Off -> inner != PolicyValue.Off
-        else -> true
+        .Enabled | .Limit(_) | .Allow | .Explicit | .Arithmetic(_) -> true
     }
 }
 
@@ -363,7 +363,7 @@ FactError: enum {
     diagnostic: fn(self) -> Diagnostic? Never! {
         if self == {
             .Conflict(key, layer, first, second) -> Val(diagnostic_from_registry("E3521", Val(second.span), "fact `{key}` has conflicting values at the {layer.name()} layer", "`{first.source}` writes {first.value.display()} at {first.span.start}:{first.span.end}; `{second.source}` writes {second.value.display()} at {second.span.start}:{second.span.end}.", "make same-layer writers agree, or move one value to a more explicit contribution layer"))
-            else -> None
+            .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> None
         }
     }
 }

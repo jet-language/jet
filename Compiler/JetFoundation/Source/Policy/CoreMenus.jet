@@ -34,13 +34,13 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
     if name == "Effect" {
         return if kind == {
             .Enum(_) -> Val(effect_roots)
-            else -> None
+            .Plain | .Generic(_) | .CryptoNominal -> None
         }
     }
     if name == "TaintKind" {
         return if kind == {
             .Enum(_) -> Val(builtin_tags)
-            else -> None
+            .Plain | .Generic(_) | .CryptoNominal -> None
         }
     }
     if name == "Path" || name == "State" {
@@ -56,7 +56,7 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
             }
             Val(result)
         }
-        else -> None
+        .Plain | .Generic(_) | .CryptoNominal -> None
     }
 }
 

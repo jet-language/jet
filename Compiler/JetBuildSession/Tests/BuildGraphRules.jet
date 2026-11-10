@@ -16,19 +16,31 @@ build_graph_rules_list: fn(values: [String]) -> BuildSessionValue Never! {
 }
 
 build_graph_rules_error: fn(reply: BuildSessionReply) -> BuildSessionError? Never! {
-    if reply == {.Failure(diagnostic) -> diagnostic.error else -> None}
+    if reply == {
+        .Failure(diagnostic) -> diagnostic.error
+        .Value(_) | .HostRequest(_, _) -> None
+    }
 }
 
 build_graph_rules_ok: fn(reply: BuildSessionReply) -> Bool Never! {
-    if reply == {.Value(_) -> true else -> false}
+    if reply == {
+        .Value(_) -> true
+        .Failure(_) | .HostRequest(_, _) -> false
+    }
 }
 
 build_graph_rules_value: fn(reply: BuildSessionReply) -> BuildSessionValue Never! {
-    if reply == {.Value(value) -> value else -> panic("build declaration failed")}
+    if reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("build declaration failed")
+    }
 }
 
 build_graph_rules_failed: fn(reply: BuildSessionReply) -> Bool Never! {
-    if reply == {.Failure(_) -> true else -> false}
+    if reply == {
+        .Failure(_) -> true
+        .Value(_) | .HostRequest(_, _) -> false
+    }
 }
 
 // `b.found(b.probe("tool", "find_program", "tool"))`: the program the
@@ -47,7 +59,10 @@ build_graph_rules_step: fn(session: &BuildSession, method: String, step: BuildSe
 // `step := b.run(name, tool, caps)`, then `step.output(path)` for each output.
 build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name: String, outputs: [String]) -> BuildSessionReply Never! {
     step: build_session_call(session, "run", [BuildSessionValue]{.Text(value: name), tool, build_graph_rules_list([String]{})}, None, true, 5, 6)
-    handle: if step == {.Value(value) -> value else -> return step}
+    handle: if step == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> return step
+    }
     loop output in outputs {
         made: build_graph_rules_step(session, "output", handle, [BuildSessionValue]{.Text(value: output)})
         if made == .Failure(_) -> return made
@@ -73,7 +88,10 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-a", [String]{".jet/generated/out.jet"})))
     assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-b", [String]{".jet/generated/out.jet"})))
     plan: build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8)
-    queried: build_session_graph(session, if plan == {.Value(value) -> value else -> panic("plan failed")})
+    queried: build_session_graph(session, if plan == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> panic("plan failed")
+    })
     assert(queried.graph == None)
     diagnostic: queried.diagnostic ?? panic("duplicate output must refuse the plan")
     assert_eq(diagnostic.error, Val(BuildSessionError.DuplicateBuildOutput{output: ".jet/generated/out.jet", first_action: "generate-a", second_action: "generate-b"}))

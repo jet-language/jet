@@ -125,7 +125,7 @@ sema_core_type_uses_default_int: fn(ty: Type) -> Bool Never! {
         .Apply(_, args) -> loop argument in args {
             if sema_core_type_uses_default_int(argument) -> break true
         } ?? false
-        else -> false
+        .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }
 
@@ -136,7 +136,7 @@ sema_core_generated_receiver_key: fn(receiver: Expr) -> String Never! {
             prefix: sema_core_generated_receiver_key(base)
             if prefix == "" -> member else -> "{prefix}.{member}"
         }
-        else -> ""
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
     }
 }
 
@@ -242,7 +242,7 @@ sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegist
         if row.declaration.kind == {
             .Module(name, _) -> target = name
             .Unqualified(module_alias, _, _, _, _) -> target = module_alias
-            else -> {}
+            .File(_, _) -> {}
         }
     }
     if {
@@ -252,7 +252,7 @@ sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegist
                     alias := if row.declaration.alias != "" -> row.declaration.alias else -> name
                     sema_core_generated_register_core_alias(markers, alias, target)
                 }
-                else -> {}
+                .File(_, _) | .Unqualified(_, _, _, _, _) -> {}
             }
             loop binding in row.bindings {
                 if {
@@ -293,7 +293,7 @@ sema_core_generated_scope_shadow_items: fn(items: [Item], markers: &[String:Bool
             .Distinct(definition) -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(definition.name))
             .TypeAlias(definition) -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(definition.name))
             .Trait(definition) -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(definition.name))
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -329,7 +329,7 @@ sema_core_generated_scope_import_markers: fn(declarations: [ImportDecl], markers
                     }
                 }
             }
-            else -> {}
+            .File(_, _) -> {}
         }
     }
 }
@@ -351,7 +351,7 @@ sema_core_generated_direct_item_roots: fn(items: [Item], used: &[String], spans:
                 if sema_core_generated_struct_has_cli(definition) -> sema_core_note_usage(used, spans, "core.args::spec", None)
                 if definition.validate_span != None || definition.validate_block.len() > 0 -> sema_core_note_usage(used, spans, "core.validate::field_error", None)
             }
-            else -> {}
+            .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -609,7 +609,7 @@ sema_core_collect_type: fn(ty: Type, registered: [String:Bool], used: &[String],
                 .Internal(internal) -> {
                     if internal == InternalTag.CoreCryptoNominal -> sema_core_note_usage(used, spans, "core.crypto::__nominal__", span)
                 }
-                else -> {}
+                .User(_) -> {}
             }
             sema_core_collect_type(inner, registered, used, spans, span)
         }
@@ -637,7 +637,7 @@ sema_core_collect_type: fn(ty: Type, registered: [String:Bool], used: &[String],
         .Union(members) -> loop member in members -> sema_core_collect_type(member, registered, used, spans, span)
         .TraitObject(bounds) -> loop bound in bounds -> sema_core_note_type_modules(bound, registered, used, spans, span)
         .Quantity(base, _) -> sema_core_collect_type(base, registered, used, spans, span)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
 
@@ -716,7 +716,7 @@ sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationMod
                 key: symbol_id(SymbolKind.Function, registration_module.module_identity, "", function.name).key
                 if called.get(key) == None -> unshared.push(function.name)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     unshared
@@ -759,7 +759,7 @@ sema_core_collect_ast_import: fn(imports: &[SemaCoreImport], declaration: Import
                 sema_core_import_add(imports, SemaCoreImport{alias: local, module_name: module_name, item: Val(item.original), span: span})
             }
         }
-        else -> {}
+        .File(_, _) -> {}
     }
 }
 
@@ -841,7 +841,7 @@ sema_core_collect_item: fn(item: Item, owner: String, unshared: [String], import
                 sema_core_collect_items(body, "", [String]{}, scoped, scoped_registered, used, spans, callbacks)
             }
         }
-        else -> {}
+        .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -852,7 +852,7 @@ sema_core_collect_lvalue: fn(value: LValue, imports: [SemaCoreImport], registere
             sema_core_collect_expr(index, imports, registered, used, spans, callbacks)
         }
         .Field(base, _, _) -> sema_core_collect_expr(base, imports, registered, used, spans, callbacks)
-        else -> {}
+        .Local(_, _) -> {}
     }
 }
 
@@ -903,7 +903,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                     call.args.len() == 1 -> {
                         if call.args[0].expr == {
                             .Str(_, _, _) -> true
-                            else -> false
+                            .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
                         }
                     }
                     else -> false
@@ -943,17 +943,20 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                 .Ident(name, _, _) -> {
                     if name == "Path" -> sema_core_note_usage(used, spans, "core.files::__pathapi__", Val(method_span))
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
             if receiver == {
                 .Ident(name, _, _) -> {
                     sema_core_note_builtin_math_type(name, registered, used, spans, Val(method_span))
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
             loop ty in owner_type_args -> sema_core_collect_type(ty, registered, used, spans, Val(method_span))
             loop ty in type_args -> sema_core_collect_type(ty, registered, used, spans, Val(method_span))
-            recv_name := if receiver == {.Ident(name, _, _) -> name else -> ""}
+            recv_name := if receiver == {
+                .Ident(name, _, _) -> name
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
+            }
             if sema_core_is_internal_task_key(recv_name, "") -> sema_core_note_usage(used, spans, "core.concurrency::task", Val(method_span))
             if method == {
                 "trim_start" | "trim_end" | "pad_start" | "pad_end" |
@@ -1002,10 +1005,10 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                                 if sema_core_import_is_core(imported.module_name) && sema_core_generated_type(imported.module_name, leaf) -> sema_core_note_usage(used, spans, "{imported.module_name}::{leaf}.{method}", Val(method_span))
                             }
                         }
-                        else -> {}
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
                     }
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
             sema_core_collect_expr(receiver, imports, registered, used, spans, callbacks)
             loop arg in args {
@@ -1026,7 +1029,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                 .Ident(alias, _, _) -> {
                     if sema_core_is_data_type(alias) && member == "Null" -> sema_core_note_usage(used, spans, "core::json", Val(span))
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
             sema_core_collect_expr(base, imports, registered, used, spans, callbacks)
         }
@@ -1070,7 +1073,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                     if sema_core_format_selector_member(format) == .Val(member) -> sema_core_note_usage(used, spans, "core.text.fmt::{member}", Val(expr_span(value)))
                     sema_core_collect_expr(value, imports, registered, used, spans, callbacks)
                 }
-                else -> {}
+                .Lit(_) | .Byte(_) -> {}
             }
         }
         .ListLit(values, _, _) -> loop value in values -> sema_core_collect_expr(value, imports, registered, used, spans, callbacks)
@@ -1096,7 +1099,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                     .Named(name) -> {
                         sema_core_note_typed_head(used, spans, name, Val(span))
                     }
-                    else -> {}
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                 }
             }
             sema_core_collect_typed_literal_body(body, imports, registered, used, spans, callbacks)
@@ -1132,7 +1135,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                 .Panic(_, args) -> {
                     loop arg in args -> sema_core_collect_expr(arg.expr, imports, registered, used, spans, callbacks)
                 }
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .Lambda(lambda, _) -> {
@@ -1158,7 +1161,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                     .Struct(type_name, _) -> {
                         if type_name == "Measurement" -> sema_core_note_usage(used, spans, "core.units::from", Val(span))
                     }
-                    else -> {}
+                    .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {}
                 }
             }
         }
@@ -1167,7 +1170,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
         .Ident(name, span, _) -> {
             if name == "input" -> sema_core_note_usage(used, spans, "core.term::__input_lines", Val(span))
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .CallValue(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -1264,7 +1267,7 @@ sema_core_collect_stmts: fn(statements: [Stmt], imports: [SemaCoreImport], regis
                 loop arg in args -> sema_core_collect_expr(arg, imports, registered, used, spans, callbacks)
                 sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)
             }
-            else -> {}
+            .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
         }
     }
 }
@@ -1277,7 +1280,7 @@ sema_core_switch_has_readiness: fn(arms: [SwitchArm]) -> Bool Never! {
             .TupleLit(fields, _, _, _) -> {
                 if fields.len() == 1 -> return true
             }
-            else -> {}
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
         }
     }
     false
@@ -1377,7 +1380,7 @@ sema_core_registration_imports: fn(registration_module: SemaRegistrationModule) 
                 }
                 if declaration.alias != "" -> sema_core_import_add(imports, SemaCoreImport{alias: declaration.alias, module_name: target, item: None, span: span})
             }
-            else -> {}
+            .File(_, _) -> {}
         }
     }
     imports

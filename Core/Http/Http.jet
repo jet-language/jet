@@ -963,7 +963,7 @@ body_as_text: fn(body: Body) -> String Never! {
     if body == {
         .Text(s) -> return s
         .Bytes(xs) -> return String.from_bytes(xs) ?? ""
-        else -> return ""
+        .Empty -> return ""
     }
     ""
 }
@@ -973,7 +973,6 @@ body_as_bytes: fn(body: Body) -> [U8] Never! {
         .Empty -> return [U8]{}
         .Text(s) -> return body_as_text(Body.Text(s)).bytes()
         .Bytes(xs) -> return xs
-        else -> return [U8]{}
     }
     [U8]{}
 }

@@ -37,7 +37,7 @@ JET_CLI_DEV_ENGINE_VERB: "__dev"
 jet_cli_dev_environment_plan: fn(start: String, raw: [String]) -[FS, Env]> JetCLIPlan? Never! {
     if jet_cli_find_package_root(start, false) == {
         .Absent -> {}
-        else -> return None
+        .Root(_) | .Refused(_) -> return None
     }
     if jet_cli_find_env_root(start) == None -> return None
     engine := [String]{JET_CLI_DEV_ENGINE_VERB}

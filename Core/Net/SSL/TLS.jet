@@ -1024,7 +1024,7 @@ ssl_sig_from_pk_alg: fn(kind: oids.PKType?) -> Int Never! {
     if t == {
         .RSA -> ssldefs.SSL_SIG_RSA
         .ECDSA | .ECKey -> ssldefs.SSL_SIG_ECDSA
-        else -> ssldefs.SSL_SIG_ANON
+        .ECKeyDH | .RSAAlt | .RSASSAPSS | .Opaque -> ssldefs.SSL_SIG_ANON
     }
 }
 
@@ -1058,7 +1058,7 @@ ssl_hash_from_md_alg: fn(md: hashes.Md?) -> Int Never! {
         .SHA256 -> ssldefs.SSL_HASH_SHA256
         .SHA384 -> ssldefs.SSL_HASH_SHA384
         .SHA512 -> ssldefs.SSL_HASH_SHA512
-        else -> ssldefs.SSL_HASH_NONE
+        .RIPEMD160 | .SHA3x224 | .SHA3x256 | .SHA3x384 | .SHA3x512 -> ssldefs.SSL_HASH_NONE
     }
 }
 
@@ -1117,7 +1117,7 @@ ssl_get_tls_id_from_ecp_group_id: fn(grp_id: ecp.GroupID) -> Int Never! {
         .Secp192k1 -> 18
         .Curve25519 -> 29
         .Curve448 -> 30
-        else -> 0
+        .Unknown -> 0
     }
 }
 
@@ -1385,7 +1385,7 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
             if ssl.send_alert != 0 -> return sslmsg.ssl_handle_pending_alert(ssl, rng)
             return Err(e)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if ssl.state == ssldefs.SSL_HANDSHAKE_OVER && ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> ssl_handshake_free(ssl)
 }
@@ -1610,12 +1610,12 @@ ssl_derive_keys: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 ssl_tls12_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
     if layer.cipher_setkey(ctx, key, op) == {
         .Err(e) -> return Val(e)
-        else -> {}
+        .Ok(_) -> {}
     }
     if ctx.info.mode == .CBC {
         if layer.cipher_set_padding_mode(ctx, cipher.CBCPadding.Unpadded) == {
             .Err(e) -> return Val(e)
-            else -> {}
+            .Ok(_) -> {}
         }
     }
     None
@@ -1795,7 +1795,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
             p += 2 + z.len()
             ssldefs.ssl_wipe(z)
         }
-        else -> return Err(.InternalError)
+        .NoExchange | .RSA | .DHERSA | .ECDHERSA | .ECDHEECDSA | .ECDHRSA | .ECDHECDSA -> return Err(.InternalError)
     }
     if end - p < 2 -> return Err(.BadInputData)
     ssldefs.ssl_put_u16(ssl.handshake.premaster, p, psk.len())
@@ -1917,13 +1917,13 @@ ssl_parse_certificate_chain: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509c
                         ssl_send_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT, rng)
                         return Err(.X509(e))
                     }
-                    else -> {
+                    .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .SigMismatch | .CertVerifyFailed(_) | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> {
                         ssl_send_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_BAD_CERT, rng)
                         return Err(.X509(e))
                     }
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         i += n
     }
@@ -2097,7 +2097,7 @@ ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
             ssldefs.ssl_wipe(buf)
             return Err(e)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     hdr: sslmsg.ssl_hs_hdr_len(ssl)
     hash_len: 12
@@ -2358,7 +2358,7 @@ ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersui
                     .RSA | .RSAPSK -> usage = x509.X509_KU_KEY_ENCIPHERMENT
                     .DHERSA | .ECDHERSA | .ECDHEECDSA -> usage = x509.X509_KU_DIGITAL_SIGNATURE
                     .ECDHRSA | .ECDHECDSA -> usage = x509.X509_KU_KEY_AGREEMENT
-                    else -> usage = 0
+                    .NoExchange | .PSK | .DHEPSK | .ECDHEPSK -> usage = 0
                 }
             }
             None -> {}
@@ -2369,7 +2369,7 @@ ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersui
             flags = flags.bit_or(x509.X509_BADCERT_KEY_USAGE)
             ok = false
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     ext_oid: if recv_endpoint == ssldefs.SSL_IS_CLIENT -> oids.OID_SERVER_AUTH else -> oids.OID_CLIENT_AUTH
     if x509crt.x509_crt_check_extended_key_usage(cert, ext_oid) == {
@@ -2377,7 +2377,7 @@ ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersui
             flags = flags.bit_or(x509.X509_BADCERT_EXT_KEY_USAGE)
             ok = false
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     ok
 }
@@ -2396,11 +2396,11 @@ ssl_verify_failure_is_soft: fn(e: ssldefs.SSLError) -> Bool Never! {
         .X509(x) -> {
             if x == {
                 .CertVerifyFailed(_) -> return true
-                else -> return false
+                .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> return false
             }
         }
         .BadCertificate -> true
-        else -> false
+        .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> false
     }
 }
 
@@ -2432,7 +2432,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, sni_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
-                else -> return None
+                .Ok(_) -> return None
             }
         }
         None -> {}
@@ -2441,7 +2441,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, conf_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
-                else -> return None
+                .Ok(_) -> return None
             }
         }
         None -> {}
@@ -2449,7 +2449,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
     empty := [x509crt.X509Crt]{}
     if x509crt.x509_crt_verify_with_profile_at(chain, empty, conf_crl, profile, cn, vrfy, now) == {
         .Err(e) -> Val(e)
-        else -> None
+        .Ok(_) -> None
     }
 }
 
@@ -2481,7 +2481,7 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
             // C's flags: those of the failed check, all set for any other error.
             if e == {
                 .CertVerifyFailed(f) -> ssl.spool[sn].verify_result = f
-                else -> ssl.spool[sn].verify_result = 0xFFFFFFFF
+                .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> ssl.spool[sn].verify_result = 0xFFFFFFFF
             }
         }
         None -> ssl.spool[sn].verify_result = 0
@@ -2809,7 +2809,7 @@ vec_wycheproof: fn(name: String) -[FS, Env, Net, Time.Wait]> Dyn {
 vec_text: fn(d: Dyn, key: String) -> String {
     if d[key] == {
         .Text(s) -> s.copy()
-        else -> panic("Wycheproof field {key} is missing")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Wycheproof field {key} is missing")
     }
 }
 
@@ -2818,14 +2818,14 @@ vec_int: fn(d: Dyn, key: String) -> Int {
         .Int(n) -> n
         .Number(s) -> Int.parse(s) ?? panic("Wycheproof field {key}: {s}")
         .Float(x) -> Int.from_float(x) ?? panic("Wycheproof field {key}: {x}")
-        else -> panic("Wycheproof field {key} is missing")
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Wycheproof field {key} is missing")
     }
 }
 
 vec_items: fn(d: Dyn, key: String) -> [Dyn] {
     if d[key] == {
         .Array(items) -> items.copy()
-        else -> panic("Wycheproof field {key} is missing")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("Wycheproof field {key} is missing")
     }
 }
 

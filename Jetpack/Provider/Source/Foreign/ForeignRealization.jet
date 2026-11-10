@@ -26,7 +26,7 @@ provider_realize_foreign_dependencies: fn(verification: &StoreVerification, root
     loop name in names {
         if manifest.dependencies[name] == {
             .Foreign(language, reference) -> realized.push(provider_realize_foreign_one(verification, roots, project_root, name, language, reference, ctx))
-            else -> {}
+            .Path(_) | .Git(_, _) | .Registry(_) -> {}
         }
     }
     Ok(realized)
@@ -98,7 +98,7 @@ provider_foreign_artifact_root: fn(project_root: String, spec: ProviderRef, ctx:
             target: spec.target.split_once("#version=")?.before ?? spec.target
             if files.is_abs(target) -> target else -> files.join(project_root, target)
         }
-        else -> {
+        .Jetpack | .Nixpkgs | .Github | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> {
             fixtures: ctx.fixtures ?? return Err(ProviderError.Unsupported("foreign provider {spec.provider.label()} has no verified artifact cache for {spec.raw}; fetch the provider output before compiling"))
             files.join(files.join(files.join(fixtures, "foreign"), spec.provider.label()), provider_safe_ref_name(name, spec.target))
         }

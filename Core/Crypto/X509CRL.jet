@@ -202,7 +202,7 @@ x509_crl_parse_der_core: fn(buf: [U8]) -> X509Crl x509.X509Error! {
         .Err(e) -> {
             absent: if e == {
                 .InvalidDate(inner) -> inner == .Val(.UnexpectedTag) || inner == .Val(.OutOfData)
-                else -> false
+                .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertVerifyFailed(_) | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> false
             }
             if !absent -> return Err(e)
         }

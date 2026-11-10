@@ -629,7 +629,7 @@ report: fn() -> String Never! {
             if family.coverage == {
                 .Gap -> rows.push(if family.note == "" -> "- GAP: {c_names(family)} (`{family.header}`)" else -> "- GAP: {c_names(family)} (`{family.header}`): {family.note}")
                 .Partial -> rows.push("- partial: {c_names(family)} (`{family.header}`): {family.note}")
-                else -> {}
+                .Covered | .Language | .NotNeeded -> {}
             }
         }
         if rows.len() == 0 -> next

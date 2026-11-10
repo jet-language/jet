@@ -122,7 +122,7 @@ sema_expression_lambda_pattern_use_outer: fn(pattern: Pattern, frame: Int, param
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> sema_expression_lambda_pattern_use_outer(nested, frame, params, scopes) else -> false
         }
-        else -> false
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
     }
 }
 
@@ -131,7 +131,7 @@ sema_expression_lambda_slot_use_outer: fn(slot: PatSlot, frame: Int, params: [St
         .Value(value) -> sema_expression_lambda_uses_outer(value, frame, params, scopes)
         .Nested(inner) -> sema_expression_lambda_pattern_use_outer(inner, frame, params, scopes)
         .Named(_, _, inner) -> sema_expression_lambda_slot_use_outer(inner, frame, params, scopes)
-        else -> false
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> false
     }
 }
 
@@ -163,7 +163,7 @@ sema_expression_lambda_uses_outer: fn(expr: Expr, frame: Int, params: [String], 
                     if sema_expression_lambda_uses_outer(entry.key, frame, params, scopes) || sema_expression_lambda_uses_outer(entry.value, frame, params, scopes) -> return true
                 }
                 .Value(value) -> return sema_expression_lambda_uses_outer(value, frame, params, scopes)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
             false
         }
@@ -283,7 +283,6 @@ sema_expression_lambda_uses_outer: fn(expr: Expr, frame: Int, params: [String], 
                             return true
                         }
                     }
-                    else -> {}
                 }
                 index += 1
             }
@@ -326,14 +325,13 @@ sema_expression_lambda_uses_outer: fn(expr: Expr, frame: Int, params: [String], 
                     }
                     return false
                 }
-                else -> false
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> false
             }
         }
         .Lambda(nested, _) -> {
             return if nested.body == {
                 .Expr(value) -> sema_expression_lambda_uses_outer(value, frame, params, scopes)
                 .Block(body) -> sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
-                else -> false
             }
         }
         .PatternTest(subject, pattern, _, _) -> sema_expression_lambda_uses_outer(subject, frame, params, scopes) || sema_expression_lambda_pattern_use_outer(pattern, frame, params, scopes)
@@ -345,7 +343,7 @@ sema_expression_lambda_uses_outer: fn(expr: Expr, frame: Int, params: [String], 
             }
             false
         }
-        else -> false
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -389,7 +387,6 @@ sema_expression_lambda_statement_use_outer: fn(statement: Stmt, frame: Int, para
                         }
                     }
                 }
-                else -> {}
             }
             sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
         }
@@ -471,7 +468,7 @@ sema_expression_lambda_statement_use_outer: fn(statement: Stmt, frame: Int, para
             sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
         }
         .DeferClose(close, _) -> sema_expression_lambda_uses_outer(close, frame, params, scopes)
-        else -> false
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> false
     }
 }
 
@@ -583,7 +580,7 @@ sema_expression_lambda_bound_expr_use: fn(expr: Expr, name: String) -> Bool {
                 }
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     false
 }
@@ -642,7 +639,7 @@ sema_expression_lambda_bound_statement_use: fn(statement: Stmt, name: String) ->
             return sema_expression_lambda_bound_statements_use(body, name)
         }
         .Yield(value, _) | .DeferClose(value, _) -> return sema_expression_lambda_bound_expr_use(value, name)
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .AuthorityScope(_, _, _, _, _) -> {}
     }
     false
 }
@@ -658,7 +655,7 @@ sema_expression_lambda_bound_direct_callee: fn(expr: Expr, name: String) -> Bool
     if expr == {
         .Ident(value, _, _) -> return value == name
         .Paren(inner, _, _) -> return sema_expression_lambda_bound_direct_callee(inner, name)
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -685,7 +682,7 @@ sema_expression_lambda_bound_expr_non_direct_use: fn(expr: Expr, name: String) -
             return false
         }
         .Lambda(_, _) -> return sema_expression_lambda_bound_expr_use(expr, name)
-        else -> return sema_expression_lambda_bound_expr_use(expr, name)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_expression_lambda_bound_expr_use(expr, name)
     }
 }
 
@@ -702,7 +699,7 @@ sema_expression_lambda_bound_statement_non_direct_use: fn(statement: Stmt, name:
                 .Field(base, _, _) -> {
                     if sema_expression_lambda_bound_expr_use(base, name) -> return true
                 }
-                else -> {}
+                .Local(_, _) -> {}
             }
             return sema_expression_lambda_bound_expr_non_direct_use(value, name)
         }
@@ -756,7 +753,7 @@ sema_expression_lambda_bound_statement_non_direct_use: fn(statement: Stmt, name:
             return sema_expression_lambda_bound_statements_non_direct_use(body, name)
         }
         .Yield(value, _) | .DeferClose(value, _) -> return sema_expression_lambda_bound_expr_non_direct_use(value, name)
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .AuthorityScope(_, _, _, _, _) -> {}
     }
     false
 }
@@ -811,7 +808,7 @@ sema_expression_lambda_bound_expr_mut_use: fn(expr: Expr, name: String) -> Bool 
         .Unary(_, value, _, _) | .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Tainted(value, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Paren(value, _, _) -> return sema_expression_lambda_bound_expr_mut_use(value, name)
         .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Index(base, _, _, _, _) -> return sema_expression_lambda_bound_expr_mut_use(base, name)
         .Lambda(_, _) -> return false
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     false
 }
@@ -872,7 +869,7 @@ sema_expression_lambda_bound_statement_mut_use: fn(statement: Stmt, name: String
             loop argument in args { if sema_expression_lambda_bound_expr_mut_use(argument, name) -> return true }
             return sema_expression_lambda_bound_statements_mut_use(body, name)
         }
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .AuthorityScope(_, _, _, _, _) -> {}
     }
     false
 }
@@ -1112,7 +1109,7 @@ sema_expression_lambda_collect_tree_fallback: fn(fallback: TOrFallback, frame: I
         .Value(value) -> sema_expression_lambda_collect_tree_expr(value, frame, scopes, keys)
         .Return(value) -> sema_expression_lambda_collect_tree_optional_expr(value, frame, scopes, keys)
         .Panic(message, _) -> sema_expression_lambda_collect_tree_expr(message, frame, scopes, keys)
-        else -> {}
+        .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> {}
     }
 }
 
@@ -1214,7 +1211,7 @@ sema_expression_lambda_collect_tree_expr: fn(value: TExpr, frame: Int, scopes: &
             sema_expression_lambda_collect_tree_optional_expr(after_value, frame, scopes, keys)
         }
         .FnValue(kind) -> sema_expression_lambda_collect_tree_fn_value(kind, frame, scopes, keys)
-        else -> {}
+        .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .StaticCall(_, _, _, _, _) | .DistinctRaw(_) | .PatternMatches(_, _) | .OverflowOpt(_, _, _, _, _) | .Flat(_) -> {}
     }
 }
 
@@ -1291,7 +1288,7 @@ sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: I
                 }
                 if else_body != None -> sema_expression_lambda_collect_tree_statements(else_body, frame, scopes, keys)
             }
-            else -> {}
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
     }
 }
@@ -1316,7 +1313,7 @@ sema_expression_lambda_is_view_type: fn(ty: Type, string_view: Bool) -> Bool Nev
     if string_view -> return true
     if ty == {
         .Apply(name, _) -> return name == "View" || name == "ViewMut" || name == "ViewIter"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1334,7 +1331,7 @@ sema_expression_lambda_block_value_type: fn(statements: [TStmt], fallback: Type)
                 }
             }
             .ExprStmt(value, _) -> return value.ty
-            else -> {}
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
         index -= 1
     }
@@ -1413,7 +1410,7 @@ sema_expression_lambda_expects_http_handler: fn(expected: Type?, environment: Se
     wanted: expected ?? return false
     if sema_call_resolved_type(wanted, environment, program) == {
         .Named(name) -> name == "<corelib>/core.http.server::HTTPHandler"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1464,7 +1461,7 @@ sema_expression_lambda_collection_callback: fn(expr: Expr, expected: Type?, envi
     keeps_slot: open_result && shorthand == None && sema_expr_is_bare_member_chain(source)
     checked := if source == {
         .Lambda(lambda, _) -> sema_expression_lambda_with_host(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics, false, false, false, true)
-        else -> sema_check_expression(source, if open_result && !keeps_slot -> None else -> expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_check_expression(source, if open_result && !keeps_slot -> None else -> expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if shorthand != None -> context.subject_shorthand_depth -= 1
     context.lambda_escapes = previous_lambda_escapes
@@ -1474,14 +1471,14 @@ sema_expression_lambda_collection_callback: fn(expr: Expr, expected: Type?, envi
 sema_expression_lambda_host_callback: fn(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
         .Lambda(lambda, _) -> return sema_expression_lambda_with_host(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics, true, write, false, false)
-        else -> sema_check_expression(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_check_expression(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
 sema_expression_lambda_host_callback_stored: fn(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
         .Lambda(lambda, _) -> return sema_expression_lambda_with_host(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics, true, write, true, false)
-        else -> sema_check_expression(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_check_expression(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
@@ -1528,7 +1525,7 @@ sema_expression_lambda_rewrite_loop_label: fn(statements: &[Stmt], old_label: St
                     .Loop(_, _, _, _) -> statements[index] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
                     .While(condition, _, _, _, _) -> statements[index] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
                     .CountedLoop(init, condition, step, _, _, _, _) -> statements[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
-                    else -> {}
+                    .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
                 }
             }
             .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
@@ -1616,7 +1613,7 @@ sema_expression_lambda_rewrite_loop_label: fn(statements: &[Stmt], old_label: St
                 sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
                 statements[index] = Stmt.ScopeMember{name: name, name_span: name_span, args: args, args_span: args_span, body: updated_body, dsl: dsl, dot_span: dot_span, span: span}
             }
-            else -> {}
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
         index += 1
     }
@@ -1646,12 +1643,12 @@ sema_expression_lambda_install_loop_label: fn(lambda: &Lambda, label: NamedSpan)
                     if previous != None -> old_label = Val(previous.name)
                     updated_statements[0] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: body, span: span, arrow_body: arrow_body, label: Val(label)}
                 }
-                else -> {}
+                .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
             }
             if old_label == .Val(old) && old != label.name -> sema_expression_lambda_rewrite_loop_label(updated_statements, old, label.name)
             lambda.body = LambdaBody.Block{body: updated_statements}
         }
-        else -> {}
+        .Expr(_) -> {}
     }
 }
 
@@ -1726,7 +1723,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 expected_metadata = metadata
                 expected_provenance = provenance
             }
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 diagnostics.push(sema_type_mismatch(normalized, Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}, lambda.span))
                 return None
             }
@@ -2282,7 +2279,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         .Val(.Result(_, err)) -> {
             if !sema_expression_lambda_type_is_result(success_ty) -> ret_ty = Type.Result{ok: success_ty, err: err}
         }
-        else -> {}
+        .Val(_) | .None -> {}
     }
     // A callback that inferred its carrier returns it around the success value.
     if !inline_loop && lambda_context.failure_inference && lambda_context.inferred_failure_carrier == .Val(inferred) {
@@ -2316,7 +2313,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         has_carrier: if ret_ty == {
             .Result(_, _) | .Option(_) -> true
             .Named(name) -> name == "Never"
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         if !has_carrier {
             ret_ty = Type.Result{ok: ret_ty, err: Type.Named{name: "Never"}}
@@ -2630,10 +2627,10 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
                     .Live(_, _) -> statements[index] = TStmt.Live{body: updated, span: span}
                     .Shield(_, _) -> statements[index] = TStmt.Shield{body: updated, span: span}
                     .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember{kind: kind, body: updated, span: span}
-                    else -> {}
+                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
                 }
             }
-            else -> {}
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
         }
     }
 }

@@ -30,7 +30,7 @@ sema_time_handle_receiver_name: fn(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> if sema_call_is_clock_type(ty) -> "Clock" else -> name
         .Tagged(_, inner) -> sema_time_handle_receiver_name(inner)
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
 }
 
@@ -41,7 +41,7 @@ sema_time_failure_carrier: fn(result: Type) -> TFailureCarrier Never! {
         // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
         .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: result} else -> TFailureCarrier.Infallible
-        else -> TFailureCarrier.Infallible
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
     }
 }
 
@@ -110,7 +110,7 @@ sema_time_finish_handle: fn(receiver: TExpr, operation: THandleOp, args: [TExpr]
 sema_time_clock_is_deterministic: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_time_handle_receiver_name(inner) == "Clock"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -126,7 +126,7 @@ sema_time_injected_clock: fn(ty: Type) -> Type? Never! {
 sema_time_clock_is_system: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.SystemClock} && sema_time_handle_receiver_name(inner) == "Clock"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -242,10 +242,13 @@ sema_time_rng_generic_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     first: sema_check_expression(updated_args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    element: if first.ty == {.List(inner) -> inner else -> {
+    element: if first.ty == {
+        .List(inner) -> inner
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
         diagnostics.push(sema_error("E0112", updated_args[0].span, "`{method}` needs a list, not {type_name(first.ty)}", "`rng.{method}` operates on a `[T]`", "pass a `[T]` value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
-    }}
+    }
+    }
     values := [TExpr]{first}
     if method == "weighted_pick" {
         weights: sema_check_expression(updated_args[1].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -260,7 +263,7 @@ sema_time_rng_generic_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         count_is_valid := count.ty == Type.Int
         if count.ty == {
             .InlineRange(_, _, _) -> { count_is_valid = true }
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
         if !count_is_valid {
             diagnostics.push(sema_error("E0112", updated_args[1].span, "`sample` count must be Int, not {type_name(count.ty)}", "`rng.sample` chooses up to k items without replacement", "pass an Int count"))

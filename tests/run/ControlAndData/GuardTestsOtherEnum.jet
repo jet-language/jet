@@ -19,7 +19,7 @@ pick: fn(instructions: [Instr], form: Form) -> Int? {
         if instruction.operation == {
             .RangeInit(_, _) && form == .Counted -> return Val(1)
             .IterInit(_, _) && form == .Iterator -> return Val(2)
-            else -> {}
+            .RangeInit(_, _) | .IterInit(_, _) | .IterAdvance(_, _) | .Other -> {}
         }
     }
     None
@@ -29,7 +29,7 @@ pick_local: fn(op: Op, form: Form) -> Int {
     if op == {
         .RangeInit(_, _) && form == .Counted -> 1
         .IterInit(_, _) && form == .Iterator -> 2
-        else -> 0
+        .RangeInit(_, _) | .IterInit(_, _) | .IterAdvance(_, _) | .Other -> 0
     }
 }
 

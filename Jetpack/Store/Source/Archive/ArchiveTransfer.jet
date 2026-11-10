@@ -328,13 +328,13 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
                 .Err(failed) -> {
                     rollback_errors.push("removing imported output: {failed.message()}")
                 }
-                else -> {}
+                .Ok(_) -> {}
             }
         }
         .Err(missing) -> {
             if missing == {
                 .NotFound(_) -> {}
-                else -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     rollback_errors.push("checking imported output: {StoreError.IO(missing).message()}")
                 }
             }
@@ -349,7 +349,7 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
                         .Err(failed) -> {
                             rollback_errors.push("syncing restored output: {failed.message()}")
                         }
-                        else -> {}
+                        .Ok(_) -> {}
                     }
                 }
                 .Err(failed) -> {
@@ -460,7 +460,7 @@ store_archive_import_unlocked: fn(verification: &StoreVerification, roots: Hanga
         failure := error
         if store_archive_rollback_import_moves(verification, moved, hangar) == {
             .Err(rollback) -> failure = StoreError.Other("{error.message()}; archive import rollback failed: {rollback.message()}")
-            else -> {}
+            .Ok(_) -> {}
         }
         store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
         return Err(failure)
@@ -1029,10 +1029,10 @@ store_archive_write_private_atomic: fn(path: String, bytes: [U8]) StoreError! {
             .Err(cleanup) -> {
                 if cleanup == {
                     .NotFound(_) -> {}
-                    else -> return Err(failure.with_message("{failure.message()}; could not remove private archive-key staging file: {StoreError.IO(cleanup).message()}"))
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(failure.with_message("{failure.message()}; could not remove private archive-key staging file: {StoreError.IO(cleanup).message()}"))
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         return Err(failure)
     }
@@ -1088,7 +1088,7 @@ store_archive_lstat: fn(path: String) -> files.Stat? StoreError! {
     info: files.stat(path) ?? {
         if err == {
             .NotFound(_) -> return Ok(None)
-            else -> return Err(StoreError.IO(err))
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
         }
     }
     Ok(Val(info))

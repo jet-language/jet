@@ -155,7 +155,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 #Test("rejects unknown source") {
     if pkg_test_ref_error("wget@brew") == {
         .UnknownSource(source, _, _) -> assert_eq(source, "brew")
-        else -> panic("expected UnknownSource")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
     }
 }
 
@@ -198,7 +198,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
         .Err(error) -> {
             if error == {
                 .UnknownSource(_, _, declared) -> assert_eq(declared, [String]{"stable", "unstable"})
-                else -> panic("expected UnknownSource")
+                .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
             }
         }
     }
@@ -232,14 +232,14 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
     assert_eq(error.code(), Val("E1231"))
     if error == {
         .UnknownMember(_, suggestions) -> assert_eq(suggestions, [String]{"logging"})
-        else -> panic("expected UnknownMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> panic("expected UnknownMember")
     }
 }
 
 #Test("unknown path member suggests paths only") {
     if pkg_test_workspace_error("infra/loggin", pkg_test_ws_index()) == {
         .UnknownMember(_, suggestions) -> assert_eq(suggestions, [String]{"infra/logging"})
-        else -> panic("expected UnknownMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> panic("expected UnknownMember")
     }
 }
 
@@ -257,7 +257,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
             assert(candidates.contains("infra/logging"))
             assert(candidates.contains("apps/logging"))
         }
-        else -> panic("expected AmbiguousMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .UnknownMember(_, _) -> panic("expected AmbiguousMember")
     }
 }
 
@@ -336,7 +336,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 #Test("provider ref rejects unknown provider") {
     if pkg_test_provider_ref_error("owner/repo@gitlab") == {
         .UnknownSource(source, _, _) -> assert_eq(source, "gitlab")
-        else -> panic("expected UnknownSource")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
     }
 }
 

@@ -7,6 +7,7 @@ use {
         Diagnostic,
         DiagnosticFixApplicability,
         DiagnosticFixSafety,
+        ElseArmLayout,
         ElseArmSpan,
         Expr,
         Marker,
@@ -87,7 +88,7 @@ JetParserState: struct {
     // Byte offsets where each source line starts, when the source text is
     // known; E0083 names the opener's line from it.
     line_starts: [Int]{[Int]{}}
-    // L0303 (#3716): the `else` arm of every dispatch table parsed so far.
+    // E0641: the `else` arm of every dispatch table parsed so far.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // Block `#Policy(...) { … }` declarations, joined to the
     // program's policy declarations after the parse.
@@ -745,6 +746,32 @@ parser_is_space_byte: fn(byte: Int) -> Bool Never! {
 
 parser_source_slice: fn(state: JetParserState, start: Int, end: Int) -> String Never! {
     String.from_bytes(state.sources[0].slice(start, end)) ?? ""
+}
+
+// E0641: the `else` arm of a dispatch table that opens after `open_end` (just
+// past its `{`), as sema reports and rewrites it. `last_arm_end` ends the arm
+// before the `else`, which starts at `else_start`; the arm ends at `arm_end`.
+parser_else_arm_span: fn(state: JetParserState, table: Span, open_end: Int, last_arm_end: Int, else_start: Int, arm_end: Int) -> ElseArmSpan Never! {
+    arm: Span{start: else_start, end: arm_end}
+    delete: Span{start: last_arm_end, end: arm_end}
+    if parser_source_slice(state, last_arm_end, else_start).contains("\n") -> return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: false, layout: None}
+    source: state.sources[0]
+    close := arm_end
+    loop close < source.len() && parser_is_space_byte(Int.from_u8(source[close])) -> close += 1
+    if close >= source.len() || Int.from_u8(source[close]) != 125 || parser_source_slice(state, open_end, else_start).contains("\n") {
+        return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: true, layout: None}
+    }
+    line_start := open_end
+    loop line_start > 0 && Int.from_u8(source[line_start - 1]) != 10 -> line_start -= 1
+    indent_end := line_start
+    loop indent_end < source.len() && (Int.from_u8(source[indent_end]) == 32 || Int.from_u8(source[indent_end]) == 9) -> indent_end += 1
+    layout: ElseArmLayout{
+        span: Span{start: open_end, end: close},
+        head: parser_source_slice(state, open_end, last_arm_end).trim(),
+        tail: parser_source_slice(state, else_start + 4, arm_end),
+        indent: parser_source_slice(state, line_start, indent_end),
+    }
+    ElseArmSpan{table: table, arm: arm, delete: delete, one_line: true, layout: Val(layout)}
 }
 
 // The source between two recorded pieces may hold only the chain's own

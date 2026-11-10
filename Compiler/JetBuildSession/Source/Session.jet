@@ -265,7 +265,7 @@ build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
         loop value in values {
             if value == {
                 .Text(text) -> out.push(text.copy())
-                else -> return None
+                .Unit | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return None
             }
         }
         return Val(out)
@@ -397,7 +397,10 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if args.len() != 2 -> return build_session_fail(state, "`b.contribute` requires a fact name and one value")
         name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
         if name.trim() == "" || name.contains(".") -> return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
-        if args[1] == {.Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {} else -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")}
+        if args[1] == {
+            .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
+            .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
+        }
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
         state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
@@ -552,7 +555,7 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
             start = first
             end = last
         }
-        else -> return build_session_fail(state, "argument 1 must be SourceSpan")
+        .Unit | .Text(_) | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) -> return build_session_fail(state, "argument 1 must be SourceSpan")
     }
     code: build_session_text(args, 1) ?? return build_session_fail(state, "build rule code must be a string")
     what: build_session_text(args, 2) ?? return build_session_fail(state, "build rule what must be a string")

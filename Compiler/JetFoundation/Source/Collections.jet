@@ -603,7 +603,7 @@ sema_collection_kind: fn(ty: Type) -> SemaCollectionKind? {
             if name == "Bits" -> return Val(SemaCollectionKind.Bits)
             None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -618,7 +618,7 @@ sema_collection_kind_element: fn(kind: SemaCollectionKind) -> Type Never! {
 sema_collection_kind_key: fn(kind: SemaCollectionKind) -> Type Never! {
     if kind == {
         .Map(key, _) | .Cache(key, _) -> key
-        else -> sema_collection_kind_element(kind)
+        .List(_) | .FixedList(_) | .Iter(_) | .ViewIter(_) | .View(_) | .Set(_) | .Rank(_) | .Bits | .Tally(_) | .Queue(_) | .PriorityQueue(_) -> sema_collection_kind_element(kind)
     }
 }
 
@@ -651,7 +651,7 @@ collection_window_write: fn(receiver: Type, row: CollectionOperationRow) -> Bool
     if !window -> return false
     if row.op == {
         .Builtin(op) -> op == TBuiltinOp.Sort || op == TBuiltinOp.SortDesc || op == TBuiltinOp.Reverse
-        else -> false
+        .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .ListShuffle | .Copy | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
     }
 }
 
@@ -667,7 +667,7 @@ collection_access_convention: fn(access: CollectionAccess, family: CollectionRec
 collection_arg_is_callback: fn(arg: CollectionArg) -> Bool Never! {
     if arg == {
         .ItemFn | .ItemPredicate | .PairPredicate | .DisjointFn | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge -> true
-        else -> false
+        .Element | .Key | .Value | .Integer | .Text | .IntegerList | .RemoveBy | .ElementList | .KeyList | .SameKind | .Entries | .Seed | .Range -> false
     }
 }
 
@@ -680,7 +680,7 @@ collection_row_takes_argument: fn(row: CollectionOperationRow, index: Int) -> Bo
     if !row.stores || index >= row.args.len() -> return false
     if row.args[index] == {
         .Element | .Key | .Value | .ElementList | .SameKind | .Entries -> true
-        else -> false
+        .Integer | .Text | .IntegerList | .RemoveBy | .KeyList | .Seed | .ItemFn | .ItemPredicate | .PairPredicate | .DisjointFn | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge | .Range -> false
     }
 }
 
@@ -702,6 +702,7 @@ sema_collection_is_list: fn(receiver: Type) -> Bool Never! {
     kind: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.List
 }
+
 
 sema_collection_is_map: fn(receiver: Type) -> Bool Never! {
     kind: sema_collection_kind(receiver) ?? return false
@@ -748,7 +749,7 @@ sema_collection_fn: fn(params: [Type], ret: Type?) -> Type Never! {
 sema_collection_output_iter: fn(contract: SemaCollectionMethodContract, element: Type) -> Type Never! {
     if contract.kind == {
         .ViewIter(_) -> Type.Apply{name: "ViewIter", args: [Type]{element}}
-        else -> Type.Apply{name: "Iter", args: [Type]{element}}
+        .List(_) | .FixedList(_) | .Iter(_) | .View(_) | .Map(_, _) | .Set(_) | .Rank(_) | .Bits | .Tally(_) | .Cache(_, _) | .Queue(_) | .PriorityQueue(_) -> Type.Apply{name: "Iter", args: [Type]{element}}
     }
 }
 
@@ -756,7 +757,7 @@ sema_collection_same_kind: fn(kind: SemaCollectionKind, element: Type) -> Type N
     if kind == {
         .Rank(_) -> Type.Apply{name: "Rank", args: [Type]{element}}
         .Queue(_) -> Type.Apply{name: "Queue", args: [Type]{element}}
-        else -> Type.Apply{name: "Set", args: [Type]{element}}
+        .List(_) | .FixedList(_) | .Iter(_) | .ViewIter(_) | .View(_) | .Map(_, _) | .Set(_) | .Bits | .Tally(_) | .Cache(_, _) | .PriorityQueue(_) -> Type.Apply{name: "Set", args: [Type]{element}}
     }
 }
 
@@ -841,7 +842,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .LazyFilterMap -> {
             if callback == {
                 .Option(payload) | .Result(payload, _) -> Val(sema_collection_output_iter(contract, payload))
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             }
         }
         // A Result callback's error ends the mapping (`[U] E!`); a `Never`
@@ -853,7 +854,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
                     if err == (Type.Named{name: "Never"}) -> return Val(if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok))
                     Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
                 }
-                else -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
             }
         }
         .Filtered -> {
@@ -866,7 +867,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
                     if err == (Type.Named{name: "Never"}) -> return Val(Type.List{element: ok})
                     Val(Type.Result{ok: Type.List{element: ok}, err: err})
                 }
-                else -> Val(Type.List{element: callback})
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(Type.List{element: callback})
             }
         }
         .ListFiltered -> sema_collection_filtered(Type.List{element: element}, callback)
@@ -878,14 +879,14 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .FlatMapped -> {
             inner: if callback == {
                 .List(value) | .FixedList(value, _) -> Val(value)
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             } ?? return None
             Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
         }
         .Flattened -> {
             if element == {
                 .List(inner) | .FixedList(inner, _) -> Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             }
         }
         .Folded -> {
@@ -895,7 +896,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .Sorted -> {
             if callback == {
                 .Result(_, err) -> Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
-                else -> Val(Type.Named{name: "Unit"})
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(Type.Named{name: "Unit"})
             }
         }
         .Grouped -> Val(Type.Map{key: callback, key_span: None, value: Type.List{element: element}})
@@ -909,7 +910,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
                     loop field in fields -> output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
                     Val(Type.Tuple{fields: output})
                 }
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             }
         }
         .SplitPair -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.List{element: element}}, TypeTupleField{name: "right", ty: Type.List{element: element}}}})
@@ -921,7 +922,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
             if element == {
                 .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
                 .Option(inner) -> Val(Type.Option{inner: Type.List{element: inner}})
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             }
         }
     }
@@ -934,7 +935,7 @@ sema_collection_filtered: fn(filtered: Type, callback: Type) -> Type? {
             if err == (Type.Named{name: "Never"}) -> return Val(filtered)
             return Val(Type.Result{ok: filtered, err: err})
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if callback != Type.Bool -> return None
     Val(filtered)
@@ -948,7 +949,10 @@ sema_collection_method_operation: fn(contract: SemaCollectionMethodContract, arg
     is_float := element == Type.Float || element == Type.Float32
     is_f32 := element == Type.Float32
     callback: callback_return ?? Type.Named{name: "Unit"}
-    fallible := if callback == {.Result(_, error) -> error != Type.Named{name: "Never"} else -> false}
+    fallible := if callback == {
+        .Result(_, error) -> error != Type.Named{name: "Never"}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
     remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
         // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Builtin owns this one

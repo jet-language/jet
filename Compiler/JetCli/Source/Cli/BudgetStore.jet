@@ -252,7 +252,7 @@ jet_cli_budget_store_stale_after: fn(measurement: CanonicalJSON) -> Int JetCLIBu
     if policy == {
         .Null -> Ok(JET_CLI_BUDGET_STALE_SECONDS)
         .Object(_) -> jet_cli_budget_store_integer(policy, "stale_after_seconds", "policy.stale_after_seconds")
-        else -> Err(jet_cli_budget_failure("measurement policy is invalid"))
+        .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> Err(jet_cli_budget_failure("measurement policy is invalid"))
     }
 }
 
@@ -572,7 +572,7 @@ jet_cli_budget_store_nullable: fn(value: CanonicalJSON, key: String, name: Strin
                 if field.value == {
                     .Null -> return Ok(CanonicalJSON.Null)
                     .String(text) -> return Ok(CanonicalJSON.String(text.copy())) // copy: the object stays whole.
-                    else -> return Err(jet_cli_budget_failure("{name} is not text or null"))
+                    .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> return Err(jet_cli_budget_failure("{name} is not text or null"))
                 }
             }
         }

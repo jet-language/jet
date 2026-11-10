@@ -90,7 +90,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     dep: mf.dependencies.get("parsekit") ?? panic("missing parsekit")
     valid: if dep == {
         .Git(url, selector) -> url.contains("parsekit") && selector == GitSelector.Tag("v0.4.1")
-        else -> false
+        .Path(_) | .Registry(_) | .Foreign(_, _) -> false
     }
     assert(valid)
 }
@@ -197,7 +197,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     error: pkg_integration_package_error("{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ trust: {{ default: maybe }} }}\n")
     bad: if error == {
         .BadEffectsBlock(_) -> true
-        else -> false
+        .MissingName | .MissingRecord(_) | .MalformedField(_) | .UnknownField(_) | .UnknownOutputKind(_) | .InvalidValue(_, _) | .RetiredRecordHead | .ConfigMembers | .Composition(_) | .NestedMembers(_, _) | .LintPolicyCode(_, _) | .BadTarget(_, _, _) | .BadTargetField(_, _) | .ReservedSection(_) | .RetiredAuthorityField(_, _) | .BadMemoryPolicy(_) | .RetiredPolicyField(_, _) | .BadGuaranteePolicy(_) | .BadPackagePolicy(_) | .BadAllocatorPolicy(_) -> false
     }
     assert(bad)
 }
@@ -216,7 +216,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
     bad: if error == {
         .BadEffectsBlock(_) -> true
-        else -> false
+        .MissingName | .MissingRecord(_) | .MalformedField(_) | .UnknownField(_) | .UnknownOutputKind(_) | .InvalidValue(_, _) | .RetiredRecordHead | .ConfigMembers | .Composition(_) | .NestedMembers(_, _) | .LintPolicyCode(_, _) | .BadTarget(_, _, _) | .BadTargetField(_, _) | .ReservedSection(_) | .RetiredAuthorityField(_, _) | .BadMemoryPolicy(_) | .RetiredPolicyField(_, _) | .BadGuaranteePolicy(_) | .BadPackagePolicy(_) | .BadAllocatorPolicy(_) -> false
     }
     assert(bad)
 }

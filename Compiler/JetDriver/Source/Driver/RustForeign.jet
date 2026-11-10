@@ -204,7 +204,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
             .Struct(definition) -> {
                 is_c: if definition.layout == {
                     .Val(.C) | .Val(.CAligned(_, _)) -> true
-                    else -> false
+                    .Val(_) | .None -> false
                 }
                 if !is_c -> next
                 key: if owner == "" -> definition.name else -> "{owner}::{definition.name}"
@@ -213,7 +213,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
                 if records.names.get(definition.name) == None -> records.names[definition.name] = rust_name
                 alignment: if definition.layout == {
                     .Val(.CAligned(value, _)) -> Val(value)
-                    else -> None
+                    .Val(_) | .None -> None
                 }
                 records.records.push(JetDriverRustForeignRecord{rust_name: rust_name, fields: definition.fields, alignment: alignment})
             }
@@ -233,7 +233,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
                     jet_driver_rust_foreign_collect_items(body, nested, module_identity, entries, records)
                 }
             }
-            else -> {}
+            .Func(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -284,7 +284,7 @@ jet_driver_rust_foreign_record_type: fn(ty: Type, records: JetDriverRustForeignR
             return None
         }
         .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
-        else -> None
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 // Whether any module declares an `extern rust` foreign function; without one

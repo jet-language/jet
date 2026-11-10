@@ -11,13 +11,13 @@ QueryTestValue: enum {
 query_test_count: fn(value: QueryTestValue) -> Int Never! {
     if value == {
         .Count(n) -> n
-        else -> { panic("expected count") }
+        .Text(_) -> { panic("expected count") }
     }
 }
 query_test_text: fn(value: QueryTestValue) -> String Never! {
     if value == {
         .Text(text) -> text
-        else -> { panic("expected text") }
+        .Count(_) -> { panic("expected text") }
     }
 }
 query_test_words: fn(text: String) -> Int Never! {

@@ -66,7 +66,7 @@ RefSource: enum {
     label: fn(self) -> String Never! {
         if self == {
             .Named(name) -> return name
-            else -> {}
+            .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> {}
         }
         loop row in PROVIDER_ROWS {
             if row.source == .Val(source) {
@@ -89,7 +89,7 @@ RefSource: enum {
             .Val(builtin) -> {
                 if builtin == {
                     .Path | .Nixpkgs -> return Err(RefError.Malformed(raw))
-                    else -> return Ok(builtin)
+                    .Jetpack | .Github | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> return Ok(builtin)
                 }
             }
             .None -> {}
@@ -270,7 +270,7 @@ ChannelPolicy: enum {
     moves: fn(self) -> Bool Never! {
         if self == {
             .Pinned -> false
-            else -> true
+            .Manual | .Automatic -> true
         }
     }
 
@@ -473,13 +473,13 @@ RefSpec: struct {
                 .Ok(spec) -> {
                     if spec.source == {
                         .Jetpack -> {}
-                        else -> return Ok(spec)
+                        .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> return Ok(spec)
                     }
                 }
                 .Err(error) -> {
                     if error == {
                         .MissingSeparator(_) -> {}
-                        else -> return Err(error)
+                        .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> return Err(error)
                     }
                 }
             }
@@ -492,7 +492,7 @@ RefSpec: struct {
             .Err(error) -> {
                 if error == {
                     .MissingSeparator(_) -> {}
-                    else -> return Err(error)
+                    .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> return Err(error)
                 }
                 if index.is_empty() -> return Err(error)
             }
@@ -533,7 +533,7 @@ RefError: enum {
             .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) -> Val("E1358")
             .AmbiguousMember(_, _) -> Val("E1230")
             .UnknownMember(_, _) -> Val("E1231")
-            else -> None
+            .UnknownSource(_, _, _) | .AmbiguousBare(_) -> None
         }
     }
 }
@@ -812,7 +812,7 @@ ProviderRef: struct {
         provider: RefSource.builtin(split.source) ?? return Err(RefError.UnknownSource{source: split.source, raw: raw, declared: [String]{}})
         if provider == {
             .Path | .Nixpkgs -> return Err(RefError.Malformed(raw))
-            else -> {}
+            .Jetpack | .Github | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> {}
         }
         tracked: ProviderRef.track(halves.before, split.selector)
         Ok(ProviderRef{provider: provider, target: tracked.target, channel: tracked.channel, policy: tracked.policy, raw: raw})

@@ -396,7 +396,7 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
     output := String?{None}
     if output_dir == {
         .Val(path) -> output = Val(foundation_sandbox_real_directory(path))
-        else -> {}
+        .None -> {}
     }
     checked_mounts: foundation_validate_read_only_mounts(mounts)
     output_is_separate: output != None
@@ -452,7 +452,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
         .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
-        else -> {}
+        .None -> {}
     }
     loop name in foundation_sandbox_sorted_names(env) -> spec = spec.env(name, env[name])
     Ok(spec)
@@ -489,7 +489,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                     output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
                     loop part in output_args -> argv.push(part)
                 }
-                else -> {
+                .None -> {
                     if source_bind == "" {
                         argv.push("--dir")
                         argv.push("/work")
@@ -503,13 +503,13 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                 }
             }
         }
-        else -> {
+        .None -> {
             if output == {
                 .Val(output_path) -> {
                     output_args: [String]{"--bind", output_path, "/work", "--chdir", "/work"}
                     loop part in output_args -> argv.push(part)
                 }
-                else -> {
+                .None -> {
                     work_args: [String]{"--dir", "/work", "--chdir", "/work"}
                     loop part in work_args -> argv.push(part)
                 }
@@ -541,7 +541,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
             argv.push("--argv0")
             argv.push(name.copy())
         }
-        else -> {}
+        .None -> {}
     }
     // Options end here, so an executable or argument starting with a dash
     // stays in the command position.
@@ -559,7 +559,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     output_path := String?{None}
     if output == {
         .Val(path) -> output_path = Val(foundation_sbpl_path(path))
-        else -> {}
+        .None -> {}
     }
     lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
     loop line in passed -> lines.push(line)
@@ -569,7 +569,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     if source_readable -> lines.push("  (subpath \"{source_path}\")")
     if output_path == {
         .Val(path) -> lines.push("  (subpath \"{path}\")")
-        else -> {}
+        .None -> {}
     }
     read_paths: [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"}
     loop line in read_paths -> lines.push(line)
@@ -582,7 +582,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     profile := "{lines.join("\n")}\n)"
     if output_path == {
         .Val(path) -> profile = "{profile}(allow file-write* (subpath \"{path}\"))\n"
-        else -> {
+        .None -> {
             if source_writable -> profile = "{profile}(allow file-write* (subpath \"{source_path}\"))\n"
         }
     }

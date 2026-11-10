@@ -16,7 +16,10 @@ s6_policy_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicyScope
         s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Relaxed, PolicyScope.Package, "package.jet")
     }
     widening: if policy_resolve(PolicyKey.Unsafe, declarations) == {
-        .Err(error) -> if error == { .Widening(_, _, _, _, outer_site) -> outer_site.source == "/admin/policy.jet" else -> false }
+        .Err(error) -> if error == {
+            .Widening(_, _, _, _, outer_site) -> outer_site.source == "/admin/policy.jet"
+            .ProhibitedScope(_, _, _) | .Conflict(_, _, _, _, _) -> false
+        }
         .Ok(_) -> false
     }
     assert(widening)
@@ -40,7 +43,10 @@ s6_policy_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicyScope
         if !policy_key_is_audited_gate(row.key) -> next
         declaration: s6_policy_declaration(row.key, PolicyValue.Forbid, PolicyScope.Organization, "org-policy.jet")
         widening: if policy_resolve_with_gates(row.key, [declaration], GateSet{allowed: [row.key]}) == {
-            .Err(error) -> if error == { .Widening(_, _, _, _, _) -> true else -> false }
+            .Err(error) -> if error == {
+                .Widening(_, _, _, _, _) -> true
+                .ProhibitedScope(_, _, _) | .Conflict(_, _, _, _, _) -> false
+            }
             .Ok(_) -> false
         }
         assert(widening, policy_key_name(row.key))

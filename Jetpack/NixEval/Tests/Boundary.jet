@@ -62,7 +62,7 @@ nixeval_test_set_members: fn(value: Dyn, key: String, to: String) -> Dyn {
             }
             Dyn.Object(out)
         }
-        else -> value
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> value
     }
 }
 
@@ -92,7 +92,7 @@ nixeval_test_oracle_error: fn(manifest: NixEvalOracleManifest, observed: NixEval
 nixeval_test_mismatch_field: fn(error: NixEvalError) -> String {
     if error == {
         .OracleIdentityMismatch(_, field, _, _) -> field
-        else -> ""
+        .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .Invalid(_) | .ResourceLimit(_) | .Syntax(_) | .Missing(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleBuildBlocked(_, _) -> ""
     }
 }
 
@@ -106,7 +106,7 @@ nixeval_test_manifest_error: fn(text: String) -> NixEvalError {
 nixeval_test_manifest_reason: fn(error: NixEvalError) -> String {
     if error == {
         .Manifest(reason) -> reason
-        else -> ""
+        .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .Invalid(_) | .ResourceLimit(_) | .Syntax(_) | .Missing(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> ""
     }
 }
 

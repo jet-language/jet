@@ -115,7 +115,7 @@ cli_cmd_update: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
 cli_update_exit_code: fn(error: CLIError) -> Int Never! {
     if error == {
         .Reported(code) -> code
-        else -> EXIT_USAGE
+        .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .ManagedTool(_) | .Store(_) | .Environment(_) | .Diagnostic(_) -> EXIT_USAGE
     }
 }
 

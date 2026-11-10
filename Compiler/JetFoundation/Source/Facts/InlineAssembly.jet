@@ -203,10 +203,10 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                 .Register(register) -> {
                     if clobbers.contains(register) -> bad = Val("return register `{register}` cannot also be an early-written clobber")
                 }
-                else -> {}
+                .Parameter(_) -> {}
             }
         }
-        else -> {}
+        .None -> {}
     }
     if !target_supported -> bad = Val("inline assembly has no audited register set for target `{target}`")
 

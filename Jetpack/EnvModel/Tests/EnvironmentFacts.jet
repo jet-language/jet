@@ -113,7 +113,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     set.insert(PresetSpec{name: "b", extends: [String]{"a"}}) ?? panic("insert b")
     cycle: if envmodel_test_preset_error(set, [String]{"a"}) == {
         .Cycle(_) -> true
-        else -> false
+        .Missing(_) | .Conflict(_) -> false
     }
     assert(cycle)
 }

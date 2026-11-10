@@ -269,7 +269,7 @@ sema_build_generate_splice_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String | .Int | .Bool -> true
         .List(element) -> sema_build_generate_splice_type(element)
-        else -> false
+        .Float | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -529,7 +529,7 @@ sema_build_option_call_shape: fn(method: String, name: String, pinned: Bool) -> 
         .Text -> "\"dist\""
         .List -> "[\"z\"]"
         .Duration -> "10min"
-        else -> build_option_argument(row, values[values.len() - 1])
+        .Choice | .Bool -> build_option_argument(row, values[values.len() - 1])
     }
     if pinned -> return "b.pin(.{name}, {example})"
     "b.{method}({example})"

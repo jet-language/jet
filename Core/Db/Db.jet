@@ -113,7 +113,7 @@ impl DBValue {
         if self == {
             .Float(number) -> Ok(number)
             .Int(number) -> Ok(Float{number})
-            else -> Err("expected a float, got {render_value(self)}")
+            .Null | .Text(_) | .Bool(_) | .Blob(_) -> Err("expected a float, got {render_value(self)}")
         }
     }
     text: fn(self) -> String Err! {
@@ -128,7 +128,7 @@ impl DBValue {
                 if number == 1 -> return Ok(true)
                 Err("expected a bool, got {render_value(self)}")
             }
-            else -> Err("expected a bool, got {render_value(self)}")
+            .Null | .Float(_) | .Text(_) | .Blob(_) -> Err("expected a bool, got {render_value(self)}")
         }
     }
     blob: fn(self) -> [U8] Err! {
@@ -146,7 +146,7 @@ row_int: fn(row: [String: DBValue], column: String) -> Int DBError! {
     value: row_value(row, column)
     if value == {
         .Int(number) -> Ok(number)
-        else -> Err(DBError{message: "expected an int, got {render_value(value)}"})
+        .Null | .Float(_) | .Text(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected an int, got {render_value(value)}"})
     }
 }
 
@@ -155,7 +155,7 @@ row_float: fn(row: [String: DBValue], column: String) -> Float DBError! {
     if value == {
         .Float(number) -> Ok(number)
         .Int(number) -> Ok(Float{number})
-        else -> Err(DBError{message: "expected a float, got {render_value(value)}"})
+        .Null | .Text(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected a float, got {render_value(value)}"})
     }
 }
 
@@ -163,7 +163,7 @@ row_text: fn(row: [String: DBValue], column: String) -> String DBError! {
     value: row_value(row, column)
     if value == {
         .Text(text) -> Ok(text)
-        else -> Err(DBError{message: "expected text, got {render_value(value)}"})
+        .Null | .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected text, got {render_value(value)}"})
     }
 }
 
@@ -176,7 +176,7 @@ row_bool: fn(row: [String: DBValue], column: String) -> Bool DBError! {
             if number == 1 -> return Ok(true)
             Err(DBError{message: "expected a bool, got {number}"})
         }
-        else -> Err(DBError{message: "expected a bool, got {render_value(value)}"})
+        .Null | .Float(_) | .Text(_) | .Blob(_) -> Err(DBError{message: "expected a bool, got {render_value(value)}"})
     }
 }
 
@@ -926,7 +926,7 @@ __ledger_row: fn(row: [String: DBValue]) -> __LedgerRow DBError! {
     if error_value == {
         .Null -> {}
         .Text(_) -> {}
-        else -> return Err(__db_error("expected text, got {render_value(error_value)}"))
+        .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> return Err(__db_error("expected text, got {render_value(error_value)}"))
     }
     Ok(__LedgerRow{
         transition_key: transition_key, migration_key: migration_key, target: target,

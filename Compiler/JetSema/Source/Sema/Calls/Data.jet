@@ -80,7 +80,7 @@ sema_dyn_wrappable: fn(ty: Type) -> Bool Never! {
         .Named(name) -> name == "Dyn" || name == "DateTime" || name == "ZonedDateTime"
         .List(element) | .FixedList(element, _) -> element == (Type.IntN{signed: false, bits: 8}) || sema_dyn_wrappable(element)
         .Map(key, _, value) -> key == Type.String && sema_dyn_wrappable(value)
-        else -> false
+        .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -96,7 +96,7 @@ sema_dyn_site: fn(expr: Expr) -> String Never! {
         .Unary(op, inner, _, _) -> {
             literal: if inner == {
                 .Int(_, _, _, _, _) | .Float(_, _, _, _, _) -> true
-                else -> false
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
             }
             if op == UnOp.Neg && literal -> return "-{sema_dyn_site(inner)}"
             "…"
@@ -108,7 +108,7 @@ sema_dyn_site: fn(expr: Expr) -> String Never! {
             }
             "\"{text}\""
         }
-        else -> "…"
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> "…"
     }
 }
 
@@ -171,14 +171,14 @@ sema_data_type_name: fn(ty: Type) -> String? {
     if ty == {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
 sema_data_label: fn(argument: CallArg) -> String? {
     if argument.label == {
         .Val(label) -> { return Val(label.name) }
-        else -> { return None }
+        .None -> { return None }
     }
 }
 
@@ -302,10 +302,10 @@ sema_data_without_user_tags: fn(ty: Type) -> Type Never! {
             if marker == {
                 .User(_) -> return sema_data_without_user_tags(inner)
                 // copy: the untagged type is a new owned Type; `ty` stays the caller's.
-                else -> return ty.copy()
+                .Internal(_) -> return ty.copy()
             }
         }
-        else -> return ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ty.copy()
     }
 }
 
@@ -331,7 +331,7 @@ sema_data_fn_has_empty_effect_bound: fn(ty: Type) -> Bool Never! {
             if bound == .Val(row) -> return row.len() == 0
             return false
         }
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -355,7 +355,7 @@ sema_data_infer_query_callback: fn(call_name: String, row: Type, argument: CallA
             }
             return SemaDataQueryCallback{value: Val(checked), result: ret}
         }
-        else -> {
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
             diagnostics.push(sema_error("E0112", callback_span, "`{call_name}` wants a callback for argument 1, but this is {sema_type_show(checked.ty)}", "query reducers take one callback over the row", "pass a lambda such as `row -> row.field`"))
             return SemaDataQueryCallback{value: None, result: None}
         }
@@ -391,7 +391,7 @@ sema_data_group_sum_numeric: fn(value: Type?) -> Bool Never! {
     found: value ?? return false
     if found == {
         .Int | .IntN(_, _) | .Float | .Float32 -> return true
-        else -> return false
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -484,7 +484,7 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
                         .Apply(other_name, other_parameters) -> {
                             if sema_data_nominal_is(other_name, "Query") && other_parameters.len() == 1 -> query_row = Val(other_parameters[0])
                         }
-                        else -> {}
+                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                     }
                     if query_row == .Val(found) {
                         right_row = found
@@ -589,7 +589,7 @@ sema_data_event_time_callback: fn(method: String, element: Type, argument: CallA
         .Fn(params, ret, _, _, _, _) -> {
             if params.len() == 1 && params[0] == element && sema_data_fn_has_empty_effect_bound(checked.ty) -> return SemaDataQueryCallback{value: Val(checked), result: ret}
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{method}` wants a callback `fn({sema_type_show(element)}) -> …` without effects, but this is {sema_type_show(checked.ty)}", "the stream calls it once for each element as the stream is pulled", "pass a lambda over one element, such as `(event: {sema_type_show(element)}) -> event.timestamp`"))
     SemaDataQueryCallback{value: None, result: None}
@@ -598,7 +598,7 @@ sema_data_event_time_callback: fn(method: String, element: Type, argument: CallA
 sema_data_event_time_is_datetime: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> return name == "DateTime" || (core_identity_in_module(name, "core.time") && name.ends_with("::DateTime"))
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -619,7 +619,7 @@ sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: &[
                     valid = false
                 }
             }
-            else -> {
+            .None -> {
                 if want != "" {
                     diagnostics.push(sema_error("E0769", expr_span(argument.expr), "argument {index + 1} of `.{method}()` needs the label `{want}:`", "the window's lateness and late-event policy are named so the two durations cannot be swapped", "write `{want}: ` before argument {index + 1}"))
                     valid = false
@@ -709,7 +709,7 @@ sema_data_group_sum_target: fn(value: Type) -> String Never! {
         .Float -> "__group_sum_float"
         .Float32 -> "__group_sum_f32"
         .IntN(signed, bits) -> if signed -> "__group_sum_i{bits}" else -> "__group_sum_u{bits}"
-        else -> "__group_sum_int"
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "__group_sum_int"
     }
 }
 
@@ -886,7 +886,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
@@ -911,7 +911,7 @@ sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_v
             .Switch -> Type.Bool
             .Count | .Seed | .Shard -> Type.Int
             .Levels -> Type.List{element: Type.String}
-            else -> Type.String
+            .Text | .Path | .Capture | .Duration | .Size -> Type.String
         }
         value: sema_data_check_argument(site, index, args[index], ty, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if index > 0 -> parts.push(TStrPart.Literal{text: "/"})
@@ -962,7 +962,7 @@ sema_data_object_pairs_argument: fn(argument: Expr, scopes: SemaScopeTable) -> B
             ty: scopes.bindings[index].symbol.ty ?? return false
             return sema_data_is_object_pairs_type(ty)
         }
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -972,10 +972,10 @@ sema_data_is_object_pairs_type: fn(ty: Type) -> Bool Never! {
         .List(element) -> {
             if element == {
                 .Tuple(fields) -> return fields.len() == 2 && fields[0].name == "key" && fields[0].ty == Type.String && fields[1].name == "value" && sema_data_is_json_name(sema_data_type_name(fields[1].ty) ?? "")
-                else -> return false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
             }
         }
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -990,7 +990,7 @@ sema_data_argument_is_borrowed: fn(argument: Expr, scopes: SemaScopeTable) -> Bo
             return sema_ownership_binding_is_borrowed_param(scopes.bindings[index])
         }
         .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Paren(base, _, _) -> return sema_data_argument_is_borrowed(base, scopes)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -1095,7 +1095,7 @@ sema_call_try_data_stream_core_call: fn(module_name: String, member: String, arg
             if row == None {
                 if first.ty == {
                     .List(element) -> { row = Val(element) }
-                    else -> {
+                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                         diagnostics.push(sema_error("E0112", updated_args[0].span, "`from_items` expects a typed row list, got `{type_name(first.ty)}`", "DataStream preserves one element type", "pass a `[T]` value or write `from_items<T>(items)`"))
                         return SemaDirectSpecialCheck{handled: true, value: None}
                     }
@@ -1113,7 +1113,7 @@ sema_call_try_data_stream_core_call: fn(module_name: String, member: String, arg
                         row = Val(parameters[0])
                     }
                 }
-                else -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
             }
             if row == None {
                 diagnostics.push(sema_error("E0112", updated_args[0].span, "`{member}` expects a `DataStream<T>` handle, got `{type_name(first.ty)}`", "stream operations preserve the row type carried by the stream", "pass a `DataStream<T>` value"))
@@ -1137,7 +1137,10 @@ sema_call_try_data_stream_core_call: fn(module_name: String, member: String, arg
         else -> Type.Bool
     }
     record: sema_call_core_record(module_name, member, updated_args.len(), span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    fallibility := if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
+    fallibility := if result_type == {
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
+    }
     effective_type_args := if member == "from_items" -> [Type]{row_type} else -> [Type]{}
     params := [SemaCallParam]{}
     call_args := [TExpr]{}
@@ -1313,11 +1316,11 @@ sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], 
             if inferred.len() != 1 -> return true
             inferred[0]
         }
-        else -> { return true }
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> { return true }
     }
     applied: if value == {
         .Apply(_, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !applied || sema_serde_type_is_admissible(environment, program, value, SemaSerdeDirection.Encode) -> return true
     sema_call_http_check_serde(SemaSerdeDirection.Encode, value, expr_source_span(args[0].expr), environment, program, diagnostics)
@@ -1335,7 +1338,7 @@ sema_data_csv_check_rows: fn(args: [CallArg], checked: TExpr, environment: SemaS
             if inferred.len() != 1 -> return true
             inferred[0]
         }
-        else -> { return true }
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> { return true }
     }
     if sema_data_csv_rows_admissible(rows, environment, program) -> return true
     diagnostics.push(sema_error("E0112", expr_source_span(args[0].expr), "`to_string` wants [[String]] rows or a list of #Codable records for argument 1, but this is {sema_type_show(rows)}", "CSV output accepts string rows or typed records", "use [[String]] rows or a list of #Codable records here"))
@@ -1351,11 +1354,11 @@ sema_data_csv_rows_admissible: fn(ty: Type, environment: SemaScopeEnvironment, p
                 .List(_) | .FixedList(_, _) -> return true
                 .Named(name) -> return sema_data_csv_generic_param(name, environment) || sema_http_route_find_struct(environment, program, row, environment.module_identity) != None
                 .Apply(_, _) -> return sema_http_route_find_struct(environment, program, row, environment.module_identity) != None
-                else -> return false
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
             }
         }
         .Named(name) -> return sema_call_reflection_leaf_name(name) == "Dyn" || sema_data_csv_generic_param(name, environment)
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 
@@ -1678,18 +1681,18 @@ sema_data_analytics_sql_literal: fn(expression: Expr) -> String? {
                             loop part in parts {
                                 if part == {
                                     .Lit(text) -> { result += text }
-                                    else -> {}
+                                    .Interp(_, _) | .Byte(_) -> {}
                                 }
                             }
                             return Val(result)
                         }
-                        else -> return None
+                        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
                     }
                 }
-                else -> return None
+                .Fields(_) | .Elements(_) | .Entries(_) | .ByteText(_) | .Empty -> return None
             }
         }
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -1745,7 +1748,7 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, env
                 }
             }
         }
-        else -> {}
+        .Enum(_, _) | .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> {}
     }
 }
 
@@ -1923,7 +1926,7 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
             module_name == "core.data" && member == "track" -> {
                 if first.ty == {
                     .List(element) -> { row = Val(element) }
-                    else -> {
+                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                         diagnostics.push(sema_error("E0112", args[0].span, "`data.track` needs a typed row list, not `{type_name(first.ty)}`", "tracking builds a key index over a typed row list", "pass a `[Row]` value and a key callback"))
                         return SemaDirectSpecialCheck{handled: true, value: None}
                     }
@@ -1946,7 +1949,7 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
                             }
                         }
                     }
-                    else -> {}
+                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                 }
                 if row == None {
                     diagnostics.push(sema_error("E0112", args[0].span, "`data.query` needs `[Row]`, `DataTracked<Row, Key>`, or `DataStream<Row>`, not `{type_name(first.ty)}`", "a query keeps one typed row shape", "pass a typed row list, tracked source, or stream"))
@@ -1960,7 +1963,7 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
                             row = Val(parameters[0])
                         }
                     }
-                    else -> {}
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                 }
                 if row == None {
                     diagnostics.push(sema_error("E0112", args[0].span, "`{member}` expects a `DataArrowBatch<T>` value, got `{type_name(first.ty)}`", "Arrow operations preserve the row type carried by the checked owner", "pass a `DataArrowBatch<T>` value"))
@@ -2020,7 +2023,7 @@ sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expec
     rows: checked ?? return SemaDirectSpecialCheck{handled: true, value: None}
     row: if rows.ty == {
         .List(element) -> element
-        else -> {
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
             diagnostics.push(sema_error("E0112", args[0].span, "`data.schema` needs a typed row list, not {sema_type_show(rows.ty)}", "core.data schema reads column names and types from ordinary rows", "pass a `[T]` value"))
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
@@ -2050,11 +2053,11 @@ sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, progr
     single: [(name: String, type_name: String)]{(name: "value", type_name: sema_data_schema_type_name(row))}
     owner_name: if row == {
         .Named(name) | .Apply(name, _) -> name
-        else -> { return single }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return single }
     }
     owner_args: if row == {
         .Apply(_, args) -> args
-        else -> [Type]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
     if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)

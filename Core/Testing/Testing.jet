@@ -910,7 +910,7 @@ testing_history_value_shrinks: fn(value: HistoryValue) -> [HistoryValue] Never! 
                 values.push(HistoryValue.Text(half))
             }
         }
-        else -> {}
+        .Handle(_) | .Redacted(_) -> {}
     }
     values
 }
@@ -1010,7 +1010,7 @@ testing_history_precondition_handle: fn(precondition: HistoryPrecondition) -> In
     if precondition == {
         .HandleLive(handle) -> Val(handle.value)
         .HandleState(handle, _) -> Val(handle.value)
-        else -> None
+        .TaskCompleted(_) | .EventAvailable(_) -> None
     }
 }
 
@@ -1092,7 +1092,7 @@ testing_history_argument_error: fn(position: Int, argument: HistoryValue, live: 
         .Handle(handle) -> {
             if live.get(handle.value) == None -> return "operation {position} requires non-live argument handle {handle.value}"
         }
-        else -> {}
+        .Integer(_) | .Boolean(_) -> {}
     }
     ""
 }
@@ -1326,7 +1326,7 @@ testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds
                 .Integer(number) -> if kind == "i" -> ints.push(number) else -> return None
                 .Boolean(flag) -> if kind == "b" -> bools.push(flag) else -> return None
                 .Text(text) -> if kind == "s" -> texts.push(text.copy()) else -> return None
-                else -> return None
+                .Handle(_) | .Redacted(_) -> return None
             }
         }
         commands.push(make(choice, ints, bools, texts))

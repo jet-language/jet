@@ -186,11 +186,11 @@ queue_validate_nonnegative_limit: fn(limit: Int, label: String) ServiceError! {
 #Test("public signed queue limits preserve the bridge error and zero reaches policy validation") {
     if queue_validate_nonnegative_limit(0, "claim limit") == {
         .Ok(_) -> assert(true)
-        else -> assert(false)
+        .Err(_) -> assert(false)
     }
     if queue_validate_nonnegative_limit(-1, "inspection limit") == {
         .Err(.Unavailable(message)) -> assert_eq(message, "queue inspection limit is outside the supported range")
-        else -> assert(false)
+        .Ok(_) | .Err(_) -> assert(false)
     }
 }
 
@@ -215,7 +215,7 @@ queue_mkdir_error: fn(error: IOError) -> ServiceError Never! {
     context: IOContext{operation: .Write, resource: Val("/jobs"), os_code: Val(13), cause: Val("Permission denied (os error 13)")}
     if queue_mkdir_error(.PermissionDenied(context)) == {
         .Unavailable(message) -> assert_eq(message, "queue SQLite directory failed: Permission denied (os error 13)")
-        else -> assert(false)
+        .Full(_) | .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Policy(_) | .Partitioned(_) | .Revoked(_) | .Stale(_) | .Expired(_) -> assert(false)
     }
 }
 
@@ -698,7 +698,7 @@ queue_row_optional_text: fn(row: [String: DBValue], name: String) -> String? Ser
     if value == {
         .Null -> Ok(None)
         .Text(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither text nor null"))
+        .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> Err(queue_unavailable("queue column `{name}` is neither text nor null"))
     }
 }
 queue_row_optional_int: fn(row: [String: DBValue], name: String) -> Int? ServiceError! {
@@ -706,7 +706,7 @@ queue_row_optional_int: fn(row: [String: DBValue], name: String) -> Int? Service
     if value == {
         .Null -> Ok(None)
         .Int(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither integer nor null"))
+        .Float(_) | .Text(_) | .Bool(_) | .Blob(_) -> Err(queue_unavailable("queue column `{name}` is neither integer nor null"))
     }
 }
 queue_row_optional_blob: fn(row: [String: DBValue], name: String) -> [U8]? ServiceError! {
@@ -714,7 +714,7 @@ queue_row_optional_blob: fn(row: [String: DBValue], name: String) -> [U8]? Servi
     if value == {
         .Null -> Ok(None)
         .Blob(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither blob nor null"))
+        .Int(_) | .Float(_) | .Text(_) | .Bool(_) -> Err(queue_unavailable("queue column `{name}` is neither blob nor null"))
     }
 }
 queue_row_bool: fn(row: [String: DBValue], name: String) -> Bool ServiceError! {
@@ -936,7 +936,7 @@ queue_sql_error: fn(operation: String, detail: ServiceError) -> ServiceError Nev
         .Policy(message) -> ServiceError.Policy("queue {operation}: {message}")
         .Revoked(message) -> ServiceError.Revoked("queue {operation}: {message}")
         .Stale(message) -> ServiceError.Stale("queue {operation}: {message}")
-        else -> detail
+        .Full(_) | .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Partitioned(_) | .Expired(_) -> detail
     }
 }
 queue_execute: fn(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -[DB]> Int ServiceError! {
@@ -1187,12 +1187,12 @@ queue_enqueue_on_driver: fn(driver: &db.__Driver, authority: String, name: Strin
     if queue_row_optional_int(row, "bad") == {
         .Val(_) | .None -> assert(false)
         .Err(.Unavailable(message)) -> assert_eq(message, "queue column `bad` is neither integer nor null")
-        else -> assert(false)
+        .Err(_) -> assert(false)
     }
     if queue_row_value(row, "absent") == {
         .Ok(_) -> assert(false)
         .Err(.Unavailable(message)) -> assert_eq(message, "queue row has no `absent` column")
-        else -> assert(false)
+        .Err(_) -> assert(false)
     }
     assert_eq(queue_saturating_add(9223372036854775807, 1), 9223372036854775807)
     assert_eq(queue_saturating_sub(-9223372036854775808, 1), -9223372036854775808)

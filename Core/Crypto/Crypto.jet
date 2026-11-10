@@ -2041,13 +2041,13 @@ __blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
             before: core.files.read_bytes(sealed.to_string()) ?? panic("read sealed")
             assert(if file_seal([recipient], source, sealed) == {
                 .Err(.DestinationExists) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert((core.files.read_bytes(sealed.to_string()) ?? panic("read unchanged sealed")) == before)
             opened.write_atomic([U8]{9, 8, 7}) ?? panic("existing output")
             assert(if file_open(identity, sealed, opened) == {
                 .Err(.DestinationExists) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert((core.files.read_bytes(opened.to_string()) ?? panic("read existing output")) == ([U8]{9, 8, 7}))
             corrupt := before.copy()
@@ -2055,7 +2055,7 @@ __blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
             sealed.write_atomic(corrupt) ?? panic("tamper")
             assert(if file_open(identity, sealed, failed) == {
                 .Err(.OpenFailed) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert(!core.files.exists(failed.to_string()))
             assert((core.files.read_bytes(source.to_string()) ?? panic("read source")) == ([U8]{0, 1, 2}))

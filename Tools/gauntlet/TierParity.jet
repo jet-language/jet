@@ -93,7 +93,7 @@ text_of: fn(d: Dyn, name: String) -> String {
 items: fn(d: Dyn) -> [Dyn] {
     if d == {
         .Array(values) -> values
-        else -> fail("entry.json: expected an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> fail("entry.json: expected an array")
     }
 }
 
@@ -111,7 +111,7 @@ load: fn(root: String, name: String) -> Entry {
     input := ""
     if member(spec, "fixtureGen") == {
         .Null -> {}
-        else -> {
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             g: member(spec, "fixtureGen")
             gen = "{dir}/{text_of(g, "script")}"
             input = text_of(g, "out")

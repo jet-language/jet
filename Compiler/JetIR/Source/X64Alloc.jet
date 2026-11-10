@@ -86,7 +86,7 @@ ir_x64_class: fn(ty: IRX64Shape) -> IRX64Class Never! {
     if ty.kind == {
         .Unit -> IRX64Class.Empty
         .Float | .Float32 -> IRX64Class.Float
-        else -> IRX64Class.General
+        .Bool | .Int | .Word | .Char | .String | .Pointer | .Aggregate -> IRX64Class.General
     }
 }
 
@@ -158,7 +158,7 @@ ir_x64_read_form: fn(op: IROp) -> Int Never! {
         .CallIndirect -> IR_X64_READS_A_ARGS
         .Store | .StreamStore -> IR_X64_READS_AC
         .Return -> IR_X64_READS_RESULT
-        else -> IR_X64_READS_NONE
+        .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Unreachable -> IR_X64_READS_NONE
     }
 }
 
@@ -182,7 +182,7 @@ ir_x64_reads_into: fn(f: IRFunction, at: Int, reads: &[Int]) Never! {
 ir_x64_write: fn(f: IRFunction, at: Int) -> Int Never! {
     if f.op[at] == {
         .Drop | .Close | .Store | .StreamStore | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Nop -> -1
-        else -> f.dst[at]
+        .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .StackAddress | .Offset | .Sqrt | .IntBig -> f.dst[at]
     }
 }
 
@@ -203,7 +203,7 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
     // The rest read slot `a`; any other instruction is no quiet value.
     reads_slot: if op == {
         .Copy | .Move | .Add | .Sub | .Mul | .Div | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not -> true
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Drop | .Close | .Rem | .FloorDiv | .Mod | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
     if !reads_slot || f.a[at] < 0 -> return false
     row: m.types[f.slot_type[f.a[at]]]
@@ -226,7 +226,7 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
         }
         .Neg -> float || (kind == .Word && wrap)
         .Not -> kind == .Bool || kind == .Word
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Rem | .FloorDiv | .Mod | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
 }
 
@@ -243,7 +243,7 @@ ir_x64_silent: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at:
     if f.op[at] == {
         .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
         .Return -> f.b[at] != IR_TAIL_JUMP
-        else -> ir_x64_quiet(m, f, consts, values, at)
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt | .IntBig -> ir_x64_quiet(m, f, consts, values, at)
     }
 }
 

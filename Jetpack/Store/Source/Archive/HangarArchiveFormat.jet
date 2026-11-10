@@ -281,7 +281,7 @@ HangarArchive: struct {
                         if size != 0 -> return Err(StoreError.InvalidData("archive directory node has a payload"))
                         [U8]{}
                     }
-                    else -> reader.take_bytes(size)
+                    .File | .Symlink | .Hardlink -> reader.take_bytes(size)
                 }
                 nodes.push(HangarArchiveNode{path, kind, mode, bytes: payload})
             }

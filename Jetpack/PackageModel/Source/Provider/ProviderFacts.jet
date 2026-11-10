@@ -65,7 +65,7 @@ ProviderFactValue: enum {
             // A strict-JSON number keeps its exact lexeme, which Core's typed
             // Float decode recognizes and the JSON writer renders verbatim.
             // Native byte/date carriers expose text through the public accessor.
-            else -> if value.decode<Float>() == .Ok(_) -> ProviderFactValue.Number(pkg_json_render(value)) else -> ProviderFactValue.Text(value.to_text() ?? "")
+            .Number(_) | .Bytes(_) | .DateTime(_) -> if value.decode<Float>() == .Ok(_) -> ProviderFactValue.Number(pkg_json_render(value)) else -> ProviderFactValue.Text(value.to_text() ?? "")
         }
     }
 }
@@ -306,7 +306,7 @@ ProviderFacts: struct {
         value: self.facts.get(key) ?? return None
         if value == {
             .Text(text) -> Val(text)
-            else -> None
+            .Null | .Bool(_) | .Number(_) | .List(_) | .Map(_) -> None
         }
     }
 

@@ -89,7 +89,7 @@ CcToolchainError: enum {
     is_missing_descriptor: fn(self, target: String) -> Bool Never! {
         if self == {
             .MissingDescriptor(missing) -> missing == target
-            else -> false
+            .Invalid(_) | .UncoveredTarget(_) | .PackHashMismatch(_, _, _) -> false
         }
     }
 }
@@ -354,7 +354,7 @@ provider_cc_toolchain_is_reference: fn(spec: RefSpec) -> Bool Never! {
     if spec.source == {
         .Jetpack -> true
         .Named(name) -> name == CC_TOOLCHAIN_SOURCE
-        else -> false
+        .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> false
     }
 }
 
@@ -483,7 +483,7 @@ provider_cc_manifest_string: fn(object: [String: Dyn], field: String) -> String 
     value: object.get(field) ?? return Err(CcToolchainError.Invalid("C toolchain manifest misses `{field}`"))
     if value == {
         .Text(text) -> Ok(text)
-        else -> Err(CcToolchainError.Invalid("C toolchain manifest field `{field}`: expected a Dyn string"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(CcToolchainError.Invalid("C toolchain manifest field `{field}`: expected a Dyn string"))
     }
 }
 
@@ -500,6 +500,6 @@ provider_cc_manifest_object: fn(value: Dyn) -> [String: Dyn]? Never! {
             loop pair in fields -> members[pair.key] = pair.value
             Val(members)
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }

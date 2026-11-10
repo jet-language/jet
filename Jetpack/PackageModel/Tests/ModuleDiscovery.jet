@@ -69,7 +69,7 @@ use {
         .Err(error) -> {
             not_found: if error == {
                 .NotFound(_) -> true
-                else -> false
+                .Ambiguous(_, _) -> false
             }
             assert(not_found)
         }
@@ -86,7 +86,7 @@ use {
         .Err(error) -> {
             ambiguous: if error == {
                 .Ambiguous(_, _) -> true
-                else -> false
+                .NotFound(_) -> false
             }
             assert(ambiguous)
         }

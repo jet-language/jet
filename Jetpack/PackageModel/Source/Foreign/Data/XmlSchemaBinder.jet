@@ -428,7 +428,7 @@ pkg_data_xml_child_elements: fn(node: XMLNode) -> [XMLNode] Never! {
     loop content in node.content {
         if content == {
             .Element(child) -> out.push(child.copy())
-            else -> {}
+            .Text | .CData | .Comment | .ProcessingInstruction -> {}
         }
     }
     out
@@ -439,7 +439,7 @@ pkg_data_xml_is_simple: fn(node: XMLNode) -> Bool Never! {
     loop content in node.content {
         if content == {
             .Text | .CData -> {}
-            else -> return false
+            .Element(_) | .Comment | .ProcessingInstruction -> return false
         }
     }
     true

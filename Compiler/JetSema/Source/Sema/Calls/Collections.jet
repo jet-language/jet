@@ -31,6 +31,7 @@ sema_call_collections_arity_error: fn(method: String, expected: SemaCollectionMe
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
 
+
 // Rust builtin-method argument inference: every argument is inferred under its contract parameter
 // type, so leading-dot variants and anonymous records (`rows.push(.Ready)`, `map.add(key, {x:
 // 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
@@ -52,7 +53,7 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
             .Lambda(_, _) -> true
-            else -> sema_expr_is_bare_member_chain(argument.expr)
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_expr_is_bare_member_chain(argument.expr)
         }
         open_slot = (required_ret == None || failure_open) && !is_lambda
     }
@@ -83,7 +84,7 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         .Fn(_, fn_result, _, _, _, _) -> {
             if fn_result == None -> sema_call_host_callback_assignable(required, value.ty, environment, program) else -> sema_call_type_assignable(required, value.ty, environment, program)
         }
-        else -> sema_call_type_assignable(required, value.ty, environment, program)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_call_type_assignable(required, value.ty, environment, program)
     }
     if compatible == (Val(true)) -> return Val(value)
     if !callback && sema_expr_numeric_value_widening(value, required) == (Val(true)) {
@@ -112,8 +113,14 @@ sema_call_collections_callback_return: fn(value: TExpr) -> Type Never! {
 sema_call_collections_callback_takes_default_route: fn(receiver: Type, method: String, callback: TExpr) -> Bool Never! {
     if callback.kind == .Lambda(_) -> return false
     receiver_ty: sema_expr_unwrap_tag(receiver)
-    sequence: if receiver_ty == {.Option(_) | .Map(_, _, _) -> false else -> true}
-    list: if receiver_ty == {.List(_) | .FixedList(_, _) -> true else -> false}
+    sequence: if receiver_ty == {
+        .Option(_) | .Map(_, _, _) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+    }
+    list: if receiver_ty == {
+        .List(_) | .FixedList(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
     return if callback.ty == {
         .Fn(params, ret, _, _, _, _) -> {
             eager: if {
@@ -123,7 +130,7 @@ sema_call_collections_callback_takes_default_route: fn(receiver: Type, method: S
             }
             eager && sema_call_collections_return_takes_default_route(ret)
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -134,13 +141,16 @@ sema_call_collections_return_takes_default_route: fn(ret: Type?) -> Bool Never! 
     return if declared == {
         .Named(name) -> name != "Never"
         .Option(_) | .Result(_, _) -> false
-        else -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
 sema_call_collections_reject_callback_shape: fn(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if method == "filter" {
-        accepted := if callback_return == {.Result(ok, _) -> ok == Type.Bool else -> callback_return == Type.Bool}
+        accepted := if callback_return == {
+            .Result(ok, _) -> ok == Type.Bool
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> callback_return == Type.Bool
+        }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {type_name(callback_return)}", "a filter callback decides whether each item stays in the collection", "return a Bool, or a fallible Bool such as `check(item)`"))
         return true
@@ -148,7 +158,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     if method == "flat_map" {
         accepted := if callback_return == {
             .List(_) | .FixedList(_, _) -> true
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.flat_map()` should return a list, not {type_name(callback_return)}", "flat_map concatenates each callback-produced list into the output", "return a list from the callback"))
@@ -157,7 +167,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     if method == "filter_map" {
         accepted := if callback_return == {
             .Option(_) | .Result(_, _) -> true
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return an Option or a Result, not {type_name(callback_return)}", "filter_map keeps each present or Ok payload and drops the rest", "return `Val(value)` or `None` (or a Result) from the callback, or use `.map()`"))
@@ -188,7 +198,7 @@ sema_call_collections_literal_remove_mode: fn(method: String, args: [CallArg]) -
             variant == "Val" -> Val(TListRemoveMode.Value)
             else -> None
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -217,7 +227,10 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         _ := sema_ownership_check_method_receiver(state, receiver, contract.receiver_access, method, scopes, span, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    copies_receiver := if contract.row.op == {.Copy -> true else -> false}
+    copies_receiver := if contract.row.op == {
+        .Copy -> true
+        .Builtin(_) | .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .ListShuffle | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
+    }
     if copies_receiver {
         if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, program, context, diagnostics, false, false)
@@ -229,7 +242,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     if contract.accepts_comparator && updated_args.len() == 1 {
         comparator = if updated_args[0].expr == {
             .Lambda(lambda, _) -> lambda.params.len() == 2
-            else -> false
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
         }
     }
     typed := [TExpr]{}
@@ -281,7 +294,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             }
             callback_mutable = if value.kind == {
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
-                else -> callback_mutable
+                .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> callback_mutable
             }
         }
         // A named binary function given to `sort_by` is its
@@ -378,7 +391,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                         builtin_args = [TExpr]{}
                         loop argument in typed -> builtin_args.push(sema_call_collections_list_as_iter(argument, span))
                     }
-                    else -> {}
+                    .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
                 }
             }
             sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
@@ -398,7 +411,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                         .Apply(name, apply_args) -> {
                             if name == "Iter" && apply_args.len() == 1 -> apply_args[0] else -> Type.Int
                         }
-                        else -> Type.Int
+                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Type.Int
                     }
                     mapped_type := Type.List{element: inner}
                     mapped := sema_tree_node(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
@@ -432,7 +445,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
 sema_call_collections_runs_on_iter: fn(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .StepBy | .Take | .Skip | .Dedup | .Chunks | .Windows | .Intersperse | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> true
-        else -> false
+        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .IterToList | .IterCollect | .ListLazy | .IterNext | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> false
     }
 }
 
@@ -446,13 +459,13 @@ sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
     return if ty == {
         .Tagged(marker, inner) -> if marker == {
             .User(_) -> sema_call_collections_list_element(inner)
-            else -> None
+            .Internal(_) -> None
         }
         // copy: `element` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
         .List(element) -> Val(element.copy())
         // copy: `element` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
         .FixedList(element, _) -> Val(element.copy())
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -507,6 +520,6 @@ sema_call_collections_list_receiver: fn(ty: Type) -> Bool Never! {
         .List(_) | .FixedList(_, _) -> true
         .Tagged(_, inner) -> sema_call_collections_list_receiver(inner)
         .Result(ok, _) -> sema_call_collections_list_receiver(ok)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

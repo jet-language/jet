@@ -124,7 +124,7 @@ TransitionPlan: struct {
         }
         if self.apply_changes() == {
             .Err(error) -> return Err(self.rollback(snapshots, error))
-            else -> {}
+            .Ok(_) -> {}
         }
         Ok(TransitionResult{summary: self.summary()})
     }
@@ -156,7 +156,7 @@ TransitionPlan: struct {
                     if current == written {
                         if env_transition_apply_state(self.root, snapshot.path, snapshot.state) == {
                             .Err(rollback) -> failures.push("{change.relative}: {rollback.message()}")
-                            else -> {}
+                            .Ok(_) -> {}
                         }
                         next
                     }

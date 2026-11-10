@@ -15,23 +15,47 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     other := build_session_new(72, "other", "fixture-compiler", policy)
     empty: BuildSessionValue.List{values: [BuildSessionValue]{}}
     probe_reply: build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "schema-compiler"), .Text(value: "find_program"), .Text(value: "schema-compiler")}, None, true, 1, 9)
-    probe: if probe_reply == {.Value(value) -> value else -> { return false }}
+    probe: if probe_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> { return false }
+    }
     found_reply: build_session_call(session, "found", [BuildSessionValue]{probe}, None, false, 1, 9)
-    found: if found_reply == {.Value(value) -> value else -> { return false }}
+    found: if found_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> { return false }
+    }
     action_reply: build_session_call(session, "run", [BuildSessionValue]{.Text(value: "schema"), found, empty}, None, false, 10, 20)
-    action: if action_reply == {.Value(value) -> value else -> { return false }}
+    action: if action_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> { return false }
+    }
     if build_session_call(session, "action.input", [BuildSessionValue]{action, .Text(value: "schema.txt")}, None, false, 10, 20) != .Value(value: .Unit) -> return false
-    if build_session_call(session, "action.output", [BuildSessionValue]{action, .Text(value: "generated/schema.bin")}, None, false, 10, 20) == {.Failure(_) -> { return false } else -> {}}
+    if build_session_call(session, "action.output", [BuildSessionValue]{action, .Text(value: "generated/schema.bin")}, None, false, 10, 20) == {
+        .Failure(_) -> { return false }
+        .Value(_) | .HostRequest(_, _) -> {}
+    }
     foreign: build_session_call(other, "add_library", [BuildSessionValue]{.Text(value: "foreign"), empty, .List(values: [BuildSessionValue]{action})}, None, false, 21, 30)
-    if foreign == {.Failure(_) -> {} else -> return false}
+    if foreign == {
+        .Failure(_) -> {}
+        .Value(_) | .HostRequest(_, _) -> return false
+    }
     target_reply: build_session_call(session, "add_library", [BuildSessionValue]{.Text(value: "schema"), .List(values: [BuildSessionValue]{.Text(value: ".jet/generated/fixture/schema.jet")}), .List(values: [BuildSessionValue]{action})}, None, false, 31, 40)
-    target: if target_reply == {.Value(value) -> value else -> { return false }}
+    target: if target_reply == {
+        .Value(value) -> value
+        .Failure(_) | .HostRequest(_, _) -> { return false }
+    }
     source: "package: {{ name: \"fixture.schema\" }}\nVALUE: 7\n"
     generated: build_session_call(session, "generate", [BuildSessionValue]{.Text(value: "schema")}, Val(source), false, 41, 50)
     if generated != .Value(value: .Unit) -> return false
     wrong_generate: build_session_call(session, "generate", [BuildSessionValue]{.Text(value: "retired"), .Text(value: source)}, None, false, 51, 60)
-    if wrong_generate == {.Failure(_) -> {} else -> return false}
-    if build_session_call(session, "run", [BuildSessionValue]{.Text(value: "short"), found}, None, false, 61, 70) == {.Failure(_) -> {} else -> return false}
+    if wrong_generate == {
+        .Failure(_) -> {}
+        .Value(_) | .HostRequest(_, _) -> return false
+    }
+    if build_session_call(session, "run", [BuildSessionValue]{.Text(value: "short"), found}, None, false, 61, 70) == {
+        .Failure(_) -> {}
+        .Value(_) | .HostRequest(_, _) -> return false
+    }
     contribution: build_session_call(session, "contribute", [BuildSessionValue]{.Text(value: "cache_slots"), .Int(value: 8)}, None, false, 71, 80)
     if contribution != .Value(value: .Unit) -> return false
     plan: build_session_call(session, "plan", [BuildSessionValue]{target}, None, false, 81, 90)
@@ -56,7 +80,10 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     selected_modules: build_plan_selected_generated(selected)
     if selected_modules.len() != 1 || selected_modules[0].source != source -> return false
     if build_session_graph(session, .Handle(type_name: "BuildPlan", session: 71, id: 0)).diagnostic == None -> return false
-    if build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 91, 100) == {.Failure(_) -> {} else -> return false}
+    if build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 91, 100) == {
+        .Failure(_) -> {}
+        .Value(_) | .HostRequest(_, _) -> return false
+    }
     true
 }
 

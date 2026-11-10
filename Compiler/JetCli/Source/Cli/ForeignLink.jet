@@ -394,7 +394,7 @@ jet_cli_inline_c_type: fn(ty: Type) -> String Never! {
         .Bool -> "_Bool"
         .IntN(signed, bits) -> if signed -> "int{bits}_t" else -> "uint{bits}_t"
         .InlineRange(base, _, _) -> jet_cli_inline_c_type(base)
-        else -> "void"
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "void"
     }
 }
 

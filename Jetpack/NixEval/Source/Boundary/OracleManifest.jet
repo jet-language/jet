@@ -292,7 +292,7 @@ nixeval_oracle_optional_sri: fn(document: NixEvalJSON, parent: [String: Int], ke
             if !nixeval_is_canonical_sha256_sri(value) -> return Err(NixEvalError.Manifest("`{key}` must be canonical SHA-256 SRI"))
             return Ok(Val(value))
         }
-        else -> {}
+        .Bool(_) | .Num(_) | .Array(_) | .Object(_) -> {}
     }
     Err(NixEvalError.Manifest("`{key}` must be a string or null"))
 }

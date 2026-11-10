@@ -222,7 +222,7 @@ parser_parse_module_contribution: fn(state: &JetParserState) -> Contribution {
             parser_module_error(state, "E2903", namespace_token.span, "performance contributions use a role module", "performance budgets need one typed budgets list and are not ordinary namespace values", "write `perf.name: module {{ budgets: [...] }}`")
             ContribValue.Expr{value: parser_parse_expression(state, 1, 0).expr}
         }
-        else -> ContribValue.Expr{value: parser_parse_expression(state, 1, 0).expr}
+        .Env | .Profile -> ContribValue.Expr{value: parser_parse_expression(state, 1, 0).expr}
     }
     end: parser_module_contribution_end(value)
     Contribution{namespace: namespace ?? Namespace.Env, path: path.name, path_span: path.span, value: value, span: parser_cover(namespace_token.span, end)}
@@ -458,7 +458,7 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 updated.body = parser_module_body_caps(definition.body, cap)
                 capped.push(Item.GenericModule{value: updated})
             }
-            else -> capped.push(item.copy())
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> capped.push(item.copy())
         }
     }
     capped
@@ -589,7 +589,7 @@ parser_module_body_visibility: fn(body: &&[Item], is_pub: Bool, is_package_pub: 
                 updated.is_package_pub = is_package_pub
                 narrowed.push(Item.ProtocolDecl{value: updated})
             }
-            else -> narrowed.push(item)
+            .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> narrowed.push(item)
         }
     }
     narrowed
@@ -818,7 +818,7 @@ parser_parse_role_module: fn(state: &JetParserState, modifiers: ParsedItemModifi
                 field_name: parser_value(state, field)
                 profile_fields.push(NamedExpr{name: field_name.move(), name_span: field.span, value: parser_parse_expression(state, 1, 0).expr})
             }
-            else -> {
+            .Perf -> {
                 field: parser_expect_name(state, "for a performance field")
                 parser_expect(state, TOKEN_COLON, "after a performance field")
                 field_name: parser_value(state, field)
@@ -859,7 +859,7 @@ parser_parse_role_module: fn(state: &JetParserState, modifiers: ParsedItemModifi
         .Fleet -> ContribValue.Fleet{value: FleetLit{explicit_type: None, fields: fleet_fields, span: body_span}}
         .VMTest -> ContribValue.VMTest{value: VMTestLit{explicit_type: None, fields: vmtest_fields, span: body_span}}
         .Profile -> ContribValue.Profile{value: ProfileLit{fields: profile_fields, span: body_span}}
-        else -> ContribValue.Perf{value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span}}
+        .Perf -> ContribValue.Perf{value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span}}
     }
     contribution: Contribution{namespace: namespace ?? Namespace.Env, path: role.name, path_span: role.span, value: value, span: parser_cover(namespace_head.span, close.span)}
     Item.Module{value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span), markers: markers}}

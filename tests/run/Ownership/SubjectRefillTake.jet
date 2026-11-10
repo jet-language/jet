@@ -39,7 +39,7 @@ descend: fn(depth: Int, steps: Int) -> String {
     loop _ in 0..<steps {
         if cursor == {
             .Wrap(inner) -> cursor = inner
-            else -> break
+            .Leaf(_) | .Pair(_, _) -> break
         }
     }
     describe(cursor)
@@ -74,7 +74,7 @@ read_after: fn(depth: Int) -> String {
             cursor = inner
             seen = describe(inner)
         }
-        else -> {}
+        .Leaf(_) | .Pair(_, _) -> {}
     }
     "{describe(cursor)} / {seen}"
 }
@@ -88,7 +88,7 @@ sibling_after: fn() -> String {
             cursor = left
             seen = describe(right)
         }
-        else -> {}
+        .Leaf(_) | .Wrap(_) -> {}
     }
     "{describe(cursor)} / {seen}"
 }

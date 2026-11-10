@@ -12,7 +12,7 @@ run: fn() -[IO, Net, Time.Wait]> {
             print(net.error_message(error))
             if error == {
                 .InvalidInput(_) -> { print("invalid-input") }
-                else -> { panic("wrong network error kind") }
+                .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> { panic("wrong network error kind") }
             }
         }
     }

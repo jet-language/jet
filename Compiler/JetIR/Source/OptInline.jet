@@ -151,7 +151,7 @@ ir_opt_located: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if kind == {
         .Int -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Shl || op == .Shr
         .Word -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || f.c[at] != IR_OVERFLOW_WRAP
-        else -> false
+        .Unit | .Bool | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> false
     }
 }
 
@@ -237,7 +237,7 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
             a = map[a]
             c = map[c]
         }
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .Call | .CallRuntime | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Return | .Unreachable -> {}
     }
     if op == .Call || op == .CallRuntime || op == .CallIndirect {
         start: f.args.len()

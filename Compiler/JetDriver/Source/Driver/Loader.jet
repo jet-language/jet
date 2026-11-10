@@ -168,7 +168,7 @@ jet_driver_program_has_inline_module: fn(program: Program, name: String) -> Bool
             .ModuleAlias(alias) -> {
                 if alias.name == name -> return true
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -897,7 +897,7 @@ jet_driver_resolve_package_dependencies: fn(packages: &[JetDriverPackageInfo], s
                     }
                     if target_root == {
                         .Val(target_root_index) -> dependency.target_root_index = target_root_index
-                        else -> diagnostics.push(jet_driver_diagnostic_at_source("E0603", dependency.span, dependency.source_path, 0, "a path dependency has no matching authorized package root", "dependency paths are interpreted by Jet and may resolve only to a native-authorized root snapshot", "include the checked dependency root at its manifest-selected path"))
+                        .None -> diagnostics.push(jet_driver_diagnostic_at_source("E0603", dependency.span, dependency.source_path, 0, "a path dependency has no matching authorized package root", "dependency paths are interpreted by Jet and may resolve only to a native-authorized root snapshot", "include the checked dependency root at its manifest-selected path"))
                     }
                 }
                 else -> {
@@ -977,7 +977,7 @@ jet_driver_manifest_entry_function: fn(source_path: String, tokens: [Token], tab
             selected: JetDriverPackageEntry{module_alias: module_alias, function_name: name, source_path: source_path, span: Val(tokens[function_index].span)}
             conflict: if entry == {
                 .Val(previous) -> previous.module_alias != selected.module_alias || previous.function_name != selected.function_name
-                else -> false
+                .None -> false
             }
             if {
                 conflict -> diagnostics.push(jet_driver_diagnostic_at_source("E0105", Val(tokens[function_index].span), source_path, 0, "package outputs select different entry functions", "the private compile request does not contain an output selector", "select one output or declare one shared entry binding"))
@@ -1992,7 +1992,7 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
                 }
                 aggregate_file = Val(SourceFile{id: source_file_id(unit.path), path: unit.path, source: file.source})
             }
-            else -> {
+            .CompilerGenerated -> {
                 if unit.file_index != -1 || jet_driver_source_path_is_authorized(snapshot, unit.path) {
                     diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source unit aliases an authorized physical source", "generated source identities are distinct from immutable disk snapshots", "use a unique compiler-generated origin path"))
                     next
@@ -2053,7 +2053,7 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
                     raw_path: jet_driver_display_path(entry_root, raw.path)
                     jet_driver_add_source_file(files, SourceFile{id: source_file_id(raw_path), path: raw_path, source: raw.source}, diagnostics)
                 }
-                else -> {
+                .CompilerGenerated -> {
                     if jet_driver_source_path_is_authorized(snapshot, segment.source_file) {
                         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated segment claims an authorized disk path", "compiler-produced text has a distinct non-disk identity", "give the generated segment a unique virtual origin"))
                         next
@@ -2236,7 +2236,7 @@ jet_driver_find_module_import_target: fn(
 jet_driver_import_is_module_edge: fn(kind: ImportKind) -> Bool Never! {
     if kind == {
         .File(_, _) | .Module(_, _) -> true
-        else -> false
+        .Unqualified(_, _, _, _, _) -> false
     }
 }
 
@@ -2449,7 +2449,7 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
                 span: Span{start: module_alias_span.start, end: module_alias_span.start}
                 bindings.push(ImportDecl{kind: ImportKind.Module{name: module_alias, span: span}, alias: module_alias, alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
             }
-            else -> {}
+            .File(_, _) | .Module(_, _) -> {}
         }
     }
     if bindings.len() == 0 -> return
@@ -2476,7 +2476,7 @@ jet_driver_namespace_item_names: fn(items: [Item], from: Int) -> [NamedSpan] Nev
             .Tag(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .Const(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .ProtocolDecl(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
-            else -> {}
+            .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     names
@@ -2558,7 +2558,7 @@ jet_driver_default_regions: fn(items: [Item], template: Bool, module_index: Int,
             .GenericModule(definition) -> jet_driver_default_regions(definition.body, template, module_index, regions)
             .TemplateLoop(definition) -> jet_driver_template_default_regions(definition.body, module_index, regions)
             .UserDerive(definition) -> jet_driver_template_default_regions(definition.body, module_index, regions)
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -3883,7 +3883,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
             .Test(_) -> {
                 if !entry -> next
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         kept.push(item)
     }
@@ -3965,7 +3965,7 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
                     next
                 }
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
         kept.push(item.copy())
     }

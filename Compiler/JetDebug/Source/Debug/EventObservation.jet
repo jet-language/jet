@@ -36,10 +36,10 @@ render_event_observations: fn(snapshot: String) -> String DebugEventObservationE
                     }
                     return debug_render_event_rows(rows)
                 }
-                else -> { return Err(debug_event_error(no_sequence)) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(debug_event_error(no_sequence)) }
             }
         }
-        else -> { return Err(debug_event_error(no_sequence)) }
+        .None -> { return Err(debug_event_error(no_sequence)) }
     }
 }
 
@@ -80,7 +80,7 @@ debug_render_event_rows: fn(events: [Dyn]) -> String DebugEventObservationError!
                 terminal: debug_event_closed(fields, "terminal") ?? return Err(err)
                 lines.push("sequence={sequence} source={source} event={event_id} owner={owner_id} subscription={subscription_id} dispatch={dispatch_id} lifecycle={lifecycle} queued={queued} blocked={blocked} running={running} capacity={capacity} overflow={overflow} priority={priority} failure={failure} terminal={terminal}")
             }
-            else -> { return Err(debug_event_error("runtime event observation is not an object")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(debug_event_error("runtime event observation is not an object")) }
         }
     }
     Ok(lines.join("\n"))
@@ -129,7 +129,7 @@ debug_event_field: fn(object: Dyn, key: String) -> Dyn? Never! {
                 if entry.key == key -> return Val(entry.value)
             }
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
     }
     None
 }

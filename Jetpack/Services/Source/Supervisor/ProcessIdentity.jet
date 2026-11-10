@@ -192,7 +192,7 @@ services_stop_platform_authority: fn(authority: ServiceAuthority) ServicesError!
             if !receipt.success -> return Err(ServicesError.new("service authority stop exited with {env_shell_exit_status_text(receipt)}"))
         }
         .WindowsGuardianJobObject(_) -> return Err(ServicesError.new("service guardian stop fallback is unavailable"))
-        else -> {}
+        .TestProcessGroup | .Unsupported -> {}
     }
 }
 
@@ -361,7 +361,7 @@ services_attach_authority: fn(authority: ServiceAuthority) -> ServiceAuthority S
     if authority == {
         .WindowsGuardianJobObject(_) -> Err(ServicesError.new(SERVICES_GUARDIAN_UNAVAILABLE))
         .Unsupported -> Err(ServicesError.new("service authority is unavailable"))
-        else -> Ok(authority)
+        .TestProcessGroup | .LinuxSystemdUser(_) -> Ok(authority)
     }
 }
 

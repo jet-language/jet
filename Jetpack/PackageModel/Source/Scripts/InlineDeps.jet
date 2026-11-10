@@ -43,7 +43,7 @@ pkg_inline_deps_collect_from_imports: fn(imports: [ImportDecl]) -> [InlineDep] N
         version: decl.inline_version ?? next
         if decl.kind == {
             .Module(name, _) -> out.push(InlineDep{name: name, selector: version.text, span: version.span})
-            else -> {}
+            .File(_, _) | .Unqualified(_, _, _, _, _) -> {}
         }
     }
     out
@@ -195,7 +195,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
-            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{error}"})) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{error}"})) }
         }
     }
     if root_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
@@ -206,7 +206,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
-            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
         }
     }
     if package_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(package_dir)))

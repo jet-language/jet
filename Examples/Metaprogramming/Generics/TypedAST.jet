@@ -79,20 +79,20 @@ eval_node: fn(n: Node) -> Value {
         .Add(a, b) -> if eval_node(a) == {
             .I(x) -> if eval_node(b) == {
                 .I(y) -> Value.I(x + y)
-                else -> Value.Stuck("add rhs")
+                .B(_) | .Stuck(_) -> Value.Stuck("add rhs")
             }
-            else -> Value.Stuck("add lhs")
+            .B(_) | .Stuck(_) -> Value.Stuck("add lhs")
         }
         .Eq(a, b) -> if eval_node(a) == {
             .I(x) -> if eval_node(b) == {
                 .I(y) -> Value.B(x == y)
-                else -> Value.Stuck("eq rhs")
+                .B(_) | .Stuck(_) -> Value.Stuck("eq rhs")
             }
-            else -> Value.Stuck("eq lhs")
+            .B(_) | .Stuck(_) -> Value.Stuck("eq lhs")
         }
         .If(c, t, e) -> if eval_node(c) == {
             .B(k) -> if k -> eval_node(t) else -> eval_node(e)
-            else -> Value.Stuck("if cond")
+            .I(_) | .Stuck(_) -> Value.Stuck("if cond")
         }
     }
 }
@@ -100,14 +100,14 @@ eval_node: fn(n: Node) -> Value {
 run_int: fn(e: Expr<Int>) -> Int {
     if eval_node(e.node) == {
         .I(v) -> v
-        else -> 0 - 1
+        .B(_) | .Stuck(_) -> 0 - 1
     }
 }
 
 run_bool: fn(e: Expr<Bool>) -> Bool {
     if eval_node(e.node) == {
         .B(v) -> v
-        else -> false
+        .I(_) | .Stuck(_) -> false
     }
 }
 

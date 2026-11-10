@@ -289,7 +289,7 @@ pkg_parse_output_value: fn(key: String, raw: String) -> OutputFact PackageParseE
         if name == OUTPUT_FIELD_LOADABLE || name == OUTPUT_FIELD_NATIVE {
             is_bool: if payload_fields[name] == {
                 .Bool(_) -> true
-                else -> false
+                .Null | .Number(_) | .String(_) | .Array(_) | .Object(_) -> false
             }
             if !is_bool -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
         }
@@ -302,14 +302,14 @@ pkg_parse_output_value: fn(key: String, raw: String) -> OutputFact PackageParseE
 pkg_payload_is_string_array: fn(payload: OutputPayload) -> Bool Never! {
     values: if payload == {
         .Array(values) -> values
-        else -> {
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Object(_) -> {
             return false
         }
     }
     loop value in values {
         if value == {
             .String(_) -> {}
-            else -> return false
+            .Null | .Bool(_) | .Number(_) | .Array(_) | .Object(_) -> return false
         }
     }
     true

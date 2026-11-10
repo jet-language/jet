@@ -309,7 +309,7 @@ cli_cc_resolve_toolchain: fn(verification: &StoreVerification, roots: HangarRoot
     realized: provider_realize(verification, spec, table, ctx)
     if realized.source_state == {
         .Downloaded | .Substituted -> store_record_realized_mode(verification, roots, realized) ?? return Err(ProviderError.BadOutput(err.message()))
-        else -> {}
+        .Built | .Cached -> {}
     }
     provider_cc_toolchain_resolve_for_target(verification, hangar, target, fixtures != None) ?? return Err(ProviderError.BadOutput(err.message()))
 }
@@ -525,7 +525,7 @@ cli_cc_report_provider_error: fn(error: ProviderError) -[IO, Env, Time.Wait]> {
         .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "{NATIVE_SANDBOX_FIX}; Jet will not run the compiler unsandboxed")
         .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "use a covered target, or install jet from a release that publishes the C toolchain pack for this machine; Jet will not use a host or PATH compiler")
         .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "run `jet env fetch-toolchain` with a pack whose SHA-256 matches (the release's, or the copy beside jet); a refused copy never enters the Hangar, and a corrupt Hangar object must be removed first")
-        else -> error.report(theme)
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> error.report(theme)
     }
 }
 

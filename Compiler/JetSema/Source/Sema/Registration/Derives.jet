@@ -188,7 +188,7 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
             inner: sema_derive_static_value(expansion, operand) ?? return None
             if inner == {
                 .Bool(value) -> Val(CtValue.Bool{value: !value})
-                else -> None
+                .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
             }
         }
         .Binary(op, left, right, _, _) -> {
@@ -232,7 +232,7 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
             CtValue?{None}
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> sema_derive_static_method(expansion, receiver, method, args)
-        else -> CtValue?{None}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> CtValue?{None}
     }
 }
 
@@ -337,7 +337,7 @@ sema_derive_static_text: fn(value: CtValue) -> String? Never! {
         .Str(text) -> Val(text)
         .Int(number) -> Val("{number}")
         .Bool(flag) -> Val("{flag}")
-        else -> None
+        .Float(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 
@@ -377,14 +377,14 @@ sema_derive_fact_read: fn(owner: CtValue, read: String) -> CtValue? Never! {
 sema_derive_ct_bool: fn(value: CtValue) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
-        else -> None
+        .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 
 sema_derive_ct_int: fn(value: CtValue) -> Int? Never! {
     if value == {
         .Int(number) -> Val(number)
-        else -> None
+        .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 
@@ -412,7 +412,7 @@ sema_derive_ct_scalar_equal: fn(lhs: CtValue, rhs: CtValue) -> Bool? Never! {
                 return Val(left_variant == right_variant)
             }
         }
-        else -> {}
+        .Float(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {}
     }
     None
 }
@@ -436,10 +436,10 @@ sema_derive_static_binary: fn(op: BinOp, lhs: CtValue, rhs: CtValue) -> CtValue?
                 .Lt -> a < b
                 .Gt -> a > b
                 .Le -> a <= b
-                else -> a >= b
+                .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Ge | .Compare | .And | .Or -> a >= b
             }
         }
-        else -> return None
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare -> return None
     }
     Val(CtValue.Bool{value: result})
 }
@@ -481,7 +481,7 @@ sema_derive_literal_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
             }
             Val(Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: None, as_trait: None, fields: expanded, inferred: false, span: span, id: AST_NODE_GENERATED})
         }
-        else -> None
+        .Float(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Closure(_) -> None
     }
 }
 
@@ -499,7 +499,7 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
             if sema_derive_struct_field(value, "name") == .Val(.Str(text)) -> return text
             sema_derive_fail(expansion, sema_error("E0956", span, "compile-time name `${binding}` has no text name", "a generated item name needs the reflected value's `name` field", "bind the name to a String value"))
         }
-        else -> {
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
             if explicit -> sema_derive_fail(expansion, sema_error("E0956", span, "compile-time name `{name}` is not text", "a generated item name needs text, but this value is {sema_derive_value_type_name(value)}", "bind the name to a String value"))
         }
     }
@@ -545,7 +545,7 @@ sema_derive_expand_type: fn(expansion: &SemaDeriveExpansion, ty: Type) -> Type N
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_derive_expand_type(expansion, base), lo: lo, hi: hi}
         // copy: the derive template type is expanded once per deriving declaration, so the template
         // keeps its node and an unexpanded node is copied into this expansion.
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty.copy()
     }
 }
 
@@ -638,7 +638,7 @@ sema_derive_loop_side: fn(subject: Expr?) -> String? Never! {
     if value == {
         .Ident(text, _, _) -> name = text
         .ComptimeName(text, _, _, _) -> name = text
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
     if name == "self" -> return Val("left")
     if name == "rhs" -> return Val("right")
@@ -721,7 +721,7 @@ sema_derive_expand_pattern: fn(expansion: &SemaDeriveExpansion, pattern: Pattern
         }
         // copy: the derive template pattern is expanded once per deriving declaration, so the
         // template keeps its node and an unexpanded node is copied into this expansion.
-        else -> pattern.copy()
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .BinMatch(_, _) -> pattern.copy()
     }
 }
 
@@ -730,7 +730,7 @@ sema_derive_expand_str_match_parts: fn(expansion: &SemaDeriveExpansion, parts: [
     loop part in parts {
         if part == {
             .Hole(name, ty, span) -> expanded.push(StrMatchPart.Hole{name: name, ty: ty.map((value) -> sema_derive_expand_type(expansion, value)), span: span})
-            else -> expanded.push(part.copy())
+            .Lit(_) -> expanded.push(part.copy())
         }
     }
     expanded
@@ -767,7 +767,7 @@ sema_derive_coerce_enum_arm: fn(expansion: SemaDeriveExpansion, cond: Expr, subj
         }
         // copy: the derive template condition is expanded once per deriving declaration, so the
         // template keeps `cond` and a non-binary condition is copied into this expansion.
-        else -> cond.copy()
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> cond.copy()
     }
 }
 
@@ -823,7 +823,7 @@ sema_derive_expand_str_parts: fn(expansion: &SemaDeriveExpansion, parts: [StrPar
     loop part in parts {
         if part == {
             .Interp(expression, format) -> expanded.push(StrPart.Interp{expr: sema_derive_expand_hole(expansion, expression), format: format})
-            else -> expanded.push(part.copy())
+            .Lit(_) | .Byte(_) -> expanded.push(part.copy())
         }
     }
     expanded
@@ -848,7 +848,7 @@ sema_derive_expand_or_fallback: fn(expansion: &SemaDeriveExpansion, fallback: Or
         .Panic(name_span, args) -> OrFallback.Panic{name_span: name_span, args: sema_derive_expand_call_args(expansion, args)}
         // copy: the derive template fallback is expanded once per deriving declaration, so the
         // template keeps its node and an unexpanded fallback is copied into this expansion.
-        else -> fallback.copy()
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> fallback.copy()
     }
 }
 
@@ -967,7 +967,7 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
             loop step in steps -> expanded.push(PipeStep{name: step.name, value: sema_derive_expand_expr(expansion, step.value), reads: step.reads, span: step.span})
             return Expr.Pipe{head: expanded_head, steps: expanded, span: span, id: node}
         }
-        else -> {}
+        .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
     }
     // copy: every other expression kind is unchanged by expansion, but the derive template keeps it
     // for the next deriving declaration, so this expansion gets its own copy.
@@ -979,7 +979,7 @@ sema_derive_reflect_literal: fn(expansion: SemaDeriveExpansion, receiver: Expr, 
     if receiver == {
         .Ident(text, _, _) -> name = text
         .ComptimeName(text, _, _, _) -> name = text
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
     value: sema_derive_scope_value(expansion, name) ?? return None
     if value == .Struct(type_name, _) {
@@ -994,7 +994,7 @@ sema_derive_expand_typed_body: fn(expansion: &SemaDeriveExpansion, body: TypedLi
         .Elements(elements) -> return TypedLitBody.Elements{elements: sema_derive_expand_exprs(expansion, elements)}
         .Entries(entries) -> return TypedLitBody.Entries{entries: sema_derive_expand_pairs(expansion, entries)}
         .Value(value) -> return TypedLitBody.Value{value: sema_derive_expand_expr(expansion, value)}
-        else -> {}
+        .ByteText(_) | .Empty -> {}
     }
     // copy: a typed literal body without template splices is unchanged, but the derive template
     // keeps it for the next deriving declaration, so this expansion gets its own copy.
@@ -1028,7 +1028,7 @@ sema_derive_expand_field: fn(expansion: &SemaDeriveExpansion, base: Expr, member
         .ComptimeName(name, _, value, _) -> {
             if value == None -> binding = Val(name)
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     // `left.index` over a reflected template value is that value's literal.
     if binding == .Val(name) {
@@ -1091,7 +1091,7 @@ sema_derive_expand_stmt_into: fn(expansion: &SemaDeriveExpansion, stmt: Stmt, ou
             }
             sema_derive_expand_loop_block(expansion, body, span, out)
         }
-        else -> out.push(sema_derive_expand_stmt(expansion, stmt))
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> out.push(sema_derive_expand_stmt(expansion, stmt))
     }
 }
 
@@ -1148,7 +1148,7 @@ sema_derive_loop_values: fn(expansion: SemaDeriveExpansion, source: Expr) -> [Ct
                     if element == {
                         .Ident(name, _, _) -> names.push(CtValue.Str{value: name})
                         .ComptimeName(name, _, _, _) -> names.push(CtValue.Str{value: sema_derive_bare(name)})
-                        else -> {
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
                             names = [CtValue]{}
                             break
                         }
@@ -1171,7 +1171,7 @@ sema_derive_expand_binding: fn(expansion: &SemaDeriveExpansion, binding: Binding
             .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: sema_derive_expand_pattern(expansion, inner, None), fallback: sema_derive_expand_or_fallback(expansion, fallback), names: names, span: span}
             // copy: the binding pattern is unchanged by expansion, but it is a payload view in the
             // derive template, which keeps it for the next deriving declaration.
-            else -> pattern.copy()
+            .List(_, _) | .Tuple(_, _) -> pattern.copy()
         })
     }
     updated.init = sema_derive_expand_expr(expansion, binding.init)
@@ -1206,7 +1206,7 @@ sema_derive_expand_lvalue: fn(expansion: &SemaDeriveExpansion, target: LValue) -
         .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(expansion, base), field: if sema_derive_splice(field) && sema_derive_scope_index(expansion, field) != None -> sema_derive_expand_name(expansion, field, span) else -> field, span: span}
         // copy: the assignment target is unchanged by expansion, but the derive template keeps it
         // for the next deriving declaration, so this expansion gets its own copy.
-        else -> target.copy()
+        .Local(_, _) -> target.copy()
     }
 }
 
@@ -1275,7 +1275,7 @@ sema_derive_expand_stmt: fn(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_derive_expand_expr(expansion, close), span: span}
         // copy: the statement kind is unchanged by expansion, but the derive template keeps it for
         // the next deriving declaration, so this expansion gets its own copy.
-        else -> stmt.copy()
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> stmt.copy()
     }
 }
 
@@ -1290,7 +1290,7 @@ sema_derive_expand_markers: fn(expansion: &SemaDeriveExpansion, markers: [Marker
         loop arg in marker.args {
             if arg == {
                 .Expr(value) -> args.push(MarkerCallArg.Expr{value: sema_derive_expand_expr(expansion, value)})
-                else -> args.push(arg.copy())
+                .EffectRow(_, _) -> args.push(arg.copy())
             }
         }
         updated.args = args
@@ -1381,16 +1381,16 @@ sema_derive_test_static_name: fn(name_expr: Expr?) -> String? Never! {
                 .Interp(value, format) -> {
                     if format == {
                         .Display -> {}
-                        else -> return None
+                        .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> return None
                     }
                     if value == {
                         .Int(number, _, _, _, _) -> text = "{text}{number}"
                         .Bool(flag, _, _) -> text = "{text}{flag}"
                         .Char(character, _, _) -> text = "{text}{character}"
-                        else -> return None
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
                     }
                 }
-                else -> return None
+                .Byte(_) -> return None
             }
         }
         return Val(text)
@@ -1476,7 +1476,7 @@ sema_derive_expand_item: fn(expansion: &SemaDeriveExpansion, item: Item) -> Item
         }
         // copy: the item kind is unchanged by expansion, but the derive template keeps it for the
         // next deriving declaration, so this expansion gets its own copy.
-        else -> item.copy()
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> item.copy()
     }
 }
 
@@ -1555,7 +1555,7 @@ sema_derive_stmt_span: fn(stmt: Stmt) -> Span Never! {
         .Expr(value) -> expr_span(value)
         .Val(binding) -> binding.name_span
         .Return(_, span) | .Switch(_, _, _, span) -> span
-        else -> Span{start: 0, end: 0}
+        .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> Span{start: 0, end: 0}
     }
 }
 
@@ -1615,7 +1615,7 @@ sema_derive_exec_stmt: fn(expansion: &SemaDeriveExpansion, stmt: Stmt) Never! {
             }
             expansion.scope.push(NamedCtValue{name: binding.name, value: value})
         }
-        else -> sema_derive_fail(expansion, sema_error("E0956", sema_derive_stmt_span(stmt), "a derive template statement is not a binding", "between template items, a derive body only binds known-time values", "move the statement into a generated function body"))
+        .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> sema_derive_fail(expansion, sema_error("E0956", sema_derive_stmt_span(stmt), "a derive template statement is not a binding", "between template items, a derive body only binds known-time values", "move the statement into a generated function body"))
     }
 }
 
@@ -1649,7 +1649,7 @@ sema_derive_exec_expr: fn(expansion: &SemaDeriveExpansion, expression: Expr) Nev
         }
         .Paren(value, _, _) -> sema_derive_exec_expr(expansion, value)
         .Unit(_, _) | .NoElse(_, _) -> {}
-        else -> sema_derive_exec_value(expansion, expression)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_derive_exec_value(expansion, expression)
     }
 }
 
@@ -1928,7 +1928,7 @@ sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: 
         }
         // copy: other type kinds are unchanged, but `ty` stays in the provider signature (the
         // caller's read parameter), so the replaced type gets its own copy.
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty.copy()
     }
 }
 
@@ -2024,7 +2024,7 @@ sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
                 index.distincts[definition.name] = true
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
-            else -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     index
@@ -2100,7 +2100,7 @@ sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name:
         .Struct(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Enum(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Distinct(definition) -> readiness.trait_name == "Equatable" || sema_derive_has_name(definition.derives, readiness.trait_name)
-        else -> false
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 
@@ -2116,7 +2116,7 @@ sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
             true
         }
         .Named(name) -> name == "U8" || name == "Ordering"
-        else -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2200,7 +2200,7 @@ sema_derive_fields_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ite
             }
             true
         }
-        else -> false
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 
@@ -2220,7 +2220,7 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
                 name = definition.name
                 requested = sema_type_metadata_enum_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
             }
-            else -> next
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) || index.codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None -> next
         readiness.candidates[name] = names.len()
@@ -2305,7 +2305,7 @@ sema_derive_unordered_comparable: fn(item: Item, diagnostics: &[Diagnostic]) -> 
         .Struct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
         .Enum(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
         .Distinct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
-        else -> { return false }
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> { return false }
     }
     held: sema_derive_item_unordered_type(item) ?? return false
     held_name: type_name(held)
@@ -2340,7 +2340,7 @@ sema_derive_item_unordered_type: fn(item: Item) -> Type? Never! {
             }
         }
         .Distinct(definition) -> return sema_derive_unordered_type(definition.base)
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     None
 }
@@ -2373,7 +2373,7 @@ sema_derive_unordered_type: fn(ty: Type) -> Type? Never! {
             }
             None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -2416,7 +2416,7 @@ sema_computed_formula_reads_only: fn(formula: Expr, fields: [Field], depth: Int)
         .CompareChain(operands, _, _, _, _) -> loop operand in operands {
             if !sema_computed_formula_reads_only(operand, fields, depth) -> break false
         } ?? true
-        else -> false
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> false
     }
 }
 
@@ -2521,7 +2521,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
                 generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: block.methods.move(), delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
             }
         }
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     blocks.move()
 }

@@ -79,7 +79,7 @@ ssl_tls13_psa_mpi_error: fn(e: bn.MpiError) -> ssldefs.SSLError Never! {
         .BadInput | .InvalidCharacter | .NegativeValue | .DivisionByZero | .NotAcceptable -> ssldefs.SSLError.BadInputData
         .BufferTooSmall -> ssldefs.SSLError.BufferTooSmall
         .AllocFailed -> ssldefs.SSLError.AllocFailed
-        else -> ssldefs.SSLError.GenericError
+        .Random | .FileIO -> ssldefs.SSLError.GenericError
     }
 }
 
@@ -374,7 +374,7 @@ ssl_tls13_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, endpoint: I
 ssl_tls13_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
     if layer.cipher_setkey(ctx, key, op) == {
         .Err(e) -> return Val(e)
-        else -> {}
+        .Ok(_) -> {}
     }
     None
 }
@@ -559,7 +559,7 @@ ssl_tls13_application_keys_of: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs
             ssldefs.ssl_wipe(transcript)
             return Err(e)
         }
-        else -> ssldefs.ssl_wipe(transcript)
+        .Ok(_) -> ssldefs.ssl_wipe(transcript)
     }
     keys: ssl_tls13_make_traffic_keys(md, ssl.spool[sn].app_secrets.client_application_traffic_secret_n, ssl.spool[sn].app_secrets.server_application_traffic_secret_n, lens.key_len, lens.iv_len)
     ssl_tls13_export_secret(ssl, ssldefs.SSL_KEY_EXPORT_TLS1_3_CLIENT_APPLICATION_TRAFFIC_SECRET, ssl.spool[sn].app_secrets.client_application_traffic_secret_n)
@@ -580,7 +580,7 @@ ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng:
             ssldefs.ssl_transform_release(ssl, tix)
             return Err(e)
         }
-        else -> ssl_tls13_key_set_wipe(traffic_keys)
+        .Ok(_) -> ssl_tls13_key_set_wipe(traffic_keys)
     }
     ssl.handshake.transform_handshake = tix
 }
@@ -597,7 +597,7 @@ ssl_tls13_compute_resumption_master_secret: fn(ssl: &ssldefs.SSLContext) ssldefs
             ssldefs.ssl_wipe(transcript)
             return Err(e)
         }
-        else -> ssldefs.ssl_wipe(transcript)
+        .Ok(_) -> ssldefs.ssl_wipe(transcript)
     }
     ssldefs.ssl_wipe(ssl.handshake.tls13_early_secret)
     ssldefs.ssl_wipe(ssl.handshake.tls13_handshake_secret)
@@ -617,7 +617,7 @@ ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SS
             ssldefs.ssl_transform_release(ssl, tix)
             return Err(e)
         }
-        else -> ssl_tls13_key_set_wipe(traffic_keys)
+        .Ok(_) -> ssl_tls13_key_set_wipe(traffic_keys)
     }
     ssl.transform_application = tix
 }

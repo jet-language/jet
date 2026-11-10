@@ -34,7 +34,7 @@ ArtifactStoreError: enum {
             .Locked(path, owner_pid, elapsed_ns) -> {
                 owner: if owner_pid == {
                     .Val(pid) -> "{pid}"
-                    else -> "unknown"
+                    .None -> "unknown"
                 }
                 seconds: time.duration_ns(elapsed_ns).total_in("seconds")
                 "store lock is owned by a live process (owner pid {owner}) after waiting {seconds:Fixed(3)}s: {path}"
@@ -42,7 +42,7 @@ ArtifactStoreError: enum {
             .Capacity(path, needed_bytes, available_bytes, limit_bytes) -> {
                 available: if available_bytes == {
                     .Val(bytes) -> "Some({bytes})"
-                    else -> "None"
+                    .None -> "None"
                 }
                 "store cannot admit {needed_bytes} bytes for {path} (available {available}, limit {limit_bytes})"
             }
@@ -238,7 +238,7 @@ ArtifactEntryKey: enum {
     secondary: fn(self) -> String Never! {
         if self == {
             .LTO(_, key) -> key
-            else -> ""
+            .Blob(_) | .Action(_) -> ""
         }
     }
 

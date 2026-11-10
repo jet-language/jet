@@ -11,10 +11,9 @@ request_dispatch: fn(raw: [U8]) -> String HTTPError! {
         .Err(error) -> {
             if error == {
                 .InvalidFraming -> return Ok("rejected:InvalidFraming")
-                else -> return Ok("rejected:other")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return Ok("rejected:other")
             }
         }
-        else -> return Ok("unexpected")
     }
 }
 
@@ -24,10 +23,9 @@ response_result: fn(raw: [U8]) -> String HTTPError! {
         .Err(error) -> {
             if error == {
                 .InvalidFraming -> return Ok("rejected:InvalidFraming")
-                else -> return Ok("rejected:other")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return Ok("rejected:other")
             }
         }
-        else -> return Ok("unexpected")
     }
 }
 
@@ -38,10 +36,10 @@ invalid_request_header: fn(name: String, value: String) -[Net, Time.Wait]> Strin
         .Err(error) -> {
             if error == {
                 .InvalidHeader -> return "rejected:InvalidHeader"
-                else -> return "rejected:other"
+                .InvalidMethod | .InvalidURL | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return "rejected:other"
             }
         }
-        else -> return "unexpected"
+        .Ok(_) -> return "unexpected"
     }
 }
 

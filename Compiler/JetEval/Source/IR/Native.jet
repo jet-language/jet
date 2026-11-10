@@ -957,7 +957,7 @@ jet_eval_ir_store_data: fn(s: &JetEvalIRState, value: TComptimeValue, row: Int) 
             }
             return jet_eval_ir_list_header(s, data, values.len())
         }
-        else -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
     }
     types_cell: jet_eval_ir_host_types(s) ?? return None
     reads: types_cell.guard_read()
@@ -1259,7 +1259,7 @@ jet_eval_ir_width: fn(ty: IRType) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> if ty.size == 1 || ty.size == 2 || ty.size == 4 -> ty.size else -> 8
-        else -> 8
+        .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 

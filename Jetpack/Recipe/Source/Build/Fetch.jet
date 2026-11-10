@@ -49,7 +49,7 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
             }
             if cache_root.remove_name(sha256) == {
                 .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "removing invalid cache entry: {error.message()}"))
-                else -> {}
+                .Ok(_) -> {}
             }
         }
         .Err(error) -> {
@@ -78,11 +78,11 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
             cache_root.remove_name(temporary_name).drop("an unpublished fetch staging file is scratch")
             return Err(RecipeDiagnostic.e1236_fetch(url, "publishing cache: {error.message()}"))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if cache_root.sync() == {
         .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "syncing fetch cache: {error.message()}"))
-        else -> {}
+        .Ok(_) -> {}
     }
     report.fetches.push(FetchRecord{url, sha256})
     report.add_effect("net.fetch")

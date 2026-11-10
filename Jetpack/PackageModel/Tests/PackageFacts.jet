@@ -102,19 +102,19 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: Environment{{ name: \"dev\", tools: [\"a\", \"b\"], services: {{ db: {{ enable: true, ports: [5432] }} }}, secrets: {{ token: \"x\" }} }}\n}}\n", "package.jet") ?? panic("parses")
     payload: if facts.outputs["app"].payload == {
         .Object(fields) -> fields
-        else -> panic("output payload must remain an object")
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> panic("output payload must remain an object")
     }
     tools_array: if payload["tools"] == {
         .Array(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Object(_) -> false
     }
     services_object: if payload["services"] == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> false
     }
     secrets_object: if payload["secrets"] == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> false
     }
     assert(tools_array)
     assert(services_object)

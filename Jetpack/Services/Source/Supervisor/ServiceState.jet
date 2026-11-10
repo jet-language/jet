@@ -72,7 +72,7 @@ ServicePhase: enum {
     is_live: fn(self) -> Bool Never! {
         if self == {
             .Starting | .Running | .Ready -> true
-            else -> false
+            .Failed | .Stopped -> false
         }
     }
 }
@@ -123,21 +123,21 @@ ServiceAuthority: enum {
     unit: fn(self) -> String? Never! {
         if self == {
             .LinuxSystemdUser(unit) -> Val(unit)
-            else -> None
+            .TestProcessGroup | .WindowsGuardianJobObject(_) | .Unsupported -> None
         }
     }
 
     guardian: fn(self) -> String? Never! {
         if self == {
             .WindowsGuardianJobObject(guardian) -> Val(guardian)
-            else -> None
+            .TestProcessGroup | .LinuxSystemdUser(_) | .Unsupported -> None
         }
     }
 
     uses_platform_authority: fn(self) -> Bool Never! {
         if self == {
             .LinuxSystemdUser(_) | .WindowsGuardianJobObject(_) -> true
-            else -> false
+            .TestProcessGroup | .Unsupported -> false
         }
     }
 }
@@ -216,7 +216,7 @@ services_remove_existing: fn(path: String) IOError! -[FS]> {
 services_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 

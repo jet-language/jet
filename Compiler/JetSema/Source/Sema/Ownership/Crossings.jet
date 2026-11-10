@@ -100,7 +100,7 @@ sema_ownership_crossing_type_leaf: fn(name: String) -> String Never! {
 sema_ownership_crossing_core_builtin: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual_name := if ty == {
         .Named(actual) | .Apply(actual, _) -> actual
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if actual_name != name -> return false
     if program.registration_graph == .Val(graph) {
@@ -121,7 +121,7 @@ sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment:
         if !allow_without_nominal -> return false
         return if ty == {
             .Apply(actual, _) -> actual == name
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     false
@@ -162,7 +162,10 @@ sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, cr
             .SourceAST(_) | .CompilerBuiltinTrait(_) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
         }
     }
-    type_args: if ty == {.Apply(_, args) -> args else -> [Type]{}}
+    type_args: if ty == {
+        .Apply(_, args) -> args
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
+    }
     key: sema_ownership_crossing_walk_key(nominal.identity_key, type_args)
     if walk.active.contains(nominal.identity_key) || walk.finished.get(key) != None -> return None
     walk.active.push(nominal.identity_key)
@@ -185,7 +188,7 @@ sema_ownership_crossing_members: fn(nominal: SemaRegistrationNominal, type_args:
                 if item == {
                     .TypeAlias(definition) -> underlying = Val(definition.target)
                     .Distinct(definition) -> underlying = Val(definition.base)
-                    else -> {}
+                    .Func(_) | .Struct(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
@@ -232,7 +235,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
             .TraitObject(bounds) -> {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: bounds.join(" + ")}))
             }
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
         // A Core type the caller never names (`session :: browser.connect(…)`
         // gives a `Browser`) has no nominal row in the caller's scope; its
@@ -299,7 +302,10 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
             cell_only -> {
                 problem: sema_ownership_crossing_stored_types(params, crossing, strict_callable, cell_only, environment, program, context, walk)
                 if problem != None -> return problem
-                if ret == {.Val(return_ty) -> sema_ownership_crossing_type_inner(return_ty, crossing, true, strict_callable, cell_only, environment, program, context, walk) else -> None}
+                if ret == {
+                    .Val(return_ty) -> sema_ownership_crossing_type_inner(return_ty, crossing, true, strict_callable, cell_only, environment, program, context, walk)
+                    .None -> None
+                }
             }
             else -> {
                 return if {
@@ -386,7 +392,7 @@ sema_ownership_crossing_problem_for_expr: fn(expr: Expr, ty: Type, crossing: Sem
         .Ident(name, span, _) -> {
             if sema_scope_resolve_index_at(scopes, name, span) != None -> return sema_ownership_crossing_problem_for_name(name, ty, crossing, closure_taken, environment, program, scopes, state, context)
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, program, scopes, context)
 }
@@ -422,7 +428,7 @@ sema_ownership_crossing_describe: fn(problem: SemaSendabilityProblem) -> String 
 sema_ownership_crossing_local_cell: fn(problem: SemaSendabilityProblem) -> Bool Never! {
     if problem.kind == {
         .ThreadConfined(name) -> name == "Cell" || name == "CellReadGuard" || name == "CellEditGuard"
-        else -> false
+        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
     }
 }
 
@@ -432,7 +438,7 @@ sema_ownership_crossing_diagnostic: fn(value: String, ty: Type, problem: SemaSen
     description := sema_ownership_crossing_describe(problem)
     local_reactive := if problem.kind == {
         .LocalReactive(_) -> true
-        else -> false
+        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
     }
     what := if {
         crossing == SemaSendCrossing.TaskCapture && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be shared into a task — it is a view that does not live long enough"

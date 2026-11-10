@@ -101,7 +101,7 @@ impl ForeignLanguage {
         if self == {
             .C | .Cpp | .Asm | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignABIContract.c()
             .Rust -> ForeignABIContract.native()
-            else -> ForeignABIContract.message()
+            .Py | .JS | .Java | .DotNet | .Tcl | .Lua | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Octave | .Com -> ForeignABIContract.message()
         }
     }
 }
@@ -736,7 +736,7 @@ FFIEvidenceBasis: enum {
     permits_guarantee: fn(self) -> Bool Never! {
         if self == {
             .Proved | .Enforced | .Contained -> true
-            else -> false
+            .Trusted | .Unknown -> false
         }
     }
 

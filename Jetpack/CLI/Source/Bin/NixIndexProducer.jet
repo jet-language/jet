@@ -124,7 +124,7 @@ cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) CLIToo
     report_tree: json.parse(generated.report) ?? return Err(CLIToolError.new("generation report is not JSON: {err.reason}"))
     report := if report_tree == {
         .Object(pairs) -> pairs
-        else -> { return Err(CLIToolError.new("generation report is not a JSON object")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(CLIToolError.new("generation report is not a JSON object")) }
     }
     report.push((key: "target_sha256", value: Dyn.Text(digest)))
     report.push((key: "target", value: Dyn.Text(target)))
@@ -467,7 +467,7 @@ cli_nix_index_contains_string: fn(value: Dyn, needle: String) -> Bool Never! {
             }
             false
         }
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> false
     }
 }
 
@@ -487,7 +487,7 @@ cli_nix_index_contains_field_string: fn(value: Dyn, field: String, needle: Strin
             }
             false
         }
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> false
     }
 }
 
@@ -508,7 +508,7 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
         .Array(items) -> {
             loop item in items -> cli_nix_index_collect_named_strings(item, field, values)
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
     }
 }
 
@@ -522,7 +522,7 @@ cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
         .Object(fields) -> {
             loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, paths)
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> {}
     }
 }
 
@@ -586,7 +586,7 @@ cli_nix_index_find_integer: fn(value: Dyn, names: [String]) -> Int? Never! {
                         found: cli_nix_index_find_integer(entry.value, names) ?? next
                         return Val(found)
                     }
-                    else -> {}
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
                 }
             }
             None
@@ -598,6 +598,6 @@ cli_nix_index_find_integer: fn(value: Dyn, names: [String]) -> Int? Never! {
             }
             None
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> None
     }
 }

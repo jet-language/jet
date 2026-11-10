@@ -26,7 +26,7 @@ run: fn() {
     #Unsafe("posix set_scheduling: the out-of-range priority never reaches the kernel") {
         refused: os.set_scheduling(.RoundRobin{priority: 100}) ? ok -> "accepted" ! error -> (if error == {
             .InvalidInput(_) -> "InvalidInput"
-            else -> "another error"
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
         })
         print("set_scheduling(.RoundRobin{{priority: 100}}): {refused}")
     }

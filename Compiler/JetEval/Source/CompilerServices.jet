@@ -611,11 +611,11 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
             if candidate.module_identity == registration_module.module_identity -> checked_module = Val(candidate)
         }
         loop item in registration_module.program.items {
-            if item == {.Func(function) -> {
+            if item == .Func(function) {
                 if function.name == "build" -> next
                 function_key := jet_eval_compiler_services_function_key(function, registration_module)
                 functions.push(jet_eval_compiler_services_function_info(function, registration_module, checked_module, function_key))
-            } else -> {}}
+            }
         }
         if checked_module == .Val(checked) {
             loop function in checked.functions {
@@ -681,7 +681,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                     functions.push(value.copy())
                     package_functions.push(value)
                 }
-                else -> {}
+                .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
                 value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")

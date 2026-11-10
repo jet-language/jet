@@ -75,7 +75,7 @@ jet_cli_emit_ast_find_functions: fn(item: Item, name: String, found: &[JetCLIEmi
         .GenericModule(value) -> {
             loop inner in value.body -> jet_cli_emit_ast_find_functions(inner, name, found)
         }
-        else -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 

@@ -15461,7 +15461,7 @@ impl Decimal.Decode {
             .Number(lexeme) -> __decimal_decoded(lexeme)
             .Int(value) -> __decimal_decoded("{value}")
             .Text(text) -> __decimal_decoded(text)
-            else -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
+            .Null | .Bool(_) | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
         }
     }
 }

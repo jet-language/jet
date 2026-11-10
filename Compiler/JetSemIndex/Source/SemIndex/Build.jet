@@ -222,7 +222,7 @@ semindex_policy_argument: fn(expr: Expr) -> String {
             arguments: loop argument in call.args -> semindex_policy_argument(argument.expr)
             "{call.name}({arguments.join(", ")})"
         }
-        else -> "<expression>"
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> "<expression>"
     }
 }
 
@@ -379,7 +379,7 @@ semindex_declaration_kind: fn(items: [Item], name: String) -> SemAnchor? {
             .Tag(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "tag", def_span: value.name_span, semantic_identity: None}) }
             .Distinct(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
             .TypeAlias(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if found != None -> return found
     }
@@ -413,7 +413,7 @@ semindex_state_marker_path: fn(expr: Expr) -> NamedSpan? {
             inner: semindex_state_marker_path(base) ?? return None
             return Val(NamedSpan{name: "{inner.name}.{member}", span: span})
         }
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -454,7 +454,7 @@ semindex_state_marker_refs: fn(item: Item, db: &SemDB, ctx: SemWalk) {
         }
         .Impl(implementation) -> loop method in implementation.methods -> semindex_state_marker_refs_for_method(method, db, ctx)
         .Enum(definition) -> loop method in definition.methods -> semindex_state_marker_refs_for_method(method, db, ctx)
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -698,7 +698,7 @@ semindex_structural_expr_span: fn(expr: Expr) -> Span {
             end: if args.len() == 0 -> method_span.end + 2 else -> semindex_structural_expr_span(args[args.len() - 1].expr).end + 1
             return Span{start: semindex_structural_expr_span(receiver).start, end: end}
         }
-        else -> return expr_span(expr)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return expr_span(expr)
     }
 }
 
@@ -1200,7 +1200,7 @@ semindex_block_body: fn(slot: String, stmts: [Stmt], db: &SemDB, ctx: &SemWalk, 
         if stmt == {
             .Val(binding) -> semindex_binding(binding, db, ctx, modules)
             .Expr(expr) | .DeferClose(expr, _) -> semindex_expr(expr, db, ctx, modules)
-            else -> {}
+            .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> {}
         }
     }
     semindex_slot_leave(ctx, saved)
@@ -1371,7 +1371,7 @@ semindex_expr: fn(expr: Expr, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
             if name.starts_with("{nul}jet.fact.") && semindex_source_text(ctx.source, span) == "$origin" -> db.refs.push(semindex_scoped_ref("$origin", span, ctx))
         }
         .Paren(value, _, _) -> semindex_scalar("inner", value, db, ctx, modules)
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
     }
     semindex_pop_parent(ctx, structural_id)
 }
@@ -1403,7 +1403,7 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
                     if other.alias != alias_name -> next
                     if other.kind == {
                         .File(_, _) | .Module(_, _) -> bound_elsewhere = true
-                        else -> {}
+                        .Unqualified(_, _, _, _, _) -> {}
                     }
                 }
             }
@@ -1887,7 +1887,7 @@ semindex_anchor_kind: fn(db: SemDB, target: SemAnchor) -> String Never! {
             .Enum(_, _) -> return "enum"
             .Trait -> return "trait"
             .Tag -> return "tag"
-            else -> {}
+            .Module | .Function(_) | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> {}
         }
     }
     target.kind
@@ -2013,7 +2013,7 @@ semindex_definition_signature: fn(definition: SemDefinition) -> String {
             "{{{types.join(",")}}}"
         }
         .Enum(variants, _) -> "variants:{variants.len()}"
-        else -> semindex_definition_kind(definition.def.kind)
+        .Module | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> semindex_definition_kind(definition.def.kind)
     }
 }
 
@@ -2081,7 +2081,7 @@ semindex_definition_facts: fn(definitions: [SemDefinition], nodes: [SemNode], mo
     loop (index, definition) in definitions {
         if definition.def.kind == {
             .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
-            else -> {}
+            .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const -> {}
         }
         candidates.push(SemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
     }
@@ -2143,7 +2143,7 @@ semindex_exported: fn(item: Item) -> String? Never! {
         .Enum(value) -> if value.is_pub { name = Val(value.name) }
         .Trait(value) -> if value.is_pub { name = Val(value.name) }
         .Tag(value) -> if value.is_pub { name = Val(value.name) }
-        else -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     name
 }
@@ -2288,7 +2288,7 @@ semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [Sem
             .Enum(enumeration) -> if enumeration.name == owner -> loop block in enumeration.trait_impls -> contracts.push(semindex_block_contract(block, owner, members))
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> semindex_collect_trait_contracts(body, owner, members, contracts)
             .GenericModule(generic) -> semindex_collect_trait_contracts(generic.body, owner, members, contracts)
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -2301,7 +2301,7 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
             .Struct(value) -> declaration = Val(value.name_span)
             .Enum(value) -> declaration = Val(value.name_span)
             .Trait(value) -> declaration = Val(value.name_span)
-            else -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if declaration == .Val(found) {
             if found.start == span.start && found.end == span.end -> return Val(item)
@@ -2310,7 +2310,7 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
         if item == {
             .CodeModule(code_module) -> nested_items = code_module.body
             .GenericModule(generic) -> nested_items = Val(generic.body)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if nested_items == .Val(body) {
             if semindex_find_declaration(body, span) == .Val(nested) -> return Val(nested)
@@ -2332,7 +2332,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
                 needs_contracts = true
             }
             .Trait -> needs_contracts = true
-            else -> {}
+            .Module | .Function(_) | .Tag | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> {}
         }
         if needs_contracts {
             loop doc_module in modules {
@@ -2349,7 +2349,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
                         associated: loop entry in trait_def.assoc_types -> SemAssociatedType{name: entry.name, ty: None}
                         contracts.push(SemTraitContract{trait_name: trait_def.name, associated_types: associated, methods: semindex_member_signatures(db.members, trait_def.name, "trait_requirement", trait_def.name)})
                     }
-                    else -> {}
+                    .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
                 break
             }

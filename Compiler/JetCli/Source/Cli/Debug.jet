@@ -26,7 +26,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Ex
     plan: jet_cli_debug_session(entry, source, scratch.path, color)
     if cli_files.remove_all(scratch.path) == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
     plan
 }
@@ -69,7 +69,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
         command := "continue"
         if input.read_line() == {
             .Ok(read) -> command = read ?? "continue"
-            else -> {}
+            .Err(_) -> {}
         }
         command = command.trim().copy()
         if echo -> jet_cli_debug_write("{command}\n")

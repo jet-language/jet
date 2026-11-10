@@ -113,7 +113,7 @@ disp_card_num: fn(card: Dyn) -> Int {
         .Int(number) -> number
         .Float(number) -> Int.from_float(number) ?? panic("card num is not an integer")
         .Number(number) -> Int.from_float(Float.parse(number) ?? panic("card num is not numeric")) ?? panic("card num is not an integer")
-        else -> panic("card num is not numeric")
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("card num is not numeric")
     }
 }
 

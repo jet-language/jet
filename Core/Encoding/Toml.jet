@@ -394,15 +394,15 @@ impl TOMLParser {
         }
         if parse_radix_int(clean) == {
             .Val(n) -> return Ok(stream.typed_number("{n}"))
-            else -> { _ := 0 }
+            .None -> { _ := 0 }
         }
         if Int.parse(clean) == {
             .Ok(n) -> return Ok(stream.typed_number("{n}"))
-            else -> { _ := 0 }
+            .Err(_) -> { _ := 0 }
         }
         if Float.parse(clean) == {
             .Ok(n) -> return Ok(number_tree(clean, n))
-            else -> { _ := 0 }
+            .Err(_) -> { _ := 0 }
         }
         if looks_toml_datetime(token) {
             stamp: Dyn.Text(token)
@@ -595,7 +595,7 @@ ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
             return out
         }
         .Object(_) -> { _ := 0 }
-        else -> child = Dyn.object()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> child = Dyn.object()
     }
     out[key] = ensure_table_path(child, path, i + 1)
     out
@@ -617,7 +617,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
                 if out.has(key) -> out[key] = Dyn.Array([Dyn]{child, Dyn.object()})
                 else -> out[key] = Dyn.Array([Dyn]{Dyn.object()})
             }
-            else -> out[key] = Dyn.Array([Dyn]{Dyn.object()})
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> out[key] = Dyn.Array([Dyn]{Dyn.object()})
         }
         return out
     }
@@ -634,7 +634,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
             return out
         }
         .Object(_) -> { _ := 0 }
-        else -> child = Dyn.object()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> child = Dyn.object()
     }
     out[key] = ensure_array_path(child, path, i + 1)
     out
@@ -652,10 +652,10 @@ has_path: fn(entries: Dyn, path: [String], i: Int) -> Bool Never! {
             last: items[items.len() - 1]
             if last == {
                 .Object(_) -> return has_path(last, path, i + 1)
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
             }
         }
-        else -> return false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return false
     }
 }
 
@@ -678,13 +678,13 @@ put_path: fn(entries: Dyn, path: [String], i: Int, value: Dyn) -> Dyn Never! {
                         out[key] = Dyn.Array(mutable)
                         return out
                     }
-                    else -> { _ := 0 }
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { _ := 0 }
                 }
             }
             child = Dyn.object()
         }
         .Object(_) -> { _ := 0 }
-        else -> child = Dyn.object()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> child = Dyn.object()
     }
     out[key] = put_path(child, path, i + 1, value)
     out
@@ -697,7 +697,7 @@ render_toml: fn(value: Dyn) -> String Never! {
 render_toml_table: fn(value: Dyn, prefix: String) -> String Never! {
     if value == {
         .Object(_) -> {}
-        else -> return ""
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return ""
     }
     entries: stream.object_entries(value)
     out := ""
@@ -715,7 +715,7 @@ render_toml_table: fn(value: Dyn, prefix: String) -> String Never! {
                     loop item in items -> out = "{out}\n[[{path}]]\n{render_toml_table(item, path)}"
                 }
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
         }
     }
     out
@@ -726,7 +726,7 @@ all_objects: fn(items: [Dyn]) -> Bool {
     loop item in items {
         if item == {
             .Object(_) -> next
-            else -> return false
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
         }
     }
     true
@@ -787,7 +787,7 @@ toml_leaf: fn(value: Dyn) -> String Never! {
             assert((detail.get("active") ?? panic("nested active")) == Dyn.Bool(true))
             assert((items[1].get("name") ?? panic("second name")) == Dyn.Text("second"))
         }
-        else -> panic("expected an array of Dyn tables")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("expected an array of Dyn tables")
     }
 }
 
@@ -801,11 +801,11 @@ toml_leaf: fn(value: Dyn) -> String Never! {
     assert_eq(toml_leaf(stamp.get("stamp") ?? panic("date-time")), "2024-01-02T03:04:05Z")
     if parse("value = {{ duplicate = 1, duplicate = 2 }}") == {
         .Err(_) -> {}
-        else -> panic("duplicate inline key accepted")
+        .Ok(_) -> panic("duplicate inline key accepted")
     }
     if parse("meta.count = 1\nmeta.count = 2") == {
         .Err(_) -> {}
-        else -> panic("duplicate dotted key accepted")
+        .Ok(_) -> panic("duplicate dotted key accepted")
     }
 }
 

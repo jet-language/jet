@@ -28,10 +28,10 @@ ImageError: enum {
             .IO(error) -> {
                 if error == {
                     .NotFound(_) -> true
-                    else -> false
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
                 }
             }
-            else -> false
+            .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .Other(_) -> false
         }
     }
 }

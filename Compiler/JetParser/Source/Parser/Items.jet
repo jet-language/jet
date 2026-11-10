@@ -531,7 +531,7 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
         .Expr(value) -> return Val(value)
-        else -> return None
+        .EffectRow(_, _) -> return None
     }
 }
 
@@ -830,12 +830,21 @@ parser_validate_param_labels: fn(state: &JetParserState, params: [Param]) {
     loop index in 0..<params.len() {
         param: params[index]
         if param.name == "self" -> next
-        label: if param.public_label == {.Val(value) -> value.name else -> param.name}
-        label_span: if param.public_label == {.Val(value) -> value.span else -> param.name_span}
+        label: if param.public_label == {
+            .Val(value) -> value.name
+            .None -> param.name
+        }
+        label_span: if param.public_label == {
+            .Val(value) -> value.span
+            .None -> param.name_span
+        }
         loop earlier_index in 0..<index {
             earlier: params[earlier_index]
             if earlier.name == "self" -> next
-            earlier_label: if earlier.public_label == {.Val(value) -> value.name else -> earlier.name}
+            earlier_label: if earlier.public_label == {
+                .Val(value) -> value.name
+                .None -> earlier.name
+            }
             if earlier_label == label {
                 parser_add_error_code(state, "E0770", label_span, "two parameters both publish the label `{label}`", "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called", "give one of them a different label, as in `{label}_2 {param.name}: …`")
                 break
@@ -1671,7 +1680,7 @@ parser_return_type_has_value: fn(return_type: Type?) -> Bool Never! {
     if ty == {
         .Named(name) -> name != "Unit"
         .Result(ok, _) -> ok != (Type.Named{name: "Unit"})
-        else -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -1743,7 +1752,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                             else -> {}
                         }
                     }
-                    else -> func.is_inline = true
+                    .None -> func.is_inline = true
                 }
             }
             // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
@@ -1937,7 +1946,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             section := parser_parse_state_section(state, type_name, name.span)
             if value.state == {
                 .None -> value.state = Val(section)
-                else -> parser_report_repeated_state_section(state, section, type_name)
+                .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
             }
             if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
             next
@@ -2902,7 +2911,7 @@ parser_derive_nested_impl_span: fn(body: [DeriveBodyItem]) -> Span? Never! {
             .Item(item) -> if item == {
                 .Impl(implementation) -> return Val(implementation.span)
                 .ErrorConv(conversion) -> return Val(conversion.from_span)
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             .Loop(_, _, _, nested, _) -> {
                 if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)

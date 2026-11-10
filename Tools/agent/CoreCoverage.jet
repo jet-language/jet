@@ -1276,18 +1276,18 @@ ratchet_entries: fn(tree: Dyn) -> [Entry] CoverageError! {
     version: if field(tree, "version") == {
         .Int(number) -> number
         .Number(lexeme) -> Int.parse(lexeme) ?? -1
-        else -> -1
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> -1
     }
     if version != 2 -> return Err(invalid)
     entries := [Entry]{}
     listed: if field(tree, "modules") == {
         .Object(object) -> object.copy()
-        else -> return Err(invalid)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(invalid)
     }
     loop module_entry in listed {
         items: if module_entry.value == {
             .Array(values) -> values.copy()
-            else -> return Err(invalid)
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(invalid)
         }
         loop item in items {
             if {

@@ -132,7 +132,7 @@ env_hook_fingerprint_from_inputs: fn(root: String, requested_preset: String?, re
         .Watch(paths, _) -> {
             loop path in paths -> env_hook_add_input(root, path, "reload-watch", budget, inputs)
         }
-        else -> {}
+        .Never | .Prompt -> {}
     }
     loop file in managed {
         if file.source == .Val(relative) -> env_hook_add_input(root, relative, "managed", budget, inputs)

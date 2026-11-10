@@ -40,7 +40,7 @@ classify: fn(value: String) -> ReflectValue {
     if is_number(t) -> return (ReflectValue{type_name: "Int", display: t})
     if Float.parse(t) == {
         .Ok(_) -> return (ReflectValue{type_name: "Float", display: t})
-        else -> { _ := 0 }
+        .Err(_) -> { _ := 0 }
     }
     name := ident_prefix(t)
     if name.len() > 0 -> return (ReflectValue{type_name: name, display: t})

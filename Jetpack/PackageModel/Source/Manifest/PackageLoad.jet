@@ -69,7 +69,7 @@ pkg_manifest_load_with_hardlink_policy: fn(dir: String, allow_hardlinks: Bool) -
 pkg_authority_package_error: fn(error: AuthorityError) -> PackageParseError Never! {
     if error == {
         .NestedMembers(root, member) -> PackageParseError.NestedMembers{root: root, member: member}
-        else -> PackageParseError.Composition(error.message())
+        .Missing(_, _) | .ManifestParse(_, _) | .IO(_, _, _) | .Symlink(_) | .WrongKind(_, _, _) | .Escapes(_) | .WorkspaceAmbiguous(_) | .WorkspaceNoModule | .Invalid(_, _) | .NotText(_, _) | .Changed(_) | .Unsupported(_) -> PackageParseError.Composition(error.message())
     }
 }
 

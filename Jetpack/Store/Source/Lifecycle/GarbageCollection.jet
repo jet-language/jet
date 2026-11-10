@@ -208,7 +208,7 @@ store_gc_io_context: fn(error: IOError, message: String) -> StoreError Never! {
     if error == {
         .NotFound(_) -> StoreError.NotFound(message)
         .PermissionDenied(_) -> StoreError.PermissionDenied(message)
-        else -> StoreError.Other(message)
+        .InvalidInput(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> StoreError.Other(message)
     }
 }
 

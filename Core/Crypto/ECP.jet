@@ -145,7 +145,7 @@ curve_info: fn(id: GroupID) -> CurveInfo? Never! {
         .Secp192k1 -> Val(CurveInfo{grp_id: id, tls_id: 18, bit_size: 192, name: "secp192k1"})
         .Curve25519 -> Val(CurveInfo{grp_id: id, tls_id: 29, bit_size: 256, name: "x25519"})
         .Curve448 -> Val(CurveInfo{grp_id: id, tls_id: 30, bit_size: 448, name: "x448"})
-        else -> None
+        .Unknown -> None
     }
 }
 
@@ -186,7 +186,7 @@ curve_type: fn(id: GroupID) -> CurveType Never! {
         .Unknown -> CurveType.Unknown
         .Curve25519 -> CurveType.Montgomery
         .Curve448 -> CurveType.Montgomery
-        else -> CurveType.ShortWeierstrass
+        .Secp192r1 | .Secp224r1 | .Secp256r1 | .Secp384r1 | .Secp521r1 | .Bp256r1 | .Bp384r1 | .Bp512r1 | .Secp192k1 | .Secp224k1 | .Secp256k1 -> CurveType.ShortWeierstrass
     }
 }
 
@@ -427,7 +427,7 @@ group_load: fn(id: GroupID) -> EcpGroup EcpError! {
         .Bp512r1 -> sw_group(id, .Mont, curves.BRAINPOOLP512R1_P, curves.BRAINPOOLP512R1_A, curves.BRAINPOOLP512R1_B, curves.BRAINPOOLP512R1_GX, curves.BRAINPOOLP512R1_GY, curves.BRAINPOOLP512R1_N, curves.BRAINPOOLP512R1_T)
         .Curve25519 -> mx_group(id, .P255, curves.CURVE25519_P, curves.CURVE25519_N, 0x01DB42, 9, 254)
         .Curve448 -> mx_group(id, .P448, curves.CURVE448_P, curves.CURVE448_N, 0x98AA, 5, 447)
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 
@@ -694,7 +694,7 @@ kind_bits: fn(kind: FieldKind) -> Int Never! {
         .K192 -> 192
         .K224 -> 224
         .K256 -> 256
-        else -> 0
+        .Mont -> 0
     }
 }
 
@@ -712,7 +712,7 @@ raw_reduce: fn(kind: FieldKind, x: &[U64], m: &[U64], q: &[U64]) -> Bool Never! 
         .K192 -> raw_koblitz(x, U64{0x1000011C9}, 192, m, q)
         .K224 -> raw_koblitz(x, U64{0x100001A93}, 224, m, q)
         .K256 -> raw_koblitz(x, U64{0x1000003D1}, 256, m, q)
-        else -> return false
+        .Mont -> return false
     }
     true
 }
@@ -743,7 +743,7 @@ field_kind: fn(id: GroupID) -> FieldKind Never! {
         .Secp192k1 -> FieldKind.K192
         .Secp224k1 -> FieldKind.K224
         .Secp256k1 -> FieldKind.K256
-        else -> FieldKind.Mont
+        .Unknown | .Bp256r1 | .Bp384r1 | .Bp512r1 -> FieldKind.Mont
     }
 }
 
@@ -1646,7 +1646,7 @@ mul_internal: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bo
     if group_type(grp) == {
         .Montgomery -> mul_mxz(grp, m, pt, rng)
         .ShortWeierstrass -> mul_comb(grp, m, pt, rng, blind: blind)
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1739,7 +1739,7 @@ check_pubkey: fn(grp: EcpGroup, pt: Point) EcpError! {
             rhs: sw_rhs(grp, pt.x)
             if bn.cmp_mpi(yy, rhs) != 0 -> return Err(.InvalidKey)
         }
-        else -> return Err(.BadInput)
+        .Unknown -> return Err(.BadInput)
     }
 }
 
@@ -1799,7 +1799,7 @@ gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: &R) -> bn.Mpi EcpError! {
     if group_type(grp) == {
         .Montgomery -> gen_privkey_mx(grp.nbits, rng)
         .ShortWeierstrass -> gen_privkey_sw(grp.n, rng)
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1869,7 +1869,7 @@ read_key_into: fn(key: &Keypair, buf: [U8]) EcpError! {
             }
         }
         .ShortWeierstrass -> { key.d = bn.read_binary(buf) }
-        else -> return Err(.FeatureUnavailable)
+        .Unknown -> return Err(.FeatureUnavailable)
     }
     check_privkey(key.grp, key.d)
 }
@@ -1885,7 +1885,7 @@ write_key: fn(key: Keypair, buflen: Int) -> [U8] EcpError! {
             Ok(bn.write_binary_le(key.d, buflen) ?? return Err(EcpError.Mpi(err)))
         }
         .ShortWeierstrass -> Ok(bn.write_binary(key.d, buflen) ?? return Err(EcpError.Mpi(err)))
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1898,7 +1898,7 @@ write_key_ext: fn(key: Keypair, buflen: Int) -> [U8] EcpError! {
     if group_type(key.grp) == {
         .Montgomery -> Ok(bn.write_binary_le(key.d, len) ?? return Err(EcpError.Mpi(err)))
         .ShortWeierstrass -> Ok(bn.write_binary(key.d, len) ?? return Err(EcpError.Mpi(err)))
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1960,7 +1960,7 @@ point_write_binary: fn(grp: EcpGroup, pt: Point, format: PointFormat, buflen: In
             out.extend(xs)
             Ok(out)
         }
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 
@@ -2000,7 +2000,7 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
             }
             Err(.BadInput)
         }
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 

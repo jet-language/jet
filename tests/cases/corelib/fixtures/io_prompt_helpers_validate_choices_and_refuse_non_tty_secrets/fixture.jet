@@ -25,7 +25,7 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .InvalidInput(_) -> { print("secret: non-tty") }
-                else -> { print("secret: other error") }
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { print("secret: other error") }
             }
         }
     }

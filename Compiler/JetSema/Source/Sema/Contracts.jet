@@ -62,7 +62,7 @@ sema_contract_result_mode: fn(carrier: Type, binding: Type) -> TContractResultMo
         .Result(_, _) -> TContractResultMode.ResultPayload
         .Option(_) -> TContractResultMode.OptionPayload
         .Tagged(_, inner) -> sema_contract_result_mode(inner, binding)
-        else -> TContractResultMode.Direct
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> TContractResultMode.Direct
     }
 }
 
@@ -165,7 +165,7 @@ sema_contract_result_ident_in_call_args: fn(args: [CallArg]) -> Span? {
 sema_contract_result_ident_in_optional_expr: fn(value: Expr?) -> Span? {
     if value == {
         .Val(expression) -> sema_contract_result_ident_in_expr(expression)
-        else -> None
+        .None -> None
     }
 }
 
@@ -177,7 +177,7 @@ sema_contract_result_ident_in_lvalue: fn(value: LValue) -> Span? {
             sema_contract_result_ident_in_expr(index)
         }
         .Field(base, _, _) -> sema_contract_result_ident_in_expr(base)
-        else -> None
+        .Local(_, _) -> None
     }
 }
 
@@ -222,7 +222,7 @@ sema_contract_result_ident_in_pattern: fn(value: Pattern) -> Span? {
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> sema_contract_result_ident_in_pattern(nested) else -> None
         }
-        else -> None
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> None
     }
 }
 
@@ -231,7 +231,7 @@ sema_contract_result_ident_in_pattern_slot: fn(slot: PatSlot) -> Span? {
         .Value(value) -> sema_contract_result_ident_in_expr(value)
         .Nested(inner) -> sema_contract_result_ident_in_pattern(inner)
         .Named(_, _, inner) -> sema_contract_result_ident_in_pattern_slot(inner)
-        else -> None
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> None
     }
 }
 
@@ -243,7 +243,7 @@ sema_contract_result_ident_in_bind_pattern: fn(value: BindPattern?) -> Span? {
             if found != None -> return found
             sema_contract_result_ident_in_fallback(fallback)
         }
-        else -> None
+        .Struct(_, _, _, _, _) | .List(_, _) | .Tuple(_, _) -> None
     }
 }
 
@@ -257,7 +257,7 @@ sema_contract_result_ident_in_fallback: fn(value: OrFallback) -> Span? {
         }
         .Return(expression, _) -> sema_contract_result_ident_in_optional_expr(expression)
         .Panic(_, args) -> sema_contract_result_ident_in_call_args(args)
-        else -> None
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> None
     }
 }
 
@@ -390,7 +390,7 @@ sema_contract_result_ident_in_stmt: fn(value: Stmt) -> Span? {
             sema_contract_result_ident_in_statements(body)
         }
         .DeferClose(expression, _) -> sema_contract_result_ident_in_expr(expression)
-        else -> None
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> None
     }
 }
 
@@ -499,7 +499,7 @@ sema_contract_result_ident_in_expr: fn(expr: Expr) -> Span? {
                     if value_found != None -> return value_found
                 }
                 .Value(value) -> return sema_contract_result_ident_in_expr(value)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
             None
         }
@@ -565,7 +565,7 @@ sema_contract_result_ident_in_expr: fn(expr: Expr) -> Span? {
             }
             None
         }
-        else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -612,7 +612,7 @@ sema_contract_type_name: fn(ty: Type) -> String? {
     if ty == {
         .Named(name) -> Val(name)
         .Tagged(_, inner) -> sema_contract_type_name(inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -637,7 +637,7 @@ sema_contract_interval: fn(expr: TExpr, environment: SemaScopeEnvironment, progr
         .Local(_) -> sema_contract_distinct_range(expr.ty, environment, program)
         .MethodCall(value, method, _, _) -> if method.name == "raw" -> sema_contract_interval(value, environment, program) else -> None
         .DistinctRaw(value) -> sema_contract_interval(value, environment, program)
-        else -> None
+        .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     }
 }
 
@@ -672,7 +672,7 @@ sema_contract_interval_comparison: fn(op: TBinaryOp, left: TIntegerRange, right:
         .Gt -> left.lo > right.hi
         .Le -> left.hi <= right.lo
         .Ge -> left.lo >= right.hi
-        else -> false
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> false
     }
 }
 
@@ -691,7 +691,7 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
                 right_range: sema_contract_interval(right, environment, program) ?? return false
                 sema_contract_interval_comparison(op, left_range, right_range)
             }
-            else -> false
+            .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare -> false
         }
         .CompareChain(operands, operators, _) -> {
             if operators.len() + 1 != operands.len() -> return false
@@ -702,7 +702,7 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
             }
             true
         }
-        else -> false
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> false
     }
 }
 
@@ -793,7 +793,7 @@ sema_contract_method_function_for_item: fn(item: Item, target: SymbolID, module_
                 if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(method)
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     None
 }
@@ -871,7 +871,7 @@ sema_contract_method_facts_for_item: fn(item: Item, target: SymbolID, module_ide
                 if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     None
 }

@@ -56,7 +56,7 @@ BuildIOError: struct {
             .AlreadyExists(_) -> BuildIOKind.AlreadyExists
             .PermissionDenied(_) -> BuildIOKind.PermissionDenied
             .InvalidInput(_) -> BuildIOKind.InvalidInput
-            else -> BuildIOKind.Other
+            .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> BuildIOKind.Other
         }
         BuildIOError{kind, message: "{error}"}
     }
@@ -521,7 +521,7 @@ build_cache_restore_miss_reason: fn(error: BuildIOError) -> CacheMissReason Neve
     if error.kind == {
         .NotFound -> CacheMissReason.DeclaredOutputMissing
         .InvalidData -> CacheMissReason.CacheRecordInvalid
-        else -> CacheMissReason.CacheRestoreFailed
+        .InvalidInput | .PermissionDenied | .NotADirectory | .AlreadyExists | .Unsupported | .Other -> CacheMissReason.CacheRestoreFailed
     }
 }
 
@@ -562,7 +562,7 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     found: outcome ?? return Err(BuildIOError.new(.InvalidData, "action record has no outcome"))
     failed: if found == {
         .Failed(_) -> true
-        else -> false
+        .Succeeded(_) | .RestoredFromCache -> false
     }
     if failed != (failure_report != None) -> return Err(BuildIOError.new(.InvalidData, "failed action record and failure report disagree"))
     if failure_report != None && outputs.len() != 0 -> return Err(BuildIOError.new(.InvalidData, "failed action record contains outputs"))
@@ -725,7 +725,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     code_value: build_report_field(fields, "code")
     code: if code_value == {
         .Null -> String?{None}
-        else -> Val(build_report_text(code_value, "code"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(build_report_text(code_value, "code"))
     }
     cause_value: build_report_field(fields, "cause")
     causes := [DiagnosticBuildError]{}
@@ -733,7 +733,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         .Null -> {}
         .Object(_) -> causes.push(build_report_from_tree(cause_value))
         .Array(items) -> loop item in items -> causes.push(build_report_from_tree(item))
-        else -> return Err(build_report_invalid("error report cause is not null, an object, or an array"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(build_report_invalid("error report cause is not null, an object, or an array"))
     }
     typed_identity := String?{None}
     if fields.get("typed_identity") == .Val(identity) -> typed_identity = Val(build_report_text(identity, "typed_identity"))
@@ -769,7 +769,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         values: build_report_field(detail, "fields")
         pairs: if values == {
             .Object(entries) -> entries
-            else -> { return Err(build_report_invalid("error report detail fields is not an object")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(build_report_invalid("error report detail fields is not an object")) }
         }
         detail_fields: loop pair in pairs -> DiagnosticErrorField{name: pair.key, value: pkg_json_render(pair.value)}
         span_value: build_report_field(detail, "source_span")

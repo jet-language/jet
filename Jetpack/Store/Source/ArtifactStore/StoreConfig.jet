@@ -45,7 +45,7 @@ ArtifactStoreConfig: struct {
                 if value == "" -> return Err(ArtifactStoreError.Config("{STORE_ARTIFACT_ENV} cannot be empty"))
                 value
             }
-            else -> store_artifact_default_root()
+            .None -> store_artifact_default_root()
         }
         cap_bytes: store_artifact_optional_size("JET_STORE_CAP_BYTES")
         reserve: store_artifact_optional_size("JET_STORE_RESERVE_BYTES")
@@ -100,7 +100,7 @@ store_artifact_optional_size: fn(name: String) -[Env]> Int? ArtifactStoreError! 
         .Err(error) -> {
             if error == {
                 .Config(message) -> Err(ArtifactStoreError.Config("{name}: {message}"))
-                else -> Err(error)
+                .IO(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Locked(_, _, _) | .Capacity(_, _, _, _) -> Err(error)
             }
         }
     }

@@ -38,7 +38,7 @@ jet_cli_compiler_key_text: fn(key: TComptimeKey) -> String Never! {
         .String(text) -> text
         .Bool(flag) -> "{flag}"
         .Char(code) -> jet_eval_format_char_text(code)
-        else -> jet_cli_status_json(jet_cli_compiler_checked_value(jet_cli_compiler_key_value(key)))
+        .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> jet_cli_status_json(jet_cli_compiler_checked_value(jet_cli_compiler_key_value(key)))
     }
 }
 

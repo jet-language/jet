@@ -849,7 +849,7 @@ truthy: fn(value: Dyn) -> Bool Never! {
         .Number(lexeme) -> (Float.parse(lexeme) ?? 1.0) != 0.0
         .Float(number) -> number != 0.0
         .Text(content) -> content != ""
-        else -> true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 
@@ -3475,7 +3475,7 @@ spelled: fn(value: Dyn) -> String Never! {
         .Int(number) -> "{number}"
         .Number(lexeme) -> lexeme.copy()
         .Bool(flag) -> if flag -> "true" else -> "false"
-        else -> json.to_string(value) ?? ""
+        .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json.to_string(value) ?? ""
     }
 }
 

@@ -276,7 +276,7 @@ ir_static_word: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row:
             }
             return None
         }
-        else -> return None
+        .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Unit -> return None
     }
 }
 
@@ -409,7 +409,7 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             ir_static_put(s, object, offset + 16, IRStaticWord{word: 0, target: ir_intern_bytes(m, bytes)}, 8)
             return true
         }
-        else -> return false
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return false
     }
 }
 
@@ -465,7 +465,7 @@ ir_static_map_order: fn(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Ne
             }
             .Bool(flag) -> words.push((key: if flag -> 1 else -> 0, at: index))
             .String(text) -> texts.push((key: text, at: index))
-            else -> return None
+            .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> return None
         }
     }
     kept := [Int]{}

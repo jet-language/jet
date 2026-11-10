@@ -20,7 +20,7 @@ use {
     assert_eq(compiler_route_files.read_bytes(path) ?? panic("read bytes: {err}"), [U8]{U8{255}})
     if compiler_route_files.read(path) == {
         .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
-        else -> assert(false)
+        .Ok(_) | .Err(_) -> assert(false)
     }
     compiler_route_files.remove_all(root) ?? panic("cleanup: {err}")
 }

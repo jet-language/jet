@@ -40,7 +40,7 @@ trust_test_restored: fn(graph: FlakeGraph) -> FlakeGraph {
 trust_test_io_reason: fn(error: TrustError) -> String {
     if error == {
         .IO(reason) -> reason
-        else -> ""
+        .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> ""
     }
 }
 
@@ -292,7 +292,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
 `)
     conflicting: if drift == {
         .ConflictingInput(input, field) -> input == "nixpkgs" && field == "revision"
-        else -> false
+        .EmptyInputName | .DuplicateInput(_) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
     }
     assert(conflicting, "a drifted revision must conflict on `revision`")
 
@@ -372,12 +372,12 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
 #Test("floating or conflicting foreign inputs fail closed") {
     floating: if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`) == {
         .MissingRevision(_) -> true
-        else -> false
+        .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
     }
     assert(floating, "a floating input must fail with MissingRevision")
     conflicting: if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=aaaaaaa"; inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=bbbbbbb"; }`) == {
         .ConflictingInput(_, _) -> true
-        else -> false
+        .EmptyInputName | .DuplicateInput(_) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
     }
     assert(conflicting, "conflicting urls must fail with ConflictingInput")
 }
@@ -396,7 +396,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
 `)
     missing: if error == {
         .MissingRevision(input) -> input == "nixpkgs"
-        else -> false
+        .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
     }
     assert(missing, "narHash is not an exact source revision")
 }
@@ -409,7 +409,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
         .Err(error) -> {
             if error == {
                 .MissingRevision(input) -> input == "nixpkgs"
-                else -> false
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
             }
         }
     }
@@ -433,7 +433,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
         .Err(error) -> {
             if error == {
                 .StaleSemanticLock(_) -> true
-                else -> false
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
             }
         }
     }

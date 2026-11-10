@@ -118,7 +118,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
                     loop opener in open -> blocked[opener] = true
                 }
             }
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     loop _ in 0..<n -> plan.kill.push(false)
@@ -154,13 +154,13 @@ ir_drop_borrows_only: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] == {
         .Copy | .Move | .Store | .StreamStore | .Return | .Load | .Offset | .CopyBytes | .CallIndirect -> return false
         .Concat -> return true
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Call | .CallRuntime | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable | .Sqrt | .IntBig -> {}
     }
     dst: f.dst[at]
     if dst < 0 -> return true
     if m.types[f.slot_type[dst]].kind == {
         .Unit | .Bool | .Int | .Float | .Float32 | .Char -> true
-        else -> false
+        .Word | .String | .Pointer | .Aggregate -> false
     }
 }
 
@@ -193,7 +193,7 @@ ir_drop_word: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
     if slot < 0 || slot >= f.slot_type.len() -> return false
     if m.types[f.slot_type[slot]].kind == {
         .Bool | .Int | .Word | .Pointer -> true
-        else -> false
+        .Unit | .Float | .Float32 | .Char | .String | .Aggregate -> false
     }
 }
 
@@ -211,7 +211,7 @@ ir_drop_target: fn(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, a
                 back = opener - 1
             }
             .Block | .Loop | .If | .Else | .Br | .BrIf | .Return | .Unreachable -> return back + 1
-            else -> back -= 1
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Sqrt | .IntBig | .StreamStore -> back -= 1
         }
     }
     back + 1

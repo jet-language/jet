@@ -29,7 +29,7 @@ s1_repair_usize: fn(tree: encoding.Dyn, key: String) -> Int {
 s1_repair_array: fn(value: encoding.Dyn) -> [encoding.Dyn] {
     if value == {
         .Array(items) -> return items
-        else -> panic("machine status reports/fix_edits is not an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("machine status reports/fix_edits is not an array")
     }
 }
 s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {

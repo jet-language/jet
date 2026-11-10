@@ -217,7 +217,7 @@ jet_driver_foreign_import_libraries: fn(declaration: ImportDecl) -> (libraries: 
 jet_driver_foreign_import_header: fn(declaration: ImportDecl) -> String Never! {
     if declaration.kind == {
         .File(path, _) -> path
-        else -> ""
+        .Module(_, _) | .Unqualified(_, _, _, _, _) -> ""
     }
 }
 
@@ -318,7 +318,7 @@ jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, m
                     }
                 }
             }
-            else -> {}
+            .File(_, _) | .Module(_, _) -> {}
         }
         if !handled_members {
             imported: jet_driver_foreign_import_libraries(declaration)
@@ -337,14 +337,14 @@ jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, m
                         maybe_library = jet_driver_foreign_library_from_cpp_header(path)
                     }
                 }
-                else -> {}
+                .Unqualified(_, _, _, _, _) -> {}
             }
             if maybe_library == {
                 .Val(library) -> {
                     jet_driver_foreign_add_request(requests, language, library, root_index, module_index, scope, source_path, declaration, declaration.alias, declaration.alias_span, declaration.span, "module", diagnostics)
                     has_request = true
                 }
-                else -> {
+                .None -> {
                     loop library in imported.libraries {
                         jet_driver_foreign_add_request(requests, "c", library, root_index, module_index, scope, source_path, declaration, declaration.alias, declaration.alias_span, declaration.span, imported.form, diagnostics)
                         has_request = true
@@ -411,7 +411,7 @@ jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_inde
                 jet_driver_foreign_collect_imports(definition.imports, root_index, module_index, nested_scope, source_path, requests, diagnostics)
                 jet_driver_foreign_collect_items(definition.body, root_index, module_index, nested_scope, source_path, requests, overlays, diagnostics)
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -620,7 +620,7 @@ jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, libra
                     else -> {
                         if jet_driver_foreign_unescape(value) == {
                             .Val(decoded) -> metadata_library = decoded
-                            else -> {
+                            .None -> {
                                 jet_driver_foreign_metadata_error(file.path, "contains an invalid percent escape", diagnostics)
                                 valid = false
                             }
@@ -847,7 +847,7 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
                 loop function in value.functions -> functions.push(function.copy())
                 break
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     (functions: functions, module_library: module_library, span: span)
@@ -886,7 +886,7 @@ jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: Strin
                 adapter.compiler_generated = true
                 return Val(adapter)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -951,7 +951,7 @@ jet_driver_foreign_add_import_edge: fn(load: &JetDriverLoadResult, request: JetD
     loop edge in load.imports {
         same_binding: if edge.foreign_binding == {
             .Val(existing) -> existing.scope == binding_value.scope && existing.alias == binding_value.alias
-            else -> false
+            .None -> false
         }
         if edge.source_module_identity == load.modules[request.module_index].module_identity && edge.target_module_identity == target_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end && same_binding -> return
     }
@@ -972,14 +972,14 @@ jet_driver_foreign_root_identity: fn(load: JetDriverLoadResult, root_index: Int)
 jet_driver_foreign_generated_path: fn(surface: JetDriverForeignSurface) -> String Never! {
     if surface.cache == {
         .Val(cache) -> cache.path
-        else -> "foreign:{surface.language}.{surface.library}"
+        .None -> "foreign:{surface.language}.{surface.library}"
     }
 }
 
 jet_driver_foreign_generated_source: fn(surface: JetDriverForeignSurface) -> String Never! {
     if surface.cache == {
         .Val(cache) -> cache.source
-        else -> ""
+        .None -> ""
     }
 }
 
@@ -1027,7 +1027,7 @@ jet_driver_foreign_collect_canonical_overlay_items: fn(items: [Item], overlay_ba
                 jet_driver_foreign_collect_canonical_overlay_items(body, overlay_bases, overlay_ends, library, functions)
             }
             .GenericModule(definition) -> jet_driver_foreign_collect_canonical_overlay_items(definition.body, overlay_bases, overlay_ends, library, functions)
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1216,7 +1216,7 @@ jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDr
     loop item in program.items {
         if item == {
             .CModule(_) -> { next }
-            else -> { synthetic_items.push(item) }
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> { synthetic_items.push(item) }
         }
     }
     loop adapter in rewritten_adapters -> synthetic_items.push(Item.Func{value: adapter})
@@ -1248,7 +1248,10 @@ jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
         items := [Item]{ }
         loop item_index in 0..<load.modules[index].program.items.len() {
             item: load.modules[index].program.items[item_index]
-            if item == { .CModule(_) -> {} else -> items.push(item.copy()) }
+            if item == {
+                .CModule(_) -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> items.push(item.copy())
+            }
         }
         load.modules[index].program.items = items.move()
     }

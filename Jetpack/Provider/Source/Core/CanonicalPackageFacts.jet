@@ -59,7 +59,7 @@ provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requ
         }
         discover: if member == {
             .Find(_) -> true
-            else -> false
+            .Path(_) -> false
         }
         member_root: files.join(repo, pkg_normalize_member_path(relative))
         info: files.stat(member_root) ?? return Err(ProviderReason{message: "could not inspect Package member `{relative}`: {err}"})
@@ -281,7 +281,7 @@ provider_canonical_package_kind: fn(facts: PackageFacts, package: String) -> Pac
     if output.kind == {
         .Library -> Val(PackageKind.Library)
         .Executable | .Service -> Val(PackageKind.Executable)
-        else -> None
+        .Check | .Environment | .Image | .Bundle | .System | .Fleet -> None
     }
 }
 

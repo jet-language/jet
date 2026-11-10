@@ -70,7 +70,7 @@ NixFallbackIdentity: struct {
             .Object(entries) -> {
                 loop pair in entries -> fields[pair.key] = pair.value
             }
-            else -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
         }
         if fields.len() != NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {
             return Err(NixError.Fallback("Nix fallback provenance has an unknown or missing identity field"))
@@ -207,7 +207,7 @@ nix_fallback_provenance_text: fn(fields: [String: Dyn], name: String) -> String 
 nix_fallback_tree_text: fn(value: Dyn) -> String NixError! {
     if value == {
         .Text(text) -> return Ok(text)
-        else -> return Err(NixError.Fallback("expected a Dyn string"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(NixError.Fallback("expected a Dyn string"))
     }
 }
 
@@ -216,7 +216,7 @@ nix_fallback_provenance_attr: fn(fields: [String: Dyn]) -> [String] NixError! {
     items := [Dyn]{}
     if value == {
         .Array(values) -> items = values
-        else -> return Err(NixError.Fallback("expected a Dyn array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(NixError.Fallback("expected a Dyn array"))
     }
     attr := [String]{}
     loop item in items -> attr.push(nix_fallback_tree_text(item))

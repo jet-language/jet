@@ -576,7 +576,7 @@ ir_range_narrow: fn(f: IRFunction, s: IRSsa, r: IRRanges, lo_in: Int, hi_in: Int
                 real_lo = true
             }
         }
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ne | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
     }
     if lo > hi -> return ir_range_none()
     IRRange{known: true, lo: lo, hi: hi, inline: real_lo && real_hi}
@@ -589,7 +589,7 @@ ir_range_swap: fn(op: IROp) -> IROp Never! {
         .Le -> IROp.Ge
         .Gt -> IROp.Lt
         .Ge -> IROp.Le
-        else -> op
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> op
     }
 }
 
@@ -600,7 +600,7 @@ ir_range_negate: fn(op: IROp) -> IROp Never! {
         .Gt -> IROp.Le
         .Ge -> IROp.Lt
         .Eq -> IROp.Ne
-        else -> IROp.Eq
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ne | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> IROp.Eq
     }
 }
 
@@ -682,7 +682,7 @@ ir_range_write: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int) -> IRRange 
             if op == .BitOr || op == .BitXor -> return ir_range_bits(op, a, b)
             ir_range_shift(op, a, b)
         }
-        else -> ir_range_top()
+        .Nop | .ConstText | .ConstBigInt | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ir_range_top()
     }
 }
 
@@ -783,7 +783,7 @@ ir_range_binary: fn(op: IROp, a: IRRange, b: IRRange) -> IRRange Never! {
             }
             ir_range_make(lo, hi)
         }
-        else -> {
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
             // By a positive divisor only.
             if b.lo <= 0 -> return ir_range_top()
             if op == .Mod || op == .Rem {
@@ -855,7 +855,7 @@ ir_range_decided: fn(op: IROp, a: IRRange, b: IRRange) -> Int Never! {
             if a.lo == a.hi && b.lo == b.hi && a.lo == b.lo -> return 1
             if a.hi < b.lo || b.hi < a.lo -> return 0
         }
-        else -> {
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ne | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
             if a.lo == a.hi && b.lo == b.hi && a.lo == b.lo -> return 0
             if a.hi < b.lo || b.hi < a.lo -> return 1
         }
@@ -1345,7 +1345,7 @@ ir_range_top_by: fn(f: IRFunction, s: IRSsa, r: IRRanges, loads: [Int], to_i64: 
     if rel == {
         .Lt -> b.hi - 1
         .Le | .Eq -> b.hi
-        else -> none
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ne | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> none
     }
 }
 
@@ -1356,7 +1356,7 @@ ir_range_implies: fn(rel: IROp, op: IROp) -> Bool Never! {
         .Lt -> op == .Le || op == .Ne
         .Gt -> op == .Ge || op == .Ne
         .Eq -> op == .Le || op == .Ge
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ne | .Le | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
 }
 

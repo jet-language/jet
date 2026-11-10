@@ -78,7 +78,7 @@ ComKind: enum {
         if self == {
             .Object(_) -> "Int"
             .Data -> "String"
-            else -> self.jet()
+            .Unit | .Int | .Float | .Bool | .Text -> self.jet()
         }
     }
 
@@ -291,7 +291,7 @@ pkg_com_validate_file_input: fn(provenance: ForeignProvenance) -[FS]> String For
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                else -> return Err(ForeignBindError.Source("the COM type library could not be inspected ({error}); regenerate the binding"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(ForeignBindError.Source("the COM type library could not be inspected ({error}); regenerate the binding"))
             }
         }
     }
@@ -511,7 +511,7 @@ pkg_com_interfaces: fn(schema: ComSchema) -> [String] Never! {
                 .Object(name) -> {
                     if !out.contains(name) -> out.push(name)
                 }
-                else -> {}
+                .Unit | .Int | .Float | .Bool | .Text | .Data -> {}
             }
         }
     }
@@ -555,7 +555,7 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
             .Unit -> "    return\n"
             .Data -> "    value := json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n"
             .Object(interface) -> "    return Ok({interface}{{ value: value }})\n"
-            else -> "    return Ok(value)\n"
+            .Int | .Float | .Bool | .Text -> "    return Ok(value)\n"
         }
         out = "{out}{tail}}}\n\n"
     }
@@ -566,7 +566,7 @@ pkg_com_abi_call_arg: fn(param: ComParam) -> String Never! {
     if param.kind == {
         .Data -> "(json.to_string({param.name}) ?? return Err(ComError.TypeMismatch))"
         .Object(_) -> "{param.name}.value"
-        else -> param.name
+        .Unit | .Int | .Float | .Bool | .Text -> param.name
     }
 }
 
@@ -610,7 +610,7 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
             .Unit -> "return;}}\n"
             .Float -> "return 0.0;}}\n"
             .Text | .Data -> "return \"\";}}\n"
-            else -> "return 0;}}\n"
+            .Int | .Bool | .Object(_) -> "return 0;}}\n"
         }
         wrappers = "{wrappers}{ret}bad:VariantClear(&result);{clear}{fallback}"
     }

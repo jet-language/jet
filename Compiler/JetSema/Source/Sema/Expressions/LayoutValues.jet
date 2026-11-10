@@ -70,8 +70,14 @@ sema_expression_layout_axis_type_name: fn(axis: SemaExpressionLayoutAxis) -> Str
 }
 
 sema_expression_layout_binop_result: fn(op: BinOp, left: Type, right: Type) -> SemaExpressionLayoutBinaryResult? {
-    left_layout := if left == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
-    right_layout := if right == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
+    left_layout := if left == {
+        .Named(name) -> sema_expression_layout_is_axis_type(name)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
+    right_layout := if right == {
+        .Named(name) -> sema_expression_layout_is_axis_type(name)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
     if !left_layout && !right_layout -> return None
     left_axis: sema_expression_layout_axis_of(left) ?? return None
     right_axis: sema_expression_layout_axis_of(right) ?? return None
@@ -151,7 +157,10 @@ sema_expression_layout_method_axis_arg: fn(method: String, index: Int) -> Bool N
 }
 
 sema_expression_layout_call_facts: fn(result_type: Type) -> SemaCallFacts Never! {
-    failure_carrier := if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
+    failure_carrier := if result_type == {
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
+    }
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
@@ -174,7 +183,10 @@ sema_expression_layout_method_params: fn(types: [Type]) -> [SemaCallParam] Never
 
 sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
-    owner := if receiver_value.ty == {.Named(name) -> if name == "Layout" || name == "Constraint" -> name else -> "" else -> ""}
+    owner := if receiver_value.ty == {
+        .Named(name) -> if name == "Layout" || name == "Constraint" -> name else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+    }
     if owner == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count: sema_expression_layout_method_arity(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if updated_args.len() != expected_count {
@@ -196,7 +208,10 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
             next
         }
         value: checked
-        axis_type := if value.ty == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
+        axis_type := if value.ty == {
+            .Named(name) -> sema_expression_layout_is_axis_type(name)
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        }
         if sema_expression_layout_method_axis_arg(method, index) && !axis_type {
             sema_expression_layout_axis_argument_mismatch(owner, method, value.ty, argument.span, diagnostics)
             valid = false
@@ -305,10 +320,10 @@ sema_layout_element_key: fn(expr: Expr) -> String? {
                     item: sema_layout_element_key(elements[0]) ?? return None
                     return Val("{type_name(ty)}{{{item}}}")
                 }
-                else -> return None
+                .Fields(_) | .Entries(_) | .ByteText(_) | .Empty -> return None
             }
         }
-        else -> return None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -330,7 +345,7 @@ sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironmen
         .Apply(name, args) -> {
             if args.len() == 1 -> name else -> ""
         }
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) -> return None
     nominal_row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
@@ -342,7 +357,7 @@ sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironmen
         .Apply(_, args) -> {
             if args.len() == 1 -> return Val(args[0])
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     }
     None

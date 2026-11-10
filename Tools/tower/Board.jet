@@ -420,7 +420,7 @@ integer: fn(tree: Dyn) -> Int? Never! {
     if tree == {
         .Int(value) -> Val(value)
         .Number(lexeme) -> whole(lexeme)
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -433,7 +433,7 @@ truthy: fn(tree: Dyn) -> Bool Never! {
         .Float(value) -> value != 0.0
         .Number(lexeme) -> !((whole(lexeme) ?? 1) == 0 || lexeme == "-0" || lexeme == "0.0" || lexeme == "-0.0")
         .Text(value) -> value != ""
-        else -> true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

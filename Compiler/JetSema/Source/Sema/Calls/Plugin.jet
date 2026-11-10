@@ -48,12 +48,12 @@ sema_plugin_literal_text: fn(value: TExpr) -> String? {
             loop part in parts {
                 if part == {
                     .Literal(piece) -> text = "{text}{piece}"
-                    else -> return None
+                    .Interpolation(_, _) -> return None
                 }
             }
             return Val(text)
         }
-        else -> return None
+        .IntLit(_, _) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return None
     }
 }
 
@@ -62,11 +62,14 @@ sema_plugin_handle_identity: fn(ty: Type, environment: SemaScopeEnvironment, pro
     identity := if resolved == {
         .Apply(name, args) -> if {
             name == "Plugin" && args.len() == 1 -> {
-                if args[0] == {.Named(value) -> Val(value) else -> None}
+                if args[0] == {
+                    .Named(value) -> Val(value)
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+                }
             }
             else -> None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
     value: identity ?? return None
     if program.registration_graph == .Val(graph) {
@@ -111,7 +114,10 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
             nominal_row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             definition: sema_plugin_checked_type_definition(environment, program, nominal) ?? return None
-            type_args := if ty == {.Apply(_, args) -> args else -> [Type]{}}
+            type_args := if ty == {
+                .Apply(_, args) -> args
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
+            }
             if type_args.len() != definition.generic_params.len() -> return None
             key := "{nominal.symbol.id.key}|{type_name(ty)}"
             loop prior in seen {
@@ -136,10 +142,10 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
                     }
                     return Val(ComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
                 }
-                else -> return None
+                .Enum(_, _) | .Distinct(_, _) | .UnitFamily(_, _) -> return None
             }
         }
-        else -> return None
+        .Char | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
 }
 
@@ -152,7 +158,7 @@ sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface
         .Val(value) -> {
             diagnostics.push(sema_error("E1257", span, "plugin interface `{value.artifact}` has no export `{method}`", "a loaded plugin exposes only the exports in its registered Component interface", "use a registered export name or update the plugin interface snapshot"))
         }
-        else -> {
+        .None -> {
             diagnostics.push(sema_error("E1257", span, "plugin export `{method}` has no registered Component interface", "plugin members are resolved only from a statically known artifact and its frozen interface", "pass a literal registered artifact to `core.plugin.load`, then call one of its exports"))
         }
     }

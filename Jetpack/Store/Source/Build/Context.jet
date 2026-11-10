@@ -215,7 +215,7 @@ HermeticBuildContext: struct {
             } ?? false
             finds_folder: if self.probes[probe.id].kind == {
                 .FindFolder(_) -> true
-                else -> false
+                .FindProgram(_) | .PkgConfig(_, _) | .HeaderCheck(_) | .CompileCheck(_, _, _) -> false
             }
             if !used || !finds_folder -> return Err(HermeticBuildError.UnknownProbe(probe.id))
         }
@@ -228,7 +228,7 @@ HermeticBuildContext: struct {
             } ?? false
             finds_program: if self.probes[program.probe.id].kind == {
                 .FindProgram(_) -> true
-                else -> false
+                .FindFolder(_) | .PkgConfig(_, _) | .HeaderCheck(_) | .CompileCheck(_, _, _) -> false
             }
             if !used || !finds_program -> return Err(HermeticBuildError.UnknownProbe(program.probe.id))
             // The argv has no argument `at` past the program it runs.

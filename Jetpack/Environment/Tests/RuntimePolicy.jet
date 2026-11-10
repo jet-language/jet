@@ -22,7 +22,7 @@ env_rt_test_scratch: fn(label: String) -[FS]> String {
 env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     if error == {
         .TimedOut(context) -> true
-        else -> false
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 

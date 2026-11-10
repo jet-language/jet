@@ -46,7 +46,7 @@ TrustEngine: struct {
                     .Err(error) -> {
                         if error == {
                             .BootstrapMissing -> bootstrap.write(dir)
-                            else -> return Err(error)
+                            .BootstrapPinMismatch(_, _) | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> return Err(error)
                         }
                     }
                 }
@@ -135,7 +135,7 @@ TrustEngine: struct {
             .Err(error) -> {
                 if error == {
                     .ThresholdUnmet(_, _, _) -> {}
-                    else -> return Err(TrustRootError.RotationRejected{detail: "expected threshold unmet, got: {error.message()}"})
+                    .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> return Err(TrustRootError.RotationRejected{detail: "expected threshold unmet, got: {error.message()}"})
                 }
             }
         }
@@ -242,7 +242,7 @@ trust_verify_role_signatures: fn(role: MetadataRole, canonical: String, signatur
                 if error == {
                     .UnknownKey(_) -> {}
                     .SignatureInvalid(_, _) -> {}
-                    else -> return Err(error)
+                    .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> return Err(error)
                 }
             }
         }

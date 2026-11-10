@@ -35,7 +35,7 @@ bump: fn(e: &Expr) {
 bump_left: fn(e: &Expr) {
     if &e == {
         .Pair(left, _) -> bump(left)
-        else -> {}
+        .Lit(_) | .Many(_) -> {}
     }
 }
 
@@ -49,7 +49,7 @@ run: fn() {
     local := a
     if &local == {
         .Pair(_, n) -> n = 7
-        else -> {}
+        .Lit(_) | .Many(_) -> {}
     }
     print("local: {show(a)} / {show(local)}")
 
@@ -74,7 +74,7 @@ run: fn() {
     field := holder
     if &field.expr == {
         .Pair(_, n) -> n = 30
-        else -> {}
+        .Lit(_) | .Many(_) -> {}
     }
     if &field.note == {
         .Val(text) -> text = "edited"

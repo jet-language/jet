@@ -493,7 +493,7 @@ CacheLease: struct {
     executable: fn(self, name: String) -> LeaseText? Never! {
         if self.require_consumable() == {
             .Err(_) -> return None
-            else -> {}
+            .Ok(_) -> {}
         }
         index: self.executable_index(name) ?? return None
         self.executable_child_text(index)
@@ -728,7 +728,7 @@ CacheLease: struct {
     integrity_failure: fn(self) -> IntegrityFailure? Never! {
         if self.validate() == {
             .Err(error) -> Val(self.consumption_failure(error))
-            else -> None
+            .Ok(_) -> None
         }
     }
 
@@ -757,19 +757,19 @@ CacheLease: struct {
         if keep_for_descendant -> return
         removed: if store_remove_snapshot_node(lease.lease_root) == {
             .Ok(_) -> true
-            else -> false
+            .Err(_) -> false
         }
         if !removed || lease.protocol_lease_id == "" || lease.protocol_owner_lock == None -> return
         protocol: ExecutableLeaseProtocol.open(lease.store_root) ?? return
         released: if protocol.release(lease.protocol_lease_id, lease.protocol_generation, lease.protocol_owner_scope) == {
             .Ok(_) -> true
-            else -> false
+            .Err(_) -> false
         }
         if released {
             lease.protocol_owner_lock = None
             if protocol.reap_empty_record(lease.protocol_lease_id) == {
                 .Err(_) -> {}
-                else -> {}
+                .Ok(_) -> {}
             }
         }
     }
@@ -859,7 +859,7 @@ store_reuse_path_variants: fn(path: String) -> [String] Never! {
             // would reject every absolute caller path.
             if canonical != "/" && !store_reuse_same_path(canonical, lexical) -> variants.push(canonical)
         }
-        else -> {}
+        .Err(_) -> {}
     }
     variants
 }

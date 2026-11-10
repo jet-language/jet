@@ -3,7 +3,7 @@ classify: fn(tree: Dyn) -> String {
     if tree == {
         .Object(entries) -> { return "object:{entries.len()}" }
         .Int(_) -> { return "int" }
-        else -> { return "other" }
+        .Null | .Bool(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return "other" }
     }
 }
 run: fn() {

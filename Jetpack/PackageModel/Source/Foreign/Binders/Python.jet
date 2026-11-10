@@ -49,7 +49,7 @@ pkg_python_check: fn(path: String) ForeignBindError! -[Exec, Time.Wait]> {
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Err(ForeignBindError.PlainToolMissing(PKG_PYTHON_RUNTIME))
-                else -> return Err(ForeignBindError.IO("could not start Python: {error}"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(ForeignBindError.IO("could not start Python: {error}"))
             }
         }
     }

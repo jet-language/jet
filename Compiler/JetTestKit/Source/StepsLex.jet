@@ -59,7 +59,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
             tree: json.parse(raw) ?? return None
             if tree == {
                 .Text(value) -> decoded = value
-                else -> return None
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
             }
         } else if first == 39 {
             interior: kit_steps_byte_slice(text, start + 1, i - 1)

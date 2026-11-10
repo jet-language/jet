@@ -643,7 +643,7 @@ provider_registry_validate_tar_archive: fn(path: String, gzipped: Bool) Registry
     loop entry in listing {
         if entry.kind == {
             .File | .Directory -> {}
-            else -> return Err(RegistryError.Reason("source archives may contain only regular files and directories"))
+            .Symlink | .Hardlink | .Special -> return Err(RegistryError.Reason("source archives may contain only regular files and directories"))
         }
         if entry.size > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
             return Err(RegistryError.Reason("source archive entry is {entry.size} bytes; per-entry limit is {PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
@@ -1017,6 +1017,6 @@ provider_registry_prepare_entry: fn(name: String, kind: RegistryTarKind, destina
             provider_registry_create_dir_all(files.dirname(target), "could not create `{trimmed}`")
             Ok(Val(target))
         }
-        else -> Err(RegistryError.Reason("source archives may contain only regular files and directories"))
+        .Symlink | .Hardlink | .Special -> Err(RegistryError.Reason("source archives may contain only regular files and directories"))
     }
 }

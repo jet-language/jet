@@ -176,7 +176,7 @@ tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? 
             .BoolLit(value) -> Val("bool:{value}")
             .CharLit(value) -> Val("char:{value}")
             .ConstRef(symbol) -> Val("constant:{symbol.key}")
-            else -> None
+            .IntLit(_, _) | .FloatLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> None
         }
         .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
         .Unary(op, value) -> {
@@ -189,9 +189,9 @@ tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? 
             .Bool(flag) -> Val("bool:{flag}")
             .Char(character) -> Val("char:{character}")
             .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
-            else -> None
+            .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit -> None
         }
-        else -> None
+        .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> None
     }
 }
 
@@ -856,11 +856,11 @@ tree_each_pattern_shape_child: fn(shape: TPatternShape, visit: fn(TExpr) -[Mem.A
                 if field == {
                     .Value(_, value, _) -> visit(value)
                     .Nested(_, inner, _) -> tree_each_pattern_shape_child(inner.shape, visit)
-                    else -> {}
+                    .Bind(_, _, _) -> {}
                 }
             }
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
     }
 }
 
@@ -868,7 +868,7 @@ tree_each_pattern_slot_child: fn(slot: TPatternBinding, visit: fn(TExpr) -[Mem.A
     if slot == {
         .Value(value) -> visit(value)
         .Nested(inner) -> tree_each_pattern_shape_child(inner.shape, visit)
-        else -> {}
+        .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
     }
 }
 
@@ -956,7 +956,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
         .Assign(place, _, value, _, _) -> {
             if place == {
                 .Expr(place_value) -> visit(place_value)
-                else -> {}
+                .Local(_) -> {}
             }
             visit(value)
         }
@@ -1048,7 +1048,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
         .ScopeMember(kind, body, _) -> {
             if kind == {
                 .Timeout(duration) -> visit(duration)
-                else -> {}
+                .Setup | .ExpectFail(_, _) | .Measure | .Skip -> {}
             }
             tree_each_stmt_list_child(body, visit)
         }
@@ -1057,14 +1057,14 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if index_temp == Val(nested) -> visit(nested)
             tree_each_stmt_child(edited, visit)
         }
-        else -> {}
+        .Break(_, _) | .Continue(_, _) -> {}
     }
 }
 
 tree_each_place_child: fn(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if place == {
         .Expr(value) -> visit(value)
-        else -> {}
+        .Local(_) -> {}
     }
 }
 
@@ -1089,7 +1089,7 @@ tree_each_or_fallback_child: fn(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Al
             if value == Val(nested) -> visit(nested)
         }
         .Panic(message, _) -> visit(message)
-        else -> {}
+        .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> {}
     }
 }
 
@@ -1111,7 +1111,7 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .OptionProbe(inner, _) -> visit(inner)
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
-        else -> {}
+        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
     }
 }
 
@@ -1143,7 +1143,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> visit(value)
-                else -> {}
+                .Literal(_) -> {}
             }
         }
         .InlineBlock(body) -> tree_each_stmt_list_child(body, visit)
@@ -1285,7 +1285,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             if value == Val(nested) -> visit(nested)
         }
         .FnValue(kind) -> tree_each_fn_value_child(kind, visit)
-        else -> {}
+        .IntLit(_, _) | .Local(_) | .CtLit(_) | .Flat(_) -> {}
     }
 }
 

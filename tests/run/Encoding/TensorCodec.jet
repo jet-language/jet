@@ -38,7 +38,7 @@ elements: fn(tree: Dyn, key: String) -> [Dyn] {
     field: tree.field(key) ?? panic("missing {key}")
     if field == {
         .Array(items) -> items
-        else -> panic("{key} is not an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("{key} is not an array")
     }
 }
 
@@ -49,7 +49,7 @@ number: fn(item: Dyn) -> Float {
         .Float(value) -> value
         .Int(value) -> Float.from_int(value)
         .Number(_) -> item.float() ?? panic("element is not a float")
-        else -> panic("element is not a number")
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("element is not a number")
     }
 }
 

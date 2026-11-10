@@ -418,7 +418,7 @@ nix_test_derivation: fn(source: String) -> NixNativeDerivation {
         output := "default"
         if fixture.get("output") == {
             .Val(output_index) -> output = document.string(output_index) ?? "default"
-            else -> {}
+            .None -> {}
         }
         evaluated: boundary.evaluate_devshell_output(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system"), output) ?? panic("breadth value must evaluate through Jetpack")
         expected: nix_test_strings(document, nix_test_get(fixture, "jet_packages"))

@@ -3,7 +3,7 @@ next: fn(value: Dyn) -> String { return "next" }
 value_if_string_err: fn(value: Dyn) -> String {
     return if value == {
         .Null -> "null"
-        else -> next(value.copy())
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> next(value.copy())
     }
 }
 run: fn() {

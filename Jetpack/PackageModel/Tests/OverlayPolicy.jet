@@ -54,7 +54,7 @@ workspace: module {
     loop source in sources {
         if pkg_test_overlay_error(source) == {
             .UnsupportedPolicy(_) -> {}
-            else -> panic("expected UnsupportedPolicy")
+            .Malformed(_) | .Conflict(_, _, _, _, _, _, _) | .IO(_) | .Patch(_) -> panic("expected UnsupportedPolicy")
         }
     }
 }

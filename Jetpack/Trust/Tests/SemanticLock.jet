@@ -196,7 +196,7 @@ dependencies = ["app"]
         .Err(error) -> {
             if error == {
                 .Rejected(issues) -> assert(issues.len() > 0)
-                else -> panic("expected Rejected")
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> panic("expected Rejected")
             }
         }
     }

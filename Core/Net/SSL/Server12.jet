@@ -293,7 +293,7 @@ ssl_srv12_parse_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
             if ssl.conf.transport == ssldefs.SSL_TRANSPORT_DATAGRAM && ssl.renego_status == ssldefs.SSL_INITIAL_HANDSHAKE {
                 if e == {
                     .UnexpectedRecord -> return Err(.UnexpectedMessage)
-                    else -> {}
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
                 }
             }
             return Err(e)
@@ -1165,7 +1165,7 @@ ssl_srv12_parse_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
             ssltls.ssl_psk_derive_premaster(ssl, kx, rng) ?? return Err(err)
         }
         .RSA -> ssl_srv12_parse_encrypted_pms(ssl, p, end, 0, rng) ?? return Err(err)
-        else -> return Err(.InternalError)
+        .NoExchange -> return Err(.InternalError)
     }
     ssltls.ssl_derive_keys(ssl) ?? return Err(err)
     sslmsg.ssl_handshake_increment_state(ssl)

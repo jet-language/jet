@@ -393,7 +393,7 @@ jet_cli_grammar_anonymous: fn(root: String) -[FS]> [String] JetCLIReadError! {
     value: cli_grammar_json.parse(text) ?? return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: {err.reason}"))
     nodes: if value == {
         .Array(items) -> items
-        else -> { return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: the node types are not an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: the node types are not an array")) }
     }
     anonymous := [String]{}
     loop node in nodes {

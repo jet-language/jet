@@ -304,7 +304,7 @@ ir_tail_safe: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
     kind: m.types[f.slot_type[slot]].kind
     if kind == {
         .Unit | .Bool | .Word | .Float | .Float32 | .Char -> return true
-        else -> {}
+        .Int | .String | .Pointer | .Aggregate -> {}
     }
     if slot < f.param_count -> return true
     if kind != .Int -> return false
@@ -312,7 +312,7 @@ ir_tail_safe: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
         if ir_x64_write(f, at) != slot -> next
         if f.op[at] == {
             .Const | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Neg -> {}
-            else -> return false
+            .Nop | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return false
         }
     }
     true

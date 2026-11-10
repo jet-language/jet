@@ -8,7 +8,7 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .InvalidHandshake -> true
-            else -> false
+            .InvalidURL | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> false
         }
     })
     return Ok(server.response(400, "bad"))

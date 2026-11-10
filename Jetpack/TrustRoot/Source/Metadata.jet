@@ -178,7 +178,7 @@ RootBootstrap: struct {
             .Err(error) -> {
                 if error == {
                     .NotFound(_) -> return Err(TrustRootError.BootstrapMissing)
-                    else -> return Err(TrustRootError.IO{detail: "{error}"})
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
                 }
             }
         }

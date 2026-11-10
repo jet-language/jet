@@ -302,7 +302,7 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
             sema_function_header_default_idents(then_value, found)
             sema_function_header_default_idents(else_value, found)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -331,7 +331,7 @@ sema_function_arithmetic_policy: fn(markers: [Marker]) -> ArithmeticPolicyFact? 
             if label != "arithmetic" -> next
             mode: if marker.args[index] == {
                 .Expr(value) -> sema_function_arithmetic_mode(value)
-                else -> None
+                .EffectRow(_, _) -> None
             } ?? return None
             return Val(ArithmeticPolicyFact{mode: mode, scope_span: marker.span, operation_span: marker.span, operation: None})
         }
@@ -353,7 +353,7 @@ sema_function_arithmetic_mode: fn(value: Expr) -> ArithmeticMode? Never! {
         .Ident(name, _, _) -> name
         .Field(_, member, _, _) -> member
         .EnumLit(_, variant, _, _, _, _, _) -> variant
-        else -> ""
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
     }
     arithmetic_mode_parse(word)
 }
@@ -422,7 +422,7 @@ sema_function_header_inline_has_core_mem: fn(module_row: SemaRegistrationModule)
             .Unqualified(module_alias, _, items, _, _) -> module_alias == "core.mem" || (loop item in items {
                 if "{module_alias}.{item.original}" == "core.mem" -> break true
             } ?? false)
-            else -> false
+            .File(_, _) -> false
         }
         if has_core_mem {
             return true
@@ -480,7 +480,6 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
                 .Local(local, local_span) -> {
                     if local == name -> uses.push(local_span.copy())
                 }
-                else -> {}
             }
             sema_function_header_variadic_expr(value, name, uses)
         }
@@ -529,7 +528,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
         }
         // Scope wrappers (`#Unsafe { }`, regions, groups, …) stay out of the
         // v1 scan, as in the Rust walk.
-        else -> {}
+        .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> {}
     }
 }
 
@@ -584,7 +583,7 @@ sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) 
                     sema_function_header_variadic_expr(entry.value, name, uses)
                 }
                 .Value(value) -> sema_function_header_variadic_expr(value, name, uses)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
         .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, uses)
@@ -597,6 +596,6 @@ sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) 
         .Str(parts, _, _) -> loop part in parts {
             if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, uses)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }

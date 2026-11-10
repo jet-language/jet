@@ -77,7 +77,7 @@ lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never!
             imported: semindex_symbol_imported_module(view.checked.modules, doc_module, doc_module.imports, def.name) ?? return None
             Val(LSPMemberScope.Module{path: imported})
         }
-        else -> None
+        .Function(_) | .Tag | .Const | .EnumVariant(_) -> None
     }
 }
 

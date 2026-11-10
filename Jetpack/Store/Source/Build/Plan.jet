@@ -66,7 +66,7 @@ HermeticBuildPlan: struct {
             loop pool in action.resource_pools {
                 pools.push(if pool == {
                     .Custom(name) -> "custom:{name}"
-                    else -> pool.as_str()
+                    .CPU | .Memory | .Linker | .Console | .GPU -> pool.as_str()
                 })
             }
             facts["{prefix}.pools"] = pools.join(nul)
@@ -253,7 +253,7 @@ HermeticBuildPlan: struct {
                                 metrics.failed_actions += 1
                             }
                             .RestoredFromCache -> metrics.cache_restored_actions += 1
-                            else -> {}
+                            .Succeeded(_) -> {}
                         }
                         events.push(BuildExecutionEvent.Finished{action, outcome})
                     }

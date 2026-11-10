@@ -1197,7 +1197,7 @@ cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never
             .PKCS7 -> U8{fill}
             .OneAndZeros -> if i == data_len -> U8{0x80} else -> U8{0}
             .ZerosAndLen -> if i == len - 1 -> U8{fill} else -> U8{0}
-            else -> U8{0}
+            .Zeros | .Unpadded -> U8{0}
         }
     }
 }

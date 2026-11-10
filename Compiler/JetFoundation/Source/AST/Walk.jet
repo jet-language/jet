@@ -95,7 +95,7 @@ ast_visit_expr: fn(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time
             ast_visit_expr(head, visitor)
             loop step in steps -> ast_visit_expr(step.value, visitor)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 // The operands under a Binary node whose operands are `left` and `right`,
@@ -139,7 +139,7 @@ ast_visit_pattern: fn(pattern: Pattern, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
             if field == {
                 .Value(_, _, value) -> ast_visit_expr(value, visitor)
                 .Nested(_, _, inner) -> ast_visit_pattern(inner, visitor)
-                else -> {}
+                .Bind(_, _, _, _) -> {}
             }
         }
         .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_visit_pattern_slot(slot, visitor)
@@ -150,7 +150,7 @@ ast_visit_pattern: fn(pattern: Pattern, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> ast_visit_pattern(nested, visitor)
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
 }
 ast_visit_pattern_slot: fn(slot: PatSlot, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
@@ -158,7 +158,7 @@ ast_visit_pattern_slot: fn(slot: PatSlot, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc,
         .Value(value) -> ast_visit_expr(value, visitor)
         .Nested(inner) -> ast_visit_pattern(inner, visitor)
         .Named(_, _, inner) -> ast_visit_pattern_slot(inner, visitor)
-        else -> {}
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> {}
     }
 }
 ast_visit_fallback: fn(fallback: OrFallback, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
@@ -170,7 +170,7 @@ ast_visit_fallback: fn(fallback: OrFallback, visitor: fn(Expr) -[Mem.Alloc, Mem.
         }
         .Return(value, _) -> if value == .Val(value) -> ast_visit_expr(value, visitor)
         .Panic(_, args) -> ast_visit_call_args(args, visitor)
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
 }
 ast_visit_statement: fn(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
@@ -195,7 +195,6 @@ ast_visit_statement: fn(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
                 // copy: `base`, `field` and `name` are payloads of read parameter `statement`; the visited place owns these
                 .Field(base, field, span) -> ast_visit_expr(Expr.Field{base: base.copy(), member: field.copy(), span: span, id: AST_NODE_GENERATED}, visitor)
                 .Local(name, name_span) -> visitor(Expr.Ident{name: name.copy(), span: name_span, id: AST_NODE_GENERATED})
-                else -> {}
             }
             ast_visit_expr(value, visitor)
         }
@@ -257,6 +256,6 @@ ast_visit_statement: fn(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
             loop argument in args -> ast_visit_expr(argument, visitor)
             ast_visit_body(body, visitor, nested_expression)
         }
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
 }

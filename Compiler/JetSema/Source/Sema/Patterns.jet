@@ -74,7 +74,7 @@ SemaPatternValidation: struct {
 sema_pattern_unwrap_tags: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> sema_pattern_unwrap_tags(inner)
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -97,7 +97,7 @@ sema_pattern_nominal_type: fn(ty: Type) -> Type? {
     if ty == {
         .Named(_) | .Apply(_, _) -> Val(ty)
         .Tagged(_, inner) -> sema_pattern_nominal_type(inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -106,7 +106,7 @@ sema_pattern_base_name: fn(ty: Type) -> String? {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
         .Tagged(_, inner) -> sema_pattern_base_name(inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -114,7 +114,7 @@ sema_pattern_subject_args: fn(ty: Type) -> [Type] Never! {
     if ty == {
         .Apply(_, args) -> args
         .Tagged(_, inner) -> sema_pattern_subject_args(inner)
-        else -> [Type]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
 }
 
@@ -196,7 +196,7 @@ sema_pattern_core_enum_payload: fn(owner_name: String, variant: String, span: Sp
 sema_pattern_flat_union_owner: fn(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Type? {
     members: if carrier == {
         .Union(values) -> values
-        else -> [Type]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     loop member in members {
         if sema_pattern_union_tag(member) == variant -> return None
@@ -259,7 +259,7 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
                 return result
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     owner_name: sema_pattern_base_name(normalized) ?? {
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{type_name(normalized)}`", "variant patterns only work on enum values", "match a value with a pattern for its type"))
@@ -297,7 +297,7 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
                         }
                     }
                 }
-                else -> {
+                .Func(_) | .Struct(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                     diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{type_name(normalized)}`", "`{owner_name}` is not an enum with variant constructors", "use a struct field or constructor pattern for this type"))
                     return result
                 }
@@ -346,28 +346,28 @@ sema_pattern_binding_shape: fn(name: String, span: Span) -> TPatternBinding Neve
 sema_pattern_is_range_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Char | .InlineRange(_, _, _) -> true
-        else -> false
+        .Float | .Bool | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
 sema_pattern_is_option: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Option(_) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
 sema_pattern_is_result: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Result(_, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
 sema_pattern_is_text_hole_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .InlineRange(_, _, _) -> true
-        else -> false
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -456,7 +456,7 @@ sema_pattern_has_named_slots: fn(slots: [PatSlot]) -> Bool {
     loop slot in slots {
         if slot == {
             .Named(_, _, _) | .Rest(_) -> return true
-            else -> {}
+            .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> {}
         }
     }
     false
@@ -470,7 +470,7 @@ sema_pattern_strip_named_slots: fn(slots: [PatSlot]) -> [PatSlot] {
         if slot == {
             .Named(_, _, inner) -> stripped.push(inner.copy())
             .Rest(_) -> {}
-            else -> stripped.push(slot.copy())
+            .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> stripped.push(slot.copy())
         }
     }
     stripped
@@ -530,7 +530,7 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
                 }
             }
             .Rest(rest_span) -> rest = Val(rest_span)
-            else -> {}
+            .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> {}
         }
     }
     missing := [String]{}
@@ -578,7 +578,7 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
         if payload.payload == {
             .Val(declared) -> if declared == {
                 .Named(fields) -> slots = sema_pattern_place_named_slots(written_slots, fields, variant, span, diagnostics)
-                else -> {
+                .Unit | .Single(_, _) -> {
                     diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, payload.types.len(), span))
                     return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
                 }
@@ -647,7 +647,7 @@ sema_pattern_struct: fn(subject_ty: Type, fields: [StructPatField], rest: Span?,
             unknown_span: if field == {
                 .Bind(_, binding_span, _, _) -> binding_span
                 .Value(_, value_span, _) -> value_span
-                else -> span
+                .Nested(_, _, _) -> span
             }
             diagnostics.push(sema_error("E0107", unknown_span, "nothing named `{field_name}` exists on this struct", "struct patterns can only name declared fields", "check the field spelling"))
             complete = false
@@ -713,7 +713,7 @@ sema_pattern_list: fn(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, sp
                 }
             }
         }
-        else -> {
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
             diagnostics.push(sema_error("E0305", span, "a list pattern cannot match `{type_name(subject_ty)}`", "list patterns match list values", "match a list value"))
             complete = false
         }
@@ -757,7 +757,7 @@ sema_pattern_map_key_written: fn(key: Expr) -> Bool Never! {
         .Ident(name, _, _) -> sema_pattern_constant_name(name)
         .Field(base, _, _, _) -> if base == .Ident(name, _, _) -> name.len() > 0 else -> false
         .Unary(_, inner, _, _) -> sema_pattern_map_key_written(inner)
-        else -> false
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -863,8 +863,11 @@ sema_pattern_test_reused_payload_name: fn(pattern: Pattern, scopes: SemaScopeTab
     sema_pattern_test_binding_names(pattern, names)
     optional_payload: if pattern == {
         .Present(_, _, inner, _) -> inner == None
-        .Variant(variant, slots, _, _) -> variant == "Val" && slots.len() == 1 && (if slots[0] == {.Bind(_, _) -> true else -> false})
-        else -> false
+        .Variant(variant, slots, _, _) -> variant == "Val" && slots.len() == 1 && (if slots[0] == {
+            .Bind(_, _) -> true
+            .Wildcard | .Range(_, _) | .Nested(_) | .Named(_, _, _) | .Rest(_) | .Value(_) -> false
+        })
+        .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
     }
     reused := false
     loop bound in names {
@@ -905,7 +908,7 @@ sema_pattern_test_binding_names: fn(pattern: Pattern, names: &[BindName]) Never!
             }
         }
         .Map(entries, _, _) -> loop entry in entries -> sema_pattern_test_slot_names(entry.slot, names)
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
 }
 
@@ -922,7 +925,7 @@ sema_pattern_test_slot_names: fn(slot: PatSlot, names: &[BindName]) Never! {
         .Bind(name, span) -> names.push(BindName{name: name, span: span, rename: None})
         .Nested(pattern) -> sema_pattern_test_binding_names(pattern, names)
         .Named(_, _, inner) -> sema_pattern_test_slot_names(inner, names)
-        else -> {}
+        .Wildcard | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
 }
 
@@ -992,7 +995,7 @@ sema_pattern_binary: fn(subject_ty: Type, parts: [BinMatchPart], span: Span, dia
     normalized: sema_pattern_unwrap_tags(subject_ty)
     bytes: if normalized == {
         .List(element) -> element == Type.IntN{signed: false, bits: 8}
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !bytes {
         diagnostics.push(sema_error("E1010", span, "this pattern matches raw bytes, but the subject is {sema_type_show(subject_ty)}", "an `[U8].{{\"…\"}}` binary pattern only matches a `[U8]` byte buffer", "match a `[U8]` subject, or use a pattern for this type instead"))
@@ -1070,7 +1073,7 @@ sema_pattern_normalize_contextual_binding: fn(slot: PatSlot, fallback: Span) -> 
 sema_pattern_normalize_nested: fn(slot: PatSlot, payload_ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables) -> Pattern? {
     if slot == {
         .Nested(nested) -> Val(sema_pattern_normalize_contextual(nested, payload_ty, env, program))
-        else -> None
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Named(_, _, _) | .Rest(_) | .Value(_) -> None
     }
 }
 
@@ -1119,7 +1122,7 @@ sema_pattern_normalize_contextual: fn(pattern: Pattern, subject_ty: Type, env: S
                 else -> {}
             }
         }
-        else -> {}
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
     // copy: the normalized pattern is a new owned Pattern. Otherwise it equals `pattern`, the
     // caller's AST pattern (a read parameter), which the caller keeps.
@@ -1158,7 +1161,7 @@ sema_pattern_validate_internal: fn(subject_ty: Type, pattern: Pattern, env: Sema
     if pattern == {
         .Present(binding, binding_span, inner, _) -> if sema_pattern_unwrap_tags(subject_ty) == {
             .Option(payload) -> sema_pattern_validate_carrier("Val", payload, binding, binding_span, inner, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 diagnostics.push(sema_error("E0305", span, "this pattern belongs to an optional value, not `{type_name(subject_ty)}`", "present-value patterns work on Option values", "match an optional value or use its enum pattern"))
                 SemaPatternValidation{shape: TPatternShape.Present{binding: binding, binding_span: binding_span, inner: None, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
             }
@@ -1172,14 +1175,14 @@ sema_pattern_validate_internal: fn(subject_ty: Type, pattern: Pattern, env: Sema
         }
         .Ok(binding, binding_span, inner, _) -> if sema_pattern_unwrap_tags(subject_ty) == {
             .Result(ok, _) -> sema_pattern_validate_carrier("Ok", ok, binding, binding_span, inner, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 diagnostics.push(sema_error("E0305", span, "this pattern belongs to a fallible result, not `{type_name(subject_ty)}`", "Ok patterns work on Result values", "match a Result value instead"))
                 SemaPatternValidation{shape: TPatternShape.Ok{binding: binding, binding_span: binding_span, inner: None, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
             }
         }
         .Err(binding, binding_span, inner, _) -> if sema_pattern_unwrap_tags(subject_ty) == {
             .Result(_, err) -> sema_pattern_validate_carrier("Err", err, binding, binding_span, inner, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 diagnostics.push(sema_error("E0305", span, "this pattern belongs to a fallible result, not `{type_name(subject_ty)}`", "Err patterns work on Result values", "match a Result value instead"))
                 SemaPatternValidation{shape: TPatternShape.Err{binding: binding, binding_span: binding_span, inner: None, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
             }
@@ -1240,7 +1243,7 @@ sema_pattern_names_optional_state: fn(pattern: Pattern) -> Bool Never! {
         .Or(alternatives, _) -> loop alternative in alternatives {
             if !sema_pattern_names_optional_state(alternative) -> break false
         } ?? true
-        else -> false
+        .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
     }
 }
 
@@ -1276,7 +1279,7 @@ sema_pattern_source_text: fn(pattern: Pattern) -> String? {
             }
             return Val(parts.join(" | "))
         }
-        else -> return None
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> return None
     }
 }
 
@@ -1313,7 +1316,7 @@ sema_pattern_report_retired_outcome: fn(pattern: Pattern, subject_ty: Type, env:
                 sema_pattern_report_retired_outcome(inner, payload_ty, env, program, diagnostics)
             }
         }
-        else -> {}
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
 }
 

@@ -99,7 +99,7 @@ dependencies = ["app"]
         .Err(error) -> {
             if error == {
                 .Rejected(issues) -> issues.len() > 0
-                else -> false
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
             }
         }
     }
@@ -140,7 +140,7 @@ dependencies = ["app"]
         .Err(error) -> {
             if error == {
                 .StaleSemanticLock(_) -> true
-                else -> false
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
             }
         }
     }
@@ -190,7 +190,7 @@ dependencies = ["app"]
         .Err(error) -> {
             if error == {
                 .StaleSemanticLock(reason) -> reason.contains("composition")
-                else -> false
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
             }
         }
     }

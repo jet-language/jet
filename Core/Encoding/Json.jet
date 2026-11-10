@@ -152,7 +152,7 @@ coerce_tree: fn(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never!
             }
             return stream.object_from_entries(out)
         }
-        else -> return value.copy()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> return value.copy()
     }
 }
 
@@ -1653,7 +1653,7 @@ pointer_select: fn(node: Dyn, segments: [String], depth: Int) -> Dyn EncodingErr
             if index >= items.len() -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
             return pointer_select(items[index], segments, depth + 1)
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     Err(value_error(EncodingErrorKind.Syntax, at, "cannot select `{segment}` inside a scalar value"))
 }
@@ -1713,7 +1713,7 @@ patch_pointer_field: fn(members: [(key: String, value: Dyn)], index: Int, name: 
             text = s
             valid = true
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { _ := 0 }
     }
     if !valid -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}` must be a JSON Pointer string"))
     segments: pointer_segments(text) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}`: {err.reason}"))
@@ -1730,7 +1730,7 @@ patch_operations: fn(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingErro
             items = values
             is_array = true
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { _ := 0 }
     }
     if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
     list := [PatchOp]{}
@@ -1742,14 +1742,14 @@ patch_operations: fn(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingErro
                 members = fields
                 is_object = true
             }
-            else -> { _ := 0 }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { _ := 0 }
         }
         if !is_object -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} must be an object"))
         name := ""
         op_value: patch_field(members, index, "op")
         if op_value == {
             .Text(s) -> name = s
-            else -> { _ := 0 }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { _ := 0 }
         }
         kind := -1
         if name == "add" -> kind = PATCH_ADD
@@ -1833,7 +1833,7 @@ patch_edit: fn(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn)
             if last && kind == PATCH_ADD && index == items.len() -> out.push(value.copy())
             return Ok(Dyn.Array(out))
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     Err(value_error(EncodingErrorKind.Syntax, at, "cannot address `{segment}` inside a scalar value"))
 }
@@ -1845,13 +1845,13 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
         .Null -> {
             if right == {
                 .Null -> return true
-                else -> return false
+                .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Bool(a) -> {
             if right == {
                 .Bool(b) -> return a == b
-                else -> return false
+                .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Int(a) -> {
@@ -1859,7 +1859,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Int(b) -> return a == b
                 .Float(b) -> return Float{a} == b
                 .Number(b) -> return Float{a} == (Float.parse(b) ?? return false)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Float(a) -> {
@@ -1867,7 +1867,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Float(b) -> return a == b
                 .Int(b) -> return a == Float{b}
                 .Number(b) -> return a == (Float.parse(b) ?? return false)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Number(a) -> {
@@ -1875,20 +1875,20 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Number(b) -> return a == b || (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
                 .Int(b) -> return (Float.parse(a) ?? return false) == Float{b}
                 .Float(b) -> return (Float.parse(a) ?? return false) == b
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Text(a) -> {
             if right == {
                 .Text(b) -> return a == b
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .DateTime(_) -> return left == right
         .Bytes(a) -> {
             if right == {
                 .Bytes(b) -> return a == b
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Array(a) -> {
@@ -1900,7 +1900,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return false
             }
         }
         .Object(a) -> {
@@ -1913,7 +1913,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
             }
         }
     }
@@ -1937,7 +1937,7 @@ tree_depth: fn(value: Dyn) -> Int Never! {
             }
             return deepest + 1
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     0
 }

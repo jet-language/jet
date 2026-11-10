@@ -153,7 +153,7 @@ pk_info_from_type: fn(kind: oids.PKType) -> oids.PKType? Never! {
         .ECKey -> Val(kind)
         .ECKeyDH -> Val(kind)
         .ECDSA -> Val(kind)
-        else -> None
+        .RSAAlt | .RSASSAPSS | .Opaque -> None
     }
 }
 
@@ -187,7 +187,7 @@ pk_can_do: fn(ctx: PKContext, kind: oids.PKType) -> Bool Never! {
         .ECKeyDH -> kind == .ECKey || kind == .ECKeyDH
         .ECDSA -> kind == .ECDSA
         .RSAAlt -> kind == .RSA
-        else -> false
+        .RSASSAPSS | .Opaque -> false
     }
 }
 
@@ -203,7 +203,7 @@ pk_get_name: fn(ctx: PKContext) -> String Never! {
         .ECKeyDH -> "EC_DH"
         .ECDSA -> "ECDSA"
         .RSAAlt -> "RSA-alt"
-        else -> "invalid PK"
+        .RSASSAPSS | .Opaque -> "invalid PK"
     }
 }
 
@@ -215,7 +215,7 @@ pk_get_bitlen: fn(ctx: PKContext) -> Int Never! {
     if own == {
         .RSA -> rsa.rsa_get_bitlen(ctx.rsa)
         .RSAAlt -> 8 * alt_key_len(ctx)
-        else -> ctx.ec.grp.pbits
+        .ECKey | .ECKeyDH | .ECDSA | .RSASSAPSS | .Opaque -> ctx.ec.grp.pbits
     }
 }
 
@@ -230,7 +230,7 @@ pk_get_ec_group_id: fn(ctx: PKContext) -> ecp.GroupID Never! {
         .ECKey -> ctx.ec.grp.id
         .ECKeyDH -> ctx.ec.grp.id
         .ECDSA -> ctx.ec.grp.id
-        else -> .Unknown
+        .RSA | .RSAAlt | .RSASSAPSS | .Opaque -> .Unknown
     }
 }
 
@@ -256,7 +256,7 @@ pk_verify: fn(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
     if own == {
         .RSA -> rsa_verify_wrap(ctx.rsa, md, hash, sig)
         .ECKey | .ECDSA -> ecdsa_verify_wrap(ctx.ec, hash, sig)
-        else -> return Err(.TypeMismatch)
+        .ECKeyDH | .RSAAlt | .RSASSAPSS | .Opaque -> return Err(.TypeMismatch)
     }
 }
 
@@ -296,7 +296,7 @@ pk_verify_ext: fn(kind: oids.PKType, options: PSSOptions?, ctx: &PKContext, md: 
             rsa.rsa_rsassa_pss_verify_ext(ctx.rsa, md, hash, opts.mgf1_hash_id, opts.expected_salt_len, cipher.bytes_of(sig, 0, rsa_len)) ?? return Err(.RSA(err))
             if sig.len() > len -> return Err(.SigLenMismatch)
         }
-        else -> {
+        .RSA | .ECKey | .ECKeyDH | .ECDSA | .RSAAlt | .Opaque -> {
             if options == {
                 .Val(_) -> return Err(.BadInput)
                 .None -> {}
@@ -316,7 +316,7 @@ pk_sign: fn<R: RNG>(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, 
         .ECKey -> ecdsa_sign_wrap(ctx.ec, md, hash, sig_size, rng)
         .ECDSA -> ecdsa_sign_wrap(ctx.ec, md, hash, sig_size, rng)
         .RSAAlt -> rsa_alt_sign_wrap(ctx, md, hash, sig_size)
-        else -> Err(.TypeMismatch)
+        .ECKeyDH | .RSASSAPSS | .Opaque -> Err(.TypeMismatch)
     }
 }
 
@@ -421,7 +421,7 @@ pk_check_pair: fn<R: RNG>(public: &PKContext, prv: &PKContext, rng: &R) PKError!
             if pub_kind != .RSA -> return Err(.TypeMismatch)
             rsa_alt_check_pair(public, prv) ?? return Err(err)
         }
-        else -> {
+        .ECKey | .ECKeyDH | .ECDSA | .RSASSAPSS | .Opaque -> {
             if pub_kind != prv_kind -> return Err(.TypeMismatch)
             ecp.check_pub_priv(public.ec, prv.ec, rng) ?? return Err(.Ecp(err))
         }

@@ -104,7 +104,7 @@ sema_serde_mentions_parameter: fn(ty: Type, name: String) -> Bool Never! {
             false
         }
         .Quantity(base, _) -> sema_serde_mentions_parameter(base, name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }
 
@@ -135,7 +135,7 @@ sema_serde_definition_reaches_parameter: fn(definition: TTypeDef, param: String)
             }
         }
         .Distinct(base, _) | .Alias(base) -> return sema_serde_mentions_parameter(base, param)
-        else -> {}
+        .UnitFamily(_, _) -> {}
     }
     false
 }
@@ -199,6 +199,6 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
             sema_serde_implementation(environment, program, definition, direction)
         }
         .Apply(name, args) -> sema_serde_apply_head(environment, program, module_identity, name, args, direction)
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

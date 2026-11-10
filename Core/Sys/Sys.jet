@@ -248,7 +248,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
     if entry_names(entries) == {
         .Err(.NonUnicode) -> {}
-        else -> panic("a non-Unicode value must refuse enumeration with NonUnicode")
+        .Ok(_) | .Err(_) -> panic("a non-Unicode value must refuse enumeration with NonUnicode")
     }
 }
 
@@ -1688,16 +1688,16 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
                     assert_eq(children.len(), 1)
                     if children[0].value == {
                         .Text(text) -> assert_eq(text, "remote")
-                        else -> assert(false)
+                        .Object(_) -> assert(false)
                     }
                 }
-                else -> assert(false)
+                .Text(_) -> assert(false)
             }
             if pairs[0].value == {
                 .Text(text) -> assert_eq(text, "updated")
-                else -> assert(false)
+                .Object(_) -> assert(false)
             }
         }
-        else -> assert(false)
+        .Text(_) -> assert(false)
     }
 }

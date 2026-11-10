@@ -103,7 +103,7 @@ store_broker_lstat: fn(path: String) -> Stat? StoreError! {
         .Err(failure) -> {
             if failure == {
                 .NotFound(_) -> Ok(None)
-                else -> Err(StoreError.IO(failure))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(StoreError.IO(failure))
             }
         }
     }
@@ -481,7 +481,7 @@ store_broker_ensure_secret: fn(path: String) StoreError! {
             failure := StoreError?{None}
             if store_broker_atomic_write(path, secret) == {
                 .Err(error) -> failure = Val(error)
-                else -> {}
+                .Ok(_) -> {}
             }
             loop index in 0..<secret.len() -> secret[index] = U8{0}
             if failure == {
@@ -512,7 +512,7 @@ store_broker_atomic_write: fn(path: String, bytes: [U8]) StoreError! {
             store_broker_discard_remove(partial)
             Err(error)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -527,7 +527,7 @@ store_broker_write_partial: fn(partial: String, path: String, bytes: [U8]) Store
 store_broker_discard_remove: fn(path: String) Never! {
     if files.remove(path) == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 

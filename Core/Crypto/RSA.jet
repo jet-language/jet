@@ -249,13 +249,13 @@ rsa_export: fn(ctx: RSAContext, part: RSAPart) -> bn.Mpi RSAError! {
     if part == {
         .N -> return Ok(bn.copy_mpi(ctx.n))
         .E -> return Ok(bn.copy_mpi(ctx.e))
-        else -> {}
+        .P | .Q | .D -> {}
     }
     if !has_private_parts(ctx) -> return Err(.BadInput(None))
     if part == {
         .P -> Ok(bn.copy_mpi(ctx.p))
         .Q -> Ok(bn.copy_mpi(ctx.q))
-        else -> Ok(bn.copy_mpi(ctx.d))
+        .N | .D | .E -> Ok(bn.copy_mpi(ctx.d))
     }
 }
 
@@ -1174,7 +1174,7 @@ rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RS
             if nb_pad < 10 + hashlen + oid.len() -> return Err(.BadInput(None))
             nb_pad -= 10 + hashlen + oid.len()
         }
-        else -> {
+        .None -> {
             if nb_pad < hashlen -> return Err(.BadInput(None))
             nb_pad -= hashlen
         }

@@ -935,7 +935,7 @@ scan_corelib: fn(root: String) -[FS]> CoreLibScan RatchetError! {
 object_fields: fn(value: Dyn) -> [(key: String, value: Dyn)]? {
     if value == {
         .Object(fields) -> return Val(fields.copy())
-        else -> return None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return None
     }
 }
 
@@ -953,7 +953,7 @@ text_field: fn(fields: [(key: String, value: Dyn)], key: String) -> String? {
     value: field(fields, key) ?? return None
     if value == {
         .Text(text) -> return Val(text.copy())
-        else -> return None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
     }
 }
 
@@ -965,7 +965,7 @@ integer: fn(value: Dyn) -> Int? {
             number: Int.parse(lexeme) ?? return None
             return Val(number)
         }
-        else -> return None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
     }
 }
 
@@ -1005,7 +1005,7 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
     items := [Dyn]{}
     if parsed == {
         .Array(values) -> items = values.copy()
-        else -> return Err(ratchet_fail("safe-abstraction registry must be a JSON array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(ratchet_fail("safe-abstraction registry must be a JSON array"))
     }
     rows := [AbstractionRow]{}
     loop item in items {
@@ -1065,7 +1065,7 @@ truthy: fn(value: Dyn) -> Bool {
         .Number(lexeme) -> return (Float.parse(lexeme) ?? 0.0) != 0.0
         .Float(number) -> return number != 0.0
         .Text(text) -> return text != ""
-        else -> return true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return true
     }
 }
 
@@ -1080,7 +1080,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
     items := [Dyn]{}
     if regions_value == {
         .Array(values) -> items = values.copy()
-        else -> return Err(ratchet_fail(invalid))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(ratchet_fail(invalid))
     }
     if total != items.len() -> return Err(ratchet_fail("unsafe baseline total does not match its region rows"))
     regions := [Region]{}

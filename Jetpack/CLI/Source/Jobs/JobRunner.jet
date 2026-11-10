@@ -48,7 +48,7 @@ cli_run_project_job_with_mode: fn(verification: &StoreVerification, cache: &Work
 cli_exit_for: fn(theme: Theme, error: CLIError) -[IO, Time.Wait]> Int Never! {
     if error == {
         .Reported(code) -> code
-        else -> {
+        .IO(_) | .InvalidData(_) | .NotFound(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .ProviderFacts(_) | .ManagedTool(_) | .Store(_) | .Environment(_) | .Diagnostic(_) -> {
             theme.error("jetpack could not finish this command", error.message(), "")
             EXIT_USAGE
         }

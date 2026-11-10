@@ -316,7 +316,7 @@ ir_x64_unsigned: fn(ty: IRX64Shape) -> Bool Never! {
     if ty.kind == {
         .Word -> !ty.signed
         .Bool | .Char | .Pointer | .String -> true
-        else -> false
+        .Unit | .Int | .Float | .Float32 | .Aggregate -> false
     }
 }
 
@@ -619,7 +619,7 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
             ir_x64_store(e, m, f, al, dst, X64_RAX)
         }
         .Float -> ir_x64_store_xmm(e, m, f, al, dst, 0)
-        else -> {}
+        .Empty -> {}
     }
 }
 
@@ -1083,7 +1083,7 @@ ir_x64_condition: fn(op: IROp, unsigned: Bool) -> X64Cond Never! {
         .Lt -> if unsigned -> X64Cond.B else -> X64Cond.L
         .Le -> if unsigned -> X64Cond.BE else -> X64Cond.LE
         .Gt -> if unsigned -> X64Cond.A else -> X64Cond.G
-        else -> if unsigned -> X64Cond.AE else -> X64Cond.GE
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> if unsigned -> X64Cond.AE else -> X64Cond.GE
     }
 }
 
@@ -1110,7 +1110,7 @@ ir_x64_exact_arithmetic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IR
         if op == {
             .Add -> x64_alu_rr(e.code, X64Alu.Add, X64_RAX, other)
             .Sub -> x64_alu_rr(e.code, X64Alu.Sub, X64_RAX, other)
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 x64_imul_rr(e.code, X64_RAX, other)
                 sites.push(x64_jcc_rel32(e.code, X64Cond.O))
             }
@@ -1751,7 +1751,7 @@ ir_x64_division_symbol: fn(op: IROp) -> String Never! {
         .Div -> "jet_int_div"
         .Rem -> "jet_int_rem"
         .FloorDiv -> "jet_int_floor_div"
-        else -> "jet_int_mod"
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> "jet_int_mod"
     }
 }
 
@@ -1903,7 +1903,7 @@ ir_x64_int_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         .BitAnd -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.And, "jet_int_bit_and")
         .BitOr -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.Or, "jet_int_bit_or")
         .BitXor -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.Xor, "jet_int_bit_xor")
-        else -> ir_x64_exact_compare(e, m, f, al, at)
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ir_x64_exact_compare(e, m, f, al, at)
     }
 }
 
@@ -1922,7 +1922,7 @@ ir_x64_word_arithmetic: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables,
         if op == {
             .Add -> x64_alu_rr(e.code, X64Alu.Add, X64_RAX, other)
             .Sub -> x64_alu_rr(e.code, X64Alu.Sub, X64_RAX, other)
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 if unsigned && bits == 64 {
                     x64_mul(e.code, other)
                 } else {
@@ -2138,7 +2138,7 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             .Sub -> X64Alu.Sub
             .BitAnd -> X64Alu.And
             .BitOr -> X64Alu.Or
-            else -> X64Alu.Xor
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> X64Alu.Xor
         }
         if source != target {
             // A wrapping Add, or Sub of a constant, whose left operand sits
@@ -2184,7 +2184,7 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             alu: if op == .BitAnd -> X64Alu.And else if op == .BitOr -> X64Alu.Or else -> X64Alu.Xor
             if imm == .Val(value) -> x64_alu_ri(e.code, alu, X64_RAX, value) else -> x64_alu_rr(e.code, alu, X64_RAX, other)
         }
-        else -> return ir_x64_fail(e, f, at, "no fixed-width form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return ir_x64_fail(e, f, at, "no fixed-width form")
     }
     ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
 }
@@ -2220,7 +2220,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
                 x64_alu_rr(e.code, X64Alu.Or, X64_RAX, X64_RCX)
             }
             .Gt | .Lt -> x64_setcc(e.code, X64Cond.A, X64_RAX)
-            else -> x64_setcc(e.code, X64Cond.AE, X64_RAX)
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Le | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> x64_setcc(e.code, X64Cond.AE, X64_RAX)
         }
         x64_movzx_r8(e.code, X64_RAX, X64_RAX)
         return ir_x64_store(e, m, f, al, dst, X64_RAX)
@@ -2238,7 +2238,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
         .Add -> X64FloatOp.Add
         .Sub -> X64FloatOp.Sub
         .Mul -> X64FloatOp.Mul
-        else -> X64FloatOp.Div
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> X64FloatOp.Div
     }
     if {
         held >= 0 -> x64_float_op(e.code, float_op, single, target, held)
@@ -2283,7 +2283,7 @@ ir_x64_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             ir_x64_fail(e, f, at, "String operands take Concat or a comparison")
         }
         .Word | .Bool | .Char | .Pointer -> ir_x64_word_binary(e, m, f, al, tables, at, ty)
-        else -> ir_x64_fail(e, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
+        .Unit | .Aggregate -> ir_x64_fail(e, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -2320,7 +2320,7 @@ ir_x64_neg: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
             ir_x64_narrow(e, X64_RAX, ty.signed, bits)
             ir_x64_store(e, m, f, al, dst, X64_RAX)
         }
-        else -> ir_x64_fail(e, f, at, "no negation of {ir_kind_name(ty.kind)}")
+        .Unit | .Bool | .Char | .String | .Pointer | .Aggregate -> ir_x64_fail(e, f, at, "no negation of {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -2358,7 +2358,7 @@ ir_x64_not: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
             e.colds.push(cold)
             return
         }
-        else -> return ir_x64_fail(e, f, at, "no `not` of {ir_kind_name(ty.kind)}")
+        .Unit | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> return ir_x64_fail(e, f, at, "no `not` of {ir_kind_name(ty.kind)}")
     }
     ir_x64_store(e, m, f, al, dst, X64_RAX)
 }
@@ -2498,7 +2498,7 @@ ir_x64_select_safe: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int)
         .Add | .Sub | .Mul -> f.c[at] == IR_OVERFLOW_WRAP && !(op == .Mul && !ty.signed && ir_x64_bits(ty) == 64)
         .BitAnd | .BitOr | .BitXor -> true
         .Div | .FloorDiv -> ir_x64_power_of_two(al, f.b[at]) > 0
-        else -> {
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Rem | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
             count: ir_x64_imm(al, f.b[at]) ?? -1
             count >= 0 && count < ir_x64_bits(ty)
         }
@@ -2677,7 +2677,7 @@ ir_x64_value_width: fn(ty: IRX64Shape) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> if ty.size == 1 || ty.size == 2 || ty.size == 4 -> ty.size else -> 8
-        else -> 8
+        .Unit | .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 
@@ -2987,7 +2987,7 @@ ir_x64_mark_test: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
                 if f.b[k] < 1 -> return
                 exits += 1
             }
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Sqrt | .IntBig -> {}
         }
     }
     if ir_x64_marks(e) != e.marked + exits -> return
@@ -3505,7 +3505,7 @@ ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
                 if depth < 0 -> return -1
             }
             .Drop | .Close | .Load | .Const | .Copy | .Move | .CallRuntime -> {}
-            else -> return -1
+            .Nop | .ConstText | .ConstBigInt | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return -1
         }
     }
     if depth != 0 -> return -1
@@ -3642,7 +3642,7 @@ ir_x64_pad_key: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int,
                 }
                 if op == .BrIf -> ir_x64_key_slot(f, al, pad, names, order, out, a)
             }
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 ir_x64_key_slot(f, al, pad, names, order, out, ir_x64_write(f, at))
                 ir_x64_reads_into(f, at, reads)
                 out.push(reads.len())
@@ -3660,7 +3660,7 @@ ir_x64_pad_key: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int,
                     }
                     .Store | .StreamStore -> out.push(b)
                     .Return -> {}
-                    else -> {
+                    .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> {
                         out.push(a)
                         out.push(b)
                         out.push(c)
@@ -4047,7 +4047,7 @@ ir_x64_wrap_op: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, picks: [Int]
         .If -> picks[at] < 0
         .Return -> f.b[at] != IR_TAIL_JUMP
         .Mul -> ir_x64_folded(m, f, al, at)
-        else -> ir_x64_quiet(m, f, al.consts, al.values, at)
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .StackAddress | .CopyBytes | .Loop | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ir_x64_quiet(m, f, al.consts, al.values, at)
     }
 }
 

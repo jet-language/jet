@@ -103,7 +103,7 @@ evidence_outcome_name: fn(value: EvidenceOutcome) -> String Never! {
 evidence_outcome_is_failure: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Failed | .Error -> true
-        else -> false
+        .Proved | .Generated | .Passed | .Checked | .Unchecked | .Unavailable | .Incomplete | .NotObserved | .Skipped -> false
     }
 }
 
@@ -111,7 +111,7 @@ evidence_outcome_is_failure: fn(value: EvidenceOutcome) -> Bool Never! {
 evidence_outcome_is_incomplete: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Unavailable | .Incomplete | .NotObserved | .Skipped -> true
-        else -> false
+        .Proved | .Generated | .Passed | .Failed | .Checked | .Unchecked | .Error -> false
     }
 }
 

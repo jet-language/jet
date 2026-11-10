@@ -103,15 +103,24 @@ sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method
     saved_transaction_wall_depth: scopes.transaction_wall_depth
     scopes.transaction_depth = 0
     scopes.transaction_wall_depth = 0
-    checked: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {.Lambda(_, _) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None}, environment, program, scopes, state, tail_store, context, Val(true), diagnostics)
+    checked: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {
+        .Lambda(_, _) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }, environment, program, scopes, state, tail_store, context, Val(true), diagnostics)
     scopes.transaction_depth = saved_transaction_depth
     scopes.transaction_wall_depth = saved_transaction_wall_depth
     callback: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    executable: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
+    executable: if callback.kind == {
+        .Lambda(value) -> Val(value)
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
+    } ?? {
         diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    handle_name: if receiver == {.Ident(name, _, _) -> name else -> ""}
+    handle_name: if receiver == {
+        .Ident(name, _, _) -> name
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
+    }
     if handle_name == "" -> return SemaMethodSpecialCheck{handled: true, value: None}
     kind: if method == "on_commit" -> TCoreClosureKind.OnCommit{handle_name: handle_name, executable: executable} else -> TCoreClosureKind.OnRollback{handle_name: handle_name, executable: executable}
     value: sema_tree_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
@@ -149,7 +158,7 @@ sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, meth
     host_stored: sema_shared_access_is_shared_type(receiver_value.ty) && method == "edit" && scopes.transaction_depth > 0
     callback: if args[0].expr == {
         .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[0].expr, callback_expected, method == "edit", environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_lambda_host_callback(args[0].expr, callback_expected, method == "edit", environment, program, scopes, state, tail_store, context, diagnostics)
-        else -> {
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
             checked: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             diagnostics.push(sema_call_builtin_host_lambda_diagnostic(method, checked.ty, args[0].span))
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -270,7 +279,7 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     receiver_name: if receiver_value.ty == {
         .Named(name) -> Val(name)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
     name: receiver_name ?? return unhandled
     parameter := TGenericParam?{None}
@@ -376,7 +385,7 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
             updated_params[0] = owner_type
             signature = Type.Fn{params: updated_params, ret: ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     generic_params: sema_inference_type_params(func.type_params)
     generic_substitutions: sema_inference_bindings_for_type_args(generic_params, type_args)
@@ -428,7 +437,7 @@ sema_call_local_method_candidates: fn(environment: SemaScopeEnvironment, program
                 owner_type: sema_call_method_owner_type(value.type_name, owner_type_args)
                 sema_call_append_local_methods(candidates, value.methods, module_name, value.type_name, owner_type, value.trait_name, type_args, environment.source_file, environment.source_origin, environment.source_segments)
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     filtered: loop candidate in candidates if candidate.method.name == method -> candidate
@@ -456,7 +465,7 @@ sema_call_method_function_for_symbol: fn(target: SymbolID, environment: SemaScop
                     if candidate.key == target.key -> return Val(method)
                 }
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -519,7 +528,7 @@ sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandida
     caller_module: if scopes.frames.len() > 0 -> scopes.frames[0].owner else -> ""
     caller_package: if program.registration_graph == {
         .Val(graph) -> graph.package_identity
-        else -> ""
+        .None -> ""
     }
     context := sema_inference_context(caller_module, caller_package, candidate.generic_params, environment.generic_params, expected)
     result: sema_infer_callable(program.registration_graph, context, parameter_types, return_type, arg_types, candidate.type_args, span, diagnostics) ?? return None
@@ -644,11 +653,11 @@ sema_call_host_callback_assignable: fn(required: Type, offered: Type, environmen
                         }
                         return Val(true)
                     }
-                    else -> {}
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                 }
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     sema_call_type_assignable(required, offered, environment, program)
 }
@@ -671,7 +680,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
         if decision != SemaCallConventionDecision.Accepted -> return None
         checked_argument: if args[index].expr == {
             .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[index].expr, Val(required), host_write, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_lambda_host_callback(args[index].expr, Val(required), host_write, environment, program, scopes, state, tail_store, context, diagnostics)
-            else -> if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, program, scopes, state, tail_store, context, sema_call_lambda_escape_policy(parameter, abi), diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, program, scopes, state, tail_store, context, sema_call_lambda_escape_policy(parameter, abi), diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
         }
         value: checked_argument ?? return None
         compatible: sema_call_host_callback_assignable(required_declared, value.ty, environment, program) ?? return None
@@ -761,7 +770,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
                     }
                     resolved_defaults = registered_defaults
                 }
-                else -> {
+                .None -> {
                     local_defaults: sema_call_local_method_defaults(resolved_candidate, binding, environment, program) ?? {
                         diagnostics.push(sema_error("E0906", span, "a default argument for this method could not be resolved", "callable defaults retain their owning declaration and source identity", "resolve the declaration before checking this method"))
                         return None
@@ -862,7 +871,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     if host_method -> facts.effect_bound = Val(sema_shared_access_effect_row(receiver_value.ty, resolved_candidate.method.name, span))
     return_view_facts: if sema_call_method_summary_signature(resolved_candidate, scopes) == {
         .Val(summary_signature) -> sema_call_return_view_facts(summary_signature, Val(receiver), checked_args, resolved_binding, scopes, state, span, diagnostics)
-        else -> sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, state, span, diagnostics)
+        .None -> sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, state, span, diagnostics)
     }
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
@@ -944,7 +953,7 @@ sema_app_returns_unit: fn(ty: Type?) -> Bool Never! {
         .Val(declared) -> if declared == {
             .Named(name) -> name == "Unit"
             .Result(ok, _) -> ok == (Type.Named{name: "Unit"})
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .None -> true
     }
@@ -999,7 +1008,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
         ty: sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_name)
         optional: if ty == {
             .Option(inner) -> Val(inner)
-            else -> None
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
         }
         decoder: if {
             server -> "__body"
@@ -1062,7 +1071,7 @@ sema_app_route_wire_type: fn(ty: Type) -> String Never! {
         .Bool -> "Bool"
         .String -> "String"
         .Named(name) -> name
-        else -> type_name(ty)
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 
@@ -1401,7 +1410,7 @@ sema_call_receiver_method_label: fn(receiver: Type) -> String Never! {
         .String -> "String"
         .Named(name) -> name
         .Apply(name, _) -> name
-        else -> type_name(receiver)
+        .Int | .Float | .Bool | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(receiver)
     }
 }
 
@@ -1551,7 +1560,7 @@ sema_call_local_method_names: fn(environment: SemaScopeEnvironment, owner: Strin
             .Impl(value) -> {
                 if value.type_name == owner -> sema_call_push_instance_method_names(names, value.methods)
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     names
@@ -1621,14 +1630,14 @@ sema_call_builtin_method_arity: fn(receiver: Type, method: String, actual: Int, 
 sema_call_option_nominal: fn(ty: Type) -> Type Never! {
     if ty == {
         .Option(inner) -> inner
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
 sema_call_is_iter_receiver: fn(receiver: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(receiver) == {
         .Apply(name, _) -> name == "Iter" || name == "ViewIter"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1641,7 +1650,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     ty: sema_expr_unwrap_tag(receiver)
     source_owned: if ty == {
         .Named(_) | .Apply(_, _) -> sema_call_declared_method_names(ty, environment, program).len() > 0
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if sema_call_builtin_method_names(ty).len() > 0 && !source_owned && !sema_call_is_iter_receiver(ty) {
         if sema_call_builtin_method_arity(ty, method, actual, span) == .Val(diagnostic) -> return diagnostic
@@ -1650,7 +1659,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     nominal: sema_call_option_nominal(ty)
     type_name_value: if nominal == {
         .Named(name) | .Apply(name, _) -> name
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if type_name_value == "" -> return sema_call_missing_instance_method(method, ty, actual, "this value does not expose an instance method named `{method}`", span, environment, program)
     display: sema_call_method_leaf(type_name_value)

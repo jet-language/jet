@@ -32,14 +32,14 @@ cli_why_test_field: fn(tree: Dyn, key: String) -> Dyn {
             }
             panic("missing field {key}")
         }
-        else -> panic("expected an object around {key}")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("expected an object around {key}")
     }
 }
 
 cli_why_test_text: fn(tree: Dyn) -> String {
     if tree == {
         .Text(text) -> text
-        else -> panic("expected a string")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("expected a string")
     }
 }
 

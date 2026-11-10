@@ -109,7 +109,7 @@ TaskOutcome: enum {
         debug: fn(&&self) -> String {
             if self == {
                 .Panicked(reason) -> "Panicked({reason:Debug})"
-                else -> task_outcome_show(self)
+                .Finished | .Cancelled | .DeadlineBlown -> task_outcome_show(self)
             }
         }
     }
@@ -207,18 +207,45 @@ endpoint_state_fixture: fn(authority: String, tree: String, worker: String, gene
     partitioned: endpoint_state_fixture(token, "tree", "worker", 1, false, true)
     stale: endpoint_state_fixture(token, "tree", "worker", 1, false, false)
     stopped: endpoint_state_fixture(token, "tree", "worker", 2, false, false)
-    assert(if authority_validate_snapshot(identity, Val(wrong_tree), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another tree" else -> false})
-    assert(if authority_validate_snapshot(identity, Val(wrong_worker), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another worker" else -> false})
-    assert(if authority_validate_snapshot(identity, Val(partitioned), empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is partitioned" else -> false})
-    assert(if authority_validate_snapshot(identity, Val(stale), empty) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is not current (current generation 1)" else -> false})
-    assert(if authority_validate_snapshot(identity, Val(stopped), empty) == {.Err(.NotStarted(message)) -> message == "service worker `worker` is not running" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(wrong_tree), empty) == {
+        .Err(.Revoked(message)) -> message == "service endpoint belongs to another tree"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, Val(wrong_worker), empty) == {
+        .Err(.Revoked(message)) -> message == "service endpoint belongs to another worker"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, Val(partitioned), empty) == {
+        .Err(.Partitioned(message)) -> message == "service endpoint authority is partitioned"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, Val(stale), empty) == {
+        .Err(.Stale(message)) -> message == "service endpoint generation 2 is not current (current generation 1)"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, Val(stopped), empty) == {
+        .Err(.NotStarted(message)) -> message == "service worker `worker` is not running"
+        .Ok(_) | .Err(_) -> false
+    })
     peers := [__EndpointState]{}
     peers.push(endpoint_state_fixture(token, "tree", "worker", 3, true, false))
-    assert(if authority_validate_snapshot(identity, Val(stopped), peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
-    assert(if authority_validate_snapshot(identity, None, empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is not registered" else -> false})
-    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stopped), peers) == {
+        .Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, None, empty) == {
+        .Err(.Partitioned(message)) -> message == "service endpoint authority is not registered"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if authority_validate_snapshot(identity, None, peers) == {
+        .Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current"
+        .Ok(_) | .Err(_) -> false
+    })
     peers.push(endpoint_state_fixture("sa-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "tree", "worker", 2, false, false))
-    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Revoked(message)) -> message == "service endpoint authority does not match the registered worker" else -> false})
+    assert(if authority_validate_snapshot(identity, None, peers) == {
+        .Err(.Revoked(message)) -> message == "service endpoint authority does not match the registered worker"
+        .Ok(_) | .Err(_) -> false
+    })
 }
 
 validate_endpoint_identity: fn(authority: String, tree: String, worker: String, generation: Int) ServiceError! {
@@ -244,11 +271,26 @@ valid_authority_token: fn(authority: String) -> Bool Never! {
 
 #Test("endpoint identity checks preserve native order and lowercase issuance") {
     token: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-    assert(if validate_endpoint_identity(token, " ", "worker", 1) == {.Ok(_) -> true else -> false})
-    assert(if validate_endpoint_identity("bad", "", "", 0) == {.Err(.Policy(message)) -> message == "service tree is empty, too long, or contains control characters" else -> false})
-    assert(if validate_endpoint_identity(token, "tree", "", 0) == {.Err(.Policy(message)) -> message == "service worker is empty, too long, or contains control characters" else -> false})
-    assert(if validate_endpoint_identity("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F", "tree", "worker", 1) == {.Err(.Policy(message)) -> message == "service authority must be a provider-issued opaque token" else -> false})
-    assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {.Err(.Policy(message)) -> message == "service endpoint generation must be positive" else -> false})
+    assert(if validate_endpoint_identity(token, " ", "worker", 1) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    })
+    assert(if validate_endpoint_identity("bad", "", "", 0) == {
+        .Err(.Policy(message)) -> message == "service tree is empty, too long, or contains control characters"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_endpoint_identity(token, "tree", "", 0) == {
+        .Err(.Policy(message)) -> message == "service worker is empty, too long, or contains control characters"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_endpoint_identity("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F", "tree", "worker", 1) == {
+        .Err(.Policy(message)) -> message == "service authority must be a provider-issued opaque token"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {
+        .Err(.Policy(message)) -> message == "service endpoint generation must be positive"
+        .Ok(_) | .Err(_) -> false
+    })
 }
 
 endpoint_show: fn(endpoint: ServiceEndpoint) -> String Never! {
@@ -331,7 +373,10 @@ restore_snapshot: fn(tree: ServiceTree) -> String ServiceError! {
 
 // Replays the in-memory records; no store read.
 replay_events: fn(tree: ServiceTree) -> String Never! {
-    version: if tree.state_authority == {.Val(value) -> value.version else -> 1}
+    version: if tree.state_authority == {
+        .Val(value) -> value.version
+        .None -> 1
+    }
     events := [String]{}
     loop record in tree.event_log {
         event: read_state_record("v{version}:", record) ?? return "StateReplayError(invalid_record)"
@@ -428,23 +473,38 @@ observe: fn(tree: ServiceTree) -> String Never! {
             .Val(.DeadlineBlown) -> deadline_blown = deadline_blown + 1
         }
     }
-    rollback: if tree.last_upgrade == {.Val(receipt) -> receipt.rollback_available else -> false}
+    rollback: if tree.last_upgrade == {
+        .Val(receipt) -> receipt.rollback_available
+        .None -> false
+    }
     "Observe(workers={tree.workers.len()}, started={tree.started}, generation={tree.generation}, dead_letters={tree.dead_letters.len()}, events={tree.event_log.len()}, chaos={tree.chaos_fails}, draining={tree.draining.len()}, partitions={tree.partitioned.len()}, rollback={rollback}, workflows={tree.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}})"
 }
 
 #Test("service state records use UTF-8 byte lengths and exact corruption errors") {
     assert((read_state_record("v1:", "v1:2:é") ?? panic("record")) == "é")
     assert((read_state_record("v1:", "v1:+2:é") ?? panic("record")) == "é")
-    assert(if read_state_record("v1:", "v2:2:é") == {.Err(.Policy(message)) -> message == "state record schema is incompatible" else -> false})
-    assert(if read_state_record("v1:", "v1:1:é") == {.Err(.Policy(message)) -> message == "state record length does not match payload" else -> false})
-    assert(if read_state_record("v1:", "v1:-1:x") == {.Err(.Policy(message)) -> message == "state record length is invalid" else -> false})
+    assert(if read_state_record("v1:", "v2:2:é") == {
+        .Err(.Policy(message)) -> message == "state record schema is incompatible"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if read_state_record("v1:", "v1:1:é") == {
+        .Err(.Policy(message)) -> message == "state record length does not match payload"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if read_state_record("v1:", "v1:-1:x") == {
+        .Err(.Policy(message)) -> message == "state record length is invalid"
+        .Ok(_) | .Err(_) -> false
+    })
 }
 
 #Test("service authority key decodes the existing token, including uppercase hex") {
     key: __authority_signing_key("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F") ?? panic("key")
     assert(key.len() == 32)
     loop i in 0..<32 -> assert(Int.from_u8(key[i]) == i)
-    assert(if __authority_signing_key("bad") == {.Err(.Revoked(message)) -> message == "service authority proof is malformed" else -> false})
+    assert(if __authority_signing_key("bad") == {
+        .Err(.Revoked(message)) -> message == "service authority proof is malformed"
+        .Ok(_) | .Err(_) -> false
+    })
 }
 
 #Test("service errors keep every message and delivery receipts keep every field") {
@@ -2101,7 +2161,10 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
         name: rollout_read_frame(lines, "worker")
         rollout_name(name, "worker")
         worker_generation: rollout_read_scalar(lines, "worker_generation")
-        pinned_generation: if last_upgrade == {.Val(receipt) -> worker_generation == receipt.from_generation else -> false}
+        pinned_generation: if last_upgrade == {
+            .Val(receipt) -> worker_generation == receipt.from_generation
+            .None -> false
+        }
         if worker_generation < 1 || (worker_generation != generation && !pinned_generation) -> return Err(state_error("rollout journal worker generation is not allowed"))
         loop seen in workers {
             if seen.name == name -> return Err(state_error("rollout journal contains a duplicate worker"))
@@ -2886,14 +2949,14 @@ workflow_frame: fn(text: String) -> String Never! { "{text.bytes().len()}:{text}
 workflow_valid_outcome: fn(outcome: TaskOutcome) -> Bool Never! {
     if outcome == {
         .Panicked(reason) -> reason.trim() != "" && workflow_visible(reason, 1048576)
-        else -> true
+        .Finished | .Cancelled | .DeadlineBlown -> true
     }
 }
 
 workflow_outcome_wire: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Panicked(reason) -> "Panicked:{workflow_frame(reason)}"
-        else -> task_outcome_show(outcome)
+        .Finished | .Cancelled | .DeadlineBlown -> task_outcome_show(outcome)
     }
 }
 
@@ -3084,12 +3147,27 @@ valid_record_payload: fn(text: String) -> Bool Never! {
 }
 
 #Test("service group policy preserves native error precedence") {
-    assert(if validate_group("", [String]{}, [String]{}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "service group needs a visible name and at least one worker" else -> false})
+    assert(if validate_group("", [String]{}, [String]{}, [(name: String, workers: [String])]{}) == {
+        .Err(.Policy(message)) -> message == "service group needs a visible name and at least one worker"
+        .Ok(_) | .Err(_) -> false
+    })
     existing: [(name: String, workers: [String])]{(name: "g", workers: [String]{"w"})}
-    assert(if validate_group("g", [String]{"unknown"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "group `g` already exists" else -> false})
-    assert(if validate_group("new", [String]{"unknown", "w"}, [String]{"w"}, existing) == {.Err(.Unknown(message)) -> message == "group `new` references unknown worker `unknown`" else -> false})
-    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "a worker can belong to only one service supervisor group" else -> false})
-    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "group `new` lists a worker more than once" else -> false})
+    assert(if validate_group("g", [String]{"unknown"}, [String]{"w"}, existing) == {
+        .Err(.Policy(message)) -> message == "group `g` already exists"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_group("new", [String]{"unknown", "w"}, [String]{"w"}, existing) == {
+        .Err(.Unknown(message)) -> message == "group `new` references unknown worker `unknown`"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, existing) == {
+        .Err(.Policy(message)) -> message == "a worker can belong to only one service supervisor group"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [(name: String, workers: [String])]{}) == {
+        .Err(.Policy(message)) -> message == "group `new` lists a worker more than once"
+        .Ok(_) | .Err(_) -> false
+    })
     assert(valid_record_payload(""))
     assert(valid_record_payload("é"))
     assert(!valid_record_payload("\n"))
@@ -3097,10 +3175,22 @@ valid_record_payload: fn(text: String) -> Bool Never! {
 
 #Test("mutating service operations borrow the tree and preserve pre-start policy") {
     fresh := tree("mutation-contract")
-    assert(if group(fresh, "g", [String]{"missing"}) == {.Err(.Unknown(message)) -> message == "group `g` references unknown worker `missing`" else -> false})
-    assert(if chaos_fail(fresh) == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
-    assert(if append_event(fresh, "event") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
-    assert(if commit_snapshot(fresh, "snapshot") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(if group(fresh, "g", [String]{"missing"}) == {
+        .Err(.Unknown(message)) -> message == "group `g` references unknown worker `missing`"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if chaos_fail(fresh) == {
+        .Err(.NotStarted(message)) -> message == "service tree is not started"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if append_event(fresh, "event") == {
+        .Err(.NotStarted(message)) -> message == "service tree is not started"
+        .Ok(_) | .Err(_) -> false
+    })
+    assert(if commit_snapshot(fresh, "snapshot") == {
+        .Err(.NotStarted(message)) -> message == "service tree is not started"
+        .Ok(_) | .Err(_) -> false
+    })
     assert(directory_generation(fresh) == 1)
     assert(event_count(fresh) == 0)
     delivery: delivery_durable()
@@ -3131,7 +3221,7 @@ route_generation_allowed: fn(generation: Int, upgrade: ServiceUpgradeReceipt?, w
                 if name == worker -> return true
             }
         }
-        else -> {}
+        .None -> {}
     }
     false
 }
@@ -3243,8 +3333,14 @@ full_tree_mailbox: fn(worker: String, capacity: Int) -> ServiceError Never! {
 }
 
 #Test("service send capacity remap and endpoint generation text retain exact native spelling") {
-    assert(if full_tree_mailbox("worker", 3) == {.Full(message) -> message == "mailbox for `worker` is full (capacity 3)" else -> false})
-    assert(if stale_tree_endpoint("tree", "worker", 1, 2) == {.Stale(message) -> message == "service endpoint tree/worker@g1 is stale (current generation 2)" else -> false})
+    assert(if full_tree_mailbox("worker", 3) == {
+        .Full(message) -> message == "mailbox for `worker` is full (capacity 3)"
+        .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Policy(_) | .Unavailable(_) | .Partitioned(_) | .Revoked(_) | .Stale(_) | .Expired(_) -> false
+    })
+    assert(if stale_tree_endpoint("tree", "worker", 1, 2) == {
+        .Stale(message) -> message == "service endpoint tree/worker@g1 is stale (current generation 2)"
+        .Full(_) | .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Policy(_) | .Unavailable(_) | .Partitioned(_) | .Revoked(_) | .Expired(_) -> false
+    })
 }
 
 // Durable delivery authority log. A line is an operation letter followed by
@@ -3449,7 +3545,7 @@ delivery_transition_allowed: fn(entry: __DeliveryEntry, state: DeliveryState, at
         .Accepted -> state == DeliveryState.Accepted || state == DeliveryState.Delivering || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
         .Delivering -> state == DeliveryState.Accepted || state == DeliveryState.Delivered || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
         .Delivered -> state == DeliveryState.DeadLettered || (state == DeliveryState.Accepted && entry.retained_until != None)
-        else -> false
+        .DeadLettered | .Cancelled -> false
     }
     if !allowed -> return Err(authority_error("delivery event contains an invalid lifecycle transition"))
 }
@@ -4186,7 +4282,7 @@ send_durable: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String,
                     runtime_dead_letter(runtime, delivery).drop("the mailbox rejection is the reported failure")
                     if tree.dead_letters.len() < 100000 -> tree.dead_letters.push(delivery.id)
                 }
-                else -> {}
+                .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Policy(_) | .Unavailable(_) | .Partitioned(_) | .Revoked(_) | .Stale(_) | .Expired(_) -> {}
             }
             return Err(error)
         }
@@ -4306,13 +4402,13 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
         .Val(rollback) -> {
             if mailbox_error == {
                 .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; mailbox rollback failed: {service_error_show(mailbox)}")
-                else -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; unmarked receipts remain recoverable from the authority log")
+                .None -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; unmarked receipts remain recoverable from the authority log")
             }
         }
-        else -> {
+        .None -> {
             if mailbox_error == {
                 .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(mailbox)}")
-                else -> return error.copy()
+                .None -> return error.copy()
             }
         }
     }
@@ -4397,7 +4493,7 @@ worker_scope: fn(names: [String], groups: [[String]], worker: String) -> (superv
         loop member in groups[supervisor] {
             if worker_index(names, member) == {
                 .Val(index) -> scope.push(index)
-                else -> {}
+                .None -> {}
             }
         }
         return (supervisor: supervisor, scope: scope)

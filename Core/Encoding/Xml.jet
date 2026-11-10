@@ -334,7 +334,7 @@ stream_error: fn(error: engine.XMLFault) -> EncodingError Never! {
         .EntityCycle | .Limit -> EncodingErrorKind.Limit
         .Canonicalization | .Unsupported -> EncodingErrorKind.Unsupported
         .Malformed -> if error.reason.contains("ended") || error.reason.contains("unterminated") || error.reason.contains("truncated") -> EncodingErrorKind.Truncated else -> EncodingErrorKind.Syntax
-        else -> EncodingErrorKind.Syntax
+        .InvalidEncoding | .MismatchedTag | .InvalidName | .Namespace | .DuplicateAttribute | .Entity | .Shape -> EncodingErrorKind.Syntax
     }
     EncodingError{format: .XML, kind: kind, byte_offset: error.offset, line: error.line,
         column: error.column, path: error.path, reason: error.reason, cause: None}
@@ -370,7 +370,7 @@ value_heap_cost: fn(value: Dyn) -> Int Never! {
             loop entry in entries -> cost += entry.key.count_bytes() + value_heap_cost(entry.value)
             cost
         }
-        else -> 0
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> 0
     }
 }
 

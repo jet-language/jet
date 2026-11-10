@@ -226,16 +226,16 @@ impl NativeSession {
             .Err(_) -> {
                 if self.child.kill() == {
                     .Err(_) -> {}
-                    else -> {}
+                    .Ok(_) -> {}
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         self.child.stdin.close()
         loop _ in self.child.stdout.lines() {}
         if self.child.wait() == {
             .Err(_) -> {}
-            else -> {}
+            .Ok(_) -> {}
         }
         self.finished = true
     }

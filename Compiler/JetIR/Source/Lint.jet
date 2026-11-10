@@ -599,7 +599,7 @@ ir_lint_slot_mode: fn(role: IRLintRole) -> Int Never! {
         .Unused | .Immediate | .Count -> 0
         .Slot -> 1
         .SlotOrNone -> 2
-        else -> -1
+        .Name | .Data | .Function | .Args | .Index | .IndexOrNone | .Depth -> -1
     }
 }
 
@@ -645,7 +645,7 @@ ir_lint_type_kinds: fn(ty: Type) -> Int Never! {
         .Result(_, _) | .Union(_) | .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) -> IR_LINT_POINTER
         .List(_) | .FixedList(_, _) -> IR_LINT_AGGREGATE
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_WORD + IR_LINT_POINTER + IR_LINT_AGGREGATE
-        else -> IR_LINT_ANY
+        .Quantity(_, _) | .Measure(_) -> IR_LINT_ANY
     }
 }
 
@@ -682,7 +682,7 @@ ir_lint_untag: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> ir_lint_untag(inner)
         .InlineRange(base, _, _) -> ir_lint_untag(base)
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -888,7 +888,7 @@ ir_lint_role_rule: fn(role: IRLintRole) -> String Never! {
         .Slot | .SlotOrNone | .Args -> IR_LINT_SLOT
         .Depth -> IR_LINT_DEPTH
         .Index | .IndexOrNone -> IR_LINT_CONTROL
-        else -> IR_LINT_REF
+        .Unused | .Name | .Data | .Function | .Count | .Immediate -> IR_LINT_REF
     }
 }
 
@@ -901,7 +901,7 @@ ir_lint_role_problem: fn(context: IRLintContext, f: IRFunction, at: Int, role: I
         .Args -> "args window {value}+{f.c[at]} of {f.args.len()} naming slots of {f.slot_type.len()}"
         .Index | .IndexOrNone -> "instruction index {value}"
         .Depth -> "depth {value}"
-        else -> "{value}"
+        .Unused | .Count | .Immediate -> "{value}"
     }
 }
 
@@ -923,7 +923,7 @@ ir_lint_class: fn(kind: IRTypeKind) -> Int Never! {
         .Float -> 1
         .Float32 -> 2
         .Unit -> 3
-        else -> 0
+        .Bool | .Int | .Word | .Char | .String | .Pointer | .Aggregate -> 0
     }
 }
 
@@ -1169,7 +1169,7 @@ ir_lint_signature_kinds: fn(ty: Type) -> Int Never! {
     if ir_lint_untag(ty) == {
         .Named(name) -> if name == "Unit" || name == "()" || name == "Never" -> IR_LINT_UNIT else -> IR_LINT_ANY
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_ANY
-        else -> ir_lint_type_kinds(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ir_lint_type_kinds(ty)
     }
 }
 
@@ -1213,7 +1213,7 @@ ir_lint_width: fn(ty: IRType) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> ty.size
-        else -> 8
+        .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 
@@ -1246,7 +1246,7 @@ ir_lint_param_words: fn(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == {
         .Unit -> 0
         .List(_) -> 2
-        else -> 1
+        .Word | .Flag | .Float | .Text | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> 1
     }
 }
 
@@ -1261,7 +1261,7 @@ ir_lint_out_words: fn(carrier: IRRouteCarrier) -> Int Never! {
             loop item in items -> words += ir_lint_out_words(item)
             words
         }
-        else -> 1
+        .Word | .Flag | .Float | .Text | .Unit | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Tag(_, _) -> 1
     }
 }
 
@@ -1294,7 +1294,7 @@ ir_lint_carrier_kinds: fn(carrier: IRRouteCarrier) -> Int Never! {
         .Float -> IR_LINT_FLOAT
         .Text -> IR_LINT_STRING
         .Tag(_, _) -> IR_LINT_WORD
-        else -> 0
+        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Option(_) | .Tuple(_) -> 0
     }
 }
 

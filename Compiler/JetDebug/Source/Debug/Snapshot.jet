@@ -132,7 +132,7 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
             typed: debug_value(local) ?? return Err(err)
             bytes: if typed == {
                 .Text(text) -> text.bytes().len()
-                else -> 8
+                .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Bytes(_, _) | .Aggregate(_, _) -> 8
             }
             return Ok(DebugEvaluation{
                 expression: trimmed,
@@ -260,7 +260,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                     if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(debug_evaluation_error(unavailable))
                     return Ok(DebugValue.Int{value: number})
                 }
-                else -> { return Err(debug_evaluation_error(unavailable)) }
+                .Err(_) -> { return Err(debug_evaluation_error(unavailable)) }
             }
         }
         .Float -> {
@@ -273,7 +273,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                     if bits < 0 -> bits += 18446744073709551616
                     return Ok(DebugValue.FloatBits{bits: bits})
                 }
-                else -> { return Err(debug_evaluation_error(unavailable)) }
+                .Err(_) -> { return Err(debug_evaluation_error(unavailable)) }
             }
         }
         .Unit -> {

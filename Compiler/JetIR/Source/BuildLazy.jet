@@ -25,12 +25,12 @@ ir_lazy_definition: fn(p: IRProgram, ty: Type) -> Int? Never! {
 ir_lazy_storage: fn(p: IRProgram, ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_storage(p, inner)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
     }
     if ir_lazy_definition(p, ty) == .Val(row) {
         if p.types[row].kind == {
             .Distinct(base, _) | .Alias(base) -> return ir_lazy_storage(p, base)
-            else -> {}
+            .Struct(_, _) | .Enum(_, _) | .UnitFamily(_, _) -> {}
         }
     }
     ty.copy()
@@ -55,12 +55,12 @@ ir_lazy_kind: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
         .Bool -> return 9
         .Char -> return 10
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_kind(m, p, inner)
-        else -> {}
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
     }
     if ir_lazy_definition(p, ty) == .Val(row) {
         if p.types[row].kind == {
             .Distinct(base, _) | .Alias(base) -> return ir_lazy_kind(m, p, base)
-            else -> {}
+            .Struct(_, _) | .Enum(_, _) | .UnitFamily(_, _) -> {}
         }
     }
     0
@@ -76,12 +76,12 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
         if p.types[row].single_use -> return false
         if p.types[row].kind == {
             .Distinct(base, _) | .Alias(base) -> return ir_lazy_can_clone(m, p, base, seen)
-            else -> {}
+            .Struct(_, _) | .Enum(_, _) | .UnitFamily(_, _) -> {}
         }
     }
     if ty == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_can_clone(m, p, inner, seen)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
     }
     if ir_iter_element(ty) != None -> return false
     if ir_value_type(m, p, ty) == .Val(row) {
@@ -101,7 +101,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
                 if !ir_lazy_can_clone(m, p, field.ty, seen) -> return false
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if ir_lazy_definition(p, storage) == .Val(row) {
         if p.types[row].kind == {
@@ -123,7 +123,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
                     }
                 }
             }
-            else -> {}
+            .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> {}
         }
     }
     true
@@ -494,7 +494,7 @@ ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
             ir_emit(b.f, IROp.Store, -1, descriptor, 56, ok_meta, line)
             ir_emit(b.f, IROp.Store, -1, descriptor, 64, err_meta, line)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     descriptor
 }
@@ -578,7 +578,7 @@ ir_lazy_moved: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 ir_list_items_lack_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_untag(m.types[row].ty) == {
         .List(inner) -> !ir_lazy_type_can_clone(m, p, inner)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -963,7 +963,7 @@ ir_lazy_closure_receiver: fn(receiver_ty: Type, operation: TClosureOp) -> Bool N
     if ir_iter_element(receiver_ty) != None -> return !ir_iter_walks(receiver_ty, operation)
     if ir_untag(receiver_ty) == {
         .List(_) | .FixedList(_, _) -> {}
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
     operation == .TakeWhile || operation == .SkipWhile || operation == .FilterMap || operation == .IsSortedBy
 }
@@ -1111,7 +1111,7 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
             method = "filter_map"
             if ir_untag(made) == {
                 .Option(inner) | .Result(inner, _) -> payload = Val(inner)
-                else -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
         if payload == .Val(built) {
@@ -1392,7 +1392,7 @@ ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty:
     listed: if ir_untag(collection_ty) == {
         .List(_) -> true
         .FixedList(_, _) -> ir_fixed_count(m, b.f.slot_type[list]) == None
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !listed -> return false
     if !b.fresh[list] && !ir_movable_binding(b, list) && !(by_value && ir_owned_binding(b, list)) -> return false

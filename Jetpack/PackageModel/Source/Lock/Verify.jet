@@ -98,19 +98,19 @@ pkg_lock_same_source_kind: fn(spec: DepSpec, source: LockSource) -> Bool Never! 
     if spec == {
         .Path(_) -> if source == {
             .Path(_) -> true
-            else -> false
+            .Root | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
         .Git(_, _) -> if source == {
             .Git(_, _) -> true
-            else -> false
+            .Root | .Path(_) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
         .Registry(_) -> if source == {
             .Registry(_, _, _, _, _, _, _, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> false
         }
         .Foreign(_, _) -> if source == {
             .Foreign(_, _, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) -> false
         }
     }
 }
@@ -140,11 +140,11 @@ pkg_lock_verify_lock_matches_manifest: fn(lock: LockFile, manifest: Manifest, lo
         source_matches: if spec == {
             .Path(path) -> if package.source == {
                 .Path(locked_path) -> path == locked_path
-                else -> false
+                .Root | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
             }
             .Git(url, selector) -> if package.source == {
                 .Git(locked_url, locked_selector) -> url == locked_url && pkg_lock_git_selector_str(selector) == locked_selector
-                else -> false
+                .Root | .Path(_) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
             }
             .Registry(_) | .Foreign(_, _) -> pkg_lock_same_source_kind(spec, package.source)
         }

@@ -131,7 +131,7 @@ NixIndexClient: struct {
                 compressed = pair.compressed
                 signature_bytes = pair.signature
             }
-            else -> {
+            .None -> {
                 if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs index target is not cached for {key.revision} on {key.system}"))
                 compressed = self.transport.get_bounded(target.url, target.compressed_length)
                 nix_index_verify_digest_and_length(compressed, target.compressed_length, target.sha256, "nix index target")
@@ -181,7 +181,7 @@ NixIndexClient: struct {
                         if cached.manifest.expires_unix > now -> return Ok(cached)
                         if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs channel manifest expired; refresh required"))
                     }
-                    else -> {
+                    .None -> {
                         if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs channel manifest is not cached"))
                     }
                 }
@@ -243,20 +243,20 @@ NixIndexClient: struct {
                 name = parts.before
                 requested = Val(parts.after)
             }
-            else -> {}
+            .None -> {}
         }
         if nix_index_valid_native_token(name, "native recipe name") == {
             .Err(_) -> return Ok(None)
-            else -> {}
+            .Ok(_) -> {}
         }
         if requested == {
             .Val(version) -> {
                 if nix_index_valid_native_token(version, "native recipe version") == {
                     .Err(_) -> return Ok(None)
-                    else -> {}
+                    .Ok(_) -> {}
                 }
             }
-            else -> {}
+            .None -> {}
         }
         matches := [NixNativeRecipe]{}
         loop recipe in recipes {
@@ -505,7 +505,7 @@ nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, p
                 host = pieces.before
                 port = nix_index_parse_index_port(pieces.after)
             }
-            else -> host = authority
+            .None -> host = authority
         }
     }
     if host == "" || (!bracketed && host.contains(":")) || nix_text_has_whitespace(host) -> return Err(NixIndexError.Invalid("nix index host is malformed"))
@@ -547,14 +547,14 @@ nix_index_is_hex: fn(text: String) -> Bool Never! {
 nix_io_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 
 nix_io_is_already_exists: fn(error: IOError) -> Bool Never! {
     if error == {
         .AlreadyExists(_) -> true
-        else -> false
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
     }
 }
 
@@ -625,7 +625,7 @@ nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexErr
                 return Err(NixIndexError.Invalid("immutable nix index object `{path}` changed"))
             }
         }
-        else -> {}
+        .Err(_) -> {}
     }
     sequence: process_sequence_take(NIX_INDEX_TEMP_SEQUENCE)
     basename: files.basename(path)

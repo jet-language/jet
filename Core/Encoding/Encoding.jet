@@ -291,7 +291,7 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
             if failures.len() > 0 -> return Err(failures)
             Ok(values)
         }
-        else -> Err(decode_expected("a list", tree))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(decode_expected("a list", tree))
     }
 }
 
@@ -311,7 +311,7 @@ __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
             bytes: base64.decode(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
             Ok(bytes)
         }
-        else -> __decode_list<U8>(tree)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .DateTime(_) | .Array(_) | .Object(_) -> __decode_list<U8>(tree)
     }
 }
 
@@ -327,7 +327,7 @@ __decode_f32: fn(tree: Dyn) -> F32 [FieldError]! {
 __decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
     if tree == {
         .Null -> Ok(None)
-        else -> {
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             value: tree.decode<Item>() ?? return Err(err)
             Ok(Val(value))
         }
@@ -351,7 +351,7 @@ __decode_map: fn<Item: Decode>(tree: Dyn) -> [String: Item] [FieldError]! {
             if failures.len() > 0 -> return Err(failures)
             Ok(values)
         }
-        else -> Err(decode_expected("an object", tree))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Err(decode_expected("an object", tree))
     }
 }
 
@@ -494,7 +494,7 @@ impl __DecodeTree.__DecodeSource {
     begin_object: fn(&self) -> Bool Never! {
         object: if self.pending == {
             .Object(_) -> true
-            else -> false
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
         }
         if object -> self.enter()
         object
@@ -515,7 +515,7 @@ impl __DecodeTree.__DecodeSource {
                     found = true
                 }
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
         }
         if !found {
             self.leave()
@@ -534,7 +534,7 @@ impl __DecodeTree.__DecodeSource {
     begin_array: fn(&self) -> Bool Never! {
         array: if self.pending == {
             .Array(_) -> true
-            else -> false
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> false
         }
         if array -> self.enter()
         array
@@ -553,7 +553,7 @@ impl __DecodeTree.__DecodeSource {
                     found = true
                 }
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
         }
         if !found {
             self.leave()
@@ -567,7 +567,7 @@ impl __DecodeTree.__DecodeSource {
     take_null: fn(&self) -> Bool Never! {
         if self.pending == {
             .Null -> true
-            else -> false
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
         }
     }
 

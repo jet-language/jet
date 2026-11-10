@@ -861,7 +861,7 @@ jet_cli_find_command_entry: fn(root: String, command: String, use_override: Bool
     stock: jet_cli_find_project_entry(root, command, color, notices)
     if stock == {
         .Refused(_) -> return stock
-        else -> {}
+        .Entry(_) | .Absent -> {}
     }
     if !use_override -> return stock
     if jet_cli_command_override(root, command, color) == {
@@ -945,7 +945,7 @@ jet_cli_no_workspace_module: fn(color: Bool) -> JetCLIPlan Never! {
 jet_cli_workspace_present: fn(source: JetCLIWorkspaceSource) -> Bool Never! {
     if source == {
         .Absent -> return false
-        else -> {}
+        .Index(_) | .Authority(_) | .Failed(_) -> {}
     }
     true
 }
@@ -1260,7 +1260,7 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]
     index_path := ""
     if source == {
         .Index(path) -> index_path = path
-        else -> return JetCLIWorkspaceCheck.Absent
+        .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceCheck.Absent
     }
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "check", color) == {
@@ -1315,7 +1315,7 @@ jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool,
     index_path := ""
     if jet_cli_workspace_source(root, color) == {
         .Index(path) -> index_path = path
-        else -> return JetCLIWorkspaceTest.Absent
+        .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceTest.Absent
     }
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "test", color) == {
@@ -1391,7 +1391,7 @@ jet_cli_with_notices: fn(notices: [String], plan: &&JetCLIPlan) -> JetCLIPlan Ne
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
         .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: report.move(), color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
         .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Diagnostics{file: file.move(), source: source.move(), report: report.move(), color: color, notice: "{notices.join("")}{notice}"}
-        else -> {}
+        .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
@@ -1407,7 +1407,7 @@ jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileRes
     root := ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
-        else -> return false
+        .Absent | .Refused(_) -> return false
     }
     facts: jet_cli_root_manifest(root) ?? return false
     if facts.outputs.len() > 0 {
@@ -1435,7 +1435,7 @@ jet_cli_project_entry_callable: fn(file: String) -[FS, Env]> String Never! {
     root := ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
-        else -> return "run"
+        .Absent | .Refused(_) -> return "run"
     }
     facts: jet_cli_root_manifest(root) ?? return "run"
     notices := [String]{}
@@ -1466,7 +1466,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
                 .Unqualified(module_alias, _, _, _, import_span) -> {
                     if module_alias.starts_with("project.") -> span = Val(import_span)
                 }
-                else -> {}
+                .File(_, _) -> {}
             }
             if span != None -> break
         }
@@ -1485,7 +1485,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
     parent: jet_cli_parent(file) ?? "."
     if jet_cli_find_package_root(parent, false) == {
         .Root(_) -> return None
-        else -> {}
+        .Absent | .Refused(_) -> {}
     }
     dir := cli_files.realpath(parent) ?? parent
     loop {

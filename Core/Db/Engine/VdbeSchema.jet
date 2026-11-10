@@ -36,7 +36,7 @@ use {
 p4_vtab: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
     if v.ops[pc].p4 == {
         .Vtab(vt) -> vt
-        else -> -1
+        .NotUsed | .Text(_) | .Coll(_) | .Int32(_) | .Int64(_) | .Real(_) | .Program(_) | .Table(_) | .TableRef(_) | .FuncDef(_) | .FuncCtx(_, _) | .KeyInfo(_) | .Mem(_) | .IntArray(_) | .Expr(_) -> -1
     }
 }
 
@@ -46,7 +46,7 @@ p4_table: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
     if v.ops[pc].p4 == {
         .Table(t) -> t
         .TableRef(t) -> t
-        else -> -1
+        .NotUsed | .Text(_) | .Coll(_) | .Int32(_) | .Int64(_) | .Real(_) | .Program(_) | .FuncDef(_) | .FuncCtx(_, _) | .KeyInfo(_) | .Mem(_) | .Vtab(_) | .IntArray(_) | .Expr(_) -> -1
     }
 }
 
@@ -55,7 +55,7 @@ p4_table: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
 p4_program: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
     if v.ops[pc].p4 == {
         .Program(p) -> p
-        else -> -1
+        .NotUsed | .Text(_) | .Coll(_) | .Int32(_) | .Int64(_) | .Real(_) | .Table(_) | .TableRef(_) | .FuncDef(_) | .FuncCtx(_, _) | .KeyInfo(_) | .Mem(_) | .Vtab(_) | .IntArray(_) | .Expr(_) -> -1
     }
 }
 
@@ -65,7 +65,7 @@ p4_func: fn(v: conn.Vdbe, pc: Int) -> conn.FuncDef? Never! {
     if v.ops[pc].p4 == {
         .FuncDef(f) -> Val(f.copy())
         .FuncCtx(f, _) -> Val(f.copy())
-        else -> None
+        .NotUsed | .Text(_) | .Coll(_) | .Int32(_) | .Int64(_) | .Real(_) | .Program(_) | .Table(_) | .TableRef(_) | .KeyInfo(_) | .Mem(_) | .Vtab(_) | .IntArray(_) | .Expr(_) -> None
     }
 }
 

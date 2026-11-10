@@ -51,7 +51,7 @@ jet_cli_impl_placement_lints: fn(program: Program) -> [Diagnostic] Never! {
         if item == {
             .Struct(value) -> declared[value.name] = true
             .Enum(value) -> declared[value.name] = true
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     found := [Diagnostic]{}
@@ -99,7 +99,7 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
         if item == {
             .Struct(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
             .Enum(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     edits := [TextEdit]{}

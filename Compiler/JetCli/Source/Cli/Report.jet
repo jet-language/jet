@@ -262,7 +262,7 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
     }
     code: if report.code == {
         .Val(text) -> jet_cli_json_control_quote(text)
-        else -> "null"
+        .None -> "null"
     }
     fields.push("\"code\":{code}")
     cause: if report.causes.len() == {
@@ -292,7 +292,7 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
         members: loop field in details.fields -> "{jet_cli_json_control_quote(field.name)}:{field.value}"
         source_span: if details.source_span == {
             .Val(span) -> jet_cli_report_span(span.start, span.end)
-            else -> "null"
+            .None -> "null"
         }
         fields.push("\"details\":{{\"variant\":{jet_cli_json_control_quote(details.variant)},\"fields\":{{{members.join(",")}}},\"source_span\":{source_span}}}")
     }
@@ -309,7 +309,7 @@ jet_cli_report_edits: fn(diagnostic: Diagnostic) -> [TextEdit] Never! {
             .SuggestedEdits(alternatives) -> {
                 loop alternative in alternatives -> edits.push(alternative.copy())
             }
-            else -> {}
+            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
         }
     }
     edits
@@ -411,7 +411,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         }
         cause_span_json: if cause.span == {
             .Val(cause_span) -> jet_cli_report_span(cause_span.start, cause_span.end)
-            else -> "null"
+            .None -> "null"
         }
         "{{\"code\":{jet_cli_json_string(cause.code)},\"file\":{cause_file},\"line\":{cause_line},\"col\":{cause_col},\"span\":{cause_span_json}}}"
     }
@@ -430,7 +430,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
                 if actual == .Val(actual_value) -> out = "{out},\"actual\":{actual_value}"
             }
             .BuildError(error_report) -> out = "{out},\"build_error\":{jet_cli_build_error_json(error_report)}"
-            else -> {}
+            .SuggestedEdits(_) | .RuntimeHostFault(_) -> {}
         }
     }
     "{out}}}"
