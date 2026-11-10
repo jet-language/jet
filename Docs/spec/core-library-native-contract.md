@@ -551,7 +551,11 @@ and its waits block that thread. Under a finite address-space limit
 (`RLIMIT_AS`) no thread or fiber stack reserves more than a hundredth of it
 and the fiber stacks together at most a quarter, so the stacks leave the
 heap its room; a task past that quarter runs on its carrier as well. A
-task's CPU clock (`jet_rt_task_cpu_ns`)
+carrier the host refuses to start (no address space or process slot for
+its thread) leaves the pool at the carriers already running; when it is
+the first, no task can run, and the process stops with one `error:` line
+that names the errno, `RLIMIT_AS` and `RLIMIT_NPROC`, exit 70, not a
+panic. A task's CPU clock (`jet_rt_task_cpu_ns`)
 is its fiber's run time summed over the carriers that ran it, and its
 identity (`jet_rt_task_identity`) is its fiber's, so a trace keyed by task
 stays whole across parks; on a plain thread both are the thread's.

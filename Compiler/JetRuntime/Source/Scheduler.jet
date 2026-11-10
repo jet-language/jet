@@ -915,9 +915,15 @@ scheduler_start_worker: fn(root: I64) {
     sync_thread_lock(root)
     handle: thread_spawn(rt_scheduler_worker_address(), record)
     if (handle < I64{0}) {
+        // The carrier scheduler_submit counted for this start never runs.
+        // With others running the pool settles at them: the queued job waits
+        // for one, and no later submit retries the start.
+        started: wrapping(sync_load(wrapping(root + I64{152})) - I64{1})
+        sync_store(wrapping(root + I64{152}), started)
+        if (started > I64{0}) -> _ := sync_swap(wrapping(root + I64{112}), started)
         sync_thread_unlock(root)
         jet_rt_free(record, I64{32}, I64{8})
-        scheduler_start_failed()
+        if (started == I64{0}) -> scheduler_first_worker_refused(-handle)
         return
     }
     sync_store(wrapping(record + I64{8}), handle)
@@ -1426,14 +1432,41 @@ scheduler_fatal: fn(message: I64) {
     jet_rt_string_drop(message)
 }
 
-// A runtime thread that could not start (thread_spawn EAGAIN: RLIMIT_AS,
-// pids limit, memory) stops the process with E3001, also inside a task or
-// root. Native code has no stop edge out of a runtime-internal failure: an
+// A runtime helper thread that could not start (thread_spawn EAGAIN:
+// RLIMIT_AS, pids limit, memory) stops the process with E3001, also inside a
+// task or root; a carrier never does (scheduler_start_worker). Native code
+// has no stop edge out of a runtime-internal failure: an
 // in-task stop would return into its caller, which would run on with the error
 // code as a thread handle or a stopped helper's 0 result.
 scheduler_start_failed: fn() {
     message: scheduler_msg_start_failed()
     trap_process_stop(I64{0}, sync_load(message), sync_load(wrapping(message + I64{8})))
+}
+
+// The pool's first carrier could not start (thread_spawn's -`errno`), so no
+// task can run. The host refused a thread, which is no fault of the
+// program: the report is no panic but one `error:` line naming the errno
+// and the limits that refuse threads, RLIMIT_AS and RLIMIT_NPROC (-1 reads
+// as unlimited), and the process exits 70. Served comptime code reports it
+// to the compiler as a stop.
+scheduler_first_worker_refused: fn(errno: I64) {
+    head: rt_static_text("error: the host refused the first scheduler worker thread (errno ")
+    trap_stop(I64{1}, rt_text_data(head), rt_text_len(head), I64{0}, I64{0})
+    trap_defect_prepare()
+    jet_rt_stdout_flush()
+    trap_write_static(head)
+    trap_number(errno)
+    trap_write_static(rt_static_text("); address-space limit RLIMIT_AS "))
+    scheduler_limit_write(thread_rlimit_soft(I64{9}))
+    trap_write_static(rt_static_text(", process limit RLIMIT_NPROC "))
+    scheduler_limit_write(thread_rlimit_soft(I64{6}))
+    trap_write_static(rt_static_text("\n"))
+    trap_defect_exit(I64{70})
+}
+
+// A soft rlimit as scheduler_first_worker_refused names it.
+scheduler_limit_write: fn(soft: I64) {
+    if (soft < I64{0}) -> trap_write_static(rt_static_text("unlimited")) else -> trap_number(soft)
 }
 
 scheduler_abort_double_panic: fn() {
