@@ -29,7 +29,9 @@ source-migration reports, and `E-WORD-WORD` with two or more uppercase words. A
 library diagnostic without a `code` constant uses its type path as its code.
 Codes are stable identities: do not reuse or renumber one. Lexer, parser, and
 semantic checks raise the row that owns the violated rule; a library rule
-raises its own type with `reject(Value)`. The CLI, LSP, machine reports, web
+raises its own type with `reject(Value)` from a marker's `expand` body, which
+reports at the marker's use site and reads the marker's arguments as `self`.
+`reject` anywhere else is E0962. The CLI, LSP, machine reports, web
 pages, and backends project those rows rather than defining a second message or
 exposing raw backend text.
 

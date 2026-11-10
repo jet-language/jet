@@ -1,0 +1,12 @@
+// @all_diags
+// `#Web.Route("/about/")` warns web.TrailingSlash; `#Allow` silences the
+// same warning on `/legacy/` only.
+use web: web
+
+#Web.Route("/about/")
+about: fn() {}
+
+#[Allow(web.TrailingSlash, "old links to /legacy/ must keep working"), Web.Route("/legacy/")]
+legacy: fn() {}
+
+run: fn() {}

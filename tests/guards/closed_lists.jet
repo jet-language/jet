@@ -583,3 +583,105 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
     assert(message.contains("Core trait with one `impl` per member") && message.contains("--check") && message.contains(CLOSED_LIST_KERNEL_PATH))
     assert(closed_list_duplicate_problem(pairs[0]).contains("Core trait with one `impl` per member"))
 }
+
+// The syntax dictionary (`jet syntax`) keeps its rows' meanings, but each
+// row's token is a copy of the syntax registry spelling the row names in
+// `registry_name`: the registry (Compiler/JetFoundation/Data/Syntax) is the
+// token's one hand-written home. A row whose `registry_name` is its token,
+// or the generated trait-marker block's OWNED_TRAITS, copies no spelling.
+CLOSED_LIST_SYNTAX_REGISTRY_DIR: "Compiler/JetFoundation/Data/Syntax"
+CLOSED_LIST_SYNTAX_DICTIONARY_PATH: "Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet"
+
+// One registry spelling: the constant's name, its literal as written, and
+// its file.
+ClosedListSpelling: struct {
+    name: String
+    text: String
+    path: String
+}
+
+// The string literal that opens `text` at `start` (a `"`), as written, or
+// None when it doesn't close on the line.
+closed_list_literal_at: fn(text: String, start: Int) -> String? {
+    bytes: text.bytes()
+    if start >= bytes.len() || Int.from_u8(bytes[start]) != 34 -> return None
+    end := start + 1
+    loop {
+        if end >= bytes.len() -> return None
+        if Int.from_u8(bytes[end]) == 92 {
+            end += 2
+            next
+        }
+        if Int.from_u8(bytes[end]) == 34 -> return Val(policy_slice_bytes(text, start + 1, end))
+        end += 1
+    }
+}
+
+// The top-level `NAME: "text"` constants in `text`, the source of `path`.
+closed_list_spellings_in: fn(path: String, text: String, out: &[ClosedListSpelling]) {
+    loop line in text.lines() {
+        ident: closed_list_ident_prefix(line)
+        if ident == "" || !closed_list_upper_byte(ident.bytes()[0]) -> next
+        width: ident.bytes().len()
+        if !policy_slice_bytes(line, width, line.bytes().len()).starts_with(": \"") -> next
+        literal: closed_list_literal_at(line, width + 2) ?? next
+        out.push(ClosedListSpelling{name: ident, text: literal, path: path})
+    }
+}
+
+// The field `name`'s literal on a dictionary row line, or None.
+closed_list_row_field: fn(line: String, name: String) -> String? {
+    needle: "{name}: \""
+    at: closed_list_after(line, needle)
+    if at >= line.bytes().len() -> return None
+    closed_list_literal_at(line, at - 1)
+}
+
+// Every dictionary row in `dictionary` whose token differs from the registry
+// spelling it names, or that names no spelling.
+closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [ClosedListSpelling]) -> [String] {
+    by_name := [String:Int]{}
+    loop (index, spelling) in spellings -> by_name[spelling.name] = index
+    problems := [String]{}
+    loop line in dictionary.lines() {
+        if !line.starts_with("    {{token: \"") -> next
+        token: closed_list_row_field(line, "token") ?? next
+        name: closed_list_row_field(line, "registry_name") ?? next
+        if name == token || name == "OWNED_TRAITS" -> next
+        index: by_name.get(name) ?? -1
+        if index < 0 {
+            problems.push("{CLOSED_LIST_SYNTAX_DICTIONARY_PATH} row `{token}` names `{name}`, which no spelling in {CLOSED_LIST_SYNTAX_REGISTRY_DIR} declares; name the registry constant that spells the token")
+            next
+        }
+        home: spellings[index]
+        if home.text != token -> problems.push("{CLOSED_LIST_SYNTAX_DICTIONARY_PATH} row `{token}` is a copy of {home.path} {home.name} (`{home.text}`) and no longer matches it. The registry is the token's one hand-written home: edit {home.path}, then copy the spelling here.")
+    }
+    problems
+}
+
+#Test("each syntax dictionary token is the registry spelling it names") {
+    guards_enter_root()
+    spellings := [ClosedListSpelling]{}
+    entries: closed_list_files.list_dir(CLOSED_LIST_SYNTAX_REGISTRY_DIR) ?? panic("list {CLOSED_LIST_SYNTAX_REGISTRY_DIR}")
+    loop entry in entries {
+        if !entry.name.ends_with(".jet") -> next
+        path: "{CLOSED_LIST_SYNTAX_REGISTRY_DIR}/{entry.name}"
+        closed_list_spellings_in(path, closed_list_files.read(path) ?? panic("read {path}"), spellings)
+    }
+    dictionary: closed_list_files.read(CLOSED_LIST_SYNTAX_DICTIONARY_PATH) ?? panic("read {CLOSED_LIST_SYNTAX_DICTIONARY_PATH}")
+    problems: closed_list_syntax_dictionary_problems(dictionary, spellings)
+    loop problem in problems -> print(problem)
+    assert_eq(problems.len(), 0)
+    // Editing a copied token alone fails, naming the home; so does a row
+    // that names no spelling.
+    home := [ClosedListSpelling]{}
+    closed_list_spellings_in("h.jet", "KW_BREAK: \"break\"\nKW_IF: \"if\" // the `if` keyword\n", home)
+    assert_eq(home.len(), 2)
+    assert_eq(home[1].text, "if")
+    kept: "    {{token: \"break\", query: \"break\", registry_name: \"KW_BREAK\", kind: K.Keyword}},\n    {{token: \"Min\", registry_name: \"Min\"}},\n"
+    assert_eq(closed_list_syntax_dictionary_problems(kept, home).len(), 0)
+    drift: closed_list_syntax_dictionary_problems("    {{token: \"brake\", registry_name: \"KW_BREAK\"}},\n    {{token: \"when\", registry_name: \"KW_WHEN\"}},\n", home)
+    assert_eq(drift.len(), 2)
+    assert(drift[0].contains("row `brake` is a copy of h.jet KW_BREAK (`break`) and no longer matches it"))
+    assert(drift[1].contains("names `KW_WHEN`, which no spelling"))
+}

@@ -8018,6 +8018,16 @@ InvalidMemberSpread: struct {
     }
 }
 
+RejectOutsideTemplate: struct {
+    impl Diagnostic {
+        code: "E0962"
+        meaning: "`reject` called outside a marker's compile-time template"
+        what: fn(self) -> String { "`reject` runs only inside a marker's `expand` template." }
+        why: fn(self) -> String { "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker; ordinary code has no use site to report at, so the call has nothing to run." }
+        fix: fn(self) -> String { "Move the check into a marker's `expand: fn(self, target: Target)` body, or return an error value from this function instead." }
+    }
+}
+
 InvalidFixedListLength: struct {
     impl Diagnostic {
         code: "E0963"

@@ -305,7 +305,10 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
                 loop field_index in 0..<row.fields.len() -> row.fields[field_index].serde_markers = sema_marker_module_bind_markers(row.fields[field_index].serde_markers, bindings)
                 row.methods = sema_marker_module_bind_functions(definition.methods, bindings)
-                loop impl_index in 0..<row.trait_impls.len() -> row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                loop impl_index in 0..<row.trait_impls.len() {
+                    row.trait_impls[impl_index].markers = sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
+                    row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                }
                 bound.push(Item.Struct{value: row})
                 next
             }
@@ -315,7 +318,10 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
                 loop variant_index in 0..<row.variants.len() -> row.variants[variant_index].serde_markers = sema_marker_module_bind_markers(row.variants[variant_index].serde_markers, bindings)
                 row.methods = sema_marker_module_bind_functions(definition.methods, bindings)
-                loop impl_index in 0..<row.trait_impls.len() -> row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                loop impl_index in 0..<row.trait_impls.len() {
+                    row.trait_impls[impl_index].markers = sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
+                    row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                }
                 value = Item.Enum{value: row}
             }
             .Distinct(definition) -> {
@@ -325,8 +331,14 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
             }
             .Impl(implementation) -> {
                 row := implementation
+                row.markers = sema_marker_module_bind_markers(implementation.markers, bindings)
                 row.methods = sema_marker_module_bind_functions(implementation.methods, bindings)
                 value = Item.Impl{value: row}
+            }
+            .ErrorConv(conversion) -> {
+                row := conversion
+                row.markers = sema_marker_module_bind_markers(conversion.markers, bindings)
+                value = Item.ErrorConv{value: row}
             }
             .CodeModule(code_module) -> {
                 row := code_module
