@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98418,
+    "rev": 98425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71718,7 +71718,7 @@
       "track": "epoch",
       "epoch": "e17",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -71727,6 +71727,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Every criterion is met; the last was c10, at dev c057ea659d. Closed by Main."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -71759,8 +71764,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): tower.json: D-SCRIPT-ONELINER1 status=ratified outcome=A ratifiedAt=2026-10-29 (card #6067); criteria follow option A as written",
-          "at": "2026-10-31T14:24:01.194Z"
+          "evidence": "D-SCRIPT-ONELINER1 is ratified with outcome A (2026-10-29), and the criteria follow option A as written.",
+          "at": "2026-11-10T02:37:43.274Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -71840,12 +71846,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:38.566Z",
-      "updated": "2026-11-10T02:36:24.744Z",
+      "updated": "2026-11-10T02:37:58.810Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 10,
+      "completedAt": "2026-11-10T02:37:58.810Z"
     },
     {
       "id": "c0810bga",
@@ -102516,16 +102523,60 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Landed in train 2 (dev c057ea659d): 75ae287c5f makes core.ui opaque fills write in place through xs.__fill and deletes the stitch rebuild; a5a8142d89 gives the program one built-in face. WaylandLead3-10cr measured a full 2560x1440 redraw at 4.9-5.2 ms on its compiler (it was 223-240 ms). Still open: __fill is internal, so the public spelling, the perf pair and the example remain; criteria 1-4 track them."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A public, idiomatic whole-span fill on lists and byte buffers (not a double-underscore internal) lowers to memset or word stores, with one meaning on O0, O1, O2 and web (I9).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T02:37:45.493Z"
+        },
+        {
+          "n": 2,
+          "text": "core.ui's canvas fill uses it, and a full redraw at 2560x1440 on O2 takes at most 6 ms, measured on a landed compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T02:37:47.371Z"
+        },
+        {
+          "n": 3,
+          "text": "A paired perf cell compares the plain per-element loop with the fill, per the performance gate, and the fill strictly beats it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T02:37:49.477Z"
+        },
+        {
+          "n": 4,
+          "text": "An example with golden output shows the fill, passing on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T02:37:51.459Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:32:55.781Z",
-      "updated": "2026-11-09T15:32:55.781Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-10T02:37:53.299Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     },
     {
       "id": "c027ynbk",
@@ -193859,6 +193910,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T02:37:58.811Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3glhp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-10T02:37:53.299Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3vq4p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T02:37:51.459Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3vq4p",
+      "note": "#4 An example with golden output shows the fill, passing on O0,"
+    },
+    {
+      "at": "2026-11-10T02:37:49.477Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3vq4p",
+      "note": "#3 A paired perf cell compares the plain per-element loop with "
+    },
+    {
+      "at": "2026-11-10T02:37:47.371Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3vq4p",
+      "note": "#2 core.ui's canvas fill uses it, and a full redraw at 2560x144"
+    },
+    {
+      "at": "2026-11-10T02:37:45.493Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3vq4p",
+      "note": "#1 A public, idiomatic whole-span fill on lists and byte buffer"
+    },
+    {
+      "at": "2026-11-10T02:37:43.274Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z3glhp",
+      "note": "#1"
+    },
     {
       "at": "2026-11-10T02:37:07.448Z",
       "by": "Main",
