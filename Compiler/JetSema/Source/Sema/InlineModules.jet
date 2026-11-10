@@ -958,7 +958,14 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
             mapped_receiver := receiver
             if receiver == {
                 .Ident(name, span, _) -> {
-                    if rewrite.types.get(name) == .Val(.Named(resolved)) -> mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
+                    if rewrite.types.get(name) == .Val(.Named(resolved)) {
+                        mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
+                    } else if rewrite.types.get(name) == .Val(actual) {
+                        // A type parameter bound to a built-in scalar (`R` = `Int`)
+                        // names that scalar as the static-call owner.
+                        scalar: sema_genmod_type_text(actual)
+                        if SEMA_CALL_SCALAR_OWNERS.contains(scalar) -> mapped_receiver = Expr.Ident{name: scalar, span: span, id: AST_NODE_GENERATED}
+                    }
                 }
                 // `tokens.Token.from_int(7)`: a member type named through its module.
                 .Field(base, member, span, _) -> {

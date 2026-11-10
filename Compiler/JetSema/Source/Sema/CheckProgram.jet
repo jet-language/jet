@@ -1828,7 +1828,14 @@ sema_function_check_passes: fn(func: Func, owner_id: SymbolID, function_kind: TF
         sema_scope_rollback(module_scopes, mark)
         rechecks: sema_function_accept_share_sites(share_known, share_found, environment, program)
         if !rechecks {
-            loop diagnostic in pass_diagnostics -> diagnostics.push(diagnostic)
+            instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
+            loop diagnostic in pass_diagnostics {
+                if instance == .Val(line) {
+                    diagnostics.push(sema_name_at_instance(diagnostic, line))
+                } else {
+                    diagnostics.push(diagnostic)
+                }
+            }
             loop fact in pass_call_facts -> call_facts.push(fact)
             loop request in pass_comptime_requests -> comptime_requests.push(request)
             loop reference in pass_name_references -> name_references.push(reference)

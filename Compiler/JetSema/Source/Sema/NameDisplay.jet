@@ -1,6 +1,6 @@
 // generic-instance/inline-module display paths, reused from
 // origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
-use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule, Diagnostic, DiagnosticLabel]
+use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule, Diagnostic, DiagnosticLabel, Span]
 sema_name_strip_prefix: fn(name: String, prefix: String) -> String Never! {
     if !name.starts_with(prefix) -> return name.copy()
     name.slice(prefix.len(), name.len())
@@ -148,6 +148,43 @@ sema_name_generated_type_paths: fn(items: [Item], paths: &[String:String]) Never
     }
 }
 
+// The path of every module with a body in `items`' module tree (`outer`,
+// `outer.inner`), as the lifted member identities spell them.
+sema_name_module_paths: fn(items: [Item], prefix: String, paths: &[String]) Never! {
+    loop item in items {
+        if item == .CodeModule(child) {
+            if child.body == .Val(body) {
+                path: if prefix == "" -> child.name.copy() else -> "{prefix}.{child.name}"
+                sema_name_module_paths(body, path, paths)
+                paths.push(path)
+            }
+        }
+    }
+}
+
+// Every function of one module's items lifted from an inline module or a
+// generic-module instance, keyed by its member identity, valued by its
+// source path (`__jet_loud_dtotal` -> `loud.total`). The identity is matched
+// by re-encoding, never decoded: a module name such as `my_data` keeps its
+// underscores unescaped there, so decoding it would misread `_d` as `.`.
+sema_name_lifted_function_paths: fn(items: [Item], paths: &[String:String]) Never! {
+    modules := [String]{}
+    sema_name_module_paths(items, "", modules)
+    if modules.len() == 0 -> return
+    loop item in items {
+        if item == .Func(function) {
+            if !function.name.starts_with("__jet_") -> next
+            member: sema_inline_member_source_name(function.name)
+            loop module_path in modules {
+                if sema_inline_member_name(module_path, member) == function.name {
+                    paths[function.name.copy()] = "{module_path}.{member}"
+                    break
+                }
+            }
+        }
+    }
+}
+
 // Whether the identifier at `bytes[start..<end]` has the shape of a
 // generated type name: `M` (after an optional `_`) and a digit.
 sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
@@ -158,8 +195,8 @@ sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! 
     digit >= 48 && digit <= 57
 }
 
-// `text` with every whole identifier that is a generated type name replaced
-// by its source path.
+// `text` with every whole identifier that is a generated type name or a
+// lifted member identity replaced by its source path.
 sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never! {
     bytes: text.bytes()
     out := ""
@@ -173,9 +210,13 @@ sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never
         }
         start: index
         loop index < bytes.len() && (sema_inline_is_alphanumeric(Int.from_u8(bytes[index])) || Int.from_u8(bytes[index]) == 95) -> index += 1
-        if !sema_name_generated_shape(bytes, start, index) -> next
+        generated: sema_name_generated_shape(bytes, start, index)
+        // `__j`: only then can the word be a lifted member (`__jet_…`).
+        lifted: !generated && index - start > 6 && Int.from_u8(bytes[start]) == 95 && Int.from_u8(bytes[start + 1]) == 95 && Int.from_u8(bytes[start + 2]) == 106
+        if !generated && !lifted -> next
         word: String.from_bytes(bytes[start..<index]) ?? next
-        display: paths.get(word) ?? next
+        display: paths.get(word) ?? ""
+        if display == "" || display == word -> next
         out = "{out}{String.from_bytes(bytes[copied..<start]) ?? ""}{display}"
         copied = index
     }
@@ -185,19 +226,63 @@ sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never
 
 // A type lifted from an inline module or a generic-module instance keeps a
 // compiler-owned name (`boxed.Entry` -> `M5BoxedEntry`) that the type checks
-// print; every diagnostic names it by its source path instead.
+// print, and a lifted function its member identity (`__jet_boxed_dput`);
+// every diagnostic names both by their source paths instead.
 sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     if diagnostics.len() == 0 -> return
     paths := [String:String]{}
-    loop source_module in graph.modules -> sema_name_generated_type_paths(source_module.program.items, paths)
-    if paths.len() == 0 -> return
+    loop source_module in graph.modules {
+        sema_name_generated_type_paths(source_module.program.items, paths)
+        sema_name_lifted_function_paths(source_module.program.items, paths)
+    }
     loop index in 0..<diagnostics.len() {
         diagnostics[index].what = sema_name_display_text(diagnostics[index].what, paths)
         diagnostics[index].why = sema_name_display_text(diagnostics[index].why, paths)
         diagnostics[index].fix = sema_name_display_text(diagnostics[index].fix, paths)
+        if diagnostics[index].call_chain.len() > 0 {
+            chain: loop step in diagnostics[index].call_chain -> sema_name_display_text(step, paths)
+            diagnostics[index].call_chain = chain
+        }
         if diagnostics[index].labels.len() == 0 -> next
         labels := [DiagnosticLabel]{}
         loop label in diagnostics[index].labels -> labels.push(DiagnosticLabel{span: label.span, message: sema_name_display_text(label.message, paths)})
         diagnostics[index].labels = labels
     }
+}
+
+// The instance line (`int_billing: billing<Int>`) of the generic-module
+// instance whose lifted function is `function`, if it is one.
+sema_name_instance_span: fn(graph: SemaRegistrationGraph, module_identity: String, function: String) -> Span? Never! {
+    if !function.starts_with("__jet_") -> return None
+    module_index: sema_registration_module_index(graph, module_identity) ?? return None
+    sema_name_instance_item_span(graph.modules[module_index].program.items, "", sema_inline_member_source_name(function), function)
+}
+
+sema_name_instance_item_span: fn(items: [Item], prefix: String, member: String, function: String) -> Span? Never! {
+    loop item in items {
+        if item == .CodeModule(child) {
+            if child.body == .Val(body) {
+                path: if prefix == "" -> child.name.copy() else -> "{prefix}.{child.name}"
+                if child.instance_identity != None {
+                    if sema_inline_member_name(path, member) == function -> return Val(child.span)
+                    next
+                }
+                found: sema_name_instance_item_span(body, path, member, function)
+                if found != None -> return found
+            }
+        }
+    }
+    None
+}
+
+// An instance's function body is its template's text, but the instance line
+// is what made the report: the report moves there, and the template text it
+// came from stays as a label.
+sema_name_at_instance: fn(diagnostic: &&Diagnostic, instance: Span) -> Diagnostic Never! {
+    original: diagnostic.span ?? return diagnostic
+    if original.start >= instance.start && original.end <= instance.end -> return diagnostic
+    updated := diagnostic
+    updated.span = Val(instance)
+    updated.labels.push(DiagnosticLabel{span: original, message: "in the template body this instance expands"})
+    updated
 }

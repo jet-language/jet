@@ -2688,6 +2688,14 @@ value kinds and types, scope, and cycles with **E0850**–**E0853** and
 **E0855**–**E0857**; a specialization identity collision is **E0859**. The
 value-argument example is `Examples/Modules/FactValueArguments.jet`.
 
+An instance's member bodies are its template's text, checked once per
+instance. An error in one is reported at the instance line
+(`int_cache: cache<Int>(64)`), with the template text it came from as a
+label; inline-module and instance members are named by their source paths
+(`int_cache.key_of`), never by their generated identities. A type parameter
+bound to a built-in scalar names that scalar as a static-call owner, so
+`K.parse(text)` in an `Int` instance reads as `Int.parse(text)`.
+
 ## Composable configuration modules
 
 A `module` declaration can contribute typed values to reserved configuration
