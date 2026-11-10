@@ -3,9 +3,9 @@ use process: core.process
 
 run: fn() {
     policy: Authority.from_rights([
-        "FS.Read:repo",
-        "FS.Write:.jet/build",
-        "Exec:/usr/bin/printf",
+        "FS.Read(\"repo\")",
+        "FS.Write(\".jet/build\")",
+        "Exec(\"/usr/bin/printf\")",
     ])
     spec: process.cmd(["/usr/bin/printf", "receipt"]).cwd("/tmp").under(policy)
     if spec.plan() == {

@@ -9,7 +9,7 @@ use fs: core.files
 
 run: fn() {
     #FX(FS.Read, IO) {
-        here: fs.scope(Authority.from_rights(["FS.Read:."]))
+        here: fs.scope(Authority.from_rights(["FS.Read(\".\")"]))
         source: here.read("FileScope.jet") ?? panic("read inside the scope")
         print("inside: {source.contains("// A file scope narrows")}")
         _: here.read("/etc/hostname") ?? {

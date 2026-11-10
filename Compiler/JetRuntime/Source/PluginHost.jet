@@ -527,7 +527,7 @@ pg_holds_family: fn(wire: I64, family: I64) -> Bool {
     false
 }
 
-// The cwd-relative path below one explicit `{family}:root` right: 0 when it
+// The cwd-relative path below one explicit `{family}("root")` right: 0 when it
 // does not apply, else the remainder after the root as an owned Text. Root
 // `repo` and `.` admit any relative path. `error` receives a policy refusal.
 pg_relative: fn(path: I64, root: I64, error: I64) -> I64 {
@@ -688,7 +688,7 @@ pg_read_below: fn(root: I64, relative: I64, error: I64) -> I64 {
 }
 
 // The scoped read behind the guest's FS.Read import: the file below the first
-// `{family}:root` right that admits `path`, read without following symlinks.
+// `{family}("root")` right that admits `path`, read without following symlinks.
 // Returns the bytes, or 0 with an owned message in `error` and the failure
 // kind in `error + 8` (Denied for policy, Guest for the read itself).
 pg_scoped_read: fn(path: I64, wire: I64, family: I64, error: I64) -> I64 {
@@ -696,7 +696,7 @@ pg_scoped_read: fn(path: I64, wire: I64, family: I64, error: I64) -> I64 {
     length: rt_text_len(wire)
     prefix: jet_rt_string_builder_new()
     jet_rt_string_builder_push(prefix, family)
-    rt_text_push_word(prefix, I64{58}, I64{1})
+    jet_rt_string_builder_push(prefix, rt_static_text("(\""))
     saw := false
     last := I64{0}
     start := I64{0}
@@ -705,9 +705,9 @@ pg_scoped_read: fn(path: I64, wire: I64, family: I64, error: I64) -> I64 {
         if (at == length || rt_text_byte(wrapping(data + at)) == I64{10}) {
             right: rt_text_copy(wrapping(data + start), at - start)
             start = at + I64{1}
-            if pg_starts(right, rt_text_data(prefix), rt_text_len(prefix)) {
+            if (pg_starts(right, rt_text_data(prefix), rt_text_len(prefix)) && authority_scope_open(right) == rt_text_len(family)) {
                 saw = true
-                root_raw: rt_text_copy(wrapping(rt_text_data(right) + rt_text_len(prefix)), rt_text_len(right) - rt_text_len(prefix))
+                root_raw: rt_text_copy(wrapping(rt_text_data(right) + rt_text_len(prefix)), rt_text_len(right) - rt_text_len(prefix) - I64{2})
                 jet_rt_string_drop(right)
                 if (rt_text_len(root_raw) == I64{0}) {
                     jet_rt_string_drop(root_raw)

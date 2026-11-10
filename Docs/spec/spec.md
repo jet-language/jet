@@ -2198,7 +2198,7 @@ on stderr whose `effects` field lists the noticed rights, beside
 `required_effects`, on every run with an effect to name.
 `-A` (`--allow-all`) acknowledges every effect and hides
 the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
-resource-qualified right still confines the run through the host sandbox.
+scoped right (`--allow='FS.Read("data/")'`) still confines the run through the host sandbox.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops
 with E1803 before host state changes.
 
@@ -5422,7 +5422,7 @@ typed plugin handle:
 use plugin: core.plugin
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:repo"])
+    policy: Authority.from_rights(["FS.Read(\"repo\")"])
     mathkit: plugin.load("mathkit.wasm", policy)
     area: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")

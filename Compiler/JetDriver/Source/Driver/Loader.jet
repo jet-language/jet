@@ -47,6 +47,9 @@ use {
         owned_trait,
         core_module_has_type,
         diagnostic_with_source_path,
+        effect_scope_is_scoped,
+        effect_scope_name,
+        effect_scope_split,
         jet_ring_parse_manifest_layer,
         LOG_FILTER_FIX,
         log_filter_bad_pair,
@@ -348,7 +351,10 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             next
         }
         item: jet_driver_manifest_field_value(source, tokens, item_index)
-        name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
+        // Layout whitespace goes; a scope argument (`FS.Read("my data/")`) keeps its text.
+        written: effect_scope_split(item.text)
+        name := written.base.replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
+        if written.scope == .Val(scope) -> name = effect_scope_name(name, scope)
         if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = token_decoded(tables, tokens[item_index])
         // A positive `Panic` entry is one E0751 at that entry and grants nothing.
         if {
@@ -356,8 +362,10 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
-            name.contains("(") && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
-            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
+            jet_driver_authority_ffi_argument(name, "`{field}:`") == .Val(ffi_argument) -> diagnostics.push(jet_driver_authority_diagnostic(span, ffi_argument))
+            effect_scope_is_scoped(name) && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid scope argument - name a folder, host or device, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
+            name.contains("(") && !effect_scope_is_scoped(name) && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
+            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> names.push(name)
         }
         item_index = item.next_index

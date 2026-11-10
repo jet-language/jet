@@ -115,17 +115,6 @@ authority_parse_right: fn(right: String) -> String? Never! {
     Val(canonical)
 }
 
-// A right in the scoped spelling. The resource-qualified holds of an
-// Authority value (`FS.Read:/data`, `Net:example.com`) name the same scopes
-// as `FS.Read("/data")` and `Net("example.com")`, so both spellings meet one
-// covers rule.
-authority_scoped_right: fn(right: String) -> String Never! {
-    if right.contains("(") -> return right.copy()
-    parts: right.split_once(":") ?? return right.copy()
-    if parts.after == "" -> return right.copy()
-    effect_scope_name(parts.before, parts.after)
-}
-
 // A bound covers itself and every descendant in the rights tree, and a
 // scoped bound covers by its scope's law (EffectScope.jet): `/data` covers
 // `/data/a.txt` but not `/database`.
@@ -133,7 +122,7 @@ authority_covers: fn(bound: String, right: String) -> Bool Never! {
     canonical_bound: authority_parse_right(bound) ?? bound.trim()
     canonical_right: authority_parse_right(right) ?? right.trim()
     if canonical_right == canonical_bound -> return true
-    effect_scope_covers(authority_scoped_right(canonical_bound), authority_scoped_right(canonical_right))
+    effect_scope_covers(canonical_bound, canonical_right)
 }
 
 authority_covers_any: fn(bounds: [String], right: String) -> Bool Never! {
@@ -191,8 +180,8 @@ CanonicalAuthority: struct {
     }
 
     // True when this authority can satisfy a host operation declaring
-    // `right`; a resource-qualified hold (`FS.Read:/data`) also satisfies the
-    // unqualified operation (`FS.Read`), bounded by the held descendant.
+    // `right`; a scoped hold (`FS.Read("/data")`) also satisfies the bare
+    // operation (`FS.Read`), bounded by the held scope.
     allows_operation: fn(self, right: String) -> Bool Never! {
         if self.allows(right) -> return true
         loop held in self.holds {

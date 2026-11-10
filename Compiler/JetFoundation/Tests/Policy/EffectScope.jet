@@ -50,8 +50,8 @@ use jet_foundation.[
     assert(effect_scope_covers("FS(\"assets/\")", "FS.Read(\"assets/a\")"), "a scoped root covers its scoped leaves")
     assert(!effect_scope_covers("FS.Read", "FS.ReadExtra"), "leaves split at dots")
     assert(sema_effect_covers("FS", "FS.Read"), "effect rows use the same rule")
-    assert(authority_covers("FS.Read:/data", "FS.Read(\"/data/a\")"), "authority holds use the same rule")
-    assert(!authority_covers("FS.Read:/data", "FS.Read:/database"), "a qualified hold covers whole components")
+    assert(authority_covers("FS.Read(\"/data\")", "FS.Read(\"/data/a\")"), "authority holds use the same rule")
+    assert(!authority_covers("FS.Read(\"/data\")", "FS.Read(\"/database\")"), "a scoped hold covers whole components")
 }
 
 #Test("a publisher's constant argument names its scope") {

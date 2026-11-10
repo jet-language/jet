@@ -2527,9 +2527,9 @@ escape. This explicit authority boundary is the process execution contract (D-AG
 ```jet
 run_with_authority: fn() -[Exec, Time.Wait]> {
     policy: Authority.from_rights([
-        "FS.Read:repo",
-        "FS.Write:.jet/build",
-        "Exec:/usr/bin/cargo",
+        "FS.Read(\"repo\")",
+        "FS.Write(\".jet/build\")",
+        "Exec(\"/usr/bin/cargo\")",
     ])
     spec: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
     receipt: process.run_spec(spec) ?? return

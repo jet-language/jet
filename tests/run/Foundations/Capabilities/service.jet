@@ -2,7 +2,7 @@
 use process: core.process
 
 lifecycle: fn() {
-    policy: Authority.from_rights(["Exec:sleep"])
+    policy: Authority.from_rights(["Exec(\"sleep\")"])
     spec: process.cmd(["sleep", "5"]).stdout(.Capture).stderr(.Capture).under(policy)
     child: spec.spawn() ?? {
         print("service:start-error")

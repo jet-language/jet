@@ -847,7 +847,7 @@ On a local path or a package it is a usage error (E2104). `--locked` runs
 only what this machine already pinned and refuses to fetch or re-resolve
 (E1805).
 
-`jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
+`jet run --allow='FS.Read("<path>")'` grants `FS.Read` confined to that path: the
 program may read the named file, or the named directory and everything
 beneath it, and nothing else (several such rows grant each path; `-A`,
 `--allow=FS` and `--allow=FS.Read` lift the confinement). The path is

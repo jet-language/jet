@@ -8,7 +8,7 @@
 use plugin: core.plugin
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:."])
+    policy: Authority.from_rights(["FS.Read(\".\")"])
     guest: plugin.load("failure_guest.wat", policy)
     if guest.trap() == {
         .Err(.Guest(fault)) -> {

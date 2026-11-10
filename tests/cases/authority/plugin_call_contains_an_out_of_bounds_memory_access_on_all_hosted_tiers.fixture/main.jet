@@ -14,7 +14,7 @@ contained: fn(name: String, err: PluginError) {
 }
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:."])
+    policy: Authority.from_rights(["FS.Read(\".\")"])
     reader: plugin.load("out_of_bounds.wat", policy)
     _peeked: reader.peek() ?? {
         contained("peek", err)

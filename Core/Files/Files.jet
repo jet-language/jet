@@ -2680,7 +2680,7 @@ scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError!
     Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
 }
 
-// One read root of a file scope. Only an `FS.Read:<path>` right names one,
+// One read root of a file scope. Only an `FS.Read("<path>")` right names one,
 // so a bare `FS.Read` never becomes an ambient file-system handle.
 ScopeRoot: struct {
     encoded: [U8]
@@ -2691,12 +2691,12 @@ ScopeRoot: struct {
 // of the files surface.
 priv scope_reads: module {
     // The scope's read roots, in the authority's sorted right order.
-    // `FS.Read:repo` is the working directory; a root with a `..` part names none.
+    // `FS.Read("repo")` is the working directory; a root with a `..` part names none.
     scope_roots: fn(scope: FileScope, platform: host_path.PathPlatform) -> [ScopeRoot] Never! {
         roots := [ScopeRoot]{}
         loop right in core.plugin.__authority_to_wire(scope.authority).split("\n") {
-            if !right.starts_with("FS.Read:") -> next
-            root: right.removeprefix("FS.Read:")
+            if !right.starts_with("FS.Read(\"") || !right.ends_with("\")") -> next
+            root: right.removeprefix("FS.Read(\"").removesuffix("\")")
             if root == "" -> next
             if root == "repo" {
                 roots.push(ScopeRoot{encoded: ".".bytes(), absolute: false})
@@ -2804,7 +2804,7 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     create_dir_all(join(root, "inner")) ?? panic("scope root")
     write(join(root, "inner/note.txt"), "scoped") ?? panic("scope file")
     symlink(join(root, "inner/note.txt"), join(root, "link.txt")) ?? panic("scope link")
-    here: scope(Authority.from_rights(["FS.Read:{root}", "FS.Read:a/../b", "FS.Read"]))
+    here: scope(Authority.from_rights(["FS.Read(\"{root}\")", "FS.Read(\"a/../b\")", "FS.Read"]))
     roots: scope_roots(here, platform)
     assert_eq(roots.len(), 1)
     assert(roots[0].absolute)

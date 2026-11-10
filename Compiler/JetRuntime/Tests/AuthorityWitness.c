@@ -108,7 +108,7 @@ int main(int argc,char **argv) {
     jet_rt_alloc_init();
     // Rights the runtime records are heap texts it shares by owner count; the
     // probes it only reads stay borrowed.
-    Text *fs=heap("FS"),*net=heap("Net.Read"),*fsread=heap("FS.Read:repo"),*empty=heap("");
+    Text *fs=heap("FS"),*net=heap("Net.Read"),*fsread=heap("FS.Read(\"repo\")"),*empty=heap("");
     unsigned char nul_bytes[]={'N',0,'x'};
     Text *nul=jet_rt_string_from_static(nul_bytes,3),*unicode=heap("\xe2\x98\x83");
     Text near=borrow("FSX");
@@ -140,10 +140,10 @@ int main(int argc,char **argv) {
     assert(changed->len==clone->len && !jet_rt_handle_eq_jet_authority(changed,clone));
     narrow(clone,"FS");
     narrow(clone,"FS.Read");
-    narrow(clone,"FS:repo");
+    narrow(clone,"FS(\"repo\")");
     narrow(clone,"FS/repo");
     narrow(clone,"Net.Read");
-    narrow(clone,"Net.Read:api");
+    narrow(clone,"Net.Read(\"api\")");
     narrow(clone,"");
     Authority *without=jet_authority_without(clone,fs);
     authority_watch(without);
@@ -154,7 +154,7 @@ int main(int argc,char **argv) {
     Authority *unchanged=jet_authority_without(clone,&near);
     authority_watch(unchanged);
     shared(unchanged,clone);
-    Text prefix=borrow("FS.Read:repo");
+    Text prefix=borrow("FS.Read(\"repo\")");
     Authority *exact=jet_authority_without(clone,&prefix);
     authority_watch(exact);
     assert(exact->len==5);
@@ -170,7 +170,7 @@ int main(int argc,char **argv) {
     shared(empty_clone,none);
     Authority *workspace=jet_authority_workspace();
     authority_watch(workspace);
-    Text *workspace_read=heap("FS.Read:repo"),*workspace_write=heap("FS.Write:.jet/build");
+    Text *workspace_read=heap("FS.Read(\"repo\")"),*workspace_write=heap("FS.Write(\".jet/build\")");
     Text *workspace_slots[]={workspace_write,workspace_read};
     Authority *workspace_expected=from(workspace_slots,2);
     independent(workspace,workspace_expected);

@@ -26,7 +26,7 @@ compiler_fs_errno: fn(operation: I64, path: I64, code: I64, error: I64) -> I64 {
     }
     compiler_fs_error(kind, operation, path, code, compiler_fs_cause(operation, code), error)
 }
-// The cause of OS error `code`. A run that `jet run --allow=FS.Read:<path>`
+// The cause of OS error `code`. A run that `jet run --allow='FS.Read("<path>")'`
 // confined (JET_READ_SCOPE names the paths; JetBackend Loader.jet
 // x64_confine_reads) is refused every other read with EACCES: that cause
 // names the refusal E1803 and the paths the run may read.
@@ -37,7 +37,7 @@ compiler_fs_cause: fn(operation: I64, code: I64) -> I64 {
     if (scope == I64{0}) -> return cause
     jet_rt_string_builder_push(cause, rt_static_text("; E1803: this run may read only "))
     jet_rt_string_builder_push(cause, scope)
-    jet_rt_string_builder_push(cause, rt_static_text(" (`--allow=FS.Read:<path>`)"))
+    jet_rt_string_builder_push(cause, rt_static_text(" (`--allow='FS.Read(\"<path>\")'`)"))
     jet_rt_string_drop(scope)
     cause
 }

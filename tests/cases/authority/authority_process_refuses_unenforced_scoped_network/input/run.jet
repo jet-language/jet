@@ -2,7 +2,7 @@ package: { name: "run", authority: { allow: [Exec] } }
 use process: core.process
 
 run: fn() {
-    policy: Authority.from_rights(["Net:example.com"])
+    policy: Authority.from_rights(["Net(\"example.com\")"])
     spec: process.cmd(["/usr/bin/true"]).under(policy)
     if spec.plan() == {
         .Ok(_) -> print("accepted")
