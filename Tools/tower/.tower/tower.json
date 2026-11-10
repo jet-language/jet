@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98892,
+    "rev": 98893,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69148,7 +69148,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-10T16:19:04.056Z",
+      "updated": "2026-11-10T17:13:18.937Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -193554,158 +193554,156 @@
       "id": "D-SHARED-CYCLE2",
       "cardId": "c0r02x8n",
       "group": "memory",
-      "title": "Repair the write-time cycle check and build the opt-in collector, instead of a type-level rule",
-      "situation": "The owner approved replacing today's write-time cycle check with a type-level rule. Review then showed that rule is unsound as stated: its frozen exception covers nothing, and a type check misses loops through stored callbacks. Two ratified rulings already cover the topic: no accidental leaking loops, and an opt-in collector.\n\nThis ballot replaces the posted draft. A keeps both rulings and repairs today's check, which refuses good programs and accepts one leak. The approved type rule is option B.",
-      "gist": "Should Jet repair today's cycle check and build the opt-in collector, instead of a type-level rule?",
-      "lesson": "Two shared values that hold each other strongly are never freed: a memory leak. Jet checks each write that could close such a loop. Today's check refuses some safe programs and misses loops through stored functions. This vote decides whether to repair that check or replace it with a rule on type declarations.",
-      "explainer": "Words used here. A Shared value is one object that several holders use; it is freed when the last strong holder lets go. A weak link points to it without keeping it alive, and upgrade() returns None once it is gone.\n\nA Pool stores values and hands out IDs, small numbers that name an entry. #Policy(gc) opts types into a collector that frees loops.",
-      "story": "Mira builds a folder tree where each folder knows its parent through a weak link. Her add helper is refused with E0221, though no loop can form. Meanwhile a listener that holds its feed strongly is accepted and leaks.",
-      "inWild": "// Swift: strong cycles leak; weak or unowned breaks them by hand.\nclass Folder { var kids: [Folder] = []; weak var parent: Folder? }\n\n// CPython: counting plus a cycle collector that frees any loop.\n// Rust: Rc cycles leak; Weak breaks them, and no checker refuses the loop.",
-      "detail": "What this ballot decides. Which rule stops accidental strong loops of Shared values, and how intentional loops are freed. CYCLE1=C's law stays under A: a beginner never builds a leaking loop by accident, and intentional loops free or are refused. GC-OPTIN1=A's #Policy(gc) opt-in stays as ratified.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5), every probe gives the seed's result. Four safe programs are refused with E0221, This write can close a strong Shared cycle. They are w1, a doubly linked list with weak back links; w2, the folder tree with a weak parent and an add helper; w3, a task graph; and w5, a scene graph.\n\nToday's check also misses a real loop. w7 stores a listener that captures its feed strongly and is accepted, printing 1. In probe s20 the feed owns a stream that should close, and the program prints end but never closed 7. The cause is in Compiler/JetSema/Source/Sema/SharedCycles.jet: a lambda is treated as fresh (:159), and places of function type are skipped.\n\nCollector and denial, also probed today. c01 puts #Policy(gc) on the strong-parent Folder and still gets E0221, so GC-OPTIN1 is ratified but not built. c02 writes -[!Mem.Gc]> on a function and gets UnknownEffectLeaf, Mem.Gc isn't a declared effect. Neither failure is used below as an argument.\n\nThe rule under A, part 1: reach sets. For each value, the compiler tracks which existing Shared cells it may reach through strong handles, owned fields, lists, options, enums, generic instances and function captures. A new cell reaches only what its fields reach. Weak links and IDs add nothing.\n\nPart 2: the write rule. Writing a value v into a cell c is refused when c may be in v's reach set, unless c's type is opted in with #Policy(gc). A write is a field set, an element set, a push or a replace. Names changed in a loop get their reach sets by repeating to a fixed point, which accepts w1.\n\nPart 3: functions and hidden edges. Each function carries two inferred facts: which results may reach which parameters, and which parameter it stores into another. Callers check with their own reach sets, which accepts w2's add helper. A function value reaches whatever it captures strongly. That fact travels through returns, parameters, lists, trait objects and package interfaces, which refuses w7 and s20.\n\nBuild order for part 3. Function types do not yet carry facts: D-FNVAL-WRITE1=A, ratified on 2026-11-05, is unbuilt, and probe c04's fn(&Mobj) field is E0003. Until it lands, a function value read back out of a list or field counts as reaching every cell.\n\nThat is stricter, never unsound. Lambdas made in the same function, and callbacks passed as parameters, keep exact facts from parts 1 and 3, so w6 and the s22 listener still build.\n\nPart 4: unknown facts. A value from a foreign call, or the payload of a trait value, may reach every cell unless its type cannot hold a Shared. Storing it into a shared cell is refused unless the cell's type is opted in.\n\nDecoded data is not unknown. A decoder builds new values, so its result reaches only the cells it creates, and its reach facts are inferred like any function's. So cache[key] = decode(text) into a shared cell is accepted, and no common program pays for part 4.\n\nPart 5: one error. Every refusal is E0221. It shows the path that would close the loop, and lists three fixes: use a weak link, use a Pool and ID, or opt the type in, which jet fix writes. Hover and jet inspect show a function's reach facts; nobody writes them.\n\nThe collector, per GC-OPTIN1. It traces every cell reachable by strong links from an opted cell, opted or not, and finds dead loops by trial deletion, CPython's method, with no stack scan. It runs when enough opted cells were made since the last run, and at task exit. A weak link to a freed cell upgrades to None.\n\nFree-or-leak proof, CYCLE1's law. Every loop is closed by some write. Each write is proved safe, refused, or lands in an opted cell. So every loop holds an opted cell, and the collector frees every unreachable loop with its unopted members.\n\nClose in a collected loop. Every close runs once, all before any member is freed, in creation order. If a close makes a member reachable again, nothing in that loop is freed, Python's PEP 442 rule. Across tasks, per D-MEMREF-TASK1, an opted type whose values reach another task keeps E0221 until a thread-safe collector is proven.\n\n!Mem.Gc, per D-DENY-COST1 and D-MEMREF-LIFE1. A function that denies collection has writes into opted cells checked as if unopted. So inside it an opted loop is refused with E0221, and the error names the denial.\n\nDownsides of A, and how the design removes them. First, a flow rule is harder to predict than a type rule. The error therefore shows the exact path and three fixes, and hover shows each function's facts, so the reason is always visible.\n\nSecond, inferred facts cross package interfaces, so editing a body could change a public fact. The fact is recorded in the package interface. If the open API ballot passes, it is part of package.api, so a changed fact shows at the library's own jet check, before any caller sees it.\n\nWhat remains. Reparenting, taking a value out of a cell and storing it where that cell may reach, stays conservatively refused; the fix is a weak link, an ID or the opt-in. Close in a collected loop runs at collection, not at scope end; a weak link gives a prompt close, as probe s22 shows with end, then closed 7.\n\nThe same program under every option is the folder tree. Under A it is w2 as written, refused today and accepted by A. Under B it is a2, the Pool and ID form, which prints notes is in docs and root has 1 kid today. Under C it is b2, the inline form today's check accepts.\n\nCensus on the seed, from a type census over Core, Compiler, Jetpack, Tools, Examples and tests: 9,833 types. A type-level rule would refuse 9 of them, all in tests: 7 in tests/ui and 2 in tests/cases, with 238 uses. One generic type depends on its instance: ExpiringSecret in Core/Crypto/Vault.jet. Four Shared-reachable types hold function values, the sites part 3 covers.\n\nFive tests/ui files expect E0221 today on dev, plus the fixtures of Compiler/JetSema/Tests/SharedCycleParity.jet. Under A they keep E0221, since each closes a real strong loop, and w1, w2, w3 and w5 become new accepted tests.\n\nBeginner path. Write the program the natural way with weak parent links, and it builds. A strong loop gets E0221 with a path and three fixes.\n\nExpert path. #Policy(gc) for graphs that really are cyclic, !Mem.Gc for code that must not depend on the collector, and jet inspect for reach facts.\n\nOther options. B is the type-level rule the owner approved: a mutable Shared type may reach its own type only through Weak or an ID. Its frozen exception covers nothing, because freezing a value that holds a Shared is E1114. C keeps today's check unchanged. D collects every type that could form a loop, with no opt-in. E is Swift's and Rust's rule: no check, and loops leak unless broken by hand.\n\nB refuses the strong kids list of every tree, so trees move to Pool and ID, and a type check alone still misses loops through stored functions. C keeps four false refusals and one leak. D reverses GC-OPTIN1 and puts a collector under every program. E reverses CYCLE1=C's law that a beginner never leaks by accident.",
+      "title": "Shared cycles: precise write proofs, a complete type rule, or conservative safety",
+      "situation": "The current write checker rejects several acyclic trees and graphs built through helpers, yet accepts a stored callback that retains its owning feed. Independent probes show the feed remains alive after its external strong handle ends. Ratified rules require a leak-free safe default and explicit collection opt-in. This ballot chooses a more precise write proof, a complete conservative type rule, or the current conservative policy with its safety holes repaired. Collection and finalization remain real implementation work.",
+      "gist": "Should Shared use precise write proofs or a more conservative complete cycle rule?",
+      "lesson": "Strong ownership loops can keep each other alive after their callers leave. Weak links do not keep payloads alive. Safe Jet must prevent such leaks or collect explicitly opted types; a missing proof may still reject a safe program.",
+      "explainer": "Reachability includes owned containers, erased payloads and callback captures, not only visible Shared fields. A collector also needs exact external-root accounting and safe cleanup. A graph sketch alone proves neither.",
+      "story": "Mira's weak-parent tree fails when built through a helper, while an inline version works. Her feed callback forms a hidden strong loop. A aims to accept the tree and reject the loop; C chooses less precision but must still reject the leak.",
+      "inWild": "// Rust illustration, not executed here:\nstruct Folder {\n    kids: RefCell<Vec<Rc<Folder>>>,\n    parent: RefCell<Weak<Folder>>,\n}\n// CPython adds cyclic collection and resurrection-aware finalization.",
+      "detail": "Authority. CYCLE1=C requires beginner leak prevention and expert graphs. GC-OPTIN1=A requires explicit collection opt-in. A, B and C preserve both. D replaces the opt-in rule. E also needs an explicit I1 leak-freedom exception; it is not legal under current rules.\n\nEvidence. Reran every original cycle2, cycle and cy subject on a0.0.43. w1/w2/w3/w5 give E0221; their Pool alternatives and inline b2 run. w7 prints 1. s20 prints end without closed 7; s21/s22 print both. New review7-retained returns only a weak handle from the feed builder. Its upgrade succeeds afterward and Close never prints. This proves retained payload, not leaked byte count.\n\nOrigin/dev SharedCycles treats .Lambda as fresh and skips some types without visible Shared paths, supporting the capture-hole diagnosis. c01 rejects opted cycles; c02 rejects undeclared Mem.Gc. c04 rejects fn(&Mobj), one grammar case, not every callable fact. None executes the proposed collector.\n\nA tracks heap edges and alias identities, not snapshots attached only to variable names. Strong handles, owned containers, generics, captures and erased payloads contribute. Weak links and generation-checked IDs contribute no ownership edge. Loops and recursion converge conservatively; unknown edges widen rather than disappear.\n\nCheck every edge mutation: field/element writes, push, replace, swaps, callbacks, decoded graphs, foreign calls and later alias mutation. Account for replaced edges before adding new ones. Failures and rollback cannot leave unchecked edges. Concurrent writes require the canonical Shared synchronization contract.\n\nFunction summaries include results, captures, fresh allocations, retained stores and mutation of existing heap edges. Preserve them through callable storage and canonical package interfaces. Unknown callbacks remain conservative even as parameters. Local syntax does not prove exact capture reach. Complete summaries are required before shipping, not deferred behind FNVAL-WRITE1.\n\nDecoders have no freshness exemption. They can intern existing cells or invoke custom hooks. Cache insertion is accepted only when the actual summary excludes a back edge. Constructors and foreign values follow the same rule. Public summary changes affect compatibility; an optional package.api view renders the same fact.\n\nOpt-in. Every Shared payload type in an intentionally accepted cyclic component must opt in under A, B and C. Unopted types may remain acyclic owned leaves and close normally when released. Mixed cyclic components require all participant types to opt in or break back edges. The draft's hidden transitive collection of unopted cyclic types is removed.\n\nCollection. Candidate registration must not retain roots. Trace all strong edges, including callbacks and erased ownership. Count external roots exactly before release. Schedule pending candidates after the last external root ends, even without later allocations. Task exit and quiescent points complete pending work; allocation thresholds alone do not prove eventual freeing.\n\nCleanup. Reuse consuming Close and finishing-duty rules, not a second Python-style lifecycle hook. A cyclic payload cannot resurrect or traverse another dying component member during consuming cleanup. Check cleanup helpers transitively; reject an unproved opted cleanup contract at declaration. Independent owned resources still close once. Weak upgrades into a reclaiming component fail before cleanup begins.\n\nThis cleanup restriction has a cost: some resources need explicit settlement before the graph becomes unreachable. Preserve cleanup effects, duty failure handling and protected storage. A stopping cleanup cannot strand remaining members. PEP 442 does not establish creation order: its finalizer order is undefined, and resurrection differs from Jet consuming Close.\n\nTasks. MEMREF-LIFE1 already rejects potentially cyclic cross-task graphs until a thread-safe collector is proven. Apply the restriction to the whole reachable component. Per-task collection cannot race another task's counts or mutations. Universal graph acceptance is not promised.\n\n!Mem.Gc forbids reachable collector work in the denying call, not just closing writes. Cover allocation slow paths, scheduling, root drops, cleanup and indirect calls. Treating opted writes as unopted is necessary but insufficient. This does not forbid unrelated tasks from collecting.\n\nB gives stable declaration contracts with less flow sensitivity. Include owned graphs and conservative callback/erasure bounds; unknown captures cannot vanish. Recursive strong children may need Pool/ID, owned recursive values or explicitly collected types. Not every tree must move to Pool. A complete B cannot silently miss stored captures.\n\nC retains freshness conservatism but repairs callback/erasure leaks and implements ratified collection. It may still reject safe helpers. This is smaller precision scope, not permission to retain a known leak. D automatically collects only potentially cyclic types, with the same cleanup and task safeguards; acyclic-only programs need no collector.\n\nE allows strong loops to leak under an explicit rule exception. Tests and warnings cannot establish leak freedom. Swift and Rust intentionally offer predictable ownership and weak links. CPython supplies a mature collector and finalizer model with tracking and synchronization costs.\n\nNo probe measures A's proof cost, collector memory, pauses or tier parity. No census proves every shape remains accepted. Beginners use acyclic ownership and weak back links. Experts use Pool/ID or explicitly opted graph types, with visible cleanup and task limits.",
       "options": [
         {
           "key": "A",
-          "name": "Repair the write check and build the opt-in collector",
-          "detail": "Keep CYCLE1=C and GC-OPTIN1=A. The write check tracks reach through helpers, loops and stored functions, so safe trees build and hidden loops are refused. Opted types are collected.",
-          "technical": "Reach sets over strong handles, owned containment, generics and captures; fixed point for loops; inferred per-function reach and store facts carried in package interfaces; unknown values reach everything. Trial-deletion collector for opted types with PEP 442 close rules; per-task; !Mem.Gc checks opted writes as unopted.",
-          "code": "Folder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared.Weak<Folder>?\n}\n\nadd: fn(parent: Shared<Folder>, name: String) -> Shared<Folder> {\n    kid := shared Folder{name: name, kids: [], parent: Val(parent.downgrade())}\n    parent.kids.push(kid.copy())\n    kid\n}\n\nrun: fn() {\n    root := shared Folder{name: \"root\", kids: [], parent: None}\n    docs: add(root.copy(), \"docs\")\n    notes: add(docs.copy(), \"notes\")\n    if notes.parent == .Val(up) {\n        if up.upgrade() == .Val(p) -> print(\"notes is in {p.name}\")\n    }\n    print(\"root has {root.kids.len()} kid\")\n}\n// Today: E0221 at parent.kids.push (probe w2). Proposed (A): accepted."
+          "name": "Precise write proof and explicit collection",
+          "detail": "Improve flow-sensitive reach and mutation proofs; collect only explicitly opted cyclic participants.",
+          "technical": "One Shared ownership mechanism. Complete alias, callback, erased and package summaries; prove eventual collection, consuming cleanup and task boundaries. Some unprovable safe programs still fail.",
+          "code": "// Proposed A, same weak-parent folder workload as w2:\nFolder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared.Weak<Folder>?\n}\nadd: fn(parent: Shared<Folder>, name: String) -> Shared<Folder> {\n    kid := shared Folder{name: name, kids: [], parent: Val(parent.downgrade())}\n    parent.kids.push(kid.copy())\n    kid\n}\n// Same intended output: notes is in docs; root has 1 kid.\n// Current helper is E0221; a proven equivalent should build."
         },
         {
           "key": "B",
-          "name": "The type-level rule from installment 2",
-          "detail": "A mutable Shared type may reach its own type only through Weak or an ID. Trees, lists and graphs of Shared values move to Pool and ID.",
-          "technical": "A declaration check over the type graph replaces E0221's write check. The frozen exception is empty under E1114. Function-valued fields in Shared-reachable types need a conservative rule, since the type graph cannot see captures.",
-          "code": "Folder: struct {\n    name: String\n    kids: [ID<Folder>]\n    parent: ID<Folder>?\n}\n\nadd: fn(tree: &Pool<Folder>, parent: ID<Folder>, name: String) -> ID<Folder> {\n    kid: tree.add(Folder{name: name, kids: [], parent: Val(parent.copy())})\n    tree[parent].kids.push(kid.copy())\n    kid\n}\n\nrun: fn() {\n    tree := Pool<Folder>.new()\n    root: tree.add(Folder{name: \"root\", kids: [], parent: None})\n    docs: add(tree, root.copy(), \"docs\")\n    notes: add(tree, docs.copy(), \"notes\")\n    if tree[notes].parent == .Val(up) -> print(\"notes is in {tree[up].name}\")\n    print(\"root has {tree[root].kids.len()} kid\")\n}\n// Today: prints notes is in docs, root has 1 kid (probe a2). The w2 form is refused at its declaration."
+          "name": "Complete type-level rule",
+          "detail": "Reject unopted recursive strong type paths at declarations, including conservative callback and erasure bounds.",
+          "technical": "Less flow sensitivity and more stable contracts than A. Unknown captures cannot be treated as harmless. Keep explicit collector opt-in; acyclic ownership and Pool/ID cover rejected recursive Shared shapes.",
+          "code": "// Current a2 performs the same folder workload using IDs.\nFolder: struct { name: String, kids: [ID<Folder>], parent: ID<Folder>? }\n// Intended declaration rule refuses unopted recursive strong Shared children.\n// Unknown callback captures must also be covered, not skipped."
         },
         {
           "key": "C",
-          "name": "Keep today's check",
-          "detail": "No change: the current write check, with its false refusals of helpers and loops and its blind spot for stored functions.",
-          "technical": "SharedCycles.jet as today. #Policy(gc) and !Mem.Gc are built as ratified, without repairing the check.",
-          "code": "Folder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared.Weak<Folder>?\n}\n\nrun: fn() {\n    root := shared Folder{name: \"root\", kids: [], parent: None}\n    docs: shared Folder{name: \"docs\", kids: [], parent: Val(root.downgrade())}\n    root.kids.push(docs.copy())\n    notes: shared Folder{name: \"notes\", kids: [], parent: Val(docs.downgrade())}\n    docs.kids.push(notes.copy())\n    if notes.parent == .Val(up) {\n        if up.upgrade() == .Val(p) -> print(\"notes is in {p.name}\")\n    }\n    print(\"root has {root.kids.len()} kid\")\n}\n// Today (C): prints notes is in docs, root has 1 kid (probe b2)."
+          "name": "Conservative checker with mandatory safety repairs",
+          "detail": "Keep current freshness conservatism; close callback and erased-payload holes and build ratified collection.",
+          "technical": "Smaller precision scope than A. w2 may remain refused while inline b2 works. No known safe-code leak is retained; collector and cleanup obligations are the same as A.",
+          "code": "// Current b2 avoids the helper's conservative refusal:\nroot := shared Folder{name: \"root\", kids: [], parent: None}\ndocs: shared Folder{name: \"docs\", kids: [], parent: Val(root.downgrade())}\nroot.kids.push(docs.copy())\n// Same tree output, but helper reuse can remain restricted."
         },
         {
           "key": "D",
-          "name": "Collect every type that can loop",
-          "detail": "No opt-in. Every type that could form a strong loop is collected automatically, and E0221 goes away.",
-          "technical": "Reverses D-GC-OPTIN1=A. The trial-deletion collector covers every possibly cyclic type; !Mem.Gc refuses such types in denying code.",
-          "code": "Folder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared<Folder>?\n}\n\nadd: fn(parent: Shared<Folder>, name: String) -> Shared<Folder> {\n    kid := shared Folder{name: name, kids: [], parent: Val(parent.copy())}\n    parent.kids.push(kid.copy())\n    kid\n}\n\nrun: fn() {\n    root := shared Folder{name: \"root\", kids: [], parent: None}\n    docs: add(root.copy(), \"docs\")\n    notes: add(docs.copy(), \"notes\")\n    if notes.parent == .Val(p) -> print(\"notes is in {p.name}\")\n    print(\"root has {root.kids.len()} kid\")\n}\n// Today: E0221 at parent.kids.push (probe d2). Proposed (D): accepted and collected."
+          "name": "Automatic collection for cyclic types",
+          "detail": "Remove explicit collection opt-in for potentially cyclic types; collect their unreachable loops automatically.",
+          "technical": "Explicitly replaces GC-OPTIN1's no-hidden-collection rule. Retain the same cleanup, effect and cross-task safeguards. Collector cost applies to potentially cyclic graphs, not every acyclic program.",
+          "code": "// Proposed D, same folder relationships with strong parents:\nFolder: struct { name: String, kids: [Shared<Folder>], parent: Shared<Folder>? }\n// The strong-parent version is accepted only with working collection.\n// Same intended tree output; lifetime and pause costs differ."
         },
         {
           "key": "E",
-          "name": "No check: loops leak unless broken by hand",
-          "detail": "As in Swift and Rust: any write is allowed, a strong loop leaks, and weak links are a convention. A leak report finds loops at run time.",
-          "technical": "Removes E0221 and reverses D-SHARED-CYCLE1=C's beginner law. jet test --leaks reports unfreed loops after a test.",
-          "code": "Folder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared<Folder>?\n}\n\nadd: fn(parent: Shared<Folder>, name: String) -> Shared<Folder> {\n    kid := shared Folder{name: name, kids: [], parent: Val(parent.copy())}\n    parent.kids.push(kid.copy())\n    kid\n}\n\nrun: fn() {\n    root := shared Folder{name: \"root\", kids: [], parent: None}\n    docs: add(root.copy(), \"docs\")\n    notes: add(docs.copy(), \"notes\")\n    if notes.parent == .Val(p) -> print(\"notes is in {p.name}\")\n    print(\"root has {root.kids.len()} kid\")\n}\n// Proposed (E): accepted; the root, docs and notes loop is never freed."
+          "name": "Allow leaking strong loops",
+          "detail": "Remove cycle prevention and rely on weak links or manual breaking; strong-only loops can remain allocated.",
+          "technical": "Requires an explicit I1 leak-freedom exception and replacement of CYCLE1's safe default. Without those approvals it cannot ship as safe Jet. Test leak reports cannot remove this exception.",
+          "code": "// Proposed exception, not valid under current I1:\na.next = Val(b.copy())\nb.next = Val(a.copy())\n// Dropping external handles leaves the strong loop alive."
         }
       ],
       "comparisons": [
         {
           "lang": "Swift",
-          "note": "ARC counts; a strong cycle leaks unless one side is weak or unowned.",
-          "code": "class Folder { var kids: [Folder] = []; weak var parent: Folder? }"
+          "note": "ARC uses strong ownership; weak/unowned links break loops. Predictable ownership is its strength; no general cycle collector is promised. Documentation checked, illustration not executed.",
+          "code": "weak var parent: Folder?"
         },
         {
-          "lang": "Python",
-          "note": "Counting plus a cycle collector; PEP 442 runs finalizers in a loop before freeing it.",
-          "code": "import gc\ngc.collect()"
+          "lang": "CPython",
+          "note": "Reference counting plus cyclic collection. PEP 442 permits resurrection and does not define finalizer order. Current free-threaded collection pauses threads. It is not evidence for Jet consuming Close.",
+          "code": "// Documentation comparison only; no Python benchmark was run."
         },
         {
           "lang": "Rust",
-          "note": "Rc cycles leak; Weak breaks them, and the compiler does not refuse a loop.",
-          "code": "struct Folder { kids: RefCell<Vec<Rc<Folder>>>, parent: RefCell<Weak<Folder>> }"
+          "note": "Rc's Weak does not retain the payload and upgrades optionally; strong ownership loops remain until broken. Documentation checked, illustration not executed.",
+          "code": "let parent: Weak<Folder>;"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A keeps both ratified rulings and makes them true: safe trees build, hidden loops are refused, and intentional loops free. No program moves to Pool and ID.",
+        "why": "A targets the demonstrated false refusals without abandoning explicit collection. It needs complete proof and cleanup contracts; the current probes do not establish that implementation.",
         "gains": [
-          "Safe helpers, loops and trees build; w1, w2, w3 and w5 stop failing.",
-          "Loops through stored listeners are refused, closing the s20 leak.",
-          "Intentional cyclic graphs free under #Policy(gc), as ratified."
+          "More safe helper-built graphs can compile.",
+          "Stored-capture leaks must be closed."
         ],
         "losses": [
           {
-            "loss": "Moving a value out of a cell and into a place it reaches is refused.",
-            "mitigation": "E0221 lists a weak link, an ID or the opt-in, and jet fix writes the opt-in."
+            "loss": "Flow proofs can widen and reject safe aliases or unknown calls.",
+            "mitigation": "Show the conservative edge, not a fabricated exact cycle; preserve B and C as simpler alternatives."
           },
           {
-            "loss": "A close inside a collected loop runs at collection, not scope end.",
-            "mitigation": "A weak link gives a prompt close, as probe s22 shows."
+            "loss": "Collected resource cleanup cannot resurrect or traverse dying component members.",
+            "mitigation": "Check consuming cleanup summaries and explicitly settle resources needing richer interactions."
           },
           {
-            "loss": "Until D-FNVAL-WRITE1=A is built, a function value read back out of storage counts as reaching every cell.",
-            "mitigation": "Local lambdas and callback parameters keep exact facts; the rule relaxes when function types carry them."
+            "loss": "Mixed unopted cyclic types and cross-task cyclic graphs remain restricted.",
+            "mitigation": "Opt all cyclic participants in, use weak/ID edges, or supply the ratified thread-safe collector proof."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B moves every tree to Pool and ID and still misses loops through stored functions."
+            "reason": "B is simpler and stable, but can reject acyclic instances of recursive Shared types."
           },
           {
             "key": "C",
-            "reason": "C keeps four false refusals and the s20 leak."
+            "reason": "C is a smaller mandatory safety repair, but leaves current helper false refusals."
           },
           {
             "key": "D",
-            "reason": "D reverses GC-OPTIN1 and puts a collector under every program."
+            "reason": "D avoids cycle annotations but replaces the owner's explicit opt-in rule."
           },
           {
             "key": "E",
-            "reason": "E lets a beginner leak by accident, reversing CYCLE1=C."
+            "reason": "E needs an I1 exception; manual conventions do not provide Jet's current safe guarantee."
           }
         ],
-        "tradeoff": "A more precise checker to build, in return for keeping every program shape and the ratified law."
+        "tradeoff": "Greater precision and proof complexity, not universal acceptance or zero-cost collection."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Part 3 carries reach facts in function types, but c04 shows D-FNVAL-WRITE1=A unbuilt, so A now states a sound interim rule. All 22 earlier probes match on a0.0.43, and the census drops an agent name."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran all original subjects and proved retained payload through a weak handle. Repaired alias, decoder, opt-in, cleanup and denial gaps; B and conservative C are now complete alternatives."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-SHARED-CYCLE2/probes/cycle2, probes/cycle (s19 to s22) and probes/cy (c01 to c04). c04 is E0003 at fn(&Mobj). The lambda case is SharedCycles.jet:159. Read D-SHARED-CYCLE1, D-GC-OPTIN1 and D-FNVAL-WRITE1 in Tower.",
+      "checkInstructions": "Independent logs are probes/*/review7-*.run.txt, including review7-retained. No proposed collector was executed. Before shipping, prove mutation aliases, callbacks, custom decoders, mixed opt-in SCCs, eventual idle collection, consuming cleanup, denial and cross-task boundaries on every tier.",
       "surface": {
-        "gist": "Should Jet repair today's cycle check and build the opt-in collector, instead of a type-level rule?",
-        "lesson": "Two shared values that hold each other strongly are never freed. Today's check refuses some safe programs and misses loops through stored functions. This vote decides whether to repair it or replace it with a rule on types.",
+        "gist": "Should Shared use precise write proofs or a more conservative complete cycle rule?",
+        "lesson": "The current checker rejects safe helper-built trees and misses stored captures. Safe delivery must close leaks regardless of the chosen precision. Collection remains explicit unless D replaces that rule.",
         "trio": {
           "current": {
-            "note": "A safe tree is refused.",
-            "code": "parent.kids.push(kid.copy())\n// Error [E0221]: This write can close a strong Shared cycle"
+            "note": "w2 fails, while a captured feed stays alive after external handles end.",
+            "code": "parent.kids.push(kid.copy()) // E0221 in w2"
           },
           "wild": {
-            "lang": "Swift",
-            "note": "Weak breaks loops by hand.",
-            "code": "weak var parent: Folder?"
+            "lang": "Rust",
+            "note": "Weak parent links avoid strong ownership loops; illustration not executed.",
+            "code": "parent: Weak<Folder>"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Repair the check",
-            "gist": "Track reach through helpers and functions; collect opted types.",
+            "name": "Precise write proof",
+            "gist": "Track aliases and captures; collect explicitly opted graphs.",
             "gains": [
-              "Safe trees build.",
-              "Hidden loops refused."
+              "More safe helpers accepted."
             ],
             "losses": [
-              "Reparenting refused."
+              "Complex proof and cleanup restrictions."
             ],
             "proposed": {
-              "code": "kid := shared Folder{name: name, kids: [], parent: Val(parent.downgrade())}\nparent.kids.push(kid.copy())   // accepted"
+              "code": "// Prove w2's weak-parent insertion acyclic."
             }
           },
           {
             "key": "B",
-            "name": "Type rule",
-            "gist": "A Shared type reaches itself only through Weak or ID.",
+            "name": "Complete type rule",
+            "gist": "Conservative declaration checks include capture bounds.",
             "gains": [
-              "Checked at the declaration."
+              "Stable, simpler contracts."
             ],
             "losses": [
-              "Trees move to Pool."
+              "Some acyclic instances rejected."
             ],
             "proposed": {
               "code": "Folder: struct { kids: [ID<Folder>], parent: ID<Folder>? }"
@@ -193713,79 +193711,78 @@
           },
           {
             "key": "C",
-            "name": "Today",
-            "gist": "Keep the current check.",
+            "name": "Conservative safety repair",
+            "gist": "Close leaks without A's precision expansion.",
             "gains": [
-              "Nothing to build."
+              "Smaller precision change."
             ],
             "losses": [
-              "False refusals and a leak."
+              "Helper false refusals remain."
             ],
             "proposed": {
-              "code": "docs: shared Folder{...}\nroot.kids.push(docs.copy())"
+              "code": "// Inline b2 can work; hidden capture cycles must fail."
             }
           },
           {
             "key": "D",
-            "name": "Collect all",
-            "gist": "Every possibly cyclic type is collected.",
+            "name": "Automatic collector",
+            "gist": "Collect potentially cyclic types without opt-in.",
             "gains": [
-              "Any shape builds."
+              "No collection annotation needed."
             ],
             "losses": [
-              "A collector everywhere."
+              "Reverses explicit opt-in."
             ],
             "proposed": {
-              "code": "parent: Shared<Folder>?   // accepted, collected"
+              "code": "parent: Shared<Folder>? // collected when cyclic"
             }
           },
           {
             "key": "E",
-            "name": "No check",
-            "gist": "Loops leak unless broken by hand.",
+            "name": "Allow leaks",
+            "gist": "Strong loops may remain allocated.",
             "gains": [
-              "Simplest compiler."
+              "No cycle proof machinery."
             ],
             "losses": [
-              "Beginners leak."
+              "Requires explicit I1 exception."
             ],
             "proposed": {
-              "code": "parent: Shared<Folder>?   // accepted, leaks"
+              "code": "// Strong loops leak unless broken manually."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A keeps both ratified rulings and makes them true, with no program moved to Pool and ID.",
+          "why": "More precise safety addresses the helper failures while preserving collection opt-in.",
           "gains": [
-            "Safe trees build.",
-            "Hidden loops refused."
+            "More accepted safe graphs."
           ],
           "losses": [
             {
-              "loss": "Reparenting refused.",
-              "mitigation": "Weak link, ID or opt-in; jet fix writes it."
+              "loss": "Unknown graphs, cleanup and cross-task cycles remain constrained.",
+              "mitigation": "Report uncertainty and retain explicit weak/ID alternatives."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Trees move to Pool."
+              "reason": "Stable but more conservative."
             },
             {
               "key": "C",
-              "reason": "False refusals, a leak."
+              "reason": "Smaller repair, fewer helper acceptances."
             },
             {
               "key": "D",
-              "reason": "Collector everywhere."
+              "reason": "Changes collection authority."
             },
             {
               "key": "E",
-              "reason": "Beginners leak."
+              "reason": "Needs a leak-freedom exception."
             }
           ],
-          "tradeoff": "A more precise checker, for every program shape and the ratified law."
+          "tradeoff": "Precision costs proof work; no universal acceptance claim."
         }
       },
       "draft": false,
@@ -193794,115 +193791,82 @@
       "designAway": [
         {
           "option": "A",
-          "loss": "A flow rule is harder to predict than a type rule.",
+          "loss": "Snapshots can miss later mutation through aliases.",
           "attempts": [
-            "Publish the rule as a type check; that is B, which refuses every strong kids list.",
-            "Show the exact loop path and three fixes in E0221, and each function's reach facts on hover and in jet inspect."
+            "Track abstract heap edges and mutation summaries to a conservative fixed point."
           ],
-          "result": "Reduced: the reason for every refusal is on screen."
+          "result": "Required proof work; a result-reaches-parameter summary alone is insufficient."
         },
         {
           "option": "A",
-          "loss": "Editing a library body could change a public reach fact.",
+          "loss": "Opted collection could silently include unopted cycles.",
           "attempts": [
-            "Check facts at publish time; that is later than the library's own check.",
-            "Record them in package.api under D-API-SURFACE1, so a change shows at the library's own jet check."
+            "Require every cyclic Shared participant to opt in; acyclic owned leaves retain ordinary cleanup."
           ],
-          "result": "Removed if D-API-SURFACE1 passes; otherwise the caller's build reports it."
+          "result": "No hidden transitive opt-in; mixed cyclic graphs may need annotations."
         },
         {
           "option": "A",
-          "loss": "Decoded data could be counted as unknown and refuse every decoded cache.",
+          "loss": "Python-style resurrection conflicts with consuming cleanup.",
           "attempts": [
-            "Opt cache types into the collector.",
-            "Infer a decoder's reach facts like any function's: it builds new values, so its result reaches only cells it creates."
+            "Keep canonical Close and prohibit traversal or resurrection of dying component members during cleanup.",
+            "Settle resources explicitly when that restriction is unsuitable."
           ],
-          "result": "Removed: cache[key] = decode(text) is accepted."
-        },
-        {
-          "option": "A",
-          "loss": "Function types cannot carry reach facts until D-FNVAL-WRITE1=A is built (c04).",
-          "attempts": [
-            "Refuse every stored function value in a shared cell.",
-            "Count only function values read back out of storage as reaching everything; local lambdas and callback parameters keep exact facts."
-          ],
-          "result": "Reduced to a narrow, sound case that relaxes when the facts land."
-        },
-        {
-          "option": "A",
-          "loss": "Reparenting a value into a place its old cell reaches is refused.",
-          "attempts": [
-            "Track moves out of a cell exactly; that needs whole-program flow.",
-            "Offer a weak link, an ID or the opt-in in E0221; jet fix writes the opt-in."
-          ],
-          "result": "Reduced to a one-line fix."
-        },
-        {
-          "option": "A",
-          "loss": "A close in a collected loop runs at collection, not scope end.",
-          "attempts": [
-            "Collect at every scope end; that costs every program.",
-            "Use a weak link for prompt close, as s22 prints end, then closed 7."
-          ],
-          "result": "Reduced; prompt close stays one weak link away."
+          "result": "A real cleanup restriction remains; no second lifecycle hook is introduced."
         },
         {
           "option": "B",
-          "loss": "Trees, lists and graphs move to Pool and ID, and stored functions are still missed.",
+          "loss": "Callbacks hide edges from the visible type graph.",
           "attempts": [
-            "Add a frozen exception; it covers nothing, since freezing a value that holds a Shared is E1114.",
-            "Add a conservative rule for function-valued fields."
+            "Include capture bounds; treat unknowns as possible back edges."
           ],
-          "result": "Not removed: the strong kids list of every tree stays refused."
+          "result": "Sound conservative alternative, with more refused payloads."
         },
         {
           "option": "C",
-          "loss": "Four false refusals (w1, w2, w3, w5) and one leak (w7, s20).",
+          "loss": "The current checker accepts hidden cycles.",
           "attempts": [
-            "Document the workarounds.",
-            "Fix the lambda case at SharedCycles.jet:159 alone; the helper and loop refusals remain."
+            "Fix capture and erased reachability without promising A's full precision."
           ],
-          "result": "Not removed without becoming A."
+          "result": "Mandatory safety repaired; false refusals can remain."
         },
         {
           "option": "D",
-          "loss": "A collector runs under every program that could loop.",
+          "loss": "Collection becomes implicit.",
           "attempts": [
-            "Collect only types proven cyclic.",
-            "Skip collection under !Mem.Gc."
+            "Limit tracking to potentially cyclic types and report its cost."
           ],
-          "result": "Reverses D-GC-OPTIN1=A either way."
+          "result": "Cost reduced, but the explicit opt-in rule still changes."
         },
         {
           "option": "E",
-          "loss": "A beginner can leak by accident.",
+          "loss": "Safe programs can leak.",
           "attempts": [
-            "Report leaks after each test with jet test --leaks.",
-            "Warn on strong back links."
+            "Leak tests and weak-link warnings."
           ],
-          "result": "Reverses D-SHARED-CYCLE1=C's law."
+          "result": "Not eliminated; explicit I1 exception is required."
         }
       ],
       "reports": [
         {
-          "title": "Shared cycle check review: probes, build order and adversarial review",
+          "title": "Shared cycles: independent retention probe and different-family review",
           "path": "Docs/audits/2026-11-10-shared-cycle-review.md",
-          "note": "All cycle2, cycle and cy probes match on a0.0.43; new c04 shows D-FNVAL-WRITE1=A unbuilt, so part 3 gets a sound interim rule; lambda-as-fresh at SharedCycles.jet:159; 5 tests/ui E0221 files on dev; Swift, CPython, PEP 442 and Rust sources."
+          "note": "All original probes rerun; weak upgrade proves retained payload. Corrected alias proofs, decoder freshness, mixed opt-in, consuming Close, cost denial and B/C framing."
         },
         {
-          "title": "PEP 442: safe object finalization",
+          "title": "PEP 442",
           "url": "https://peps.python.org/pep-0442/"
         },
         {
-          "title": "CPython garbage collector design",
+          "title": "CPython GC design",
           "url": "https://raw.githubusercontent.com/python/cpython/main/InternalDocs/garbage_collector.md"
         },
         {
-          "title": "Swift automatic reference counting",
+          "title": "Swift ARC",
           "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/"
         },
         {
-          "title": "Rust std::rc::Weak",
+          "title": "Rust Weak",
           "url": "https://doc.rust-lang.org/std/rc/struct.Weak.html"
         }
       ]
@@ -200116,6 +200080,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:13:18.937Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SHARED-CYCLE2",
+      "note": ""
+    },
     {
       "at": "2026-11-10T17:06:58.730Z",
       "by": "Main",
