@@ -74,12 +74,13 @@ signature_part_nonzero: fn(x: bn.Mpi) -> Bool Never! { bn.core_check_zero_ct(x.p
 usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp.n.p.len() != 0 }
 
 /// The signing loop (mbedtls_ecdsa_sign_restartable without a restart
-/// context): the nonce k from rng, the blinding of k G from blind, or from
-/// rng itself with `shared_rng`, as mbedtls_ecdsa_sign passes one generator
-/// for both. r and s are computed in N's limbs with no division: x(k G) mod
-/// N by mod_ct, the products by Montgomery multiplication, and k^-1 by the
-/// constant-time inverse, which needs no blinding (mbedtls blinds its
-/// inverse with a draw t).
+/// context): the nonce k from rng, the blinding of k G and the draw t from
+/// blind, or from rng itself with `shared_rng`, as mbedtls_ecdsa_sign passes
+/// one generator for both. r and s are computed in N's limbs with no
+/// division: x(k G) mod N by mod_ct, the products by Montgomery
+/// multiplication, and the inverse by the constant-time inverse. As in
+/// mbedtls, s = t (e + r d) / (k t) mod N, so neither the inverse nor a
+/// product ever sees k or e + r d unblinded.
 sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B, shared_rng: Bool{false}) -> ECDSASignature ecp.EcpError! {
     if !usable_group(grp) -> return Err(.BadInput)
     if !ecp.privkey_valid(grp, d) -> return Err(.InvalidKey)
@@ -106,17 +107,30 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
             r = bn.mod_ct(pt.x, grp.n, rr) ?? return Err(.Mpi(err))
             if signature_part_nonzero(r) -> break
         }
-        // Step 5: e from the hash. Step 6: s = (e + r d) / k mod N.
+        // Step 5: e from the hash, and the draw t that blinds the inverse.
+        // Step 6: s = t (e + r d) / (k t) mod N.
+        t := if shared_rng -> ecp.gen_privkey(grp, rng) else -> ecp.gen_privkey(grp, blind)
+        tl := bn.limbs_of(t, nl)
+        kl := bn.limbs_of(k, nl)
         rd := cipher.words(nl)
         bn.core_mul_mod(rd, r.p, dl, grp.n.p, nl, mm, rr.p, work)
         sum := cipher.words(nl)
         bn.core_add_mod(sum, e.p, rd, grp.n.p, nl)
-        inv := bn.gcd_modinv_odd(k, grp.n, inverse: true) ?? return Err(.Mpi(err))
+        sum_t := cipher.words(nl)
+        bn.core_mul_mod(sum_t, sum, tl, grp.n.p, nl, mm, rr.p, work)
+        kt := bn.zeros(nl) ?? return Err(.Mpi(err))
+        bn.core_mul_mod(kt.p, kl, tl, grp.n.p, nl, mm, rr.p, work)
+        inv := bn.gcd_modinv_odd(kt, grp.n, inverse: true) ?? return Err(.Mpi(err))
         s := bn.zeros(nl) ?? return Err(.Mpi(err))
-        bn.core_mul_mod(s.p, inv.i.p, sum, grp.n.p, nl, mm, rr.p, work)
+        bn.core_mul_mod(s.p, inv.i.p, sum_t, grp.n.p, nl, mm, rr.p, work)
         cipher.wipe_words(rd)
         cipher.wipe_words(sum)
+        cipher.wipe_words(sum_t)
+        cipher.wipe_words(kt.p)
         cipher.wipe_words(inv.i.p)
+        cipher.wipe_words(tl)
+        cipher.wipe_words(t.p)
+        cipher.wipe_words(kl)
         cipher.wipe_words(k.p)
         if signature_part_nonzero(s) {
             cipher.wipe_words(dl)

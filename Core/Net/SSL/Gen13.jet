@@ -151,23 +151,34 @@ ssl_tls13_certificate_verify_failed: fn(ssl: &ssldefs.SSLContext) -> ssldefs.SSL
     ssldefs.SSLError.HandshakeFailure
 }
 
+// Whether the peer's key can make a TLS 1.3 signature of `algorithm`, of
+// key type `kind`: a key of that type and, for ECDSA, on the curve the
+// algorithm names (RFC 8446 4.2.3). mbedtls 3.6 checks the type only.
+ssl_tls13_key_fits: fn(key: pk.PKContext, algorithm: Int, kind: oids.PKType) -> Bool Never! {
+    if !pk.pk_can_do(key, kind) -> return false
+    curve: ssltls.ssl_tls13_sig_alg_curve(algorithm)
+    curve == ecp.GroupID.Unknown || pk.pk_get_ec_group_id(key) == curve
+}
+
 // Parse the CertificateVerify at in_buf[buf..<end] and verify its
 // signature over verify_buffer with the peer's key
 // (ssl_tls13_parse_certificate_verify). The algorithm must be one we
-// offered and suit the key.
+// offered, one RFC 8446 allows in a CertificateVerify (so not PKCS#1 v1.5,
+// which mbedtls 3.6 lets through when offered for certificates), and suit
+// the key.
 ssl_tls13_parse_certificate_verify: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, verify_buffer: [U8]) ssldefs.SSLError! {
     p := buf
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     algorithm: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
-    if !ssltls.ssl_sig_alg_is_offered(ssl, algorithm) -> return Err(ssl_tls13_certificate_verify_failed(ssl))
+    if !ssltls.ssl_sig_alg_is_offered(ssl, algorithm) || !ssltls.ssl_tls13_sig_alg_for_cert_verify_is_supported(algorithm) -> return Err(ssl_tls13_certificate_verify_failed(ssl))
     parts := if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(algorithm) == {
         .Ok(found) -> found
         .Err(_) -> return Err(ssl_tls13_certificate_verify_failed(ssl))
     }
     sn: ssl.session_negotiate
-    key_fits: if ssl.spool[sn].peer_cert == {
-        .Val(chain) -> chain.len() > 0 && pk.pk_can_do(chain[0].pk, parts.pk_type)
+    key_fits: if &ssl.spool[sn].peer_cert == {
+        .Val(chain) -> chain.len() > 0 && ssl_tls13_key_fits(chain[0].pk, algorithm, parts.pk_type)
         None -> false
     }
     if !key_fits -> return Err(ssl_tls13_certificate_verify_failed(ssl))

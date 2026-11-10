@@ -41,6 +41,7 @@ use {
     srv13: __core_net_ssl_srv13
     keys13: __core_net_ssl_keys13
     // The test vectors only.
+    gen13: __core_net_ssl_gen13
     aead: __core_crypto_aead
     drbg: __core_crypto_drbg
     ecdsa: __core_crypto_ecdsa
@@ -351,7 +352,10 @@ ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
 }
 
 /// Free a context's state (mbedtls_ssl_free): its buffers are wiped and
-/// its sessions and transforms released.
+/// its sessions and transforms released. The pools hold what C reaches
+/// through pointers, so every pool entry is wiped too, and the
+/// configuration's PSK (mbedtls_ssl_config_free's part, since the context
+/// owns its configuration).
 ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
     ssldefs.ssl_wipe(ssl.out_buf)
     ssldefs.ssl_wipe(ssl.in_buf)
@@ -364,6 +368,12 @@ ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
     }
     ssldefs.ssl_transform_release(ssl, ssl.transform_application)
     ssldefs.ssl_session_release(ssl, ssl.session)
+    loop i in 0..<ssl.tpool.len() -> ssldefs.ssl_transform_release(ssl, i)
+    loop i in 0..<ssl.spool.len() -> ssldefs.ssl_session_release(ssl, i)
+    if &ssl.conf.psk == {
+        .Val(p) -> ssldefs.ssl_wipe(p)
+        None -> {}
+    }
     ssl = ssldefs.SSLContext{}
 }
 
@@ -1152,6 +1162,15 @@ ssl_tls13_sig_alg_for_cert_verify_is_supported: fn(sig_alg: Int) -> Bool Never! 
     sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256 || sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384 || sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP521R1_SHA512 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512
 }
 
+/// The curve a TLS 1.3 ECDSA signature algorithm names, Unknown for an
+/// algorithm that names none.
+ssl_tls13_sig_alg_curve: fn(sig_alg: Int) -> ecp.GroupID Never! {
+    if sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256 -> return .Secp256r1
+    if sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384 -> return .Secp384r1
+    if sig_alg == ssldefs.TLS1_3_SIG_ECDSA_SECP521R1_SHA512 -> return .Secp521r1
+    ecp.GroupID.Unknown
+}
+
 /// mbedtls_ssl_tls13_sig_alg_is_supported.
 ssl_tls13_sig_alg_is_supported: fn(sig_alg: Int) -> Bool Never! {
     if sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512 -> return true
@@ -1351,7 +1370,10 @@ ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
 
 /// Perform one step of the handshake (mbedtls_ssl_handshake_step). A step
 /// that fails with a fatal alert pending sends it, and fails with the
-/// alert's reason.
+/// alert's reason. When a TLS 1.3 step ends the handshake, what the
+/// handshake holds is freed: its secrets, key shares, transcript and
+/// handshake transform. The empty structure stays for the post-handshake
+/// NewSessionTicket, as mbedtls keeps the structure itself until ssl_free.
 ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if !ssl.has_conf || !ssl.has_handshake || ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return Err(.BadInputData)
     ssl_prepare_handshake_step(ssl, rng) ?? return Err(err)
@@ -1363,6 +1385,7 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
         }
         else -> {}
     }
+    if ssl.state == ssldefs.SSL_HANDSHAKE_OVER && ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> ssl_handshake_free(ssl)
 }
 
 /// Perform the handshake to its end (mbedtls_ssl_handshake). DTLS needs the
@@ -2465,8 +2488,9 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
     // the X.509 check passed. An empty chain has no key and no extensions,
     // which pass them.
     if chain.len() > 0 {
-        // TLS 1.3 signature algorithms name the curve, which is checked
-        // with the signature.
+        // The curve check is TLS 1.2's: a TLS 1.3 ECDSA signature algorithm
+        // names the curve, and the CertificateVerify's key must be on it
+        // (ssl_tls13_key_fits).
         if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 && pk.pk_can_do(chain[0].pk, .ECKey) && !ssl_check_curve(ssl, pk.pk_get_ec_group_id(chain[0].pk)) {
             ssl.spool[sn].verify_result = ssl.spool[sn].verify_result.bit_or(x509.X509_BADCERT_BAD_KEY)
             if !failed {
@@ -2848,6 +2872,71 @@ vec_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
 vec_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
     k: aead.gcm_key(cipher.aes_key(key, false) ?? return None)
     aead.gcm_decrypt(k, iv, aad, sealed, 16) ?? return None
+}
+
+// A TLS 1.3 client's check of a server CertificateVerify, under
+// `algorithm`, whose signature over `signed` is `signature` and whose
+// certificate key is `key`: 0 when the engine takes it, else the alert it
+// pends.
+vec_certificate_verify: fn(key: &&pk.PKContext, algorithm: Int, signature: [U8], signed: [U8]) -> Int {
+    conf := ssldefs.SSLConfig{}
+    ssl_config_defaults(conf, ssldefs.SSL_IS_CLIENT, ssldefs.SSL_TRANSPORT_STREAM, ssldefs.SSL_PRESET_DEFAULT) ?? panic("defaults: {err}")
+    ssl := ssldefs.SSLContext{}
+    ssl_setup(ssl, conf) ?? panic("setup: {err}")
+    ssl.tls_version = ssldefs.SSL_VERSION_TLS1_3
+    sn: ssldefs.ssl_session_alloc(ssl)
+    ssl.session_negotiate = sn
+    crt := x509crt.x509_crt_new()
+    crt.pk = key
+    chain := [x509crt.X509Crt]{}
+    chain.push(crt)
+    ssl.spool[sn].peer_cert = Val(chain)
+    body := [U8]{ssldefs.ssl_byte(algorithm >> 8), ssldefs.ssl_byte(algorithm), ssldefs.ssl_byte(signature.len() >> 8), ssldefs.ssl_byte(signature.len())}
+    body.extend(signature.copy())
+    ssl.in_buf = body.copy()
+    if gen13.ssl_tls13_parse_certificate_verify(ssl, 0, body.len(), signed) == .Err(_) -> return ssl.alert_type
+    0
+}
+
+vec_localhost_key: fn() -> pk.PKContext {
+    rng := vec_rng()
+    pem_key: core.files.read_bytes("tests/fixtures/tls/localhost.key.pem") ?? panic("{err}")
+    pkparse.pk_parse_key(pem_key, None, rng) ?? panic("localhost.key.pem: {err}")
+}
+
+vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
+    rng := vec_rng()
+    key := pk.pk_new()
+    pk.pk_setup(key, Val(oids.PKType.ECKey)) ?? panic("pk_setup: {err}")
+    key.ec = ecp.gen_key(id, rng) ?? panic("gen_key: {err}")
+    key
+}
+
+#Test("A TLS 1.3 CertificateVerify must use an algorithm RFC 8446 allows there, and an ECDSA one must name the key's curve") {
+    rng := vec_rng()
+    signed: "TLS 1.3 CertificateVerify content".bytes()
+    sha256: hashes.hash(.SHA256, signed)
+    sha384: hashes.hash(.SHA384, signed)
+    // RSASSA-PSS is taken; PKCS#1 v1.5, which the default configuration
+    // offers for certificate signatures only, is refused with a signature
+    // that verifies.
+    pss_key := vec_localhost_key()
+    pss: pk.pk_sign_ext(.RSASSAPSS, pss_key, Val(hashes.Md.SHA256), sha256, 1024, rng) ?? panic("PSS: {err}")
+    assert_eq(vec_certificate_verify(pss_key, ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256, pss, signed), 0)
+    pkcs1_key := vec_localhost_key()
+    pkcs1: pk.pk_sign(pkcs1_key, Val(hashes.Md.SHA256), sha256, 1024, rng) ?? panic("PKCS#1: {err}")
+    pk.pk_verify_ext(.RSA, None, pkcs1_key, Val(hashes.Md.SHA256), sha256, pkcs1) ?? panic("the PKCS#1 v1.5 signature does not verify: {err}")
+    assert_eq(vec_certificate_verify(pkcs1_key, ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256, pkcs1, signed), ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR)
+    // A P-256 key signs under ecdsa_secp256r1_sha256, but not under
+    // ecdsa_secp384r1_sha384 with a signature over the SHA-384 hash that
+    // verifies.
+    p256_key := vec_ec_key(.Secp256r1)
+    p256: pk.pk_sign(p256_key, Val(hashes.Md.SHA256), sha256, 200, rng) ?? panic("ECDSA: {err}")
+    assert_eq(vec_certificate_verify(p256_key, ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256, p256, signed), 0)
+    mismatch_key := vec_ec_key(.Secp256r1)
+    mismatch: pk.pk_sign(mismatch_key, Val(hashes.Md.SHA384), sha384, 200, rng) ?? panic("ECDSA: {err}")
+    pk.pk_verify_ext(.ECDSA, None, mismatch_key, Val(hashes.Md.SHA384), sha384, mismatch) ?? panic("the P-256 signature over SHA-384 does not verify: {err}")
+    assert_eq(vec_certificate_verify(mismatch_key, ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384, mismatch, signed), ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR)
 }
 
 #Test("NIST CAVP GCM vectors seal and open with AES-128 and AES-256, 96-bit IVs and 128-bit tags") {

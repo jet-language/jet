@@ -93,6 +93,29 @@ __TLSState: struct {
     closed: Bool
 }
 
+// The engine's secrets and the plaintext the stream holds die wiped: when the
+// last handle to the state goes, after a failed handshake included, the
+// engine is freed (mbedtls_ssl_free) and the buffers zeroed. `close` does the
+// same at once.
+impl __TLSState.Close {
+    close: fn(&&self) {
+        ssl := self.ssl.move()
+        ssltls.ssl_free(ssl)
+        buffer := self.buffer.move()
+        ssldefs.ssl_wipe(buffer)
+        pending := self.pending.move()
+        ssldefs.ssl_wipe(pending)
+    }
+}
+
+// Free the engine and wipe the buffers of a stream that is done.
+__release: fn(&tls: __TLSState) Never! {
+    ssltls.ssl_free(tls.ssl)
+    ssldefs.ssl_wipe(tls.buffer)
+    ssldefs.ssl_wipe(tls.pending)
+    tls.pending = [U8]{}
+}
+
 // One engine read: the byte count or the status, and the bytes read.
 __Got: struct {
     status: Int
@@ -238,13 +261,15 @@ impl TLSStream {
     }
 
     // Sends close_notify, shuts down the socket's write side and closes the
-    // stream. Closing a closed stream succeeds.
+    // stream, freeing the engine and wiping its buffers. Closing a closed
+    // stream succeeds.
     close: fn(self) IOError! -[Net, Time.Wait]> {
         state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
         if guard.value.closed -> return Ok()
         _: __close_write(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
         guard.value.closed = true
+        __release(guard.value)
         Ok()
     }
 
@@ -1286,6 +1311,99 @@ __utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
     assert(!__utf8_cut([U8]{255, 98}))
     assert(!__utf8_cut([U8]{226, 130, 65}))
     assert_eq(__utf8_valid([U8]{226, 130, 172, 33}), 4)
+}
+
+// Moves what one engine queued for the network to the other's input, so a
+// test runs both ends of a handshake in memory.
+__test_pump: fn(&from: __TLSState, &to: __TLSState) Never! {
+    to.ssl.bio.rx.extend(from.ssl.bio.tx)
+    from.ssl.bio.tx.clear()
+}
+
+// One engine handshake call: 0 when it is over, else the status it stopped at.
+__test_step: fn(&tls: __TLSState) -> Int Never! {
+    if tls.ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return 0
+    if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) -> return __code(e)
+    0
+}
+
+// Whether a finished handshake kept none of what it needed only to finish:
+// the key shares, the secrets, the transcript and the handshake transform.
+__test_handshake_freed: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
+    share: if &ssl.handshake.ecdh_ctx == {
+        .Val(_) -> true
+        None -> false
+    }
+    transcript: if &ssl.handshake.fin_sha256 == {
+        .Val(_) -> true
+        None -> false
+    }
+    if share || transcript || ssl.handshake.transform_handshake != -1 -> return false
+    ssl.handshake.randbytes.len() == 0 && ssl.handshake.premaster.len() == 0 && ssl.handshake.finished_digest.len() == 0 && ssl.handshake.tls13_app_secret.len() == 0 && ssl.handshake.client_handshake_traffic_secret.len() == 0 && ssl.handshake.server_handshake_traffic_secret.len() == 0
+}
+
+__test_zero: fn(bytes: [U8]) -> Bool Never! {
+    loop b in bytes {
+        if b != (U8{0}) -> return false
+    }
+    true
+}
+
+// Whether a state's engine was freed and its buffers wiped.
+__test_released: fn(tls: __TLSState) -> Bool Never! {
+    !tls.ssl.has_conf && tls.ssl.tpool.len() == 0 && tls.ssl.spool.len() == 0 && tls.ssl.in_buf.len() == 0 && tls.pending.len() == 0 && __test_zero(tls.buffer)
+}
+
+#Test("A finished TLS 1.2 or 1.3 handshake keeps none of its secrets, and close and release free the engine and wipe the plaintext") {
+    cert: String.from_bytes(core.files.read_bytes("tests/fixtures/tls/localhost.cert.pem") ?? panic("{err}")) ?? ""
+    key: String.from_bytes(core.files.read_bytes("tests/fixtures/tls/localhost.key.pem") ?? panic("{err}")) ?? ""
+    versions: [Int]{ssldefs.SSL_VERSION_TLS1_2, ssldefs.SSL_VERSION_TLS1_3}
+    loop version in versions {
+        listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+        addr: net.listener_local_socket_addr(listener) ?? panic("listen address: {err}")
+        client_tcp := net.tcp_connect_addr(addr) ?? panic("connect: {err}")
+        server_tcp := net.tcp_accept(listener) ?? panic("accept: {err}")
+        client_context := __context_new(ssldefs.SSL_IS_CLIENT) ?? panic("client context: {err}")
+        client_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+        client_context.conf.max_tls_version = version
+        server_context := __server_context(cert, key) ?? panic("server context: {err}")
+        server_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+        client := __open(client_context, client_tcp, "") ?? panic("client: {__ssl_text(err)}")
+        server := __open(server_context, server_tcp, "") ?? panic("server: {__ssl_text(err)}")
+        rounds := 0
+        loop client.ssl.state != ssldefs.SSL_HANDSHAKE_OVER || server.ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
+            rounds += 1
+            assert(rounds < 20)
+            sent: __test_step(client)
+            assert(sent == 0 || sent == C_WANT_READ)
+            __test_pump(client, server)
+            answered: __test_step(server)
+            assert(answered == 0 || answered == C_WANT_READ)
+            __test_pump(server, client)
+        }
+        assert_eq(client.ssl.tls_version, version)
+        assert(__test_handshake_freed(client.ssl))
+        assert(__test_handshake_freed(server.ssl))
+        // Application bytes land in the server's plaintext buffer.
+        message: "a secret line".bytes()
+        wrote := 0
+        if sslmsg.ssl_write(client.ssl, message, message.len(), client.rng) == .Ok(n) -> wrote = n
+        assert_eq(wrote, message.len())
+        __test_pump(client, server)
+        got := 0
+        if sslmsg.ssl_read(server.ssl, server.buffer, C_RECORD_BYTES, server.rng) == .Ok(n) -> got = n
+        assert_eq(got, message.len())
+        assert(!__test_zero(server.buffer))
+        // close: close_notify goes out, then the engine is freed and the
+        // plaintext wiped.
+        stream := TLSStream{state: Val(shared server)}
+        _: stream.close() ?? panic("close: {err}")
+        state: __state(stream) ?? panic("the closed stream lost its state")
+        guard := state.guard_edit()
+        assert(__test_released(guard.value))
+        __release(client)
+        assert(__test_released(client))
+    }
 }
 
 // Buffers decrypted bytes for `ready`; true once a read would not block.
