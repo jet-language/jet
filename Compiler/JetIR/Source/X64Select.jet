@@ -269,6 +269,15 @@ IRX64Emitter: struct {
     // now (-1 none).
     picks: [Int]
     select: Int
+    // Per instruction: of a Loop whose head only tests its exits
+    // (ir_x64_mark_test), the offset past the head's last exit jcc (else
+    // -1), whether a back edge repeated the head (ir_x64_rotate), and that
+    // last exit's BrIf. `marked` counts the slow paths, relocations and
+    // branches when the innermost Loop opened.
+    tests: [Int]
+    rotated: [Bool]
+    exits: [Int]
+    marked: Int
     // Whether the function holds a StreamStore: its non-temporal stores
     // are fenced (sfence) before each call but a stop poll's, an in-place
     // template, a tail jump and the epilogue, so a callee, a caller or
@@ -1708,8 +1717,9 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int, op: IROp) Never! {
 // the positive constant d. The shifted high product is the quotient: no +1
 // rounds it toward zero, as a negative n would need. n stays in its own
 // register (its home, else r11). A Div's quotient is stored from rdx. A
-// Rem's n - q * d is computed as -d * q + n into dst's own register when
-// that is not n's (else rdx), with no copy of n or of the result.
+// Rem's n - q * d is computed as -d * q + n into dst's own register: when
+// that is not n's, by the three-operand imul; when it is (n dies there),
+// by adding -d * q, built in rdx, to it. Neither copies n or the result.
 ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int) Never! {
     n: ir_x64_use(e, m, f, al, f.a[at], X64_R11)
     magic: ir_x64_magic(d)
@@ -1720,15 +1730,19 @@ ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, a
     if magic.shift > 0 -> x64_shift_ri(e.code, X64Shift.Sar, X64_RDX, magic.shift)
     if f.op[at] == .Div -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
     home: ir_x64_home_reg(m, f, al, f.dst[at], X64_RDX)
-    target := if home == n -> X64_RDX else -> home
+    if x64_fits_i32(d) && home != n {
+        x64_imul_rri(e.code, home, X64_RDX, 0 - d)
+        x64_alu_rr(e.code, X64Alu.Add, home, n)
+        return ir_x64_store(e, m, f, al, f.dst[at], home)
+    }
     if x64_fits_i32(d) {
-        x64_imul_rri(e.code, target, X64_RDX, 0 - d)
+        x64_imul_rri(e.code, X64_RDX, X64_RDX, 0 - d)
     } else {
-        target = X64_RDX
         x64_mov_ri(e.code, X64_RCX, 0 - d)
         x64_imul_rr(e.code, X64_RDX, X64_RCX)
     }
-    x64_alu_rr(e.code, X64Alu.Add, target, n)
+    target: if home == n -> n else -> X64_RDX
+    x64_alu_rr(e.code, X64Alu.Add, target, if home == n -> X64_RDX else -> n)
     ir_x64_store(e, m, f, al, f.dst[at], target)
 }
 
@@ -2916,11 +2930,13 @@ ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     if e.open.len() == 0 -> return ir_x64_fail(e, f, at, "End without an open construct")
     here: e.code.bytes.len()
     row: e.open.len() - 1
+    opener: e.open[row]
     if e.heads[row] >= 0 {
-        e.loops.push(e.heads[row])
+        // A rotated loop (ir_x64_rotate) runs its head test once: its
+        // passes start past it.
+        e.loops.push(if e.rotated[opener] -> e.tests[opener] else -> e.heads[row])
         e.loop_ends.push(here)
     }
-    opener: e.open[row]
     e.end_of[opener] = here
     if e.falses[row] >= 0 -> ir_x64_patch(e, e.falses[row], here)
     kept := 0
@@ -2940,6 +2956,86 @@ ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     _ := e.open.pop()
     _ := e.heads.pop()
     _ := e.falses.pop()
+}
+
+// The slow paths, relocations and branches laid out so far.
+ir_x64_marks: fn(e: IRX64Emitter) -> Int Never! {
+    e.colds.len() + e.relocs.len() + e.branches.len() + e.end_sites.len()
+}
+
+// The most code a loop's back edges repeat of its head (ir_x64_rotate).
+IR_X64_ROTATE_BYTES: 64
+
+// After the BrIf at `at`: when it leaves the innermost open Loop and every
+// instruction before it in that Loop's head only computes (no construct,
+// call or return) or is a BrIf out of the Loop, with no slow path or
+// relocation and no branch but those BrIfs' in at most
+// IR_X64_ROTATE_BYTES, the Loop's back edges may repeat the head up to it
+// (ir_x64_rotate): re-run where the Loop's own values hold what they hold
+// at its head, the same instructions select the same code, and the head
+// runs on every pass anyway.
+ir_x64_mark_test: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
+    row: e.open.len() - 1
+    if row < 0 || e.heads[row] < 0 || f.b[at] < 1 || e.code.bytes.len() - e.heads[row] > IR_X64_ROTATE_BYTES -> return
+    opener: e.open[row]
+    exits := 1
+    loop k in (opener + 1)..<at {
+        if e.absorbed[k] -> next
+        if f.op[k] == {
+            .Block | .Loop | .If | .Else | .End | .Br | .Return | .Unreachable | .Call | .CallRuntime | .CallIndirect | .StreamStore -> return
+            .BrIf -> {
+                if f.b[k] < 1 -> return
+                exits += 1
+            }
+            else -> {}
+        }
+    }
+    if ir_x64_marks(e) != e.marked + exits -> return
+    e.tests[opener] = e.code.bytes.len()
+    e.exits[opener] = at
+}
+
+// Loop rotation: a back edge (Br 0) to a Loop whose head only tests its
+// exits (ir_x64_mark_test) repeats that head instead of jumping to it, its
+// last exit test inverted into a jcc back past the head while the loop goes
+// on, then that exit's edge, which falls through when only the Ends up to
+// the exit's come next. Each pass then runs one branch fewer.
+ir_x64_rotate: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int) -> Bool Never! {
+    if f.a[at] != 0 -> return false
+    row: ir_x64_target(e, 0)
+    if row < 0 || e.heads[row] < 0 -> return false
+    opener: e.open[row]
+    if e.tests[opener] < 0 -> return false
+    test: e.exits[opener]
+    loop k in (opener + 1)..<test {
+        if f.op[k] == .BrIf && !e.absorbed[k] {
+            e.at = k
+            e.code.at = k
+            exit: ir_x64_truth(e, m, f, al, f.a[k])
+            ir_x64_branch(e, f, k, f.b[k], true, exit)
+        } else {
+            ir_x64_select_at(e, m, f, al, tables, k)
+        }
+    }
+    e.at = at
+    e.code.at = at
+    truth: ir_x64_truth(e, m, f, al, f.a[test])
+    site: x64_jcc_rel32(e.code, x64_cond_invert(truth))
+    ir_x64_patch(e, site, e.tests[opener])
+    e.rotated[opener] = true
+    // The exit's row, depth rows out from here: its End comes next when
+    // the next depth + 1 instructions are the Ends of the rows up to it.
+    depth: f.b[test]
+    out: row - depth
+    if e.heads[out] < 0 && e.select < 0 && at + depth + 1 < f.op.len() {
+        falls := true
+        loop k in (at + 1)..<(at + depth + 2) {
+            if f.op[k] != .End -> falls = false
+        }
+        if falls -> return true
+    }
+    ir_x64_branch(e, f, at, depth, false, X64Cond.E)
+    true
 }
 
 // The condition that holds when Bool `slot` is true: a fused comparison's
@@ -3089,7 +3185,10 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
         }
         .Block -> ir_x64_open(e, at, -1, -1)
         // ir_x64_relax aligns the head of an innermost loop.
-        .Loop -> ir_x64_open(e, at, e.code.bytes.len(), -1)
+        .Loop -> {
+            ir_x64_open(e, at, e.code.bytes.len(), -1)
+            e.marked = ir_x64_marks(e)
+        }
         .If -> {
             // Both arms run; the comparison waits for the End.
             if e.picks[at] >= 0 {
@@ -3128,10 +3227,13 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             }
             ir_x64_end(e, f, at)
         }
-        .Br -> ir_x64_branch(e, f, at, f.a[at], false, X64Cond.E)
+        .Br -> {
+            if !ir_x64_rotate(e, m, f, al, tables, at) -> ir_x64_branch(e, f, at, f.a[at], false, X64Cond.E)
+        }
         .BrIf -> {
             truth: ir_x64_truth(e, m, f, al, f.a[at])
             ir_x64_branch(e, f, at, f.b[at], true, truth)
+            ir_x64_mark_test(e, f, at)
         }
         // A tail jump's Return: the Call before it already left.
         .Return -> {
@@ -3993,12 +4095,15 @@ ir_x64_wrap_return: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64
 // Function row `row` (`f`, borrowed from `m`).
 ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: x64_code_logged(ir_x64_logged(tables, row)), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, streams: f.op.contains(IROp.StreamStore)}
+    e := IRX64Emitter{code: x64_code_logged(ir_x64_logged(tables, row)), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore)}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
         e.absorbed.push(false)
         e.picks.push(-1)
+        e.tests.push(-1)
+        e.rotated.push(false)
+        e.exits.push(-1)
     }
     loop at in 0..<f.op.len() {
         if f.op[at] != .If -> next
@@ -4520,10 +4625,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(x64_assemble_template(restore, [String]{}, false, false).error != None)
 }
 
-// count(n) counts i up to n; the Loop is line 3 and its first instruction
-// line 4, so the line table's row for line 4 is the head. The innermost
-// loop's head starts on its alignment, which the function's start keeps.
-#Test("An innermost Loop's head starts on its alignment") {
+// count(n) counts i up to n; the Loop is line 3, its exit test line 4 and
+// its body line 5. The back edge repeats the test (ir_x64_rotate), so the
+// passes start at the body: the line table's row for line 5 starts on the
+// innermost loop's alignment, which the function's start keeps.
+#Test("A rotated innermost Loop's passes start on its alignment") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
@@ -4546,13 +4652,13 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     _ := ir_emit(f, IROp.Return, -1, i, -1, -1, 6)
     m.functions.push(f)
     compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
-    head := -1
+    body := -1
     loop row in compiled.debug.lines {
-        if row.line == 4 && head < 0 -> head = row.at
+        if row.line == 5 && body < 0 -> body = row.at
     }
-    assert(head > 0)
+    assert(body > 0)
     assert(compiled.function.align >= X64_FUNCTION_ALIGN)
-    assert_eq(head % compiled.function.align, 0)
+    assert_eq(body % compiled.function.align, 0)
 }
 
 // step(x) is x / 2 for an even x, else 3x + 1, both arms wrapping word
