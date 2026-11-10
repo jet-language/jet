@@ -229,9 +229,13 @@ diagnostic_order_root_first: fn(diagnostics: &&[Diagnostic]) -> [Diagnostic] Nev
     ordered
 }
 
+// A label's types print by the shared display rule
+// (diagnostic_display_identities), as the message's do, with clashes judged
+// over the label.
 diagnostic_with_label: fn(diagnostic: &&Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
-    updated.labels.push(DiagnosticLabel{span: span, message: message})
+    shown: diagnostic_display_identities(message, diagnostic_identity_clashes(message.bytes()))
+    updated.labels.push(DiagnosticLabel{span: span, message: shown})
     updated
 }
 
