@@ -13,10 +13,9 @@ unless it leaves through `.copy()`? Or should it move out by itself, as D-CONTEX
 1. **A's precedent for function-type facts is unbuilt.** A closes the r8 hole, where a closure capturing
    arena data is accepted, by carrying escape facts in function and trait-method types, "the way
    D-FNVAL-WRITE1 keeps write parameters". D-FNVAL-WRITE1=A was ratified on 2026-11-05. New probe r15 declares
-   `State: struct { action: fn(&Mobj) }` and gets E0003 "Expected a type, found `&`". Function types carry no
-   per-parameter facts today. A now states the build order: until those facts exist, a call through a
-   function value or trait method inside the block counts as keeping. That is stricter and never unsound, and
-   it is a new, named loss.
+   `State: struct { action: fn(&Mobj) }` and gets E0003 "Expected a type, found `&`".
+   This proves that grammar case is missing, not that every callable fact is absent.
+   A now requires complete callable provenance before shipping instead of presenting a temporary blanket refusal as completed design.
 2. **package.api needs one more column.** D-API-SURFACE1's A lists each row's effects, error sets, markers
    and `#if` conditions. Escape facts are not among them, so A names them as one more column there.
 3. **Line range and wording.** `ir_context_block` is at `Compiler/JetIR/Source/BuildTransact.jet:250-275`
@@ -44,8 +43,7 @@ unless it leaves through `.copy()`? Or should it move out by itself, as D-CONTEX
 | r14 store view in list | E0201 | |
 | r15 `fn(&Mobj)` field (new) | E0003 | FNVAL-WRITE1 unbuilt |
 
-Census: `#Context(allocator:` appears in 5 Jet files: one example, three tests and one parser message. It is
-not in Core or Jetpack. This is unchanged.
+No occurrence count is used as proof of complete migration or unchanged output after allocator retargeting starts.
 
 ## Peers (sourced)
 
@@ -57,14 +55,50 @@ not in Core or Jetpack. This is unchanged.
 
 | Claim | Attack | Verdict |
 |---|---|---|
-| Function values carry escape facts like write marks | Is the precedent built? (r15) | **Failed**: unbuilt. A now treats such calls as keeping until it lands |
-| Escape facts recorded in package.api | D-API-SURFACE1 row contents | Held only with one added column, now stated |
-| No silent library copy | Store in a dependency | Holds: the same E0631 as a local store |
+| Function values carry escape facts like write marks | Is the precedent built? (r15) | **Holds within limits**: one grammar case fails; complete escape summaries remain build work |
+| Escape facts recorded in package.api | D-API-SURFACE1 row contents | Conditional on that open ballot; canonical package checking must enforce them regardless |
+| One copy fixes every library store | Fresh internal allocation, shared graphs and read-only dependencies | **Fails**; copying an argument cannot repair all retaining stores |
 | Probe results | Rerun on a0.0.43 | Hold |
 | Plain language | "you"/"your" | **Failed**. Fixed |
 
 ## Remaining losses
 
-- An unmodified caching library is refused inside the block until it adds one `.copy()`.
-- One `.copy()` per exit, offered by E0631.
-- Until D-FNVAL-WRITE1=A is built, every function-value call inside the block counts as keeping.
+- Caching dependencies may need updates or calls moved outside the block.
+- Destination-directed copy needs a proven use graph; ambiguous targets are refused.
+- Shared contents, pools, resources and erased callables need complete graph provenance.
+- Automatic relocation remains a strong alternative for unchanged library reuse.
+
+## Different-family review (GPT, 2026-11-10)
+
+Reviewer: BallotReview7. Read live CONTEXT1=A, ALLOC-SITE1=A, JAI-CONTEXT1=A,
+FNVAL-WRITE1=A, ALLOC-TRAIT1=A and HTTP-REQMEM1=A; API-SURFACE1 is still open.
+The newer CONTEXT1 already assigns spawned tasks the program allocator and their own scratch.
+
+| Claim | Attack and independent evidence | Verdict |
+|---|---|---|
+| A merely implements the owner's approved block | CONTEXT1 explicitly relocates escaping owned values automatically. | **Fails**; A is an escape-policy amendment, E preserves the ratification |
+| Current output proves arena behavior | Reran all r subjects. r1 and r4 outputs agree; origin/dev BuildTransact:250-275 ignores non-deadline guards. | **Fails**; current output is heap behavior |
+| Closure success proves an actual dangling read | r8 and r8b accept arena-view captures, while r6 directly returning a view gets E0631. No memory-corruption measurement was performed. | **Holds within limits** as a static-coverage inconsistency, not observed use-after-free |
+| One `.copy()` selects the correct destination | A temporary or indirect call may hide or conflict over the destination; copying normally inside the block would allocate there. | **Fails** as an unspecified guarantee; define canonical copy placement through proven uses and reject ambiguity |
+| A Pool can leave by copy and all IDs stay valid | An ID carries owner identity; byte-cloning a pool does not establish ownership-preserving identity. | **Fails**; older stable identities may leave, otherwise require a valid copy contract or refuse |
+| Shared program storage automatically makes contents safe | A persistent cell can contain arena-backed text or erased payloads. | **Fails**; check the complete contents graph |
+| All new resources must be opened outside | A stable independent handle need not depend on arena bytes. Conversely a wrapper can hide such bytes. | **Fails** as a blanket rule; provenance, not creation time, decides |
+| Copying caller arguments repairs unknown callees | A callee may allocate fresh data and cache it in older state without retaining an argument. | **Fails**; summaries include fresh retention, and some repairs require dependency changes |
+| r15 proves no function-type facts exist | It only rejects fn(&Mobj). | **Fails**; no broad absence claim follows |
+| Task heap startup is a new amendment | Newer CONTEXT1 already states it. | **Fails**; corrected decision history |
+| B only loses library convenience | Zig's allocator guide explicitly recommends allocator parameters for libraries; polymorphic APIs support composition without twins. | **Fails** as framing; B's explicit dependency benefit stated |
+| C is shown under Unsafe | Original code only said so in a trailing comment. | **Fails**; actual #Unsafe block now appears, with manual copy for matched output |
+| D has no user context but still displays one | Original D code retained #Context and an unused arena. | **Fails**; removed both, and denied private Core allocator powers |
+| E must test and copy at every store | Static provenance can eliminate checks and many stores contain no new arena dependency. No A/E implementation was measured. | **Fails**; implicit cost remains a policy tradeoff, not an every-store speed result |
+| Every exit rewinds | Unwinding and cancellation need cleanup; kill/abort cannot promise it. Nested marks and borrowers complicate ordering. | **Holds within stated limits** after specifying once-only unwind and exclusions |
+
+Independent logs are `probes/review7-*.run.txt`. All 18 r subjects were exercised with a0.0.43.
+r10 gives E0904; r11b/r14 give E0201; r13/r13b still print 1 under the allocation-denial probes.
+None establishes destination-copy behavior, complete allocator denial, performance or tier parity.
+Read Odin's context and allocator sections, Zig's allocator guide and bumpalo documentation.
+bumpalo explicitly distinguishes arena reclamation from running Drop; wrappers are needed for destructors.
+Peer illustrations were not executed.
+
+Recommendation: A is defensible with the repaired semantics, but reviewer prefers existing E for unchanged-library reuse.
+No option added. Do not post the owner-approved slogan, universal one-line copy fixes, pool-ID preservation,
+new task-policy reversal, heap probes as arena proof, or an every-store overhead comparison.
