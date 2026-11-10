@@ -29,6 +29,7 @@ use {
         StrPart,
         Type,
         TypedLitBody,
+        LIST_TYPE_OWNER,
         dimension_display_name,
         expr_span,
         measure_expression,
@@ -1270,9 +1271,11 @@ jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span
         }
         if name == jfmt_internal_name("jet.task") && jfmt_fmt_task_surface_method(f, method, args) -> return
     }
-    jfmt_fmt_expr(f, receiver, JFMT_PREC_POSTFIX)
+    // A list-type static `[T#N].filled(value)` prints its owner type as written.
+    list_type_owner: if receiver == .Ident(name, _, _) -> name == LIST_TYPE_OWNER && owner_type_args.len() == 1 else -> false
+    if list_type_owner -> jfmt_fmt_type(f, owner_type_args[0]) else -> jfmt_fmt_expr(f, receiver, JFMT_PREC_POSTFIX)
     receiver_end: expr_span(receiver).end
-    jfmt_fmt_call_type_args(f, owner_type_args, receiver_end)
+    if !list_type_owner -> jfmt_fmt_call_type_args(f, owner_type_args, receiver_end)
     // S69 keep an author-placed break before `.method(...)`.
     if jfmt_chain_break_between(f, receiver_end, method_span.start) {
         jfmt_emit_trailing(f, receiver_end)

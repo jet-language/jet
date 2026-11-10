@@ -4,6 +4,7 @@
 use {
     math: core.math
     jet_foundation.[
+        LIST_TYPE_OWNER,
         AST_NODE_GENERATED,
         AccessConvention,
         MARKER_NUMERIC,
@@ -5772,12 +5773,17 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
 }
 
 sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // `[Int?].filled(…)` and `[Int?#3].filled(None)`: the parser gave the
+    // list type as the call's one owner type argument.
+    if receiver == .Ident(owner, _, _) && owner == LIST_TYPE_OWNER && owner_type_args.len() == 1 {
+        return sema_expr_check_list_type_static(owner_type_args[0], method, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     // `[T].with_capacity(n)` writes a list type where a receiver value goes.
     // A list type is not a static owner, so name the `List` static rather
     // than report `T` as an unknown value (E0107).
     if receiver == .ListLit(elements, _, _) && elements.len() == 1 {
         if elements[0] == .Ident(element, _, _) && sema_expr_names_list_element_type(element, scopes) {
-            diagnostics.push(sema_error("E0311", method_span, "`[{element}]` has no `{method}`", "`[{element}]` before `.` is a list type, and a list type has no static methods; list statics belong to `List`", "write `List.try_with_capacity(n) ?? …` where `[{element}]` is the expected type, for an empty list with room for n items, or `[{element}]{{…}}` for a list of values"))
+            diagnostics.push(sema_expr_list_type_static_error(Type.List{element: Type.Named{name: element}}, method, method_span))
             return None
         }
     }
@@ -5859,6 +5865,66 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, scopes, state, diagnostics)
     }
     checked
+}
+
+// A static call on a written list type. `[T#N].filled(value)` is N copies of
+// one value: it is the hand-written form `v: T = value` then `[T#N]{v, …, v}`
+// in a frame of its own, so the value is checked against `T` and evaluated
+// once, every slot but the last shares it and the last takes it. A copy that
+// `T` refuses is refused there (E0211). Any other static is E0311.
+sema_expr_check_list_type_static: fn(written: Type, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if written == .FixedList(element, _) && method == "filled" {
+        if args.len() != 1 {
+            diagnostics.push(sema_error("E0104", method_span, "`{type_name(written)}.filled` expects 1 argument, got {args.len()}", "`filled` takes the one value every slot holds; the length is the type's `#N`", "Call `.filled(value)` with one value."))
+            return None
+        }
+        length: sema_loop_fixed_length(sema_expr_expected_type(written, environment, program)) ?? {
+            diagnostics.push(sema_error("E0311", method_span, "`{type_name(written)}.filled` needs a known length", "`filled` writes one copy of the value per slot, so the length must be a number when the program is built", "write the length as a number, as in `[{type_name(element)}#3].filled(value)`"))
+            return None
+        }
+        span: Span{start: method_span.start, end: args[0].span.end}
+        name: "__jet_filled_{method_span.start}"
+        binding: Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: method_span, sigil_span: None, pattern: None, ty: Val(element), ty_span: Val(method_span), init: args[0].expr.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+        slots: loop _ in 0..<length -> Expr.Ident{name: name, span: method_span, id: AST_NODE_GENERATED}
+        filled: Expr.TypedLit{head: Val(written.copy()), body: TypedLitBody.Elements{elements: slots}, span: span, id: AST_NODE_GENERATED}
+        return_type: scopes.return_type.copy()
+        mark: sema_scope_mark(scopes)
+        sema_scope_enter(scopes, state, "filled@{method_span.start}")
+        checked_binding: sema_check_statements([Stmt]{binding}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
+        if !checked_binding.complete {
+            sema_scope_leave(scopes, state)
+            return None
+        }
+        value: sema_check_expression(filled, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_scope_leave(scopes, state)
+            return None
+        }
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+        sema_scope_rollback(scopes, mark)
+        body := checked_binding.value
+        body.push(TStmt.ExprStmt{value: value, span: span})
+        return Val(sema_tree_node(value.ty, TExprKind.InlineBlock{body: body}, span))
+    }
+    diagnostics.push(sema_expr_list_type_static_error(written, method, method_span))
+    None
+}
+
+// E0311 for a static named through a list type, which has none but the
+// fixed array's `filled`. The fix names the list literal and `[T#N].filled`.
+sema_expr_list_type_static_error: fn(written: Type, method: String, method_span: Span) -> Diagnostic Never! {
+    shown: type_name(written)
+    element: if written == {
+        .List(inner) | .FixedList(inner, _) -> type_name(inner)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> shown.copy()
+    }
+    fixed: if written == .FixedList(_, _) -> true else -> false
+    why: if fixed -> "`{shown}` before `.` is a fixed-array type, whose one static is `filled`" else -> "`{shown}` before `.` is a list type, and a list type has no static methods; list statics belong to `List`"
+    fix: if {
+        fixed -> "write `{shown}.filled(value)` for a copy of one value in every slot, or the literal `{shown}{{…}}` for a fixed array of values"
+        method == "filled" -> "write the list literal `[{element}]{{…}}` for a list of values, or `[{element}#N].filled(value)` for a fixed array of N copies of one value"
+        else -> "write `List.try_with_capacity(n) ?? …` where `{shown}` is the expected type, for an empty list with room for n items, or `{shown}{{…}}` for a list of values"
+    }
+    sema_error("E0311", method_span, "`{shown}` has no `{method}`", why, fix)
 }
 
 // Whether `name`, written alone inside `[…]` before `.`, spells a type: a

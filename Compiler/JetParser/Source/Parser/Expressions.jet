@@ -37,6 +37,7 @@ use {
         TypedLitBody,
         UnOp,
         UnitFormat,
+        LIST_TYPE_OWNER,
         ast_empty_call_arg_flags,
         ast_empty_lambda_meta,
         diagnostic_from_registry,
@@ -768,6 +769,57 @@ parser_try_parse_typed_literal: fn(state: &JetParserState, depth: Int) -> Parsed
     Val(parser_parse_typed_literal_body(state, Val(parsed.ty), parsed.span, depth + 1))
 }
 
+// A list type before `.name(`: `[Int?].filled(3, None)` or
+// `[Int?#3].filled(None)`. Only a bracket whose contents can't be a list
+// literal counts, one holding an optional element's `?` or a fixed length's
+// `#`, so `[x].len()` stays a call on a list literal.
+parser_list_type_owner_ahead: fn(state: &JetParserState) -> Bool Never! {
+    nested := 0
+    type_only := false
+    index := state.position + 1
+    loop index < state.tokens.len() {
+        kind: state.tokens[index].kind
+        if kind == TOKEN_EOF || kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_LPAREN -> return false
+        if kind == TOKEN_LBRACKET -> nested += 1
+        if kind == TOKEN_RBRACKET {
+            if nested == 0 {
+                if !type_only || parser_lookahead_forward(state, index + 1, 0).kind != TOKEN_DOT -> return false
+                return parser_lookahead_forward(state, index + 1, 1).kind == TOKEN_IDENT && parser_lookahead_forward(state, index + 1, 2).kind == TOKEN_LPAREN
+            }
+            nested -= 1
+        }
+        if kind == TOKEN_HASH || kind == TOKEN_QUESTION -> type_only = true
+        index += 1
+    }
+    false
+}
+
+// `[T].name(args)` with the list type as the call's owner type argument.
+// None, with the parser restored, when the bracket doesn't read as a type.
+parser_try_parse_list_type_static: fn(state: &JetParserState, depth: Int) -> ParsedExpr? {
+    saved_position := state.position
+    saved_diagnostics := state.diagnostics.len()
+    saved_gt := state.pending_type_gt
+    saved_gt_span := state.pending_type_gt_span
+    parsed := parser_parse_type(state, depth + 1)
+    if state.diagnostics.len() != saved_diagnostics || parser_current_kind(state) != TOKEN_DOT {
+        state.position = saved_position
+        loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
+        state.pending_type_gt = saved_gt
+        state.pending_type_gt_span = saved_gt_span
+        return None
+    }
+    parser_bump(state)
+    method: parser_bump(state)
+    args: parser_parse_call_args(state, depth + 1, false)
+    span: parser_cover(parsed.span, parser_lookahead(state, -1).span)
+    owner: Expr.Ident{name: LIST_TYPE_OWNER, span: parsed.span, id: parser_node_id(state)}
+    Val(ParsedExpr{
+        expr: Expr.MethodCall{receiver: owner, method: parser_value(state, method), method_span: method.span, owner_type_args: [Type]{parsed.ty}, type_args: [Type]{}, args: args, id: parser_node_id(state)},
+        span: span,
+    })
+}
+
 // Rust `starts_shared_operand`: the tokens that open the value of a
 // `shared expr` construction. Anything else leaves `shared` a plain name.
 parser_starts_shared_operand: fn(kind: Int) -> Bool Never! {
@@ -886,6 +938,10 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // meaning is a declared tag applied to the value after it.
     if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT -> return parser_parse_marker_value(state, depth + 1, allow_struct_lit, stop_before_comparison)
     if kind == TOKEN_LPAREN -> return parser_parse_parenthesized(state, depth + 1)
+    if kind == TOKEN_LBRACKET && parser_list_type_owner_ahead(state) {
+        static_call: parser_try_parse_list_type_static(state, depth + 1)
+        if static_call == .Val(parsed) -> return parsed
+    }
     if kind == TOKEN_LBRACKET -> return parser_parse_collection(state, depth + 1)
     if allow_struct_lit && kind == TOKEN_LBRACE {
         return parser_parse_typed_literal_body(state, None, token.span, depth + 1)

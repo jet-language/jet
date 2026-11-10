@@ -879,6 +879,11 @@ result: [Int#3]{2, 4, 6}
 [a, b, c]: result
 ```
 
+`[T#N].filled(value)` is a fixed list of `N` copies of `value`, which is
+evaluated once: `slots: [Int?#3].filled(None)`. A list type with no length
+has no static methods. `[Int?].filled(3, None)` is **E0311**, and the fix is
+the list literal `[Int?]{…}` or the fixed list `[Int?#N].filled(value)`.
+
 A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
 and `clear` on a fixed-size list are **E0964**. A literal index outside
 `0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer
