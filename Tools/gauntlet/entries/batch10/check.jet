@@ -1,0 +1,12 @@
+// The job of a batch10 case, as facts (PortBars.jet runs it in the case
+// directory with the file holding the program's output): every integrate10
+// run with its SUBs, each quarantine and verdict as printed, and each held
+// SUB with the seed it waits for (by its first word).
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    loop line in files.read(process.args()[0]).lines() -> print(if line.starts_with("HELD ") -> line.words().slice(0, 4).join(" ") else -> line)
+}

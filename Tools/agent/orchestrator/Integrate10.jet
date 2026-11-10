@@ -3,14 +3,17 @@
 // (git apply -p1 against origin/dev), `msg`, `tests` (one shell command per
 // line, run from the tree root with `jet` = the compiler this pass builds)
 // and `cards`. Steps, all collect-all:
-//   1. export origin/dev to integ/BATCH/tree and apply every SUB in order (a
-//      SUB that does not apply is reported and skipped; the rest still run);
-//   2. one census of the composed tree (check, build, guards, runtime pack,
-//      self-check, Core self-check) through census-snap2.sh under a 32G cap;
-//      every keep-going row is attributed to the SUBs whose touched files it
-//      names;
-//   3. if the build produced a compiler, every SUB's tests run with it, each
-//      recorded with rc and output tail.
+//   1. export origin/dev to integ/BATCH/tree, apply INTEG_PRE's stacked SUBs
+//      ("BATCH:SUB ...", already tested in a batch still landing), then every
+//      SUB through integ-apply6.sh (a SUB that does not apply is reported and
+//      skipped); a failed regeneration stops the pass (3);
+//   2. one census of the composed tree through census-snap2.sh under a 32G
+//      cap, then every ratchet check with the seed at once; every keep-going
+//      row is attributed to the SUBs whose touched files it names;
+//   3. if the build produced a compiler, every SUB's tests run with it four
+//      SUBs at a time (runsub6.sh), the failing ones rerun on a clean dev
+//      export with the seed, and the goldens citing a touched Core or Prelude
+//      file run.
 // Writes integ/BATCH/REPORT.md (one section per SUB: OK, or every failure
 // found) and prints its path.
 //
@@ -19,10 +22,7 @@
 // $JET_DEV_WORKTREE and the seed $JET_SEED; integ-apply6.sh and
 // census-snap2.sh are the ones in $JET_ORCHESTRATOR_DIR (this program's
 // directory unless set), and capped.sh and runsub6.sh are Main's, in
-// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. A relative
-// path the original names after a `cd` is read from that directory, as the
-// shell reads it. Lines sort in byte order, as the original sorts them with
-// LC_ALL=C.
+// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them.
 use {
     files: core.files
     process: core.process
@@ -30,7 +30,6 @@ use {
     roots: "Roots"
     sys: core.sys
     term: core.term
-    time: core.time
 }
 
 // The test durations a FAIL row drops before two runs' rows are compared.
@@ -38,676 +37,262 @@ DURATION: Regex{"[0-9]+(\.[0-9]+)? ?(ms|s|µs)"}
 // The touched files whose lines goldens cite.
 CORE_SOURCE: Regex{"^(Core|Compiler/Prelude)/.*\.jet$"}
 
-// One variable the test jobs get.
-Var: struct {
-    name: String
-    value: String
+// Ends the run with `code` after `line`.
+stop: fn(line: String, code: Int) -> Never {
+    print(line)
+    process.exit(code)
 }
 
-// The census's exit status (1 when a ratchet failed too) and whether it built
-// the batch compiler.
-CensusResult: struct {
-    crc: Int
-    built: Bool
+// A finished child's exit status, 124 when its timeout stopped it.
+rc: fn(receipt: ProcessReceipt) -> Int { if receipt.timed_out -> 124 else -> receipt.code }
+
+// Whether `spec` ran and exited 0.
+ok: fn(spec: ProcessSpec) -> Bool {
+    receipt: spec.stderr(.Inherit).run() ?? return false
+    receipt.code == 0
 }
 
-// `text` without its trailing newlines, as `$(...)` gives it.
-chomp: fn(text: String) -> String Never! {
-    out := text.copy()
-    loop out.ends_with("\n") -> out = out.removesuffix("\n")
-    out
-}
+// The lines of the file at `path`, none when it can't be read.
+lines_of: fn(path: String) -> [String] { (files.read(path) ?? "").lines() }
 
-// The lines awk reads from `text`: a last line without its newline counts.
-records: fn(text: String) -> [String] Never! {
-    out := text.split("\n").to_list()
-    if out.len() > 0 && out[out.len() - 1] == "" -> _ := out.pop()
-    out
-}
-
-// The lines `while read` reads from `text`: a last line without its newline
-// does not count.
-read_lines: fn(text: String) -> [String] Never! {
-    out := text.split("\n").to_list()
-    _ := out.pop()
-    out
-}
-
-// The lines awk reads from the file at `path`, none when it can't be read.
-lines_of: fn(path: String) -[FS]> [String] Never! { records(files.read(path) ?? "") }
-
-// The words the shell splits `text` into (no globbing).
-words: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    loop word in text.replace("\t", " ").replace("\n", " ").split(" ") {
-        if word != "" -> out.push(word.copy())
-    }
-    out
-}
-
-// `lines` sorted, each once (`sort -u`).
-unique: fn(lines: [String]) -> [String] Never! {
-    sorted := lines.copy()
+// `lines` sorted, each once.
+unique: fn(lines: [String]) -> [String] {
+    sorted := lines
     sorted.sort()
-    out := [String]{}
-    loop line in sorted {
-        if out.len() == 0 || out[out.len() - 1] != line -> out.push(line.copy())
-    }
-    out
+    sorted.dedup().to_list()
 }
 
-// The last `count` of `lines` (`tail -count`).
-tail: fn(lines: [String], count: Int) -> [String] Never! {
-    lines[(if lines.len() > count -> lines.len() - count else -> 0)..<lines.len()]
-}
-
-// The first `count` of `lines` (`awk 'NR<=count'`).
-head: fn(lines: [String], count: Int) -> [String] Never! {
-    lines[0..<(if lines.len() < count -> lines.len() else -> count)]
-}
-
-// The lines that hold one of `needles` (`awk '/a|b/'`).
-holding: fn(lines: [String], needles: [String]) -> [String] Never! {
-    out := [String]{}
-    loop line in lines {
-        probe: line.copy()
-        if needles.any(needle -> probe.contains(needle)) -> out.push(line.copy())
-    }
-    out
-}
-
-// `text` without the tabs at its start and end, as `IFS=$'\t' read` trims.
-trim_tabs: fn(text: String) -> String Never! {
-    out := text.copy()
-    loop out.starts_with("\t") -> out = out.removeprefix("\t")
-    loop out.ends_with("\t") -> out = out.removesuffix("\t")
-    out
-}
-
-// `path` as the shell opens it after a `cd dir`.
-within: fn(dir: String, path: String) -> String Never! {
-    if path.starts_with("/") -> path.copy() else -> "{dir}/{path}"
-}
-
-// The names in `dir` that `dir/prefix*suffix` matches, sorted.
-matching: fn(dir: String, prefix: String, suffix: String) -[FS]> [String] Never! {
-    names := [String]{}
-    loop entry in (files.list_dir(dir) ?? return [String]{}) {
-        name: entry.name
-        if !name.starts_with(".") && name.starts_with(prefix) && name.ends_with(suffix) && name.bytes().len() >= prefix.bytes().len() + suffix.bytes().len() -> names.push(name.copy())
-    }
+// The names in `dir` ending in `suffix`, sorted.
+named: fn(dir: String, suffix: String) -> [String] {
+    names := loop entry in (files.list_dir(dir) ?? []) -> entry.name
     names.sort()
-    names
+    names.filter(name -> name.ends_with(suffix))
 }
 
-// The text of every file in `dir` that `dir/*suffix` matches, joined as `cat`
-// joins them.
-cat_matching: fn(dir: String, suffix: String) -[FS]> String Never! {
-    out := ""
-    loop name in matching(dir, "", suffix) -> out = "{out}{files.read("{dir}/{name}") ?? ""}"
-    out
+// `link` made a symlink to `target`, replacing what was there.
+relink: fn(target: String, link: String) {
+    if files.lexists(link) -> files.remove(link)
+    files.symlink(target, link)
 }
 
-// Whether `path` names something of nonzero size (`[ -s path ]`).
-nonempty: fn(path: String) -[FS]> Bool Never! {
-    info: files.stat(path, links: .Follow) ?? return false
-    info.size > 0
-}
-
-// `readlink -f path`: the path with every symlink resolved; a last part that
-// does not exist stays as it is.
-readlink_f: fn(path: String) -[FS, Env]> String Never! {
-    whole: files.canonicalize(path) ?? {
-        parent: files.canonicalize(if files.dirname(path) == "" -> "." else -> files.dirname(path)) ?? return path.copy()
-        return "{parent}/{files.basename(path)}"
-    }
-    whole
-}
-
-// `ln -sfn target link`: a link that is a directory (not a link to one) gets
-// the new link inside it; whether it was made.
-link_sfn: fn(target: String, link: String) -[FS, IO]> Bool Never! {
-    at: if files.is_dir(link) && !files.is_symlink(link) -> "{link}/{files.basename(target)}" else -> link.copy()
-    if files.lexists(at) -> files.remove(at) ?? ()
-    files.symlink(target, at) ?? {
-        term.eprint("ln: failed to create symbolic link '{at}': {err}")
-        return false
-    }
-    true
-}
-
-// `cp from to`: the copy keeps the permission bits; whether it was made.
-copy_file: fn(from: String, to: String) -[FS, IO]> Bool Never! {
-    files.copy(from, to) ?? {
-        term.eprint("cp: {from}: {err}")
-        return false
-    }
-    info: files.stat(from, links: .Follow) ?? return true
-    files.set_mode(to, info.mode % 512) ?? term.eprint("cp: {to}: {err}")
-    true
-}
-
-// Writes `bytes` to stdout now, before any child writes to it.
-emit: fn(bytes: [U8]) Never! -[IO]> {
-    out := term.stdout()
-    out.write_bytes(bytes) ?? ()
-    out.flush() ?? ()
-}
-
-say: fn(line: String) Never! -[IO]> { emit("{line}\n".bytes()) }
-
-// `printf ... >> path`.
-append: fn(path: String, bytes: [U8]) Never! -[FS, IO]> {
-    writer: files.append(path) ?? {
-        term.eprint("integrate: {path}: {err}")
-        return
-    }
-    writer.write_all(bytes) ?? term.eprint("integrate: {path}: {err}")
-    writer.flush() ?? ()
-}
-
-// `printf ... > path`.
-put: fn(path: String, text: String) Never! -[FS, IO]> {
-    files.write(path, text) ?? term.eprint("integrate: {path}: {err}")
-}
-
-add: fn(out: &[U8], text: String) { out.extend(text.bytes()) }
-
-// `... | cut -c1-width`: each line cut to its first `width` bytes.
-add_cut: fn(out: &[U8], lines: [String], width: Int) {
-    loop line in lines {
-        raw: line.bytes()
-        out.extend(raw.slice(0, if raw.len() < width -> raw.len() else -> width))
-        out.push(U8{10})
-    }
-}
-
-// The exit status the shell gives a finished child: 124 for one `timeout`
-// stopped, 128 + N for signal N.
-status: fn(receipt: ProcessReceipt) -> Int Never! {
-    if receipt.timed_out -> return 124
-    if receipt.signal == .Val(number) -> return 128 + number
-    receipt.code
-}
-
-// Ends the run with `code` after `line` on stdout.
-stop: fn(line: String, code: Int) -[Exec, IO]> Never {
-    say(line)
-    process.exit(code)
-}
-
-// Ends the run with `code` after `message` on stderr.
-quit: fn(message: String, code: Int) -[Exec, IO]> Never {
-    term.eprint(message)
-    process.exit(code)
-}
-
-// Runs `spec` on the program's streams; its exit status.
-runs: fn(spec: ProcessSpec) -[Exec, IO, Time.Wait]> Int Never! {
-    receipt: spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
-        term.eprint("integrate: {err}")
-        return 127
-    }
-    status(receipt)
-}
-
-// `$(spec 2>/dev/null)`, its stdout as it printed it.
-quiet_output: fn(spec: ProcessSpec) -[Exec, Time.Wait]> String Never! {
-    receipt: spec.stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824).run() ?? return ""
-    receipt.output
-}
-
-// `spec > path`, its stderr as the caller set it; the shell's exit status. As
-// in the shell, a file that can't be opened fails (1) before `spec` runs.
-into: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
-    files.write(path, "") ?? {
-        term.eprint("integrate: {path}: {err}")
-        return 1
-    }
-    receipt: spec.stdin(.Inherit).stdout(.Capture).output_limit(1073741824).run() ?? {
-        term.eprint("integrate: {err}")
-        return 127
-    }
-    files.write(path, receipt.output) ?? term.eprint("integrate: {path}: {err}")
-    status(receipt)
-}
-
-// `spec > path 2>&1`.
-into_merged: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! { into(spec.stderr(.Stdout), path) }
-
-// `spec` with the variables `vars` set.
-with_vars: fn(spec: ProcessSpec, vars: [Var]) -> ProcessSpec Never! {
-    out := spec
-    loop item in vars -> out = out.env(item.name, item.value)
-    out
-}
-
-// `... | xargs -r -P 4 -I{} bash G/runsub6.sh MODE {}`: one job per item,
-// four at a time, each on the program's streams with `vars` exported.
-runsubs: fn(g: String, mode: String, items: [String], vars: [Var]) Never! -[Exec, IO, Time.Wait]> {
-    if items.len() == 0 -> return
-    specs := [ProcessSpec]{}
-    loop item in items {
-        spec: process.cmd([String]{"bash", "{g}/runsub6.sh", mode.copy(), item.copy()}).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
-        specs.push(with_vars(spec, vars))
-    }
-    ran: process.run_all(specs, 4) ?? {
-        term.eprint("xargs: {err}")
-        return
-    }
-    loop result in ran {
-        if result == .Err(error) -> term.eprint("xargs: {error}")
-    }
-}
-
-// `(cd W && git fetch -q origin && git rev-parse --short origin/dev > I/BASE
-// && git archive origin/dev | tar -x -C T)`: whether it succeeded.
-exported: fn(w: String, i: String, t: String) -[Exec, FS, IO, Time.Wait]> Bool Never! {
-    if !files.is_dir(w) {
-        term.eprint("integrate: cd: {w}: No such file or directory")
-        return false
-    }
-    if runs(process.cmd([String]{"git", "fetch", "-q", "origin"}).cwd(w)) != 0 -> return false
-    based: process.cmd([String]{"git", "rev-parse", "--short", "origin/dev"}).cwd(w).stderr(.Inherit)
-    if into(based, within(w, "{i}/BASE")) != 0 -> return false
-    archive: process.pipeline([ProcessSpec]{
-        process.cmd([String]{"git", "archive", "origin/dev"}).cwd(w),
-        process.cmd([String]{"tar", "-x", "-C", t.copy()}).cwd(w),
-    }) ?? {
-        term.eprint("integrate: {err}")
-        return false
-    }
-    if archive.errors != "" -> term.eprint(chomp(archive.errors))
-    archive.success
-}
-
-// `(cd W && git archive "$(cat I/BASE)" | tar -x -C B)`: the base commit's
-// tree for the reruns.
-base_export: fn(w: String, i: String, b: String) Never! -[Exec, FS, IO, Time.Wait]> {
-    if !files.is_dir(w) {
-        term.eprint("integrate: cd: {w}: No such file or directory")
-        return
-    }
-    commit: chomp(files.read(within(w, "{i}/BASE")) ?? "")
-    archive: process.pipeline([ProcessSpec]{
-        process.cmd([String]{"git", "archive", commit}).cwd(w),
-        process.cmd([String]{"tar", "-x", "-C", b.copy()}).cwd(w),
-    }) ?? {
-        term.eprint("integrate: {err}")
-        return
-    }
-    if archive.errors != "" -> term.eprint(chomp(archive.errors))
-}
-
-// INTEG_PRE="BATCH:SUB ...": those SUBs (already tested in a batch still
-// landing) applied first, untested and unreported.
-pre_apply: fn(i: String, t: String) Never! -[Env, Exec, FS, IO, Time.Wait]> {
-    loop ps in words(roots.env_or("INTEG_PRE", "")) {
-        parts: ps.partition(":")
-        pb: parts.head.copy()
-        pd: if parts.sep == "" -> ps.copy() else -> parts.tail.copy()
-        applied: if files.is_dir(t) -> runs(process.cmd([String]{"git", "apply", "-p1", "{pd}/patch"}).cwd(t)) else -> 1
-        if applied != 0 -> stop("integrate: pre {pd} does not apply", 2)
-        append("{i}/PRE", "{pb}\n".bytes())
-        say("PRE {files.basename(pd)} from {pb}")
-    }
-}
-
-// Stops the run (3) when a generator failed on the composed sources, with the
-// regeneration logs in the report.
-regen_check: fn(i: String, report: String, apply_lines: [String]) Never! -[Exec, FS, IO]> {
-    if !apply_lines.any(line -> line.starts_with("REGEN ") && !line.ends_with(" rc=0")) -> return
-    out := [U8]{}
-    add(out, "REGEN FAILED: the census did not run.\n")
-    logs := matching(i, "regen.", ".out")
-    if logs.len() == 0 -> logs.push("regen.*.out")
-    loop name in logs {
-        add(out, "\n{name}:\n```\n")
-        add_cut(out, tail(lines_of("{i}/{name}"), 20), 300)
-        add(out, "```\n")
-    }
-    append(report, out)
-    put("{i}/REGENFAIL", "REGENFAIL\n")
-    stop(report, 3)
-}
-
-// The repository ratchets and generator checks (Land.jet ratchets), with the
-// seed on the composed tree, all at once; 0 when every one passes.
-ratchet_checks: fn(i: String, t: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    c: readlink_f(roots.seed())
-    identity: chomp(files.read("{c}/IDENTITY") ?? "")
-    listing: process.cmd([String]{"{c}/jet", "Tools/agent/Land.jet", "ratchets"}).cwd(t).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", t)
-    tools: if files.is_dir(t) -> records(quiet_output(listing)) else -> [String]{}
-    files.create_dir_all("{i}/ratchets") ?? term.eprint("mkdir: {i}/ratchets: {err}")
-    rrc := 0
-    if tools.len() == 0 {
-        put("{i}/ratchets/none.out", "no ratchets listed\n")
-        rrc = 1
-    }
-    specs := [ProcessSpec]{}
-    started := [String]{}
-    loop tool in tools {
-        name: files.basename(tool)
-        // As in the shell, a log that can't be opened fails (1) before the check runs.
-        files.write(within(t, "{i}/ratchets/{name}.out"), "") ?? {
-            term.eprint("integrate: {i}/ratchets/{name}.out: {err}")
-            put(within(t, "{i}/ratchets/{name}.rc"), "1\n")
-            next
-        }
-        started.push(name.copy())
-        specs.push(process.cmd([String]{"nice", "-n", "19", "{c}/jet", tool.copy(), "--check"}).cwd(t)
-            .env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", t).timeout(time.duration_seconds(900))
-            .stdin(.Inherit).stdout(.Capture).stderr(.Stdout).output_limit(1073741824))
-    }
-    ran := [Result<ProcessReceipt, IOError>]{}
-    if specs.len() > 0 {
-        ran = process.run_all(specs, specs.len()) ?? {
-            term.eprint("integrate: {err}")
-            [Result<ProcessReceipt, IOError>]{}
-        }
-    }
-    loop at in 0..<ran.len() {
-        name: started[at]
-        code: if ran[at] == {
-            .Ok(receipt) -> {
-                files.write(within(t, "{i}/ratchets/{name}.out"), receipt.output) ?? term.eprint("integrate: {i}/ratchets/{name}.out: {err}")
-                status(receipt)
-            }
-            .Err(error) -> {
-                term.eprint("integrate: {error}")
-                127
-            }
-        }
-        put(within(t, "{i}/ratchets/{name}.rc"), "{code}\n")
-    }
-    loop name in matching("{i}/ratchets", "", ".rc") {
-        if chomp(files.read("{i}/ratchets/{name}") ?? "") != "0" -> rrc = 1
-    }
-    rrc
-}
-
-// Goldens that cite a line of a Core or Prelude file this batch touches
-// (`<corelib>/Core/X.jet:N`), each run with the batch compiler.
-goldens: fn(i: String, t: String, g: String, self_jet: String, id: String, touched: [String]) Never! -[Env, Exec, FS, IO, Time.Wait]> {
-    list: "{i}/goldens.list"
-    put(list, "")
-    loop f in touched {
-        if !regex.is_match(CORE_SOURCE, f) -> next
-        search: process.cmd([String]{"git", "grep", "-l", "--no-index", "-F", "<corelib>/{f}:", "--", "*.out"}).cwd(t)
-        found: if files.is_dir(t) -> quiet_output(search) else -> ""
-        append(list, found.bytes())
-    }
-    sorted: unique(lines_of(list))
-    put(list, if sorted.len() == 0 -> "" else -> "{sorted.join("\n")}\n")
-    loop golden in sorted {
-        if golden == "" -> next
-        stem: golden.removesuffix(".out").removesuffix(".err")
-        argv: [String]{"bash", "{g}/capped.sh", "24G", "nice", "-n", "19", "jet", "test", "Compiler", "--profile", "golden", stem.copy()}
-        spec: process.cmd(argv).cwd(t).env("PATH", "{i}/bin:{roots.env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id)
-            .env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31").timeout(time.duration_seconds(1800))
-        rc: if files.is_dir(t) -> into_merged(spec, "{i}/goldens.{stem.replace("/", "_")}.out") else -> 1
-        append("{i}/goldens.rc", "{rc}\t{stem}\n".bytes())
-    }
+// `git archive COMMIT` of the dev worktree unpacked into `dir`.
+unpack: fn(w: String, commit: String, dir: String) -> Bool {
+    piped: process.pipeline([process.cmd(["git", "-C", w, "archive", commit]), process.cmd(["tar", "-x", "-C", dir])]) ?? return false
+    piped.success
 }
 
 // The FAIL rows of a test log without their durations, sorted once each.
-fail_rows: fn(path: String) -[FS]> [String] Never! {
-    rows := [String]{}
-    loop line in lines_of(path) {
-        if line.contains("FAIL") -> rows.push(regex.replace(DURATION, line, ""))
-    }
-    unique(rows)
+fail_rows: fn(path: String) -> [String] {
+    unique(loop line in lines_of(path).filter(line -> line.contains("FAIL")) -> regex.replace(DURATION, line, ""))
 }
 
-// One SUB test line's report entry; whether it counts against the SUB.
-test_entry: fn(out: &[U8], i: String, n: String, k: Int, rc: String, line: String) -[FS]> Bool Never! {
-    if rc == "0" {
-        add(out, "- PASS `{line}`\n")
+// The report lines of one SUB test line; whether it counts against the SUB.
+test_entry: fn(out: &[String], tests: String, k: Int, code: String, line: String) -> Bool {
+    if code == "0" {
+        out.push("- PASS `{line}`")
         return false
     }
-    o: "{i}/tests/{n}.{k}.out"
-    bo: "{i}/tests/{n}.{k}.base.out"
-    base_rc: chomp(files.read("{i}/tests/{n}.{k}.base.rc") ?? "")
-    if files.is_file(bo) && base_rc != "0" {
+    o: "{tests}.{k}.out"
+    bo: "{tests}.{k}.base.out"
+    base_rc: (files.read("{tests}.{k}.base.rc") ?? "0").trim()
+    log: lines_of(o)
+    if base_rc != "0" && files.is_file(bo) {
         ours: fail_rows(o)
         theirs: fail_rows(bo)
-        fresh := [String]{}
-        loop row in ours {
-            if !theirs.contains(row) -> fresh.push(row.copy())
-        }
+        fresh: ours.filter(row -> !theirs.contains(row))
         if fresh.len() == 0 && ours.len() > 0 {
-            add(out, "- PRE-EXISTING rc={rc} `{line}`: every FAIL row also fails on origin/dev with the seed ({bo})\n")
+            out.push("- PRE-EXISTING rc={code} `{line}`: every FAIL row also fails on origin/dev with the seed ({bo})")
             return false
         }
-        add(out, "- FAIL rc={rc} `{line}` (full output {o}; dev with the seed also fails, rc={base_rc}, {bo}). FAIL rows not on dev:\n```\n")
-        if {
-            fresh.len() > 0 -> add_cut(out, head(fresh, 25), 300)
-            else -> {
-                lines: lines_of(o)
-                add_cut(out, head(holding(lines, [String]{"error", "Error", "panic", "failed"}), 25), 300)
-                add_cut(out, tail(lines, 5), 300)
-            }
-        }
-        add(out, "```\n")
+        out.push("- FAIL rc={code} `{line}` (full output {o}; dev with the seed also fails, rc={base_rc}, {bo}). FAIL rows not on dev:")
+        out.push("```")
+        out.extend(if fresh.len() > 0 -> fresh.slice(0, 25) else -> log.filter(text -> ["error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(log.slice(log.len() - 5, log.len())))
+        out.push("```")
         return true
     }
-    add(out, "- FAIL rc={rc} `{line}` (full output {o}; passes on origin/dev with the seed or was not rerun):\n```\n")
-    lines: lines_of(o)
-    add_cut(out, head(holding(lines, [String]{"FAIL", "error", "Error", "panic", "failed"}), 25), 300)
-    add_cut(out, tail(lines, 5), 300)
-    add(out, "```\n")
+    out.push("- FAIL rc={code} `{line}` (full output {o}; passes on origin/dev with the seed or was not rerun):")
+    out.push("```")
+    out.extend(log.filter(text -> ["FAIL", "error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(log.slice(log.len() - 5, log.len())))
+    out.push("```")
     true
-}
-
-// The census rows that name one of `paths` (`grep -F`), sorted once each.
-rows_naming: fn(rows: [String], paths: [String]) -> [String] Never! {
-    hits := [String]{}
-    loop path in paths {
-        if path == "" -> next
-        loop row in rows {
-            if row.contains(path) -> hits.push(row.copy())
-        }
-    }
-    unique(hits)
-}
-
-// The report body after the header: the summary, then one section per SUB.
-report: fn(i: String, subs: [String], applied: [String], census: CensusResult) -[FS, IO]> [U8] Never! {
-    crc: census.crc
-    built: census.built
-    out := [U8]{}
-    rows: records("{chomp(cat_matching("{i}/census", "keep-going.tsv"))}\n")
-    add(out, "Census rc={crc} (built compiler: {if built -> "yes" else -> "no"}). Summary:\n```\n")
-    loop line in holding(lines_of("{i}/census.out"), [String]{" rc=", "rows="}) -> add(out, "{line}\n")
-    checks: matching("{i}/ratchets", "", ".rc")
-    loop name in checks -> add(out, "ratchet {name.removesuffix(".rc")} rc={chomp(files.read("{i}/ratchets/{name}") ?? "")}\n")
-    if files.is_file("{i}/goldens.rc") {
-        loop line in lines_of("{i}/goldens.rc") {
-            fields: line.split("\t").to_list()
-            add(out, "golden {if fields.len() > 1 -> fields[1].copy() else -> ""} rc={fields[0]}\n")
-        }
-    }
-    add(out, "```\n")
-    loop name in checks {
-        if chomp(files.read("{i}/ratchets/{name}") ?? "") == "0" -> next
-        check: name.removesuffix(".rc")
-        add(out, "Ratchet {check} failed:\n```\n")
-        add_cut(out, tail(lines_of("{i}/ratchets/{check}.out"), 30), 300)
-        add(out, "```\n")
-    }
-    add(out, "\n")
-    base: chomp(files.read("{i}/BASE") ?? "")
-    loop sub in subs {
-        n: files.basename(sub.removesuffix("/"))
-        add(out, "## {n}\n")
-        if files.is_file("{i}/{n}.status") {
-            add(out, "Does not apply to origin/dev {base}:\n```\n")
-            add_cut(out, head(lines_of("{i}/{n}.apply"), 20), 300)
-            add(out, "```\n\n")
-            next
-        }
-        bad := false
-        hits := [U8]{}
-        add_cut(hits, rows_naming(rows, read_lines(files.read("{i}/{n}.files") ?? "")), 400)
-        loop hits.len() > 0 && hits[hits.len() - 1] == (U8{10}) -> _ := hits.pop()
-        if hits.len() > 0 {
-            bad = true
-            add(out, "Census rows in files this patch touches:\n```\n")
-            out.extend(hits)
-            add(out, "\n```\n")
-        }
-        if {
-            files.is_file("{i}/tests/{n}.rc") -> {
-                k := 0
-                loop entry in read_lines(files.read("{i}/tests/{n}.rc") ?? "") {
-                    k += 1
-                    parts: trim_tabs(entry).partition("\t")
-                    if test_entry(out, i, n, k, parts.head, trim_tabs(parts.tail)) -> bad = true
-                }
-            }
-            !built -> {
-                bad = true
-                add(out, "Tests not run: the composed tree did not build (see census).\n")
-            }
-            else -> add(out, "No tests listed.\n")
-        }
-        if {
-            !bad && crc == 0 -> {
-                add(out, "\n**OK**\n\n")
-                put("{i}/{n}.status", "OK\n")
-            }
-            else -> {
-                add(out, "\n**NOT OK**\n\n")
-                put("{i}/{n}.status", "BAD\n")
-            }
-        }
-    }
-    if crc != 0 {
-        add(out, "## Census rows not in any submitted file\n```\n")
-        named := ""
-        loop s in applied -> named = "{named}{files.read("{i}/{files.basename(s)}.files") ?? ""}"
-        paths := [String]{}
-        loop line in records("{chomp(named)}\n") {
-            if words(line).len() > 0 -> paths.push(line.copy())
-        }
-        kept := [String]{}
-        loop row in rows {
-            probe: row.copy()
-            if !paths.any(path -> probe.contains(path)) -> kept.push(row.copy())
-        }
-        add_cut(out, head(kept, 40), 300)
-        add(out, "```\n")
-    }
-    out
 }
 
 run: fn() {
     args: process.args()
-    if args.len() < 1 || args[0] == "" -> quit("integrate: 1: batch", 1)
-    batch: args[0].copy()
-    subs: args[1..<args.len()]
-    m: roots.main()
+    if args.len() == 0 || args[0] == "" {
+        term.eprint("usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
+        process.exit(1)
+    }
+    batch: args[0]
+    subs: args.slice(1, args.len())
     w: roots.worktree()
     g: "{roots.state()}/scratch/Main"
     o: roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
-    i: "{m}/integ/{batch}"
+    i: "{roots.main()}/integ/{batch}"
     t: "{i}/tree"
     files.remove_all(i) ?? ()
-    made: [String]{t, "{i}/tests", "{i}/bin"}
-    loop dir in made -> files.create_dir_all(dir) ?? term.eprint("mkdir: {dir}: {err}")
-    if !exported(w, i, t) -> stop("integrate: export failed", 2)
+    loop dir in [t, "{i}/tests", "{i}/bin"] -> files.create_dir_all(dir)
+    fetched: ok(process.cmd(["git", "-C", w, "fetch", "-q", "origin"]))
+    based: if fetched -> process.cmd(["git", "-C", w, "rev-parse", "--short", "origin/dev"]).run() ?? stop("integrate: export failed", 2) else -> stop("integrate: export failed", 2)
+    base: based.output.trim()
+    if based.code != 0 || !unpack(w, "origin/dev", t) -> stop("integrate: export failed", 2)
+    files.write("{i}/BASE", "{base}\n")
     report_path: "{i}/REPORT.md"
-    put(report_path, "# Integration {batch} on origin/dev {chomp(files.read("{i}/BASE") ?? "")}\n\n")
-    pre_apply(i, t)
+    report := ["# Integration {batch} on origin/dev {base}", ""]
+    files.write(report_path, "{report.join("\n")}\n")
+    stacked := [String]{}
+    loop ps in roots.env_or("INTEG_PRE", "").words() {
+        // An item without a batch names the SUB for both.
+        parts: ps.partition(":")
+        pb: parts.head
+        pd: if parts.sep == "" -> ps else -> parts.tail
+        if !ok(process.cmd(["git", "-C", t, "apply", "-p1", files.join(files.cwd(), "{pd}/patch")])) -> stop("integrate: pre {pd} does not apply", 2)
+        stacked.push(pb.copy())
+        files.write("{i}/PRE", "{stacked.join("\n")}\n")
+        print("PRE {files.basename(pd)} from {pb}")
+    }
     // Apply (three-way, generated files excluded and regenerated): integ-apply6.sh prints the applied SUBs last.
-    apply_argv := [String]{"bash", "{o}/integ-apply6.sh", t, i}
-    apply_argv.extend(subs.copy())
-    if into_merged(process.cmd(apply_argv), "{i}/apply.out") != 0 {
-        last := ""
-        loop line in lines_of("{i}/apply.out") {
-            if line.starts_with("integ-apply:") -> last = line.copy()
+    apply: process.cmd(["bash", "{o}/integ-apply6.sh", t, i].concat(subs)).stderr(.Stdout).run()
+    files.write("{i}/apply.out", apply.output)
+    if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(line -> line.starts_with("integ-apply:")).last() ?? ""}", 2)
+    listing: apply.output.partition("--applied--\n")
+    if listing.head != "" -> print(listing.head.trim_end())
+    applied: listing.tail.words()
+    // A generator that fails on the composed sources leaves every generated table stale: report the regeneration.
+    if listing.head.lines().any(line -> line.starts_with("REGEN ") && !line.ends_with(" rc=0")) {
+        report.push("REGEN FAILED: the census did not run.")
+        loop name in named(i, ".out").filter(name -> name.starts_with("regen.")) {
+            log: lines_of("{i}/{name}")
+            report.extend(["", "{name}:", "```"].concat(log.slice(log.len() - 20, log.len())).concat(["```"]))
         }
-        stop("integrate: the apply step failed: {last}", 2)
+        files.write(report_path, "{report.join("\n")}\n")
+        files.write("{i}/REGENFAIL", "REGENFAIL\n")
+        stop(report_path, 3)
     }
-    apply_lines: lines_of("{i}/apply.out")
-    shown := [U8]{}
-    applied := [String]{}
-    marked := false
-    loop line in apply_lines {
-        if {
-            marked -> { if words(line).len() > 0 -> applied.push(line.copy()) }
-            line == "--applied--" -> marked = true
-            else -> add(shown, "{line}\n")
-        }
-    }
-    if shown.len() > 0 -> emit(shown)
-    regen_check(i, report_path, apply_lines)
     // The census: every file any applied SUB touches selects the Jetpack pass when it is under Jetpack/.
-    named := ""
-    loop s in applied -> named = "{named}{files.read("{i}/{files.basename(s)}.files") ?? ""}"
-    touched: unique(records(named))
-    say("census start")
-    census_argv := [String]{"bash", "{g}/capped.sh", "32G", "bash", "{o}/census-snap2.sh"}
-    census_argv.extend(touched.copy())
-    census: process.cmd(census_argv).env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31")
-    crc := into_merged(census, "{i}/census.out")
-    say("census rc={crc}")
-    rrc: ratchet_checks(i, t)
-    say("ratchets rc={rrc}")
+    touched := [String]{}
+    loop s in applied -> touched.extend(lines_of("{i}/{files.basename(s)}.files"))
+    touched = unique(touched)
+    print("census start")
+    census: process.cmd(["bash", "{g}/capped.sh", "32G", "bash", "{o}/census-snap2.sh"].concat(touched)).env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
+    files.write("{i}/census.out", census.output)
+    crc := census.code
+    print("census rc={crc}")
+    // The repository ratchets and generator checks (Land.jet ratchets), with the seed on the composed tree, all at once.
+    seed: files.canonicalize(roots.seed())
+    id: files.read("{seed}/IDENTITY").trim()
+    ratchets: process.cmd(["{seed}/jet", "Tools/agent/Land.jet", "ratchets"]).cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
+    files.create_dir_all("{i}/ratchets")
+    if ratchets.len() == 0 -> files.write("{i}/ratchets/none.out", "no ratchets listed\n")
+    checks: process.run_all(loop tool in ratchets -> process.cmd(["nice", "-n", "19", "{seed}/jet", tool, "--check"]).cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
+    summary := census.output.lines().filter(line -> line.contains(" rc=") || line.contains("rows="))
+    failures := [String]{}
+    rrc := if ratchets.len() == 0 -> 1 else -> 0
+    loop at in 0..<ratchets.len() {
+        name: files.basename(ratchets[at])
+        receipt: checks[at] ?? stop("integrate: ratchet {name}: {err}", 2)
+        files.write("{i}/ratchets/{name}.out", receipt.output)
+        files.write("{i}/ratchets/{name}.rc", "{rc(receipt)}\n")
+        summary.push("ratchet {name} rc={rc(receipt)}")
+        if rc(receipt) != 0 {
+            rrc = 1
+            log: receipt.output.lines()
+            failures.extend(["Ratchet {name} failed:", "```"].concat(log.slice(log.len() - 30, log.len())).concat(["```"]))
+        }
+    }
+    print("ratchets rc={rrc}")
     if rrc != 0 -> crc = 1
     self_jet: "{t}/Compiler/JetCli/.jet/build/jet"
-    seed: readlink_f(roots.seed())
-    id: chomp(files.read("{seed}/IDENTITY") ?? "")
     built: files.can_execute(self_jet)
-    if built -> _ := link_sfn(self_jet, "{i}/bin/jet")
+    if built -> relink(self_jet, "{i}/bin/jet")
     // The engine `jet` talks to must be the seed's jetpack, whose identity JET_COMPILER_IDENTITY names.
-    if files.can_execute("{seed}/jetpack") -> _ := link_sfn("{seed}/jetpack", "{i}/bin/jetpack")
+    if files.can_execute("{seed}/jetpack") -> relink("{seed}/jetpack", "{i}/bin/jetpack")
     // The engine beside the batch compiler must be the jetpack this tree builds: the census's hosted bootstrap
     // names it as hosted-binary.
-    hb := ""
-    loop line in lines_of("{i}/census/jetpack.log") {
-        if line.starts_with("hosted-binary: ") {
-            fields: words(line)
-            hb = if fields.len() > 1 -> fields[1].copy() else -> ""
-        }
-    }
+    hb: (lines_of("{i}/census/jetpack.log").filter(line -> line.starts_with("hosted-binary: ")).last() ?? "").words().get(1) ?? ""
     if {
         hb != "" && files.can_execute(hb) -> {
-            built_pack: "{i}/bin/jetpack.built"
-            if copy_file(hb, built_pack) && link_sfn(built_pack, "{i}/bin/jetpack") -> _ := link_sfn(built_pack, "{files.dirname(readlink_f(self_jet))}/jetpack")
-            say("tests use the built jetpack {hb}")
+            packed: "{i}/bin/jetpack.built"
+            files.copy(hb, packed)
+            files.set_mode(packed, files.stat(hb).mode % 512)
+            relink(packed, "{i}/bin/jetpack")
+            if built -> relink(packed, "{files.dirname(files.canonicalize(self_jet))}/jetpack")
+            print("tests use the built jetpack {hb}")
         }
-        else -> say("no built jetpack (census jetpack row failed); tests use the seed's")
+        else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
     }
-    vars := [Var]{Var{name: "I", value: i.copy()}, Var{name: "T", value: t.copy()}, Var{name: "SELF", value: self_jet.copy()}, Var{name: "ID", value: id.copy()}, Var{name: "G", value: g.copy()}}
-    // Every SUB runs its test lines as one job, four SUBs at a time.
+    runsub: (argv: [String]) -> process.cmd(["bash", "{g}/runsub6.sh"].concat(argv)).env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit)
+    golden_rcs := [String]{}
     if built {
-        listed := [String]{}
-        loop s in applied {
-            if nonempty("{s}/tests") -> listed.push(s.copy())
+        // Every SUB runs its test lines as one job, four SUBs at a time.
+        _ := process.run_all(loop s in applied.filter(s -> (files.read("{s}/tests") ?? "") != "") -> runsub(["new", s]), 4)
+        // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
+        // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
+        failing: loop name in named("{i}/tests", ".rc").filter(name -> lines_of("{i}/tests/{name}").any(line -> !line.starts_with("0\t"))) -> name.removesuffix(".rc")
+        if failing.len() > 0 {
+            loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
+            _ := unpack(w, base, "{i}/basetree")
+            relink("{seed}/jet", "{i}/basebin/jet")
+            relink("{seed}/jetpack", "{i}/basebin/jetpack")
+            _ := process.run_all(loop name in failing -> runsub(["base", name]), 4)
+            files.remove_all("{i}/basetree")
         }
-        runsubs(g, "new", listed, vars)
+        // Goldens that cite a line of a Core or Prelude file this batch touches (`<corelib>/Core/X.jet:N`) drift
+        // when that file moves; run each one so the batch, not the release gate, catches it.
+        cited := [String]{}
+        loop f in touched.filter(f -> regex.is_match(CORE_SOURCE, f)) -> cited.extend(process.cmd(["git", "grep", "-l", "--no-index", "-F", "<corelib>/{f}:", "--", "*.out"]).cwd(t).run().output.lines())
+        cited = unique(cited)
+        files.write("{i}/goldens.list", cited.map(path -> "{path}\n").join(""))
+        loop golden in cited {
+            stem: golden.removesuffix(".out").removesuffix(".err")
+            ran: process.cmd(["bash", "{g}/capped.sh", "24G", "nice", "-n", "19", "jet", "test", "Compiler", "--profile", "golden", stem]).cwd(t)
+                .env("PATH", "{i}/bin:{roots.env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31")
+                .timeout(1800s).stderr(.Stdout).run()
+            files.write("{i}/goldens.{stem.replace("/", "_")}.out", ran.output)
+            golden_rcs.push("{rc(ran)}\t{stem}")
+            summary.push("golden {stem} rc={rc(ran)}")
+        }
+        if golden_rcs.len() > 0 -> files.write("{i}/goldens.rc", "{golden_rcs.join("\n")}\n")
     }
-    // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are told
-    // apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
-    failing := [String]{}
-    loop name in matching("{i}/tests", "", ".rc") {
-        if lines_of("{i}/tests/{name}").any(line -> line.partition("\t").head != "0") -> failing.push(name.removesuffix(".rc"))
+    // The report: the summary, then one section per SUB.
+    rows := [String]{}
+    loop name in named("{i}/census", "keep-going.tsv") -> rows.extend(lines_of("{i}/census/{name}"))
+    report.extend(["Census rc={crc} (built compiler: {if built -> "yes" else -> "no"}). Summary:", "```"].concat(summary).concat(["```"]).concat(failures).concat([""]))
+    loop sub in subs {
+        n: files.basename(sub.removesuffix("/"))
+        report.push("## {n}")
+        if files.is_file("{i}/{n}.status") {
+            report.extend(["Does not apply to origin/dev {base}:", "```"].concat(lines_of("{i}/{n}.apply").slice(0, 20)).concat(["```", ""]))
+            next
+        }
+        mine: lines_of("{i}/{n}.files").filter(path -> path != "")
+        hits: unique(rows.filter(row -> mine.any(path -> row.contains(path))))
+        bad := hits.len() > 0
+        if bad -> report.extend(["Census rows in files this patch touches:", "```"].concat(hits).concat(["```"]))
+        tests: "{i}/tests/{n}"
+        if {
+            files.is_file("{tests}.rc") -> {
+                entries: lines_of("{tests}.rc")
+                loop at in 0..<entries.len() {
+                    parts: entries[at].partition("\t")
+                    if test_entry(report, tests, at + 1, parts.head, parts.tail) -> bad = true
+                }
+            }
+            !built -> {
+                bad = true
+                report.push("Tests not run: the composed tree did not build (see census).")
+            }
+            else -> report.push("No tests listed.")
+        }
+        verdict: !bad && crc == 0
+        report.extend(["", if verdict -> "**OK**" else -> "**NOT OK**", ""])
+        files.write("{i}/{n}.status", if verdict -> "OK\n" else -> "BAD\n")
     }
-    if built && failing.len() > 0 {
-        b: "{i}/basetree"
-        made_base: [String]{b, "{i}/basebin"}
-        loop dir in made_base -> files.create_dir_all(dir) ?? term.eprint("mkdir: {dir}: {err}")
-        base_export(w, i, b)
-        _ := link_sfn("{seed}/jet", "{i}/basebin/jet")
-        _ := link_sfn("{seed}/jetpack", "{i}/basebin/jetpack")
-        base_vars := vars.copy()
-        base_vars.push(Var{name: "B", value: b.copy()})
-        base_vars.push(Var{name: "C0", value: seed.copy()})
-        runsubs(g, "base", failing, base_vars)
-        files.remove_all(b) ?? ()
+    if crc != 0 {
+        named_paths := [String]{}
+        loop s in applied -> named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(path -> path.trim() != ""))
+        report.extend(["## Census rows not in any submitted file", "```"].concat(rows.filter(row -> !named_paths.any(path -> row.contains(path))).slice(0, 40)).concat(["```"]))
     }
-    if built -> goldens(i, t, g, self_jet, id, touched)
-    append(report_path, report(i, subs, applied, CensusResult{crc: crc, built: built}))
-    say(report_path)
+    files.write(report_path, "{report.join("\n")}\n")
+    print(report_path)
 }

@@ -1,0 +1,47 @@
+// The job of an integrate10 case, as facts (PortBars.jet runs it in the case
+// directory with the file holding the program's output): what the pass
+// printed, then for each batch it made every file it left (the composed tree
+// aside, which the census's checksum in the report covers), the links (from
+// the case directory), the status, rc and list files, and the report with
+// each line cut to 300 bytes.
+use {
+    files: core.files
+    process: core.process
+}
+
+// Every file and link under `dir` (not `skip`), as paths relative to `root`.
+walk: fn(root: String, dir: String, skip: String) -> [String] {
+    found := [String]{}
+    names := loop entry in (files.list_dir("{root}/{dir}") ?? []) -> entry.name
+    names.sort()
+    loop name in names {
+        path: if dir == "" -> name else -> "{dir}/{name}"
+        if {
+            path == skip -> next
+            files.is_symlink("{root}/{path}") -> found.push(path)
+            files.is_dir("{root}/{path}") -> found.extend(walk(root, path, skip))
+            else -> found.push(path)
+        }
+    }
+    found
+}
+
+run: fn() {
+    loop line in files.read(process.args()[0]).lines() -> print(line.trim_end())
+    here: "{files.cwd()}/"
+    batches := loop entry in (files.list_dir("lanes/Main/integ") ?? []) -> entry.name
+    batches.sort()
+    loop batch in batches {
+        root: "lanes/Main/integ/{batch}"
+        print("== {batch}")
+        loop path in walk(root, "", "tree") {
+            at: "{root}/{path}"
+            if {
+                files.is_symlink(at) -> print("{path} -> {files.read_link(at).removeprefix(here)}")
+                path == "REPORT.md" || path.ends_with(".out") || path.ends_with(".apply") || path.ends_with(".files") -> print(path)
+                else -> print("{path}: {files.read(at).trim_end().replace("\n", " | ")}".trim_end())
+            }
+        }
+        loop line in (files.read("{root}/REPORT.md") ?? "").lines() -> print("| {if line.len() > 300 -> line.slice(0, 300) else -> line}".trim_end())
+    }
+}

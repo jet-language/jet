@@ -10,9 +10,7 @@
 // $TOWER_SPEC_WRITER ($JET_STATE_ROOT/scratch/Main/tower-dev.mjs unless set),
 // which takes the card patches from $TOWER_SPEC_PATCHES
 // ($JET_SCRATCH_ROOT/lanes/Main unless set), the roots as Roots.jet finds
-// them. A relative root names a path in the caller's directory. Printed text
-// is cut in UTF-16 code units and a removed criterion's blanks are
-// JavaScript's `\s`, as the original's string methods count them.
+// them. A relative root names a path in the caller's directory.
 use {
     files: core.files
     json: core.encoding.json
@@ -22,216 +20,162 @@ use {
     term: core.term
 }
 
-// `v.key`, or `v` itself when no key is given. The helpers below read spec
-// and card values through it.
-pick: fn(v: Dyn?, key: String) -> Dyn? { if key == "" -> v else -> (v ?? Dyn.Null).get(key) }
+// `v` when it is text, else "".
+str: fn(v: Dyn) -> String { if v == .Text(t) -> t.copy() else -> "" }
 
-// The value as a JavaScript template prints it.
-shown: fn(v: Dyn?, key: String{""}) -> String {
-    x: pick(v, key) ?? return "undefined"
-    if x == .Text(t) -> t.copy() else -> json.dumps(x) ?? ""
+// The text field `key` of `v`, "" when it has none.
+text: fn(v: Dyn, key: String) -> String { str(v.get(key) ?? Dyn.Null) }
+
+// The list field `key` of `v`, empty when it has none.
+list: fn(v: Dyn, key: String) -> [Dyn] { if v.get(key) == .Val(.Array(l)) -> l.copy() else -> [] }
+
+// A criterion number as the spec or card writes it.
+label: fn(v: Dyn?) -> String {
+    if v == .Val(.Text(t)) -> return t.copy()
+    json.dumps(v ?? Dyn.Null) ?? ""
 }
 
-// Whether JavaScript takes the value as true.
-truthy: fn(v: Dyn?, key: String{""}) -> Bool {
-    x: pick(v, key) ?? Dyn.Null
-    x != Dyn.Null && x != Dyn.Bool(false) && x != Dyn.Int(0) && x != Dyn.Text("")
-}
+// The first `limit` characters of `t`, marked with … when it was longer.
+cut: fn(t: String, limit: Int) -> String { if t.len() > limit -> "{t.slice(0, limit)}…" else -> t.copy() }
 
-// `value || ""` for a text value.
-text: fn(v: Dyn?, key: String{""}) -> String { if pick(v, key) == .Val(.Text(t)) -> t.copy() else -> "" }
-
-// `value || []`.
-list: fn(v: Dyn?, key: String{""}) -> [Dyn] { if pick(v, key) == .Val(.Array(l)) -> l.copy() else -> [Dyn]{} }
-
-// A scalar's length in UTF-16 code units, the unit JavaScript strings count.
-width: fn(c: Char) -> Int { if "{c}".count_bytes() == 4 -> 2 else -> 1 }
-
-js_length: fn(t: String) -> Int {
-    n := 0
-    loop c in t.chars() -> n += width(c)
-    n
-}
-
-// `t.slice(0, limit)` as JavaScript prints it: a cut through a surrogate pair
-// leaves its first half, which prints as U+FFFD.
-clip: fn(t: String, limit: Int) -> String {
-    out := ""
-    used := 0
-    loop c in t.chars() {
-        used += width(c)
-        if used > limit -> return if used - width(c) < limit -> "{out}�" else -> out
-        out = "{out}{c}"
-    }
-    out
-}
-
-// `t.replace(/\s+/g, " ")`: JavaScript's `\s` is Unicode White_Space without
-// U+0085 (NEL), and U+FEFF (BOM).
-collapse: fn(t: String) -> String {
-    out := ""
-    loop c in t.chars() {
-        b: "{c}".bytes()
-        blank: ("{c}".is_whitespace() && b != [U8]{U8{194}, U8{133}}) || b == [U8]{U8{239}, U8{187}, U8{191}}
-        if {
-            !blank -> out = "{out}{c}"
-            !out.ends_with(" ") -> out = "{out} "
-        }
-    }
-    out
-}
-
-// `argv` in the Tower checkout with the caller's git index unset: its stdout,
-// or the first line of the error execFileSync throws.
+// `argv` in the Tower checkout with the caller's git index unset: its stdout.
 node: fn(repo: String, argv: [String]) -> String Err! {
-    failed: "Command failed: {argv.join(" ")}"
-    r: process.cmd(argv).cwd(repo).env_remove("GIT_INDEX_FILE").stdout(.Capture).stderr(.Inherit).output_limit(67108864).run() ?? return Err(failed)
-    if r.code != 0 || r.signal != .None -> return Err(failed)
+    r: process.cmd(argv).cwd(repo).env_remove("GIT_INDEX_FILE").stderr(.Inherit).output_limit(67108864).run() ?? return Err("Command failed: {argv.join(" ")}")
+    if r.code != 0 -> return Err("Command failed: {argv.join(" ")}")
     Ok(r.output)
 }
 
 card: fn(repo: String, num: String) -> Dyn Err! {
-    j: json.parse(node(repo, [String]{"node", "Tools/tower/tower.mjs", "card", "show", num, "--json"}) ?? return Err(err)) ?? return Err("{err}")
-    Ok(if truthy(j, "card") -> j.get("card") ?? j else -> j)
+    j: json.parse(node(repo, ["node", "Tools/tower/tower.mjs", "card", "show", num, "--json"]) ?? return Err(err)) ?? return Err("{err}")
+    Ok(if j.get("card") == .Val(.Object(_)) -> j.get("card") ?? j else -> j)
 }
 
 // The Tower writer's trimmed answer to `args`.
 tower: fn(repo: String, writer: String, args: [String]) -> String Err! {
-    Ok((node(repo, [String]{"node", writer}.concat(args).concat([String]{"--by", "Main"})) ?? return Err(err)).trim())
+    Ok((node(repo, ["node", writer].concat(args).concat(["--by", "Main"])) ?? return Err(err)).trim())
 }
 
 // `t` with every `from` replaced by `to`; `place` names it when `from` is absent.
 sub: fn(t: String, from: String, to: String, place: String) -> String Err! {
-    if !t.contains(from) -> return Err("{place}: text not found: {clip(from, 80)}")
+    if !t.contains(from) -> return Err("{place}: text not found: {from}")
     Ok(t.replace(from, to))
 }
 
-// The index of criterion `n` (`Number(n)`) in `crit`.
+// The index of criterion `n` in `crit`.
 by_n: fn(crit: [Dyn], n: Dyn?, num: String) -> Int Err! {
-    loop i in 0..<crit.len() {
-        if shown(crit[i], "n") == "{shown(n).trim().to_int() ?? -1}" -> return Ok(i)
+    loop at in 0..<crit.len() {
+        if label(crit[at].get("n")) == label(n) -> return Ok(at)
     }
-    Err("#{num} no c{shown(n)}")
+    Err("#{num} no c{label(n)}")
 }
 
 apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}) Err! {
-    num: shown(s, "num")
+    num: label(s.get("num"))
     c: card(repo, num) ?? return Err(err)
     crit := list(c, "criteria")
     changes := [String]{}
-    // Object.entries order: index keys ascending, then the rest as written.
-    indexes := [Int]{}
-    rest := [String]{}
-    loop key in (s.get("rewrite") ?? Dyn.object()).keys() {
-        if key.isdigit() && (key == "0" || !key.starts_with("0")) && key.count_bytes() < 10 -> indexes.push(key.to_int() ?? 0) else -> rest.push(key)
-    }
-    indexes.sort()
-    loop key in (loop at in indexes -> "{at}").concat(rest) {
+    rewrite: s.get("rewrite") ?? Dyn.object()
+    loop key in rewrite.keys() {
         at: by_n(crit, Dyn.Text(key), num) ?? return Err(err)
-        if shown(crit[at], "status") != "open" -> return Err("#{num} c{key} is {shown(crit[at], "status")}")
-        new: text(s.get("rewrite"), key)
-        changes.push("c{key} REWRITE\n   old: {clip(text(crit[at], "text"), 400)}\n   new: {clip(new, 400)}")
+        if text(crit[at], "status") != "open" -> return Err("#{num} c{key} is {text(crit[at], "status")}")
+        new: text(rewrite, key)
+        changes.push("c{key} REWRITE\n   old: {text(crit[at], "text")}\n   new: {new}")
         crit[at]["text"] = Dyn.Text(new)
     }
     loop step in list(s, "replace") {
-        p: list(step).concat([Dyn]{Dyn.Null, Dyn.Null, Dyn.Null})
-        from: text(p[1])
+        p: if step == .Array(l) -> l.concat([Dyn.Null, Dyn.Null, Dyn.Null]) else -> [Dyn.Null, Dyn.Null, Dyn.Null]
+        from: str(p[1])
+        to: str(p[2])
+        every: p[0] == Dyn.Text("*")
         targets := [Int]{}
-        if p[0] != Dyn.Text("*") -> targets.push(by_n(crit, p[0], num) ?? return Err(err))
-        loop i in 0..<crit.len() {
-            if p[0] == Dyn.Text("*") && shown(crit[i], "status") == "open" && text(crit[i], "text").contains(from) -> targets.push(i)
+        if !every -> targets.push(by_n(crit, p[0], num) ?? return Err(err))
+        loop at in 0..<crit.len() {
+            if every && text(crit[at], "status") == "open" && text(crit[at], "text").contains(from) -> targets.push(at)
         }
-        if targets.len() == 0 -> return Err("#{num} *: no open criterion has {clip(from, 60)}")
-        loop i in targets {
-            label: "c{shown(crit[i], "n")}"
-            crit[i]["text"] = Dyn.Text(sub(text(crit[i], "text"), from, text(p[2]), "#{num} {label}") ?? return Err(err))
-            changes.push("{label} REPLACE '{clip(from, 70)}' -> '{clip(text(p[2]), 70)}'")
+        if targets.len() == 0 -> return Err("#{num} *: no open criterion has {from}")
+        loop at in targets {
+            n: label(crit[at].get("n"))
+            crit[at]["text"] = Dyn.Text(sub(text(crit[at], "text"), from, to, "#{num} c{n}") ?? return Err(err))
+            changes.push("c{n} REPLACE '{from}' -> '{to}'")
         }
     }
     removed := [Int]{}
     loop n in list(s, "remove") {
         at: by_n(crit, n, num) ?? return Err(err)
-        if shown(crit[at], "status") != "open" -> return Err("#{num} c{shown(n)} is {shown(crit[at], "status")}, not removable")
+        if text(crit[at], "status") != "open" -> return Err("#{num} c{label(n)} is {text(crit[at], "status")}, not removable")
         removed.push(at)
     }
     next := 0
     kept := [Dyn]{}
-    loop i in 0..<crit.len() {
-        n: shown(crit[i], "n").to_int() ?? 0
+    loop at in 0..<crit.len() {
+        n: label(crit[at].get("n")).to_int() ?? 0
         if n > next -> next = n
-        if !removed.contains(i) -> kept.push(crit[i].copy())
+        if !removed.contains(at) -> kept.push(crit[at].copy())
     }
     loop added in list(s, "add") {
         next += 1
-        row := Dyn.object()
-        row["n"] = Dyn.Int(next)
-        row["text"] = added.copy()
-        row["status"] = Dyn.Text("open")
-        kept.push(row)
-        changes.push("c{next} ADD {clip(text(added), 300)}")
+        kept.push(Dyn.Object(["n": Dyn.Int(next), "text": added.copy(), "status": Dyn.Text("open")]))
+        changes.push("c{next} ADD {str(added)}")
     }
-    loop i in removed -> changes.push("c{shown(crit[i], "n")} REMOVE {clip(text(crit[i], "text"), 160)}")
+    loop at in removed -> changes.push("c{label(crit[at].get("n"))} REMOVE {text(crit[at], "text")}")
     patch := Dyn.object()
     if changes.len() > 0 -> patch["criteria"] = Dyn.Array(kept)
-    if truthy(s, "title") {
-        patch["title"] = s.get("title") ?? Dyn.Null
-        changes.push("TITLE {shown(c, "title")}\n   -> {shown(s, "title")}")
+    title: text(s, "title")
+    if title != "" {
+        patch["title"] = Dyn.Text(title)
+        changes.push("TITLE {text(c, "title")}\n   -> {title}")
     }
-    loop field in ([String]{"body", "plan"}) {
+    loop field in ["body", "plan"] {
         old: text(c, field)
         new := old.copy()
         loop pair in list(s, "{field}Replace") {
-            p: list(pair).concat([Dyn]{Dyn.Null, Dyn.Null})
-            new = sub(new, text(p[0]), text(p[1]), "#{num} {field}") ?? return Err(err)
+            p: if pair == .Array(l) -> l.concat([Dyn.Null, Dyn.Null]) else -> [Dyn.Null, Dyn.Null]
+            new = sub(new, str(p[0]), str(p[1]), "#{num} {field}") ?? return Err(err)
         }
         if s.has(field) -> new = text(s, field)
         if new != old {
             patch[field] = Dyn.Text(new.copy())
-            changes.push("{field.upper()} changed ({js_length(old)} -> {js_length(new)} chars)")
+            changes.push("{field.upper()} changed ({old.len()} -> {new.len()} chars)")
         }
     }
-    if truthy(s, "addTags") -> patch["addTags"] = s.get("addTags") ?? Dyn.Null
-    quoted: loop i in removed -> "c{shown(crit[i], "n")} \"{collapse(clip(text(crit[i], "text"), 140))}{if js_length(text(crit[i], "text")) > 140 -> "…" else -> ""}\""
+    if s.has("addTags") -> patch["addTags"] = s.get("addTags") ?? Dyn.Null
+    quoted: loop at in removed -> "c{label(crit[at].get("n"))} \"{cut(text(crit[at], "text"), 140).words().join(" ")}\""
     log: "{text(s, "log")}{if removed.len() > 0 -> " Removed as superseded: {quoted.join("; ")}." else -> ""}"
-    close: shown(s, "close")
-    print("\n#### #{num} {clip(shown(c, "title"), 90)} [{shown(c, "phase")}]\n  {changes.join("\n  ")}{if truthy(s, "close") -> "\n  CLOSE: {clip(close, 200)}" else -> ""}\n  LOG: {clip(log, 600)}")
+    close: text(s, "close")
+    print("\n#### #{num} {text(c, "title")} [{text(c, "phase")}]\n  {changes.join("\n  ")}{if close != "" -> "\n  CLOSE: {close}" else -> ""}\n  LOG: {log}")
     if !go -> return Ok()
     if patch.len() > 0 {
         file: "{patches}/obe-patch-{num}.json"
         files.write(file, json.dumps(patch) ?? "") ?? return Err("{err}")
-        print("  {tower(repo, writer, [String]{"card", "update", num, "--file", file}) ?? return Err(err)}")
+        print("  {tower(repo, writer, ["card", "update", num, "--file", file]) ?? return Err(err)}")
     }
-    if log.trim() != "" -> print("  {tower(repo, writer, [String]{"card", "log", num, "--text", log.trim()}) ?? return Err(err)}")
-    if !truthy(s, "close") -> return Ok()
-    kind: if truthy(s, "closeKind") -> [String]{"--kind", shown(s, "closeKind")} else -> [String]{}
+    if log.trim() != "" -> print("  {tower(repo, writer, ["card", "log", num, "--text", log.trim()]) ?? return Err(err)}")
+    if close == "" -> return Ok()
+    kind: if text(s, "closeKind") != "" -> ["--kind", text(s, "closeKind")] else -> [String]{}
     loop k in list(card(repo, num) ?? return Err(err), "criteria") {
-        if shown(k, "status") == "open" -> print("  {tower(repo, writer, [String]{"card", "criteria", num, "--meet", shown(k, "n"), "--evidence", close}.concat(kind)) ?? return Err(err)}")
+        if text(k, "status") == "open" -> print("  {tower(repo, writer, ["card", "criteria", num, "--meet", label(k.get("n")), "--evidence", close].concat(kind)) ?? return Err(err)}")
     }
-    print("  {tower(repo, writer, [String]{"card", "update", num, "--phase", "done"}) ?? return Err(err)}")
+    print("  {tower(repo, writer, ["card", "update", num, "--phase", "done"]) ?? return Err(err)}")
     Ok()
-}
-
-// Ends the run with exit code 1 after `message` on stderr, as an uncaught
-// error ends the original.
-quit: fn(message: String) -> Never {
-    term.eprint("tower-spec-apply: {message}")
-    process.exit(1)
 }
 
 run: fn() {
     args: process.args()
-    path: args.get(0) ?? quit("SPEC.json [--go]")
-    spec: json.parse(files.read(path) ?? quit("{path}: {err}")) ?? quit("{path}: {err}")
+    if args.len() == 0 {
+        term.eprint("usage: jet Tools/agent/orchestrator/TowerSpecApply.jet SPEC.json [--go]")
+        process.exit(1)
+    }
+    spec: json.parse(files.read(args[0]))
     tool: "/Tools/agent/orchestrator/TowerSpecApply.jet"
     checkout: if sys.executable().ends_with(tool) -> sys.executable().removesuffix(tool) else -> "."
-    repo: files.absolute(roots.env_or("TOWER_SPEC_REPO", checkout)) ?? quit("{err}")
-    writer: files.absolute(roots.env_or("TOWER_SPEC_WRITER", "{roots.state()}/scratch/Main/tower-dev.mjs")) ?? quit("{err}")
-    patches: files.absolute(roots.env_or("TOWER_SPEC_PATCHES", roots.main())) ?? quit("{err}")
+    repo: files.absolute(roots.env_or("TOWER_SPEC_REPO", checkout))
+    writer: files.absolute(roots.env_or("TOWER_SPEC_WRITER", "{roots.state()}/scratch/Main/tower-dev.mjs"))
+    patches: files.absolute(roots.env_or("TOWER_SPEC_PATCHES", roots.main()))
     failed := 0
-    loop s in list(spec) {
+    loop s in (if spec == .Array(l) -> l.copy() else -> [Dyn]{}) {
         if apply(s, repo, writer, patches, go: args.contains("--go")) == .Err(e) {
             failed += 1
-            print("!!!! #{shown(s, "num")}: {e.message.partition("\n").head}")
+            print("!!!! #{label(s.get("num"))}: {e.message.partition("\n").head}")
         }
     }
     print(if failed > 0 -> "\nFAILED {failed}" else -> "\nALL OK")

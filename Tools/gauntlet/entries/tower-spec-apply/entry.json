@@ -1,11 +1,15 @@
 {
   "name": "tower-spec-apply",
   "mode": "tool",
-  "description": "Main's Tower spec apply tower-spec-apply.mjs and its Jet twin TowerSpecApply.jet (#5072 c15): for each card in a spec, read the card, rewrite, replace (one criterion or every open one), remove and add criteria, change the title, body and plan, and print the changes; with --go, write the card patch, the log line and the closing evidence through the Tower writer. The fixtures hold a stand-in Tower checkout whose reader prints cards from cards/N.json (one wrapped in {card}, one bare with non-ASCII text, one for the failures) and a stand-in writer that prints its arguments and the patch. The dry spec exercises every change, the Object.entries order of rewrite keys, UTF-16 cuts through a surrogate pair, JavaScript's whitespace in the removal note and each failure the original throws, an unknown card included; the go spec writes them; a missing and a broken spec exit 1.",
+  "description": "Main's Tower spec apply tower-spec-apply.mjs and its Jet twin TowerSpecApply.jet (#5072 c15): for each card in a spec, read the card, rewrite, replace (one criterion or every open one), remove and add criteria, change the title, body and plan, and print the changes; with --go, write the card patch, the log line and the closing evidence through the Tower writer. The fixtures hold a stand-in Tower checkout whose reader prints cards from cards/N.json (one wrapped in {card}, one bare with non-ASCII text, one for the failures) and a stand-in writer that prints its arguments and the patch and records both in writes.log. The dry spec exercises every change, blanks in a removed criterion and each failure, an unknown card included; the go spec writes them; a missing and a broken spec exit 1. check.jet prints each card's changes, the failures, the verdict and every recorded Tower write.",
   "tool": {
     "original": "Tools/agent/orchestrator/tower-spec-apply.mjs",
     "jet": "Tools/agent/orchestrator/TowerSpecApply.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c36",
+      "#5072 c39"
+    ],
     "cases": [
       {
         "args": [
@@ -16,6 +20,7 @@
           "TOWER_SPEC_WRITER": "writer.mjs",
           "TOWER_SPEC_PATCHES": "."
         },
+        "check": "check.jet",
         "expected": "expected/dry.out"
       },
       {
@@ -28,6 +33,7 @@
           "TOWER_SPEC_WRITER": "writer.mjs",
           "TOWER_SPEC_PATCHES": "."
         },
+        "check": "check.jet",
         "expected": "expected/go.out"
       },
       {
@@ -40,6 +46,7 @@
           "TOWER_SPEC_PATCHES": "."
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/no-spec.out"
       },
       {
@@ -52,6 +59,7 @@
           "TOWER_SPEC_PATCHES": "."
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/bad-spec.out"
       }
     ]

@@ -17,214 +17,91 @@
 use {
     files: core.files
     process: core.process
+    regex: core.regex
     roots: "Roots"
     sys: core.sys
     term: core.term
 }
 
-// `text` without its trailing newlines, as `$(...)` gives it.
-chomp: fn(text: String) -> String Never! {
-    out := text.copy()
-    loop out.ends_with("\n") -> out = out.removesuffix("\n")
-    out
-}
-
-is_word: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
-    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
-}
-
-is_blank: fn(byte: U8) -> Bool Never! { byte == U8{32} || byte == U8{9} }
-
-// `text` without the spaces and tabs at its start (`front`) or its end.
-trim_blanks: fn(text: String, front: Bool) -> String Never! {
-    raw: text.bytes()
-    start := 0
-    end := raw.len()
-    if front {
-        loop start < end && is_blank(raw[start]) -> start += 1
-    } else {
-        loop end > start && is_blank(raw[end - 1]) -> end -= 1
-    }
-    String.from_bytes(raw.slice(start, end)) ?? text.copy()
-}
-
-// What `awk -F': *' '$1=="seed"{print $2}' META` prints, as `$(...)` keeps it.
-seed_of: fn(meta: String) -> String Never! {
-    values := [String]{}
-    loop line in meta.lines() {
-        parts: line.partition(":")
-        if parts.head != "seed" -> next
-        rest := parts.tail.copy()
-        loop rest.starts_with(" ") -> rest = rest.removeprefix(" ")
-        values.push(rest.partition(":").head)
-    }
-    chomp(values.join("\n"))
-}
-
-// The text of every file in `dir` whose name ends with `suffix` (and starts
-// with `prefix`), joined as `cat` joins them.
-cat_matching: fn(dir: String, prefix: String, suffix: String) -[FS]> String Never! {
-    names := [String]{}
-    loop entry in (files.list_dir(dir) ?? return "") {
-        if !entry.name.starts_with(".") && entry.name.starts_with(prefix) && entry.name.ends_with(suffix) -> names.push(entry.name.copy())
-    }
-    names.sort()
-    out := ""
-    loop name in names -> out = "{out}{files.read("{dir}/{name}") ?? ""}"
-    out
-}
-
-// The names a generator quotes: the last dot-part, longer than 3, of each
-// `quoted` span.
-quoted_names: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    loop line in text.lines() {
-        raw: line.bytes()
-        at := 0
-        loop at < raw.len() {
-            if raw[at] != 96 {
-                at += 1
-                next
-            }
-            close := at + 1
-            loop close < raw.len() && raw[close] != 96 -> close += 1
-            if close >= raw.len() -> break
-            if close == at + 1 {
-                at += 1
-                next
-            }
-            quoted: String.from_bytes(raw.slice(at + 1, close)) ?? ""
-            last: quoted.rpartition(".").tail
-            if last.len() > 3 && !out.contains(last) -> out.push(last)
-            at = close + 1
-        }
-    }
-    out
-}
-
-// The lines a patch adds (`^\+[^+]`), without the `+`.
-added_lines: fn(patch: String) -> [String] Never! {
-    out := [String]{}
-    loop line in patch.lines() {
-        raw: line.bytes()
-        if raw.len() >= 2 && raw[0] == 43 && raw[1] != 43 -> out.push(line.removeprefix("+"))
-    }
-    out
-}
-
-// Whether `line` holds `name` as a whole word, as `grep -w` matches it.
-has_word: fn(line: String, name: String) -> Bool Never! {
-    parts: line.split(name).to_list()
-    loop index in 1..<parts.len() {
-        before: parts[index - 1].bytes()
-        after: parts[index].bytes()
-        if before.len() > 0 && is_word(before[before.len() - 1]) -> next
-        if after.len() > 0 && is_word(after[0]) -> next
-        return true
-    }
-    false
-}
-
-// The file a census row names: column 2 without `<corelib>/`, its final
-// `:line.col` and `.jet`.
-row_path: fn(field: String) -> String Never! {
-    parts: field.partition("<corelib>/")
-    out := "{parts.head}{parts.tail}"
-    if parts.sep == "" -> out = field.copy()
-    colon: out.rfind(":")
-    if colon >= 0 {
-        rest: out.bytes().slice(colon + 1, out.bytes().len())
-        numeric := true
-        loop byte in rest {
-            code: Int.from_u8(byte)
-            if code != 46 && (code < 48 || code > 57) -> numeric = false
-        }
-        if numeric -> out = String.from_bytes(out.bytes().slice(0, colon)) ?? out
-    }
-    out.removesuffix(".jet")
-}
-
-census_rows: fn(integ: String) -[FS]> [String] Never! {
-    text: "{cat_matching("{integ}/census", "", "keep-going.tsv")}{files.read("{integ}/census.out") ?? ""}"
-    out := [String]{}
-    loop line in text.lines() {
-        fields: line.split("\t").to_list()
-        if fields.len() < 2 -> next
-        path: row_path(fields[1])
-        if !out.contains(path) -> out.push(path)
-    }
-    out
-}
-
-// Whether `line` is a quoted source line `  NNN | text`; gives the text.
-quoted_source: fn(line: String) -> String? Never! {
-    raw: line.bytes()
-    at := 0
-    loop at < raw.len() && raw[at] == 32 -> at += 1
-    digits: at
-    loop at < raw.len() && Int.from_u8(raw[at]) >= 48 && Int.from_u8(raw[at]) <= 57 -> at += 1
-    if at == digits || at + 3 > raw.len() || raw[at] != 32 || raw[at + 1] != 124 || raw[at + 2] != 32 -> return None
-    at += 3
-    loop at < raw.len() && raw[at] == 32 -> at += 1
-    Val(String.from_bytes(raw.slice(at, raw.len())) ?? "")
-}
-
-// Source lines quoted under Error headers (not warnings), trimmed.
-error_lines: fn(integ: String) -[FS]> [String] Never! {
-    out := [String]{}
-    in_error := false
-    loop line in cat_matching("{integ}/census", "", ".err").lines() {
-        if line.starts_with("Error [") {
-            in_error = true
-            next
-        }
-        if line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
-        if !in_error -> next
-        text: trim_blanks(quoted_source(line) ?? next, false)
-        if text.len() > 8 && !out.contains(text) -> out.push(text)
-    }
-    out
-}
-
-lead_of: fn(name: String) -> String Never! {
-    if name.contains("-") -> name.slice(0, name.rfind("-")) else -> name.copy()
-}
-
-// Whether an earlier blamed SUB has the same lead.
-same_lead: fn(blamed: [String], name: String) -> Bool Never! {
-    lead: lead_of(name)
-    loop other in blamed {
-        if lead_of(other) == lead -> return true
-    }
-    false
-}
-
-no_apply: fn(integ: String, name: String) -[FS]> Bool Never! {
-    chomp(files.read("{integ}/{name}.status") ?? "") == "NOAPPLY"
-}
-
-size_of: fn(path: String) -[FS]> Int Never! {
-    if files.stat(path) == {
-        .Ok(info) -> info.size
-        .Err(_) -> -1
-    }
-}
-
-// Runs integrate10.sh with inherited stdio and gives its exit code.
-integrate: fn(orchestrator: String, batch: String, subs: [String]) -[Exec, IO, Time.Wait]> Int Never! {
-    argv := [String]{"{orchestrator}/integrate10.sh", batch.copy()}
-    argv.extend(subs.copy())
-    receipt: process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
-        term.eprint("batch: {argv[0]}: {err}")
-        return 127
-    }
-    if receipt.signal != None -> 128 + (receipt.signal ?? 0) else -> receipt.code
-}
-
-fail: fn(message: String, code: Int) -[Exec, IO]> Never {
+// Ends the run with `code` after `message`.
+fail: fn(message: String, code: Int) -> Never {
     print(message)
     process.exit(code)
+}
+
+// Runs integrate10.sh BATCH SUBS; its exit code.
+integrate: fn(orchestrator: String, batch: String, subs: [String]) -> Int {
+    process.cmd(["{orchestrator}/integrate10.sh", batch].concat(subs)).stdout(.Inherit).stderr(.Inherit).run().code
+}
+
+// The text of the files in `dir` whose names start with `prefix` and end with `suffix`, in name order.
+read_all: fn(dir: String, prefix: String, suffix: String) -> String {
+    names := (loop entry in (files.list_dir(dir) ?? []) -> entry.name).filter(name -> name.starts_with(prefix) && name.ends_with(suffix))
+    names.sort()
+    (loop name in names -> files.read("{dir}/{name}")).join("")
+}
+
+// The lines a patch adds, trimmed.
+added: fn(patch: String) -> [String] {
+    loop line in patch.lines().filter(line -> line.starts_with("+") && !line.starts_with("++")) -> line.removeprefix("+").trim()
+}
+
+// A SUB's lead: its name up to the last `-`.
+lead: fn(name: String) -> String {
+    parts: name.rpartition("-")
+    if parts.sep == "" -> name else -> parts.head
+}
+
+// Whether any of `lines` is one of `set`.
+overlaps: fn(lines: [String], set: [String]) -> Bool {
+    loop line in lines {
+        if set.contains(line) -> return true
+    }
+    false
+}
+
+// Whether a line `patch` adds holds a word `word` matches.
+adds_word: fn(patch: String, word: Regex) -> Bool {
+    loop line in added(patch) {
+        if word.is_match(line) -> return true
+    }
+    false
+}
+
+// The SUBs of `run` that `hits` names, each with every later SUB of its
+// lead, and the others; a SUB whose patch did not apply is in neither.
+quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String], keep: [String]) {
+    blamed := [String]{}
+    keep := [String]{}
+    loop at in 0..<run.len() {
+        name: files.basename(run[at])
+        if (files.read("{integ}/{name}.status") ?? "").trim() == "NOAPPLY" -> next
+        his: lead(name)
+        if hits[at] || blamed.any(other -> lead(other) == his) -> blamed.push(name) else -> keep.push(run[at])
+    }
+    (blamed: blamed, keep: keep)
+}
+
+// The files the census rows name: column 2 without `<corelib>/`, its final `:line.col` and `.jet`.
+census_rows: fn(integ: String) -> [String] {
+    text: "{read_all("{integ}/census", "", "keep-going.tsv")}{files.read("{integ}/census.out") ?? ""}"
+    place: regex.compile(":[0-9.]*$")
+    loop line in text.lines().filter(line -> line.contains("\t")) -> place.replace(line.split("\t").to_list()[1].replace("<corelib>/", ""), "").removesuffix(".jet")
+}
+
+// The source lines quoted under Error headers (not warnings or notes) in census/*.err, trimmed, longer than 8.
+error_lines: fn(integ: String) -> [String] {
+    quoted: regex.compile("^ *[0-9]+ \\| (.*)$")
+    out := [String]{}
+    in_error := false
+    loop line in read_all("{integ}/census", "", ".err").lines() {
+        if {
+            line.starts_with("Error [") -> in_error = true
+            line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
+            in_error && quoted.match(line) == .Val(m) && m.groups[0].trim().len() > 8 -> out.push(m.groups[0].trim())
+        }
+    }
+    out
 }
 
 run: fn() {
@@ -241,7 +118,8 @@ run: fn() {
     run := [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
-        seed: seed_of(files.read("{sub}/meta") ?? "")
+        seeds: (files.read("{sub}/meta") ?? "").lines().filter(line -> line.starts_with("seed:"))
+        seed: if seeds.len() > 0 -> seeds[0].removeprefix("seed:").trim() else -> ""
         if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
     }
     // rc 2: the export or the apply step stopped (integrate10 printed why); there is no census to attribute.
@@ -250,48 +128,27 @@ run: fn() {
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
         // __from_bits_f32), with every later SUB of the same lead.
-        names: quoted_names(cat_matching(integ, "regen.", ".out"))
-        keep := [String]{}
-        blamed := [String]{}
-        loop sub in run {
-            name: files.basename(sub)
-            if no_apply(integ, name) -> next
-            added: added_lines(files.read("{sub}/patch") ?? "")
-            hit: added.any(line -> names.any(quoted -> has_word(line, quoted))) || same_lead(blamed, name)
-            if hit -> blamed.push(name) else -> keep.push(sub.copy())
-        }
-        if blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
-        print("QUARANTINED (regen) {blamed.join(" ")}")
-        process.exit(integrate(orchestrator, "{batch}-r", keep))
+        names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.", ".out")) -> m.groups[0].rpartition(".").tail).filter(name -> name.len() > 3)
+        word: regex.compile("\\b({(loop name in names -> regex.escape(name)).join("|")})\\b")
+        split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read("{sub}/patch") ?? "", word))
+        if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
+        print("QUARANTINED (regen) {split.blamed.join(" ")}")
+        process.exit(integrate(orchestrator, "{batch}-r", split.keep))
     }
-    loop line in (files.read("{integ}/REPORT.md") ?? "").lines() {
-        if line.starts_with("Census rc=0 ") -> process.exit(0)
-    }
+    if (files.read("{integ}/REPORT.md") ?? "").lines().any(line -> line.starts_with("Census rc=0 ")) -> process.exit(0)
     rows: census_rows(integ)
     errors: error_lines(integ)
-    keep := [String]{}
-    blamed := [String]{}
+    hits := [Bool]{}
     loop sub in run {
         name: files.basename(sub)
-        if no_apply(integ, name) -> next
-        hit := false
-        if rows.len() > 0 {
-            loop path in (files.read("{integ}/{name}.files") ?? "").lines() {
-                if path != "" && (rows.contains(path.removesuffix(".jet")) || rows.contains(path)) {
-                    hit = true
-                    break
-                }
-            }
-        }
-        if !hit && errors.len() > 0 {
-            patch: if size_of("{integ}/{name}.rebased") > 0 -> "{integ}/{name}.rebased" else -> "{sub}/patch"
-            hit = added_lines(files.read(patch) ?? "").any(line -> errors.contains(trim_blanks(trim_blanks(line, true), false)))
-        }
-        // A quarantined SUB takes every later SUB of the same lead with it (they may stack on it).
-        if hit || same_lead(blamed, name) -> blamed.push(name) else -> keep.push(sub.copy())
+        paths: (files.read("{integ}/{name}.files") ?? "").lines().filter(path -> path != "")
+        rebased: files.read("{integ}/{name}.rebased") ?? ""
+        hits.push(overlaps(paths.concat(loop path in paths -> path.removesuffix(".jet")), rows) || overlaps(added(if rebased != "" -> rebased else -> files.read("{sub}/patch") ?? ""), errors))
     }
-    if blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
-    print("QUARANTINED {blamed.join(" ")}")
-    if keep.len() == 0 -> process.exit(1)
-    process.exit(integrate(orchestrator, "{batch}-r", keep))
+    split: quarantine(integ, run, hits)
+    if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
+    print("QUARANTINED {split.blamed.join(" ")}")
+    if split.keep.len() == 0 -> process.exit(1)
+    code: integrate(orchestrator, "{batch}-r", split.keep)
+    if code != 0 -> process.exit(code)
 }

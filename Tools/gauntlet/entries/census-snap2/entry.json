@@ -1,11 +1,17 @@
 {
   "name": "census-snap2",
   "mode": "tool",
-  "description": "Main's precommit census census-snap2.sh and its Jet twin CensusSnap2.jet (#5072 c15): snapshot HEAD of the dev worktree plus the named files (or take a prepared tree), then the seed check, the keep-going build, the guards gate, the runtime pass, the self-check of the compiler just built and, for a named Jetpack file, the hosted Jetpack pass, each reported in one line with its rows. The fixtures hold a stand-in jet (seed/jet) that writes the keep-going report each case's STANDIN_* variables ask for, stand-ins for Main's helpers (scratch/Main) and a bare repository (work.git) whose HEAD differs from the worktree beside it.",
+  "description": "Main's precommit census census-snap2.sh and its Jet twin CensusSnap2.jet (#5072 c15): snapshot HEAD of the dev worktree plus the named files (or take a prepared tree), then the seed check, the keep-going build, the guards gate, the runtime pass, the self-check of the compiler just built and, for a named Jetpack file, the hosted Jetpack pass, each reported in one line with its rows. The fixtures hold a stand-in jet (seed/jet) that writes the keep-going report each case's STANDIN_* variables ask for, stand-ins for Main's helpers (scratch/Main) and a bare repository (work.git) whose HEAD differs from the worktree beside it. check.jet prints each output line by its first three words (a pass with its rc and rows, a row by place, kind and code) and every report and snapshot file left.",
   "tool": {
     "original": "Tools/agent/orchestrator/census-snap2.sh",
     "jet": "Tools/agent/orchestrator/CensusSnap2.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c36",
+      "#5072 c38",
+      "#5072 c39",
+      "#5072 c40"
+    ],
     "cases": [
       {
         "args": [],
@@ -18,6 +24,7 @@
           "STANDIN_BUILD_PACK": "1",
           "STANDIN_GUARDS_FAIL": "unicode_tables_are_current"
         },
+        "check": "check.jet",
         "expected": "expected/clean.out"
       },
       {
@@ -32,6 +39,7 @@
           "STANDIN_CHECK_RC": "1"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/check-rows.out"
       },
       {
@@ -45,6 +53,7 @@
           "STANDIN_CHECK_ROWS": "2",
           "CENSUS_BUILD": "0"
         },
+        "check": "check.jet",
         "expected": "expected/check-only.out"
       },
       {
@@ -59,6 +68,7 @@
           "STANDIN_BUILD_RC": "1"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/build-rows.out"
       },
       {
@@ -73,6 +83,7 @@
           "STANDIN_GUARDS_FAIL": "unicode_tables_are_current no_loose_scripts"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/guards-fail.out"
       },
       {
@@ -86,6 +97,7 @@
           "CENSUS_GUARDS": "0"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/no-pack.out"
       },
       {
@@ -102,6 +114,7 @@
           "STANDIN_SELF_RC": "1"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/packager-selfcheck-rows.out"
       },
       {
@@ -117,6 +130,7 @@
           "STANDIN_PACK_RC": "3"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/packager-fails.out"
       },
       {
@@ -133,6 +147,7 @@
           "STANDIN_CORE_RC": "1"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/core-rows.out"
       },
       {
@@ -150,6 +165,7 @@
           "CENSUS_SELFCHECK": "0",
           "STANDIN_BUILD_PACK": "1"
         },
+        "check": "check.jet",
         "expected": "expected/jetpack-ok.out"
       },
       {
@@ -168,6 +184,7 @@
           "STANDIN_JETPACK": "fail"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/jetpack-fail.out"
       },
       {
@@ -186,6 +203,7 @@
           "STANDIN_BUILD_PACK": "1",
           "STANDIN_JETPACK": "fail"
         },
+        "check": "check.jet",
         "expected": "expected/jetpack-skipped.out"
       },
       {
@@ -200,6 +218,7 @@
           "CENSUS_SELFCHECK": "0",
           "STANDIN_BUILD_PACK": "1"
         },
+        "check": "check.jet",
         "expected": "expected/guards-timeout-zero.out"
       },
       {
@@ -211,6 +230,7 @@
           "JET_DEV_WORKTREE": "missing"
         },
         "exit": 2,
+        "check": "check.jet",
         "expected": "expected/export-failed.out"
       },
       {
@@ -229,6 +249,7 @@
           "GIT_CONFIG_NOSYSTEM": "1"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/snapshot.out"
       }
     ]

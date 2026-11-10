@@ -1,33 +1,99 @@
 {
   "name": "integ-land4",
   "mode": "tool",
-  "description": "The Lander's integ-land4.sh and its Jet twin IntegLand4.jet (#5072 c15): land a passed integration batch's SUBs on dev, one commit each, after checking the census, each SUB's status, origin/dev against BASE and the landed tree against the tested one, then push. The fixtures are the dev worktree itself (its git directory is work.git, its origin the bare origin.git) with four batches: one that lands, one whose census failed, one whose tested tree differs, and one whose SUB did not apply.",
+  "description": "The Lander's integ-land4.sh and its Jet twin IntegLand4.jet (#5072 c15): land a passed integration batch's SUBs on dev, one commit each, after checking the census, each SUB's status, origin/dev against BASE and the landed tree against the tested one, then push. The fixtures are the dev worktree itself (its git directory is work.git, its origin the bare origin.git) with four batches: one that lands, one whose census failed, one whose tested tree differs, and one whose SUB did not apply. check.jet prints what the program printed, the commits, origin's dev, the queue files and the landed-file lists and commit messages.",
   "tool": {
     "original": "Tools/agent/orchestrator/integ-land4.sh",
     "jet": "Tools/agent/orchestrator/IntegLand4.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c36",
+      "#5072 c38",
+      "#5072 c39",
+      "#5072 c40"
+    ],
     "cases": [
       {
-        "args": ["b1", "inbox/L-1/"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_STATE_ROOT": ".", "JET_DEV_WORKTREE": ".", "GIT_DIR": "work.git", "GIT_WORK_TREE": ".", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid", "GIT_AUTHOR_DATE": "2026-11-09T13:00:00+0000", "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid", "GIT_COMMITTER_DATE": "2026-11-09T13:00:00+0000"},
+        "args": [
+          "b1",
+          "inbox/L-1/"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_STATE_ROOT": ".",
+          "JET_DEV_WORKTREE": ".",
+          "GIT_DIR": "work.git",
+          "GIT_WORK_TREE": ".",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_AUTHOR_NAME": "Fixture",
+          "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+          "GIT_AUTHOR_DATE": "2026-11-09T13:00:00+0000",
+          "GIT_COMMITTER_NAME": "Fixture",
+          "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+          "GIT_COMMITTER_DATE": "2026-11-09T13:00:00+0000"
+        },
+        "check": "check.jet",
         "expected": "expected/landed.out"
       },
       {
-        "args": ["b2", "inbox/L-1"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_STATE_ROOT": ".", "JET_DEV_WORKTREE": ".", "GIT_DIR": "work.git", "GIT_WORK_TREE": ".", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"},
+        "args": [
+          "b2",
+          "inbox/L-1"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_STATE_ROOT": ".",
+          "JET_DEV_WORKTREE": ".",
+          "GIT_DIR": "work.git",
+          "GIT_WORK_TREE": ".",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1"
+        },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/census-failed.out"
       },
       {
-        "args": ["b3", "inbox/L-1"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_STATE_ROOT": ".", "JET_DEV_WORKTREE": ".", "GIT_DIR": "work.git", "GIT_WORK_TREE": ".", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid", "GIT_AUTHOR_DATE": "2026-11-09T13:00:00+0000", "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid", "GIT_COMMITTER_DATE": "2026-11-09T13:00:00+0000"},
+        "args": [
+          "b3",
+          "inbox/L-1"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_STATE_ROOT": ".",
+          "JET_DEV_WORKTREE": ".",
+          "GIT_DIR": "work.git",
+          "GIT_WORK_TREE": ".",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_AUTHOR_NAME": "Fixture",
+          "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+          "GIT_AUTHOR_DATE": "2026-11-09T13:00:00+0000",
+          "GIT_COMMITTER_NAME": "Fixture",
+          "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+          "GIT_COMMITTER_DATE": "2026-11-09T13:00:00+0000"
+        },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/tree-differs.out"
       },
       {
-        "args": ["b4", "inbox/L-2"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_STATE_ROOT": ".", "JET_DEV_WORKTREE": ".", "GIT_DIR": "work.git", "GIT_WORK_TREE": ".", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"},
+        "args": [
+          "b4",
+          "inbox/L-2"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_STATE_ROOT": ".",
+          "JET_DEV_WORKTREE": ".",
+          "GIT_DIR": "work.git",
+          "GIT_WORK_TREE": ".",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1"
+        },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/not-ok.out"
       }
     ]

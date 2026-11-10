@@ -14,11 +14,11 @@
 // The Jet twin of integ-apply6.sh (gauntlet tool entry integ-apply6): the
 // base blobs are the objects of the repository $JET_DEV_WORKTREE belongs to,
 // the generators run with the seed $JET_SEED, and linemerge.mjs is Main's, in
-// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them.
+// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. Paths a
+// git step reads are given to git as named, so a relative one is from TREE.
 use {
     files: core.files
     process: core.process
-    regex: core.regex
     roots: "Roots"
     term: core.term
     time: core.time
@@ -31,241 +31,64 @@ GENERATOR_NAME: Regex{"[Gg]enerated by Tools/[^ ;]+"}
 // A conflict marker line a three-way merge leaves.
 CONFLICT_MARKER: Regex{"^(<<<<<<<|=======|>>>>>>>)( |$)"}
 
-// `text` without its trailing newlines, as `$(...)` gives it.
-chomp: fn(text: String) -> String Never! {
-    out := text.copy()
-    loop out.ends_with("\n") -> out = out.removesuffix("\n")
-    out
-}
-
-// The lines awk reads from `text`: a last line without its newline counts.
-records: fn(text: String) -> [String] Never! {
-    out := text.split("\n").to_list()
-    if out.len() > 0 && out[out.len() - 1] == "" -> _ := out.pop()
-    out
-}
-
-// The words the shell splits `text` into (no globbing).
-words: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    loop word in text.replace("\t", " ").replace("\n", " ").split(" ") {
-        if word != "" -> out.push(word.copy())
-    }
-    out
-}
-
-// `${name%-*}`: `name` without its last `-` part.
-lead_of: fn(name: String) -> String Never! {
-    parts: name.split("-").to_list()
-    if parts.len() < 2 -> return name.copy()
-    parts[0..<parts.len() - 1].join("-")
-}
-
-// `readlink -f path`: the path with every symlink resolved; a last part that
-// does not exist stays as it is.
-readlink_f: fn(path: String) -[FS, Env]> String Never! {
-    whole: files.canonicalize(path) ?? {
-        parent: files.canonicalize(if files.dirname(path) == "" -> "." else -> files.dirname(path)) ?? return path.copy()
-        return "{parent}/{files.basename(path)}"
-    }
-    whole
-}
-
-// Writes `line` to stdout now, before any child writes to it.
-say: fn(line: String) Never! -[IO]> {
-    out := term.stdout()
-    out.write_bytes("{line}\n".bytes()) ?? ()
-    out.flush() ?? ()
-}
-
-// `printf ... >> path`.
-append: fn(path: String, text: String) Never! -[FS, IO]> {
-    writer: files.append(path) ?? {
-        term.eprint("integ-apply: {path}: {err}")
-        return
-    }
-    writer.write_all(text.bytes()) ?? term.eprint("integ-apply: {path}: {err}")
-    writer.flush() ?? ()
-}
-
-// `printf ... > path`.
-put: fn(path: String, text: String) Never! -[FS, IO]> {
-    files.write(path, text) ?? term.eprint("integ-apply: {path}: {err}")
-}
-
-// The exit status the shell gives a finished child: 124 for one `timeout`
-// stopped, 128 + N for signal N.
-status: fn(receipt: ProcessReceipt) -> Int Never! {
-    if receipt.timed_out -> return 124
-    if receipt.signal == .Val(number) -> return 128 + number
-    receipt.code
-}
-
-// Ends the run with `code` after `line` on stdout.
-stop: fn(line: String, code: Int) -[Exec, IO]> Never {
-    say(line)
+// Ends the run with `code` after `line`.
+stop: fn(line: String, code: Int) -> Never {
+    print(line)
     process.exit(code)
 }
 
-// Ends the run with `code` after `message` on stderr.
-quit: fn(message: String, code: Int) -[Exec, IO]> Never {
-    term.eprint(message)
-    process.exit(code)
+// `git -C tree ARGS` with the integ identity and no automatic gc: a detached
+// auto gc started by one SUB's commit raced the next commit and broke HEAD
+// (every later .rebased and regen.patch came out empty while APPLIED still
+// printed).
+git: fn(tree: String, args: [String]) -> ProcessSpec {
+    process.cmd(["git", "-C", tree, "-c", "user.name=integ", "-c", "user.email=integ@local", "-c", "gc.auto=0", "-c", "maintenance.auto=false"].concat(args))
 }
 
-// `git -C tree` with the integ identity and no automatic gc: a detached auto
-// gc started by one SUB's commit raced the next commit and broke HEAD (every
-// later .rebased and regen.patch came out empty while APPLIED still printed).
-gitq: fn(tree: String, args: [String]) -[Exec]> ProcessSpec Never! {
-    argv := [String]{"git", "-C", tree.copy(), "-c", "user.name=integ", "-c", "user.email=integ@local", "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
-    argv.extend(args.copy())
-    process.cmd(argv)
-}
+// Whether `git -C tree ARGS` exits 0.
+ok: fn(tree: String, args: [String]) -> Bool { git(tree, args).run().code == 0 }
 
-// Runs `spec` on the program's streams; its exit status.
-runs: fn(spec: ProcessSpec) -[Exec, IO, Time.Wait]> Int Never! {
-    receipt: spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
-        term.eprint("integ-apply: {err}")
-        return 127
-    }
-    status(receipt)
-}
-
-// Runs `spec` with its stderr discarded (`2>/dev/null`); its exit status.
-runs_quiet: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Int Never! {
-    receipt: spec.stdin(.Inherit).stdout(.Inherit).stderr(.Capture).output_limit(1073741824).run() ?? return 127
-    status(receipt)
-}
-
-// `$(spec)` with its stderr shown: None when it could not start.
-captured: fn(spec: ProcessSpec) -[Exec, IO, Time.Wait]> ProcessReceipt? Never! {
-    receipt: spec.stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(1073741824).run() ?? {
-        term.eprint("integ-apply: {err}")
-        return None
-    }
-    Val(receipt)
-}
-
-// `$(spec)`, its stdout without trailing newlines.
-output: fn(spec: ProcessSpec) -[Exec, IO, Time.Wait]> String Never! {
-    receipt: captured(spec) ?? return ""
-    chomp(receipt.output)
-}
-
-// `spec > path`, its stderr as the caller set it; the shell's exit status. As
-// in the shell, a file that can't be opened fails (1) before `spec` runs.
-into: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
-    files.write(path, "") ?? {
-        term.eprint("integ-apply: {path}: {err}")
-        return 1
-    }
-    receipt: spec.stdin(.Inherit).stdout(.Capture).output_limit(1073741824).run() ?? {
-        term.eprint("integ-apply: {err}")
-        return 127
-    }
-    files.write(path, receipt.output) ?? term.eprint("integ-apply: {path}: {err}")
-    status(receipt)
-}
-
-// `spec > path`, its stderr shown.
-into_file: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! { into(spec.stderr(.Inherit), path) }
-
-// `spec > path 2>&1`.
-into_merged: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! { into(spec.stderr(.Stdout), path) }
-
-// `spec > path 2>/dev/null`.
-into_quiet: fn(spec: ProcessSpec, path: String) -[Exec, FS, IO, Time.Wait]> Int Never! { into(spec.stderr(.Capture), path) }
+// The unmerged paths of the tree's index.
+unmerged: fn(tree: String) -> [String] { git(tree, ["diff", "--name-only", "--diff-filter=U"]).run().output.lines() }
 
 // The base commit: the export with every tracked file (-f: some match
 // .gitignore, as Tools/script-census.tsv does), the main repository's objects
 // at hand for the three-way merges; whether every step succeeded.
-based: fn(tree: String, worktree: String) -[Exec, FS, IO, Time.Wait]> Bool Never! {
-    init: gitq(tree, [String]{"init", "-q"})
-    if runs(init) != 0 -> return false
-    common: captured(process.cmd([String]{"git", "-C", worktree.copy(), "rev-parse", "--path-format=absolute", "--git-common-dir"})) ?? return false
-    if status(common) != 0 -> return false
-    alternates: "{tree}/.git/objects/info/alternates"
-    files.write(alternates, "{chomp(common.output)}/objects\n") ?? {
-        term.eprint("integ-apply: {alternates}: {err}")
-        return false
-    }
-    add: gitq(tree, [String]{"add", "-A", "-f"})
-    commit: gitq(tree, [String]{"commit", "-qm", "base", "--no-verify"})
-    tagged: gitq(tree, [String]{"tag", "base"})
-    runs(add) == 0 && runs(commit) == 0 && runs(tagged) == 0
+based: fn(tree: String, worktree: String) -> Bool {
+    if !ok(tree, ["init", "-q"]) -> return false
+    common: process.cmd(["git", "-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"]).run()
+    if common.code != 0 -> return false
+    files.write("{tree}/.git/objects/info/alternates", "{common.output.trim()}/objects\n")
+    ok(tree, ["add", "-A", "-f"]) && ok(tree, ["commit", "-qm", "base", "--no-verify"]) && ok(tree, ["tag", "base"])
 }
 
-// The paths `git apply --numstat` lists for `patch` (its third column).
-patch_paths: fn(patch: String) -[Exec, Time.Wait]> [String] Never! {
-    receipt: process.cmd([String]{"git", "apply", "--numstat", patch.copy()}).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824).run() ?? return [String]{}
-    out := [String]{}
-    loop line in records(receipt.output) {
-        fields: line.split("\t").to_list()
-        out.push(if fields.len() > 2 -> fields[2].copy() else -> "")
-    }
-    out
-}
-
-// The generator a file's header names in its first 40 lines, one trailing
-// `.` dropped; empty when none does.
-generator_of: fn(path: String) -[FS]> String Never! {
-    text: files.read(path) ?? return ""
-    lines: records(text)
-    loop line in lines[0..<(if lines.len() < 40 -> lines.len() else -> 40)] {
-        if !regex.is_match(GENERATED_HEADER, line) -> next
-        found: regex.find(GENERATOR_NAME, line) ?? return ""
-        return found.removeprefix("generated by ").removeprefix("Generated by ").removesuffix(".")
+// The generator a file's header names in its first 40 lines, one trailing `.`
+// dropped; "" when none does.
+generator_of: fn(path: String) -> String {
+    loop line in (files.read(path) ?? "").lines().slice(0, 40) {
+        if !GENERATED_HEADER.is_match(line) -> next
+        found: GENERATOR_NAME.find(line) ?? ""
+        return found.slice(13, found.len()).removesuffix(".")
     }
     ""
 }
 
-// The SUBs of a meta file's stack lines (`stack: a, b`); a bare number is a
-// SUB of the same lead.
-stacked_on: fn(meta: String, lead: String) -[FS]> [String] Never! {
-    text: files.read(meta) ?? return [String]{}
-    out := [String]{}
-    loop line in records(text) {
-        parts: line.partition(":")
-        if parts.head != "stack" -> next
-        value := parts.tail.copy()
-        loop value.starts_with(" ") -> value = value.removeprefix(" ")
-        loop word in words(value.partition(":").head.replace(",", " ")) {
-            if word == "none" -> next
-            out.push(if word.contains("-") -> word.copy() else -> "{lead}-{word}")
-        }
-    }
-    out
-}
-
-// The last SUB of `lead` in the batch so far.
-previous_of: fn(order: String, lead: String) -[FS]> String Never! {
-    text: files.read(order) ?? return ""
-    found := ""
-    loop line in records(text) {
-        parts: line.split("/").to_list()
-        last: parts[parts.len() - 1].copy()
-        if lead_of(last) == lead -> found = last.copy()
-    }
-    found
-}
-
-// The unmerged paths of the tree's index.
-unmerged: fn(tree: String) -[Exec, IO, Time.Wait]> [String] Never! {
-    diff: gitq(tree, [String]{"diff", "--name-only", "--diff-filter=U"})
-    words(output(diff))
+// A SUB's lead: its name up to the last `-`.
+lead: fn(name: String) -> String {
+    parts: name.rpartition("-")
+    if parts.sep == "" -> name else -> parts.head
 }
 
 // A file whose every conflict lies inside a generated region keeps ours there
-// ("ours"); any other conflict is "none"; "" when the file can't be read.
-marker_mode: fn(path: String) -[FS]> String Never! {
-    text: files.read(path) ?? return ""
+// ("ours"); any other conflict is "none".
+marker_mode: fn(path: String) -> String {
     generated := false
     bad := false
     seen := false
-    loop line in records(text) {
+    loop line in (files.read(path) ?? "").lines() {
         if line.contains("unsafe-ratchet:begin") || line.contains("BEGIN GENERATED") -> generated = true
-        if regex.is_match(CONFLICT_MARKER, line) {
-            if !generated -> bad = true
+        if CONFLICT_MARKER.is_match(line) {
+            bad = bad || !generated
             seen = true
         }
         if line.contains("unsafe-ratchet:end") || line.contains("END GENERATED") -> generated = false
@@ -273,41 +96,34 @@ marker_mode: fn(path: String) -[FS]> String Never! {
     if seen && !bad -> "ours" else -> "none"
 }
 
-// The base, ours and theirs of an unmerged `path` in `work` as `b`, `o`, `t`.
-stages: fn(tree: String, path: String, work: String) Never! -[Exec, FS, IO, Time.Wait]> {
-    _ := into_quiet(gitq(tree, [String]{"show", ":1:{path}"}), "{work}/b")
-    _ := into_file(gitq(tree, [String]{"show", ":2:{path}"}), "{work}/o")
-    _ := into_file(gitq(tree, [String]{"show", ":3:{path}"}), "{work}/t")
-}
-
-// A scratch directory for one file's stages.
-scratch: fn() -[FS, IO]> String Never! {
-    files.mkdtemp("integ-apply") ?? {
-        term.eprint("mktemp: {err}")
-        "."
-    }
+// A scratch directory holding the base, ours and theirs of an unmerged `path` as `b`, `o` and `t`.
+stages: fn(tree: String, path: String) -> String {
+    work: files.mkdtemp("integ-apply")
+    files.write("{work}/b", git(tree, ["show", ":1:{path}"]).run().output)
+    files.write("{work}/o", git(tree, ["show", ":2:{path}"]).run().output)
+    files.write("{work}/t", git(tree, ["show", ":3:{path}"]).run().output)
+    work
 }
 
 // The mode a conflict the markers leave unresolved merges by: "union" when
 // every conflict hunk is a pure addition on both sides (an empty base part);
-// else "lines" when linemerge.mjs merges neighbouring-line edits line by line,
-// its result in I/linemerge.tmp; else "none".
-staged_mode: fn(tree: String, integ: String, g: String, path: String) -[Exec, FS, IO, Time.Wait]> String Never! {
-    work: scratch()
-    stages(tree, path, work)
-    merged: output(process.cmd([String]{"git", "merge-file", "--diff3", "-p", "{work}/o", "{work}/b", "{work}/t"}))
+// else "lines" when linemerge.mjs merges neighbouring-line edits (and name
+// additions to one `{ a, b }` set line) line by line, its result in
+// I/linemerge.tmp; else "none".
+staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String {
+    work: stages(tree, path)
     open := false
     hunks := 0
     in_base := false
     bad := false
-    loop line in records(merged) {
+    loop line in process.cmd(["git", "merge-file", "--diff3", "-p", "{work}/o", "{work}/b", "{work}/t"]).run().output.lines() {
         if {
             line.starts_with("<<<<<<< ") -> {
                 open = true
                 hunks += 1
             }
-            line.starts_with("||||||| ") -> { if open -> in_base = true }
-            line == "=======" -> { if open -> in_base = false }
+            line.starts_with("||||||| ") -> in_base = open
+            line == "=======" -> in_base = false
             line.starts_with(">>>>>>> ") -> {
                 open = false
                 in_base = false
@@ -316,82 +132,73 @@ staged_mode: fn(tree: String, integ: String, g: String, path: String) -[Exec, FS
         }
     }
     mode := if hunks > 0 && !bad -> "union" else -> "none"
-    linemerge: process.cmd([String]{"node", "{g}/linemerge.mjs", "{work}/o", "{work}/b", "{work}/t"})
-    if mode == "none" && into_quiet(linemerge, "{integ}/linemerge.tmp") == 0 -> mode = "lines"
-    files.remove_all(work) ?? ()
+    if mode == "none" {
+        merged: process.cmd(["node", "{g}/linemerge.mjs", "{work}/o", "{work}/b", "{work}/t"]).run()
+        files.write("{integ}/linemerge.tmp", merged.output)
+        if merged.code == 0 -> mode = "lines"
+    }
+    files.remove_all(work)
     mode
 }
 
-// Writes the `mode` merge of an unmerged `path` over the tree's copy.
-merge_into: fn(tree: String, path: String, mode: String) Never! -[Exec, FS, IO, Time.Wait]> {
-    work: scratch()
-    stages(tree, path, work)
-    _ := into_file(process.cmd([String]{"git", "merge-file", "--{mode}", "-p", "{work}/o", "{work}/b", "{work}/t"}), "{tree}/{path}")
-    files.remove_all(work) ?? ()
+// Records SUB `name` as not applied, `note` after its name.
+failed: fn(integ: String, name: String, note: String{""}) {
+    print("NOAPPLY {name}{note}")
+    files.write("{integ}/{name}.status", "NOAPPLY\n")
+    files.append_all("{integ}/failed", "{name}\n")
 }
 
-// Records SUB `name` as not applied.
-failed: fn(integ: String, name: String, note: String) Never! -[FS, IO]> {
-    say("NOAPPLY {name}{note}")
-    put("{integ}/{name}.status", "NOAPPLY\n")
-    append("{integ}/failed", "{name}\n")
-}
-
-// Applies SUB `sub`; its path when it applied.
-apply_sub: fn(tree: String, integ: String, g: String, sub: String) -[Exec, FS, IO, Time.Wait]> String? Never! {
+// Applies SUB `sub`; whether it applied.
+apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
-    listed: patch_paths("{s}/patch")
-    put("{integ}/{n}.files", if listed.len() == 0 -> "" else -> "{listed.join("\n")}\n")
+    listed: (loop line in process.cmd(["git", "apply", "--numstat", "{s}/patch"]).run().output.lines() -> line.split("\t").to_list().concat(["", "", ""])[2])
+    files.write("{integ}/{n}.files", (loop path in listed -> "{path}\n").join(""))
     excluded := [String]{}
-    loop f in listed {
-        if f == "" -> next
+    loop f in listed.filter(f -> f != "") {
         path: "{tree}/{f}"
         // An edit of a file an earlier SUB in this batch deleted is dropped (the deleting SUB replaced the file's
         // role, e.g. ScriptLead-1 computes the script census that Tools/script-census.tsv held by hand).
-        if !files.exists(path) {
-            probe: gitq(tree, [String]{"cat-file", "-e", "base:{f}"})
-            if runs_quiet(probe) == 0 {
-                by: output(gitq(tree, [String]{"log", "--format=%s", "--diff-filter=D", "-1", "--", f.copy()}))
-                if by != "" {
-                    excluded.push("--exclude={f}")
-                    append("{integ}/{n}.dropped", "dropped edit of {f}: deleted by {by}\n")
-                }
-                next
+        if !files.exists(path) && ok(tree, ["cat-file", "-e", "base:{f}"]) {
+            by: git(tree, ["log", "--format=%s", "--diff-filter=D", "-1", "--", f]).run().output.trim()
+            if by != "" {
+                excluded.push("--exclude={f}")
+                files.append_all("{integ}/{n}.dropped", "dropped edit of {f}: deleted by {by}\n")
             }
+            next
         }
-        if !files.is_file(path) -> next
         // Agent policy and skill prose may quote the generated-file header; it is never generated.
-        if f == "AGENTS.md" || f.starts_with(".agents/") -> next
+        if !files.is_file(path) || f == "AGENTS.md" || f.starts_with(".agents/") -> next
         // The safety ledger is written whole by UnsafeRatchet --update (its regions move with every source line).
         generator: if f == "Docs/spec/safety.md" -> "Tools/agent/UnsafeRatchet.jet" else -> generator_of(path)
         if generator == "" -> next
         excluded.push("--exclude={f}")
-        append("{integ}/generators", "{generator}\t{f}\n")
+        files.append_all("{integ}/generators", "{generator}\t{f}\n")
     }
-    lead: lead_of(n)
-    failed_text: files.read("{integ}/failed") ?? ""
-    failures: records(failed_text)
-    dependency := ""
-    loop d in stacked_on("{s}/meta", lead) {
-        if failures.contains(d) -> dependency = d.copy()
+    his: lead(n)
+    // The SUBs its meta's stack lines name (`stack: a, b`; a bare number is a SUB of the same lead); with no
+    // meta file, a SUB stacks on the previous SUB of the same lead in this batch.
+    meta: files.read("{s}/meta") ?? ""
+    stacked := [String]{}
+    loop line in meta.lines().filter(line -> line.starts_with("stack:")) {
+        loop d in line.removeprefix("stack:").replace(",", " ").words().filter(d -> d != "none") -> stacked.push(if d.contains("-") -> d else -> "{his}-{d}")
     }
-    // With no meta file, a SUB stacks on the previous SUB of the same lead in this batch.
     if !files.is_file("{s}/meta") {
-        previous: previous_of("{integ}/order", lead)
-        if previous != "" && failures.contains(previous) -> dependency = previous.copy()
+        same: order.filter(other -> lead(files.basename(other)) == his)
+        if same.len() > 0 -> stacked.push(files.basename(same[same.len() - 1]))
     }
-    append("{integ}/order", "{s}\n")
+    files.append_all("{integ}/order", "{s}\n")
+    order.push(s.copy())
     apply_log: "{integ}/{n}.apply"
-    if dependency != "" {
-        put(apply_log, "stack dependency {dependency} did not apply\n")
-        failed(integ, n, "")
-        return None
+    dependency: stacked.filter(d -> failures.contains(d))
+    if dependency.len() > 0 {
+        files.write(apply_log, "stack dependency {dependency[dependency.len() - 1]} did not apply\n")
+        failed(integ, n)
+        failures.push(n)
+        return false
     }
-    apply_args := [String]{"apply", "--3way", "-p1"}
-    apply_args.extend(excluded)
-    apply_args.push("{s}/patch")
-    applied: into_merged(gitq(tree, apply_args), apply_log)
+    applied: git(tree, ["apply", "--3way", "-p1"].concat(excluded).concat(["{s}/patch"])).stderr(.Stdout).run()
+    files.write(apply_log, applied.output)
     // Conflicts left by the three-way merge are resolved only where the answer is mechanical:
     //  - every conflict lies inside a generated region (`unsafe-ratchet:begin..end`, `BEGIN GENERATED..END
     //    GENERATED`): keep ours there and rerun that region's generator;
@@ -399,123 +206,104 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String) -[Exec, FS, I
     //  - every conflict hunk is a pure addition on both sides (an empty base part): keep both, ours first
     //    (union); the census then checks the composed file.
     // Any other conflict makes the SUB NOAPPLY.
-    ok := applied == 0 || unmerged(tree).len() > 0
-    loop f in unmerged(tree) {
+    conflicts: unmerged(tree)
+    clean := applied.code == 0 || conflicts.len() > 0
+    loop f in conflicts {
         mode := if f.ends_with(".tsv") -> "union" else -> marker_mode("{tree}/{f}")
         if mode == "none" -> mode = staged_mode(tree, integ, g, f)
         if mode == "none" {
-            ok = false
-            append(apply_log, "unresolvable conflict outside a generated region: {f}\n")
+            clean = false
+            files.append_all(apply_log, "unresolvable conflict outside a generated region: {f}\n")
             break
         }
         if {
-            mode == "lines" -> files.copy("{integ}/linemerge.tmp", "{tree}/{f}") ?? term.eprint("cp: {integ}/linemerge.tmp: {err}")
-            else -> merge_into(tree, f, mode)
+            mode == "lines" -> files.copy("{integ}/linemerge.tmp", "{tree}/{f}")
+            else -> {
+                work: stages(tree, f)
+                files.write("{tree}/{f}", process.cmd(["git", "merge-file", "--{mode}", "-p", "{work}/o", "{work}/b", "{work}/t"]).run().output)
+                files.remove_all(work)
+            }
         }
-        _ := runs(gitq(tree, [String]{"add", "--", f.copy()}))
-        append(apply_log, "resolved {f} ({mode})\n")
-        if mode == "ours" {
-            text: files.read("{tree}/{f}") ?? ""
-            regenerated: if text.contains("unsafe-ratchet:begin") -> "Tools/agent/UnsafeRatchet.jet" else -> "Tools/agent/CoreSourceRows.jet"
-            append("{integ}/generators", "{regenerated}\t{f}\n")
-        }
+        _ := ok(tree, ["add", "--", f])
+        files.append_all(apply_log, "resolved {f} ({mode})\n")
+        if mode == "ours" -> files.append_all("{integ}/generators", "{if files.read("{tree}/{f}").contains("unsafe-ratchet:begin") -> "Tools/agent/UnsafeRatchet.jet" else -> "Tools/agent/CoreSourceRows.jet"}\t{f}\n")
     }
-    clean: ok && unmerged(tree).len() == 0
-    add: gitq(tree, [String]{"add", "-A"})
-    unchanged: gitq(tree, [String]{"diff", "--cached", "--quiet", "HEAD"})
-    if {
-        clean && runs(add) == 0 && runs(unchanged) == 0 -> {
-            // The patch changes nothing on this tree: an earlier SUB of the batch already carries it.
-            append(apply_log, "already in the tree: every change of this patch is carried by an earlier SUB\n")
-            failed(integ, n, " (empty)")
-            None
-        }
-        clean -> {
-            commit: gitq(tree, [String]{"commit", "-qm", n.copy(), "--no-verify"})
-            if runs(commit) != 0 -> stop("integ-apply: commit of {n} failed; the integ repo is broken, stopping", 2)
-            rebased: "{integ}/{n}.rebased"
-            diff: gitq(tree, [String]{"diff", "--binary", "HEAD~1", "HEAD"})
-            if into_file(diff, rebased) != 0 -> stop("integ-apply: diff of {n} failed; stopping", 2)
-            written: files.read_bytes(rebased) ?? [U8]{}
-            if written.len() == 0 -> stop("integ-apply: {n}.rebased is empty; stopping", 2)
-            say("APPLIED {n}")
-            Val(s)
-        }
-        else -> {
-            _ := runs(gitq(tree, [String]{"reset", "-q", "--hard", "HEAD"}))
-            _ := runs(gitq(tree, [String]{"clean", "-qfd"}))
-            failed(integ, n, "")
-            None
-        }
+    clean = clean && unmerged(tree).len() == 0
+    if clean && ok(tree, ["add", "-A"]) && ok(tree, ["diff", "--cached", "--quiet", "HEAD"]) {
+        // The patch changes nothing on this tree: an earlier SUB of the batch already carries it (post42h2: Main-2).
+        files.append_all(apply_log, "already in the tree: every change of this patch is carried by an earlier SUB\n")
+        failed(integ, n, " (empty)")
+        failures.push(n)
+        return false
     }
+    if !clean {
+        _ := ok(tree, ["reset", "-q", "--hard", "HEAD"])
+        _ := ok(tree, ["clean", "-qfd"])
+        failed(integ, n)
+        failures.push(n)
+        return false
+    }
+    if !ok(tree, ["commit", "-qm", n, "--no-verify"]) -> stop("integ-apply: commit of {n} failed; the integ repo is broken, stopping", 2)
+    rebased: git(tree, ["diff", "--binary", "HEAD~1", "HEAD"]).run()
+    if rebased.code != 0 -> stop("integ-apply: diff of {n} failed; stopping", 2)
+    files.write("{integ}/{n}.rebased", rebased.output)
+    if rebased.output == "" -> stop("integ-apply: {n}.rebased is empty; stopping", 2)
+    print("APPLIED {n}")
+    true
 }
 
 // Regenerates every generated file an applied SUB touched, with the seed,
 // from the composed sources.
-regenerate: fn(tree: String, integ: String) Never! -[Env, Exec, FS, IO, Time.Wait]> {
-    seed: readlink_f(roots.seed())
+regenerate: fn(tree: String, integ: String) {
+    seed: files.canonicalize(roots.seed())
     // The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
-    append("{integ}/generators", "Tools/agent/RuntimeGenerators.jet\tall\n")
-    text: files.read("{integ}/generators") ?? ""
-    names := [String]{}
-    loop line in records(text) {
-        loop name in words(line.partition("\t").head) -> names.push(name)
-    }
+    files.append_all("{integ}/generators", "Tools/agent/RuntimeGenerators.jet\tall\n")
+    names := loop line in files.read("{integ}/generators").lines() -> line.partition("\t").head
     names.sort()
-    identity: chomp(files.read("{seed}/IDENTITY") ?? "")
-    at := 0
-    loop at < names.len() {
-        gen: names[at].copy()
-        at += 1
-        if at > 1 && names[at - 2] == gen -> next
-        if !gen.starts_with("Tools/") || !gen.ends_with(".jet") {
-            say("REGEN-SKIP {gen} (not a Jet generator)")
-            next
+    identity: files.read("{seed}/IDENTITY").trim()
+    loop gen in names.dedup().to_list() {
+        if {
+            !gen.starts_with("Tools/") || !gen.ends_with(".jet") -> print("REGEN-SKIP {gen} (not a Jet generator)")
+            !files.is_file("{tree}/{gen}") -> print("REGEN-SKIP {gen} (missing)")
+            else -> {
+                flag: if {
+                    gen.ends_with("/DiagnosticRows.jet") -> ["--write"]
+                    gen.ends_with("/UnsafeRatchet.jet") -> ["--update"]
+                    else -> [String]{}
+                }
+                run: process.cmd(["nice", "-n", "19", "{seed}/jet", gen].concat(flag)).cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
+                    .timeout(time.duration_seconds(900)).cpu_affinity(loop cpu in 16..<32 -> cpu).stderr(.Stdout).run()
+                files.write("{integ}/regen.{files.basename(gen)}.out", run.output)
+                print((["REGEN", gen].concat(flag).concat(["rc={if run.timed_out -> 124 else -> run.code}"])).join(" "))
+            }
         }
-        if !files.is_file("{tree}/{gen}") {
-            say("REGEN-SKIP {gen} (missing)")
-            next
-        }
-        flag: if {
-            gen.ends_with("/DiagnosticRows.jet") -> "--write"
-            gen.ends_with("/UnsafeRatchet.jet") -> "--update"
-            else -> ""
-        }
-        argv := [String]{"nice", "-n", "19", "{seed}/jet", gen.copy()}
-        if flag != "" -> argv.push(flag.copy())
-        spec: process.cmd(argv).cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
-            .timeout(time.duration_seconds(900)).cpu_affinity(loop cpu in 16..<32 -> cpu)
-        rc: into_merged(spec, "{integ}/regen.{files.basename(gen)}.out")
-        say("REGEN {gen} {flag} rc={rc}")
     }
 }
 
 run: fn() {
     args: process.args()
-    if args.len() < 1 || args[0] == "" -> quit("integ-apply: 1: tree", 1)
-    if args.len() < 2 || args[1] == "" -> quit("integ-apply: 2: integ dir", 1)
-    tree: args[0].copy()
-    integ: args[1].copy()
+    if args.len() < 2 {
+        term.eprint("usage: jet Tools/agent/orchestrator/IntegApply6.jet TREE I SUB...")
+        process.exit(1)
+    }
+    tree: args[0]
+    integ: args[1]
     g: "{roots.state()}/scratch/Main"
-    worktree: roots.worktree()
-    if !based(tree, worktree) -> stop("integ-apply: init failed", 2)
-    put("{integ}/generators", "")
+    if !based(tree, roots.worktree()) -> stop("integ-apply: init failed", 2)
+    files.write("{integ}/generators", "")
+    order := [String]{}
+    failures := [String]{}
     applied := [String]{}
-    loop sub in args[2..<args.len()] {
-        if apply_sub(tree, integ, g, sub) == .Val(path) -> applied.push(path)
+    loop sub in args.slice(2, args.len()) {
+        if apply_sub(tree, integ, g, sub, order, failures) -> applied.push(sub.removesuffix("/"))
     }
     // INTEG_POST="patch ...": Main's fixups that must apply plainly (no three-way, no keep-ours) to the composed
     // tree after every SUB, such as deleting ledger proof rows a merge kept. They land inside regen.patch.
-    loop patch in words(roots.env_or("INTEG_POST", "")) {
-        post: process.cmd([String]{"git", "apply", "-p1", patch.copy()}).cwd(tree)
-        say(if runs(post) == 0 -> "POST {patch}" else -> "POST-FAIL {patch}")
-    }
+    loop patch in roots.env_or("INTEG_POST", "").words() -> print("{if process.cmd(["git", "apply", "-p1", patch]).cwd(tree).run().code == 0 -> "POST" else -> "POST-FAIL"} {patch}")
     regenerate(tree, integ)
-    add: gitq(tree, [String]{"add", "-A"})
-    if runs(add) == 0 -> _ := into_file(gitq(tree, [String]{"diff", "--cached", "--binary", "HEAD"}), "{integ}/regen.patch")
-    files.remove_all("{tree}/.git") ?? ()
-    say("--applied--")
-    if applied.len() == 0 -> say("")
-    loop path in applied -> say(path)
+    if ok(tree, ["add", "-A"]) -> files.write("{integ}/regen.patch", git(tree, ["diff", "--cached", "--binary", "HEAD"]).run().output)
+    files.remove_all("{tree}/.git")
+    print("--applied--")
+    loop path in applied -> print(path)
 }

@@ -10,9 +10,7 @@
 // The Jet twin of integ-land4.sh (gauntlet tool entry integ-land4): the
 // batches live in $JET_SCRATCH_ROOT/lanes/Main/integ, the dev worktree is
 // $JET_DEV_WORKTREE, and batch-queue.txt and landed-subs.txt are Main's, in
-// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. As the
-// original does after its `cd`, a relative path names a file in the
-// worktree from the second step on.
+// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them.
 use {
     files: core.files
     process: core.process
@@ -20,118 +18,41 @@ use {
     term: core.term
 }
 
-// The directories the tree-only check never enters (treeonly.mjs).
-SKIPPED_DIRS: [String]{".jet", ".git", "target", "node_modules", ".chain"}
+// The directories the tree-only check never enters.
+SKIPPED_DIRS: [".jet", ".git", "target", "node_modules", ".chain"]
 
-// `path` as the shell finds it from `dir`.
-at: fn(dir: String, path: String) -> String Never! {
-    if path.starts_with("/") -> path.copy() else -> "{dir}/{path}"
-}
-
-// `text` without its trailing newlines, as `$(...)` gives it.
-chomp: fn(text: String) -> String Never! {
-    out := text.copy()
-    loop out.ends_with("\n") -> out = out.removesuffix("\n")
-    out
-}
-
-// The first `count` lines of `text`, each followed by a space (`head -n N | tr '\n' ' '`).
-first_lines: fn(text: String, count: Int) -> String Never! {
-    out := ""
-    taken := 0
-    loop line in text.lines() {
-        if taken == count -> break
-        out = "{out}{line} "
-        taken += 1
-    }
-    out
-}
-
-// The words of `text`, as an unquoted `$(cat FILE)` splits it.
-words: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    loop line in text.lines() {
-        loop word in line.replace("\t", " ").split(" ") {
-            if word != "" -> out.push(word.copy())
-        }
-    }
-    out
-}
-
-// Runs git in `dir`, passing its stderr through, and gives its exit code
-// and stdout.
-git: fn(dir: String, args: [String]) -[Exec, IO, Time.Wait]> (code: Int, output: String) Never! {
-    argv := [String]{"git"}
-    argv.extend(args.copy())
-    receipt: process.cmd(argv).cwd(dir).stdin(.Inherit).stderr(.Inherit).output_limit(1073741824).run() ?? {
-        term.eprint("git: {err}")
-        return (code: 127, output: "")
-    }
-    code: if receipt.signal != None -> 128 + (receipt.signal ?? 0) else -> receipt.code
-    (code: code, output: receipt.output.copy())
-}
-
-head_sha: fn(dir: String) -[Exec, IO, Time.Wait]> String Never! { chomp(git(dir, [String]{"rev-parse", "--short", "HEAD"}).output) }
-
-has_line_prefix: fn(text: String, prefix: String) -> Bool Never! {
-    loop line in text.lines() {
-        if line.starts_with(prefix) -> return true
-    }
-    false
-}
-
-// The size of the file at `path`, -1 when there is none.
-size_of: fn(path: String) -[FS]> Int Never! {
-    if files.stat(path) == {
-        .Ok(info) -> info.size
-        .Err(_) -> -1
-    }
-}
-
-// The `*.files` lists in `dir`.
-file_lists: fn(dir: String) -[FS]> [String] Never! {
-    out := [String]{}
-    entries: files.list_dir(dir) ?? return out
-    loop entry in entries {
-        if entry.name.ends_with(".files") -> out.push(entry.name.copy())
-    }
-    out.sort()
-    out
-}
-
-// What `cat "$I"/*.files` lists, one path per line.
-batch_files: fn(integ: String) -[FS]> [String] Never! {
-    out := [String]{}
-    loop name in file_lists(integ) {
-        loop line in (files.read("{integ}/{name}") ?? "").lines() -> out.push(line.copy())
-    }
-    out
-}
-
-fail: fn(message: String, code: Int) -[Exec, IO]> Never {
+// Ends the run with exit code 1 after `message`.
+fail: fn(message: String) -> Never {
     print(message)
-    process.exit(code)
+    process.exit(1)
 }
 
-// The files of `tree` (below `rel`) that git does not track, skipping
-// build output (treeonly.mjs).
-tree_only: fn(tree: String, rel: String, tracked: [String], out: &[String]) -[FS]> () {
-    entries: files.list_dir(if rel == "" -> tree.copy() else -> "{tree}/{rel}") ?? return
-    loop entry in entries {
+// `git ARGS` in the dev worktree, its stderr passed through.
+git: fn(w: String, args: [String]) -> ProcessReceipt { process.cmd(["git", "-C", w].concat(args)).stderr(.Inherit).run() }
+
+// Whether `git ARGS` in the dev worktree exits 0.
+git_ok: fn(w: String, args: [String]) -> Bool { git(w, args).code == 0 }
+
+// The files under `tree` (below `rel`) that git does not track, build output aside.
+tree_only: fn(tree: String, rel: String, tracked: [String], out: &[String]) {
+    loop entry in (files.list_dir("{tree}/{rel}") ?? []) {
         path: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
-        directory: entry.is_dir && !files.is_symlink(entry.path)
         if {
-            directory -> {
-                if !SKIPPED_DIRS.contains(entry.name) -> tree_only(tree, path, tracked, out)
-            }
+            entry.is_dir && !files.is_symlink(entry.path) -> { if !SKIPPED_DIRS.contains(entry.name) -> tree_only(tree, path, tracked, out) }
             !tracked.contains(path) -> out.push(path)
         }
     }
 }
 
-append_line: fn(path: String, line: String) -[FS, IO]> () {
-    existing: files.read(path) ?? ""
-    files.write(path, "{existing}{line}\n") ?? term.eprint("{path}: {err}")
+// Stages `patch` and commits exactly the paths it staged with `message`; the new commit's short sha.
+commit: fn(w: String, patch: String, landfiles: String, msgfile: String, message: String) -> String {
+    if !git_ok(w, ["apply", "-p1", "--index", patch]) -> return ""
+    // Every path the patch staged, rename sources included (numstat names only the rename target: b6d left 12 behind).
+    staged: git(w, ["diff", "--cached", "--name-only", "--no-renames"]).output
+    files.write(landfiles, staged)
+    files.write(msgfile, message)
+    if !git_ok(w, ["commit", "-q", "-F", msgfile, "--"].concat(staged.lines())) -> return "-"
+    git(w, ["rev-parse", "--short", "HEAD"]).output.trim()
 }
 
 run: fn() {
@@ -141,110 +62,76 @@ run: fn() {
         process.exit(1)
     }
     batch: args[0]
-    worktree: roots.worktree()
-    scratch: "{roots.state()}/scratch/Main"
+    w: roots.worktree()
+    queue: "{roots.state()}/scratch/Main"
     integ: "{roots.main()}/integ/{batch}"
-    if !has_line_prefix(files.read("{integ}/REPORT.md") ?? "", "Census rc=0 ") -> fail("integ-land: batch {batch} did not pass its census/ratchets", 1)
-    if !files.is_dir(worktree) {
-        term.eprint("IntegLand4.jet: cd: {worktree}: No such file or directory")
-        process.exit(2)
-    }
-    here: at(worktree, integ)
-    if chomp(git(worktree, [String]{"status", "--porcelain=v1", "-uno"}).output) != "" -> fail("integ-land: dev worktree has changes", 1)
-    git(worktree, [String]{"fetch", "-q", "origin"})
-    base: chomp(files.read("{here}/BASE") ?? "")
-    moved: git(worktree, [String]{"diff", "--name-only", base, "origin/dev"}).output
-    listed: batch_files(here)
-    bad := [String]{}
-    loop path in moved.lines() {
-        if path == "" -> next
-        input: path.starts_with("Compiler/") || path.starts_with("Core/") || path.starts_with("Jetpack/") || path.starts_with("Tools/")
-        if input || listed.contains(path) -> bad.push(path.copy())
-    }
-    if bad.len() > 0 {
-        named: bad.join(" ")
-        cut: if named.bytes().len() > 300 -> String.from_bytes(named.bytes().slice(0, 300)) ?? named.copy() else -> named.copy()
-        fail("integ-land: origin/dev moved from {base} in build inputs or batch files: {cut}; rerun integrate.sh", 1)
-    }
-    if git(worktree, [String]{"merge", "-q", "--ff-only", "origin/dev"}).code != 0 -> fail("integ-land: cannot fast-forward the worktree to origin/dev", 1)
+    if !(files.read("{integ}/REPORT.md") ?? "").lines().any(line -> line.starts_with("Census rc=0 ")) -> fail("integ-land: batch {batch} did not pass its census/ratchets")
+    if git(w, ["status", "--porcelain=v1", "-uno"]).output != "" -> fail("integ-land: dev worktree has changes")
+    _ := git(w, ["fetch", "-q", "origin"])
+    base: files.read("{integ}/BASE").trim()
+    // origin/dev may have moved past BASE only by changes that are not build inputs and share no file with this
+    // batch: the net diff BASE..origin/dev may touch no Compiler/, Core/, Jetpack/ or Tools/ file and none of the
+    // batch files.
+    lists: (loop entry in files.list_dir(integ) -> entry.name).filter(name -> name.ends_with(".files"))
+    listed := [String]{}
+    loop name in lists -> listed.extend(files.read("{integ}/{name}").lines())
+    bad: git(w, ["diff", "--name-only", base, "origin/dev"]).output.lines().filter(path -> ["Compiler/", "Core/", "Jetpack/", "Tools/"].any(top -> path.starts_with(top)) || listed.contains(path))
+    if bad.len() > 0 -> fail("integ-land: origin/dev moved from {base} in build inputs or batch files: {bad.join(" ")}; rerun integrate.sh")
+    if !git_ok(w, ["merge", "-q", "--ff-only", "origin/dev"]) -> fail("integ-land: cannot fast-forward the worktree to origin/dev")
     landed := [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
         name: files.basename(sub)
-        if chomp(files.read("{here}/{name}.status") ?? "") != "OK" {
+        if (files.read("{integ}/{name}.status") ?? "").trim() != "OK" {
             print("integ-land: {name} is not OK in {batch}; stopping before it")
             break
         }
         rebased: "{integ}/{name}.rebased"
-        rebased_size: size_of(at(worktree, rebased))
-        patch: if rebased_size > 0 -> rebased.copy() else -> "{sub}/patch"
         // An empty .rebased means the integ repo lost the commit (b6d: gc race); the raw patch is not what was tested.
-        if rebased_size == 0 -> fail("integ-land: {rebased} is empty; rebuild it (rebuild-rebased.sh) before landing", 1)
-        if git(worktree, [String]{"apply", "-p1", "--index", patch}).code != 0 -> fail("integ-land: {name} does not apply on {head_sha(worktree)}", 1)
-        // Every path the patch staged, rename sources included (numstat names only the rename target: b6d left 12 behind).
-        staged: git(worktree, [String]{"diff", "--cached", "--name-only", "--no-renames"}).output
-        files.write("{here}/{name}.landfiles", staged) ?? term.eprint("{integ}/{name}.landfiles: {err}")
-        lane: if name.contains("-") -> name.slice(0, name.rfind("-")) else -> name.copy()
-        message: files.read(at(worktree, "{sub}/msg")) ?? ""
-        files.write("{here}/{name}.commitmsg", "{message}\nLane: {lane}\nIntegrated: {batch} on {base}\n") ?? term.eprint("{integ}/{name}.commitmsg: {err}")
-        commit := [String]{"commit", "-q", "-F", "{integ}/{name}.commitmsg", "--"}
-        commit.extend(words(staged))
-        if git(worktree, commit).code != 0 -> fail("integ-land: commit of {name} failed", 1)
-        landed.push("{head_sha(worktree)} {name}")
+        if files.exists(rebased) && files.stat(rebased).size == 0 -> fail("integ-land: {rebased} is empty; rebuild it (rebuild-rebased.sh) before landing")
+        lane: name.rpartition("-").head
+        sha: commit(w, if files.exists(rebased) -> rebased else -> "{sub}/patch", "{integ}/{name}.landfiles", "{integ}/{name}.commitmsg", "{files.read("{sub}/msg")}\nLane: {if lane == "" -> name else -> lane}\nIntegrated: {batch} on {base}\n")
+        if sha == "" -> fail("integ-land: {name} does not apply on {git(w, ["rev-parse", "--short", "HEAD"]).output.trim()}")
+        if sha == "-" -> fail("integ-land: commit of {name} failed")
+        landed.push("{sha} {name}")
     }
     if landed.len() == 0 -> process.exit(1)
-    // The generated tables integ-apply regenerated from the composed sources land last, only when EVERY SUB the batch
-    // applied landed (b4b: landing a subset with the full regen put SchedLead-6 rows on dev without their source).
-    applied: file_lists(here).filter(name -> name != "regen.files").len()
+    // The generated tables integ-apply regenerated from the composed sources land last, only when EVERY SUB the
+    // batch applied landed (b4b: landing a subset with the full regen put SchedLead-6 rows on dev without their source).
+    applied: lists.filter(name -> name != "regen.files").len()
     // INTEG_LANDED_BEFORE=k: k SUBs of this batch already landed in an earlier, interrupted run.
-    before: roots.env_or("INTEG_LANDED_BEFORE", "0").to_int() ?? 0
-    if size_of("{here}/regen.patch") > 0 {
-        if landed.len() + before != applied -> fail("integ-land: not every SUB landed, so regen.patch was not applied; rerun the generators", 1)
-        if git(worktree, [String]{"apply", "-p1", "--index", "{integ}/regen.patch"}).code != 0 -> fail("integ-land: regen commit failed", 1)
-        regen: git(worktree, [String]{"diff", "--cached", "--name-only", "--no-renames"}).output
-        files.write("{here}/regen.files", regen) ?? term.eprint("{integ}/regen.files: {err}")
-        files.write("{here}/regen.commitmsg", "integration: regenerate the generated tables for {batch}\n\nIntegrated: {batch} on {base}\n") ?? term.eprint("{integ}/regen.commitmsg: {err}")
-        commit := [String]{"commit", "-q", "-F", "{integ}/regen.commitmsg", "--"}
-        commit.extend(words(regen))
-        if git(worktree, commit).code != 0 -> fail("integ-land: regen commit failed", 1)
-        landed.push("{head_sha(worktree)} regen")
+    done: landed.len() + (roots.env_or("INTEG_LANDED_BEFORE", "0").to_int() ?? 0)
+    if (files.read("{integ}/regen.patch") ?? "") != "" {
+        if done != applied -> fail("integ-land: not every SUB landed, so regen.patch was not applied; rerun the generators")
+        sha: commit(w, "{integ}/regen.patch", "{integ}/regen.files", "{integ}/regen.commitmsg", "integration: regenerate the generated tables for {batch}\n\nIntegrated: {batch} on {base}\n")
+        if sha == "" || sha == "-" -> fail("integ-land: regen commit failed")
+        landed.push("{sha} regen")
     }
     // The landed tree must be the tested composed tree, byte for byte, before anything is pushed.
-    leftovers: git(worktree, [String]{"status", "--porcelain=v1", "-uno"}).output
-    if chomp(leftovers) != "" -> fail("integ-land: staged leftovers after landing: {first_lines(leftovers, 5)}", 1)
-    if landed.len() + before >= applied {
-        tracked := [String]{}
-        loop path in git(worktree, [String]{"-c", "core.quotepath=off", "ls-files"}).output.lines() -> tracked.push(path.copy())
+    leftovers: git(w, ["status", "--porcelain=v1", "-uno"]).output.lines()
+    if leftovers.len() > 0 -> fail("integ-land: staged leftovers after landing: {leftovers.slice(0, 5).join(" ")}")
+    if done >= applied {
+        tracked: git(w, ["-c", "core.quotepath=off", "ls-files"]).output.lines()
         drift := [String]{}
         loop path in tracked {
-            if files.is_symlink(at(worktree, path)) -> next
-            if !files.exists("{here}/tree/{path}") {
-                if files.exists(at(worktree, path)) -> drift.push("NOTINTREE {path}")
-                next
+            tested: "{integ}/tree/{path}"
+            if {
+                files.is_symlink(path) -> next
+                !files.exists(tested) -> { if files.exists(path) -> drift.push("NOTINTREE {path}") }
+                (files.read_bytes(path) ?? []) != (files.read_bytes(tested) ?? []) -> drift.push("DIFF {path}")
             }
-            same: if files.read_bytes(at(worktree, path)) == {
-                .Ok(landed_bytes) -> if files.read_bytes("{here}/tree/{path}") == {
-                    .Ok(tree_bytes) -> landed_bytes == tree_bytes
-                    .Err(_) -> false
-                }
-                .Err(_) -> false
-            }
-            if !same -> drift.push("DIFF {path}")
         }
         only := [String]{}
-        tree_only("{here}/tree", "", tracked, only)
-        loop path in only.slice(0, if only.len() > 40 -> 40 else -> only.len()) {
-            if path.trim() != "" -> drift.push("ONLYINTREE {path}")
-        }
-        if drift.len() > 0 -> fail("integ-land: landed tree differs from {integ}/tree: {first_lines(drift.join("\n"), 8)}", 1)
+        tree_only("{integ}/tree", "", tracked, only)
+        loop path in only -> drift.push("ONLYINTREE {path}")
+        if drift.len() > 0 -> fail("integ-land: landed tree differs from {integ}/tree: {drift.slice(0, 8).join(" ")}")
     }
-    pushed: git(worktree, [String]{"fetch", "-q", "origin"}).code == 0 && git(worktree, [String]{"merge-base", "--is-ancestor", "origin/dev", "HEAD"}).code == 0 && git(worktree, [String]{"push", "-q", "origin", "HEAD:dev"}).code == 0
-    if !pushed -> fail("integ-land: push failed", 1)
-    queue: at(worktree, scratch)
+    pushed: git_ok(w, ["fetch", "-q", "origin"]) && git_ok(w, ["merge-base", "--is-ancestor", "origin/dev", "HEAD"]) && git_ok(w, ["push", "-q", "origin", "HEAD:dev"])
+    if !pushed -> fail("integ-land: push failed")
     loop entry in landed {
         parts: entry.partition(" ")
-        append_line("{queue}/batch-queue.txt", parts.head)
-        if parts.tail != "regen" -> append_line("{queue}/landed-subs.txt", parts.tail)
+        files.append_all("{queue}/batch-queue.txt", "{parts.head}\n")
+        if parts.tail != "regen" -> files.append_all("{queue}/landed-subs.txt", "{parts.tail}\n")
         print("LANDED {entry}")
     }
 }
