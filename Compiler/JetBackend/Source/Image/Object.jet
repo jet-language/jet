@@ -345,6 +345,40 @@ x64_object_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
+// Appends data object `row` to `order` unless it is placed already or not an
+// object of `data`, then, depth first in relocation order, every object its
+// relocations reach (x64_object_functions_threads lays `.data` out so).
+x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[Int]) Never! {
+    pending := [Int]{row}
+    loop pending.len() > 0 {
+        at: pending.pop() ?? -1
+        if at < 0 || at >= placed.len() || placed[at] -> next
+        placed[at] = true
+        order.push(at)
+        relocs: data[at].relocs
+        loop index in 0..<relocs.len() -> pending.push(relocs[relocs.len() - 1 - index].target.value)
+    }
+}
+
+#Test("Data objects are placed in first-reference order, depth first through their relocations") {
+    // Object i's relocations reach the objects targets[i] names, in order.
+    targets: [[Int]]{[Int]{2}, [Int]{}, [Int]{1, 4}, [Int]{}, [Int]{0}}
+    data := [X64Data]{}
+    loop row in 0..<targets.len() {
+        relocs := [X64DataReloc]{}
+        loop target in targets[row] -> relocs.push(X64DataReloc{offset: 0, target: X64DataID{value: target}, addend: 0})
+        data.push(X64Data{id: X64DataID{value: row}, bytes: [U8]{0}, align: 8, relocs: relocs})
+    }
+    placed := [Bool]{false, false, false, false, false}
+    order := [Int]{}
+    x64_object_data_place(data, 2, placed, order)
+    assert_eq(order, [Int]{2, 1, 4, 0})
+    x64_object_data_place(data, 7, placed, order)
+    x64_object_data_place(data, 0, placed, order)
+    loop index in 0..<data.len() -> x64_object_data_place(data, index, placed, order)
+    assert_eq(order, [Int]{2, 1, 4, 0, 3})
+}
+
 // x64_object_functions with the `.debug_info` subprograms built on the
 // threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
 // for any thread count. With `debug_info` false the DWARF sections are empty
@@ -422,18 +456,32 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // Calls between functions are patched below as rel32 without per-site
     // checks: every distance inside `.text` is below its length.
     if !x64_fits_i32(text_size) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
+    // `.data` holds each object where the text first reaches it: in function
+    // order, each function's objects in relocation order with the objects
+    // their relocations reach right after them, then every object nothing
+    // reaches, in data order. With the hot functions first
+    // (ir_x64_hot_order) a short run then reads its data from few pages.
     rodata := [U8]{}
     data_offsets := [Int]{}
     rodata_align := 1
-    loop object in program.data {
-        if own_sections {
-            data_offsets.push(0)
-            next
+    loop _ in program.data -> data_offsets.push(0)
+    if !own_sections {
+        placed := [Bool]{}
+        loop _ in program.data -> placed.push(false)
+        order := [Int]{}
+        loop function in functions {
+            loop reloc in function.relocs {
+                if reloc.target == .Data(id) -> x64_object_data_place(program.data, id.value, placed, order)
+            }
         }
-        elf64_pad(rodata, object.align)
-        if object.align > rodata_align -> rodata_align = object.align
-        data_offsets.push(rodata.len())
-        rodata.extend(object.bytes)
+        loop index in 0..<program.data.len() -> x64_object_data_place(program.data, index, placed, order)
+        loop index in order {
+            object: program.data[index]
+            elf64_pad(rodata, object.align)
+            if object.align > rodata_align -> rodata_align = object.align
+            data_offsets[index] = rodata.len()
+            rodata.extend(object.bytes)
+        }
     }
     // With own sections: per function, then per data object, its section's
     // symbol.

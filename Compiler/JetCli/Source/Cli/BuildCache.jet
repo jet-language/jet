@@ -133,9 +133,10 @@ jet_cli_build_store_off: fn(verbose: Bool, reason: String) -> String Never! {
 
 // The store key of `name`'s executable: this compiler (its identity, else its
 // file's), the runtime pack it links, the Core sources it compiles, the build
-// options and host, every source of the authorized snapshot and every
-// comptime input the compile read (`comptime_inputs`: an edited
-// `embed_file` asset is a new key), each part length-framed and hashed
+// options and host, every source of the authorized snapshot, every comptime
+// input the compile read (`comptime_inputs`: an edited `embed_file` asset is
+// a new key) and the functions the package lays out first (jet_cli_hot_text:
+// an edited hot-text.list is a new image), each part length-framed and hashed
 // together. None when the compiler, its runtime or its Core sources can't be
 // identified.
 jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot, comptime_inputs: [JetDriverComptimeInputRecord]) -[FS, Env]> String? Never! {
@@ -170,6 +171,7 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
         parts.push("comptime-input:{input.file}")
         parts.push(input.sha256)
     }
+    if snapshot.roots.len() > 0 -> parts.push("hot-text:{jet_cli_hot_text(snapshot.roots[0].canonical_path).join("\n")}")
     framed: loop part in parts -> "{part.len()}:{part}"
     Val(sha256_hex(framed.join("\n")))
 }

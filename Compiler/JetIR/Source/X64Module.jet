@@ -624,10 +624,13 @@ ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Ne
 
 // Order the functions of `compiled` (and their debug rows) for the object's
 // text: those `hot` names first, in the list's order, then the rest, each
-// group in function order. `hot` lists the functions a short run enters
-// (Compiler/JetCli/hot-text.list, written by Tools/perf/hot-text.mjs), so
-// their code shares pages and a cold start faults in fewer of them. Returns
-// how many names of `hot` name no function.
+// group in function order. `hot` lists the functions a warm run and short
+// cold runs enter (Compiler/JetCli/hot-text.list, written by
+// Tools/perf/hot-text.mjs), so their code shares pages: the kernel maps a
+// read fault's neighbouring pages with it, and a run that touches few
+// windows of the image keeps few pages resident. JetBackend Object.jet lays
+// `.data` out in the order this text references it. Returns how many names of
+// `hot` name no function.
 ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     if hot.len() == 0 -> return 0
     ranks := [String:Int]{}
