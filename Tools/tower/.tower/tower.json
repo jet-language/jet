@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98931,
+    "rev": 98937,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56541,6 +56541,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Main token attribution, 2026-11-10 ~13:40, over the nine twins with PerfLead-5072portcut applied (PortBars rules, tests excluded). The twins total 23773 tokens and the originals 7631. Helper fns re-implementing shell builtins: text 1425 (26 fns), file ops 1408 (22), command wrappers 1224 (20), print-and-exit 732 (20), JS emulation 299, version sort 241, roots 294. Inline: `??` arms 1368 (228), process.cmd chains 1072 (35), effect rows 1013 (121), files.* calls 904 (226), typed list literals 696 (174), .copy() 628 (157), term.eprint 483 (78), Never! 322 (161), use blocks 279. Script: $JET_STATE_ROOT/scratch/Main/tokfam.mjs and tokcat.mjs."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Owner instruction 2026-11-10 ~13:25, verbatim: \"For token count on scripts, we should get as close as we can with Jet and ways to get closer to competitors like syntax should be balloted. Other than syntax changes that is indicative of a gap in APIs which should be made to get us closer. Performance is the number one goal, tokens should be minimized/optimized but is not the main defining criteria\". Applied: c29-c33 are built without a ballot. New criteria cover the judge re-rank and the syntax ballots."
         },
         {
@@ -56985,12 +56990,48 @@
         },
         {
           "n": 35,
-          "text": "Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides engineered away. From the port-bar measurement: `!` error propagation (2 tokens per fallible call), a filtering loop with an else arm plus list concatenation (13 on streamb10), and an open-ended slice `xs[2..]` (7). One ballot per mechanism, each linked to its report and given a different-family review.",
+          "text": "Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides engineered away, one ballot per mechanism, each linked to its report and given a different-family review. Main's attribution over the nine orchestrator twins (23773 tokens against 7631) ranks the inline costs: error propagation and a failing script main that reports and exits (the syntax half of 2583 failure-handling tokens); effect rows on private script fns (121 rows, 1013 tokens) and `Never!` (161, 322), meaning inference for non-public fns; element-type inference for list literals (`[\"a\", \"b\"]`, 174 typed literals, about 520); implicit copy where a String value is used (157 `.copy()`, 628); a filtering loop with an else arm plus list concatenation (13 on streamb10); an open-ended slice `xs[2..]` (7); and default core imports in scripts (279 in use blocks).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T18:18:28.863Z"
+          "at": "2026-11-10T18:28:14.059Z"
+        },
+        {
+          "n": 36,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): running a command and using its output costs 1224 tokens in 20 hand-written wrapper fns (git, runs, runs_quiet, output, quiet_output, status, into…), plus argv list literals at every call. Core gains one command spelling that takes the whole command line as a checked text value with `{…}` holes (each hole one argv element, never shell-split; a D-TEXTHEAD-HOLES1 text kind), with the result giving status, stdout with the trailing newline trimmed, and stdout lines, and a plain-call form for inherited stdio. Each twin drops its wrappers and argv lists. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:28:08.994Z"
+        },
+        {
+          "n": 37,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): shell-style text work costs 1425 tokens in 26 hand-written fns (chomp, words, first_lines, tail, lines_of, trim_tabs, is_blank, records, has_line_prefix…). Core String gains what they re-implement: trailing-newline trim, split on whitespace runs, first/last n lines, a line-prefix and line-regex test (with c29), and tab-separated field records. Each twin uses them instead. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:28:10.293Z"
+        },
+        {
+          "n": 38,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): file operations that are one shell command cost 1408 tokens in 22 hand-written fns (readlink_f, link_sfn, append, size_of, batch_files, file_lists, tree_only…). Core files gains append, a size-or-none read, a glob list (`dir/*.files`), canonicalize (readlink -f), a replacing symlink (ln -sfn) and a filtered walk. Each twin uses them instead. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:28:11.527Z"
+        },
+        {
+          "n": 39,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): failure handling costs 2583 tokens: 228 `??` arms (1368), 78 term.eprint calls (483) and 20 print-and-exit fns (732). The API half, with c31 and c32: process.fail, and read/list/stat forms that take the default in the call (`files.read_or(path, \"\")`), so a script states its fallback once per call without an arm. The syntax half (propagation, a failing script main that reports and exits) goes to ballot under c35.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:28:12.768Z"
         }
       ],
       "refs": [],
@@ -57003,12 +57044,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T18:18:30.718Z",
+      "updated": "2026-11-10T18:28:15.320Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 35
+      "criteriaLastN": 39
     },
     {
       "id": "c022g7qw",
@@ -200209,6 +200250,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T18:28:15.320Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T18:28:14.059Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#35: Owner asked for the Pareto list (13:40); token attribution added the inline costs; was: Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides "
+    },
+    {
+      "at": "2026-11-10T18:28:12.769Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#39 Core API gap from the port bars (owner instruction 2026-11-1"
+    },
+    {
+      "at": "2026-11-10T18:28:11.527Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#38 Core API gap from the port bars (owner instruction 2026-11-1"
+    },
+    {
+      "at": "2026-11-10T18:28:10.293Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#37 Core API gap from the port bars (owner instruction 2026-11-1"
+    },
+    {
+      "at": "2026-11-10T18:28:08.994Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#36 Core API gap from the port bars (owner instruction 2026-11-1"
+    },
     {
       "at": "2026-11-10T18:24:38.896Z",
       "by": "Main",
