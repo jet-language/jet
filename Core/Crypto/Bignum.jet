@@ -150,6 +150,20 @@ core_lt_ct: fn(a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     ret
 }
 
+/// 1 when a has a bit set above bit `pos`, in constant time.
+core_bits_above: fn(a: [U64], pos: Int) -> U64 Never! {
+    seen := U64{0}
+    loop i in 0..<a.len() {
+        low: i * LIMB_BITS
+        if low > pos {
+            seen = seen.bit_or(a[i])
+        } else if low + LIMB_BITS > pos + 1 {
+            seen = seen.bit_or(a[i] >> (pos - low + 1))
+        }
+    }
+    ct_bool(seen)
+}
+
 /// x = a when `assign` is 1, in constant time.
 core_cond_assign: fn(x: &[U64], a: [U64], limbs: Int, assign: U64) Never! {
     mask: ct_mask(assign)
@@ -168,7 +182,7 @@ core_cond_swap: fn(x: &[U64], y: &[U64], limbs: Int, swap: U64) Never! {
 
 /// Byte i (little-endian) of the number in a.
 get_byte: fn(a: [U64], i: Int) -> U8 Never! {
-    U8{(a[i /% LIMB_BYTES] >> ((i % LIMB_BYTES) * 8)).bit_and(U64{0xff})}
+    wrapping(U8{a[i /% LIMB_BYTES] >> ((i % LIMB_BYTES) * 8)})
 }
 
 /// Little-endian `input` into the `x_limbs` limbs of x.
@@ -190,11 +204,7 @@ core_read_be: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
 /// When out_len is the shorter, the dropped bytes must be zero.
 core_write_le: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
-    if stored >= out_len {
-        loop i in out_len..<stored {
-            if get_byte(a, i) != (U8{0}) -> return Err(.BufferTooSmall)
-        }
-    }
+    if !core_fits(a, a_limbs, out_len) -> return Err(.BufferTooSmall)
     out := cipher.zero_bytes(out_len)
     loop i in 0..<(if stored < out_len -> stored else -> out_len) -> out[i] = get_byte(a, i)
     Ok(out)
@@ -203,14 +213,22 @@ core_write_le: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 /// The number in a's first `a_limbs` limbs as `out_len` big-endian bytes.
 core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
-    if stored >= out_len {
-        loop i in out_len..<stored {
-            if get_byte(a, i) != (U8{0}) -> return Err(.BufferTooSmall)
-        }
-    }
+    if !core_fits(a, a_limbs, out_len) -> return Err(.BufferTooSmall)
     out := cipher.zero_bytes(out_len)
     loop i in 0..<(if stored < out_len -> stored else -> out_len) -> out[out_len - 1 - i] = get_byte(a, i)
     Ok(out)
+}
+
+/// Whether the number in a's first `a_limbs` limbs fits `out_len` bytes,
+/// read in constant time. Callers write a value below a modulus of that many
+/// bytes, so the verdict is fixed by construction; a larger value gets
+/// BufferTooSmall, as from mbedtls.
+core_fits: fn(a: [U64], a_limbs: Int, out_len: Int) -> Bool Never! {
+    stored: a_limbs * LIMB_BYTES
+    if stored <= out_len -> return true
+    extra := U8{0}
+    loop i in out_len..<stored -> extra = extra.bit_or(get_byte(a, i))
+    extra == U8{0}
 }
 
 /// x >>= count over `limbs` limbs.
@@ -420,29 +438,30 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
         core_shift_r(x, limbs, 8 * n_bytes - n_bits)
         count -= 1
         if count == 0 -> return Err(.NotAcceptable)
-        ge_lower: core_uint_le_mpi(min, x, limbs)
-        lt_upper: core_lt_ct(x, n, limbs)
-        if ge_lower.bit_and(lt_upper) == (U64{1}) -> return
+        if draw_in_range(x, min, n, limbs) -> return
     }
+}
+
+/// Whether a rejection-sampling draw is in [min, n), read in constant time.
+/// A rejected draw is thrown away and an accepted one says only that it is
+/// in range, so the verdict is public.
+draw_in_range: fn(x: [U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
+    core_uint_le_mpi(min, x, limbs).bit_and(core_lt_ct(x, n, limbs)) == U64{1}
 }
 
 /// The window width of exponentiation for an exponent of `ebits` bits.
 exp_mod_window: fn(ebits: Int) -> Int Never! { if ebits > 79 -> WINDOW_SIZE else -> 1 }
 
 /// x = a^e mod n with a in Montgomery form and the result in Montgomery
-/// form. a and n have an_limbs limbs, e has e_limbs; rr is R^2 mod n. With
-/// `public` false the time and access pattern never depend on e: every
-/// exponent limb is processed and the window is chosen by a full table
-/// scan. Left-to-right k-ary exponentiation, one bit per step (HAC 14.82).
-core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [U64], e_limbs: Int, rr: [U64], public: Bool) Never! {
-    limb_index := e_limbs
-    bit_index := 0
-    if public {
-        e_bits := core_bitlen(e, e_limbs)
-        if e_bits == 0 -> e_bits = 1
-        limb_index = e_bits /% LIMB_BITS
-        bit_index = e_bits % LIMB_BITS
-    }
+/// form. a and n have an_limbs limbs; rr is R^2 mod n. The exponent's bits
+/// are read from bit `start_bit` of limb `start_limb` of e down: a secret
+/// exponent starts past its top limb (limb e.len(), bit 0), so every limb
+/// is processed. Each window is chosen by a full table scan, so the time
+/// and access pattern depend only on the start. Left-to-right k-ary
+/// exponentiation, one bit per step (HAC 14.82).
+core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
+    limb_index := start_limb
+    bit_index := start_bit
     wsize: exp_mod_window(limb_index * LIMB_BITS)
     welem: 1 << wsize
     mm: core_montmul_init(n)
@@ -479,12 +498,7 @@ core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [U64], e_limbs
         window = (window << 1).bit_or((e[limb_index] >> bit_index).bit_and(U64{1}))
         last: bit_index == 0 && limb_index == 0
         if window_bits == wsize || last {
-            if public {
-                at: Int.from_u64(window) * an_limbs
-                loop j in 0..<an_limbs -> selected[j] = table[at + j]
-            } else {
-                core_ct_uint_table_lookup(selected, table, an_limbs, welem, window)
-            }
+            core_ct_uint_table_lookup(selected, table, an_limbs, welem, window)
             copy_limbs(prev, x, an_limbs)
             core_montmul(x, prev, selected, an_limbs, n, an_limbs, mm, temp)
             window = U64{0}
@@ -520,6 +534,84 @@ core_from_mont_rep: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, mm: U64, t:
 core_sub_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
     c: core_sub(x, a, b, limbs)
     _: core_add_if(x, n, limbs, c)
+}
+
+/// x = a + b mod n with a and b in [0, n).
+core_add_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
+    sum := cipher.words(limbs)
+    carry: core_add(sum, a, b, limbs)
+    borrow: core_sub(x, sum, n, limbs)
+    // a + b < n: (0, 1), keep the sum; otherwise keep a + b - n, as in
+    // core_montmul.
+    core_cond_assign(x, sum, limbs, carry.bit_xor(borrow))
+    cipher.wipe_words(sum)
+}
+
+/// x = a * b mod n for a < R and b < n, all of an_limbs limbs: the
+/// Montgomery product a b R^-1, then its product with rr = R^2 mod n.
+core_mul_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+    ab := cipher.words(an_limbs)
+    core_montmul(ab, a, b, an_limbs, n, an_limbs, mm, t)
+    core_montmul(x, ab, rr, an_limbs, n, an_limbs, mm, t)
+    cipher.wipe_words(ab)
+}
+
+/// x = a * R mod n for any a of a_limbs limbs, given rr = R^2 mod n: Horner
+/// over a's an_limbs-limb chunks from the top, x = x R + chunk R mod n by
+/// two Montgomery products and a modular sum each, so no division and no
+/// test of a's or n's limbs.
+core_to_mont_rep_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+    zero_limbs(x, an_limbs)
+    chunk := cipher.words(an_limbs)
+    high := cipher.words(an_limbs)
+    low := cipher.words(an_limbs)
+    k := (a_limbs + an_limbs - 1) /% an_limbs
+    loop k > 0 {
+        k -= 1
+        loop j in 0..<an_limbs {
+            at: k * an_limbs + j
+            chunk[j] = if at < a_limbs -> a[at] else -> U64{0}
+        }
+        copy_limbs(low, x, an_limbs)
+        core_montmul(high, low, rr, an_limbs, n, an_limbs, mm, t)
+        core_montmul(low, chunk, rr, an_limbs, n, an_limbs, mm, t)
+        core_add_mod(x, high, low, n, an_limbs)
+    }
+    cipher.wipe_words(chunk)
+    cipher.wipe_words(high)
+    cipher.wipe_words(low)
+}
+
+/// x = a mod n for any a of a_limbs limbs, in n's an_limbs limbs, given
+/// rr = R^2 mod n: into Montgomery form by core_to_mont_rep_wide and out
+/// again, with no division.
+core_mod_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+    m := cipher.words(an_limbs)
+    core_to_mont_rep_wide(m, a, a_limbs, n, an_limbs, mm, rr, t)
+    core_from_mont_rep(x, m, n, an_limbs, mm, t)
+    cipher.wipe_words(m)
+}
+
+/// R^2 mod n, R = 2^(64 * n.p.len()), in n.p.len() limbs, for odd n: 1 mod
+/// n doubled mod n 2 * 64 * n.p.len() times, each doubling's reduction
+/// chosen by mask, so a secret modulus (a CRT prime) shows nothing.
+core_get_mont_r2_ct: fn(n: Mpi) -> Mpi MpiError! {
+    an: n.p.len()
+    x := zeros(an) ?? return Err(err)
+    // 1 mod n: 0 when n is 1.
+    x.p[0] = core_uint_le_mpi(U64{2}, n.p, an)
+    d := cipher.words(an)
+    loop _ in 0..<(2 * an * LIMB_BITS) {
+        carry := U64{0}
+        loop i in 0..<an {
+            d[i] = (x.p[i] << 1).bit_or(carry)
+            carry = x.p[i] >> 63
+        }
+        borrow: core_sub(x.p, d, n.p, an)
+        core_cond_assign(x.p, d, an, carry.bit_xor(borrow))
+    }
+    cipher.wipe_words(d)
+    Ok(x)
 }
 
 /// x = x / 2 mod n for odd n and x in [0, n): add n first when x is odd.
@@ -672,6 +764,10 @@ copy_mpi: fn(y: Mpi) -> Mpi Never! {
     Mpi{s: y.s, p: p}
 }
 
+/// A copy of y with all its limbs, leading zero ones too, so no limb is
+/// tested: copy_mpi (mbedtls_mpi_copy) for a secret.
+copy_mpi_ct: fn(y: Mpi) -> Mpi Never! { Mpi{s: y.s, p: y.p.copy()} }
+
 /// x = y in place, as mbedtls_mpi_copy: x keeps its limbs, grown to y's
 /// significant ones (at least one) and zeroed above them; an empty y zeroes
 /// x. Results replace a number through this rather than by rebinding it
@@ -714,9 +810,14 @@ lset: fn(x: &Mpi, z: Int) MpiError! {
 }
 
 /// Bit `pos` of |x|.
-get_bit: fn(x: Mpi, pos: Int) -> Int Never! {
-    if x.p.len() * LIMB_BITS <= pos -> return 0
-    Int.from_u64((x.p[pos /% LIMB_BITS] >> (pos % LIMB_BITS)).bit_and(U64{1}))
+get_bit: fn(x: Mpi, pos: Int) -> Int Never! { Int.from_u64(limb_bit(x, pos)) }
+
+/// Bit `pos` of |x| as a word, 0 past its limbs: the limb and the shift
+/// come from the position alone, so a secret's bit is read with no test of
+/// its value.
+limb_bit: fn(x: Mpi, pos: Int) -> U64 Never! {
+    if x.p.len() * LIMB_BITS <= pos -> return U64{0}
+    (x.p[pos /% LIMB_BITS] >> (pos % LIMB_BITS)).bit_and(U64{1})
 }
 
 /// Set bit `pos` of |x| to `val`, 0 or 1, growing x for a 1.
@@ -1232,63 +1333,140 @@ mod_int: fn(a: Mpi, b: Int) -> U64 MpiError! {
     Ok(y)
 }
 
-/// a^e mod n for odd n > 0 and e >= 0, both at most MAX_BITS. `rr` caches
-/// R^2 mod n between calls: empty, it is computed and stored. With `public`
-/// false the time never depends on e.
-exp_mod_optionally_safe: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi, public: Bool) -> Mpi MpiError! {
-    if cmp_int(n, 0) <= 0 || n.p[0].bit_and(U64{1}) == (U64{0}) -> return Err(.BadInput)
-    if cmp_int(e, 0) < 0 -> return Err(.BadInput)
-    if bitlen(e) > MAX_BITS || bitlen(n) > MAX_BITS -> return Err(.BadInput)
-    if e.p.len() == 0 -> return Ok(from_int(1))
-    an: n.p.len()
+/// rr = R^2 mod n for odd n > 1, R = 2^(64 * n.p.len()), unless rr already
+/// holds it: the cache `exp_mod` and `mod_ct` keep beside a modulus. It is
+/// computed in constant time, since the modulus may be a CRT prime.
+mont_r2: fn(rr: &Mpi, n: Mpi) MpiError! {
     if rr.p.len() == 0 {
-        computed := core_get_mont_r2_unsafe(n) ?? return Err(err)
+        computed := core_get_mont_r2_ct(n) ?? return Err(err)
         swap(rr, computed)
     } else {
-        grow(rr, an) ?? return Err(err)
+        grow(rr, n.p.len()) ?? return Err(err)
     }
-    x := copy_mpi(a)
-    x.s = 1
-    if cmp_mpi(x, n) >= 0 {
-        reduced: mod_mpi(x, n) ?? return Err(err)
-        set_mpi(x, reduced) ?? return Err(err)
-    }
-    grow(x, an) ?? return Err(err)
+}
+
+/// a mod n for odd n > 1 and a >= 0 of any length, in n's limb count, with
+/// no division and no test of either's limbs (core_mod_wide). `rr` caches
+/// R^2 mod n as for `exp_mod`.
+mod_ct: fn(a: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+    if a.s < 0 -> return Err(.BadInput)
+    mont_r2(rr, n) ?? return Err(err)
+    an: n.p.len()
+    x := zeros(an) ?? return Err(err)
     mm: core_montmul_init(n.p)
     t := cipher.words(2 * an + 1)
-    m := cipher.words(an)
-    core_to_mont_rep(m, x.p, n.p, an, mm, rr.p, t)
-    core_exp_mod(x.p, m, n.p, an, e.p, e.p.len(), rr.p, public)
-    copy_limbs(m, x.p, an)
-    core_from_mont_rep(x.p, m, n.p, an, mm, t)
+    core_mod_wide(x.p, a.p, a.p.len(), n.p, an, mm, rr.p, t)
     cipher.wipe_words(t)
-    cipher.wipe_words(m)
-    // A negative a with an odd exponent: the result is n - |a|^e mod n.
-    if a.s == -1 && e.p[0].bit_and(U64{1}) != (U64{0}) {
-        x.s = ct_sign_if(core_check_zero_ct(x.p, x.p.len()), -1, 1)
-        sum: add_mpi(n, x) ?? return Err(err)
-        set_mpi(x, sum) ?? return Err(err)
-    }
     Ok(x)
 }
 
-/// a^e mod n, constant time in e (mbedtls_mpi_exp_mod).
-exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! { exp_mod_optionally_safe(a, e, n, rr, false) }
+/// x's limbs in exactly `limbs` limbs: zero-extended, or cut where a value
+/// in range has only zero limbs. Only x's limb count is tested.
+limbs_of: fn(x: Mpi, limbs: Int) -> [U64] Never! {
+    out := cipher.words(limbs)
+    loop i in 0..<(if x.p.len() < limbs -> x.p.len() else -> limbs) -> out[i] = x.p[i]
+    out
+}
+
+/// a^e mod n for odd n > 0 and e >= 0, both at most MAX_BITS. `rr` caches
+/// R^2 mod n between calls: empty, it is computed and stored. The exponent's
+/// bits are read from bit `start_bit` of limb `start_limb` of `ep` down.
+/// |a| of any length enters Montgomery form by core_to_mont_rep_wide, so an
+/// a at or above n is reduced with no division; the result has n's limb
+/// count.
+exp_mod_from: fn(a: Mpi, ep: [U64], start_limb: Int, start_bit: Int, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+    an: n.p.len()
+    mont_r2(rr, n) ?? return Err(err)
+    x := zeros(an) ?? return Err(err)
+    mm: core_montmul_init(n.p)
+    t := cipher.words(2 * an + 1)
+    m := cipher.words(an)
+    core_to_mont_rep_wide(m, a.p, a.p.len(), n.p, an, mm, rr.p, t)
+    core_exp_mod(x.p, m, n.p, an, ep, start_limb, start_bit, rr.p)
+    copy_limbs(m, x.p, an)
+    core_from_mont_rep(x.p, m, n.p, an, mm, t)
+    // A negative a with an odd exponent: the result is n - |a|^e mod n
+    // (zero stays zero), chosen by mask on the exponent's low bit.
+    if a.s == -1 {
+        negated := cipher.words(an)
+        _: core_sub(negated, n.p, x.p, an)
+        odd: ep[0].bit_and(U64{1})
+        nonzero: core_check_zero_ct(x.p, an)
+        core_cond_assign(x.p, negated, an, odd.bit_and(nonzero))
+        cipher.wipe_words(negated)
+    }
+    cipher.wipe_words(t)
+    cipher.wipe_words(m)
+    Ok(x)
+}
+
+/// The modulus checks `exp_mod` and `exp_mod_unsafe` share: odd n > 0 at
+/// most MAX_BITS wide. A CRT prime is a secret modulus, so n's bits are
+/// read with no test of them and only the verdict leaves.
+exp_mod_modulus_ok: fn(n: Mpi) -> Bool Never! {
+    if n.s < 0 || n.p.len() == 0 -> return false
+    ok: n.p[0].bit_and(U64{1}).bit_and(core_bits_above(n.p, MAX_BITS - 1).bit_xor(U64{1}))
+    ok == U64{1}
+}
+
+/// a^e mod n for odd n > 0 and e >= 0, n at most MAX_BITS and e at most
+/// MAX_BITS / LIMB_BITS limbs, in time that never depends on e
+/// (mbedtls_mpi_exp_mod). e is read over the larger of its own and n's limb
+/// count with the window that length fixes, so its bit length does not
+/// show either. A negative e is told by its sign alone.
+exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+    if !exp_mod_modulus_ok(n) || e.s < 0 || e.p.len() > MAX_BITS /% LIMB_BITS -> return Err(.BadInput)
+    if e.p.len() == 0 -> return Ok(from_int(1))
+    limbs := n.p.len()
+    if e.p.len() > limbs -> limbs = e.p.len()
+    ep := cipher.words(limbs)
+    copy_limbs(ep, e.p, e.p.len())
+    x := exp_mod_from(a, ep, limbs, 0, n, rr) ?? {
+        cipher.wipe_words(ep)
+        return Err(err)
+    }
+    cipher.wipe_words(ep)
+    Ok(x)
+}
 
 /// a^e mod n for a public e; the time depends on e (mbedtls_mpi_exp_mod_unsafe).
-exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! { exp_mod_optionally_safe(a, e, n, rr, true) }
+exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+    if !exp_mod_modulus_ok(n) || cmp_int(e, 0) < 0 || bitlen(e) > MAX_BITS -> return Err(.BadInput)
+    if e.p.len() == 0 -> return Ok(from_int(1))
+    e_bits := bitlen(e)
+    if e_bits == 0 -> e_bits = 1
+    exp_mod_from(a, e.p, e_bits /% LIMB_BITS, e_bits % LIMB_BITS, n, rr)
+}
 
 /// gcd(a, n) and, with `inverse`, a^-1 mod n (meaningful when the gcd is
 /// 1), in constant time, for odd n and 0 <= a <= n; `inverse` needs n > 1.
 /// Both results have n's limb count; `i` is empty without `inverse`.
 gcd_modinv_odd: fn(a: Mpi, n: Mpi, inverse: Bool) -> (g: Mpi, i: Mpi) MpiError! {
-    if cmp_int(a, 0) < 0 || cmp_mpi(a, n) > 0 || get_bit(n, 0) != 1 || (inverse && cmp_int(n, 1) == 0) -> return Err(.BadInput)
+    if !modinv_args_ok(a, n, inverse) -> return Err(.BadInput)
     g := zeros(n.p.len()) ?? return Err(err)
     i := if inverse -> zeros(n.p.len()) ?? return Err(err) else -> mpi()
     ap: if a.p.len() == 0 -> [U64]{U64{0}} else -> a.p.copy()
     an: if a.p.len() >= n.p.len() -> n.p.len() else if a.p.len() != 0 -> a.p.len() else -> 1
     core_gcd_modinv_odd(g.p, i.p, inverse, ap, an, n.p, n.p.len())
     Ok((g: g, i: i))
+}
+
+/// Whether gcd_modinv_odd may run on a and n: 0 <= a <= n, n odd, and n > 1
+/// for an inverse. n may be a CRT prime and a a blinding draw, so their
+/// limbs are read in constant time and only the verdict leaves.
+modinv_args_ok: fn(a: Mpi, n: Mpi, inverse: Bool) -> Bool Never! {
+    if a.s < 0 || n.s < 0 || n.p.len() == 0 -> return false
+    nl: n.p.len()
+    low := cipher.words(nl)
+    high := U64{0}
+    loop i in 0..<a.p.len() {
+        if i < nl -> low[i] = a.p[i] else -> high = high.bit_or(a.p[i])
+    }
+    ok := core_lt_ct(n.p, low, nl).bit_or(ct_bool(high)).bit_xor(U64{1})
+    ok = ok.bit_and(n.p[0].bit_and(U64{1}))
+    if inverse -> ok = ok.bit_and(core_uint_le_mpi(U64{2}, n.p, nl))
+    cipher.wipe_words(low)
+    ok == U64{1}
 }
 
 /// gcd(a, b) >= 0; gcd(0, b) = |b|. Constant time once both are non-zero.

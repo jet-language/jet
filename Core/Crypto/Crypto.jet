@@ -369,21 +369,23 @@ pbkdf2_hmac: fn(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U
 // user-facing signature.
 wipe: fn(bytes: &[U8]) Never! { core.crypto.wipe(bytes) }
 
+/// Whether a and b hold the same bytes, in time that depends only on their
+/// lengths: the bytes fold into one U8 difference, with no branch on them.
 constant_time_equal_bytes: fn(a: [U8], b: [U8]) -> Bool Never! {
-    diff := 0
-    if a.len() != b.len() -> diff = 1
+    diff := U8{0}
+    if a.len() != b.len() -> diff = U8{1}
     n: a.len()
     m: b.len()
     limit := n
     if m > limit -> limit = m
     loop i in 0..<limit {
-        left := 0
-        right := 0
-        if i < n -> left = Int.from_u8(a[i])
-        if i < m -> right = Int.from_u8(b[i])
-        diff = (diff).bit_or(((left).bit_xor(right)))
+        left := U8{0}
+        right := U8{0}
+        if i < n -> left = a[i]
+        if i < m -> right = b[i]
+        diff = diff.bit_or(left.bit_xor(right))
     }
-    diff == 0
+    diff == U8{0}
 }
 
 constant_time_equal: fn(a: Secret, b: Secret) -> Bool Never! {

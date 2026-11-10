@@ -54,7 +54,7 @@ ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: &R) -> (d: bn.Mpi, q: ecp.Po
 ecdh_compute_shared: fn<R: RNG>(grp: ecp.EcpGroup, q: ecp.Point, d: bn.Mpi, rng: &R) -> bn.Mpi ecp.EcpError! {
     pt: ecp.ecp_mul(grp, d, q, rng)
     if ecp.is_zero(pt) -> return Err(.BadInput)
-    Ok(bn.copy_mpi(pt.x))
+    Ok(bn.copy_mpi_ct(pt.x))
 }
 
 /// The context's curve; Unknown before setup (mbedtls_ecdh_get_grp_id).
@@ -111,7 +111,7 @@ ecdh_get_params: fn(ctx: &ECDHContext, key: ecp.Keypair, side: ECDHSide) ecp.Ecp
         .Theirs -> ctx.qp = ecp.point_copy(key.q)
         .Ours -> {
             ctx.q = ecp.point_copy(key.q)
-            ctx.d = bn.copy_mpi(key.d)
+            ctx.d = bn.copy_mpi_ct(key.d)
         }
     }
 }

@@ -148,7 +148,7 @@ u32le: fn(bytes: [U8], off: Int) -> U32 Never! {
 // the expert surface.
 priv u32_words: module {
     push_u32le: fn(out: &[U8], value: U32) Never! {
-        loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+        loop k in 0..<4 -> out.push(wrapping(U8{value >> (8 * k)}))
     }
 }
 
@@ -164,7 +164,7 @@ chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Neve
             word: w[k] + state[k]
             loop shift in 0..<4 {
                 if i >= plain.len() -> return out
-                out.push(plain[i].bit_xor(U8{(word >> (8 * shift)).bit_and(U32{255})}))
+                out.push(plain[i].bit_xor(wrapping(U8{word >> (8 * shift)})))
                 i += 1
             }
         }
@@ -402,14 +402,13 @@ aes_gcm_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     aes256_encrypt_block(rk, j0, state, work)
     loop i in 0..<16 -> mask[i] = state[i]
     expect := gcm_tag(h, mask, aad, cipher, body_len)
-    different := U8{0}
-    loop i in 0..<16 -> different = different.bit_or((expect[i].bit_xor(cipher[body_len + i])))
+    matches: __gcm_tag_matches(expect, cipher, body_len)
     crypto.wipe(h)
     crypto.wipe(mask)
     crypto.wipe(expect)
     // The only secret-result branch is after the complete tag comparison.
     // No plaintext is allocated or written before authentication succeeds.
-    if different != (U8{0}) {
+    if !matches {
         crypto.wipe(rk)
         crypto.wipe(state)
         aes_workspace_clear(work)
@@ -420,6 +419,14 @@ aes_gcm_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     crypto.wipe(state)
     aes_workspace_clear(work)
     Val(out)
+}
+
+// Whether the 16 tag bytes of `sealed` at `at` match `expect`, in one pass
+// over all of them: the verdict of the tag check.
+__gcm_tag_matches: fn(expect: [U8], sealed: [U8], at: Int) -> Bool Never! {
+    different := U8{0}
+    loop i in 0..<16 -> different = different.bit_or(expect[i].bit_xor(sealed[at + i]))
+    different == U8{0}
 }
 
 zeros16: fn() -> [U8] Never! {
@@ -467,7 +474,7 @@ gcm_tag: fn(h: [U8], ek0: [U8], aad: [U8], ct: [U8], count: Int) -> [U8] Never! 
     out := zeros16()
     loop i in 0..<16 {
         word: y[i /% 8] >> (56 - 8 * (i %% 8))
-        out[i] = U8{word.bit_and(U64{255})}.bit_xor(ek0[i])
+        out[i] = wrapping(U8{word}).bit_xor(ek0[i])
     }
     y[0] = U64{0}
     y[1] = U64{0}
@@ -598,7 +605,7 @@ sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
     loop lane in 0..<16 {
         byte := U64{0}
         loop p in 0..<8 -> byte = byte.bit_or((((w[p] >> lane).bit_and(U64{1})) << p))
-        s[lane] = U8{byte}
+        s[lane] = wrapping(U8{byte})
     }
 }
 
@@ -717,6 +724,20 @@ xtime: fn(a: U8) -> U8 Never! {
     aes_workspace_clear(work)
 }
 
+#Test("The GCM tag check matches all 16 bytes at the offset and nothing else") {
+    expect := [U8]{}
+    loop i in 0..<16 -> expect.push(U8{i * 7 + 1})
+    sealed := [U8]{0xaa, 0xbb, 0xcc}
+    loop i in 0..<16 -> sealed.push(expect[i])
+    assert(__gcm_tag_matches(expect, sealed, 3))
+    assert(!__gcm_tag_matches(expect, sealed, 2))
+    loop i in 0..<16 {
+        forged := sealed.copy()
+        forged[3 + i] = forged[3 + i].bit_xor(U8{0x80})
+        assert(!__gcm_tag_matches(expect, forged, 3))
+    }
+}
+
 /// RFC 9106 Argon2id.  The portable implementation supports one to eight
 /// lanes, with memory rounded down to a whole number of four-slice lanes.
 /// Memory is one flat `[U64]` of 128-word blocks; every compression works in
@@ -809,7 +830,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     }
     result_bytes := [U8]{}
     loop word in work {
-        loop b in 0..<8 -> result_bytes.push(U8{(word >> (b * 8)).bit_and(U64{255})})
+        loop b in 0..<8 -> result_bytes.push(wrapping(U8{word >> (b * 8)}))
     }
     argon2_blake2b_long(result_bytes, out_len)
 }
@@ -952,7 +973,7 @@ blake2b: fn(data: [U8], out_len: Int) -> [U8] Never! {
     }
     blake2b_compress(h, v, m, data, i, data.len(), true)
     out := [U8]{}
-    loop k in 0..<out_len -> out.push(U8{(h[k /% 8] >> ((k %% 8) * 8)).bit_and(U64{255})})
+    loop k in 0..<out_len -> out.push(wrapping(U8{h[k /% 8] >> ((k %% 8) * 8)}))
     out
 }
 

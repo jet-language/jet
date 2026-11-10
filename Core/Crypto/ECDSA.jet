@@ -50,18 +50,25 @@ ecdsa_can_do: fn(id: ecp.GroupID) -> Bool Never! {
 }
 
 /// The integer of a message hash for grp: its leftmost nbits bits, reduced
-/// once mod N (SEC1 4.1.3 step 5, 4.1.4 step 3).
+/// once mod N (SEC1 4.1.3 step 5, 4.1.4 step 3), in N's limbs. The one
+/// subtraction of N is chosen by mask, since x < 2^nbits < 2N.
 derive_mpi: fn(grp: ecp.EcpGroup, hash: [U8]) -> bn.Mpi ecp.EcpError! {
     n_size: (grp.nbits + 7) /% 8
     use_size: if hash.len() > n_size -> n_size else -> hash.len()
     x := bn.read_binary(cipher.bytes_of(hash, 0, use_size)) ?? return Err(.Mpi(err))
     if use_size * 8 > grp.nbits -> bn.shift_r(x, use_size * 8 - grp.nbits)
-    if bn.cmp_mpi(x, grp.n) >= 0 {
-        t: bn.sub_mpi(x, grp.n) ?? return Err(.Mpi(err))
-        x = t
-    }
-    Ok(x)
+    nl: grp.n.p.len()
+    xl := bn.limbs_of(x, nl)
+    out := bn.zeros(nl) ?? return Err(.Mpi(err))
+    borrow: bn.core_sub(out.p, xl, grp.n.p, nl)
+    bn.core_cond_assign(out.p, xl, nl, borrow)
+    Ok(out)
 }
+
+/// Whether a signature part (r or s) is not zero, read in constant time.
+/// The verdict is public: r and s are the signature's output, and a zero
+/// one only redraws the nonce (SEC1 4.1.3 steps 3 and 6).
+signature_part_nonzero: fn(x: bn.Mpi) -> Bool Never! { bn.core_check_zero_ct(x.p, x.p.len()) == U64{1} }
 
 /// Whether grp is set up for ECDSA.
 usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp.n.p.len() != 0 }
@@ -69,10 +76,20 @@ usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp
 /// The signing loop (mbedtls_ecdsa_sign_restartable without a restart
 /// context): the nonce k from rng, the blinding of k G from blind, or from
 /// rng itself with `shared_rng`, as mbedtls_ecdsa_sign passes one generator
-/// for both.
+/// for both. r and s are computed in N's limbs with no division: x(k G) mod
+/// N by mod_ct, the products by Montgomery multiplication, and k^-1 by the
+/// constant-time inverse, which needs no blinding (mbedtls blinds its
+/// inverse with a draw t).
 sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B, shared_rng: Bool{false}) -> ECDSASignature ecp.EcpError! {
     if !usable_group(grp) -> return Err(.BadInput)
-    if bn.cmp_int(d, 1) < 0 || bn.cmp_mpi(d, grp.n) >= 0 -> return Err(.InvalidKey)
+    if !ecp.privkey_valid(grp, d) -> return Err(.InvalidKey)
+    nl: grp.n.p.len()
+    mm: bn.core_montmul_init(grp.n.p)
+    rr := bn.mpi()
+    bn.mont_r2(rr, grp.n) ?? return Err(.Mpi(err))
+    work := cipher.words(2 * nl + 1)
+    dl := bn.limbs_of(d, nl)
+    e: derive_mpi(grp, hash)
     sign_tries := 0
     loop {
         if sign_tries > 10 -> return Err(.RandomFailed)
@@ -86,17 +103,26 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
             key_tries += 1
             k = ecp.gen_privkey(grp, rng)
             pt: if shared_rng -> ecp.ecp_mul(grp, k, grp.g, rng) else -> ecp.ecp_mul(grp, k, grp.g, blind)
-            r = bn.mod_mpi(pt.x, grp.n) ?? return Err(.Mpi(err))
-            if bn.cmp_int(r, 0) != 0 -> break
+            r = bn.mod_ct(pt.x, grp.n, rr) ?? return Err(.Mpi(err))
+            if signature_part_nonzero(r) -> break
         }
         // Step 5: e from the hash. Step 6: s = (e + r d) / k mod N.
-        e: derive_mpi(grp, hash)
-        rd: bn.mul_mpi(r, d) ?? return Err(.Mpi(err))
-        sum: bn.add_mpi(e, rd) ?? return Err(.Mpi(err))
-        inv: bn.gcd_modinv_odd(k, grp.n, inverse: true) ?? return Err(.Mpi(err))
-        prod: bn.mul_mpi(inv.i, sum) ?? return Err(.Mpi(err))
-        s: bn.mod_mpi(prod, grp.n) ?? return Err(.Mpi(err))
-        if bn.cmp_int(s, 0) != 0 -> return Ok(ECDSASignature{r: r, s: s})
+        rd := cipher.words(nl)
+        bn.core_mul_mod(rd, r.p, dl, grp.n.p, nl, mm, rr.p, work)
+        sum := cipher.words(nl)
+        bn.core_add_mod(sum, e.p, rd, grp.n.p, nl)
+        inv := bn.gcd_modinv_odd(k, grp.n, inverse: true) ?? return Err(.Mpi(err))
+        s := bn.zeros(nl) ?? return Err(.Mpi(err))
+        bn.core_mul_mod(s.p, inv.i.p, sum, grp.n.p, nl, mm, rr.p, work)
+        cipher.wipe_words(rd)
+        cipher.wipe_words(sum)
+        cipher.wipe_words(inv.i.p)
+        cipher.wipe_words(k.p)
+        if signature_part_nonzero(s) {
+            cipher.wipe_words(dl)
+            cipher.wipe_words(work)
+            return Ok(ECDSASignature{r: r, s: s})
+        }
     }
 }
 
@@ -207,4 +233,50 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
     assert(bn.cmp_mpi(sig.r, r) == 0 && bn.cmp_mpi(sig.s, s) == 0)
     q: ecp.ecp_mul(grp, d, grp.g, blind) ?? panic("q")
     ecdsa_verify(grp, hash, q, sig.r, sig.s) ?? panic("verify")
+}
+
+#Test("The comb never meets R = ±T before its last step over 3000 random scalars on four curves, against G and another point") {
+    rng := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, "comb invariant".bytes())
+    curves: [ecp.GroupID]{ecp.GroupID.Secp192r1, ecp.GroupID.Secp256r1, ecp.GroupID.Bp256r1, ecp.GroupID.Secp384r1}
+    meets := 0
+    loop id in curves {
+        grp: ecp.group_load(id) ?? panic("load")
+        other: ecp.ecp_mul(grp, bn.from_int(7), grp.g, rng) ?? panic("7G")
+        loop i in 0..<750 {
+            m: bn.random(1, grp.n, rng) ?? panic("draw")
+            pt: if i % 3 == 0 -> ecp.point_copy(other) else -> ecp.point_copy(grp.g)
+            _: ecp.mul_comb_counted(grp, m, pt, rng, meets) ?? panic("mul")
+        }
+    }
+    assert_eq(meets, 0)
+}
+
+#Test("The comb's complete last addition gives 2R for R = T, infinity for R = -T, and T for R at infinity") {
+    grp: ecp.group_load(.Secp256r1) ?? panic("load")
+    f: grp.f
+    w := ecp.fe_work(f.n)
+    t := ecp.fe_tmp(f.n)
+    spare := ecp.jac_new(f.n)
+    gx := cipher.words(f.n)
+    gy := cipher.words(f.n)
+    ecp.fe_from_mpi(f, w, gx, grp.g.x)
+    ecp.fe_from_mpi(f, w, gy, grp.g.y)
+    twice := ecp.jac_new(f.n)
+    ecp.jac_from_point(f, w, twice, grp.g)
+    ecp.jac_double(f, w, t, twice)
+    ecp.jac_normalize(f, w, t, twice)
+    r := ecp.jac_new(f.n)
+    ecp.jac_from_point(f, w, r, grp.g)
+    assert(ecp.jac_add_affine(f, w, t, r, gx, gy, spare, true) == 0)
+    ecp.jac_normalize(f, w, t, r)
+    assert(ecp.fe_eq(f, r.x, twice.x) && ecp.fe_eq(f, r.y, twice.y) && ecp.fe_eq(f, r.z, f.one))
+    neg := gy.copy()
+    ecp.fe_cond_neg(f, w, neg, U64{1})
+    ecp.jac_from_point(f, w, r, grp.g)
+    _: ecp.jac_add_affine(f, w, t, r, gx, neg, spare, true)
+    assert(ecp.fe_is_zero(f, r.z))
+    ecp.jac_set_zero(f, r)
+    _: ecp.jac_add_affine(f, w, t, r, gx, gy, spare, true)
+    assert(ecp.fe_eq(f, r.x, gx) && ecp.fe_eq(f, r.y, gy) && ecp.fe_eq(f, r.z, f.one))
 }

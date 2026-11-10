@@ -3766,3 +3766,78 @@ ct_base64_decoded: fn(bytes: [U8]) -> Int Never! {
         ct_dudect("expert XChaCha20-Poly1305 open", 4000, 2, ct_last_flipped(ct_take(xchacha, 64, 16)), (x) -> ct_opened(vec_expert_xchacha_open(k2, xiv, aad2, vec_concat(xchacha_body, x))))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Constant time: the emission check's entry
+// ---------------------------------------------------------------------------
+
+/// The RSA-1024 key of the mbedtls rsa.c self-test (RSA.jet), completed.
+ct_rsa_key: fn() -> rsa.RSAContext {
+    ctx := rsa.rsa_new()
+    n: bn.read_string(16, "9292758453063D803DD603D5E777D7888ED1D5BF35786190FA2F23EBC0848AEADDA92CA6C3D80B32C4D109BE0F36D6AE7130B9CED7ACDF54CFC7555AC14EEBAB93A89813FBF3C4F8066D2D800F7C38A81AE31942917403FF4946B0A83D3D3E05EE57C6F5F5606FB5D4BC6CD34EE0801A5E94BB77B07507233A0BC7BAC8F90F79") ?? panic("N")
+    p: bn.read_string(16, "C36D0EB7FCD285223CFB5AABA5BDA3D82C01CAD19EA484A87EA4377637E75500FCB2005C5C7DD6EC4AC023CDA285D796C3D9E75E1EFC42488BB4F1D13AC30A57") ?? panic("P")
+    q: bn.read_string(16, "C000DF51A7C77AE8D7C7370C1FF55B69E211C2B9E5DB1ED0BF61D0D9899620F4910E4168387E3C30AA1E00C339A795088452DD96A9A5EA5D9DCA68DA636032AF") ?? panic("Q")
+    d: bn.read_string(16, "24BF6185468786FDD303083D25E64EFC66CA472BC44D253102F8B4A9D3BFA75091386C0077937FE33FA3252D28855837AE1B484A8A9A45F7EE8C0C634F99E8CDDF79C5CE07EE72C7F123142198164234CABB724CF78B8173B9F880FC86322407AF1FEDFDDE2BEB674CA15F3E81A1521E071513A1E85B5DFA031F21ECAE91A34D") ?? panic("D")
+    e: bn.read_string(16, "10001") ?? panic("E")
+    rsa.rsa_import(ctx, .N, n) ?? panic("import N")
+    rsa.rsa_import(ctx, .P, p) ?? panic("import P")
+    rsa.rsa_import(ctx, .Q, q) ?? panic("import Q")
+    rsa.rsa_import(ctx, .D, d) ?? panic("import D")
+    rsa.rsa_import(ctx, .E, e) ?? panic("import E")
+    rsa.rsa_complete(ctx) ?? panic("complete")
+    ctx
+}
+
+// Each primitive of the dudect tests above runs once here, so a build of this
+// test alone selects every secret-dependent primitive; the case
+// tests/cases/core_net_tls/constant_time_primitives_emit_no_secret_branch_or_index.case
+// reads their emission log (JET_X64_EMIT_LOG) at O0, O1 and O2. The secrets
+// are ct_entry's parameters, which a build at O1 and O2 keeps where it drops
+// a test's locals.
+#Test("The secret-dependent primitives each run once on test secrets (the emission check's entry)") {
+    r := CtRand{s: U64{37}}
+    ctx := ct_rsa_key()
+    rng := vec_rng()
+    #Unsafe("test keys and nonces, each used for this run only") {
+        ct_entry(r, ctx, rng)
+    }
+}
+
+#Unsafe("`r` draws test keys and nonces, each used for this run only") ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg) {
+    mac: ct_bytes(r, 32)
+    flipped: ct_last_flipped(mac)
+    assert(ctime.memcmp(mac, 0, flipped, 0, 32) != 0)
+    assert(!core.crypto.constant_time_equal_bytes(mac, flipped))
+    block: ct_bytes(r, 16)
+    assert(ct_aes(ct_bytes(r, 16), block) >= 0)
+    assert(ct_aes(ct_bytes(r, 32), block) >= 0)
+    key: ct_bytes(r, 32)
+    iv: ct_bytes(r, 12)
+    xiv: ct_bytes(r, 24)
+    aad: ct_bytes(r, 13)
+    plain: ct_bytes(r, 64)
+    gcm: vec_gcm_seal(key, iv, aad, plain) ?? panic("GCM seal failed")
+    assert_eq(ct_opened(vec_gcm_open(key, iv, aad, gcm)), 64)
+    chacha: vec_chacha_seal(key, iv, aad, plain) ?? panic("ChaCha20-Poly1305 seal failed")
+    assert_eq(ct_opened(vec_chacha_open(key, iv, aad, chacha)), 64)
+    assert_eq(hashes.hmac(hashes.Md.SHA256, key, plain).len(), 32)
+    assert_eq(hashes.hmac(hashes.Md.SHA384, ct_bytes(r, 48), plain).len(), 48)
+    base := [U8]{9}
+    loop _ in 1..<32 -> base.push(U8{0})
+    assert_eq(ct_opened(vec_ecdh(.Curve25519, ct_bytes(r, 32), base)), 32)
+    assert_eq(ct_opened(vec_ecdh(.Secp256r1, ct_scalar(ct_bytes(r, 32)), ct_generator(.Secp256r1, 32))), 32)
+    assert_eq(ct_opened(vec_ecdh(.Secp384r1, ct_scalar(ct_bytes(r, 48)), ct_generator(.Secp384r1, 48))), 48)
+    assert(ct_ecdsa_sign(.Secp256r1, ct_bytes(r, 32), ct_bytes(r, 32)) > 0)
+    assert(ct_ecdsa_sign(.Secp384r1, ct_bytes(r, 48), ct_bytes(r, 48)) > 0)
+    sig: rsa.rsa_pkcs1_sign(ctx, rng, Val(hashes.Md.SHA256), ct_bytes(r, 32)) ?? panic("RSA sign failed")
+    assert_eq(sig.len(), 128)
+    assert_eq(ct_base64_decoded(ct_bytes(r, 64)), 48)
+    #Unsafe("test keys and nonces, each used for this run only") {
+        assert_eq(ct_opened(vec_expert_x25519(ct_bytes(r, 32), base)), 32)
+        assert_eq(vec_expert_ed25519_sign(ct_bytes(r, 32), plain), 64)
+        sealed: vec_expert_gcm_seal(key, iv, aad, plain) ?? panic("expert GCM seal failed")
+        assert_eq(ct_opened(vec_expert_gcm_open(key, iv, aad, sealed)), 64)
+        xsealed: vec_expert_xchacha_seal(key, xiv, aad, plain) ?? panic("expert XChaCha20-Poly1305 seal failed")
+        assert_eq(ct_opened(vec_expert_xchacha_open(key, xiv, aad, xsealed)), 64)
+    }
+}

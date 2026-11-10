@@ -111,7 +111,8 @@ le32: fn(b: [U8], off: Int) -> U64 Never! {
     U64.from_u8(b[off]).bit_or(U64.from_u8(b[off + 1]) << 8).bit_or(U64.from_u8(b[off + 2]) << 16).bit_or(U64.from_u8(b[off + 3]) << 24)
 }
 
-low_byte: fn(x: U64) -> U8 Never! { U8{x.bit_and(U64{255})} }
+// The low byte of `x` (wrapping): no test of the value.
+low_byte: fn(x: U64) -> U8 Never! { wrapping(U8{x}) }
 
 // ---------------------------------------------------------------------------
 // Bitsliced AES. q[j] holds bit j of every byte of four blocks: bit

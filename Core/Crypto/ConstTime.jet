@@ -106,7 +106,7 @@ bool_if_else_0: fn(c: CtCond, if1: CtCond) -> CtCond Never! { CtCond{mask: if_el
 
 /// if1 when c is true, else if0, for a byte.
 byte_if: fn(c: CtCond, if1: U8, if0: U8) -> U8 Never! {
-    m: U8{c.mask.bit_and(U64{0xff})}
+    m: wrapping(U8{c.mask})
     if1.bit_and(m).bit_or(if0.bit_and(m.bit_not()))
 }
 
@@ -117,7 +117,7 @@ uchar_in_range_if: fn(low: U8, high: U8, c: U8, t: U8) -> U8 Never! {
     // All ones in the byte above bit 7 when the subtraction borrows.
     low_mask: (co - U32{low}) >> 8
     high_mask: (U32{high} - co) >> 8
-    U8{low_mask.bit_or(high_mask).bit_not().bit_and(U32{0xff})}.bit_and(t)
+    wrapping(U8{low_mask.bit_or(high_mask).bit_not()}).bit_and(t)
 }
 
 /// if1 when c is true, else if0, for mbedtls-style error codes in
@@ -129,7 +129,7 @@ error_if_else_0: fn(c: CtCond, if1: Int) -> Int Never! { 0 - Int.from_u64(if_els
 
 /// Zero buf[off..<off+len] when c is true; leave it when false.
 zeroize_if: fn(c: CtCond, buf: &[U8], off: Int, len: Int) Never! {
-    keep: U8{c.mask.bit_not().bit_and(U64{0xff})}
+    keep: wrapping(U8{c.mask.bit_not()})
     loop i in off..<(off + len) -> buf[i] = buf[i].bit_and(keep)
 }
 
@@ -154,7 +154,7 @@ memmove_left: fn(buf: &[U8], start: Int, total: Int, offset: Int) Never! {
 /// dest[doff..<doff+len] = src[soff..<soff+len] when c is true; unchanged
 /// otherwise (mbedtls_ct_memcpy_if with a NULL src2).
 memcpy_if: fn(c: CtCond, dest: &[U8], doff: Int, src: [U8], soff: Int, len: Int) Never! {
-    m: U8{c.mask.bit_and(U64{0xff})}
+    m: wrapping(U8{c.mask})
     nm: m.bit_not()
     loop i in 0..<len -> dest[doff + i] = src[soff + i].bit_and(m).bit_or(dest[doff + i].bit_and(nm))
 }
@@ -162,7 +162,7 @@ memcpy_if: fn(c: CtCond, dest: &[U8], doff: Int, src: [U8], soff: Int, len: Int)
 /// dest[doff..<doff+len] = c ? src1[off1..] : src2[off2..], len bytes
 /// (mbedtls_ct_memcpy_if with both sources).
 memcpy_if_else: fn(c: CtCond, dest: &[U8], doff: Int, src1: [U8], off1: Int, src2: [U8], off2: Int, len: Int) Never! {
-    m: U8{c.mask.bit_and(U64{0xff})}
+    m: wrapping(U8{c.mask})
     nm: m.bit_not()
     loop i in 0..<len -> dest[doff + i] = src1[off1 + i].bit_and(m).bit_or(src2[off2 + i].bit_and(nm))
 }

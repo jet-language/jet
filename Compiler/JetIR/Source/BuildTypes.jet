@@ -4222,8 +4222,11 @@ ir_fixed_fit_value: fn(m: &IRModule, b: &IRBuilder, value: Int, row: Int) -> Int
 // (TNumericOp.FixedNarrow) of an exact Int or a fixed word: a value in the
 // destination's range converts unchanged. One outside it stops with E3010 at
 // `line` (Stop), keeps its low bits (Wrap), takes the nearest bound
-// (Saturate), or is None (Absent, whose `ty` is the Option). Everything is
-// inline, so the runtime's own narrowing conversions call no route.
+// (Saturate), or is None (Absent, whose `ty` is the Option). A fixed word
+// wraps with no test of its value (a mask, or the re-read at the narrow
+// width for a signed destination), so `wrapping(U8{word})` takes the same
+// path for every word, as constant-time code needs. Everything is inline,
+// so the runtime's own narrowing conversions call no route.
 ir_fixed_narrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, outcome: TNarrowOutcome, line: Int, span: Span) -> Int Never! {
     absent: outcome == TNarrowOutcome.Absent
     destination := -1
@@ -4239,6 +4242,16 @@ ir_fixed_narrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: T
     t_bits: row.bits
     source: m.types[b.f.slot_type[value]]
     if source.kind != .Int && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(b, span, "narrowing conversion of {ir_type_name(source.ty)}")
+    if outcome == TNarrowOutcome.Wrap && source.kind == .Word {
+        low: ir_fixed_low_word(m, b, value)
+        if t_signed || t_bits == 64 -> return ir_numeric_cast(m, p, b, low, destination, span)
+        mask: ir_const_like(m, b, low, (1 << t_bits) - 1)
+        masked: ir_temp_like(m, b, low)
+        ir_emit(b.f, IROp.BitAnd, masked, low, mask, IR_OVERFLOW_WRAP, b.line)
+        wrapped: ir_temp(m, b, destination)
+        ir_emit(b.f, IROp.Copy, wrapped, masked, -1, -1, b.line)
+        return wrapped
+    }
     fits: ir_fixed_in_range(m, b, value, t_signed, t_bits)
     if absent {
         option_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)

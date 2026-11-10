@@ -224,8 +224,9 @@ set_zero: fn(pt: &Point) EcpError! {
     bn.lset(pt.z, 0)
 }
 
-/// Whether pt is the point at infinity.
-is_zero: fn(pt: Point) -> Bool Never! { bn.cmp_int(pt.z, 0) == 0 }
+/// Whether pt is the point at infinity, Z read in constant time. Every
+/// caller fails on infinity, so the verdict is public.
+is_zero: fn(pt: Point) -> Bool Never! { bn.core_check_zero_ct(pt.z.p, pt.z.p.len()) == U64{0} }
 
 /// Whether p and q have equal coordinates.
 point_eq: fn(p: Point, q: Point) -> Bool Never! {
@@ -524,27 +525,30 @@ raw_p192: fn(x: &[U64]) Never! {
     loop i in 3..<6 -> x[i] = U64{0}
 }
 
-/// 32-bit chunk j of x.
-ld32: fn(x: [U64], j: Int) -> Int Never! {
+/// 32-bit chunk j of x, as a signed accumulator word.
+ld32: fn(x: [U64], j: Int) -> I64 Never! {
     w: x[j /% 2]
-    Int.from_u64(if j %% 2 == 1 -> w >> 32 else -> w.bit_and(U64{0xffffffff}))
+    wrapping(I64{if j %% 2 == 1 -> w >> 32 else -> w.bit_and(U64{0xffffffff})})
 }
 
 /// Store the low 32 bits of cur as chunk i of x.
-st32: fn(x: &[U64], i: Int, cur: Int) Never! {
-    v: U64{cur.bit_and(0xffffffff)}
+st32: fn(x: &[U64], i: Int, cur: I64) Never! {
+    v: wrapping(U64{cur}).bit_and(U64{0xffffffff})
     w: x[i /% 2]
     x[i /% 2] = if i %% 2 == 1 -> w.bit_and(U64{0xffffffff}).bit_or(v << 32) else -> w.bit_and(U64{0xffffffff00000000}).bit_or(v)
 }
 
-/// The signed carry out of a chunk accumulator (extract_carry).
-carry32: fn(cur: Int) -> Int Never! { (cur - cur.bit_and(0xffffffff)) /% 0x100000000 }
+/// The signed carry out of a chunk accumulator (extract_carry): its
+/// arithmetic shift right by 32.
+carry32: fn(cur: I64) -> I64 Never! { cur >> 32 }
 
 /// The 32-bit NIST reductions (p224, p256, p384). `ops` lists, per output
 /// chunk from 0 up to `top`, the chunks to add (positive index) or subtract
 /// (negative), with 0 between chunks. Then `rounds` times the carry out of
 /// the top chunk folds back in with the signs in `fix`. False when a carry
-/// is left over, which no input below p^2 produces.
+/// is left over, which no input below p^2 produces. The accumulator is a
+/// fixed word (it stays within 2^40 of zero), so no step tests the value.
+#Arithmetic(.Wrapping)
 chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
     i := 0
     cur := ld32(x, 0)
@@ -567,7 +571,7 @@ chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, roun
         i = 0
         cur = ld32(x, 0)
         loop j in 0..<(top + 1) {
-            cur += fix[j] * last
+            cur += I64{fix[j]} * last
             if j < top {
                 c: carry32(cur)
                 st32(x, i, cur)
@@ -579,12 +583,11 @@ chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, roun
     c: carry32(cur)
     st32(x, i, cur)
     i += 1
-    if c != 0 -> return false
     loop i < 2 * x_limbs {
-        st32(x, i, 0)
+        st32(x, i, I64{0})
         i += 1
     }
-    true
+    c == I64{0}
 }
 
 /// FIPS 186-3 D.2.2 for p224: chunk sums of the high part.
@@ -977,9 +980,9 @@ fe_cond_neg: fn(f: Field, w: &FeWork, x: &[U64], cond: U64) Never! {
     bn.core_cond_assign(x, w.m, f.n, nz.bit_and(cond))
 }
 
-/// Whether x is zero. Not constant time: the callers branch on it as
-/// mbedtls does, on values that are public or zero with negligible
-/// probability.
+/// Whether x is zero. The test itself is constant time; its callers
+/// branch on it only for public values, or, on the comb, through
+/// comb_meets_t.
 fe_is_zero: fn(f: Field, x: [U64]) -> Bool Never! { bn.core_check_zero_ct(x, f.n) == (U64{0}) }
 
 /// Whether a = b.
@@ -989,7 +992,8 @@ fe_eq: fn(f: Field, a: [U64], b: [U64]) -> Bool Never! {
     diff == (U64{0})
 }
 
-/// d = a^-1, constant time; a must not be zero.
+/// d = a^-1, constant time; for a zero a, d is unspecified (jac_normalize
+/// masks it out).
 fe_inv: fn(f: Field, w: &FeWork, d: &[U64], a: [U64]) Never! {
     bn.core_gcd_modinv_odd(w.g, w.i, true, a, f.n, f.p, f.n)
     if f.kind == .Mont {
@@ -1070,10 +1074,12 @@ jac_from_point: fn(f: Field, w: &FeWork, r: &JacPoint, pt: Point) Never! {
     bn.copy_limbs(r.z, f.one, f.n)
 }
 
-/// The point r stands for; r must be normalized (Z = 1) or infinity.
+/// The point r stands for; r must be normalized (Z = 1) or infinity. Z is
+/// read with no test of it: 1 when it is not zero.
 jac_to_point: fn(f: Field, w: &FeWork, r: JacPoint) -> Point Never! {
-    zero: fe_is_zero(f, r.z)
-    Point{x: fe_to_mpi(f, w, r.x), y: fe_to_mpi(f, w, r.y), z: bn.from_int(if zero -> 0 else -> 1)}
+    z := cipher.words(1)
+    z[0] = bn.core_check_zero_ct(r.z, f.n)
+    Point{x: fe_to_mpi(f, w, r.x), y: fe_to_mpi(f, w, r.y), z: bn.Mpi{s: 1, p: z}}
 }
 
 /// r = 2 r (ecp_double_jac): dbl-1998-cmo-2 for a = -3, with the a = 0
@@ -1162,15 +1168,102 @@ jac_add_mixed: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, q: JacPoint) ->
     true
 }
 
-/// r = (X/Z^2, Y/Z^3, 1) unless r is infinity (ecp_normalize_jac).
+/// r = q when cond is 1, in constant time.
+jac_cond_assign: fn(f: Field, r: &JacPoint, q: JacPoint, cond: U64) Never! {
+    bn.core_cond_assign(r.x, q.x, f.n, cond)
+    bn.core_cond_assign(r.y, q.y, f.n, cond)
+    bn.core_cond_assign(r.z, q.z, f.n, cond)
+}
+
+/// r = infinity, as (1, 1, 0), when cond is 1, in constant time.
+jac_cond_set_zero: fn(f: Field, r: &JacPoint, cond: U64) Never! {
+    bn.core_cond_assign(r.x, f.one, f.n, cond)
+    bn.core_cond_assign(r.y, f.one, f.n, cond)
+    keep: bn.ct_mask(cond.bit_xor(U64{1}))
+    loop i in 0..<f.n -> r.z[i] = r.z[i].bit_and(keep)
+}
+
+/// r = r + q for an affine q given by its coordinates (Z = 1): the comb's
+/// addition (ecp_add_mixed's general case, Cohen et al. 2-12) with no
+/// branch on a coordinate. r at infinity gives q, chosen by mask. With
+/// `complete`, r = q gives 2r and r = -q infinity, both chosen by mask, 2r
+/// computed into `spare` first. Without it r = ±q is the one branch,
+/// `comb_meets_t`, which comb_core's invariant rules out; the result is 1
+/// when that branch ran, else 0.
+jac_add_affine: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, qx: [U64], qy: [U64], spare: &JacPoint, complete: Bool) -> Int Never! {
+    r_inf: bn.core_check_zero_ct(r.z, f.n).bit_xor(U64{1})
+    if complete {
+        jac_assign(f, spare, r)
+        jac_double(f, w, t, spare)
+    }
+    fe_sqr(f, w, t.t0, r.z)
+    fe_mul(f, w, t.t1, t.t0, r.z)
+    fe_mul_in(f, w, t.t0, qx)
+    fe_mul_in(f, w, t.t1, qy)
+    fe_sub_in(f, t.t0, r.x)
+    fe_sub_in(f, t.t1, r.y)
+    same_x := U64{0}
+    same_y := U64{0}
+    if complete {
+        same_x = bn.core_check_zero_ct(t.t0, f.n).bit_xor(U64{1})
+        same_y = bn.core_check_zero_ct(t.t1, f.n).bit_xor(U64{1})
+    } else if comb_meets_t(f, t.t0) {
+        // r = ±q: 2r when Y agrees too, else infinity, chosen by mask.
+        y_differs: bn.core_check_zero_ct(t.t1, f.n)
+        jac_double(f, w, t, r)
+        jac_cond_set_zero(f, r, y_differs)
+        return 1
+    }
+    fe_mul_in(f, w, r.z, t.t0)
+    fe_sqr(f, w, t.t2, t.t0)
+    fe_mul(f, w, t.t3, t.t2, t.t0)
+    fe_mul_in(f, w, t.t2, r.x)
+    bn.copy_limbs(t.t0, t.t2, f.n)
+    fe_dbl_in(f, t.t0)
+    fe_sqr(f, w, r.x, t.t1)
+    fe_sub_in(f, r.x, t.t0)
+    fe_sub_in(f, r.x, t.t3)
+    fe_sub_in(f, t.t2, r.x)
+    fe_mul_in(f, w, t.t2, t.t1)
+    fe_mul_in(f, w, t.t3, r.y)
+    fe_sub(f, r.y, t.t2, t.t3)
+    if complete {
+        jac_cond_assign(f, r, spare, same_x.bit_and(same_y))
+        jac_cond_set_zero(f, r, same_x.bit_and(same_y.bit_xor(U64{1})))
+    }
+    bn.core_cond_assign(r.x, qx, f.n, r_inf)
+    bn.core_cond_assign(r.y, qy, f.n, r_inf)
+    bn.core_cond_assign(r.z, f.one, f.n, r_inf)
+    0
+}
+
+/// Whether the comb's addend meets R = ±T (t0 = T.x Z^2 - X is zero): the
+/// one branch of the comb on a coordinate, declassified because its outcome
+/// is fixed by construction, so it reveals nothing. At step i of comb_core
+/// (i = d - 1 down to 1) R = 2c P and T = ±T_i P, where T_i = sum_j x_j
+/// 2^(jd) for the digit x of column i, and c = sum_{l > i} 2^(l-i-1) s_l
+/// T_l. Every digit is odd (comb_recode_core's even-digit adjustment), so
+/// every T_l is odd and, as c = 2c' ± T_(i+1), so is c; 2c ± T_i is then
+/// odd, never zero. With m' (m or N - m, whichever is odd) in [1, N),
+/// |2c| <= m' / 2^i + 2 max T and max T < 2^((w-1)d + 1), so |2c ± T_i| <
+/// N / 2 + 3 * 2^((w-1)d + 1) < N for every curve here (it needs nbits >
+/// (w-1)^2 + 5w), and 2c ± T_i is not 0 mod N: R is never ±T, nor
+/// infinity. The last step (i = 0) is not covered (R = T when m' = N - 2
+/// T_0 with a negative last digit), so comb_core runs it complete.
+comb_meets_t: fn(f: Field, t0: [U64]) -> Bool Never! { fe_is_zero(f, t0) }
+
+/// r = (X/Z^2, Y/Z^3, 1) unless r is infinity (ecp_normalize_jac), with no
+/// test of Z: the inverse runs on Z whatever it is, and an infinite r is
+/// set back to (1, 1, 0) by mask.
 jac_normalize: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint) Never! {
-    if fe_is_zero(f, r.z) -> return
+    finite: bn.core_check_zero_ct(r.z, f.n)
     fe_inv(f, w, t.t0, r.z)
     fe_mul_in(f, w, r.y, t.t0)
     fe_sqr_in(f, w, t.t0)
     fe_mul_in(f, w, r.x, t.t0)
     fe_mul_in(f, w, r.y, t.t0)
-    bn.copy_limbs(r.z, f.one, f.n)
+    bn.core_cond_assign(r.z, f.one, f.n, finite)
+    jac_cond_set_zero(f, r, finite.bit_xor(U64{1}))
 }
 
 /// Randomize r's Jacobian coordinates with a random l in [2, p): (l^2 X,
@@ -1336,10 +1429,11 @@ comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: U64, rx: &[U64],
 
 /// The comb digits of an odd m: d + 1 signed digits of `wnd` bits each,
 /// the sign in bit 7 (ecp_comb_recode_core).
+#Arithmetic(.Wrapping)
 comb_recode_core: fn(d: Int, wnd: Int, m: bn.Mpi) -> [U64] Never! {
     x := cipher.words(d + 1)
     loop i in 0..<d {
-        loop j in 0..<wnd -> x[i] = x[i].bit_or(U64{bn.get_bit(m, i + d * j)} << j)
+        loop j in 0..<wnd -> x[i] = x[i].bit_or(bn.limb_bit(m, i + d * j) << j)
     }
     c := U64{0}
     loop i in 1..<(d + 1) {
@@ -1357,39 +1451,63 @@ comb_recode_core: fn(d: Int, wnd: Int, m: bn.Mpi) -> [U64] Never! {
 }
 
 /// The recoded digits of m or of N - m, whichever is odd, and 1 when it is
-/// N - m (ecp_comb_recode_scalar). N must be odd.
+/// N - m (ecp_comb_recode_scalar). N must be odd and m in [1, N): both
+/// candidates are positive, so only their limbs are chosen, and N - m is a
+/// fixed-width subtraction over N's limbs.
 comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> (k: [U64], parity: U64) EcpError! {
     if bn.get_bit(grp.n, 0) != 1 -> return Err(.BadInput)
-    parity: if bn.get_bit(m, 0) == 0 -> 1 else -> 0
-    mm := bn.copy_mpi(m)
-    nm: bn.sub_mpi(grp.n, m)
-    bn.safe_cond_assign(mm, nm, parity)
-    k: comb_recode_core(d, wnd, mm)
-    Ok((k: k, parity: U64{parity}))
+    parity: bn.limb_bit(m, 0).bit_xor(U64{1})
+    limbs: grp.n.p.len()
+    mm := cipher.words(limbs)
+    loop i in 0..<limbs {
+        if i < m.p.len() -> mm[i] = m.p[i]
+    }
+    nm := cipher.words(limbs)
+    _: bn.core_sub(nm, grp.n.p, mm, limbs)
+    bn.core_cond_assign(mm, nm, limbs, parity)
+    cipher.wipe_words(nm)
+    chosen := bn.Mpi{s: 1, p: mm.copy()}
+    cipher.wipe_words(mm)
+    k: comb_recode_core(d, wnd, chosen)
+    cipher.wipe_words(chosen.p)
+    Ok((k: k, parity: parity))
 }
 
 /// R = m P with the comb over `table` (ecp_mul_comb_core and
-/// ecp_mul_comb_after_precomp); the result is normalized.
-comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64], ts: Int, k: [U64], d: Int, rng: &R, blind: Bool{true}) EcpError! {
+/// ecp_mul_comb_after_precomp). Each step but the last adds with
+/// jac_add_affine's one declassified branch, which comb_meets_t's invariant
+/// keeps untaken; the last runs complete. The result counts the times the
+/// branch ran: 0 for every m in [1, N).
+comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64], ts: Int, k: [U64], d: Int, rng: &R, blind: Bool{true}) -> Int EcpError! {
     txi := jac_new(f.n)
+    spare := jac_new(f.n)
     comb_select(f, w, table, ts, k[d], r.x, r.y)
     bn.copy_limbs(r.z, f.one, f.n)
     if blind -> jac_randomize(f, w, r, rng)
+    meets := 0
     i := d
     loop i > 0 {
         i -= 1
         jac_double(f, w, t, r)
         comb_select(f, w, table, ts, k[i], txi.x, txi.y)
-        bn.copy_limbs(txi.z, f.one, f.n)
-        _: jac_add_mixed(f, w, t, r, txi)
+        meets += jac_add_affine(f, w, t, r, txi.x, txi.y, spare, i == 0)
     }
     jac_wipe(txi)
+    jac_wipe(spare)
+    Ok(meets)
 }
 
 /// R = m P on a short Weierstrass curve (ecp_mul_comb). G uses the static
 /// table with a window one wider; any other point builds its table. With
 /// `blind` the start point is randomized from rng.
 mul_comb: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bool{true}) -> Point EcpError! {
+    meets := 0
+    mul_comb_counted(grp, m, pt, rng, meets, blind: blind)
+}
+
+/// mul_comb adding to `meets` the count of comb_core's declassified branch,
+/// which its test holds at 0.
+mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets: &Int, blind: Bool{true}) -> Point EcpError! {
     f: grp.f
     n: f.n
     p_eq_g: bn.cmp_mpi(pt.y, grp.g.y) == 0 && bn.cmp_mpi(pt.x, grp.g.x) == 0
@@ -1404,14 +1522,17 @@ mul_comb: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bool{t
     rec: comb_recode_scalar(grp, m, d, wnd)
     r := jac_new(n)
     if {
-        p_eq_g && grp.t_size == ts -> comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind)
+        p_eq_g && grp.t_size == ts -> meets += comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind)
         else -> {
+            // The table of the public point P, built with its own scratch.
+            pw := fe_work(n)
+            ptmp := fe_tmp(n)
             px := cipher.words(n)
             py := cipher.words(n)
-            fe_from_mpi(f, w, px, pt.x)
-            fe_from_mpi(f, w, py, pt.y)
-            table := comb_precompute(f, w, t, px, py, wnd, d)
-            comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind)
+            fe_from_mpi(f, pw, px, pt.x)
+            fe_from_mpi(f, pw, py, pt.y)
+            table := comb_precompute(f, pw, ptmp, px, py, wnd, d)
+            meets += comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind)
             cipher.wipe_words(table)
         }
     }
@@ -1477,7 +1598,7 @@ mul_mxz: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R) -> Point EcpEr
     i := grp.nbits + 1
     loop i > 0 {
         i -= 1
-        b: U64{bn.get_bit(m, i)}
+        b: bn.limb_bit(m, i)
         bn.core_cond_swap(rx, sx, n, b)
         bn.core_cond_swap(rz, sz, n, b)
         mxz_double_add(f, w, t, rx, rz, sx, sz, px)
@@ -1609,16 +1730,33 @@ check_pubkey: fn(grp: EcpGroup, pt: Point) EcpError! {
 /// Check that d is a valid private key (mbedtls_ecp_check_privkey): 1 <= d
 /// < N (Weierstrass), or clamped as RFC 7748 (Montgomery).
 check_privkey: fn(grp: EcpGroup, d: bn.Mpi) EcpError! {
-    if group_type(grp) == {
-        .Montgomery -> {
-            if bn.get_bit(d, 0) != 0 || bn.get_bit(d, 1) != 0 || bn.bitlen(d) != grp.nbits + 1 -> return Err(.InvalidKey)
-            if grp.nbits == 254 && bn.get_bit(d, 2) != 0 -> return Err(.InvalidKey)
-        }
-        .ShortWeierstrass -> {
-            if bn.cmp_int(d, 1) < 0 || bn.cmp_mpi(d, grp.n) >= 0 -> return Err(.InvalidKey)
-        }
-        else -> return Err(.BadInput)
+    kind: group_type(grp)
+    if kind != .Montgomery && kind != .ShortWeierstrass -> return Err(.BadInput)
+    if !privkey_valid(grp, d) -> return Err(.InvalidKey)
+}
+
+/// Whether d is a valid private key of grp (check_privkey), read with no
+/// test of its bits: only the verdict leaves, and an invalid key is
+/// rejected where it loads.
+privkey_valid: fn(grp: EcpGroup, d: bn.Mpi) -> Bool Never! {
+    if group_type(grp) == .Montgomery {
+        // Bits 0 and 1 (and 2 for Curve25519) clear, bit nbits the top one.
+        top: grp.nbits
+        bad := bn.limb_bit(d, 0).bit_or(bn.limb_bit(d, 1)).bit_or(bn.limb_bit(d, top).bit_xor(U64{1})).bit_or(bn.core_bits_above(d.p, top))
+        if top == 254 -> bad = bad.bit_or(bn.limb_bit(d, 2))
+        return bad == U64{0}
     }
+    // 1 <= d < N: d's low limbs against N's, and d's limbs above N's zero.
+    if d.s < 0 -> return false
+    limbs: grp.n.p.len()
+    low := cipher.words(limbs)
+    high := U64{0}
+    loop i in 0..<d.p.len() {
+        if i < limbs -> low[i] = d.p[i] else -> high = high.bit_or(d.p[i])
+    }
+    ok: bn.core_uint_le_mpi(U64{1}, low, limbs).bit_and(bn.core_lt_ct(low, grp.n.p, limbs)).bit_and(bn.ct_bool(high).bit_xor(U64{1}))
+    cipher.wipe_words(low)
+    ok == U64{1}
 }
 
 /// A clamped Montgomery private key with top bit `high_bit`
@@ -1769,7 +1907,7 @@ calc_public: fn<R: RNG>(key: &Keypair, rng: &R) EcpError! {
 /// The group, private key and public point of key (mbedtls_ecp_export).
 export: fn(key: Keypair) -> (grp: EcpGroup, d: bn.Mpi, q: Point) EcpError! {
     grp: group_load(key.grp.id)
-    Ok((grp: grp, d: bn.copy_mpi(key.d), q: point_copy(key.q)))
+    Ok((grp: grp, d: bn.copy_mpi_ct(key.d), q: point_copy(key.q)))
 }
 
 // ---------------------------------------------------------------------------

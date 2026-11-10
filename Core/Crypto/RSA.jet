@@ -171,15 +171,24 @@ has_private_parts: fn(ctx: RSAContext) -> Bool Never! {
 /// Whether the primitives can run on ctx: n is odd, positive and len bytes
 /// long, e is positive and, for the private operation, p and q are odd and
 /// positive and dp, dq and qp positive (rsa_check_context). It says nothing
-/// of whether the values agree.
+/// of whether the values agree. The private parts are secret, so their
+/// checks fold into one word with no test of their limbs and only the
+/// verdict leaves; mbedtls compares each in turn.
 rsa_check_context: fn(ctx: RSAContext, is_priv: Bool{false}) -> Bool Never! {
     if ctx.len != bn.size(ctx.n) || ctx.len > MPI_MAX_SIZE -> return false
     if bn.cmp_int(ctx.n, 0) <= 0 || bn.get_bit(ctx.n, 0) == 0 -> return false
-    if is_priv && (bn.cmp_int(ctx.p, 0) <= 0 || bn.get_bit(ctx.p, 0) == 0 || bn.cmp_int(ctx.q, 0) <= 0 || bn.get_bit(ctx.q, 0) == 0) -> return false
     if bn.cmp_int(ctx.e, 0) <= 0 -> return false
-    if is_priv && (bn.cmp_int(ctx.dp, 0) <= 0 || bn.cmp_int(ctx.dq, 0) <= 0) -> return false
-    if is_priv && bn.cmp_int(ctx.qp, 0) <= 0 -> return false
-    true
+    if !is_priv -> return true
+    ok := positive_ct(ctx.p).bit_and(bn.limb_bit(ctx.p, 0))
+    ok = ok.bit_and(positive_ct(ctx.q)).bit_and(bn.limb_bit(ctx.q, 0))
+    ok = ok.bit_and(positive_ct(ctx.dp)).bit_and(positive_ct(ctx.dq)).bit_and(positive_ct(ctx.qp))
+    ok == U64{1}
+}
+
+/// 1 when x > 0, with no test of its limbs; the sign is public.
+positive_ct: fn(x: bn.Mpi) -> U64 Never! {
+    if x.s < 0 -> return U64{0}
+    bn.core_check_zero_ct(x.p, x.p.len())
 }
 
 /// Deduce the missing parameters of a key given as (n, e), (p, q, d, e),
@@ -494,57 +503,118 @@ rsa_public: fn(ctx: &RSAContext, input: [U8]) -> [U8] RSAError! {
     Ok(out)
 }
 
+/// The range check reads t's limbs in constant time (below_modulus): the
+/// signature check of rsa_pkcs1_sign runs this on the signature just made.
 public_core: fn(ctx: &RSAContext, input: [U8]) -> [U8] bn.MpiError! {
     t: bn.read_binary(cipher.bytes_of(input, 0, ctx.len))
-    if bn.cmp_mpi(t, ctx.n) >= 0 -> return Err(.BadInput)
+    nl: ctx.n.p.len()
+    if t.p.len() > nl || !below_modulus(bn.limbs_of(t, nl), ctx.n.p, nl) -> return Err(.BadInput)
     r: bn.exp_mod_unsafe(t, ctx.e, ctx.n, ctx.rn)
     out: bn.write_binary(r, ctx.len)
     Ok(out)
 }
 
-/// The t with t = tp mod p and t = tq mod q:
-/// ((tp - tq) qp mod p) q + tq (rsa_apply_crt).
-apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: RSAContext) -> bn.Mpi bn.MpiError! {
-    diff: bn.sub_mpi(tp, tq)
-    scaled: bn.mul_mpi(diff, ctx.qp)
-    reduced: bn.mod_mpi(scaled, ctx.p)
-    lifted: bn.mul_mpi(reduced, ctx.q)
-    t: bn.add_mpi(lifted, tq)
-    Ok(t)
+/// The t with t = tp mod p and t = tq mod q: ((tp - tq) qp mod p) q + tq
+/// (rsa_apply_crt), for tp < p and tq < q, in n's limb count. The halves are
+/// secret, so the arithmetic is fixed-width: tq comes below p by a
+/// Montgomery reduction, its product with qp mod p is two Montgomery
+/// products, and the lift is a plain product and sum. mbedtls uses the
+/// variable-time mbedtls_mpi_sub_mpi, mul_mpi and mod_mpi here.
+apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: &RSAContext) -> bn.Mpi bn.MpiError! {
+    pl: ctx.p.p.len()
+    ql: ctx.q.p.len()
+    bn.mont_r2(ctx.rp, ctx.p)
+    mm: bn.core_montmul_init(ctx.p.p)
+    t := cipher.words(2 * pl + 1)
+    tq_p := cipher.words(pl)
+    bn.core_mod_wide(tq_p, tq.p, tq.p.len(), ctx.p.p, pl, mm, ctx.rp.p, t)
+    tp_w := bn.limbs_of(tp, pl)
+    diff := cipher.words(pl)
+    bn.core_sub_mod(diff, tp_w, tq_p, ctx.p.p, pl)
+    qp_w := bn.limbs_of(ctx.qp, pl)
+    h := cipher.words(pl)
+    bn.core_mul_mod(h, diff, qp_w, ctx.p.p, pl, mm, ctx.rp.p, t)
+    // h q + tq <= (p - 1) q + q - 1 < n.
+    wl: pl + ql
+    wide := cipher.words(wl)
+    bn.core_mul(wide, h, pl, ctx.q.p, ql)
+    tq_w := bn.limbs_of(tq, wl)
+    sum := cipher.words(wl)
+    _: bn.core_add(sum, wide, tq_w, wl)
+    nl: ctx.n.p.len()
+    out := bn.zeros(nl)
+    loop i in 0..<(if wl < nl -> wl else -> nl) -> out.p[i] = sum[i]
+    cipher.wipe_words(t)
+    cipher.wipe_words(tq_p)
+    cipher.wipe_words(tp_w)
+    cipher.wipe_words(diff)
+    cipher.wipe_words(qp_w)
+    cipher.wipe_words(h)
+    cipher.wipe_words(wide)
+    cipher.wipe_words(tq_w)
+    cipher.wipe_words(sum)
+    Ok(out)
 }
 
-/// A random a invertible mod n and b = a^-1 mod n, drawn as one pair mod p
-/// and one mod q joined by the CRT (rsa_gen_rand_with_inverse).
-gen_rand_with_inverse: fn<R: RNG>(ctx: RSAContext, rng: &R) -> (a: bn.Mpi, b: bn.Mpi) RSAError! {
-    ap: bn.random(1, ctx.p, rng)
+/// Whether a gcd is 1, read in constant time. For a prime p it is 1 for
+/// every draw but a multiple of p, so the verdict is public: a failure is
+/// RNGFailed.
+gcd_is_one: fn(g: bn.Mpi) -> Bool Never! {
+    if g.s < 0 || g.p.len() == 0 -> return false
+    rest := U64{0}
+    loop i in 1..<g.p.len() -> rest = rest.bit_or(g.p[i])
+    g.p[0].bit_xor(U64{1}).bit_or(rest) == U64{0}
+}
+
+/// A random a invertible mod n and b = a^-1 mod n (rsa_gen_rand_with_inverse):
+/// a is drawn in [1, n) and its inverses mod p and mod q are joined by the
+/// CRT. mbedtls draws a mod p and a mod q apart, which reads the bit lengths
+/// of p and q; one draw below the public n needs neither, and a draw that is
+/// a multiple of p or q (odds near 2^-(bitlen(p) - 1)) fails as RNGFailed.
+gen_rand_with_inverse: fn<R: RNG>(ctx: &RSAContext, rng: &R) -> (a: bn.Mpi, b: bn.Mpi) RSAError! {
+    a: bn.random(1, ctx.n, rng)
+    ap: bn.mod_ct(a, ctx.p, ctx.rp)
     gp: bn.gcd_modinv_odd(ap, ctx.p, true)
-    // Only a p that is not prime has a non-invertible draw.
-    if bn.cmp_int(gp.g, 1) != 0 -> return Err(.RNGFailed)
-    aq: bn.random(1, ctx.q, rng)
+    // Only a p that is not prime or a multiple of p has no inverse.
+    if !gcd_is_one(gp.g) -> return Err(.RNGFailed)
+    aq: bn.mod_ct(a, ctx.q, ctx.rq)
     gq: bn.gcd_modinv_odd(aq, ctx.q, true)
-    if bn.cmp_int(gq.g, 1) != 0 -> return Err(.RNGFailed)
-    a: apply_crt(ap, aq, ctx)
+    if !gcd_is_one(gq.g) -> return Err(.RNGFailed)
     b: apply_crt(gp.i, gq.i, ctx)
     Ok((a: a, b: b))
 }
 
-/// Make the blinding pair, or refresh it by squaring both halves
-/// (rsa_prepare_blinding; Kocher, CRYPTO '96, section 10).
+/// Make the blinding pair, or refresh it by squaring both halves mod n by
+/// Montgomery products (rsa_prepare_blinding; Kocher, CRYPTO '96, section
+/// 10).
 prepare_blinding: fn<R: RNG>(ctx: &RSAContext, rng: &R) RSAError! {
     if ctx.vf.p.len() != 0 {
-        vi2: bn.mul_mpi(ctx.vi, ctx.vi)
-        vi: bn.mod_mpi(vi2, ctx.n)
-        bn.set_mpi(ctx.vi, vi)
-        vf2: bn.mul_mpi(ctx.vf, ctx.vf)
-        vf: bn.mod_mpi(vf2, ctx.n)
-        bn.set_mpi(ctx.vf, vf)
+        bn.mont_r2(ctx.rn, ctx.n)
+        nl: ctx.n.p.len()
+        mm: bn.core_montmul_init(ctx.n.p)
+        t := cipher.words(2 * nl + 1)
+        vi := bn.limbs_of(ctx.vi, nl)
+        vf := bn.limbs_of(ctx.vf, nl)
+        sq := cipher.words(nl)
+        bn.core_mul_mod(sq, vi, vi, ctx.n.p, nl, mm, ctx.rn.p, t)
+        cipher.wipe_words(ctx.vi.p)
+        ctx.vi = bn.Mpi{s: 1, p: sq.copy()}
+        bn.core_mul_mod(sq, vf, vf, ctx.n.p, nl, mm, ctx.rn.p, t)
+        cipher.wipe_words(ctx.vf.p)
+        ctx.vf = bn.Mpi{s: 1, p: sq.copy()}
+        cipher.wipe_words(t)
+        cipher.wipe_words(vi)
+        cipher.wipe_words(vf)
+        cipher.wipe_words(sq)
         return
     }
     pair: gen_rand_with_inverse(ctx, rng)
-    bn.set_mpi(ctx.vf, pair.a)
+    cipher.wipe_words(ctx.vf.p)
+    ctx.vf = bn.copy_mpi_ct(pair.a)
     // vi = vf^-e mod n; pair.b already is vf^-1.
     vi: bn.exp_mod(pair.b, ctx.e, ctx.n, ctx.rn)
-    bn.set_mpi(ctx.vi, vi)
+    cipher.wipe_words(ctx.vi.p)
+    ctx.vi = vi
 }
 
 /// t = t vf mod n through one Montgomery product with t in Montgomery form
@@ -584,31 +654,73 @@ rsa_private: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError
 }
 
 private_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError! {
-    t0: bn.read_binary(cipher.bytes_of(input, 0, ctx.len))
-    if bn.cmp_mpi(t0, ctx.n) >= 0 -> return Err(.Mpi(.BadInput))
+    nl: ctx.n.p.len()
+    t0 := cipher.words(nl)
+    bn.core_read_be(t0, nl, cipher.bytes_of(input, 0, ctx.len))
+    if !below_modulus(t0, ctx.n.p, nl) -> return Err(.Mpi(.BadInput))
     // Blinding: t = t0 vi mod n.
     prepare_blinding(ctx, rng)
-    t1: bn.mul_mpi(t0, ctx.vi)
-    t: bn.mod_mpi(t1, ctx.n)
+    bn.mont_r2(ctx.rn, ctx.n)
+    mm: bn.core_montmul_init(ctx.n.p)
+    work := cipher.words(2 * nl + 1)
+    vi := bn.limbs_of(ctx.vi, nl)
+    t := bn.zeros(nl)
+    bn.core_mul_mod(t.p, t0, vi, ctx.n.p, nl, mm, ctx.rn.p, work)
+    cipher.wipe_words(vi)
+    cipher.wipe_words(work)
     // Exponent blinding: dp + (p - 1) r and dq + (q - 1) r'.
-    p1: bn.sub_int(ctx.p, 1)
-    q1: bn.sub_int(ctx.q, 1)
-    rp: bn.fill_random(EXPONENT_BLINDING, rng)
-    dp_r: bn.mul_mpi(p1, rp)
-    dp_blind: bn.add_mpi(dp_r, ctx.dp)
-    rq: bn.fill_random(EXPONENT_BLINDING, rng)
-    dq_r: bn.mul_mpi(q1, rq)
-    dq_blind: bn.add_mpi(dq_r, ctx.dq)
+    dp_blind: blind_exponent(ctx.p, ctx.dp, rng)
+    dq_blind: blind_exponent(ctx.q, ctx.dq, rng)
     // The CRT: tp = t^dp mod p, tq = t^dq mod q.
     tp: bn.exp_mod(t, dp_blind, ctx.p, ctx.rp)
     tq: bn.exp_mod(t, dq_blind, ctx.q, ctx.rq)
     s := apply_crt(tp, tq, ctx)
     // Check the result against a fault in the computation.
     check: bn.exp_mod(s, ctx.e, ctx.n, ctx.rn)
-    if bn.cmp_mpi(check, t) != 0 -> return Err(.VerifyFailed)
+    if !fault_check_passes(check, t, nl) -> return Err(.VerifyFailed)
     unblind(s, ctx)
     out: bn.write_binary(s, ctx.len)
     Ok(out)
+}
+
+/// Whether an RSA input is below n, read in constant time. The input is
+/// public, since s^e mod n gives it back from the output, but it is read the
+/// same way as the rest (mbedtls_mpi_cmp_mpi in mbedtls): the private
+/// operation's input, and the signature that rsa_pkcs1_sign checks.
+below_modulus: fn(t: [U64], n: [U64], limbs: Int) -> Bool Never! { bn.core_lt_ct(t, n, limbs) == U64{1} }
+
+/// d + (p - 1) r for a fresh EXPONENT_BLINDING-byte r, over fixed limb
+/// counts: the exponent blinding of mbedtls_rsa_private, where
+/// mbedtls_mpi_sub_int, mul_mpi and add_mpi run in variable time.
+blind_exponent: fn<R: RNG>(p: bn.Mpi, d: bn.Mpi, rng: &R) -> bn.Mpi RSAError! {
+    pl: p.p.len()
+    r: bn.fill_random(EXPONENT_BLINDING, rng)
+    rl: r.p.len()
+    p1 := cipher.words(pl)
+    _: bn.core_sub_int(p1, p.p, U64{1}, pl)
+    wl: pl + rl
+    prod := cipher.words(wl)
+    bn.core_mul(prod, p1, pl, r.p, rl)
+    dw := bn.limbs_of(d, wl)
+    out := bn.zeros(wl)
+    _: bn.core_add(out.p, prod, dw, wl)
+    cipher.wipe_words(p1)
+    cipher.wipe_words(prod)
+    cipher.wipe_words(dw)
+    Ok(out)
+}
+
+/// Whether the fault check's s^e mod n gave back the blinded input t, in
+/// one pass over all limbs. A mismatch means a fault in the computation and
+/// fails the operation, so the verdict is public.
+fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
+    a := bn.limbs_of(check, limbs)
+    b := bn.limbs_of(t, limbs)
+    diff := U64{0}
+    loop i in 0..<limbs -> diff = diff.bit_or(a[i].bit_xor(b[i]))
+    cipher.wipe_words(a)
+    cipher.wipe_words(b)
+    diff == U64{0}
 }
 
 // ---------------------------------------------------------------------------

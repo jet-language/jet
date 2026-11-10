@@ -669,11 +669,13 @@ word32: fn(b: [U8], off: Int) -> U32 Never! {
     U32{b[off]}.bit_or(U32{b[off + 1]} << 8).bit_or(U32{b[off + 2]} << 16).bit_or(U32{b[off + 3]} << 24)
 }
 
+// Little-endian, each byte the word's low bits (wrapping): no test of the
+// key stream's value.
 put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
-    out[at] = U8{w.bit_and(U32{255})}
-    out[at + 1] = U8{(w >> 8).bit_and(U32{255})}
-    out[at + 2] = U8{(w >> 16).bit_and(U32{255})}
-    out[at + 3] = U8{w >> 24}
+    out[at] = wrapping(U8{w})
+    out[at + 1] = wrapping(U8{w >> 8})
+    out[at + 2] = wrapping(U8{w >> 16})
+    out[at + 3] = wrapping(U8{w >> 24})
 }
 
 /// The 20 rounds (ten column-and-diagonal double rounds) of the ChaCha

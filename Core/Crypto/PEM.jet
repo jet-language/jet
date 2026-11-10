@@ -116,6 +116,24 @@ dec_bits: fn(c: U8) -> U8 Never! {
 /// -1, in constant time (mbedtls_ct_base64_dec_value).
 base64_dec_value: fn(c: U8) -> Int Never! { Int.from_u8(dec_bits(c)) - 1 }
 
+LAYOUT_SPACE: U8{1}
+LAYOUT_CR: U8{2}
+LAYOUT_LF: U8{3}
+LAYOUT_EQUALS: U8{4}
+LAYOUT_INVALID: U8{5}
+
+// What byte c of Base64 text is, with no branch or table lookup on c: a
+// digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
+// the class, the text's layout; never on a digit's value.
+#Arithmetic(.Wrapping)
+layout_class: fn(c: U8) -> U8 Never! {
+    v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
+    v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))
+    v = v.bit_or(ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF))
+    v = v.bit_or(ctime.uchar_in_range_if(EQUALS, EQUALS, c, LAYOUT_EQUALS))
+    v.bit_or(ctime.uchar_in_range_if(U8{0}, U8{0}, dec_bits(c).bit_or(v), LAYOUT_INVALID))
+}
+
 /// The padded Base64 of src, no line breaks (mbedtls_base64_encode).
 base64_encode: fn(src: [U8]) -> [U8] Never! {
     out := [U8]{}
@@ -153,26 +171,27 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     i := 0
     loop i < slen {
         spaces := false
-        loop i < slen && src[i] == SPACE {
+        loop i < slen && layout_class(src[i]) == LAYOUT_SPACE {
             i += 1
             spaces = true
         }
         // Spaces at the end of the text are fine.
         if i == slen -> break
-        if slen - i >= 2 && src[i] == CR && src[i + 1] == LF {
+        class: layout_class(src[i])
+        if slen - i >= 2 && class == LAYOUT_CR && layout_class(src[i + 1]) == LAYOUT_LF {
             i += 2
             next
         }
-        if src[i] == LF {
+        if class == LAYOUT_LF {
             i += 1
             next
         }
-        if spaces || src[i] > (U8{127}) -> return Err(.InvalidCharacter)
-        if src[i] == EQUALS {
+        if spaces || class == LAYOUT_INVALID || class == LAYOUT_CR -> return Err(.InvalidCharacter)
+        if class == LAYOUT_EQUALS {
             equals += 1
             if equals > 2 -> return Err(.InvalidCharacter)
         } else {
-            if equals != 0 || base64_dec_value(src[i]) < 0 -> return Err(.InvalidCharacter)
+            if equals != 0 -> return Err(.InvalidCharacter)
         }
         n += 1
         i += 1
@@ -184,23 +203,24 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     x := U32{0}
     digits := 0
     loop c in src {
-        if c == CR || c == LF || c == SPACE -> next
+        class: layout_class(c)
+        if class == LAYOUT_CR || class == LAYOUT_LF || class == LAYOUT_SPACE -> next
         // The first pass put every `=` at the end.
-        if c == EQUALS -> break
-        x = (x << 6).bit_or(U32{dec_bits(c)} - U32{1})
+        if class == LAYOUT_EQUALS -> break
+        x = (x << 6).bit_or(wrapping(U32{dec_bits(c)} - U32{1}))
         digits += 1
         if digits == 4 {
             digits = 0
-            out.push(U8{(x >> 16).bit_and(U32{0xFF})})
-            out.push(U8{(x >> 8).bit_and(U32{0xFF})})
-            out.push(U8{x.bit_and(U32{0xFF})})
+            out.push(wrapping(U8{x >> 16}))
+            out.push(wrapping(U8{x >> 8}))
+            out.push(wrapping(U8{x}))
         }
     }
     if digits == 3 {
-        out.push(U8{(x >> 10).bit_and(U32{0xFF})})
-        out.push(U8{(x >> 2).bit_and(U32{0xFF})})
+        out.push(wrapping(U8{x >> 10}))
+        out.push(wrapping(U8{x >> 2}))
     } else if digits == 2 {
-        out.push(U8{(x >> 4).bit_and(U32{0xFF})})
+        out.push(wrapping(U8{x >> 4}))
     }
     Ok(out)
 }
