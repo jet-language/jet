@@ -1,14 +1,14 @@
-#!/usr/bin/env jet
 // VerifyRows.jet ROWS OUTDIR [JET]: runs every "criterion<TAB>profile<TAB>filter"
 // row of ROWS as `jet test Compiler --profile P --filter F` from the dev
 // worktree, six at a time on CPUs 0-11, each under a 600 s timeout with its
 // output in OUTDIR/C.P.F.out, and prints one line per row in `sort -V` order:
 // criterion, profile, filter, PASS count, FAIL count, rc. The Jet twin of
-// verify-rows.sh (gauntlet tool entry verify-rows).
+// verify-rows.sh (gauntlet tool entry verify-rows); the dev worktree is
+// $JET_DEV_WORKTREE as Roots.jet finds it.
 use {
     files: core.files
     process: core.process
-    sys: core.sys
+    roots: "Roots"
     term: core.term
 }
 
@@ -16,38 +16,6 @@ Row: struct {
     criterion: String
     profile: String
     filter: String
-}
-
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> fallback.copy() else -> value
-}
-
-// What the machine's jet/env file sets `name` to (the default of its
-// `${NAME:-default}` form), None when it sets nothing.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
-    home: env_or("HOME", "")
-    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
-    defaulted: "${{{name}:-"
-    found := ""
-    seen := false
-    loop line in text.lines() {
-        parts: line.trim().removeprefix("export ").partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
-        found = value.replace("$HOME", home)
-        seen = true
-    }
-    if seen -> Val(found) else -> None
-}
-
-// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
-// file, else `fallback`.
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found: env_or(name, "")
-    if found != "" -> return found
-    env_file_value(name) ?? fallback.copy()
 }
 
 // The number after `"KEY":` in a testkit summary line, 0 when it has none.
@@ -144,8 +112,7 @@ run: fn() {
         cells: line.split("\t").to_list()
         if cells.len() >= 3 -> rows.push(Row{criterion: cells[0].copy(), profile: cells[1].copy(), filter: cells[2].copy()})
     }
-    // As roots.sh: JET_DEV_WORKTREE, else the checkout holding this program.
-    worktree: root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
+    worktree: roots.worktree()
     cpus: loop cpu in 0..<12 -> cpu
     specs: loop row in rows -> process.cmd([String]{jet, "test", "Compiler", "--profile", row.profile, "--filter", row.filter}).cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
     results: process.run_all(specs, 6) ?? return fail("verify-rows: {err}", 1)

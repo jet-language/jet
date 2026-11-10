@@ -1,0 +1,65 @@
+// The dev tool roots for the orchestrator's Jet twins, the twin of
+// Tools/agent/roots.sh (which their originals source): a root is the
+// environment's value, else what the machine's ${XDG_CONFIG_HOME:-~/.config}/jet/env
+// sets it to, else the default derived from $HOME and the XDG directories.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+// `$name`, or `fallback` when it is unset or empty.
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> fallback.copy() else -> value
+}
+
+// What the machine's jet/env file sets `name` to (the default of its
+// `${NAME:-default}` form), None when it sets nothing.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
+    defaulted: "${{{name}:-"
+    found := ""
+    seen := false
+    loop line in text.lines() {
+        parts: line.trim().removeprefix("export ").partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        if value.starts_with(defaulted) && value.ends_with("}}") {
+            value = value.removeprefix(defaulted).removesuffix("}}")
+        }
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+// A root: the environment, else the jet/env file, else `fallback`.
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    found: env_or(name, "")
+    if found != "" -> return found
+    env_file_value(name) ?? fallback.copy()
+}
+
+state: fn() -[Env, FS]> String Never! {
+    root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")
+}
+
+scratch: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state()) }
+
+// The land queue, locks and slot ledger.
+run_dir: fn() -[Env, FS]> String Never! { root("JET_RUN_ROOT", "{scratch()}/run") }
+
+// The lanes/Main directory under the scratch root.
+main: fn() -[Env, FS]> String Never! { "{scratch()}/lanes/Main" }
+
+// The checkout the lander commits to: the one holding this program unless set.
+worktree: fn() -[Env, FS]> String Never! {
+    root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
+}
+
+seed: fn() -[Env, FS]> String Never! {
+    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
+    root("JET_SEED", "{seeds}/current")
+}

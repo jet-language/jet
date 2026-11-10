@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // LaneCommit.jet LANE MESSAGE PATCH: the ONLY way lanes put changes onto dev.
 // Lanes develop in their own export (outside the repo), never in the shared
 // worktree. To commit: make a patch of your changes (repo-relative paths with
@@ -18,63 +17,17 @@
 // The Jet twin of lane-commit.sh (gauntlet tool entry lane-commit): the
 // worktree is $LANE_COMMIT_WORKTREE, else $JET_DEV_WORKTREE; the queue, lock,
 // hold switch and path freeze are in $JET_RUN_ROOT; the precommit is Main's
-// precommit.sh, in $JET_STATE_ROOT/scratch/Main, as Tools/agent/roots.sh sets
+// precommit.sh, in $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds
 // them. A relative root names a path in the caller's directory. The original
 // reverts a drain on SIGTERM, SIGINT and SIGHUP; Core handles only SIGINT
 // (sys.on_interrupt), so this twin reverts on SIGINT alone.
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
-}
-
-TOOL: "/Tools/agent/orchestrator/LaneCommit.jet"
-
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> fallback.copy() else -> value
-}
-
-// What the machine's jet/env file sets `name` to (the default of its
-// `${NAME:-default}` form), None when it sets nothing.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
-    home: env_or("HOME", "")
-    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
-    defaulted: "${{{name}:-"
-    found := ""
-    seen := false
-    loop line in text.lines() {
-        parts: line.trim().removeprefix("export ").partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
-        found = value.replace("$HOME", home)
-        seen = true
-    }
-    if seen -> Val(found) else -> None
-}
-
-// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
-// file, else `fallback`.
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found: env_or(name, "")
-    if found != "" -> return found
-    env_file_value(name) ?? fallback.copy()
-}
-
-state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
-
-scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
-
-run_root: fn() -[Env, FS]> String Never! { root("JET_RUN_ROOT", "{scratch_root()}/run") }
-
-// The checkout holding this script, as roots.sh defaults $JET_DEV_WORKTREE.
-dev_worktree: fn() -[Env, FS]> String Never! {
-    script: sys.executable()
-    fallback: if script.ends_with(TOOL) -> script.removesuffix(TOOL) else -> files.cwd() ?? "."
-    root("JET_DEV_WORKTREE", fallback)
 }
 
 // `path` as an absolute path: a relative one names a path in `cwd`.
@@ -451,15 +404,15 @@ run: fn() {
     if args.len() < 3 || args[2] == "" -> quit("lane-commit: 3: patch file", 1)
     lane: args[0].copy()
     cwd: files.cwd() ?? "."
-    run_dir: run_root()
+    run_dir: roots.run_dir()
     l: Lander{
-        worktree: absolute(cwd, env_or("LANE_COMMIT_WORKTREE", dev_worktree())),
-        queue: absolute(cwd, env_or("LANE_COMMIT_QUEUE", "{run_dir}/commit-queue")),
-        precommit: absolute(cwd, env_or("LANE_COMMIT_PRECOMMIT", "{state_root()}/scratch/Main/precommit.sh")),
+        worktree: absolute(cwd, roots.env_or("LANE_COMMIT_WORKTREE", roots.worktree())),
+        queue: absolute(cwd, roots.env_or("LANE_COMMIT_QUEUE", "{run_dir}/commit-queue")),
+        precommit: absolute(cwd, roots.env_or("LANE_COMMIT_PRECOMMIT", "{roots.state()}/scratch/Main/precommit.sh")),
         hold: absolute(cwd, "{run_dir}/commit-hold"),
         freeze: absolute(cwd, "{run_dir}/path-freeze"),
     }
-    lock: absolute(cwd, env_or("LANE_COMMIT_LOCK", "{run_dir}/commit.lock"))
+    lock: absolute(cwd, roots.env_or("LANE_COMMIT_LOCK", "{run_dir}/commit.lock"))
     files.create_dir_all(l.queue) ?? term.eprint("lane-commit: {l.queue}: {err}")
     // Hold switch: while the hold file exists, only the lanes it lists (one per line) land.
     loop held(l, lane) -> time.sleep(20s)

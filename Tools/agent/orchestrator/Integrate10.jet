@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // Integrate10.jet BATCH SUB...: Main's integration pass. Each SUB is an inbox
 // folder ($JET_SCRATCH_ROOT/lanes/Main/inbox/<Lead>-<n>/) holding `patch`
 // (git apply -p1 against origin/dev), `msg`, `tests` (one shell command per
@@ -20,7 +19,7 @@
 // $JET_DEV_WORKTREE and the seed $JET_SEED; integ-apply6.sh and
 // census-snap2.sh are the ones in $JET_ORCHESTRATOR_DIR (this program's
 // directory unless set), and capped.sh and runsub6.sh are Main's, in
-// $JET_STATE_ROOT/scratch/Main, as Tools/agent/roots.sh sets them. A relative
+// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. A relative
 // path the original names after a `cd` is read from that directory, as the
 // shell reads it. Lines sort in byte order, as the original sorts them with
 // LC_ALL=C.
@@ -28,6 +27,7 @@ use {
     files: core.files
     process: core.process
     regex: core.regex
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -49,47 +49,6 @@ Var: struct {
 CensusResult: struct {
     crc: Int
     built: Bool
-}
-
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> fallback.copy() else -> value
-}
-
-// What the machine's jet/env file sets `name` to (the default of its
-// `${NAME:-default}` form), None when it sets nothing.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
-    home: env_or("HOME", "")
-    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
-    defaulted: "${{{name}:-"
-    found := ""
-    seen := false
-    loop line in text.lines() {
-        parts: line.trim().removeprefix("export ").partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
-        found = value.replace("$HOME", home)
-        seen = true
-    }
-    if seen -> Val(found) else -> None
-}
-
-// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
-// file, else `fallback`.
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found: env_or(name, "")
-    if found != "" -> return found
-    env_file_value(name) ?? fallback.copy()
-}
-
-state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
-
-scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
-
-seed_dir: fn() -[Env, FS]> String Never! {
-    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
-    root("JET_SEED", "{seeds}/current")
 }
 
 // `text` without its trailing newlines, as `$(...)` gives it.
@@ -383,7 +342,7 @@ base_export: fn(w: String, i: String, b: String) Never! -[Exec, FS, IO, Time.Wai
 // INTEG_PRE="BATCH:SUB ...": those SUBs (already tested in a batch still
 // landing) applied first, untested and unreported.
 pre_apply: fn(i: String, t: String) Never! -[Env, Exec, FS, IO, Time.Wait]> {
-    loop ps in words(env_or("INTEG_PRE", "")) {
+    loop ps in words(roots.env_or("INTEG_PRE", "")) {
         parts: ps.partition(":")
         pb: parts.head.copy()
         pd: if parts.sep == "" -> ps.copy() else -> parts.tail.copy()
@@ -415,7 +374,7 @@ regen_check: fn(i: String, report: String, apply_lines: [String]) Never! -[Exec,
 // The repository ratchets and generator checks (Land.jet ratchets), with the
 // seed on the composed tree, all at once; 0 when every one passes.
 ratchet_checks: fn(i: String, t: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    c: readlink_f(seed_dir())
+    c: readlink_f(roots.seed())
     identity: chomp(files.read("{c}/IDENTITY") ?? "")
     listing: process.cmd([String]{"{c}/jet", "Tools/agent/Land.jet", "ratchets"}).cwd(t).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", t)
     tools: if files.is_dir(t) -> records(quiet_output(listing)) else -> [String]{}
@@ -484,7 +443,7 @@ goldens: fn(i: String, t: String, g: String, self_jet: String, id: String, touch
         if golden == "" -> next
         stem: golden.removesuffix(".out").removesuffix(".err")
         argv: [String]{"bash", "{g}/capped.sh", "24G", "nice", "-n", "19", "jet", "test", "Compiler", "--profile", "golden", stem.copy()}
-        spec: process.cmd(argv).cwd(t).env("PATH", "{i}/bin:{env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id)
+        spec: process.cmd(argv).cwd(t).env("PATH", "{i}/bin:{roots.env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id)
             .env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31").timeout(time.duration_seconds(1800))
         rc: if files.is_dir(t) -> into_merged(spec, "{i}/goldens.{stem.replace("/", "_")}.out") else -> 1
         append("{i}/goldens.rc", "{rc}\t{stem}\n".bytes())
@@ -647,10 +606,10 @@ run: fn() {
     if args.len() < 1 || args[0] == "" -> quit("integrate: 1: batch", 1)
     batch: args[0].copy()
     subs: args[1..<args.len()]
-    m: "{scratch_root()}/lanes/Main"
-    w: root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
-    g: "{state_root()}/scratch/Main"
-    o: env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
+    m: roots.main()
+    w: roots.worktree()
+    g: "{roots.state()}/scratch/Main"
+    o: roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
     i: "{m}/integ/{batch}"
     t: "{i}/tree"
     files.remove_all(i) ?? ()
@@ -697,7 +656,7 @@ run: fn() {
     say("ratchets rc={rrc}")
     if rrc != 0 -> crc = 1
     self_jet: "{t}/Compiler/JetCli/.jet/build/jet"
-    seed: readlink_f(seed_dir())
+    seed: readlink_f(roots.seed())
     id: chomp(files.read("{seed}/IDENTITY") ?? "")
     built: files.can_execute(self_jet)
     if built -> _ := link_sfn(self_jet, "{i}/bin/jet")

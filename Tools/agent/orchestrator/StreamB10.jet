@@ -3,119 +3,59 @@
 // carrying A's rows) through integrate10.sh with that compiler as its seed.
 // The Jet twin of streamB10.sh (gauntlet tool entry streamb10): the batches
 // live in $JET_SCRATCH_ROOT/lanes/Main/integ, the seed's IDENTITY and jetpack
-// come from $JET_SEED (as Tools/agent/roots.sh sets them), and integrate10.sh
+// come from $JET_SEED (the roots as Roots.jet finds them), and integrate10.sh
 // is the one in $JET_ORCHESTRATOR_DIR, this program's directory unless set.
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> fallback.copy() else -> value
-}
-
-// What the machine's jet/env file sets `name` to (the default of its
-// `${NAME:-default}` form), None when it sets nothing.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
-    home: env_or("HOME", "")
-    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
-    defaulted: "${{{name}:-"
-    found := ""
-    seen := false
-    loop line in text.lines() {
-        parts: line.trim().removeprefix("export ").partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        if value.starts_with(defaulted) && value.ends_with("}}") {
-            value = value.removeprefix(defaulted).removesuffix("}}")
-        }
-        found = value.replace("$HOME", home)
-        seen = true
-    }
-    if seen -> Val(found) else -> None
-}
-
-// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
-// file, else `fallback`.
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found: env_or(name, "")
-    if found != "" -> return found
-    env_file_value(name) ?? fallback.copy()
-}
-
-scratch_root: fn() -[Env, FS]> String Never! {
-    root("JET_SCRATCH_ROOT", root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev"))
-}
-
-seed_root: fn() -[Env, FS]> String Never! {
-    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
-    root("JET_SEED", "{seeds}/current")
-}
-
 // Whether `line` reports `step` failing: `step rc=` and a nonzero code.
-step_failed: fn(line: String, step: String) -> Bool Never! {
+failed: fn(line: String, step: String) -> Bool {
     rest: line.removeprefix("{step} rc=")
-    if rest.len() == line.len() || rest.len() == 0 -> return false
-    first: Int.from_u8(rest.bytes()[0])
-    first >= 49 && first <= 57
+    rest != line && rest != "" && "123456789".contains(rest.slice(0, 1))
 }
 
-// "ready" once the census output has a runtime, "failed" when it never will,
-// else "".
-census_state: fn(text: String) -> String Never! {
-    failed := false
-    loop line in text.lines() {
-        if line.starts_with("runtime rc=0") -> return "ready"
-        if line.starts_with("runtime rc=1") || step_failed(line, "build") || step_failed(line, "check") {
-            failed = true
-        }
-    }
-    if failed -> "failed" else -> ""
-}
-
-fail: fn(message: String, code: Int) -[Exec, IO]> Never {
+fail: fn(message: String, code: Int) -> Never {
     term.eprint(message)
     process.exit(code)
 }
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 {
-        fail("usage: jet Tools/agent/orchestrator/StreamB10.jet A_BATCH B_BATCH SUB...", 1)
-    }
-    batch: args[0]
-    main: "{scratch_root()}/lanes/Main"
-    orchestrator: env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
-    census: "{main}/integ/{batch}/census.out"
+    if args.len() < 2 -> fail("usage: jet Tools/agent/orchestrator/StreamB10.jet A_BATCH B_BATCH SUB...", 1)
+    integ: "{roots.main()}/integ"
     loop {
-        state: census_state(files.read(census) ?? "")
-        if state == "ready" -> break
-        if state == "failed" {
-            print("streamB: {batch} has no compiler")
+        ready := false
+        dead := false
+        loop line in (files.read("{integ}/{args[0]}/census.out") ?? "").lines() {
+            ready = ready || line.starts_with("runtime rc=0")
+            dead = dead || line.starts_with("runtime rc=1") || failed(line, "build") || failed(line, "check")
+        }
+        if ready -> break
+        if dead {
+            print("streamB: {args[0]} has no compiler")
             process.exit(2)
         }
         time.sleep(30s)
     }
-    seed: "{main}/integ/seed-{batch}"
+    seed: "{integ}/seed-{args[0]}"
+    build: "{integ}/{args[0]}/tree/Compiler/JetCli/.jet/build"
+    current: files.canonicalize(roots.seed()) ?? roots.seed()
     files.remove_all(seed) ?? ()
     files.create_dir_all(seed) ?? term.eprint("streamB: {seed}: {err}")
-    build: "{main}/integ/{batch}/tree/Compiler/JetCli/.jet/build"
     files.copy("{build}/jet", "{seed}/jet") ?? term.eprint("streamB: {build}/jet: {err}")
     files.copy_dir("{build}/jet-runtime", "{seed}/jet-runtime") ?? term.eprint("streamB: {build}/jet-runtime: {err}")
-    current: files.canonicalize(seed_root()) ?? seed_root()
     files.copy("{current}/IDENTITY", "{seed}/IDENTITY") ?? term.eprint("streamB: {current}/IDENTITY: {err}")
     files.symlink("{current}/jetpack", "{seed}/jetpack") ?? term.eprint("streamB: {seed}/jetpack: {err}")
     print("streamB: seed {seed} ready")
-    argv := [String]{"{orchestrator}/integrate10.sh", args[1].copy()}
+    argv := [String]{"{roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))}/integrate10.sh", args[1].copy()}
     loop sub in args.slice(2, args.len()) {
-        if {
-            files.is_dir(sub) -> argv.push(sub.copy())
-            else -> print("streamB: not staged, skipped: {sub}")
-        }
+        if files.is_dir(sub) -> argv.push(sub.copy()) else -> print("streamB: not staged, skipped: {sub}")
     }
     receipt: process.cmd(argv).env("CENSUS_JET_DIR", seed).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return fail("streamB: {argv[0]}: {err}", 127)
     process.exit(if receipt.signal != None -> 128 + (receipt.signal ?? 0) else -> receipt.code)
