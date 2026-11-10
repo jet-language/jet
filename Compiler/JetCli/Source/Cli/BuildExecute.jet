@@ -28,14 +28,7 @@ use {
 // Driver's build query selects it (jet_driver_query_build_plan); any other
 // top-level `build: fn` is ordinary code.
 jet_cli_declares_build_entry: fn(source: String) -> Bool Never! {
-    lines: source.split("\n").to_list()
-    loop line in jet_cli_top_level_function_lines(source, "build") {
-        if line < 1 || line > lines.len() -> next
-        if lines[line - 1].split_once("build: fn(") == .Val(opened) && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
-            if !typed.before.contains(",") && typed.after.trim() == "Build" -> return true
-        }
-    }
-    false
+    jet_cli_build_entry_lines(source).len() > 0
 }
 
 // Whether the package enclosing `file` declares its build entry in another of
@@ -851,4 +844,7 @@ jet_cli_build_add_target: fn(build: &HermeticBuildContext, target: BuildSessionT
 #Test("the build entry is the colon declaration `build: fn(b: Build)`") {
     assert(jet_cli_declares_build_entry("build: fn(b: Build) {{}}\n"))
     assert(!jet_cli_declares_build_entry("build: fn(n: Int) {{}}\n"))
+    assert(jet_cli_declares_build_entry("build: fn(_: Build) {{}}\n"))
+    // A method is no entry, also after a raw string that holds a brace.
+    assert(!jet_cli_declares_build_entry("NOTE: ```}}```\nimpl Shape {{ build: fn(b: Build) {{}} }}\n"))
 }

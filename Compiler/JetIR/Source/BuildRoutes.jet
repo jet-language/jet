@@ -3693,16 +3693,19 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
 // Core's `__to_bits_f32(x)` (leaf "to_bits_f32"): F32 `value`'s binary32
 // bits as an Int in 0..<2^32, stored over a zeroed frame word and read back
 // whole; `__from_bits_f32(bits)` ("from_bits_f32"): the F32 whose bits are
-// the low 32 of Int `value`, which Core keeps in 0..<2^32 so the Int is its
-// own word. No conversion runs, so a payload and a signaling NaN cross
-// unchanged.
+// the low 32 of `value`, which Core keeps in 0..<2^32 so the Int is its own
+// word. The argument arrives as that Int or as the I64 word a native call
+// narrowed it to; both store the same frame word. No conversion runs, so a
+// payload and a signaling NaN cross unchanged.
 ir_f32_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, leaf: String, result: Type, span: Span) -> Int Never! {
     to_bits: leaf == "to_bits_f32"
-    input: m.types[b.f.slot_type[value]].kind
+    input_type: b.f.slot_type[value]
+    input: m.types[input_type].kind
     row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     output: m.types[row].kind
-    if to_bits && (input != .Float32 || output != .Int) -> return ir_fail_slot(b, span, "F32 bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
-    if !to_bits && (input != .Int || output != .Float32) -> return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
+    if to_bits && (input != .Float32 || output != .Int) -> return ir_fail_slot(b, span, "F32 bits of {ir_type_name(m.types[input_type].ty)}")
+    word_input: input == .Word && m.types[input_type].ty == (Type.IntN{signed: true, bits: 64})
+    if !to_bits && ((input != .Int && !word_input) || output != .Float32) -> return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(m.types[input_type].ty)}")
     pointer: ir_pointer_row(m)
     area: ir_temp(m, b, pointer)
     ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)

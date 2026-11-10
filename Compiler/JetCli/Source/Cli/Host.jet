@@ -1701,7 +1701,7 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
 // it: the exit returns the whole program's memory at once, where drop glue
 // would walk every IR row and fault every swapped-out page back in (minutes
 // after the self-host unit's link). A verb with nothing compiled returns its
-// output to `jet_cli_main` instead. Callers keep the shapes the seed backends
+// output to `jet_cli_main`, which ends here with it. Callers keep the shapes the seed backends
 // lower: a value-returning function ends in a value, never in this call, and
 // a `??` fallback calls it directly, not from a block of statements.
 // A Jet defect (JET_CLI_EXIT_ICE, I2) ends through process.exit_unmapped
@@ -3359,27 +3359,23 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 // target of `--trace[=FILE]` (which the front door admits only on those
 // verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
-// every other verb's output is written here, as its `--json` outcome
-// (jet_cli_json_outcome), and its exit code returned to
-// run.jet, which exits with it. This is round 3's entry shape: every seed
-// (a0_001 included) checks and lowers it.
-jet_cli_main: fn(args: [String]) -> Int {
+// every other verb's output ends it here, as its `--json` outcome
+// (jet_cli_json_outcome), through jet_cli_finish too, so its ICE exits 101.
+// This is round 3's entry shape: every seed (a0_001 included) checks and
+// lowers it.
+jet_cli_main: fn(args: [String]) {
     plan: jet_cli_front(args)
     owned: jet_cli_owned_flags(args)
     recording := JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {
-        .Replay(replayed) -> {
-            jet_cli_write_output(replayed)
-            return replayed.exit_code
-        }
+        .Replay(replayed) -> jet_cli_finish(replayed)
         .Run(claimed) -> recording = claimed
     }
     done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned), recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
-    jet_cli_write_output(output)
     // A check that ends here (refused before its compile) is still recorded.
     if recording == .Val(claimed) -> jet_cli_check_receipt_publish(claimed, output, [JetCLIReceiptInput]{})
-    output.exit_code
+    jet_cli_finish(output)
 }
 
 // Carry out a compiling verb's plan as a task, on a scheduler worker rather
