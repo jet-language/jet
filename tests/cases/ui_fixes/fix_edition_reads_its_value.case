@@ -1,0 +1,19 @@
+# `jet fix --edition` reads its value in both spellings (#6281 c141). The
+# current edition runs the ordinary fix pass. Any other edition is refused
+# with E2104, a usage error that leaves the file untouched, instead of running
+# as a plain fix. `2027` is not taken as the file to fix.
+fixture: fix_edition_reads_its_value.fixture
+env: NO_COLOR=1
+step: jet fix --edition=2027 run.jet
+exit: 2
+stderr: ~ "`jet fix --edition=2027` is not built: this jet migrates to edition 2026 only" # names the edition asked for and the one it knows
+stderr: ~ "E2104" # a registered usage diagnostic
+file: run.jet = fix_edition_reads_its_value.fixture/run.jet
+step: jet fix --edition 2027 run.jet
+exit: 2
+stderr: ~ "`jet fix --edition=2027` is not built" # the separate value is read too
+file: run.jet = fix_edition_reads_its_value.fixture/run.jet
+step: jet fix --edition=2026 run.jet
+exit: 0
+step: jet fix --edition 2026 run.jet
+exit: 0
