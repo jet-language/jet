@@ -35,8 +35,10 @@
 // `exit: N`. check-errors.txt maps `jet check` errors back to source files.
 //
 // Environment:
-//   JET                       the admitted native jet compiler (required)
-//   JET_COMPILER_IDENTITY     default: the first line of IDENTITY beside $JET
+//   JET                       the admitted native jet compiler (required); a link
+//                             names the binary it points to. The assembler's own
+//                             tool runs get it as JET_BIN.
+//   JET_COMPILER_IDENTITY     default: the first line of IDENTITY beside that binary
 //   JET_TOOLCHAIN_ROOT        default: this checkout (it must hold Core/)
 //   JETPACK_BOOTSTRAP_SOURCE_ROOT  the tree to assemble (default: this checkout)
 //   JETPACK_WORKER            the scratch directory's writer name (default lead)
@@ -154,11 +156,13 @@ parse_options: fn(args: [String]) -> Options {
     options
 }
 
-// $JET: an executable file, else exit 69.
+// $JET resolved through any links: an executable file, else exit 69.
 admitted_jet: fn() -> String {
     jet: process.env_get("JET") ?? ""
-    if jet == "" || !executable(jet) -> fail(69, "JET must name the admitted native jet compiler")
-    jet
+    if jet == "" -> fail(69, "JET must name the admitted native jet compiler")
+    binary: files.canonicalize(jet) ?? fail(69, "JET must name the admitted native jet compiler: {err}")
+    if !executable(binary) -> fail(69, "JET must name the admitted native jet compiler")
+    binary
 }
 
 executable: fn(path: String) -> Bool {
@@ -210,6 +214,7 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
     set_or_unset(child, "JETPACK_BOOTSTRAP_DEPS_FROM_HEAD", if options.deps_from_head -> "1" else -> "")
     set(child, "JET_COMPILER_IDENTITY", identity)
     set(child, "JET_TOOLCHAIN_ROOT", toolchain)
+    set(child, "JET_BIN", jet)
     files.create_dir_all(scratch) ?? fail(1, "cannot create {scratch}: {err}")
     files.create_dir_all("{state}/slots") ?? fail(1, "cannot create {state}/slots: {err}")
     receipt: "{scratch}/{if options.hosted -> "hosted" else -> "check"}.receipt"
