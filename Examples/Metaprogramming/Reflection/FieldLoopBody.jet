@@ -1,0 +1,35 @@
+// A `comptime loop` inside a generated method body unrolls once per field of
+// the marked type. `self.#{f}` pastes each field's name where the body reads
+// a field and where it assigns one, and each unrolled iteration keeps its
+// own `doubled` local.
+Bump: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            impl #{tname} {
+                bumped: fn(self) -> #{tname} {
+                    out := self.copy()
+                    comptime loop f in target.fields {
+                        doubled: self.#{f} * 2
+                        out.#{f} = doubled + 1
+                    }
+                    out
+                }
+            }
+        }
+    }
+}
+
+#Bump
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    p: Point{x: 3, y: 4}.bumped()
+    print(p.x)
+    print(p.y)
+}

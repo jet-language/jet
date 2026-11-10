@@ -972,9 +972,9 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     }
     // The lexer reads `$NAME` as one
     // identifier. Only a config surface reads it as an environment read; in
-    // ordinary source a `$` word must be a subjectless fact root (or a
-    // template binding inside a template body).
-    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads && state.derive_template_depth == 0 && !parser_fact_root(word) {
+    // ordinary source, a template included, a `$` word must be a site
+    // location (`$here`, `$caller`).
+    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads && !parser_fact_root(word) {
         parser_bump(state)
         parser_report_unknown_fact_root(state, word, token.span)
         return ParsedExpr{expr: Expr.Ident{name: word, span: token.span, id: parser_node_id(state)}, span: token.span}
@@ -2016,9 +2016,9 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             keyword_member: parser_is_keyword_token(state, next_token)
             member: if keyword_member -> parser_bump(state) else -> parser_expect_name(state, "after the field-access operator")
             member_name: if keyword_member -> parser_text(state, member) else -> parser_value(state, member)
-            // A `$` member is a derive or marker template read; a program
-            // reads a compiler fact through `x.reflect().fact`.
-            if member_name.starts_with("$") && state.derive_template_depth == 0 {
+            // A program reads a compiler fact through `x.reflect().fact`, and a
+            // template pastes a member name as `x.#{name}`.
+            if member_name.starts_with("$") {
                 parser_add_error_code(state, "E0003", member.span, "`{member_name}` is not a member name", "a member after `.` is a plain name", "write the member's name")
             }
             span := parser_cover(expression.span, member.span)

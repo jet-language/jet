@@ -71,14 +71,14 @@ and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptim
 uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
-Inside a template the fact sigil also splices a template binding
-(D-NAME-SPLICE1=B). `$method: fn(self)` and `impl $type_name` name a
-declaration from the binding's text, `self.$field` reads the member a loop
-value names, `.$left` matches the variant it names, and `{$count}` or a bare
-`$count` reads the binding's build-time value. A `$` word that names no
-template binding, or that is read on a bound value such as `field.reflect().name`,
-stays a compiler fact. The retired `@` splice teaches E0388 with the `$`
-respelling; prefix `@` in code marks only a live link.
+Inside a template a paste `#{name}` splices a template binding
+(D-META-HASH1=A). `#{method}: fn(self)` and `impl #{type_name}` name a
+declaration from the binding's text, `self.#{field}` reads the member a loop
+value names, `.#{left}` matches the variant it names, and a bare `#{count}`
+or a string hole `{count}` reads the binding's build-time value. A compiler
+fact reads through the subject, `field.reflect().name`, inside a template as
+anywhere else. A paste outside a derive or marker template is E0003, and a
+`$` word other than the site locations `$here` and `$caller` is E0003.
 
 ## Effect tiers and reproducibility
 
@@ -182,7 +182,7 @@ The source registry reserves typed item-template generation. `derive T.Trait {
 grammar, and neither form accepts a source string or re-lexes generated text.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
-A `$name` in a `b.generate` body that names a local of the build entry splices
+A `#{name}` paste in a `b.generate` body that names a local of the build entry splices
 that local's value into the generated items as a Jet literal, so build
 reflection can feed generated code:
 
@@ -192,7 +192,7 @@ build: fn(b: Build) {
         if function.name == "wrapped" {
             operation: function.arithmetic[0].operation
             b.generate("reflection_values") {
-                reflected_operation: fn() -> String { $operation }
+                reflected_operation: fn() -> String { #{operation} }
             }
         }
     }
@@ -202,7 +202,7 @@ build: fn(b: Build) {
 A spliced local is a `String`, `Int` or `Bool`, or a list of them; any other
 type is E3502. The value goes where an expression goes; a generated
 declaration's name comes only from a compile-time binding, such as a
-`comptime` loop name. A `$name` that names no build local stays a
+`comptime` loop name. A `#{name}` that names no build local stays a
 compile-time name of the items.
 
 ## Typed reflection

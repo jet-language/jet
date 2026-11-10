@@ -720,7 +720,7 @@ is `#!X`, `#X: v` passes one name path, string, or number, and
 `#X: (args)` passes any other argument list; any other value is E0943, and a
 required Bool argument is written `#X: (true)` (E0943). The line is the same
 marker as `#X(args)` above the declaration, checked at the same site; type
-facts such as `$layout` apply once the whole body is read, and a function's
+facts such as `reflect().layout` apply once the whole body is read, and a function's
 value line may come before its marker lines. One declaration writes its whole
 set in one place: markers above and inside together are E0942, whose fix
 moves the set above. A line inside a nested block or a lambda body, and a

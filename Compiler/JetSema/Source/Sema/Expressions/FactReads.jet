@@ -42,7 +42,6 @@ use jet_foundation.[
     type_name,
     fact_read_detail_field,
     fact_read_kind,
-    fact_read_members,
     fact_read_reflection_kind,
 ]
 
@@ -68,16 +67,6 @@ sema_fact_read_kind: fn(member: String) -> FactRead? Never! {
         .BuildPackageName | .BuildPackageVersion | .BuildOS | .BuildProfile | .BuildStampGit | .BuildStampDirty | .BuildStampToolchain | .BuildStampAt -> None
         else -> Val(read)
     }
-}
-
-// A `$` member that names no registered fact read is E0302 with the closed
-// list of compiler-owned facts from the registry; a registered one is None.
-sema_fact_read_unknown_member: fn(member: String, span: Span) -> Diagnostic? Never! {
-    if !member.starts_with("$") -> return None
-    members: fact_read_members()
-    if members.contains(member) -> return None
-    known: loop known_member in members -> "`{sema_fact_member_display(known_member)}`"
-    Val(sema_error("E0302", span, "`{sema_fact_member_display(member)}` is not a compiler-owned fact", "the compiler-owned facts are {known.join(", ")}", "write a registered fact read such as `T.reflect().layout`"))
 }
 
 // How a diagnostic names the fact member `$fact`: the source spelling

@@ -1,7 +1,7 @@
 derive T.FieldNames {
-    comptime loop field in T.$fields {
-        method: "field_{field.$name}"
-        $method: fn(self) -> String { field.$name }
+    comptime loop field in T.reflect().fields {
+        method: "field_{field.reflect().name}"
+        #{method}: fn(self) -> String { field.reflect().name }
     }
 }
 

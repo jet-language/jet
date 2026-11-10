@@ -181,7 +181,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
 }
 
 // A `b.generate` template's formatted items and the build locals it splices.
-// Each `$name` naming a build local is formatted as that splice's marker, a
+// Each `#{name}` naming a build local is formatted as that splice's marker, a
 // whole Int literal, which the build host replaces with the local's value
 // written as a Jet literal (JetDriver jet_driver_build_host_call).
 SemaBuildGenerateSplices: struct {
@@ -204,7 +204,7 @@ sema_build_generate_format: fn(items: [Item]) -> String {
 }
 
 // Rust lower_build_generate expands and formats the typed body under an empty
-// compile-time scope. A `$name` still unbound there that names a build local
+// compile-time scope. A `#{name}` still unbound there that names a build local
 // of a literal type is spliced: the body is expanded again with each such
 // name bound to its marker, so the marker stands exactly where the value goes.
 sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaBuildGenerateSplices? {
@@ -216,7 +216,7 @@ sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, environment:
         local: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
         value: sema_check_expression(local.copy(), None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         if !sema_build_generate_splice_type(value.ty) {
-            diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice `${name}`, a `{type_name(value.ty)}`", "a build local enters the generated items as a literal, and only String, Int and Bool values and lists of them have one", "splice a String, Int or Bool built from `{name}`"))
+            diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice `#{{{name}}}`, a `{type_name(value.ty)}`", "a build local enters the generated items as a literal, and only String, Int and Bool values and lists of them have one", "splice a String, Int or Bool built from `{name}`"))
             return None
         }
         marker: SEMA_BUILD_GENERATE_SPLICE_BASE + splices.markers.len()
@@ -235,20 +235,21 @@ sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, environment:
     Val(splices)
 }
 
-// The names of the `$name` splices in formatted items, in first-use order.
+// The names of the `#{name}` splices in formatted items, in first-use order.
 sema_build_generate_splice_names: fn(text: String) -> [String] Never! {
     names := [String]{}
     bytes: text.bytes()
     index := 0
-    loop index < bytes.len() {
-        if (bytes[index] != U8{36}) {
+    loop index + 1 < bytes.len() {
+        if (bytes[index] != U8{35}) || (bytes[index + 1] != U8{123}) {
             index += 1
             next
         }
-        end := index + 1
-        loop end < bytes.len() && sema_build_generate_name_byte(bytes[end], end > index + 1) -> end += 1
-        if end > index + 1 {
-            name: String.from_bytes(bytes[index + 1..<end]) ?? ""
+        start: index + 2
+        end := start
+        loop end < bytes.len() && sema_build_generate_name_byte(bytes[end], end > start) -> end += 1
+        if end > start && end < bytes.len() && (bytes[end] == U8{125}) {
+            name: String.from_bytes(bytes[start..<end]) ?? ""
             seen := false
             loop known in names {
                 if known == name -> seen = true

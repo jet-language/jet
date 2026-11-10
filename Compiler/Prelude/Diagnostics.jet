@@ -3632,13 +3632,13 @@ RetiredAtCompileTime: struct {
     impl Diagnostic {
         code: "E0388"
         status: .Retired
-        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME: value` is `NAME: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `$method: fn`, `self.$field` or `.$left`"
+        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME: value` is `NAME: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `#{{method}}: fn`, `self.#{{field}}` or `.#{{left}}`"
         detail: true
         edit: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`{self.old}` is retired; write `{self.new}`." }
-        why: fn(self) -> String { "Build-time blocks, branches, loops, functions and values carry the word `comptime`, so forced compile time is always explicit: a constant that must be evaluated while building is `NAME: comptime {{ value }}` (a plain `NAME: value` folds while building only when it can), and the case of a name never implies it. A template splices a binding's name with the fact sigil `$`. Prefix `@` now marks a live link. The meaning and the checks are unchanged." }
+        why: fn(self) -> String { "Build-time blocks, branches, loops, functions and values carry the word `comptime`, so forced compile time is always explicit: a constant that must be evaluated while building is `NAME: comptime {{ value }}` (a plain `NAME: value` folds while building only when it can), and the case of a name never implies it. A template pastes a binding's name as `#{{name}}`. Prefix `@` now marks a live link. The meaning and the checks are unchanged." }
         fix: fn(self) -> String { "Replace `{self.old}` with `{self.new}`." }
     }
 }

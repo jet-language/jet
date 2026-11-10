@@ -398,7 +398,7 @@ parser_pattern_rhs_ahead: fn(state: &JetParserState, value: Bool) -> Bool Never!
             next: parser_lookahead(state, 1)
             if next.kind == TOKEN_IDENT {
                 word: parser_value(state, next)
-                return parser_pascal_name(word) || word.starts_with("$")
+                return parser_pascal_name(word) || word.starts_with("#{{")
             }
             next.kind == TOKEN_NULL || next.kind == TOKEN_LBRACE
         }
@@ -770,7 +770,7 @@ parser_struct_field_nested_pattern_ahead: fn(state: &JetParserState) -> Bool Nev
     if parser_current_kind(state) == {
         TOKEN_DOT -> {
             next: parser_lookahead(state, 1)
-            variant: next.kind == TOKEN_NULL || (next.kind == TOKEN_IDENT && (parser_pascal_name(parser_value(state, next)) || parser_value(state, next).starts_with("$")))
+            variant: next.kind == TOKEN_NULL || (next.kind == TOKEN_IDENT && (parser_pascal_name(parser_value(state, next)) || parser_value(state, next).starts_with("#{{")))
             after: parser_kind_at(state, 2)
             variant && (after == TOKEN_LPAREN || after == TOKEN_LBRACE || after == TOKEN_PIPE)
         }

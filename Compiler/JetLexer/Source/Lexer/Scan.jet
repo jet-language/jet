@@ -669,12 +669,22 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             next
         }
         if value == 35 {
+            // A template paste `#{name}` is one word: the name a derive or
+            // marker template splices in for its binding `name`.
+            if next1 == 123 && is_identifier_start(source, i + 2) {
+                paste_end: scan_identifier_end(source, i + 2)
+                if byte_at(source, paste_end) == 125 {
+                    last_code = push_code(facts, K_IDENT, start, paste_end + 1, false)
+                    i = paste_end + 1
+                    next
+                }
+            }
             last_code = push_code(facts, K_HASH, start, start + 1, false)
             i += 1
             next
         }
         if value == 36 {
-            // Prefix `$name` is one word (`$here`, a template's `self.$field`); config
+            // Prefix `$name` is one word (`$here`, `$caller`); config
             // surfaces read the same word as a `$NAME` environment read. A
             // lone `$` keeps its token.
             if {

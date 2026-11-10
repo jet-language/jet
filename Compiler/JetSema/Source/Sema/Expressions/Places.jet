@@ -522,10 +522,6 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
         diagnostics.push(diagnostic_with_edit(renamed, TextEdit{span: Span{start: span.end - member.len(), end: span.end}, new_text: "type"}))
         return None
     }
-    if sema_fact_read_unknown_member(member, span) == .Val(unknown) {
-        diagnostics.push(unknown)
-        return None
-    }
     diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
 }

@@ -1,6 +1,6 @@
 // A source rule with a body adds an ordinary method. A
-// template binding is spliced with `$`: `impl $tname`
-// names the target type and `$marker_count` reads the build-time value.
+// template binding is pasted as `#{name}`: `impl #{tname}`
+// names the target type and `#{marker_count}` reads the build-time value.
 Audited: struct {
     impl Marker {
         sites: [.Type]
@@ -14,10 +14,10 @@ AddGreeting: struct {
         expand: fn(self, target: Target) {
             tname: target.name
             marker_count: target.markers.len()
-            impl $tname {
+            impl #{tname} {
                 greeting: fn(self) -> String { "hello" }
 
-                marker_count: fn(self) -> Int { $marker_count }
+                marker_count: fn(self) -> Int { #{marker_count} }
             }
         }
     }

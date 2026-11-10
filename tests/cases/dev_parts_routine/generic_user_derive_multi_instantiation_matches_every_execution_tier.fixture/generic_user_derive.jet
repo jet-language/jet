@@ -1,25 +1,25 @@
 
 derive T.Access {
     info: T.reflect()
-    name: T.$name
+    name: T.reflect().name
     param: info.type_params[0].name
-    make: fn(value: &&$param) -> $name<$param> {
-        return $name<$param>{ value: value }
+    make: fn(value: &&#{param}) -> #{name}<#{param}> {
+        return #{name}<#{param}>{ value: value }
     }
     marker: fn() -> Int { 17 }
-    get_value: fn(self) -> $param { self.value.copy() }
-    type_name: fn(self) -> String { T.$name }
+    get_value: fn(self) -> #{param} { self.value.copy() }
+    type_name: fn(self) -> String { T.reflect().name }
 }
 
 derive T.NumericAccess {
     info: T.reflect()
     param: info.type_params[0].name
-    replace: fn(&self, value: &&$param) -> $param {
+    replace: fn(&self, value: &&#{param}) -> #{param} {
         self.value = value
         return self.value.copy()
     }
-    plus: fn(self, rhs: $param) -> $param { self.value + rhs }
-    equal_to: fn(self, rhs: $param) -> Bool { self.value == rhs }
+    plus: fn(self, rhs: #{param}) -> #{param} { self.value + rhs }
+    equal_to: fn(self, rhs: #{param}) -> Bool { self.value == rhs }
 }
 
 #Access

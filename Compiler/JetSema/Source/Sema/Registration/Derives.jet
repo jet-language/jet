@@ -102,8 +102,17 @@ SemaDeriveReport: struct {
     definition: ImplDef
 }
 
+// A template paste `#{name}` names the binding `name`; a `$fact` member is
+// the compiler fact `fact`.
 sema_derive_bare: fn(name: String) -> String Never! {
+    if sema_derive_splice(name) && name.ends_with("}}") -> return name.slice(2, name.len() - 1)
     if name.starts_with("$") -> String.from_bytes(name.bytes()[1..<name.bytes().len()]) ?? name.copy() else -> name.copy()
+}
+
+// Whether `name` is a template paste `#{name}`, which the lexer reads as one
+// word.
+sema_derive_splice: fn(name: String) -> Bool Never! {
+    name.starts_with("#{{")
 }
 
 // The field a typed layout selector `[.field]` names. The parser keeps the
@@ -354,7 +363,7 @@ sema_derive_named_row: fn(owner: CtValue, rows: String, name: String) -> CtValue
     None
 }
 
-// `handle.$read` over a reflected handle without a direct
+// `handle.reflect().read` over a reflected handle without a direct
 // field reads the handle's homed fact row of that name; the fact value keeps
 // its detail under the same name.
 sema_derive_fact_read: fn(owner: CtValue, read: String) -> CtValue? Never! {
@@ -476,10 +485,10 @@ sema_derive_literal_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Name splices `$name` splices the template binding `name`.
+// A paste `#{name}` splices the template binding `name`.
 
 sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span: Span) -> String Never! {
-    explicit: name.starts_with("$")
+    explicit: sema_derive_splice(name)
     binding: sema_derive_bare(name)
     value: sema_derive_scope_value(expansion, binding) ?? return name
     if value == {
@@ -546,9 +555,9 @@ sema_derive_expand_types: fn(expansion: &SemaDeriveExpansion, types: [Type]) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Reflected enum payload bindings. A `.$left` arm binds every payload field of
+// Reflected enum payload bindings. A `.#{left}` arm binds every payload field of
 // the reflected variant under a side-qualified local (`left_Circle_radius`),
-// and `self.$field` / `rhs.$field` inside that arm read the same locals.
+// and `self.#{field}` / `rhs.#{field}` inside that arm read the same locals.
 
 sema_derive_reflected_name: fn(value: CtValue) -> String? Never! {
     if sema_derive_struct_field(value, "name") == .Val(.Str(text)) -> return Val(text)
@@ -650,7 +659,7 @@ sema_derive_side_payload_owner: fn(expansion: SemaDeriveExpansion, side: String,
             if right == .Val(right_name) -> return "right_{left_name}_{right_name}"
         }
         if right == .Val(right_name) -> return "right_{right_name}"
-        // `if rhs == { .$left -> … }` matches `rhs` against the arm's own
+        // `if rhs == { .#{left} -> … }` matches `rhs` against the arm's own
         // variant; the field reads below name the same locals.
         if left == .Val(left_name) {
             if key == "left" -> return "right_{left_name}"
@@ -665,7 +674,7 @@ sema_derive_payload_owner_for_subject: fn(expansion: SemaDeriveExpansion, subjec
     sema_derive_side_payload_owner(expansion, side, variant)
 }
 
-// Only a spliced variant (`.$left`) binds the reflected variant's payload: a
+// Only a spliced variant (`.#{left}`) binds the reflected variant's payload: a
 // literal variant in the template (`.Equal` of `Ordering`) names its own enum,
 // even when the deriving type has a variant of the same name.
 sema_derive_fill_variant_bindings: fn(expansion: SemaDeriveExpansion, variant: String, bindings: [PatSlot], span: Span, subject: Expr?, spliced: Bool) -> [PatSlot] Never! {
@@ -680,7 +689,7 @@ sema_derive_fill_variant_bindings: fn(expansion: SemaDeriveExpansion, variant: S
     filled
 }
 
-// Rust `derive_payload_owner`: `self.$field` / `rhs.$field` inside a reflected
+// Rust `derive_payload_owner`: `self.#{field}` / `rhs.#{field}` inside a reflected
 // variant arm read the arm's payload locals.
 sema_derive_field_payload_owner: fn(expansion: SemaDeriveExpansion, binding: String?) -> String? Never! {
     name: binding ?? return None
@@ -707,7 +716,7 @@ sema_derive_expand_pattern: fn(expansion: &SemaDeriveExpansion, pattern: Pattern
         .StrMatch(parts, span) -> Pattern.StrMatch{parts: sema_derive_expand_str_match_parts(expansion, parts), span: span}
         .Variant(variant, bindings, leading_dot, span) -> {
             expanded_variant: sema_derive_expand_name(expansion, variant, span)
-            Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject, variant.starts_with("$")), leading_dot: leading_dot, span: span}
+            Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject, sema_derive_splice(variant)), leading_dot: leading_dot, span: span}
         }
         // copy: the derive template pattern is expanded once per deriving declaration, so the
         // template keeps its node and an unexpanded node is copied into this expansion.
@@ -742,7 +751,7 @@ sema_derive_pattern_test_from_enum_lit: fn(expansion: SemaDeriveExpansion, subje
 
 // Rust `coerce_derive_enum_arm`: an enum-literal arm of a reflected switch is a
 // variant pattern over the switch subject. `spliced` says the template arm
-// named a reflected variant (`.$left`), not a literal one.
+// named a reflected variant (`.#{left}`), not a literal one.
 sema_derive_coerce_enum_arm: fn(expansion: SemaDeriveExpansion, cond: Expr, subject: Expr, spliced: Bool) -> Expr Never! {
     if cond == {
         .EnumLit(_, variant, _, args, _, span, _) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span, spliced)
@@ -761,11 +770,11 @@ sema_derive_coerce_enum_arm: fn(expansion: SemaDeriveExpansion, cond: Expr, subj
     }
 }
 
-// The template arm condition names a spliced variant: `.$left` or `== .$left`.
+// The template arm condition names a spliced variant: `.#{left}` or `== .#{left}`.
 sema_derive_cond_splices_variant: fn(cond: Expr) -> Bool Never! {
-    if cond == .EnumLit(_, variant, _, _, _, _, _) -> return variant.starts_with("$")
+    if cond == .EnumLit(_, variant, _, _, _, _, _) -> return sema_derive_splice(variant)
     if cond == .Binary(op, _, right, _, _) {
-        if op == BinOp.Eq && right == .EnumLit(_, variant, _, _, _, _, _) -> return variant.starts_with("$")
+        if op == BinOp.Eq && right == .EnumLit(_, variant, _, _, _, _, _) -> return sema_derive_splice(variant)
     }
     false
 }
@@ -812,11 +821,22 @@ sema_derive_expand_str_parts: fn(expansion: &SemaDeriveExpansion, parts: [StrPar
     expanded := [StrPart]{}
     loop part in parts {
         if part == {
-            .Interp(expression, format) -> expanded.push(StrPart.Interp{expr: sema_derive_expand_expr(expansion, expression), format: format})
+            .Interp(expression, format) -> expanded.push(StrPart.Interp{expr: sema_derive_expand_hole(expansion, expression), format: format})
             else -> expanded.push(part.copy())
         }
     }
     expanded
+}
+
+// A hole `{name}` over a template binding reads the binding's value; any
+// other hole expands as an expression.
+sema_derive_expand_hole: fn(expansion: &SemaDeriveExpansion, expression: Expr) -> Expr Never! {
+    if expression == .Ident(name, span, _) {
+        if sema_derive_scope_value(expansion, name) == .Val(value) {
+            if sema_derive_literal_expr(value, span) == .Val(literal) -> return literal
+        }
+    }
+    sema_derive_expand_expr(expansion, expression)
 }
 
 sema_derive_expand_or_fallback: fn(expansion: &SemaDeriveExpansion, fallback: OrFallback) -> OrFallback Never! {
@@ -868,10 +888,10 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
         .Slice(base, start, end, range, span, node) -> return Expr.Slice{base: sema_derive_expand_expr(expansion, base), start: sema_derive_expand_expr(expansion, start), end: sema_derive_expand_expr(expansion, end), range: sema_derive_expand_optional_expr(expansion, range), span: span, id: node}
         .Range(start, end, exclusive, span, node) -> return Expr.Range{start: sema_derive_expand_expr(expansion, start), end: sema_derive_expand_expr(expansion, end), exclusive: exclusive, span: span, id: node}
         .Ident(name, span, _) -> {
-            // copy: a non-`$` identifier is unchanged, but the derive template keeps it for the
+            // copy: a name that is no paste is unchanged, but the derive template keeps it for the
             // next deriving declaration, so this expansion gets its own copy.
-            if !name.starts_with("$") -> return expression.copy()
-            // copy: an unbound `$` name stays as written, but the derive template keeps it for the
+            if !sema_derive_splice(name) -> return expression.copy()
+            // copy: an unbound paste stays as written, but the derive template keeps it for the
             // next deriving declaration, so this expansion gets its own copy.
             value: sema_derive_scope_value(expansion, name) ?? return expression.copy()
             // copy: a value with no literal form stays as written, but the derive template keeps it
@@ -988,7 +1008,7 @@ sema_derive_expand_enum_lit: fn(expansion: &SemaDeriveExpansion, type_name: Stri
             .Named(label, value) -> expanded_args.push(EnumLitArg.Named{label: label, expr: sema_derive_expand_expr(expansion, value)})
         }
     }
-    if expanded_args.len() == 0 && variant.starts_with("$") {
+    if expanded_args.len() == 0 && sema_derive_splice(variant) {
         if sema_derive_variant_payload_fields(expansion, variant) == .Val(payload) {
             owner: sema_derive_payload_binding_owner(expansion, variant)
             loop field in payload {
@@ -1009,7 +1029,7 @@ sema_derive_expand_field: fn(expansion: &SemaDeriveExpansion, base: Expr, member
         }
         else -> {}
     }
-    // `left.$index` over a reflected template value is that value's literal.
+    // `left.index` over a reflected template value is that value's literal.
     if binding == .Val(name) {
         if sema_derive_scope_index(expansion, name) == .Val(owner_index) {
             if sema_derive_struct_field(expansion.scope[owner_index].value, member) == .Val(value) {
@@ -1017,9 +1037,9 @@ sema_derive_expand_field: fn(expansion: &SemaDeriveExpansion, base: Expr, member
             }
         }
     }
-    // A `$` member naming no template binding is a compiler fact
-    // (`self.reflect().layout`) and stays for sema; one that does is a splice.
-    if member.starts_with("$") && sema_derive_scope_index(expansion, member) != None {
+    // A pasted member `x.#{name}` splices its binding; any other member stays
+    // for sema.
+    if sema_derive_splice(member) && sema_derive_scope_index(expansion, member) != None {
         if sema_derive_field_payload_owner(expansion, binding) == .Val(payload_owner) {
             field_name: sema_derive_expand_name(expansion, member, span)
             return Expr.Ident{name: "{payload_owner}_{field_name}", span: span, id: AST_NODE_GENERATED}
@@ -1083,16 +1103,31 @@ sema_derive_expand_loop_block: fn(expansion: &SemaDeriveExpansion, body: [Stmt],
                 return
             }
             // Each iteration's bindings (the loop variable and the bindings
-            // its body declares) end with the iteration.
+            // its body declares) end with the iteration. A body that declares
+            // a local unrolls each iteration into its own block (a selected
+            // `comptime if true`), so every iteration's locals stay private.
             depth: expansion.scope.len()
+            declares_local := false
+            loop inner in loop_body {
+                if inner == .Val(_) {
+                    declares_local = true
+                    break
+                }
+            }
             loop value in values {
                 expansion.scope.push(NamedCtValue{name: var, value: value})
+                iteration := [Stmt]{}
                 loop inner in loop_body {
                     if expansion.failure != None -> break
-                    sema_derive_expand_stmt_into(expansion, inner, out)
+                    sema_derive_expand_stmt_into(expansion, inner, iteration)
                 }
                 loop expansion.scope.len() > depth -> _ := expansion.scope.pop()
                 if expansion.failure != None -> return
+                if declares_local {
+                    out.push(Stmt.ComptimeIf{cond: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, cond_span: span, then_body: iteration, else_body: None, span: span, selected_then: Val(true)})
+                } else {
+                    loop inner in iteration -> out.push(inner)
+                }
             }
             return
         }
@@ -1166,7 +1201,8 @@ sema_derive_expand_lvalue: fn(expansion: &SemaDeriveExpansion, target: LValue) -
     if target == {
         // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
         .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(expansion, base), index: sema_derive_expand_expr(expansion, index), span: span, kind: kind.copy()}
-        .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(expansion, base), field: field, span: span}
+        // A pasted target member `out.#{name} = …` splices its binding like a read does.
+        .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(expansion, base), field: if sema_derive_splice(field) && sema_derive_scope_index(expansion, field) != None -> sema_derive_expand_name(expansion, field, span) else -> field, span: span}
         // copy: the assignment target is unchanged by expansion, but the derive template keeps it
         // for the next deriving declaration, so this expansion gets its own copy.
         else -> target.copy()

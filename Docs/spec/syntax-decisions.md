@@ -40,7 +40,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `comptime fn` | build-time literal-hook method |
 | `comptime use { … } / comptime use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime { … }` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
 | `<comptime N: Int>` | compile-time number parameter declaration |
-| `$` | template name splice `$method: fn`, `self.$field`, `.$left` |
+| `$` | site location `$here`, `$caller` |
+| `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
 | `build` | Prelude build-fact value: `build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`); a binding named `build` shadows it |
 | `#package` | package site value: `#package.name`, `.version` |
