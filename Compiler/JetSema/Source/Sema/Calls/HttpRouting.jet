@@ -196,24 +196,58 @@ sema_http_route_constant_string: fn(expression: Expr, environment: SemaScopeEnvi
             }
             if binding.symbol.kind != SymbolKind.Constant -> return None
             if program.registration_graph == .Val(graph) {
-            loop module_row_index in 0..<graph.modules.len() {
-                loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
-                    if graph.modules[module_row_index].constants[constant_index].symbol.id.key != binding.symbol.id.key -> next
-                    if graph.modules[module_row_index].constants[constant_index].declaration.ct == {
-                        .Val(ct_value) -> {
-                            if ct_value == {
-                                .Str(text) -> { return Val(text) }
-                                else -> { return None }
-                            }
-                        }
-                        else -> { return None }
+                loop module_row_index in 0..<graph.modules.len() {
+                    loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                        if graph.modules[module_row_index].constants[constant_index].symbol.id.key != binding.symbol.id.key -> next
+                        return sema_http_route_module_constant(graph, module_row_index, constant_index, 0)
                     }
                 }
-            }
-            return None
+                return None
             } else {
                 return None
             }
+        }
+        else -> return None
+    }
+}
+
+// The String a module constant holds: its staged value, or its declared
+// expression folded (a String literal without holes, `comptime { … }`
+// holding one, or another such constant of the same module). Chains stop
+// at 32 links.
+sema_http_route_module_constant: fn(graph: SemaRegistrationGraph, module_index: Int, constant_index: Int, depth: Int) -> String? Never! {
+    if depth > 32 -> return None
+    if graph.modules[module_index].constants[constant_index].declaration.mutable -> return None
+    if graph.modules[module_index].constants[constant_index].declaration.ct == .Val(ct_value) {
+        if ct_value == .Str(text) -> return Val(text)
+        return None
+    }
+    sema_http_route_constant_fold(graph, module_index, graph.modules[module_index].constants[constant_index].declaration.value, depth + 1)
+}
+
+sema_http_route_constant_fold: fn(graph: SemaRegistrationGraph, module_index: Int, expression: Expr, depth: Int) -> String? Never! {
+    if expression == {
+        .Paren(inner, _, _) -> return sema_http_route_constant_fold(graph, module_index, inner, depth)
+        .Str(parts, _, _) -> {
+            value := ""
+            loop part in parts {
+                if part == {
+                    .Lit(text) -> { value = "{value}{text}" }
+                    else -> { return None }
+                }
+            }
+            return Val(value)
+        }
+        .ComptimeName(_, _, value, _) -> {
+            present: value ?? return None
+            if present == .Str(text) -> return Val(text)
+            return None
+        }
+        .Ident(name, _, _) -> {
+            loop constant_index in 0..<graph.modules[module_index].constants.len() {
+                if graph.modules[module_index].constants[constant_index].symbol.name == name -> return sema_http_route_module_constant(graph, module_index, constant_index, depth)
+            }
+            return None
         }
         else -> return None
     }
