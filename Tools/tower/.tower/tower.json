@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98867,
+    "rev": 98874,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-10T14:16:44.032Z"
+    "completionCursor": "2026-11-10T16:31:52.956Z"
   },
   "epochs": [
     {
@@ -56856,6 +56856,24 @@
           "verifiedBy": null,
           "evidence": "PerfLead-c24 (c0e6345125) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS golden tests/run/TextUnicode/FixedRoundsTheExactBinaryValue on o0/o1/o2, and the web build of the same program run under node matches its .out; PASS golden FmtContract and CoreTextCalls.",
           "at": "2026-11-10T12:14:15.457Z"
+        },
+        {
+          "n": 25,
+          "text": "D-EMBED-TOOLCHAIN1=A, first build step: `.jet/lock` records a `[[comptime_inputs]]` row with the SHA-256 of every file a build reads through embed_file or find, as Docs/spec/spec.md:539 says. Today, on a0.0.43, the CLI fills these rows only for generated sources (Compiler/JetCli/Source/Cli/InspectBuild.jet:267-275). A case builds a package with an embed and checks the row, then edits the file and checks that the digest changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:32:27.966Z"
+        },
+        {
+          "n": 26,
+          "text": "D-EMBED-TOOLCHAIN1=A: embed_file and find take `toolchain:` paths, resolved against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else the nearest toolchain), with no built-in-copy fallback. Membership, root and glob authority is checked, and a read outside that tree is a new registered error with a UI snapshot. The derived compiler and Jetpack tables CoreSourceRows.jet writes today (eight outputs, per the different-family review in Docs/audits/2026-11-10-embed-toolchain-review.md) are computed at build time from those reads. Their checked-in copies and the generator modes that wrote them are deleted in the same cutover. The result cache stays keyed by content.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:32:30.448Z"
         }
       ],
       "refs": [],
@@ -56868,12 +56886,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T16:28:43.700Z",
+      "updated": "2026-11-10T16:32:30.448Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 26
     },
     {
       "id": "c022g7qw",
@@ -63273,6 +63291,24 @@
           "verifiedBy": null,
           "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB TlsLead-61r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). civil_tzif reads the TZif footer: New_York EDT in July 2045, EST in January; case on O0/O1/O2 and web.",
           "at": "2026-11-10T16:28:25.941Z"
+        },
+        {
+          "n": 112,
+          "text": "D-NET-READINTO1=A is built. `read_into(buffer, limit)` appends up to `limit` bytes to the caller's `[U8]` and returns the count, as an inherent method on TCPStream, UnixStream, TLSStream and file readers, with a deadline form. It returns 0 at end of stream, and a limit below 1 is invalid input. The Reader trait is unchanged. The HTTP server, the HTTP client and the TLS record reader switch to it. A paired two-program cell (a read(4096) loop against read_into: wall time, allocations per read, peak memory) is in the measurement manifest, and read_into strictly wins it. Goldens run on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:32:35.042Z"
+        },
+        {
+          "n": 113,
+          "text": "D-WS-ROUTE1=A is built. `mux.websocket(pattern, handler)` and `#Server.WebSocket(path)`: the server runs authentication and Origin policy, then validates and upgrades, and the handler returns nothing. One route-table adapter and handshake serve TCP and TLS. The route owns GET, so an equivalent GET registration is refused, HEAD gets 405 without an upgrade, and OPTIONS lists GET. Upgraded tasks stay inside the server limits and shutdown. Protocol close codes are kept; an application failure may send 1011 only before the transport closes. OpenAPI describes handshake responses only. This depends on the concurrent serve loop (#4635). Goldens on O0, O1 and O2, plus a TLS case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:32:37.393Z"
         }
       ],
       "refs": [],
@@ -63283,12 +63319,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T16:29:43.050Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-10T16:32:37.393Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 111
+      "criteriaLastN": 113
     },
     {
       "id": "c0h4r83r",
@@ -75994,6 +76030,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-10T15:38:38.913Z"
+        },
+        {
+          "n": 172,
+          "text": "D-LANG-MIGRATE1=A is built. Every breaking language change lands with a registered rewrite: one codemod plan per change in Compiler/Migrations, named by toolchain version, each with an old-spelling fixture the suite replays. `jet fix` applies every rewrite since the toolchain in the lock, or since `--since`. When a check fails in a project whose lock is older, it adds one line naming that toolchain and the count of pending rewrites, never a spelling. The old spelling keeps the generic error (no teaching). Cases cover a plan replay, `jet fix` with a lock and with --since, and the one-line notice (UI snapshot).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:32:32.898Z"
         }
       ],
       "refs": [],
@@ -76004,9 +76049,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T16:29:16.189Z",
+      "updated": "2026-11-10T16:32:32.898Z",
       "updatedBy": "Main",
-      "criteriaLastN": 171
+      "criteriaLastN": 172
     },
     {
       "id": "c0kyjdtx",
@@ -200081,6 +200126,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:32:37.393Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iuv3zr",
+      "note": "#113 D-WS-ROUTE1=A is built. `mux.websocket(pattern, handler)` an"
+    },
+    {
+      "at": "2026-11-10T16:32:35.042Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iuv3zr",
+      "note": "#112 D-NET-READINTO1=A is built. `read_into(buffer, limit)` appen"
+    },
+    {
+      "at": "2026-11-10T16:32:32.898Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#172 D-LANG-MIGRATE1=A is built. Every breaking language change l"
+    },
+    {
+      "at": "2026-11-10T16:32:30.448Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#26 D-EMBED-TOOLCHAIN1=A: embed_file and find take `toolchain:` "
+    },
+    {
+      "at": "2026-11-10T16:32:27.966Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#25 D-EMBED-TOOLCHAIN1=A, first build step: `.jet/lock` records "
+    },
+    {
+      "at": "2026-11-10T16:31:52.956Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-10T16:31:52.956Z"
+    },
+    {
+      "at": "2026-11-10T16:31:44.171Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-10T16:31:44.170Z"
+    },
     {
       "at": "2026-11-10T16:30:29.200Z",
       "by": "Main",
