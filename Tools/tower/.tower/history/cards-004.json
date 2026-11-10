@@ -88220,6 +88220,50 @@
       "completedAt": "2026-11-07T04:00:13.365Z",
       "questions": [],
       "retiredAt": "2026-11-10T04:01:57.361Z"
+    },
+    {
+      "id": "c0zy8wm1",
+      "num": 6633,
+      "title": "Alloc cache gating disagrees between alloc and free (Alloc.jet:1012 vs :1056)",
+      "body": "Found by MechD 2026-11-06 while fixing the JetRuntime plain transport (#6594). Compiler/JetRuntime Alloc.jet:1056 gates the cached free on alloc_root+200 (the tracked count) while the allocation fast path at :1012 gates on alloc_root+144 (mode). When anything is tracked, frees bypass the cache but allocations still pop it. Confirm with a runtime test that tracks one allocation and then cycles cached sizes; fix so both paths read the same gate.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A runtime test tracks an allocation and cycles cached sizes; alloc and free gate on the same root field, and the test passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Not a bug: the two gates differ on purpose. Compiler/JetRuntime/Source/Alloc.jet:1012 jet_rt_alloc takes the cache only when the counting mode word (alloc_root+144) is 0, so every allocation in counting mode is tracked. :1056 jet_rt_free takes the cache only when the tracked count (alloc_root+200) is 0. Policy restore (:887) turns the mode off while tracked blocks stay in the side table, so each of those frees must still reach alloc_untrack. Gating free on the mode would skip the untrack and leave the ProgramAllocator facts stale. Gating alloc on the count would skip tracking the first counted block. The comment at :995-997 documents the split. Verified by Main from MechD-3's analysis.",
+          "at": "2026-11-07T04:02:07.340Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T02:21:25.580Z",
+      "updated": "2026-11-07T04:02:10.160Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T04:02:10.160Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T04:35:52.058Z"
     }
   ]
 }

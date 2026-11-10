@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98519,
+    "rev": 98520,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34591,6 +34591,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "G8Lead2 (2026-11-09, 23:45): the D-META-LADDER1 Compiler value cannot land end to end yet. It needs three pieces that do not exist: parser support for the #code quote; an event loop that runs the build program IR closures during the app sema (the #3527 sessions and events); and a rewrite_body recheck. Parked until those are built; G8Lead2 continues on #6206."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "Owner ruling 2026-11-09 (BoardPlanner C-G6-2): re-ballot the whole expert metaprogramming ladder (D-META-OPTIN2, D-JAI-CODE1, D-JAI-EXPERT1 and D-META-COMPILER1 conflict). No building on #3526, #3520 c11/c19 or #5023 until the new ballot is ratified."
@@ -34827,7 +34832,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-10T03:47:33.291Z",
+      "updated": "2026-11-10T04:35:51.741Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -94289,48 +94294,6 @@
       "updated": "2026-11-09T19:51:31.891Z",
       "updatedBy": "Main",
       "criteriaLastN": 104
-    },
-    {
-      "id": "c0zy8wm1",
-      "num": 6633,
-      "title": "Alloc cache gating disagrees between alloc and free (Alloc.jet:1012 vs :1056)",
-      "body": "Found by MechD 2026-11-06 while fixing the JetRuntime plain transport (#6594). Compiler/JetRuntime Alloc.jet:1056 gates the cached free on alloc_root+200 (the tracked count) while the allocation fast path at :1012 gates on alloc_root+144 (mode). When anything is tracked, frees bypass the cache but allocations still pop it. Confirm with a runtime test that tracks one allocation and then cycles cached sizes; fix so both paths read the same gate.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A runtime test tracks an allocation and cycles cached sizes; alloc and free gate on the same root field, and the test passes on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Not a bug: the two gates differ on purpose. Compiler/JetRuntime/Source/Alloc.jet:1012 jet_rt_alloc takes the cache only when the counting mode word (alloc_root+144) is 0, so every allocation in counting mode is tracked. :1056 jet_rt_free takes the cache only when the tracked count (alloc_root+200) is 0. Policy restore (:887) turns the mode off while tracked blocks stay in the side table, so each of those frees must still reach alloc_untrack. Gating free on the mode would skip the untrack and leave the ProgramAllocator facts stale. Gating alloc on the count would skip tracking the first counted block. The comment at :995-997 documents the split. Verified by Main from MechD-3's analysis.",
-          "at": "2026-11-07T04:02:07.340Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G10"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-07T02:21:25.580Z",
-      "updated": "2026-11-07T04:02:10.160Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-07T04:02:10.160Z"
     },
     {
       "id": "c0gztprh",
@@ -200353,6 +200316,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T04:35:51.741Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02m1p02",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-10T04:02:05.502Z",
       "by": "Main",
