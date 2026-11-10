@@ -5550,8 +5550,19 @@ before any build has recorded one it fails with E2104. Example:
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only
 declared inputs enter its writable tree and only declared outputs leave it.
-Network is unshared unless both source and policy grant `Net`. A missing
-sandbox is E3505, not an unsandboxed run. Build authority uses the same
+Network is unshared unless both source and policy grant `Net`. One resolver
+(`foundation_linux_bwrap`) picks the bubblewrap for every sandboxed action,
+`jet build`, `jet cc` and the Rust bridge alike: the `bwrap` on PATH first,
+because a host that lets only profiled programs create user namespaces
+(Ubuntu's AppArmor profile for `/usr/bin/bwrap`) allows only its own copy;
+then Jet's own hash-pinned static bubblewrap at
+`<hangar>/tools/<sha256>/bwrap`, installed from the `jet-bwrap-<arch>-linux`
+beside jet (a release archive carries it there) or, by a command that runs
+build actions, fetched on first need from `JET_BWRAP_URL` or the jet's
+release. Each must pass its probe. With neither usable the build is E3505,
+whose message names why each failed, not an unsandboxed run. Example:
+[`tests/cases/build_entry/build_step_without_any_usable_bubblewrap_names_both.case`](../../tests/cases/build_entry/build_step_without_any_usable_bubblewrap_names_both.case).
+Build authority uses the same
 `--allow=<RIGHTS>` and `--deny=<RIGHTS>` surface as other commands. Every
 effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.

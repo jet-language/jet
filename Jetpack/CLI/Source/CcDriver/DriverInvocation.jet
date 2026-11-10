@@ -127,6 +127,12 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
         cli_cc_report_operational_error("C/C++ invocation could not open the artifact store", "{err}", "check JET_STORE_DIR and retry")
         return EXIT_USER_ERROR
     }
+    // The action runs only in the native sandbox; fetch Jet's pinned
+    // Bubblewrap first when the host has no usable one.
+    if foundation_native_sandbox_prepare() == .Err(error) {
+        cli_cc_report_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()})
+        return EXIT_USER_ERROR
+    }
     if build_execute_build_plan(plan, project_root, artifact_store, grants) == {
         .Ok(_) -> {
             if !options.compile_only {
@@ -466,7 +472,7 @@ cli_cc_report_provider_error: fn(error: ProviderError) -[IO, Env, Time.Wait]> {
     theme: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
         .Offline(reason) -> theme.error_coded("E1276", "C/C++ toolchain is unavailable offline", reason, "run `jet env fetch-toolchain` while online, or install jet from the release archive that carries the C toolchain pack")
-        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
+        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "{NATIVE_SANDBOX_FIX}; Jet will not run the compiler unsandboxed")
         .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "use a covered target, or install jet from a release that publishes the C toolchain pack for this machine; Jet will not use a host or PATH compiler")
         .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "run `jet env fetch-toolchain` with a pack whose SHA-256 matches (the release's, or the copy beside jet); a refused copy never enters the Hangar, and a corrupt Hangar object must be removed first")
         else -> error.report(theme)
@@ -476,7 +482,7 @@ cli_cc_report_provider_error: fn(error: ProviderError) -[IO, Env, Time.Wait]> {
 cli_cc_report_execution_error: fn(error: BuildExecutionError) -[IO, Env, Time.Wait]> {
     theme: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
-        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
+        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "{NATIVE_SANDBOX_FIX}; Jet will not run the compiler unsandboxed")
         .Reported(report) -> theme.error_coded(report.code ?? "E3505", "C/C++ compiler action failed", build_report_render(report), "fix the reported compiler or linker error; no artifact was accepted")
         .MissingGrant(action, capability) -> theme.error_coded("E1340", "C/C++ action lacked its required build grant", "action `{action}` requested `{capability.name()}`", "retry through the canonical `jet cc` or `jet c++` entry point")
         .IO(action, detail) -> theme.error_coded("E1340", "C/C++ build action could not complete", "action `{action}`: {detail}", "check the project paths and declared toolchain object, then retry")

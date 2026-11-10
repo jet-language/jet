@@ -178,22 +178,32 @@ export_commit: fn(repo: String, commit: String, dir: String) -[FS, Exec, Time.Wa
     if failed == "" -> None else -> Val("{failed} ({commit})")
 }
 
+// The variables that point git at a repository other than its `-C` one.
+GIT_REPOSITORY_VARS: [String]{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+
+// `git -C repo ARGS` with `repo` alone naming the repository: an inherited
+// GIT_REPOSITORY_VARS variable would point git at another one (a test
+// fixture's commit would land there).
+git_spec: fn(repo: String, args: [String]) -> ProcessSpec Never! {
+    argv := [String]{"git", "-C", repo.copy()}
+    argv.extend(args.copy())
+    spec := process.cmd(argv).cwd(repo).output_limit(268435456)
+    loop name in GIT_REPOSITORY_VARS -> spec = spec.env_remove(name)
+    spec
+}
+
 // `git -C repo ARGS` on the index file `index`: "" when it succeeds, else
 // why it failed.
 git_indexed: fn(repo: String, index: String, args: [String]) -[Exec, Time.Wait]> String Never! {
-    argv := [String]{"git", "-C", repo.copy()}
-    argv.extend(args.copy())
     step: if args[0].starts_with("--") -> args[1] else -> args[0]
-    receipt: process.cmd(argv).cwd(repo).env("GIT_INDEX_FILE", index).output_limit(268435456).run() ?? return "git {step} failed: {err}"
+    receipt: git_spec(repo, args).env("GIT_INDEX_FILE", index).run() ?? return "git {step} failed: {err}"
     if receipt.code != 0 || receipt.signal != None -> return "git {step} failed: {receipt.errors.trim()}"
     ""
 }
 
-// `git -C repo ARGS`: exit status and trimmed output.
+// `git -C repo ARGS` (git_spec): exit status and trimmed output.
 git_in: fn(repo: String, args: [String]) -[Exec, Time.Wait]> (rc: Int, out: String, err: String) Never! {
-    argv := [String]{"git", "-C", repo.copy()}
-    argv.extend(args.copy())
-    receipt: process.cmd(argv).cwd(repo).env_remove("GIT_INDEX_FILE").output_limit(268435456).run() ?? return (rc: 127, out: "", err: "git: {err}")
+    receipt: git_spec(repo, args).run() ?? return (rc: 127, out: "", err: "git: {err}")
     (rc: if receipt.signal == .Val(_) -> 128 else -> receipt.code, out: receipt.output.trim().copy(), err: receipt.errors.trim().copy())
 }
 

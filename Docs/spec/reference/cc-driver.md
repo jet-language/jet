@@ -44,6 +44,12 @@ when network access is denied, a missing pack is one error that names both
 fixes: `jet env fetch-toolchain`, or the combined archive. A missing or corrupt
 object is an error, not an invitation to use the host compiler.
 
+Every compile and link runs in the native sandbox that `jet build` actions use,
+chosen by the same one resolver: the `bwrap` on PATH, else Jet's hash-pinned
+static bubblewrap from the Hangar, which `jet cc` fetches on first need (from
+beside jet, `JET_BWRAP_URL`, or the release) like the pack. With neither usable
+it is E1275, never an unsandboxed compile.
+
 The per-target libc is built lazily into its own Hangar entry: a glibc target
 copies the pack's headers and link stubs, and a musl target compiles `libc.a`
 with the pack's own clang the first time it is used (`building musl for
