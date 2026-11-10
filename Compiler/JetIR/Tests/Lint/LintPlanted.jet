@@ -12,7 +12,7 @@
 // instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
 use {
     jet_ir.[
-        IRClass, IRDataReloc, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_CODE_TYPE, IR_LINT_OPS, IR_OVERFLOW_TRAP,
+        IRClass, IRDataReloc, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_CODE_TYPE, IR_LINT_OPS, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
         ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
         ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
     ]
@@ -107,7 +107,8 @@ lp_module: fn(plant: String) -> IRModule {
 
 // The valid run: a loop over a Bool, an If with an Else, a call, a print,
 // text and big Int constants, frame storage stored, loaded, copied and
-// viewed, a call through a function value's code, and drops.
+// viewed, a call through a function value's code, drops, and a fixed word
+// masked with no jump.
 lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     three: lp_const(f, t.int, 3)
     six: lp_temp(f, t.int)
@@ -160,6 +161,15 @@ lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     _ := ir_emit(f, IROp.Drop, -1, guard, -1, -1, 1)
     handle: lp_temp(f, t.owned)
     _ := ir_emit(f, IROp.Close, -1, handle, ir_intern_name(m, "jet_handle_close"), -1, 1)
+    key: lp_fixed(f, t)
+    one: lp_const(f, t.word, 1)
+    low: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.BitAnd, low, key, one, IR_OVERFLOW_WRAP, 1)
+    zero: lp_const(f, t.word, 0)
+    mask: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Sub, mask, zero, low, IR_OVERFLOW_WRAP, 1)
+    picked: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Shl, picked, mask, one, IR_OVERFLOW_WRAP, 1)
     lp_return(f, -1)
 }
 
@@ -412,6 +422,51 @@ lp_int_big_width: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
+// A word the builder marked fixed, read through a Copy.
+lp_fixed: fn(f: &IRFunction, t: LPTypes) -> Int {
+    marked: lp_temp(f, t.word)
+    f.slot_fixed[marked] = true
+    key: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Copy, key, marked, -1, -1, 1)
+    key
+}
+
+// A branch on a compare of a fixed word.
+lp_fixed_branch: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    key: lp_fixed(f, t)
+    zero: lp_const(f, t.word, 0)
+    flag: lp_temp(f, t.bool)
+    _ := ir_emit(f, IROp.Eq, flag, key, zero, -1, 1)
+    _ := ir_open_if(f, flag, 1)
+    ir_end(f, 1)
+    lp_return(f, -1)
+}
+
+// A division by a fixed word, a shift by one and an add that traps.
+lp_fixed_divide: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    key: lp_fixed(f, t)
+    seven: lp_const(f, t.word, 7)
+    quotient: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Div, quotient, seven, key, IR_OVERFLOW_WRAP, 1)
+    lp_return(f, -1)
+}
+
+lp_fixed_shift: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    key: lp_fixed(f, t)
+    seven: lp_const(f, t.word, 7)
+    shifted: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Shr, shifted, seven, key, IR_OVERFLOW_WRAP, 1)
+    lp_return(f, -1)
+}
+
+lp_fixed_trap: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    key: lp_fixed(f, t)
+    seven: lp_const(f, t.word, 7)
+    sum: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Add, sum, seven, key, IR_OVERFLOW_TRAP, 1)
+    lp_return(f, -1)
+}
+
 // The plants: each one's name is the rule it breaks, then any `#variant`
 // of another bug for the same rule; one module each.
 LP_RULES: [String]{
@@ -419,7 +474,7 @@ LP_RULES: [String]{
     "typing.clone", "typing.data", "typing.data#text", "typing.data#object", "typing.access", "typing.access#store", "typing.access#copy",
     "typing.access#frame", "typing.access#view", "typing.access#word", "typing.drop", "typing.drop#close", "call.arity", "call.arg",
     "call.result", "call.indirect", "call.indirect#arg", "call.indirect#result", "route.call", "control.nesting", "control.depth", "return",
-    "type.kind", "type.layout",
+    "type.kind", "type.layout", "timing.fixed", "timing.fixed#divide", "timing.fixed#shift", "timing.fixed#trap",
 }
 
 lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
@@ -457,6 +512,10 @@ lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
         "return" -> lp_return_value(m, t, f)
         "type.kind" -> lp_type_kind(m, t, f)
         "type.layout" -> lp_type_layout(m, t, f)
+        "timing.fixed" -> lp_fixed_branch(m, t, f)
+        "timing.fixed#divide" -> lp_fixed_divide(m, t, f)
+        "timing.fixed#shift" -> lp_fixed_shift(m, t, f)
+        "timing.fixed#trap" -> lp_fixed_trap(m, t, f)
         else -> lp_valid(m, t, f)
     }
 }

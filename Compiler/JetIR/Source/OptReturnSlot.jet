@@ -189,6 +189,7 @@ ir_opt_slot_rebuild: fn(m: IRModule, f: IRFunction, plan: IROptSlotPlan, id: Int
     loop slot in 0..<f.param_count -> map.push(ir_slot(v, f.slot_type[slot], IRSlotKind.Param, f.slot_name[slot], f.slot_line[slot]))
     out: if own -> ir_slot(v, f.result, IRSlotKind.Param, -1, 0) else -> -1
     loop slot in f.param_count..<f.slot_type.len() -> map.push(ir_slot(v, f.slot_type[slot], f.slot_kind[slot], f.slot_name[slot], f.slot_line[slot]))
+    loop slot in 0..<f.slot_type.len() -> v.slot_fixed[map[slot]] = f.slot_fixed[slot]
     // The results of the calls that now pass frame storage.
     framed := [Bool]{}
     loop _ in 0..<f.slot_type.len() -> framed.push(false)

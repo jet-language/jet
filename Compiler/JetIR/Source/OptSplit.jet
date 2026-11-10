@@ -80,7 +80,9 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         loop slot in touched {
             if !splittable[slot] || inside[slot] == uses[slot] || (changed[slot] && !exits) -> next
             split_slot.push(slot)
-            split_new.push(ir_slot(f, f.slot_type[slot], .Temp, -1, f.slot_line[slot]))
+            split: ir_slot(f, f.slot_type[slot], .Temp, -1, f.slot_line[slot])
+            f.slot_fixed[split] = f.slot_fixed[slot]
+            split_new.push(split)
             split_old.push(-1)
             split_written.push(changed[slot])
         }

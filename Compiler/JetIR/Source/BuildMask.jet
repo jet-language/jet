@@ -13,8 +13,70 @@
 // nothing else that could flow out of an arm. Each masked branch is a row of
 // IRFunction.masked, which `jet inspect decisions` lists
 // (ir_masked_branch_rows).
+//
+// The fixed bit (IRFunction.slot_fixed): the builder marks each scalar slot
+// (a Word, Bool or Char) that holds a value of a fixed-tagged checked type
+// (FnBody.fixed_tags), a parameter, an expression's result or an element read
+// out of a list whose elements are fixed (a compared element's checked type
+// drops the tag), but not one a constant makes. IR Lint follows the values
+// computed from these after the build and after each pass (Lint.jet
+// ir_lint_fixed).
 
-use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, FnBody, Span, TBinaryOp, Type]
+use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, body_type_id, FnBody, Span, TBinaryOp, Type]
+
+// Which types of the checked body's type table are fixed (IRBuilder.fixed_ids).
+// An instance's types are its own, so it marks none.
+ir_fixed_types: fn(b: &IRBuilder, function: FnBody) Never! {
+    if function.fixed_tags.len() == 0 || b.instance.names.len() > 0 -> return
+    loop ty in function.tree.types.types -> b.fixed_ids.push(ir_fixed_type(function.fixed_tags, ty))
+}
+
+// Whether `ty` carries one of `fixed_tags` on its own value.
+ir_fixed_type: fn(fixed_tags: [String], ty: Type) -> Bool Never! {
+    if ty == .Tagged(marker, inner) {
+        if marker == .User(name) {
+            if fixed_tags.contains(name) -> return true
+        }
+        return ir_fixed_type(fixed_tags, inner)
+    }
+    false
+}
+
+// Marks `slot` fixed when it is a scalar and the instruction just built did
+// not make it a constant.
+ir_fix_slot: fn(m: IRModule, b: &IRBuilder, slot: Int) Never! {
+    kind: m.types[b.f.slot_type[slot]].kind
+    if kind != .Word && kind != .Bool && kind != .Char -> return
+    last: b.f.op.len() - 1
+    if last >= 0 && b.f.dst[last] == slot && b.f.op[last] == .Const -> return
+    b.f.slot_fixed[slot] = true
+}
+
+// Marks `slot`, the value of node `expression`, when the node's checked
+// type is fixed or the node reads an element of a list of fixed elements.
+ir_fix_expr: fn(m: IRModule, p: IRProgram, b: &IRBuilder, expression: Int, slot: Int) Never! {
+    if slot < 0 || b.row < 0 || b.fixed_ids.len() == 0 || expression <= IR_FIRST_NODE_ID -> return
+    function: p.functions[b.row]
+    id: body_type_id(function.tree, expression)
+    if id < b.fixed_ids.len() && b.fixed_ids[id] {
+        ir_fix_slot(m, b, slot)
+        return
+    }
+    if ir_body_node(p, b, expression).kind == .Index(base, _, kind, _, _, _) {
+        if (kind != .List && kind != .FixedListProof) || base <= IR_FIRST_NODE_ID -> return
+        if ir_fixed_element(function.fixed_tags, function.tree.types.types[body_type_id(function.tree, base)]) -> ir_fix_slot(m, b, slot)
+    }
+}
+
+// Whether `ty` is a list (tagged or not) whose elements are fixed.
+ir_fixed_element: fn(fixed_tags: [String], ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(_, inner) -> return ir_fixed_element(fixed_tags, inner)
+        .List(element) -> return ir_fixed_type(fixed_tags, element)
+        .FixedList(element, _) -> return ir_fixed_type(fixed_tags, element)
+        else -> return false
+    }
+}
 
 // Whether the branch at `span` of the function being built is masked.
 ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {

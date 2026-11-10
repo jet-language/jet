@@ -774,6 +774,16 @@ a Map's value tag and a tuple field's tag reach every read out of the value,
 a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
 value secret too: `opt ?? d` on it is E0737.
 
+The compiler keeps this check after its own lowering too. In the IR, a
+fixed-width integer, `Bool` or `Char` whose type carries a `.Fixed` tag holds a
+fixed bit. So does every value computed from one without a call. Before code
+selection, and with the optimizer's verify mode after each of its passes, IR
+Lint finds any fixed value that decides a branch, divides, sets a shift amount,
+an address or an indirect call target, or meets arithmetic that can stop. Each
+finding is a compiler bug (an ICE), never a user diagnostic. A routine that
+reveals a fixed value (`#Scrub`) is not inlined where its result is public
+(D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`

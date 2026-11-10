@@ -30,10 +30,12 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
             }
         }
     }
+    ir_fixed_types(b, function)
     loop param in function.params {
         param_ty: ir_fact(p, b, param.ty, param.span)
         if ir_failed(b) -> return
-        if ir_param_slot(m, p, b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(b, param.span, "parameter type {ir_type_name(param_ty)}")
+        slot: ir_param_slot(m, p, b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) ?? return ir_fail(b, param.span, "parameter type {ir_type_name(param_ty)}")
+        if b.fixed_ids.len() > 0 && ir_fixed_type(function.fixed_tags, param_ty) -> ir_fix_slot(m, b, slot)
     }
     ir_coverage_probe(m, p, b, function)
     if ir_generator_element(p, b, function) == .Val(element) -> return ir_build_generator(m, p, b, function, element)
@@ -1473,9 +1475,17 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
 }
 
 // ---------------------------------------------------------------------------
-// Expressions. Each returns the slot holding the value (-1 for Unit).
+// Expressions. Each returns the slot holding the value (-1 for Unit),
+// marked fixed when the expression's checked type is (BuildMask.jet
+// ir_fix_expr).
 
 ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    slot: ir_expr_slot(m, p, b, expression)
+    ir_fix_expr(m, p, b, expression, slot)
+    slot
+}
+
+ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
     expression_ty: ir_ty(p, b, expression)
     if ir_failed(b) -> return -1
     node: ir_body_node(p, b, expression)

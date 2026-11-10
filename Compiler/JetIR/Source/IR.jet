@@ -270,6 +270,12 @@ IRFunction: struct {
     // each: the function inlined there and the site it sits in (0: the
     // function's own code). Site s (from 1) is words 2s - 2 and 2s - 1.
     inline_sites: [Int]{[Int]{}}
+    // Per slot, whether it holds a `timing: .Fixed` value: the builder marks
+    // each scalar slot whose checked type carries a fixed tag
+    // (BuildMask.jet ir_fix_slot), a pass that copies a slot copies its bit,
+    // and IR Lint follows the values computed from these (Lint.jet
+    // ir_lint_fixed). ir_slot adds every slot unmarked.
+    slot_fixed: [Bool]{[Bool]{}}
 }
 
 // The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C
@@ -583,6 +589,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
     f.slot_kind.push(kind.copy())
     f.slot_name.push(name)
     f.slot_line.push(line)
+    f.slot_fixed.push(false)
     if kind == .Param -> f.param_count += 1
     id
 }
@@ -783,9 +790,10 @@ ir_op_code: fn(op: IROp) -> Int Never! {
     }
 }
 
-// Text form for dumps and diffs: one line per slot, then one per
-// instruction, indented by structured nesting. Names and data resolve
-// through `m`, so the text is the function's content.
+// Text form for dumps and diffs: one line per slot (a fixed one ends in
+// `fixed`, IRFunction.slot_fixed), then one per instruction, indented by
+// structured nesting. Names and data resolve through `m`, so the text is
+// the function's content.
 ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
     lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={f.result}"}
     if f.asm == .Val(leaf) {
@@ -801,7 +809,8 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
             .Temp -> "temp"
         }
         ty: m.types[f.slot_type[slot]]
-        lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}")
+        fixed: if f.slot_fixed[slot] -> " fixed" else -> ""
+        lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}{fixed}")
     }
     depth := 1
     loop at in 0..<f.op.len() {
