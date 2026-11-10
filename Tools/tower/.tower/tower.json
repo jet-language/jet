@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98806,
+    "rev": 98807,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63259,7 +63259,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T16:11:38.060Z",
+      "updated": "2026-11-10T16:15:51.879Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -195578,19 +195578,19 @@
       "cardId": "c0iuv3zr",
       "group": "library",
       "title": "A WebSocket route kind on the HTTP mux: the server validates and upgrades, and the handler gets the request and the connection",
-      "situation": "A WebSocket starts as a web request and then becomes a two-way connection. In Jet today, a server handler makes that switch itself and must still return a web response, which the server throws away. The handler also writes its own error replies for a bad handshake.\n\nThere is a bigger catch. The server answers one request at a time, so while one WebSocket stays open, no other client is served. We recommend A: a WebSocket route kind. The server checks the handshake, runs each connection in its own task, and the handler returns nothing.",
+      "situation": "A WebSocket starts as a web request and then becomes a two-way connection. In Jet today, a server handler makes that switch itself and must still return a web response, which the server throws away. The handler also writes its own error replies for a bad handshake.\n\nThere is a bigger catch. The server answers one connection at a time, so while one WebSocket stays open, no other client is served (probe w04). That breaks the ratified server design, D-HTTP-SERVER2=A, and its fix serves every option.\n\nThe recommendation is A: a WebSocket route kind. The server checks the handshake, and the handler returns nothing.",
       "gist": "Should the HTTP mux gain a WebSocket route whose handler gets the connection and returns nothing, instead of a fake response?",
-      "lesson": "A WebSocket starts as an ordinary web request and then becomes a two-way connection. Today your handler must still hand back a web response that nobody sees. This vote decides how a Jet server says a route is a WebSocket.",
+      "lesson": "A WebSocket starts as an ordinary web request and then becomes a two-way connection. Today a handler must still hand back a web response that nobody sees. This vote decides how a Jet server says a route is a WebSocket.",
       "explainer": "Words used here. Upgrade is the step where a web request becomes a WebSocket. The mux is the server's table of routes. A handler is the function a route calls.",
-      "story": "Lee writes a chat route. Under A, mux.websocket(\"/chat\", chat) is the whole setup. Bad handshakes get a 400 before chat runs, chat never invents a response, and a second user can join while the first is still talking.",
+      "story": "Lee writes a chat route. Under A, mux.websocket(\"/chat\", chat) is the whole setup. Bad handshakes get a 400 before chat runs, chat never invents a response, and once the server serves connections side by side, as ratified, a second user joins while the first talks.",
       "inWild": "// Axum: the upgrade extractor hands the socket to a callback.\nws.on_upgrade(|socket| handle(socket))",
-      "detail": "What this ballot decides. How a server route says it serves WebSocket connections, and what its handler returns. The client side and ws.upgrade stay.\n\nToday, with the t6c compiler on dev 76955986d0. Probe w01 is WSEcho.jet. The handler upgrades, echoes, closes, and returns a 500 response marked unused; it prints echo:ping. Upgrade failures must also be turned into a response by hand, here a 400.\n\nHow the server copes. Core/Http/Http.jet:271-277 marks the request's connection as claimed, and Server.jet:1161-1196 skips writing the reply and leaves the socket open. The returned value is thrown away.\n\nOne at a time. HTTPServer.serve accepts a connection and serves it to the end before accepting the next (Server.jet:268-273), and its own comment says requests are answered one at a time (:295). A WebSocket handler runs inside that call, so an open socket stops the whole server.\n\nCensus on dev. ws.upgrade has 12 calls in 11 files. Eight files are HTTP handlers that must return an HTTPResponse after upgrading: WSEcho.jet, six tests/cases fixtures and tests/run/Net/WsConnHolderMovesItsSocket.jet. The other three are helpers that return the WsConn and one conformance probe.\n\nProbe w02 calls mux.websocket(\"/live\", echo) and gets E0102, HTTPMux has no method websocket. Probe w03 type-checks A's handler body, fn(HTTPRequest, WsConn) WsError!, and prints handler checks.\n\nWhat A does. mux.websocket(pattern, handler) registers a route for GET. The handler type is fn(HTTPRequest, WsConn) WsError!, so path parameters and headers stay readable. It returns nothing.\n\nBefore the handler runs, the server checks the handshake with ws.upgrade's own rules and answers 400 on failure. Middleware layers still run on the handshake request, so an auth layer can refuse it with its own response.\n\nA handler error closes the connection with code 1011 and is logged as a failed request. web.openapi lists the route as a GET with a 101 response.\n\nConcurrency. After the handshake the server starts the handler in its own task and goes back to accepting. A can do this because the route says, before any handler runs, that the request becomes a long-lived socket. Under B, C and D the talking happens inside the handler call, so each handler must start its own task. Open sockets are capped by a server option, default 256; past it the handshake gets 503.\n\nRatified decisions. A keeps D-HTTPDEPTH1=A, where core.http owns the router and the WebSocket home. It keeps D-WS1=B's separate WebSocket module for WsConn and the client. ws.upgrade stays for hand-rolled servers.\n\nBeginner path. One route line and a handler that talks to the connection. Expert path. ws.upgrade(req) inside a plain handler keeps working for custom servers and mixed routes.\n\nDownsides of A, and what the design does about them. The mux gains a second handler type. Its name says WebSocket, and a wrong handler type is an ordinary type error at the route line. Each open socket holds a task; the cap bounds them and its 503 names the option.\n\nWhat remains. The server cannot upgrade a TLS connection, since Http.jet:274 needs a plain socket; this holds under every option. Under A the server knows its routes, so binding tls: with a WebSocket route fails at bind, as a bad certificate does (Server.jet:375-376), instead of a 400 per request.\n\nOther options. B keeps the handler and adds http.switched(), an honest response the server recognizes. C makes the handler return HTTPResponse?, with None meaning upgraded. D keeps today's form.\n\nTheir best cases. B changes one line per handler. C needs no new function. D costs nothing. Their costs: B still writes failure responses by hand. C makes every HTTP handler's type optional for one route kind. D keeps the fake response.",
+      "detail": "What this ballot decides. How a server route says it serves WebSocket connections, and what its handler returns. The client side and ws.upgrade stay.\n\nToday, with the a0.0.43 compiler (dev c460ba91e5). Probe w01 is WSEcho.jet. The handler upgrades, echoes, closes, and returns a 500 response marked unused; it prints echo:ping. Upgrade failures must also be turned into a response by hand, here a 400.\n\nHow the server copes. Core/Http/Http.jet:271-277 marks the request's connection as claimed, and Server.jet:1159-1196 skips writing the reply and leaves the socket open. The returned value is thrown away.\n\nOne at a time. HTTPServer.serve accepts a connection and serves it to the end before accepting the next (Server.jet:268-273), and its own comment says requests are answered one at a time (:295). A WebSocket handler runs inside that call, so an open socket stops the whole server. Probe w04 holds one socket open for 400 ms and asks GET /hi at 50 ms; the answer arrives at 400 ms.\n\nThat loop breaks D-HTTP-SERVER2=A, ratified on 2026-07-11: handler concurrency bounded by the task scheduler, 10,000 connections in all and 256 per address, 503 past them. Once the server meets it, an upgraded handler under any option runs in its own connection's task.\n\nCensus on dev. ws.upgrade has 12 calls in 11 files. Eight files are HTTP handlers that must return an HTTPResponse after upgrading: WSEcho.jet, six tests/cases fixtures and tests/run/Net/WsConnHolderMovesItsSocket.jet. The other three are helpers that return the WsConn and one conformance probe.\n\nProbe w02 calls mux.websocket(\"/live\", echo) and gets E0102, HTTPMux has no method websocket. Probe w03 type-checks A's handler body, fn(HTTPRequest, WsConn) WsError!, and prints handler checks.\n\nWhat A does. mux.websocket(pattern, handler) registers a route for GET. The handler type is fn(HTTPRequest, WsConn) WsError!, so path parameters and headers stay readable. It returns nothing.\n\nThe marker form matches. D-HTTP-ROUTE-EXPOSE1=A gives every verb a marker read by mux.mount, such as #Server.Get(path) (Server.jet:25-75). A adds #Server.WebSocket(path) for a method with the WebSocket handler shape.\n\nBefore the handler runs, the server checks the handshake with ws.upgrade's own rules and answers 400 on failure. Middleware layers still run on the handshake request, so an auth layer can refuse it with its own response.\n\nA handler error closes the connection with code 1011 and is logged as a failed request. web.openapi lists the route as a GET with a 101 response.\n\nConcurrency. Under every option an open socket holds its connection's task, and D-HTTP-SERVER2=A's connection limits bound them, with 503 past them. A adds no second cap and no new server option.\n\nRatified decisions. A keeps D-HTTPDEPTH1=A, where core.http owns the router and the WebSocket home. It keeps D-WS1=B's separate WebSocket module for WsConn and the client. ws.upgrade stays for hand-rolled servers.\n\nBeginner path. One route line and a handler that talks to the connection. Expert path. ws.upgrade(req) inside a plain handler keeps working for custom servers and mixed routes.\n\nDownsides of A, and what the design does about them. The mux gains a second handler type. Its name says WebSocket, and a wrong handler type is an ordinary type error at the route line. The marker list gains one entry, read by mount like the rest.\n\nWhat remains. The server cannot upgrade a TLS connection, since Http.jet:274 needs a plain socket; this holds under every option. Under A the server knows its routes, so binding tls: with a WebSocket route fails at bind, as a bad certificate does (Server.jet:375-376), instead of a 400 per request.\n\nOther options. B keeps the handler and adds http.switched(), an honest response the server recognizes. C makes the handler return HTTPResponse?, with None meaning upgraded. D keeps today's form.\n\nTheir best cases. B changes one line per handler. C needs no new function. D costs nothing. Their costs: B still writes failure responses by hand. C makes every HTTP handler's type optional for one route kind. D keeps the fake response.",
       "options": [
         {
           "key": "A",
           "name": "WebSocket route kind",
           "detail": "mux.websocket(pattern, handler); the server validates and upgrades; the handler returns nothing.",
-          "technical": "HTTPMux method over __route_add; handler fn(HTTPRequest, WsConn) WsError!. The server checks the handshake with ws.upgrade's rules (400 on failure) after middleware. Each handler runs in its own task, capped (default 256, then 503); an error closes with 1011. tls: with a WebSocket route fails at bind; openapi shows GET 101.",
+          "technical": "HTTPMux method over __route_add; handler fn(HTTPRequest, WsConn) WsError!. The server checks the handshake with ws.upgrade's rules (400 on failure) after middleware. A #Server.WebSocket(path) marker joins Get and Post for mount. Open sockets fall under D-HTTP-SERVER2=A's connection limits; an error closes with 1011. tls: with a WebSocket route fails at bind; openapi shows GET 101.",
           "code": "echo: fn(req: HTTPRequest, sock: WsConn) WsError! {\n    message: sock.recv()\n    sock.send_text(\"echo:{message.text() ?? \"\"}\")\n    sock.close(1000, \"\")\n}\n// Today (probe w01): the handler upgrades itself and returns\n//   Ok(http_server.response(500, \"unused\")).\n// Proposed (A): mux.websocket(\"/live\", echo)"
         },
         {
@@ -195639,7 +195639,7 @@
         "gains": [
           "No fake responses.",
           "Bad handshakes answered by the server.",
-          "An open socket no longer stops the server: each runs in its own task.",
+          "tls: with a WebSocket route fails at bind, not on every request.",
           "One line to add a WebSocket route."
         ],
         "losses": [
@@ -195648,8 +195648,8 @@
             "mitigation": "A wrong handler type is an ordinary type error at the route line."
           },
           {
-            "loss": "Each open socket holds a task.",
-            "mitigation": "A server option caps them, default 256, and the 503 past it names the option."
+            "loss": "The route markers gain a WebSocket entry beside the seven verbs.",
+            "mitigation": "It is one more marker struct in Server.jet, read by mount like the rest."
           }
         ],
         "whyNot": [
@@ -195673,12 +195673,12 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Probe w04 confirms one open socket stalls the server, but D-HTTP-SERVER2=A already requires concurrency, so A's own task cap was dropped as a second limit. A now adds #Server.WebSocket for D-HTTP-ROUTE-EXPOSE1's marker form."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/ws run: w01 prints echo:ping, w02 is E0102, w03 prints handler checks. Outputs are in probes/ws/out6. Read Core/Http/Server.jet:268-273 and :295 (one request at a time) and :1161-1196 (the upgraded reply dropped). Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-WS-ROUTE1/probes: w01 prints echo:ping, w02 is E0102, w03 prints handler checks, w04 answers GET /hi at about 400 ms. Read Core/Http/Server.jet:25-75, :262-289, :295, :374-377 and :1159-1196. Read D-HTTP-SERVER2 and D-HTTP-ROUTE-EXPOSE1 in Tower.",
       "surface": {
         "gist": "Should the HTTP mux gain a WebSocket route whose handler gets the connection and returns nothing, instead of a fake response?",
-        "lesson": "A WebSocket starts as an ordinary web request and then becomes a two-way connection. Today your handler must still hand back a web response that nobody sees. This vote decides how a Jet server says a route is a WebSocket.",
+        "lesson": "A WebSocket starts as an ordinary web request and then becomes a two-way connection. Today a handler must still hand back a web response that nobody sees. This vote decides how a Jet server says a route is a WebSocket.",
         "trio": {
           "current": {
             "note": "The handler returns a response nobody sees.",
@@ -195698,11 +195698,11 @@
             "gains": [
               "No fake responses.",
               "Server answers bad handshakes.",
-              "One socket no longer blocks the server."
+              "TLS mix fails at bind."
             ],
             "losses": [
               "Second handler type.",
-              "A task per open socket."
+              "One more route marker."
             ],
             "proposed": {
               "code": "mux.websocket(\"/live\", echo)"
@@ -195757,7 +195757,7 @@
           "gains": [
             "No fake responses.",
             "Server answers bad handshakes.",
-            "One socket no longer blocks the server."
+            "TLS mix fails at bind."
           ],
           "losses": [
             {
@@ -195765,8 +195765,8 @@
               "mitigation": "A wrong one is a type error at the route."
             },
             {
-              "loss": "A task per open socket.",
-              "mitigation": "Capped by a server option, default 256."
+              "loss": "One more route marker.",
+              "mitigation": "Read by mount like Get."
             }
           ],
           "whyNot": [
@@ -195788,7 +195788,91 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:48:17.201Z"
+      "created": "2026-11-10T03:48:17.201Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "The mux gains a second handler type.",
+          "attempts": [
+            "Reuse the HTTP handler type and pass the socket through the request; that is D's fake response again.",
+            "Name the method websocket, so a wrong handler type is an ordinary type error at the route line."
+          ],
+          "result": "Reduced to one named method and one marker."
+        },
+        {
+          "option": "A",
+          "loss": "The marker form would lack a WebSocket route.",
+          "attempts": [
+            "Leave WebSocket routes to the call form only.",
+            "Add #Server.WebSocket(path) beside the seven verb markers (Server.jet:25-75), read by mount."
+          ],
+          "result": "Removed by the second attempt."
+        },
+        {
+          "option": "A",
+          "loss": "An open socket stops the whole server (w04).",
+          "attempts": [
+            "Start each WebSocket handler in its own task with a separate cap of 256; that adds a second limit beside D-HTTP-SERVER2's.",
+            "Fix the serving loop to D-HTTP-SERVER2=A's ratified concurrency, which serves every option."
+          ],
+          "result": "Removed for all options by the ratified server fix, tracked outside this ballot."
+        },
+        {
+          "option": "A",
+          "loss": "TLS connections cannot upgrade (Http.jet:271-277 needs a plain socket).",
+          "attempts": [
+            "Answer 400 per request.",
+            "Refuse tls: with a WebSocket route at bind, as an unusable certificate is (Server.jet:374-377)."
+          ],
+          "result": "Reduced to a startup error; the TLS limit holds under every option."
+        },
+        {
+          "option": "B",
+          "loss": "Failure responses are still written by hand.",
+          "attempts": [
+            "Let http.switched() carry the failure.",
+            "Have the server check the handshake first; that is A's route kind."
+          ],
+          "result": "Removed only by becoming A."
+        },
+        {
+          "option": "C",
+          "loss": "Every HTTP handler's result becomes optional.",
+          "attempts": [
+            "Make only WebSocket routes optional; that is a second handler type, as in A.",
+            "Default None to a 500."
+          ],
+          "result": "Not removed: the optional type reaches every handler."
+        },
+        {
+          "option": "D",
+          "loss": "Every WebSocket handler returns a response nobody sees.",
+          "attempts": [
+            "Document the unused response.",
+            "Lint for it."
+          ],
+          "result": "Not removed."
+        }
+      ],
+      "reports": [
+        {
+          "title": "WebSocket route review: the serial server, the marker form and adversarial review",
+          "path": "Docs/audits/2026-11-10-ws-route-review.md",
+          "note": "w01-w03 on a0.0.43; new w04 shows GET /hi waits 400 ms behind one open socket, a defect against D-HTTP-SERVER2=A; A's separate 256 cap dropped; #Server.WebSocket added for D-HTTP-ROUTE-EXPOSE1=A; Axum, gorilla and FastAPI sources."
+        },
+        {
+          "title": "Axum WebSocketUpgrade",
+          "url": "https://docs.rs/axum/latest/axum/extract/ws/index.html"
+        },
+        {
+          "title": "gorilla/websocket Upgrader",
+          "url": "https://pkg.go.dev/github.com/gorilla/websocket#Upgrader"
+        },
+        {
+          "title": "FastAPI WebSockets",
+          "url": "https://fastapi.tiangolo.com/advanced/websockets/"
+        }
+      ]
     },
     {
       "id": "D-IMPL-COND1",
@@ -199794,6 +199878,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:15:51.879Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WS-ROUTE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:11:38.060Z",
       "by": "Main",
