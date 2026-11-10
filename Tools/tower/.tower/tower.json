@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98742,
+    "rev": 98745,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46212,7 +46212,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-10T12:39:19.557Z",
+      "updated": "2026-11-10T12:54:12.929Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -75723,7 +75723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T12:52:58.977Z",
+      "updated": "2026-11-10T12:54:15.753Z",
       "updatedBy": "Main",
       "criteriaLastN": 157
     },
@@ -193449,20 +193449,20 @@
       "cardId": "c0oev2ib",
       "group": "language",
       "title": "A task whose function is top-level and whose inputs and result encode may run at another place, checked against that place's grants",
-      "situation": "Jet tasks run in one process today. On seed a0_042, a task on a plain Job value prints area 42, and the same Job encodes as JSON. A task on Shared state also runs, but that state is tied to this process.\n\nD-SERVICE-IDENTITY1=D gives callers typed endpoint capabilities, and D-ACTOR1=A builds actors over tasks. No form runs one task elsewhere.",
+      "situation": "Jet tasks run in one process today. A task on a plain Job value prints its area, and the same Job encodes as JSON. A task on Shared state also runs, but that state is tied to this process.\n\nRatified rulings already give callers typed endpoints to other services and build actors over tasks. No form runs one task elsewhere.",
       "gist": "Should a task whose inputs and result encode be able to run at another place, checked against that place's grants?",
       "lesson": "A task is a piece of work that runs beside the rest of the program. Some work could just as well run on another machine. This vote decides whether Jet lets you send a task there, and what it checks first.",
       "explainer": "Words used here. A place is another process or machine that can run work. Encodable means a value can be turned into bytes and back. A grant is an effect a place allows.",
       "story": "Sam's app renders thumbnails. Under A, worker.run(render, job) sends each job to a render machine. The build refuses a job that needs files the machine does not grant.",
       "inWild": "// Ray sends a function and its arguments to a cluster worker:\nresult = area.remote(job)",
-      "detail": "What this ballot decides. Whether one task can run at another place, and which rules the build checks. Transport, discovery and identity come from D-SERVICE-IDENTITY1=D and are not reopened.\n\nToday, on seed a0_042. Probe t01 runs task area(job) and prints area 42, wire {\"width\":6,\"height\":7}. Probe t02 runs a task on Shared<Hits> and prints hits 1. Both run in this process only.\n\nWhat must exist first. A Place type in core.tasks backed by D-SERVICE-IDENTITY1=D's typed endpoint capabilities, and a transport for them. Neither exists on the seed. A says what the build checks once they do.\n\nWhat A does. place.run(area, job) returns the same task handle as task area(job), so join works the same way. The build checks four rules before it allows the call.\n\nFirst, the function is top-level, so it has no hidden captures. Second, every argument and the result encode, as Job does in t01. Third, no argument holds Shared, Pool IDs or other process-tied state, so t02's form is refused.\n\nFourth, the function's effect row is covered by the place's grants. The place's type carries those grants, as a typed endpoint capability does under D-SERVICE-IDENTITY1=D.\n\nFailure is typed. join on a moved task can also return PlaceLost when the place is unreachable, never a hidden retry. That matches D-SERVICE-IDENTITY1=D's typed partition results.\n\nRatified decisions. A keeps D-SERVICE-IDENTITY1=D and D-ACTOR1=A unchanged, and uses the sendability rules tasks already follow. Actors can later place their task the same way.\n\nBeginner path. A beginner keeps writing task f(x); nothing changes. Expert path. Swap task for place.run, and the build lists each rule a function breaks.\n\nDownsides of A, and what the design does about them. A moved task pays encoding and network time. The handle and its errors are the same, so measuring both forms is a one-word change.\n\nWhat remains. A top-level function rule refuses closures that would be convenient. Captured values become arguments, which the encode rule can then check.\n\nOther options. B keeps tasks local; remote work goes through typed service endpoints. C also moves closures whose captures encode, as Unison does. D places actors, not tasks, as Erlang and Akka do.\n\nTheir best cases. B adds nothing. C is the most convenient. D fits long-lived state. Their costs: B needs a service for every remote job. C hides what crosses the wire inside a closure. D makes one-shot work carry an actor's protocol.",
+      "detail": "What this ballot decides. Whether one task can run at another place, and which rules the build checks. Transport, discovery and identity come from D-SERVICE-IDENTITY1=D and are not reopened.\n\nToday, on the t6c compiler (dev 76955986d0), as on the seed. Probe t01 runs task area(job) and prints area 42, wire {\"width\":6,\"height\":7}. Probe t02 runs a task on Shared<Hits> and prints hits 1. Both run in this process only.\n\nProbe t03 is new. A top-level function with a plain Int argument and result changes a module-level shared holder, and prints bumped 5, hits 5. It passes the draft's four rules, yet its state cannot cross.\n\nWhat must exist first. A Place type in core.tasks backed by D-SERVICE-IDENTITY1=D's typed endpoint capabilities, and a transport for them. Neither exists on dev; Core declares no Place type. A says what the build checks once they do.\n\nWhat A does. place.run(area, job) returns the same task handle as task area(job), so join works the same way. The build checks five rules before it allows the call.\n\nFirst, the function is top-level, so it has no hidden captures. Second, every argument and the result encode, as Job does in t01. Third, no argument holds Shared, Pool IDs, handles or other process-tied state, so t02's form is refused.\n\nAn argument with an unpaid D-OWES1 duty is refused too, since the duty could not be paid here once the value leaves.\n\nFourth, the function and everything it calls read and write no module state. That covers module variables, module-level shared holders and #Persist values, so t03's bump is refused. Module constants are part of the code and may be read.\n\nThis is checked like the effect row, over the same call graph, and the refusal names the first line that touches module state.\n\nFifth, the function's effect row is covered by the place's grants. The place's type carries those grants, as a typed endpoint capability does under D-SERVICE-IDENTITY1=D. Effects act on the place's own resources: a file written there is the place's file.\n\nSame code. The call carries the identity of the build it came from. A place running a different build refuses the call with PlaceMismatch, so no task runs against code it was not checked with.\n\nFailure is typed. join on a moved task can also return PlaceLost when the place is unreachable, or PlaceMismatch, never a hidden retry. A stop at the place comes back as the same task failure join reports locally. That matches D-SERVICE-IDENTITY1=D's typed partition results.\n\nRatified decisions. A keeps D-SERVICE-IDENTITY1=D and D-ACTOR1=A unchanged, and uses the sendability rules tasks already follow. Actors can later place their task the same way.\n\nBeginner path. A beginner keeps writing task f(x); nothing changes. Expert path. Swap task for place.run, and the build lists each of the five rules a function breaks, with its line.\n\nDownsides of A, and what the design does about them. A moved task pays encoding and network time. The handle and its errors are the same, so measuring both forms is a one-word change.\n\nWhat remains. A top-level function rule refuses closures that would be convenient. Captured values become arguments, which the encode rule can then check.\n\nOther options. B keeps tasks local; remote work goes through typed service endpoints. C also moves closures whose captures encode, as Unison does. D places actors, not tasks, as Erlang and Akka do.\n\nTheir best cases. B adds nothing. C is the most convenient. D fits long-lived state. Their costs: B needs a service for every remote job. C hides what crosses the wire inside a closure. D makes one-shot work carry an actor's protocol.",
       "options": [
         {
           "key": "A",
           "name": "Move a top-level task",
-          "detail": "place.run(f, args) runs a top-level function elsewhere when its inputs, result and effects fit.",
-          "technical": "core.tasks Place over D-SERVICE-IDENTITY1=D endpoints; build checks top-level function, encodable arguments and result, no process-tied state, effect row covered by the place's grants. join adds PlaceLost. Needs Place and transport first.",
-          "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Today (probe t01): task area(job) prints area 42, in this process.\n// Proposed (A): t: render_box.run(area, job); t.join() works the same.\n// A Shared<Hits> argument is refused before the program runs."
+          "detail": "place.run(f, args) runs a top-level function elsewhere when its inputs, result, module-state use and effects fit.",
+          "technical": "core.tasks Place over D-SERVICE-IDENTITY1=D endpoints. Build checks: top-level function, encodable arguments and result, no process-tied state or unpaid duty. It also checks no module state in the call graph, and an effect row the place's grants cover. The call carries its build identity; join adds PlaceLost and PlaceMismatch.",
+          "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Today (probe t01): task area(job) prints area 42, in this process.\n// Proposed (A): t: render_box.run(area, job); t.join() works the same.\n// A Shared<Hits> argument, or a function that touches module state (probe t03), is refused before the program runs."
         },
         {
           "key": "B",
@@ -193543,9 +193543,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
       },
-      "checkInstructions": "With seed a0_042 on PATH, run jet run t01_value.jet and jet run t02_shared.jet in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/tm. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/tm run for t01, t02 and t03; outputs are in probes/tm/out6. Then run Tools/agent/ballots/Validate.jet on this payload.",
       "surface": {
         "gist": "Should a task whose inputs and result encode be able to run at another place, checked against that place's grants?",
         "lesson": "A task is a piece of work that runs beside the rest of the program. Some work could just as well run on another machine. This vote decides whether Jet lets you send a task there, and what it checks first.",
@@ -194763,6 +194763,215 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-10T11:49:53.484Z"
+    },
+    {
+      "id": "D-SITE-CALLER1",
+      "cardId": "c0699zei",
+      "group": "syntax",
+      "title": "The place values: #here is where code is written, and a #caller default is the place of each call",
+      "situation": "Jet can tell a function where it was called from, and code where it is written. A logger uses this to print the caller's line, and a check helper to name the failing claim's line.\n\nToday both are spelled with a dollar sign, which a ratified ruling retires. That ruling names hash line and hash file, but nothing for the caller's place. This vote picks the new spelling and closes three traps found while probing.",
+      "gist": "Should the two place values be spelled #here and #caller, with assert and panic using the same caller default?",
+      "lesson": "A log line is more useful when it says which line wrote it. Jet fills that place in for you, so the logger does not need it passed by hand. This vote decides how that filled-in place is written, now that its old spelling is retired.",
+      "explainer": "Words used here. A source location is the file, line, column, function and module of a place in code. It displays as file:line:column.\n\nA parameter default is the value a parameter takes when a call leaves it out, written at: SourceLocation{...}. A site value is a value the compiler fills in, marked with #.",
+      "story": "Ravi writes a check helper for his tests. It prints the caller's line, but when a claim fails, the stop report names the helper's own assert line instead. He has no way to pass the place on.",
+      "inWild": "// Swift: a #line default is the caller's line.\nfunc log(_ m: String, file: String = #file, line: Int = #line) { }\n\n// Rust: a marker adds a hidden caller parameter.\n#[track_caller] fn check(ok: bool) { let at = std::panic::Location::caller(); }\n\n// C++20: a default argument is filled at the call.\nvoid log(std::string_view m, std::source_location at = std::source_location::current());",
+      "detail": "What this ballot decides. How Jet spells the two place values that are $here and $caller today, now that the ratified one-mark ruling retires every $. It also settles their edge rules.\n\nD-META-HASH1=A names #line, #file and #package as site values. It names no successor for the caller's place. #line and #file cover two of the five fields today's record carries.\n\nToday, on the t6c compiler (dev 76955986d0). $here is a SourceLocation record: file, line, column, function and module, displayed as file:line:column. Probe s01 prints here 13:11 in run, module s01_today.\n\n$caller is legal only as a parameter default, written at: SourceLocation{$caller}. Each call that leaves at out passes its own place. In s01 the direct log prints line 11, and the forwarding warn prints line 12.\n\nThe fill rule also holds for methods and pipes, where s04 prints lines 16 and 17. It holds for a generic function called from a lambda (s06, function run) and for a call through a function value (s12).\n\nAnywhere else, $caller is E2427, CallerSiteMisplaced (s03). D-JAI-SITE1=A also allows it inside an #Expand macro, but sema has no such case, and #Expand left with macros under D-META-COMPILER1.\n\nThree traps today. $here written as a default names the declaration, so both calls in s02 print line 2. At module level, $here has an empty function (s09). assert reports its own line, never the caller's (s08).\n\nCensus on dev, by git grep for $here and $caller. Jet code has 22 caller defaults: Core/Log 14, Core/Http 3, Examples 3 and tests 2. It has 4 $here reads: Examples 1 and tests 3.\n\nThe compiler side holds the parser's root list, sema's site checks in five files, the loader's SourceLocation alias, the syntax tables and E2427's texts. Four editor grammars and 16 Markdown lines in 5 files follow. The $here in Tools/perf is a shell variable.\n\nCore/Log reads at.module to filter records, and the HTTP route check requires its at default to be $caller. Both need one record with a module, not separate line and file values.\n\nThe rule under A. #here is the SourceLocation of the place where it is written. #caller, written as a parameter default, is the place of each call that leaves that parameter out. Both are constants and never fail.\n\n#line and #file become #here.line and #here.file. Neither is built: probe mh/h04 gets E0915 for #line, and s05 gets E0927 for #caller. No code uses them, so one record serves every place read. #package stays, since it names a package.\n\nD-SCRIPT-SCRIPTDIR1=A, ratified after the one-mark ruling, still spells $here.file and $here.dir as package-relative Path values. Under A those members ride on #here unchanged, so the record gains dir and file becomes a Path, as ratified.\n\nEdge rules under A. #caller anywhere but a default keeps E2427, respelled, with its fix: declare at: SourceLocation{#caller} and read at. Inside a lambda, the function field is the enclosing named function, as s06 shows today.\n\n#here written as a parameter default becomes an error whose fix writes #caller. Today that default silently names the declaration (s02). No code on dev writes it, so the error refuses only the trap.\n\nA wrapper forwards its caller's place by declaring the same default and passing at: at, as today. A call through a function value fills the call's place, as s12 shows. At module level the function field stays empty.\n\nThe one-mechanism check. assert, assert_eq and panic gain the same trailing at: SourceLocation{#caller}. A plain assert(ok) still reports its own line. The check helper above passes at: at, so the stop names its caller.\n\nWith that, every place Jet reports comes from one record and one fill rule. There is no second channel for stops, no hidden parameter, and no name whose meaning depends on where it is written.\n\nLowercase # names are compiler values and capitalised ones are markers, the split E0087 already enforces. So #here and #caller cannot be read as markers, and no user name can hide them.\n\nMigration. jet fix rewrites $here to #here and $caller to #caller one to one: 26 Jet uses, then the compiler's tables, diagnostics, grammars and docs. The retired $ forms get that fix.\n\nRelation to the open hash-spelling ballot, D-META-HASH2. Its option A writes the same #here and #caller. This ballot decides the place values and their edge rules alone, so that ballot can settle build separately.\n\nBeginner path. Call log(\"starting\") and the message names its line; nobody writes #caller to use a logger. Write spot: #here to ask where a line is.\n\nExpert path. Declare at: SourceLocation{#caller} on a helper and pass at: at down to log or assert. Read at.module to filter by module, and build a SourceLocation by hand in tests.\n\nDownsides of A, and what the design does about them. A wrapper that forgets at: at names itself, not its caller. The printed place names the wrapper's own function, so the slip shows on the first run.\n\nassert, assert_eq and panic gain a parameter. Existing calls do not change, since the default fills it; only the stop report reads it.\n\nOther options. B makes here and caller plain Prelude values, like build. Its best case is no mark at all: a reader sees an ordinary name.\n\nB's cost. A default resolves where its function is declared, and a module function named caller is legal; s11 prints 42 from one. So a plain caller can be hidden, silently changing every default in that file.\n\nB also adds a plain value that is filled at each call, which no other value does. And it reverses D-META-HASH1's rule that compiler-filled site values carry #.\n\nC folds both into one name: only #here, and a #here default means the call's place, as a Swift #line default does. Its best case is one name fewer.\n\nC's cost. One token means two places by position, and a reader of at: SourceLocation{#here} must know the rule to know which. It also flips s02's meaning without a word changing.\n\nD is Rust's track_caller. A #TrackCaller marker adds a hidden place parameter, SourceLocation.caller() reads it, and calls between marked functions forward it. Its best case is no at parameter and nothing to forget.\n\nD's cost. The place travels in a parameter no signature shows, so function values and package interfaces must carry it. It adds a second way into a function next to defaults, which the one-mechanism rule refuses.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#here and a #caller default",
+          "detail": "#here is where code is written; a #caller default is each call's place. #line and #file become fields of #here. assert, assert_eq and panic take the same default.",
+          "technical": "Respells D-JAI-SITE1=A's roots under D-META-HASH1=A, and amends HASH1's #line and #file to #here.line and #here.file. #here as a default is refused with a fix to #caller. E2427 respelled. Stops read an at: SourceLocation{#caller} parameter.",
+          "code": "log: fn(message: String, at: SourceLocation{#caller}) {\n    print(\"{at}: {message}\")\n}\n\nwarn: fn(message: String, at: SourceLocation{#caller}) {\n    log(\"warning: {message}\", at: at)\n}\n\ncheck: fn(ok: Bool, claim: String, at: SourceLocation{#caller}) {\n    if !ok -> print(\"check failed at line {at.line} in {at.function}: {claim}\")\n    assert(ok, at: at)\n}\n\nrun: fn() {\n    log(\"starting\")\n    warn(\"low stock\")\n    check(1 + 1 == 2, \"sums work\")\n    spot: #here\n    print(\"written at line {spot.line} in {spot.function}\")\n}\n// Proposed (A). Probe s10 is this program with $ for # and a plain assert(ok).\n// It prints s10_program_today.jet:16:5: starting, then :17:5: warning: low stock,\n// then written at line 19 in run."
+        },
+        {
+          "key": "B",
+          "name": "Plain Prelude values here and caller",
+          "detail": "here and caller are ordinary Prelude names, like build. A caller default is filled at each call.",
+          "technical": "Reverses D-META-HASH1=A's # mark for site values. Prelude names are shadowable, so a file's own caller or here hides them. A call-filled plain value is a new kind of value.",
+          "code": "log: fn(message: String, at: SourceLocation{caller}) {\n    print(\"{at}: {message}\")\n}\n\nwarn: fn(message: String, at: SourceLocation{caller}) {\n    log(\"warning: {message}\", at: at)\n}\n\ncheck: fn(ok: Bool, claim: String, at: SourceLocation{caller}) {\n    if !ok -> print(\"check failed at line {at.line} in {at.function}: {claim}\")\n    assert(ok, at: at)\n}\n\nrun: fn() {\n    log(\"starting\")\n    warn(\"low stock\")\n    check(1 + 1 == 2, \"sums work\")\n    spot: here\n    print(\"written at line {spot.line} in {spot.function}\")\n}\n// Proposed (B): here and caller are Prelude values; a module name caller would hide the default (probe s11)."
+        },
+        {
+          "key": "C",
+          "name": "One #here; a default means the call",
+          "detail": "Only #here exists. Written as a parameter default, it is the place of each call, as in Swift. Elsewhere it is where it is written.",
+          "technical": "D-META-HASH1=A plus #here, with Swift's default rule. No #caller. Today's $here default meaning flips.",
+          "code": "log: fn(message: String, at: SourceLocation{#here}) {\n    print(\"{at}: {message}\")\n}\n\nwarn: fn(message: String, at: SourceLocation{#here}) {\n    log(\"warning: {message}\", at: at)\n}\n\ncheck: fn(ok: Bool, claim: String, at: SourceLocation{#here}) {\n    if !ok -> print(\"check failed at line {at.line} in {at.function}: {claim}\")\n    assert(ok, at: at)\n}\n\nrun: fn() {\n    log(\"starting\")\n    warn(\"low stock\")\n    check(1 + 1 == 2, \"sums work\")\n    spot: #here\n    print(\"written at line {spot.line} in {spot.function}\")\n}\n// Proposed (C): #here in a default is the call's place. Today the same default names the declaration (probe s02)."
+        },
+        {
+          "key": "D",
+          "name": "A #TrackCaller marker",
+          "detail": "A marked function receives its caller's place in a hidden parameter, read with SourceLocation.caller(). Calls between marked functions forward it.",
+          "technical": "Core marker and Core function, as in Rust. Function types and package interfaces carry the hidden parameter. #here as in A.",
+          "code": "#TrackCaller\nlog: fn(message: String) {\n    at: SourceLocation.caller()\n    print(\"{at}: {message}\")\n}\n\n#TrackCaller\nwarn: fn(message: String) {\n    log(\"warning: {message}\")      // forwarded by the marker\n}\n\n#TrackCaller\ncheck: fn(ok: Bool, claim: String) {\n    at: SourceLocation.caller()\n    if !ok -> print(\"check failed at line {at.line} in {at.function}: {claim}\")\n    assert(ok)                     // reports check's caller\n}\n\nrun: fn() {\n    log(\"starting\")\n    warn(\"low stock\")\n    check(1 + 1 == 2, \"sums work\")\n    spot: #here\n    print(\"written at line {spot.line} in {spot.function}\")\n}\n// Proposed (D): a hidden place parameter on marked functions; not built."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "A #line or #file default is filled at the call.",
+          "code": "func log(_ m: String, line: Int = #line) { }"
+        },
+        {
+          "lang": "Rust",
+          "note": "#[track_caller] adds a hidden location parameter.",
+          "code": "#[track_caller]\nfn check(ok: bool) { let at = Location::caller(); }"
+        },
+        {
+          "lang": "C++20",
+          "note": "source_location::current() as a default is the call's place.",
+          "code": "void log(std::string_view m, std::source_location at = std::source_location::current());"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives both places one record, one mark and one fill rule, and stops use it too. No name can hide it, and no position changes its meaning.",
+        "gains": [
+          "Logs, checks and stops name the caller through one mechanism.",
+          "The $here default trap becomes an error with a fix.",
+          "26 Jet uses respell one to one."
+        ],
+        "losses": [
+          {
+            "loss": "A wrapper that forgets at: at names itself, not its caller.",
+            "mitigation": "The printed function names the wrapper, so the slip shows on the first run."
+          },
+          {
+            "loss": "#line and #file, ratified but unbuilt, become #here.line and #here.file.",
+            "mitigation": "No code uses them, and one record serves every place read."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's plain caller can be hidden by a file's own name, silently changing its defaults."
+          },
+          {
+            "key": "C",
+            "reason": "C gives one token two meanings by position and flips today's default meaning."
+          },
+          {
+            "key": "D",
+            "reason": "D adds a hidden parameter, a second way into a function next to defaults."
+          }
+        ],
+        "tradeoff": "Forwarding stays written as at: at, in return for one visible mechanism."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) drafted this new ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/sc run; outputs are in probes/sc/out6. The census is git grep for $here and $caller on the dev worktree. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should the two place values be spelled #here and #caller, with assert and panic using the same caller default?",
+        "lesson": "A log line is more useful when it says which line wrote it. Jet fills that place in for you. This vote decides how that filled-in place is written, now that its old spelling is retired.",
+        "trio": {
+          "current": {
+            "note": "Today's spelling is retired.",
+            "code": "log: fn(message: String, at: SourceLocation{$caller})\nspot: $here"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A #line default is the caller's line.",
+            "code": "func log(_ m: String, line: Int = #line)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "#here and #caller",
+            "gist": "Two site values, one record.",
+            "gains": [
+              "One mechanism, stops included.",
+              "The default trap is refused."
+            ],
+            "losses": [
+              "Forwarding is written."
+            ],
+            "proposed": {
+              "code": "log: fn(message: String, at: SourceLocation{#caller})\nspot: #here"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Plain here and caller",
+            "gist": "Ordinary Prelude names.",
+            "gains": [
+              "No mark."
+            ],
+            "losses": [
+              "A file's own name hides them."
+            ],
+            "proposed": {
+              "code": "log: fn(message: String, at: SourceLocation{caller})\nspot: here"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One #here",
+            "gist": "A #here default means the call.",
+            "gains": [
+              "One name fewer."
+            ],
+            "losses": [
+              "Meaning depends on position."
+            ],
+            "proposed": {
+              "code": "log: fn(message: String, at: SourceLocation{#here})\nspot: #here"
+            }
+          },
+          {
+            "key": "D",
+            "name": "#TrackCaller",
+            "gist": "A marker adds a hidden place.",
+            "gains": [
+              "Automatic forwarding."
+            ],
+            "losses": [
+              "A hidden parameter."
+            ],
+            "proposed": {
+              "code": "#TrackCaller\nlog: fn(message: String)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One record, one mark and one fill rule, used by logs and stops alike.",
+          "gains": [
+            "One mechanism.",
+            "The default trap is refused."
+          ],
+          "losses": [
+            {
+              "loss": "A forgotten at: at names the wrapper.",
+              "mitigation": "The printed function shows the slip."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Names can hide it."
+            },
+            {
+              "key": "C",
+              "reason": "Meaning by position."
+            },
+            {
+              "key": "D",
+              "reason": "Hidden parameter."
+            }
+          ],
+          "tradeoff": "Written forwarding, for one visible mechanism."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T12:54:09.738Z"
     }
   ],
   "questions": [
@@ -197835,6 +198044,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T12:54:15.753Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TASK-MOVE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-10T12:54:12.929Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SITE-CALLER1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-10T12:54:09.738Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SITE-CALLER1",
+      "note": "The place values: #here is where code is written, and a #caller default is the place of each call"
+    },
     {
       "at": "2026-11-10T12:52:58.977Z",
       "by": "Main",
