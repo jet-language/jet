@@ -1348,7 +1348,9 @@ check runs before the owner's mutability, so a computed target reports E0339
 whether its owner is immutable or mutable. Provider code edits the stored
 field. A read is an ordinary materialized getter result, and consuming that
 result stays legal. A literal that sets a computed field is E0339 and still
-reports the first `priv` field it omits (E0605).
+reports the first `priv` field it omits (E0605). The `core.files` handles
+`TempDir`, `TempFile`, `FileLock`, `FileReader`, `FileWriter`, `Directory` and
+`MappedFile` expose `path` this way.
 
 **D-QUAL3 — Unit families**: `#UnitFamily(Currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);

@@ -227,10 +227,12 @@ FileScope: struct {
 }
 
 // The native file resources below are filled only by Core's own opens:
-// their `priv handle` keeps a literal outside core.files from forging one
-// (core-library.md:635/:701: `.path` stays readable, the handle does not).
+// their `priv handle` keeps a literal outside core.files from forging one,
+// and `path` is computed over `priv stored_path`, so it stays readable
+// (core-library.md:635/:701) while no code can write it.
 MappedFile: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     bytes: [U8]
     priv handle: Int
 
@@ -243,18 +245,21 @@ MappedFile: struct {
 }
 
 TempDir: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     is_dir: Bool
     priv handle: Int
 }
 
 TempFile: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 }
 
 FileLock: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 }
 
@@ -307,7 +312,8 @@ impl AdvisoryLock.Close {
 /// at end of file. Only Core's opens fill the `priv handle`, so a literal
 /// outside core.files cannot forge one.
 FileReader: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// What the open file is now (fstat). Comparing
@@ -334,7 +340,8 @@ FileReader: struct {
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
 FileWriter: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// What the open file is now (fstat). Bytes still
@@ -419,7 +426,8 @@ rename_code: fn(if_exists: RenameIfExists) -> Int Never! {
 /// `IOError.InvalidInput`. The handle is close-on-exec and closes when it
 /// leaves scope or at `close(directory)`.
 Directory: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// Open the regular file `name` for reading.
@@ -438,7 +446,7 @@ Directory: struct {
     open_directory: fn(self, name: String) -[FS.Read]> Directory IOError! {
         held_name(self.path, name, false)
         key: core.files.__open_directory(self.handle, name)
-        Ok(Directory{path: join(self.path, name), handle: key})
+        Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
     /// Create the directory `name` and hold it. An existing name reports
@@ -447,7 +455,7 @@ Directory: struct {
         held_name(self.path, name, true)
         core.files.__create_directory(self.handle, name, mode ?? -1)
         key: core.files.__open_directory(self.handle, name)
-        Ok(Directory{path: join(self.path, name), handle: key})
+        Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
     /// The entries in raw-name byte order. A link to a directory has
@@ -551,7 +559,7 @@ Directory: struct {
     /// keeps the directory open in a child while this handle stays usable.
     duplicate: fn(self) -[FS.Read]> Directory IOError! {
         key: core.files.__open_directory(self.handle, ".")
-        Ok(Directory{path: self.path.copy(), handle: key})
+        Ok(Directory{stored_path: self.stored_path.copy(), handle: key})
     }
 
     // Kept only for CacheLease, which passes one lease directory into many
@@ -581,7 +589,7 @@ Directory: struct {
 // child's working directory. The Directory is borrowed through the
 // duplication, so a later rename or close here never changes the child's view.
 process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
-    context: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
+    context: IOContext{operation: .Resolve, resource: Val(directory.stored_path), os_code: None, cause: None}
     if child_fd < 3 || child_fd > 2147483646 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
             cause: Val("the inherited directory descriptor must be between 3 and 2147483646")}))
@@ -722,7 +730,7 @@ impl Directory.Close {
 /// real directory, not a link.
 open_directory: fn(path: String) -[FS.Read]> Directory IOError! {
     key: core.files.__open_directory(-1, path)
-    Ok(Directory{path: path.copy(), handle: key})
+    Ok(Directory{stored_path: path.copy(), handle: key})
 }
 
 

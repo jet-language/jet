@@ -162,7 +162,6 @@ fs_lock_sleep: fn(nanos: I64) {
 #Export(c) jet_rt_handle_clone_jet_file_lock_owner: fn(value: I64) -> I64 { jet_fd_retain_raw(value) }
 // Out receives a read-only view (data, len, cap) of the immutable owner path with
 // no owner word of its own: a caller copies the bytes, never clones or drops it.
-#Export(c) jet_rt_handle_field_jet_file_lock_owner_path: fn(value: I64, out: I64) { coll_copy(fd_word(value, I64{24}), out, I64{24}) }
 #Export(c) jet_rt_handle_field_jet_file_lock_owner_stored_path: fn(value: I64, out: I64) { coll_copy(fd_word(value, I64{24}), out, I64{24}) }
 
 fs_lock_flag: fn(word: I64) -> Bool { word != I64{0} }
