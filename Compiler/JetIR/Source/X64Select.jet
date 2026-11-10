@@ -1669,12 +1669,13 @@ ir_x64_magic_divisor: fn(al: IRX64Allocation, slot: Int) -> Int Never! {
     d
 }
 
-// rax divided by the constant d (ir_x64_magic_divisor) as idiv leaves it:
-// the truncated quotient in rax, the remainder in rdx, d in rcx. Uses r11.
-// A negative d divides by its magnitude and negates the quotient: the
-// truncated quotient of n by -d is minus that of n by d, the remainder the
-// same.
-ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int) Never! {
+// rax divided by the constant d (ir_x64_magic_divisor) as `op` needs it. A
+// Div leaves the truncated quotient in rax; a Rem, the truncated remainder in
+// r11; FloorDiv and Mod leave what idiv does (quotient in rax, remainder in
+// rdx, d in rcx) for ir_x64_floor_adjust. Uses r11. A negative d divides by
+// its magnitude and negates the quotient: the truncated quotient of n by -d
+// is minus that of n by d, the remainder the same.
+ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int, op: IROp) Never! {
     magic: ir_x64_magic(if d < 0 -> 0 - d else -> d)
     x64_mov_rr(e.code, X64_R11, X64_RAX)
     x64_mov_ri(e.code, X64_RCX, magic.multiplier)
@@ -1685,6 +1686,17 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int) Never! {
     x64_shift_ri(e.code, X64Shift.Shr, X64_RAX, 63)
     x64_alu_rr(e.code, X64Alu.Add, X64_RAX, X64_RDX)
     if d < 0 -> x64_neg(e.code, X64_RAX)
+    if op == .Div -> return
+    if op == .Rem {
+        // n - q * d, the product in rax (it cannot overflow: |q * d| <= |n|).
+        if x64_fits_i32(d) {
+            x64_imul_rri(e.code, X64_RAX, X64_RAX, d)
+        } else {
+            x64_mov_ri(e.code, X64_RCX, d)
+            x64_imul_rr(e.code, X64_RAX, X64_RCX)
+        }
+        return x64_alu_rr(e.code, X64Alu.Sub, X64_R11, X64_RAX)
+    }
     x64_mov_ri(e.code, X64_RCX, d)
     x64_mov_rr(e.code, X64_RDX, X64_RAX)
     x64_imul_rr(e.code, X64_RDX, X64_RCX)
@@ -1811,10 +1823,10 @@ ir_x64_exact_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX6
     if magic != 0 {
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
         ir_x64_operand_test(e, al, f.a[at], X64_RAX, sites)
-        ir_x64_magic_division(e, magic)
+        ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
-        if op == .Rem || op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
-        ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
+        if op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
+        ir_x64_store(e, m, f, al, f.dst[at], if op == .Rem -> X64_R11 else -> X64_RAX)
         return ir_x64_located_cold(e, f, at, ir_x64_division_symbol(op), sites)
     }
     ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
@@ -2015,10 +2027,10 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     if magic != 0 {
         // Neither is the divisor 0 or -1.
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
-        ir_x64_magic_division(e, magic)
+        ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
-        if op == .Rem || op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
-        return ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
+        if op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
+        return ir_x64_store(e, m, f, al, f.dst[at], if op == .Rem -> X64_R11 else -> X64_RAX)
     }
     if op == .Mul && f.c[at] == IR_OVERFLOW_WRAP {
         // A wrapping product by 2^k is a left shift (the same low bits).
