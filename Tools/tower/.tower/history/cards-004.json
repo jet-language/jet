@@ -90828,6 +90828,50 @@
       "completedAt": "2026-11-07T10:00:29.093Z",
       "questions": [],
       "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c0jstfps",
+      "num": 6672,
+      "title": "Miscompile: a write through &list[i] to a handle-row element (Decimal) never reaches the list",
+      "body": "Found by MechD-3 (#6651 group D). With values := [1.5, 2.5, 3.5] (Decimal), first: &values[0]; first = 4.5; first += 1.25 leaves the list unchanged. jet run exits 0 and prints 1.5/3.5 where 5.75/6.75 is required. Cause: in BuildExpr.jet, ir_bind_pin binds a write pin of a handle-row place as a copy (ir_bind_local), because only scalar rows get the ir_scalar_window address alias. The Int list case is correct. Case: tests/cases/dev_parts_routine/numeric_singleton_splits_match_resident_jit_and_aot_without_fallback.case.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A write pin of any non-scalar (handle-row) place binds as an address alias, so assignment and compound assignment through it reach the owner on o0, o1 and o2. numeric_singleton_splits_match_resident_jit_and_aot_without_fallback prints 5.75/6.75 and passes, and its KF line is removed. A golden or case covers &list[i] writes for Decimal, String and a struct element.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "704276a947: ir_bind_pin binds a write pin of any non-scalar place held in storage (list or map element, a field of one or of a local, pool slot, shared guard) as an address alias, with no per-type special case. BuildTypes gains the precise +, - and * that Decimal compound updates need. New case core_and_closures/write_pins_of_handle_elements_write_in_place covers Decimal, String, an enum box, Int?, a struct element and &people[0].name, 200 rewrites each, on O0, O1 and O2: PASS. I1: reads through read pins load unowned temps, and writes drop the old value before storing. numeric_singleton_splits_match_resident_jit_and_aot_without_fallback loses its KF line. MechD-3 lane run over 187 cases (core_and_closures, collections_and_methods, memory_semantics, core_files_opaque_handles, ownership): 0 FAIL. Confirm in the next Main batch.",
+          "at": "2026-11-07T10:49:39.303Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:37:56.047Z",
+      "updated": "2026-11-07T10:49:41.063Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:49:41.063Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:49:49.362Z"
     }
   ]
 }
