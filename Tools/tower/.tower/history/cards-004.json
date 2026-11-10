@@ -91387,6 +91387,248 @@
       "completedAt": "2026-11-07T15:10:51.877Z",
       "questions": [],
       "retiredAt": "2026-11-10T15:13:55.366Z"
+    },
+    {
+      "id": "c0fgw1zd",
+      "num": 6575,
+      "title": "JetCli test 'budget view projects only reports of the requested sources' fails (BudgetView.jet)",
+      "body": "Seen by BallotDesign-3 running jet test Compiler/JetCli at dev ab5d7e577c. The test calls only jet_cli_budget_facts (Compiler/JetCli/Source/Cli/BudgetView.jet) and canonical_json_parse, which ab5d7e577c doesn't touch, so it's likely pre-existing (not rerun on 3b93a6294e). Find the commit that broke it, fix the root, and prove it with jet test Compiler/JetCli passing that test.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Passes on dev 2d561d3e15; the regression was fixed upstream."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet test Compiler/JetCli` passes 'budget view projects only reports of the requested sources', fixed at the root that broke it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2d561d3e15: jet test Compiler/JetCli --filter 'budget view' with seed a0_033 -> 'budget view projects only reports of the requested sources: pass', 1 passed, 0 failed.",
+          "at": "2026-11-07T20:44:39.560Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:51:32.590Z",
+      "updated": "2026-11-07T20:44:41.218Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T20:44:41.218Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T20:53:13.647Z"
+    },
+    {
+      "id": "c08512l6",
+      "num": 6649,
+      "title": "Package #Tests under Compiler/ and Jetpack/ are red or no longer compile",
+      "body": "A serial jet test of every package under Compiler/ and Jetpack/ (a0_031 on dev e4756389a9, $JET_SCRATCH_ROOT/lanes/Main/pkgrerun.sh) finds failing tests in 10 test packages and 8 test packages that no longer compile. They pass unnoticed because no gate runs them. Compiler/JetCli/Tests (18 failing) is tracked on #6631 c7. Fixture packages (*.fixture) and packages with no #Test blocks are excluded.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "All 9 criteria met: jet test Compiler --profile full runs every package's #Tests, and the red packages pass or are deleted."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c1 green half (PortsLead-2, 11-07): jet test Compiler --profile packages on a clean clone of dev 5202bd0699 gives rc=0 in 1654 s with 2982 rows: 2942 PASS and 26 FAIL, all known-failing (#6649, #3590, #6650). The #Test coverage row passes on the unseeded tree. Evidence: $JET_SCRATCH_ROOT/lanes/PortsLead/p6649/cov-green.{log,json}."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c9 progress: a1a6c69d62 (CoreCliLead-2) adds kit_require_tool in Compiler/JetTestKit/Source/RequireTool.jet. It reuses the runtime's one skip path (jet_rt_test_skip_scope) and has no spelling outside TestKit; 11 host-tool claims call it and their 11 KF lines are gone. Bare PATH (git+coreutils): JetCanvas 8 skipped, JetDebug 36 passed and 1 skipped, Integrations 92 passed and 2 skipped. Dev PATH: all 11 pass. The packages profile exits 0 bare. Still open in c9: the 7 dev rows (JetBackend/Tests, JetImpact, JetRuntime, Prelude, and 3 Publication api_diff), KF under this card, which need an owner."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Rerun in the batch environment: JetWasm/Tests 16/0, JetCli/Tests 97/0 (+1 expected-fail), EnvModel/Tests 148/0, Integrations/Tests 94/0, Foundation/Tests 93/0, JetDebug/Tests 37/0. Still red: JetParser/Tests 13, JetLexer/Tests 3, JetFoundation 1, PackageModel 1, PackageModel/Tests 1 (ada), and the 8 non-compiling test packages in c6. c3 met; c4/c5 corrected; c7 added (quick-profile baseline hides failures)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Rows c2-c6 came from a census run without JET_COMPILER_IDENTITY, JET_TOOLCHAIN_ROOT or jet-env (MechC found it: the 18 JetCli failures pass in the batch environment). Rerunning in the batch environment (pkgrerun.sh, fixed); rows will be corrected to its result before work starts."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A gate runs every package test: jet test Compiler --profile full runs the #Tests of every package under Compiler/ and Jetpack/ that has them (Tests subpackages included), so a red or non-compiling test package fails the profile. A package that no gate should run is deleted, not left unrun.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "bd42ba0383 (PortsLead-2): Compiler/test.jet's packages profile adds a #Test coverage row that fails on any tracked #Test file outside a run package; Jetpack/JetOS is a named frozen exclusion. Red: a HEAD f5b313c304 clone plus the patch plus a seeded Compiler/Seeded/Unrun.jet with one #Test gives rc=1 under jet test Compiler --profile packages (2982 rows, 2941 PASS, 27 FAIL with 26 KF). The one new row is '#Test coverage: 1 #Tests no suite runs: Compiler/Seeded/Unrun.jet', and it names only the seed, so every tracked #Test on HEAD is covered. The gaps it exposed are fixed in the same commit: StopWitness.jet and UiWitness.jet (#! scripts) now run and pass. JetDevserver/Tests and JetLSP/Tests don't compile, and their KF rows are owned by #6650 (known-failing.tsv:1025 and :1027). LaneCheck: CHECK OK on Compiler/test.jet.",
+          "at": "2026-11-07T14:27:33.354Z"
+        },
+        {
+          "n": 2,
+          "text": "Compiler/JetParser/Tests (13 failing: keyword before the declared name, unknown top word, ineligible state section, comptime braced values, named rule arguments, ordered groups format, grouped retired markers, abi lowering, doc_on_a_function_requires_task, suffix contract, generated call arguments, clean preparation tokens, root template loop) and Compiler/JetLexer/Tests (3 failing: triple delimiter parity, parser-ready tokens, inline foreign bodies) pass, with each test migrated to the current syntax or deleted when its subject is retired.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "f32390df2f; pkgrerun.sh in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env, private HOME and JET_TEST_STATE_DIR) on dev f32390df2f: Compiler/JetParser/Tests 171 passed, 0 failed; Compiler/JetLexer/Tests 31 passed, 0 failed.",
+          "at": "2026-11-07T06:25:54.744Z"
+        },
+        {
+          "n": 3,
+          "text": "Compiler/JetWasm/Tests passes (8 failing: mathkit component decode and bodies, compiler-extension fixtures, text vs binary inputs, shipped text guests, shipped components validate).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "pkgrerun.sh rerun in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env), dev at 5384202a82: Compiler/JetWasm/Tests 16 passed, 0 failed. The earlier 8 failures came from the census's missing environment, not code.",
+          "at": "2026-11-07T05:35:56.404Z"
+        },
+        {
+          "n": 4,
+          "text": "The Jetpack package tests pass: Jetpack/PackageModel ('test profile fields refuse unknown fields, bad values and empty suites') and Jetpack/PackageModel/Tests ('ada generated source uses current callable and effect shapes'). EnvModel/Tests, Integrations/Tests and Foundation/Tests already pass (148/0, 94/0, 93/0) in the batch environment.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "8ce5de93f9; pkgrerun.sh in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env) on dev 8ce5de93f9: Jetpack/PackageModel 7 passed, 0 failed (incl. 'test profile fields refuse unknown fields, bad values and empty suites'); Jetpack/PackageModel/Tests 448 passed, 0 failed (incl. 'ada generated source uses current callable and effect shapes'). EnvModel/Tests 148/0, Integrations/Tests 94/0 and Foundation/Tests 93/0 in the same environment.",
+          "at": "2026-11-07T06:07:44.730Z"
+        },
+        {
+          "n": 5,
+          "text": "Compiler/JetFoundation passes 'later test setting layers replace earlier values' (Source/Registry/TestSettings.jet:433 expects the t.coverage refusal text 'not ported to the Jet test runner yet' and gets an empty refusal: either coverage is ported and the test asserts its real behavior, or the refusal text is restored).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b49fb1b11a; pkgrerun.sh in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env) on dev a96e86061b: Compiler/JetFoundation 6 passed, 0 failed ('later test setting layers replace earlier values' included); Compiler/JetFoundation/Tests 216 passed, 0 failed. JetDebug/Tests passed 37/0 in the earlier rerun.",
+          "at": "2026-11-07T06:11:55.668Z"
+        },
+        {
+          "n": 6,
+          "text": "These test packages compile and pass, or are deleted when dead: Compiler/JetSema/Tests (40 problems), Compiler/JetDriver/Tests (6), Compiler/JetRepl/Tests (51), Compiler/JetCli/Commands (12) and Compiler/JetCli/Commands/Tests (94), Compiler/JetImpact/Tests (path dependency jet_env_model escapes its parent), Compiler/JetFoundation/Data (6), Compiler/JetTestKit/Probes (inline Package facts beside package.jet).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "PortsLead-2 on dev ccfbacc571, jet test with JET_BIN set: JetSema/Tests 27/0, JetDriver/Tests 19/0, JetCli/Commands/Tests 49/0, JetImpact/Tests 8/0, JetTestKit/Probes 1/0. JetCli/Commands and JetFoundation/Data have no tests and exit 0; JetRepl/Tests no longer exists. No KF line on dev for any of them. The fixes landed in 0b2a48df2c, 4af5a352ef and d16f96e61e.",
+          "at": "2026-11-07T10:02:28.489Z"
+        },
+        {
+          "n": 7,
+          "text": "The quick profile can't hide a failure: today jet test Compiler compares against Compiler/.jet/test/quick/tests.rows, a git-ignored baseline that the first run records, failures included (it holds the jet_foundation failure and still exits 0: '236 rows ... 0 lost, 0 changed, 0 new'). A failing row fails the run whatever the baseline says, so a fresh clone's first run and every later run are red while any member test fails.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): cases cli_parts_runtime/test_profile_code_suites_report_rows.case and test_profiles_bound_fan_out_and_compare_baselines.case PASS (8a36682cd6: a failing row fails the run whatever the recorded baseline says).",
+          "at": "2026-11-07T07:08:19.852Z"
+        },
+        {
+          "n": 8,
+          "text": "The Jetpack engine areas' #Tests (Jetpack/Store, Provider, Recipe, CLI, Services and Image Tests; these areas have no package.jet, so package_dirs in Compiler/test.jet skips them) run as per-claim rows in jet test Compiler --profile packages, which full includes. Each failing claim passes or carries a known-failing line naming its owning card. Their only runner today is Jetpack/Bootstrap/check.sh --tests (shell plus assemble.mjs), and no gate calls it: release admit runs check.sh without --tests. That runner is ported to Jet or replaced, in one cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "4af5a352ef: the Jetpack engine areas' #Tests run as per-claim rows in jet test Compiler --profile packages, and the check.sh --tests runner is cut over. MechD-3 lane run, s1 at 4af5a352ef with the hosted jetpack: 2974 rows, PASS 2919, FAIL 0, KNOWN-FAILING 33 (engine 13: 9 under #3590, 4 under #6649; CLI 9), UNSUPPORTED 11, ERROR, REFUSED and TIMEOUT 0. Jetpack/Store, ArtifactStore included, has no non-pass row. The only other non-pass rows were the 11 UNEXPECTED-PASS host-tool rows, whose KF lines a1a6c69d62 removed (they skip without the tool and pass with it). JetOS is frozen by owner order and not run. Confirm in the next Main batch's packages profile.",
+          "at": "2026-11-07T09:34:09.537Z"
+        },
+        {
+          "n": 9,
+          "text": "The package rows that fail on dev a499bfc612 in jet test Compiler --profile packages (CoreCliLead-2 bare run, 2146 rows) pass or are deleted when dead. Rows: Compiler/JetBackend/Tests (no run.jet or #Test: delete), Compiler/JetImpact (PathDependencyEscape jet_env_model), Compiler/JetRuntime (UnknownFunction os_store_i64; the runtime has to be tested in the mode it is built in), Compiler/Prelude (ReservedDunderName __live_arg; likewise), and Jetpack/Publication/Tests (api_diff_detects_removed_fn, api_diff_detects_changed_signature, 'api snapshot rows keep each line as its signature'). Package rows that need a tool outside the release environment (node, ssh) either stop needing it or declare it as a host requirement and SKIP-HOST, like the cases suite's tool: rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d16f96e61e (PortsLead-2): JetImpact declares jet_env_model (jet test exits 0). JetRuntime and Prelude are ASSEMBLED_PACKAGES in Compiler/test.jet and report skipped rows: JetRuntime is assembled by the chain and its registries run in the registries profile; Prelude is embedded and has no #Test. The dead JetBackend/Tests run-script is replaced by a real #Test, NativeOutputDiagnostic.jet, whose failure is a product defect now on #6669. Publication's 35 API-row literals are restored to the rows sema emits, and the 3 target rows PASS (298/1; the 1 needs JET_BIN, which the suite sets). 7 KF lines dropped. LaneCheck CHECK OK. Confirm in the next batch's packages profile.",
+          "at": "2026-11-07T10:02:27.621Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:21:14.209Z",
+      "updated": "2026-11-07T20:37:07.268Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-07T20:37:07.268Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T20:53:13.647Z"
+    },
+    {
+      "id": "c0o6f5xn",
+      "num": 6658,
+      "title": "Native ELF writer emits no .text section header, so objdump -d shows nothing",
+      "body": "From #6651 (MechD-3, row simd_witness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier, KF #6414). objdump -d prints nothing for a jet-built binary because the native ELF writer emits no section headers for code; tools that disassemble or symbolize by section (objdump, perf annotate, gdb disassemble) see no .text.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "The ELF writer emits .text; the case pins it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "objdump -d on a jet-built hello binary lists a .text section with disassembly of main; a case pins it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a41d925827 + cd023c35d1: tests/cases/debug/objdump_disassembles_main_from_text_section.case builds hello; objdump -h lists .text (PROGBITS AX at 0x401000) and objdump -d disassembles <main>:. jet test Compiler --profile cases --filter objdump_disassembles_main (seed a0_033, llvm objdump) PASS 1/1.",
+          "at": "2026-11-07T20:49:44.712Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:20.248Z",
+      "updated": "2026-11-07T20:49:47.963Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T20:49:47.963Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T20:53:13.647Z"
     }
   ]
 }
