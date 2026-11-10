@@ -342,7 +342,6 @@
         "plain_program": "gauntlet:performance-surface:net_read_into_vs_read:plain",
         "evidence_key": "net_read_into_vs_read",
         "evidence_file": "Tools/gauntlet/performance-surface-read-into-evidence.json",
-        "memory_evidence_file": "Tools/gauntlet/performance-surface-read-into-memory.json",
         "surface_field": "surface_wall_time_ms",
         "plain_field": "plain_wall_time_ms",
         "surface_source": "// Real paired workload: net_read_into_vs_read surface spelling\npackage: {\n    name: \"read_into_pair_surface\"\n    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }\n}\nuse net: core.net\n\nrun: fn() {\n    listener: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"listen\")\n    address: net.listener_local_socket_addr(listener) ?? panic(\"listener address\")\n    writer: task {\n        accepting := listener.move()\n        side: accepting.accept() ?? panic(\"accept\")\n        block := [U8]{}\n        loop _ in 0..<4096 { block.push(U8{97}) }\n        loop _ in 0..<16384 { side.write_all(block) ?? panic(\"write\") }\n        side.close() ?? panic(\"close\")\n    }\n    client := net.tcp_connect_addr(address) ?? panic(\"connect\")\n    total := 0\n    reads := 0\n    buffer := [U8]{}\n    loop {\n        buffer.clear()\n        count: client.read_into(buffer, 4096) ?? panic(\"read_into\")\n        if count == 0 -> break\n        total += count\n        reads += 1\n    }\n    writer.join() ?? panic(\"writer\")\n    eprint(\"reads={reads}\")\n    print(\"performance-surface:net_read_into_vs_read:{total}\")\n}",
