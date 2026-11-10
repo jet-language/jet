@@ -849,8 +849,10 @@ rsa_pkcs1_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RS
 // ---------------------------------------------------------------------------
 // Decryption.
 
-/// RSAES-OAEP-DECRYPT (mbedtls_rsa_rsaes_oaep_decrypt). The padding checks
-/// run in constant time and fold into one InvalidPadding.
+/// RSAES-OAEP-DECRYPT (mbedtls_rsa_rsaes_oaep_decrypt). The decoding runs
+/// in constant time and constant memory trace (rsaes_oaep_unpadding); only
+/// its verdict shows, as one InvalidPadding or, for a good padding whose
+/// message is longer than `output_max_len`, OutputTooLarge.
 rsa_rsaes_oaep_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, label: [U8], input: [U8], output_max_len: Int) -> [U8] RSAError! {
     if ctx.padding != .PKCSV21 -> return Err(.BadInput(None))
     ilen: ctx.len
@@ -859,47 +861,99 @@ rsa_rsaes_oaep_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, label: [U8], input
     hlen: hashes.md_size(md)
     if 2 * hlen + 2 > ilen -> return Err(.BadInput(None))
     buf := rsa_private(ctx, rng, input) ?? return Err(err)
-    // seed, then DB.
+    lhash := hashes.hash(md, label)
+    decoded := rsaes_oaep_unpadding(buf, md, lhash, output_max_len)
+    core.crypto.wipe(lhash)
+    core.crypto.wipe(buf)
+    out: unpadded_message(decoded) ?? return Err(err)
+    Ok(out)
+}
+
+/// EME-OAEP decoding (RFC 8017 section 7.1.2 step 3) in constant time and
+/// constant memory trace, in the shape of rsaes_pkcs1_v15_unpadding: `buf`,
+/// the private operation's block, is unmasked in place and every byte of
+/// its DB is read whatever it holds. Neither the verdict nor the message
+/// length shows in the time or the accesses; the counts that depend on the
+/// padding are U64 words, each step `wrapping`, so that no overflow check
+/// branches on them. `lhash` is the label's hash; the most a message can
+/// be is min(output_max_len, ilen - 2 hlen - 2).
+rsaes_oaep_unpadding: fn(buf: &[U8], md: hashes.Md, lhash: [U8], output_max_len: Int) -> V15Unpadded Never! {
+    ilen: buf.len()
+    hlen: hashes.md_size(md)
+    // The seed's mask comes from maskedDB, then DB's from the seed.
     db_part := cipher.bytes_of(buf, hlen + 1, ilen - hlen - 1)
     mgf_mask(buf, 1, hlen, db_part, md)
     core.crypto.wipe(db_part)
     seed_part := cipher.bytes_of(buf, 1, hlen)
     mgf_mask(buf, hlen + 1, ilen - hlen - 1, seed_part, md)
     core.crypto.wipe(seed_part)
-    lhash := hashes.hash(md, label)
-    // The first byte is 0, the label hash matches, zeros then 0x01.
+    room: ilen - 2 * hlen - 2
+    plaintext_max_size: if output_max_len > room -> room else -> output_max_len
+    max_size: U64{plaintext_max_size}
+    // 0x00 || seed || lHash' || PS || 0x01 || M with lHash' = lHash and PS
+    // all zeros.
     bad := ctime.cond_of(U64.from_u8(buf[0]))
-    p := 1 + hlen
-    bad = ctime.bool_or(bad, ctime.cond_of_int(ctime.memcmp(lhash, 0, buf, p, hlen)))
-    p += hlen
-    pad_len := 0
-    in_padding := ctime.ct_true()
-    loop i in 0..<(ilen - 2 * hlen - 2) {
-        in_padding = ctime.bool_and(in_padding, ctime.uint_eq(U64.from_u8(buf[p + i]), U64{0}))
-        pad_len += ctime.size_if_else_0(in_padding, 1)
+    bad = ctime.bool_or(bad, ctime.cond_of_int(ctime.memcmp(lhash, 0, buf, 1 + hlen, hlen)))
+    // Read the whole of PS || 0x01 || M: pad_count counts the zeros before
+    // the first nonzero byte, which must be 0x01.
+    start: 1 + 2 * hlen
+    pad_done := ctime.ct_false()
+    one_found := ctime.ct_false()
+    pad_count := U64{0}
+    loop i in start..<ilen {
+        byte: U64.from_u8(buf[i])
+        first: ctime.bool_and(ctime.bool_not(pad_done), ctime.uint_ne(byte, U64{0}))
+        one_found = ctime.bool_or(one_found, ctime.bool_and(first, ctime.uint_eq(byte, U64{1})))
+        pad_done = ctime.bool_or(pad_done, first)
+        pad_count = wrapping(pad_count + ctime.if_else_0(ctime.bool_not(pad_done), U64{1}))
     }
-    p += pad_len
-    bad = ctime.bool_or(bad, ctime.uint_ne(U64.from_u8(buf[p]), U64{1}))
-    p += 1
-    core.crypto.wipe(lhash)
-    // Only whether the padding was right leaks, as PKCS#1 v2.2 asks.
-    if ctime.cond_is_true(bad) {
-        core.crypto.wipe(buf)
-        return Err(.InvalidPadding)
-    }
-    if ilen - p > output_max_len {
-        core.crypto.wipe(buf)
+    bad = ctime.bool_or(bad, ctime.bool_not(one_found))
+    // A bad padding claims the largest message that fits, so the size does
+    // not tell; ilen - start - pad_count - 1 is garbage only when the
+    // padding is bad, where it is never selected.
+    plaintext_size := ctime.select(bad, max_size, wrapping(U64{ilen - start - 1} - pad_count))
+    too_large: ctime.uint_gt(plaintext_size, max_size)
+    // Zero what is about to be copied out when it must not be; copy the
+    // same bytes from the same place either way.
+    ctime.zeroize_if(ctime.bool_or(bad, too_large), buf, start, ilen - start)
+    plaintext_size = ctime.select(too_large, max_size, plaintext_size)
+    // Move the message to start plaintext_max_size bytes from the end with
+    // an access pattern independent of its size.
+    ctime.memmove_left(buf, ilen - plaintext_max_size, plaintext_max_size, wrapping(max_size - plaintext_size))
+    out: cipher.bytes_of(buf, ilen - plaintext_max_size, plaintext_max_size)
+    V15Unpadded{out: out, olen: plaintext_size, bad: bad, too_large: too_large}
+}
+
+/// The message of a decoded block, its first olen bytes (wiping the rest),
+/// or the decoding's verdict: InvalidPadding, or OutputTooLarge for a good
+/// padding whose message the output cannot hold. Only the verdict and the
+/// length of a message handed out show, as mbedtls returns them.
+unpadded_message: fn(decoded: &V15Unpadded) -> [U8] RSAError! {
+    bad: unpadding_bad(decoded.bad)
+    too_large: unpadding_bad(decoded.too_large)
+    if bad || too_large {
+        core.crypto.wipe(decoded.out)
+        if bad -> return Err(.InvalidPadding)
         return Err(.OutputTooLarge)
     }
-    out: cipher.bytes_of(buf, p, ilen - p)
-    core.crypto.wipe(buf)
+    out: cipher.bytes_of(decoded.out, 0, unpadded_len(decoded.olen))
+    core.crypto.wipe(decoded.out)
     Ok(out)
 }
 
-/// The decoded block of rsaes_pkcs1_v15_unpadding: `out` holds
-/// plaintext_max_size bytes whose first olen are the message; on bad
-/// padding or a message longer than the output they are zero and olen is
-/// plaintext_max_size.
+/// An unpadding's verdict, revealed once the whole block is decoded, as
+/// mbedtls returns it.
+unpadding_bad: fn(bad: ctime.CtCond) -> Bool Never! { ctime.cond_is_true(bad) }
+
+/// The length of a message an unpadding hands out, revealed once its
+/// verdict is good: the caller is handed that many bytes. It is below the
+/// modulus length, so the U32 holds it whole.
+unpadded_len: fn(olen: U64) -> Int Never! { Int{wrapping(U32{olen})} }
+
+/// The decoded block of rsaes_pkcs1_v15_unpadding or rsaes_oaep_unpadding:
+/// `out` holds plaintext_max_size bytes whose first olen are the message;
+/// on bad padding or a message longer than the output they are zero and
+/// olen is plaintext_max_size.
 V15Unpadded: struct {
     out: [U8]
     olen: U64
@@ -955,15 +1009,7 @@ rsa_rsaes_pkcs1_v15_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8], 
     buf := rsa_private(ctx, rng, input) ?? return Err(err)
     decoded := rsaes_pkcs1_v15_unpadding(buf, output_max_len)
     core.crypto.wipe(buf)
-    bad: ctime.cond_is_true(decoded.bad)
-    too_large: ctime.cond_is_true(decoded.too_large)
-    if bad || too_large {
-        core.crypto.wipe(decoded.out)
-        if bad -> return Err(.InvalidPadding)
-        return Err(.OutputTooLarge)
-    }
-    out: cipher.bytes_of(decoded.out, 0, Int.from_u64(decoded.olen))
-    core.crypto.wipe(decoded.out)
+    out: unpadded_message(decoded) ?? return Err(err)
     Ok(out)
 }
 
@@ -1408,4 +1454,47 @@ self_test_key: fn() -> RSAContext {
     ctx.padding = .PKCSV21
     raw: rsa_public(ctx, blocks[0]) ?? panic("raw")
     assert(rsa_rsaes_pkcs1_v15_decrypt_fixed(ctx, rng, raw, 48) == .Err(.BadInput(None)))
+}
+
+#Test("RSAES-OAEP decryption gives each message back, and one InvalidPadding for another label or a spoiled block") {
+    ctx := self_test_key()
+    rsa_set_padding(ctx, .PKCSV21, Val(hashes.Md.SHA256))
+    rng := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, "rsa oaep self-test".bytes())
+    label: "oaep label".bytes()
+    message := [U8]{}
+    loop i in 0..<63 -> message.push(U8{i + 7})
+    // RSA-1024 under SHA-256 holds 128 - 2 * 32 - 2 = 62 bytes.
+    lengths: [Int]{0, 1, 32, 62}
+    loop len in lengths {
+        plain: cipher.bytes_of(message, 0, len)
+        sealed: rsa_rsaes_oaep_encrypt(ctx, rng, label, plain) ?? panic("encrypt {len}")
+        opened: rsa_rsaes_oaep_decrypt(ctx, rng, label, sealed, 62) ?? panic("decrypt {len}")
+        assert(opened == plain)
+        exact: rsa_rsaes_oaep_decrypt(ctx, rng, label, sealed, len) ?? panic("decrypt {len} to its length")
+        assert(exact == plain)
+        if len > 0 -> assert(rsa_rsaes_oaep_decrypt(ctx, rng, label, sealed, len - 1) == .Err(.OutputTooLarge))
+        assert(rsa_rsaes_oaep_decrypt(ctx, rng, "other label".bytes(), sealed, 62) == .Err(.InvalidPadding))
+    }
+    assert(rsa_rsaes_oaep_encrypt(ctx, rng, label, message) == .Err(.BadInput(None)))
+    // A block whose first byte is not 0 is InvalidPadding, and the decoding
+    // zeroes its output; the block as it was decodes to its message.
+    sealed: rsa_rsaes_oaep_encrypt(ctx, rng, label, cipher.bytes_of(message, 0, 16)) ?? panic("encrypt 16")
+    block := rsa_private(ctx, rng, sealed) ?? panic("private operation")
+    spoiled := block.copy()
+    spoiled[0] = U8{1}
+    first: rsa_public(ctx, spoiled) ?? panic("public operation")
+    assert(rsa_rsaes_oaep_decrypt(ctx, rng, label, first, 62) == .Err(.InvalidPadding))
+    zeros := [U8]{}
+    loop _ in 0..<62 -> zeros.push(U8{0})
+    lhash: hashes.hash(.SHA256, label)
+    decoded := rsaes_oaep_unpadding(spoiled, .SHA256, lhash, 62)
+    assert(ctime.cond_is_true(decoded.bad))
+    assert(decoded.out == zeros)
+    good := block.copy()
+    kept := rsaes_oaep_unpadding(good, .SHA256, lhash, 62)
+    assert(!ctime.cond_is_true(kept.bad))
+    assert(!ctime.cond_is_true(kept.too_large))
+    assert_eq(unpadded_len(kept.olen), 16)
+    assert(cipher.bytes_of(kept.out, 0, 16) == cipher.bytes_of(message, 0, 16))
 }

@@ -4104,6 +4104,113 @@ ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8],
     if ct_abs(t) >= (Float{9} / Float{2}) -> panic("TLS 1.2 RSA premaster after the private operation: Welch's t is {t} between good and bad padding; the bound is 4.5")
 }
 
+/// The data block DB = lHash || PS || 0x01 || M of an EME-OAEP block
+/// under SHA-256 with label `label`, `len` bytes, of `kind`: 0 a good one
+/// with a 32-byte message; 1 a good DB (the block's first byte is spoiled
+/// later); 2 a label hash with its last byte flipped; 3 0x02 in place of
+/// the 0x01; 4 a good padding with a 40-byte message, longer than the 32
+/// bytes the output holds.
+ct_oaep_db: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
+    db := [U8]{}
+    lhash: hashes.hash(.SHA256, label)
+    loop i in 0..<32 -> db.push(lhash[i])
+    if kind == 2 -> db[31] = db[31].bit_xor(U8{1})
+    message: if kind == 4 -> 40 else -> 32
+    loop _ in 32..<(len - message - 1) -> db.push(U8{0})
+    separator: if kind == 3 -> U8{2} else -> U8{1}
+    db.push(separator)
+    loop b in ct_bytes(r, message) -> db.push(b)
+    db
+}
+
+/// The block an RSA private operation gives for an RSAES-OAEP ciphertext
+/// (RFC 8017 section 7.1.1 step 3): 0, the masked seed and the masked DB of
+/// ct_oaep_db, `len` bytes; kind 1 has a first byte of 1.
+ct_oaep_block: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
+    seed: ct_bytes(r, 32)
+    block := [U8]{U8{0}}
+    if kind == 1 -> block[0] = U8{1}
+    loop b in seed -> block.push(b)
+    loop b in ct_oaep_db(r, len - 33, label, kind) -> block.push(b)
+    rsa.mgf_mask(block, 33, len - 33, seed, .SHA256)
+    masked: cipher.bytes_of(block, 33, len - 33)
+    rsa.mgf_mask(block, 1, 32, masked, .SHA256)
+    block
+}
+
+/// What an RSAES-OAEP decryption does with a block after its private
+/// operation (rsa.rsaes_oaep_unpadding), to an output of 32 bytes: the
+/// label's hash, the unmasking and the decoding, with its verdict in
+/// constant-time words. Gives the first byte out.
+ct_oaep_after_private: fn(block: [U8], label: [U8]) -> Int {
+    buf := block.copy()
+    lhash: hashes.hash(.SHA256, label)
+    decoded: rsa.rsaes_oaep_unpadding(buf, .SHA256, lhash, 32)
+    Int.from_u8(decoded.out[0])
+}
+
+/// The ciphertext of an OAEP block under SHA-256 with the label `label`:
+/// good (kind 0) or bad of a kind 1 to 4 (ct_oaep_block). Public, as a
+/// ciphertext on the wire is.
+ct_oaep_sealed: fn(key: &rsa.RSAContext, r: &CtRand, label: [U8], kind: Int) -> [U8] {
+    block: ct_oaep_block(r, key.len, label, kind)
+    rsa.rsa_public(key, block) ?? panic("public operation: {err}")
+}
+
+/// The blocks an OAEP timing after the private operation takes in turn: 16
+/// good and 16 bad, of each kind in turn.
+CtOaepBlocks: struct {
+    good: [[U8]]
+    bad: [[U8]]
+    turn: Int
+    label: [U8]
+}
+
+/// One timed run: the input (255, 255), the fixed class's, takes the next
+/// good block, any other the next bad one, in the same turn.
+ct_oaep_block_turn: fn(blocks: &CtOaepBlocks, x: [U8]) -> Int {
+    k: blocks.turn %% 16
+    blocks.turn = blocks.turn + 1
+    if x[0] == (U8{255}) && x[1] == (U8{255}) -> return ct_oaep_after_private(blocks.good[k], blocks.label)
+    ct_oaep_after_private(blocks.bad[k], blocks.label)
+}
+
+// The decoding an RSAES-OAEP decryption runs on the private operation's
+// block, timed on a good block against bad ones of each kind: a spoiled
+// first byte, another label's hash, 0x02 for the 0x01, a message longer
+// than the output. Before the fix, when the decryption returned its verdict
+// as soon as it had one and copied out a message of the length it found,
+// this gave t = -47.6; now it gives -0.9, -1.3 and 0.8. The bound is 4.5.
+#Test("dudect: after its private operation an RSAES-OAEP decryption takes as long on a good block as on each kind of bad one") {
+    r := CtRand{s: U64{67}}
+    key := ct_rsa_key()
+    rng := vec_rng()
+    rsa.rsa_set_padding(key, .PKCSV21, Val(hashes.Md.SHA256))
+    label: "jet oaep".bytes()
+    blocks := CtOaepBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0, label: label.copy()}
+    loop i in 0..<16 {
+        blocks.good.push(ct_oaep_block(r, key.len, label, 0))
+        blocks.bad.push(ct_oaep_block(r, key.len, label, 1 + i %% 4))
+    }
+    // The blocks are what the private operation gives: each good one's
+    // ciphertext decrypts to its message, each bad one's fails.
+    loop i in 0..<16 {
+        good: blocks.good[i]
+        sealed: rsa.rsa_public(key, good) ?? panic("public operation")
+        opened: rsa.rsa_rsaes_oaep_decrypt(key, rng, label, sealed, 32) ?? panic("decrypt a good block: {err}")
+        assert_eq(opened.len(), 32)
+        assert_eq(ct_oaep_after_private(good, label), Int.from_u8(opened[0]))
+        bad_sealed: rsa.rsa_public(key, blocks.bad[i]) ?? panic("public operation")
+        if i %% 4 == 3 {
+            assert(rsa.rsa_rsaes_oaep_decrypt(key, rng, label, bad_sealed, 32) == .Err(.OutputTooLarge))
+        } else {
+            assert(rsa.rsa_rsaes_oaep_decrypt(key, rng, label, bad_sealed, 32) == .Err(.InvalidPadding))
+        }
+    }
+    t: ct_measure("RSAES-OAEP after the private operation", 20000, 1, [U8]{255, 255}, (x) -> ct_oaep_block_turn(blocks, x))
+    if ct_abs(t) >= (Float{9} / Float{2}) -> panic("RSAES-OAEP after the private operation: Welch's t is {t} between good and bad blocks; the bound is 4.5")
+}
+
 // ---------------------------------------------------------------------------
 // Constant time: the emission check's entry
 // ---------------------------------------------------------------------------
@@ -4212,6 +4319,16 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     kx_bad_sealed: ct_rsa_kx_sealed(ctx, rng, r, 1)
     kx_bad := ct_rsa_kx_server(ctx, kx_bad_sealed)
     assert_eq(ct_rsa_kx_premaster(kx_bad, rng).len(), 48)
+    // An RSAES-OAEP decryption of a good block and of a bad one: after the
+    // private operation only the decoding's verdict shows.
+    oaep_label: "jet oaep".bytes()
+    oaep := rsa.rsa_copy(ctx)
+    rsa.rsa_set_padding(oaep, .PKCSV21, Val(hashes.Md.SHA256))
+    oaep_good_sealed: ct_oaep_sealed(oaep, r, oaep_label, 0)
+    oaep_good: rsa.rsa_rsaes_oaep_decrypt(oaep, rng, oaep_label, oaep_good_sealed, 32) ?? panic("OAEP decrypt: {err}")
+    assert_eq(oaep_good.len(), 32)
+    oaep_bad_sealed: ct_oaep_sealed(oaep, r, oaep_label, 2)
+    assert(rsa.rsa_rsaes_oaep_decrypt(oaep, rng, oaep_label, oaep_bad_sealed, 32) == .Err(.InvalidPadding))
     // core.crypto's own paths beside the expert ones above: the envelope
     // (X25519, HKDF-SHA256, XChaCha20-Poly1305) sealed to and opened by a
     // test identity, a key wrapped and unwrapped, Ed25519 signing, X25519,
