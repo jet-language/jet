@@ -1,0 +1,28 @@
+package: {
+    name: "scoped_effects"
+    authority: { allow: [FS.Read, IO] }
+}
+// An effect argument names a scope: a folder, a host or a device. The checker
+// proves every constant path a body reads is inside its row's scope, by whole
+// path components, so `-[FS.Read("ScopedEffects.jet")]>` lets `first_line`
+// read that one file and nothing else.
+use files: core.files
+
+first_line: fn() -[FS.Read("ScopedEffects.jet")]> String {
+    text: files.read("ScopedEffects.jet") ?? ""
+    text.split("\n").to_list()[0]
+}
+
+// A folder scope covers every file below it.
+has_golden: fn() -[FS.Read("./")]> Bool { (files.read("ScopedEffects.out") ?? "").len() > 0 }
+
+// A scoped denial refuses its folder and leaves every other path open.
+outside_secrets: fn() -[!FS.Read("secrets/")]> Int {
+    (files.read("ScopedEffects.jet") ?? "").split("\n").to_list().len()
+}
+
+run: fn() {
+    print(first_line())
+    print("golden present: {has_golden()}")
+    print("more than ten lines: {outside_secrets() > 10}")
+}

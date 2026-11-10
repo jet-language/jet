@@ -2118,6 +2118,52 @@ call with a precise leaf under its own root records only that leaf, so
 still covers both. Application authority reads these sema facts and never
 alters them.
 
+### Effect scopes
+
+An effect argument names a scope from Core's scope kinds: a folder
+(`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a device
+(`GPU("npu")`). The argument is one plain string, with no interpolation,
+quote or backslash; `Mem` and `Panic` take none. One covers rule
+(`Compiler/JetFoundation/Source/Policy/EffectScope.jet`) decides coverage for
+effect rows, denials and run grants, from three fixed laws
+(D-EFFECT-ARGS1):
+
+- A path covers by whole components after normalization: `templates/` covers
+  `templates/home.html` but not `templates2/`, and `templates/../secret.txt`
+  is `secret.txt`.
+- A host covers by exact match after lower-casing and dropping one trailing
+  `.`: `api.example.com` never covers `evilapi.example.com`. Internationalized
+  names are compared as written.
+- Any other argument covers by equality.
+
+A bare effect covers every scoped instance of itself and its leaves, so `FS`
+and `FS.Read` both cover `FS.Read("assets/")`. A scoped effect never covers
+the bare one.
+
+A call names its scope through a constant argument. The `core.files`
+functions that read or write the one path their first argument names, such
+as `read`, `read_bytes`, `open`, `write` and `create`, need `FS.Read` or
+`FS.Write` scoped to that path when it is a string literal:
+`files.read("assets/logo.txt")` needs `FS.Read("assets/logo.txt")`. An
+interpolated literal names the folder its constant text ends in, so
+`files.read("assets/{name}")` needs `FS.Read("assets/")`. `http.get` with a
+constant URL host needs `Net` scoped to that host. A path known only at run
+time names no scope and needs the bare effect.
+
+```jet
+load: fn() -[FS.Read("assets/")]> String {
+    files.read("assets/logo.txt") ?? ""
+}
+```
+
+A row with a scope is checked at build time: a constant path outside it is
+E0740, and so is a run-time path, since the bare need is outside every scope.
+A denial (`-[!FS.Read("secrets/")]>`) refuses each need it covers with E0749;
+a need that only overlaps it, such as `FS.Read("assets/")` under a denied
+`assets/private/`, builds. Run grants (`--allow`, `--deny`) use the same
+spelling and rule, and a mediated call checks its run-time path against them
+(see "Application authority").
+
 ### Application authority
 
 Every effect is allowed unless code denies it (D-AUTH-DEFAULT1). With no

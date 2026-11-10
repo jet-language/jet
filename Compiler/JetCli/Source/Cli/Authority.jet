@@ -20,7 +20,9 @@ use {
         authority_is_deny_only,
         authority_own_process_leaf,
         authority_parse_root,
+        authority_scoped_right,
         diagnostic_from_registry,
+        effect_scope_covers,
     ]
     jet_sema.[
         sema_effect_builtin_leaf_unknown,
@@ -94,16 +96,13 @@ jet_cli_parse_right: fn(raw: String) -> String? Never! {
     Val(canonical)
 }
 
-// `covers`: a bound covers itself and every descendant; a resource-qualified
-// bound (`FS.Read:/data`) only across a `/` boundary.
+// `covers`: the one covers rule (jet_foundation effect_scope_covers) over
+// canonical rights.
 jet_cli_right_covers: fn(raw_bound: String, raw_right: String) -> Bool Never! {
     bound: jet_cli_parse_right(raw_bound) ?? raw_bound.trim()
     right: jet_cli_parse_right(raw_right) ?? raw_right.trim()
     if right == bound -> return true
-    if !right.starts_with(bound) || right.len() == bound.len() -> return false
-    next_byte: right.bytes()[bound.bytes().len()]
-    if bound.contains(":") -> return next_byte == (U8{47})
-    next_byte == (U8{46}) || next_byte == (U8{58}) || next_byte == (U8{47})
+    effect_scope_covers(authority_scoped_right(bound), authority_scoped_right(right))
 }
 
 jet_cli_covers_any: fn(bounds: [String], right: String) -> Bool Never! {

@@ -65,9 +65,10 @@ authority_holds: fn(rights: [String]) -> [String] Never! {
     out
 }
 
-// Root segment of a dotted right (`FS.Read` -> `FS`).
+// Root segment of a dotted right (`FS.Read` -> `FS`), with any scope
+// argument set aside (`Net("api.example.com")` -> `Net`).
 authority_root: fn(right: String) -> String Never! {
-    parts: right.split(".").to_list()
+    parts: effect_scope_base(right).split(".").to_list()
     if parts.len() == 0 -> return right.copy()
     parts[0]
 }
@@ -93,35 +94,46 @@ authority_parse_root: fn(right: String) -> String? Never! {
     None
 }
 
-// Preserve a right's leaf spelling while normalizing its canonical root.
+// Preserve a right's leaf spelling and scope argument while normalizing its
+// canonical root.
 authority_parse_right: fn(right: String) -> String? Never! {
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
     trimmed := right.trim()
-    root: authority_parse_root(trimmed) ?? return None
+    split: effect_scope_split(trimmed)
+    root: authority_parse_root(split.base) ?? return None
     if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
-    raw: trimmed.bytes()
+    canonical := root.copy()
+    raw: split.base.bytes()
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == 46 {
             leaf: String.from_bytes(raw[index + 1..<raw.len()]) ?? ""
-            return Val("{root}.{leaf}")
+            canonical = "{root}.{leaf}"
+            break
         }
     }
-    Val(root)
+    if split.scope == .Val(scope) -> return Val(effect_scope_name(canonical, scope))
+    Val(canonical)
 }
 
-// A bound covers itself and every descendant in the rights tree.
-// Resource-qualified rights use `:` for hosts and paths (`FS.Read:/data`); a
-// qualified descendant must cross a `/` boundary, so `/data` does not cover
-// `/database`.
+// A right in the scoped spelling. The resource-qualified holds of an
+// Authority value (`FS.Read:/data`, `Net:example.com`) name the same scopes
+// as `FS.Read("/data")` and `Net("example.com")`, so both spellings meet one
+// covers rule.
+authority_scoped_right: fn(right: String) -> String Never! {
+    if right.contains("(") -> return right.copy()
+    parts: right.split_once(":") ?? return right.copy()
+    if parts.after == "" -> return right.copy()
+    effect_scope_name(parts.before, parts.after)
+}
+
+// A bound covers itself and every descendant in the rights tree, and a
+// scoped bound covers by its scope's law (EffectScope.jet): `/data` covers
+// `/data/a.txt` but not `/database`.
 authority_covers: fn(bound: String, right: String) -> Bool Never! {
     canonical_bound: authority_parse_right(bound) ?? bound.trim()
     canonical_right: authority_parse_right(right) ?? right.trim()
     if canonical_right == canonical_bound -> return true
-    if !canonical_right.starts_with(canonical_bound) -> return false
-    qualified: canonical_bound.contains(":")
-    next_byte: Int.from_u8(canonical_right.bytes()[canonical_bound.bytes().len()])
-    if qualified -> return next_byte == 47
-    next_byte == 46 || next_byte == 58 || next_byte == 47
+    effect_scope_covers(authority_scoped_right(canonical_bound), authority_scoped_right(canonical_right))
 }
 
 authority_covers_any: fn(bounds: [String], right: String) -> Bool Never! {

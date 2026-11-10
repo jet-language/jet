@@ -36,6 +36,13 @@ use jet_foundation.[
     diagnostic_registry_row,
     Effect,
     EffectRowEntry,
+    effect_scope_argument_valid,
+    effect_scope_covers,
+    effect_scope_is_scoped,
+    effect_scope_name,
+    effect_scope_of_argument,
+    effect_scope_published_effect,
+    effect_scope_split,
     FnBody,
     Func,
     SharedLifetime,
@@ -352,6 +359,18 @@ SemaEffectNode: struct {
     // effects it lists (E0756), and those its row denies (E0749).
     library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
     library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}}
+    // Calls to a Core scope publisher with a constant argument
+    // (effect_scope_published_effect): the callee's bare effect reaches this
+    // body as the scoped one. A publisher it also calls with a run-time
+    // argument is in `bare_scope_callees`, and reaches it bare as well.
+    scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}}
+    bare_scope_callees: [String]{[String]{}}
+}
+
+SemaEffectScopedCall: struct {
+    callee: String
+    published: String
+    scoped: String
 }
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -659,7 +678,13 @@ sema_effect_set_union: fn(target: &[String], values: [String]) -> Bool Never! {
 sema_effect_parse_name: fn(name: String) -> String? {
     if name == "" || name.starts_with("..") -> return None
     base := name
-    if base.contains("(") {
+    scoped: effect_scope_split(name)
+    if scoped.scope == .Val(scope) {
+        // A scope argument names a folder, a host or a device; the deny-only
+        // `Mem` and `Panic` roots name none.
+        if !effect_scope_argument_valid(scope) || authority_is_deny_only(scoped.base) -> return None
+        base = scoped.base
+    } else if base.contains("(") {
         parts: base.split("(").to_list()
         if parts.len() != 2 -> return None
         closing: parts[1].split(")").to_list()
@@ -942,15 +967,28 @@ sema_effect_apply_via: fn(nodes: &[SemaEffectNode], node_index: Int, function: F
     }
 }
 
-// `e0740`: the span is the row's first entry.
+// `e0740`: the span is the row's first entry. A scoped need that a bare
+// need in the same list covers is not named twice.
 sema_effect_bound_diagnostic: fn(node: SemaEffectNode, over: [String]) -> Diagnostic {
-    sorted := over.copy()
+    sorted := [String]{}
+    loop name in over {
+        if !sema_effect_bare_covered(over, name) -> sorted.push(name.copy())
+    }
     sorted.sort()
     over_list: sema_effect_show(sorted)
     declared: if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
     span: node.row_span ?? node.name_span
     diagnostic: sema_error("E0740", span, "`{node.name}` uses the effect `{over_list}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those; `{over_list}` is outside that set", "add `{over_list}` to the effect list, or stop using it in `{node.name}`")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
+}
+
+// True when `name` is scoped and a bare name in `names` covers it.
+sema_effect_bare_covered: fn(names: [String], name: String) -> Bool Never! {
+    if !effect_scope_is_scoped(name) -> return false
+    loop other in names {
+        if !effect_scope_is_scoped(other) && effect_scope_covers(other, name) -> return true
+    }
+    false
 }
 
 // `e0749` / `e0749_panic`: a reached Panic names the reachable function where
@@ -2462,6 +2500,45 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
     }
 }
 
+// A call to a Core scope publisher narrows the effect the callee declares to
+// the scope its constant first argument names: `files.read("assets/a.png")`
+// needs `FS.Read("assets/a.png")`. A run-time argument names no scope, so
+// that call needs the bare effect (EffectScope.jet).
+sema_effect_record_scope: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
+    callee_key: fact.callee.map((callee) -> callee.key) ?? return
+    published: effect_scope_published_effect(callee_key) ?? return
+    if sema_effect_call_scope(tree, node, published) == .Val(scope) {
+        scoped: effect_scope_name(published, scope)
+        loop call in nodes[node_index].scoped_calls {
+            if call.callee == callee_key && call.scoped == scoped -> return
+        }
+        nodes[node_index].scoped_calls.push(SemaEffectScopedCall{callee: callee_key, published: published, scoped: scoped})
+    } else if !nodes[node_index].bare_scope_callees.contains(callee_key) {
+        nodes[node_index].bare_scope_callees.push(callee_key)
+    }
+}
+
+// The scope a publisher call's first argument names for `effect`, when that
+// argument is a string literal whose constant text names one.
+sema_effect_call_scope: fn(tree: BodyTree, node: BodyNode, published: String) -> String? Never! {
+    if node.kind == .Call(_, _, args) {
+        if args.len() == 0 -> return None
+        argument: body_node(tree, args[0].value)
+        if argument.kind == .StrLit(parts) {
+            text := ""
+            loop part in parts {
+                if part == .Literal(piece) {
+                    text = "{text}{piece}"
+                } else {
+                    return effect_scope_of_argument(published, text, false)
+                }
+            }
+            return effect_scope_of_argument(published, text, true)
+        }
+    }
+    None
+}
+
 // `close(value)`: an edge to the value type's own `close` method, the
 // function codegen calls for it. Methods are indexed by their owner type's
 // name, so a same-named type in another module adds its method too: the row
@@ -2531,6 +2608,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
+                            sema_effect_record_scope(nodes, node_index, tree, node, value)
                             sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_instantiation(nodes, node_index, tree, node, value)
                         }
@@ -2938,10 +3016,29 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
         incoming: pending[cursor]
         cursor += 1
         loop caller in callers[incoming.node] {
-            if sema_effect_set_add(solved[caller], incoming.name) -> pending.push(SemaEffectPending{node: caller, name: incoming.name})
+            if nodes[caller].scoped_calls.len() > 0 {
+                sema_effect_solve_scoped(solved, pending, nodes[caller], caller, nodes[incoming.node].key, incoming.name)
+            } else if sema_effect_set_add(solved[caller], incoming.name) {
+                pending.push(SemaEffectPending{node: caller, name: incoming.name})
+            }
         }
     }
     solved
+}
+
+// One effect reaching `caller` from the callee `callee_key` when the caller
+// calls scope publishers: a publisher's bare effect arrives as each scope the
+// caller's constant arguments name, and bare too only when it also calls that
+// publisher with a run-time argument.
+sema_effect_solve_scoped: fn(solved: &[[String]], pending: &[SemaEffectPending], node: SemaEffectNode, caller: Int, callee_key: String, name: String) Never! {
+    renamed := false
+    loop call in node.scoped_calls {
+        if call.callee != callee_key || call.published != name -> next
+        renamed = true
+        if sema_effect_set_add(solved[caller], call.scoped) -> pending.push(SemaEffectPending{node: caller, name: call.scoped})
+    }
+    if renamed && !node.bare_scope_callees.contains(callee_key) -> return
+    if sema_effect_set_add(solved[caller], name) -> pending.push(SemaEffectPending{node: caller, name: name})
 }
 
 // Rust `solve_reachability` "secret" row: only a direct `Secret` read seeds

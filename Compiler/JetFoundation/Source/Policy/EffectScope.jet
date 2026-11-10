@@ -1,0 +1,193 @@
+// The one covers rule for effects that name a scope (spec.md "Effect
+// scopes"). An effect argument names a scope from Core's scope kinds: a
+// folder (`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a
+// device (`GPU("npu")`). Rows, run grants (`--allow`) and denials all decide
+// coverage here, from three fixed laws, so coverage is reflexive, transitive
+// and always terminates:
+// - an `FS` argument is a path; it covers by whole components after
+//   normalization, so `templates/` covers `templates/home.html` but not
+//   `templates2/`, and `templates/../secret.txt` is `secret.txt`;
+// - a `Net` argument is a host; it covers by exact match after lower-casing,
+//   so `api.example.com` never covers `evilapi.example.com`;
+// - any other argument covers by equality.
+// A bare effect (`FS.Read`) covers every scoped instance of itself and of its
+// leaves. A scoped effect never covers the bare one.
+
+// An effect name split at its scope argument: `FS.Read("templates/")` is
+// `FS.Read` with scope `templates/`; a name with no quoted argument is bare.
+EffectScopeName: struct {
+    base: String
+    scope: String?
+}
+
+effect_scope_split: fn(name: String) -> EffectScopeName Never! {
+    trimmed: name.trim()
+    if !trimmed.ends_with("\")") -> return EffectScopeName{base: trimmed.copy(), scope: None}
+    parts: trimmed.split_once("(\"") ?? return EffectScopeName{base: trimmed.copy(), scope: None}
+    inner: parts.after.slice(0..<parts.after.len() - 2)
+    EffectScopeName{base: parts.before.trim().copy(), scope: Val(inner.copy())}
+}
+
+// The written spelling of `base` scoped to `scope`.
+effect_scope_name: fn(base: String, scope: String) -> String Never! {
+    "{base}(\"{scope}\")"
+}
+
+// Whether `name` carries a scope argument.
+effect_scope_is_scoped: fn(name: String) -> Bool Never! {
+    effect_scope_split(name).scope != None
+}
+
+// The bare effect `name` scopes (`FS.Read` for `FS.Read("assets/")`).
+effect_scope_base: fn(name: String) -> String Never! {
+    effect_scope_split(name).base
+}
+
+// A scope argument the laws accept: not empty, and free of the quote and
+// backslash a written row could not spell back.
+effect_scope_argument_valid: fn(scope: String) -> Bool Never! {
+    if scope == "" -> return false
+    loop byte in scope.bytes() {
+        if byte == (U8{34}) || byte == (U8{92}) || byte < (U8{32}) -> return false
+    }
+    true
+}
+
+// The scope kind of an effect root: `path` for `FS`, `host` for `Net`, and
+// `value` for every other root, whose arguments cover by equality.
+effect_scope_kind: fn(base: String) -> String Never! {
+    root: base.split(".").to_list()[0]
+    if root == "FS" -> return "path"
+    if root == "Net" -> return "host"
+    "value"
+}
+
+// A path's components after normalization: `.` and empty components go, and
+// `..` takes back the component before it. An absolute path starts with
+// `/`; a `..` above the root stays at the root, and a `..` above a relative
+// start is kept, so it never falls inside a relative scope.
+effect_scope_path_parts: fn(path: String) -> [String] Never! {
+    parts := [String]{}
+    if path.starts_with("/") -> parts.push("/")
+    loop segment in path.split("/") {
+        if segment == "" || segment == "." -> next
+        if segment == ".." {
+            if parts.len() == 0 || parts[parts.len() - 1] == ".." {
+                parts.push("..")
+            } else if parts[parts.len() - 1] != "/" {
+                _ := parts.pop()
+            }
+            next
+        }
+        parts.push(segment.copy())
+    }
+    parts
+}
+
+// The path law: `bound` covers `need` when its components are a prefix of
+// the need's.
+effect_scope_path_covers: fn(bound: String, need: String) -> Bool Never! {
+    held: effect_scope_path_parts(bound)
+    asked: effect_scope_path_parts(need)
+    if held.len() > asked.len() -> return false
+    loop index in 0..<held.len() {
+        if held[index] != asked[index] -> return false
+    }
+    true
+}
+
+// A host lower-cased, with the one trailing `.` of a fully qualified name
+// dropped.
+effect_scope_host: fn(host: String) -> String Never! {
+    bytes := [U8]{}
+    loop byte in host.trim().bytes() {
+        if byte >= (U8{65}) && byte <= (U8{90}) {
+            bytes.push(byte + (U8{32}))
+        } else {
+            bytes.push(byte)
+        }
+    }
+    if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{46}) -> _ := bytes.pop()
+    String.from_bytes(bytes) ?? host.copy()
+}
+
+// The host law: exact match after lower-casing.
+effect_scope_host_covers: fn(bound: String, need: String) -> Bool Never! {
+    effect_scope_host(bound) == effect_scope_host(need)
+}
+
+// Whether the bare effect `bound` covers the bare effect `need`: itself and
+// every leaf below it (`FS` covers `FS.Read`).
+effect_scope_base_covers: fn(bound: String, need: String) -> Bool Never! {
+    if bound == need -> return true
+    need.starts_with("{bound}.")
+}
+
+// The covers rule: `bound` covers `need` when the bare names cover and, if
+// `bound` names a scope, `need` names one its law covers.
+effect_scope_covers: fn(bound: String, need: String) -> Bool Never! {
+    if bound == need -> return true
+    held: effect_scope_split(bound)
+    asked: effect_scope_split(need)
+    if !effect_scope_base_covers(held.base, asked.base) -> return false
+    held_scope: held.scope ?? return true
+    asked_scope: asked.scope ?? return false
+    kind: effect_scope_kind(held.base)
+    if kind == "path" -> return effect_scope_path_covers(held_scope, asked_scope)
+    if kind == "host" -> return effect_scope_host_covers(held_scope, asked_scope)
+    held_scope == asked_scope
+}
+
+// Core's scope publishers: the `core.files` functions whose first argument
+// is the one path they read or write, and `core.http.get`, whose URL names
+// the one host it reaches. A call with a constant argument needs the
+// published effect scoped to that argument; any other call needs it bare.
+EFFECT_SCOPE_READERS: [String]{"open", "read", "read_bytes", "map", "read_at", "open_directory", "list_dir", "stat", "lstat", "is_dir", "can_read", "canonicalize", "read_link", "space"}
+EFFECT_SCOPE_WRITERS: [String]{"create", "append", "write", "write_bytes", "append_all", "write_atomic", "write_at", "create_dir_all", "remove", "remove_dir", "set_mode"}
+
+// The effect the publisher `callee_key` (a `kind:module:owner:name` symbol
+// key) declares, or None for any other callee.
+effect_scope_published_effect: fn(callee_key: String) -> String? Never! {
+    if callee_key.ends_with(":<corelib>/core.http::get") -> return Val("Net")
+    if !callee_key.contains(":<corelib>/core.files::") -> return None
+    name: (callee_key.cut_last("::") ?? return None).after
+    if EFFECT_SCOPE_READERS.contains(name) -> return Val("FS.Read")
+    if EFFECT_SCOPE_WRITERS.contains(name) -> return Val("FS.Write")
+    None
+}
+
+// The scope a publisher's argument names for `effect`, from the argument's
+// constant text: all of it when `whole`, else the text before the first
+// interpolation. A path scope is the whole path, or the folder the constant
+// text ends in (`assets/` for `"assets/{name}"`); a host scope is the URL's
+// host. None when the constant text names no scope.
+effect_scope_of_argument: fn(published: String, text: String, whole: Bool) -> String? Never! {
+    if effect_scope_kind(published) == "host" -> return effect_scope_url_host(text, whole)
+    scope := text.copy()
+    if !whole {
+        folder: text.cut_last("/") ?? return None
+        scope = "{folder.before}/"
+    }
+    if !effect_scope_argument_valid(scope) -> return None
+    Val(scope)
+}
+
+// The host of a `scheme://host[:port][/path]` URL whose constant text
+// reaches past the host, or None.
+effect_scope_url_host: fn(text: String, whole: Bool) -> String? Never! {
+    rest: (text.split_once("://") ?? return None).after
+    bytes: rest.bytes()
+    end := bytes.len()
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if code == 64 -> return None
+        if code == 47 || code == 58 || code == 63 || code == 35 {
+            end = index
+            break
+        }
+    }
+    if end == bytes.len() && !whole -> return None
+    host: String.from_bytes(bytes[0..<end]) ?? return None
+    if !effect_scope_argument_valid(host) -> return None
+    Val(host)
+}

@@ -1,4 +1,4 @@
-Error [jet.ProhibitedEffectReached]: `rates` reaches the `FS.Read` effect, which module `pricing` denies
+Error [jet.ProhibitedEffectReached]: `rates` reaches the `FS.Read("rates.txt")` effect, which module `pricing` denies
   --> tests/ui/effects/module_cap_denial_is_e0749.jet:5:5
     |
   5 |     rates: fn() -> String { fs.read("rates.txt") ?? "" }
@@ -8,7 +8,7 @@ Error [jet.ProhibitedEffectReached]: `rates` reaches the `FS.Read` effect, which
   3 | #FX(!Net, !FS)
     | ^^^^^^^^^^^^^^ module `pricing` is capped here
  Why: The module's `#FX(…)` cap denies `FS` to every function inside it and every callee it can reach
- Fix: Remove the call that introduces `FS.Read`, move `rates` out of module `pricing`, or drop `!FS` from the module's `#FX(…)` cap
+ Fix: Remove the call that introduces `FS.Read("rates.txt")`, move `rates` out of module `pricing`, or drop `!FS` from the module's `#FX(…)` cap
  Denial: invocation
  Call chain: rates
  Scope chain: module pricing

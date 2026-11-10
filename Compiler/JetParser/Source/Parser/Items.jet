@@ -86,6 +86,8 @@ use {
         expr_span,
         diagnostic_with_edit,
         diagnostic_with_structured_edit,
+        effect_scope_argument_valid,
+        effect_scope_name,
         marker_registered,
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
@@ -1349,7 +1351,7 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
             prohibited: parser_current_kind(state) == TOKEN_BANG
             if prohibited -> parser_bump(state)
             entry: parser_expect_effect_path_name(state)
-            if !prohibited && entry.name.contains("(") {
+            if !prohibited && entry.name.starts_with("Mem.Alloc(") {
                 parser_add_fatal_code(state, "E0119", entry.span, "`{entry.name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `-[!{entry.name}]>`")
                 break
             }
@@ -1362,8 +1364,9 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
     effects
 }
 
-// An effect path `ident (.ident)*`; the one
-// parameterized entry is the bounded memory denial `Mem.Alloc(above: N)`.
+// An effect path `ident (.ident)*`, with an optional argument: the bounded
+// memory denial `Mem.Alloc(above: N)`, or a scope string naming a folder, a
+// host or a device (`FS.Read("templates/")`, `Net("api.example.com")`).
 parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "for an effect name")
     name := parser_value(state, first)
@@ -1373,6 +1376,22 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         segment: parser_expect_name(state, "for an effect path segment after `.`")
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
+    }
+    if name != "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
+        parser_bump(state)
+        token: parser_current(state)
+        if token.kind != TOKEN_STRING || parser_interpolations(state, token) > 0 {
+            parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` takes one plain string scope", "an effect argument names a folder, a host or a device as fixed text", "write `{name}(\"templates/\")`")
+            return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+        }
+        parser_bump(state)
+        scope: parser_value(state, token)
+        if !effect_scope_argument_valid(scope) {
+            parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` needs a non-empty scope without quotes or backslashes", "a scope is a folder, a host or a device name", "write `{name}(\"templates/\")`")
+            return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+        }
+        close: parser_expect(state, TOKEN_RPAREN, "`)` after the effect scope")
+        return NamedSpan{name: effect_scope_name(name, scope), span: Span{start: first.span.start, end: close.span.end}}
     }
     if name == "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)

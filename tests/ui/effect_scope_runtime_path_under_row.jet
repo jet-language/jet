@@ -1,0 +1,9 @@
+// A path known only at run time names no scope, so it needs the bare
+// `FS.Read`, which the scoped row `FS.Read("assets/")` doesn't cover.
+use files: core.files
+
+load: fn(name: String) -[FS.Read("assets/")]> String {
+    files.read(name) ?? ""
+}
+
+run: fn() { print(load("assets/logo.txt")) }

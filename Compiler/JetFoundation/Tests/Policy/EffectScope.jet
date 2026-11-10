@@ -1,0 +1,69 @@
+// The one covers rule for scoped effects (Policy/EffectScope.jet): the path,
+// host and value laws, the bare and scoped orders, and the scope a Core
+// publisher's constant argument names.
+use jet_foundation.[
+    authority_covers,
+    effect_scope_covers,
+    effect_scope_name,
+    effect_scope_of_argument,
+    effect_scope_published_effect,
+    effect_scope_split,
+    sema_effect_covers,
+]
+
+#Test("a scoped effect splits into its bare effect and its scope") {
+    split: effect_scope_split("FS.Read(\"templates/\")")
+    assert_eq(split.base, "FS.Read")
+    assert_eq(split.scope ?? "", "templates/")
+    assert(effect_scope_split("FS.Read").scope == None, "a bare effect has no scope")
+    assert(effect_scope_split("Mem.Alloc(above: 64)").scope == None, "a memory bound is not a scope")
+    assert_eq(effect_scope_name("Net", "api.example.com"), "Net(\"api.example.com\")")
+}
+
+#Test("a path scope covers by whole components after normalization") {
+    assert(effect_scope_covers("FS.Read(\"templates/\")", "FS.Read(\"templates/home.html\")"), "a folder covers its files")
+    assert(effect_scope_covers("FS.Read(\"templates\")", "FS.Read(\"templates/a/b.txt\")"), "the trailing slash is optional")
+    assert(effect_scope_covers("FS.Read(\"./templates/\")", "FS.Read(\"templates/x/../y.txt\")"), "`.` and `..` normalize")
+    assert(!effect_scope_covers("FS.Read(\"templates/\")", "FS.Read(\"templates2/a.txt\")"), "a sibling with a longer name is outside")
+    assert(!effect_scope_covers("FS.Read(\"templates/\")", "FS.Read(\"templates/../secret.txt\")"), "`..` leaves the folder")
+    assert(!effect_scope_covers("FS.Read(\"templates/\")", "FS.Read(\"../templates/a.txt\")"), "a parent-relative path is outside")
+    assert(!effect_scope_covers("FS.Read(\"/data\")", "FS.Read(\"/database/a\")"), "an absolute folder covers whole components")
+    assert(!effect_scope_covers("FS.Read(\"/data\")", "FS.Read(\"data/a\")"), "absolute and relative paths differ")
+}
+
+#Test("a host scope covers the same host only") {
+    assert(effect_scope_covers("Net(\"api.example.com\")", "Net(\"API.Example.com.\")"), "hosts compare without case or the trailing dot")
+    assert(!effect_scope_covers("Net(\"api.example.com\")", "Net(\"evilapi.example.com\")"), "a longer host is another host")
+    assert(!effect_scope_covers("Net(\"example.com\")", "Net(\"api.example.com\")"), "a parent domain covers no subdomain")
+}
+
+#Test("any other scope covers by equality") {
+    assert(effect_scope_covers("GPU(\"npu\")", "GPU(\"npu\")"), "a device covers itself")
+    assert(!effect_scope_covers("GPU(\"npu\")", "GPU(\"npu0\")"), "another device is outside")
+}
+
+#Test("a bare effect covers its scoped leaves and a scoped one never the bare") {
+    assert(effect_scope_covers("FS", "FS.Read(\"a.txt\")"), "a root covers a scoped leaf")
+    assert(effect_scope_covers("FS.Read", "FS.Read(\"a.txt\")"), "a leaf covers its scoped instances")
+    assert(!effect_scope_covers("FS.Read(\"assets/\")", "FS.Read"), "a scope never covers a run-time path")
+    assert(!effect_scope_covers("FS.Read(\"assets/\")", "FS.Write(\"assets/a\")"), "a scope covers only its own effect")
+    assert(effect_scope_covers("FS(\"assets/\")", "FS.Read(\"assets/a\")"), "a scoped root covers its scoped leaves")
+    assert(!effect_scope_covers("FS.Read", "FS.ReadExtra"), "leaves split at dots")
+    assert(sema_effect_covers("FS", "FS.Read"), "effect rows use the same rule")
+    assert(authority_covers("FS.Read:/data", "FS.Read(\"/data/a\")"), "authority holds use the same rule")
+    assert(!authority_covers("FS.Read:/data", "FS.Read:/database"), "a qualified hold covers whole components")
+}
+
+#Test("a publisher's constant argument names its scope") {
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::read") ?? "", "FS.Read")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::write_bytes") ?? "", "FS.Write")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.http::get") ?? "", "Net")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files:FileReader:read") == None, "a method publishes nothing")
+    assert_eq(effect_scope_of_argument("FS.Read", "assets/logo.txt", true) ?? "", "assets/logo.txt")
+    assert_eq(effect_scope_of_argument("FS.Read", "assets/icons/", false) ?? "", "assets/icons/")
+    assert(effect_scope_of_argument("FS.Read", "logo", false) == None, "no folder before the interpolation")
+    assert_eq(effect_scope_of_argument("Net", "https://api.example.com/v1/", false) ?? "", "api.example.com")
+    assert_eq(effect_scope_of_argument("Net", "http://api.example.com:8080", true) ?? "", "api.example.com")
+    assert(effect_scope_of_argument("Net", "https://api.", false) == None, "the host continues at run time")
+    assert(effect_scope_of_argument("Net", "https://user@evil.example/", true) == None, "user info hides the host")
+}

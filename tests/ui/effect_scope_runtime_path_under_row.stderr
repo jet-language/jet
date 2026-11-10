@@ -1,0 +1,10 @@
+Error [jet.EffectBoundExceeded]: `load` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/effect_scope_runtime_path_under_row.jet:5:26
+    |
+  5 | load: fn(name: String) -[FS.Read("assets/")]> String {
+    |                          ^^^^^^^^^^^^^^^^^^
+ Why: The signature declares `-[FS.Read("assets/")]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `load`
+ Denial: invocation
+ Call chain: load
+More: jet-lang.dev/e/E0740

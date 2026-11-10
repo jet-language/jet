@@ -538,8 +538,8 @@ pkg_jetlib_check_before_map: fn(library: String, stamp: JetLibStamp, grant: [Str
     if pkg_jetlib_check_compiler_identity(stamp, version) == .Val(problem) -> return JetLibRefusal{diagnostics: [Diagnostic]{problem}}
     pkg_jetlib_check_effect_grant(library, stamp, grant)
 }
+// The one covers rule (Policy/EffectScope.jet): an effect covers itself and
+// every leaf below it, and a scoped effect covers by its scope's law.
 sema_effect_covers: fn(bound: String, effect_name: String) -> Bool Never! {
-    if bound == effect_name -> return true
-    prefix: "{bound}."
-    effect_name.starts_with(prefix)
+    effect_scope_covers(bound, effect_name)
 }
