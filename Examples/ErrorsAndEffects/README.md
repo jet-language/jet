@@ -31,7 +31,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [EffectTree](Effects/EffectTree.jet) — The ten effect names (`Net`, `FS`, `DB`, …) are tree ROOTS.
 - [FileScope](Effects/FileScope.jet)
 - [GenericRow](Effects/GenericRow.jet) — A generic type's row belongs to each instance: what `Traced` does through its type parameter is charged to the caller that writes `Traced<Parser>`.
-- [LibraryEffect](Effects/LibraryEffect.jet) — A library effect written as a type: `Sql` implements `Effect`, and the `#FX(…)` above it names the kernel effects a row that names `Sql` may do.
+- [LibraryEffect](Effects/LibraryEffect.jet) — A library effect written as a type: `SQL` implements `Effect`, and the `#FX(…)` above it names the kernel effects a row that names `SQL` may do.
 - [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
 - [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
 - [Pure](Effects/Pure.jet)

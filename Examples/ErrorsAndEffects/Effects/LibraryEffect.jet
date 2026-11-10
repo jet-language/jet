@@ -1,11 +1,11 @@
-// A library effect written as a type: `Sql` implements `Effect`, and the
+// A library effect written as a type: `SQL` implements `Effect`, and the
 // `#FX(…)` above it names the kernel effects it relies on, here the terminal
-// its query log prints to. A row that names `Sql`, or one of its cases, may
-// do what `Sql` lists and nothing else: a query that reached the network
-// would stop the check with E0756. Another package names it `sql.Sql`
+// its query log prints to. A row that names `SQL`, or one of its cases, may
+// do what `SQL` lists and nothing else: a query that reached the network
+// would stop the check with E0756. Another package names it `sql.SQL`
 // through its import, and a caller that denies `IO` still can't run a query.
 #FX(IO)
-Sql: enum {
+SQL: enum {
     Read
     Write
 
@@ -17,12 +17,12 @@ Table: struct {
     rows: [String]
 }
 
-insert: fn(table: &Table, row: String) -[Sql.Write]> {
+insert: fn(table: &Table, row: String) -[SQL.Write]> {
     print("INSERT INTO {table.name} VALUES ('{row}')")
     table.rows.push(row.copy())
 }
 
-select: fn(table: Table, prefix: String) -[Sql.Read]> [String] {
+select: fn(table: Table, prefix: String) -[SQL.Read]> [String] {
     print("SELECT * FROM {table.name} WHERE name LIKE '{prefix}%'")
     found := [String]{}
     loop row in table.rows {
@@ -32,7 +32,7 @@ select: fn(table: Table, prefix: String) -[Sql.Read]> [String] {
 }
 
 // A caller that names the whole effect may read and write.
-seed: fn(table: &Table) -[Sql]> {
+seed: fn(table: &Table) -[SQL]> {
     names: [String]{"ada", "alan", "grace"}
     loop name in names -> insert(table, name)
 }
