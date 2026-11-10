@@ -3,8 +3,8 @@
 // impls, so a top-level `impl T` or `impl T.Trait` in the file that declares
 // `T` is flagged unless one of the lint's exception rules applies.
 use {
-    jet_driver.[JetDriverAuthorizedSourceSnapshot]
-    jet_foundation.[Diagnostic, ImplDef, Item, Program, Span, diagnostic_from_registry, diagnostic_with_source_path]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, jet_driver_apply_edits]
+    jet_foundation.[Diagnostic, ImplDef, Item, Program, Span, TextEdit, diagnostic_from_registry, diagnostic_with_source_path]
     jet_parser.[parse_source]
 }
 
@@ -76,4 +76,183 @@ jet_cli_impl_placement_exception: fn(value: ImplDef) -> JetCLIImplPlacementRule?
     if value.is_generated_serde -> return Val(JetCLIImplPlacementRule.Generated)
     if value.trait_name == None && value.markers.len() > 0 -> return Val(JetCLIImplPlacementRule.MarkedInherent)
     None
+}
+
+// `jet fix --style`: each impl `jet check --style` flags (L0535) moves into
+// its type's body, in source order, with the comment and marker lines written
+// right above it: an inherent impl's members become the body's members, and
+// a trait impl becomes a nested `impl Trait { … }`, its own markers kept
+// where they were written. The moved text keeps its bytes; only the
+// indentation and the type name of a trait impl's head change. An impl the
+// fix cannot lift whole is left for a hand edit: one whose type closes its
+// body on a line holding other text, or an inherent impl that opens its body
+// on the head line and closes it on a later one. `deferred` counts those.
+jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
+    unchanged: JetCLIFixApply{source: before.copy(), applied: 0, deferred: 0} // copy: the caller keeps the input.
+    parsed: parse_source(before.bytes())
+    if jet_cli_errors(parsed.diagnostics).len() > 0 -> return unchanged
+    bytes: before.bytes()
+    // Each declared type, and where the line of its closing `}` starts when
+    // the brace stands alone on it (-1 when it does not).
+    closes := [String:Int]{}
+    loop item in parsed.program.items {
+        if item == {
+            .Struct(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
+            .Enum(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
+            else -> {}
+        }
+    }
+    edits := [TextEdit]{}
+    moved := [String:String]{}
+    order := [String]{}
+    deferred := 0
+    // Where the last lifted impl's bytes end; the next one takes no line
+    // before that.
+    floor := 0
+    loop item in parsed.program.items {
+        if item == .Impl(value) {
+            at: closes.get(value.type_name) ?? next
+            if jet_cli_impl_placement_exception(value) != None -> next
+            lifted := JetCLIStyleLift?{None}
+            if at >= 0 -> lifted = jet_cli_style_lift(bytes, value, floor)
+            if lifted == .Val(block) {
+                edits.push(TextEdit{span: Span{start: block.start, end: block.end}, new_text: ""})
+                floor = block.end
+                if !order.contains(value.type_name) -> order.push(value.type_name.copy()) // copy: the order list keeps the name.
+                moved[value.type_name] = "{moved.get(value.type_name) ?? ""}\n{block.text}"
+            } else {
+                deferred += 1
+            }
+        }
+    }
+    if edits.len() == 0 -> return JetCLIFixApply{source: before.copy(), applied: 0, deferred: deferred} // copy: nothing moved.
+    applied: edits.len()
+    loop name in order {
+        at: closes.get(name) ?? next
+        edits.push(TextEdit{span: Span{start: at, end: at}, new_text: moved.get(name) ?? ""})
+    }
+    // The edits cannot overlap: each lifted range starts at or after `floor`.
+    text: jet_driver_apply_edits(before, edits) ?? return unchanged
+    JetCLIFixApply{source: text, applied: applied, deferred: deferred}
+}
+
+// One impl lifted out of the file: the bytes it leaves (its comment and
+// marker lines, its lines, and one blank line beside them) and the text the
+// type's body takes.
+JetCLIStyleLift: struct {
+    start: Int
+    end: Int
+    text: String
+}
+
+// Where the line of the `}` closing `span` starts, or -1 when the brace
+// shares its line with other text.
+jet_cli_style_close_line: fn(bytes: [U8], span: Span) -> Int Never! {
+    close: span.end - 1
+    if close < 0 || close >= bytes.len() || bytes[close] != 125 -> return -1
+    start: jet_cli_style_line_start(bytes, close)
+    if !jet_cli_style_blank(bytes, start, close) -> return -1
+    start
+}
+
+// `value` lifted whole, or None when it shares a line with other code.
+// `floor`: where the bytes the previous lifted impl leaves end; no line
+// before it is taken twice.
+jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLift? Never! {
+    head: jet_cli_style_line_start(bytes, value.span.start)
+    if head != value.span.start -> return None
+    // The impl's closing line holds nothing after it but a comment.
+    after: jet_cli_style_line_end(bytes, value.span.end)
+    if !jet_cli_style_blank_or_comment(bytes, value.span.end, after) -> return None
+    // The comment and marker lines written right above it.
+    start := head
+    loop start > floor {
+        above: jet_cli_style_line_start(bytes, start - 1)
+        text: jet_cli_style_text(bytes, above, start).trim().copy()
+        if !text.starts_with("//") && !text.starts_with("#") -> break
+        start = above
+    }
+    leading: jet_cli_style_text(bytes, start, head)
+    body := ""
+    if value.trait_name == None {
+        // Inherent: the members, at the indentation they already have.
+        open: jet_cli_style_find(bytes, value.type_span.end, 123)
+        close: value.span.end - 1
+        if open < 0 || open >= close -> return None
+        if jet_cli_style_blank(bytes, open + 1, jet_cli_style_line_end(bytes, open) - 1) && jet_cli_style_line_start(bytes, close) > open {
+            if !jet_cli_style_blank(bytes, jet_cli_style_line_start(bytes, close), close) -> return None
+            body = "{jet_cli_style_indent(leading)}{jet_cli_style_text(bytes, jet_cli_style_line_end(bytes, open), jet_cli_style_line_start(bytes, close))}"
+        } else if jet_cli_style_line_start(bytes, close) == head {
+            body = "{jet_cli_style_indent(leading)}    {jet_cli_style_text(bytes, open + 1, close).trim()}\n"
+        } else {
+            return None
+        }
+    } else if value.trait_span == .Val(trait_span) {
+        // A trait impl: `impl T.Trait` is written `impl Trait` in the body.
+        written: "{leading}{jet_cli_style_text(bytes, head, value.type_span.start)}{jet_cli_style_text(bytes, trait_span.start, after)}"
+        body = jet_cli_style_indent(written)
+    } else {
+        return None
+    }
+    end := after
+    // One blank line beside the impl goes with it: the one after, else the
+    // one before.
+    if end < bytes.len() && jet_cli_style_blank(bytes, end, jet_cli_style_line_end(bytes, end) - 1) {
+        end = jet_cli_style_line_end(bytes, end)
+    } else if start > floor {
+        above: jet_cli_style_line_start(bytes, start - 1)
+        if above >= floor && jet_cli_style_blank(bytes, above, start - 1) -> start = above
+    }
+    Val(JetCLIStyleLift{start: start, end: end, text: body})
+}
+
+// Every non-blank line of `text` one level (4 spaces) deeper.
+jet_cli_style_indent: fn(text: String) -> String Never! {
+    shifted := [String]{}
+    loop line in text.split("\n").to_list() {
+        shifted.push(if line.trim() == "" -> "" else -> "    {line}")
+    }
+    shifted.join("\n")
+}
+
+// Where the line holding `at` starts.
+jet_cli_style_line_start: fn(bytes: [U8], at: Int) -> Int Never! {
+    start := at
+    loop start > 0 && bytes[start - 1] != 10 -> start -= 1
+    start
+}
+
+// The start of the line after the one holding `at` (or the end of the file).
+jet_cli_style_line_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    end := at
+    loop end < bytes.len() && bytes[end] != 10 -> end += 1
+    if end < bytes.len() -> end + 1 else -> end
+}
+
+// The first `byte` at or after `at` on its line, or -1.
+jet_cli_style_find: fn(bytes: [U8], at: Int, byte: U8) -> Int Never! {
+    index := at
+    loop index < bytes.len() && bytes[index] != 10 {
+        if bytes[index] == byte -> return index
+        index += 1
+    }
+    -1
+}
+
+// Whether `bytes[start..<end]` is only spaces, tabs and line ends.
+jet_cli_style_blank: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    loop index in start..<end {
+        if bytes[index] != 32 && bytes[index] != 9 && bytes[index] != 10 && bytes[index] != 13 -> return false
+    }
+    true
+}
+
+// Whether `bytes[start..<end]` is blank or a `//` comment.
+jet_cli_style_blank_or_comment: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    rest: jet_cli_style_text(bytes, start, end).trim().copy()
+    rest == "" || rest.starts_with("//")
+}
+
+jet_cli_style_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(bytes[start..<end]) ?? panic("a source slice is not UTF-8")
 }

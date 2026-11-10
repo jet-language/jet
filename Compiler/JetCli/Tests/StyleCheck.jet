@@ -1,0 +1,54 @@
+// #6561: impl placement. L0535 flags a top-level impl of a struct or enum the
+// same file declares unless an exception rule keeps it outside, and
+// `jet fix --style` moves exactly the flagged ones. A marked inherent impl
+// stays (rule g: its markers would become the type's); a trait impl moves
+// with its own markers where they were written, above it or in its head.
+use {
+    jet_cli.[JetCLIImplPlacementRule, jet_cli_fix_style, jet_cli_impl_placement_exception, jet_cli_impl_placement_lints]
+    jet_parser.[parse_source]
+}
+
+// A struct with a marked trait impl and a marked inherent impl outside it.
+style_marked_source: fn() -> String Never! {
+    "Meters: struct {{\n    value: Int\n}}\n\n#Commutative\nimpl Meters.Add(Int) {{\n    add: fn(self, other: Int) -> Meters {{ Meters{{value: self.value + other}} }}\n}}\n\n#Inline\nimpl Meters {{\n    double: fn(self) -> Meters {{ Meters{{value: self.value * 2}} }}\n}}\n"
+}
+
+#Test("impl placement: a marked inherent impl stays, a marked trait impl is flagged") {
+    source: style_marked_source()
+    parsed: parse_source(source.bytes())
+    lints: jet_cli_impl_placement_lints(parsed.program)
+    assert_eq(lints.len(), 1)
+    assert(lints[0].what.contains("`impl Meters.Add"))
+    rules := [String]{}
+    loop item in parsed.program.items {
+        if item == .Impl(value) {
+            rule: jet_cli_impl_placement_exception(value)
+            rules.push(if rule == Val(JetCLIImplPlacementRule.MarkedInherent) -> "g" else if rule == None -> "-" else -> "other")
+        }
+    }
+    assert_eq(rules.join(" "), "- g")
+}
+
+#Test("jet fix --style moves a trait impl with the markers above it and leaves the marked inherent impl") {
+    source: style_marked_source()
+    moved: jet_cli_fix_style(source)
+    assert_eq(moved.applied, 1)
+    assert_eq(moved.deferred, 0)
+    assert_eq(moved.source, "Meters: struct {{\n    value: Int\n\n    #Commutative\n    impl Add(Int) {{\n        add: fn(self, other: Int) -> Meters {{ Meters{{value: self.value + other}} }}\n    }}\n}}\n\n#Inline\nimpl Meters {{\n    double: fn(self) -> Meters {{ Meters{{value: self.value * 2}} }}\n}}\n")
+    assert_eq(jet_cli_fix_style(moved.source).applied, 0)
+}
+
+#Test("jet fix --style keeps a marker written in the trait impl's head") {
+    source: "Money: struct {{\n    cents: Int\n}}\n\nimpl Money.Mul(Int) #Commutative {{\n    mul: fn(self, rhs: Int) -> Money {{ Money{{cents: self.cents * rhs}} }}\n}}\n"
+    moved: jet_cli_fix_style(source)
+    assert_eq(moved.applied, 1)
+    assert_eq(moved.source, "Money: struct {{\n    cents: Int\n\n    impl Mul(Int) #Commutative {{\n        mul: fn(self, rhs: Int) -> Money {{ Money{{cents: self.cents * rhs}} }}\n    }}\n}}\n")
+}
+
+#Test("jet fix --style leaves an impl it cannot lift whole and counts it deferred") {
+    source: "Tile: struct {{ size: Int }}\n\nimpl Tile {{\n    area: fn(self) -> Int {{ self.size }}\n}}\n"
+    moved: jet_cli_fix_style(source)
+    assert_eq(moved.applied, 0)
+    assert_eq(moved.deferred, 1)
+    assert_eq(moved.source, source)
+}

@@ -212,7 +212,8 @@ JetCLIPlan: enum {
     FmtLang(argv: [String], color: Bool)
     // Normal diagnostic fixes use the shared edit engine and a held codemod
     // transaction. Memory fixes retain their independent witness consumer.
-    Fix(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool, notice: String)
+    // `style`: `--style`, the moves the opt-in style checks name (StyleCheck.jet).
+    Fix(file: String, dry_run: Bool, all: Bool, markers: String, style: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
@@ -2702,6 +2703,8 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
                 if word == "--edition" || word.starts_with("--edition=") -> asked_edition = true
             }
             if asked_markers && markers != "inside" && markers != "above" -> return jet_cli_fail("E2104", "`{markers}` is not a `jet fix --markers` placement", jet_cli_why("E2104"), "write `jet fix --markers inside <file>` or `jet fix --markers above <file>`", color, JET_DRIVER_EXIT_USAGE)
+            style: jet_argv.contains("--style")
+            if asked_markers && style -> return jet_cli_fail("E2104", "`jet fix` takes `--markers` or `--style`, not both", jet_cli_why("E2104"), "run `jet fix --markers {markers} <file>`, then `jet fix --style <file>`", color, JET_DRIVER_EXIT_USAGE)
             // `--edition` names the edition to migrate to. This jet migrates
             // to its own edition only (the ordinary fix pass); any other is
             // refused rather than run as a plain fix.
@@ -2720,7 +2723,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
                 file = "{target}.jet"
             }
-            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), markers: markers, color: color, quiet: quiet, json: json, notice: notice}
+            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), markers: markers, style: style, color: color, quiet: quiet, json: json, notice: notice}
         }
         "gc" -> return jet_cli_gc(argv, args, color, json)
         "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}
