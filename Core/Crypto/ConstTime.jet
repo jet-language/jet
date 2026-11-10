@@ -167,11 +167,11 @@ memcpy_if_else: fn(c: CtCond, dest: &[U8], doff: Int, src1: [U8], off1: Int, src
     loop i in 0..<len -> dest[doff + i] = src1[off1 + i].bit_and(m).bit_or(src2[off2 + i].bit_and(nm))
 }
 
-/// dest[doff..<doff+len] = src[soff+offset..], for a secret offset in
-/// offset_min..offset_max: every candidate offset is read
-/// (mbedtls_ct_memcpy_offset).
-memcpy_offset: fn(dest: &[U8], doff: Int, src: [U8], soff: Int, offset: Int, offset_min: Int, offset_max: Int, len: Int) Never! {
-    loop v in offset_min..offset_max -> memcpy_if(size_eq(v, offset), dest, doff, src, soff + v, len)
+/// dest[doff..<doff+len] = src[soff+offset..], for a secret offset (a word,
+/// compared under masks only) in offset_min..offset_max: every candidate
+/// offset is read (mbedtls_ct_memcpy_offset).
+memcpy_offset: fn(dest: &[U8], doff: Int, src: [U8], soff: Int, offset: U64, offset_min: Int, offset_max: Int, len: Int) Never! {
+    loop v in offset_min..offset_max -> memcpy_if(uint_eq(U64{v}, offset), dest, doff, src, soff + v, len)
 }
 
 /// Zero when a[aoff..<aoff+n] equals b[boff..<boff+n], else a value that is
@@ -193,6 +193,31 @@ memcmp_partial: fn(a: [U8], b: [U8], n: Int, skip_head: Int, skip_tail: Int) -> 
         diff = diff.bit_or(if_else_0(valid, d))
     }
     Int.from_u64(diff)
+}
+
+/// Entry x of a table packed 1 << per_log entries to a word (entry i in
+/// bits (64 >> per_log) * (i %% per) of word i >> per_log), for a secret x
+/// below the table's entry count: every word is read and the entry picked
+/// with masks, so no address or branch depends on x. The S-box lookups of
+/// the table-driven ciphers (DES, ARIA, Camellia) run through it; per_log is
+/// 3 for byte entries and 1 for 32-bit ones.
+#Arithmetic(.Wrapping)
+table_entry: fn(packed: [U64], per_log: Int, x: U64) -> U64 Never! {
+    per: 1 << per_log
+    width: 64 >> per_log
+    hi: x >> per_log
+    word := U64{0}
+    // All ones when the index matches: the xor is small, so subtracting one
+    // borrows into bit 63 only from zero.
+    loop i in 0..<packed.len() -> word = word.bit_or(packed[i].bit_and(U64{0} - ((U64{i}.bit_xor(hi) - U64{1}) >> 63)))
+    lo: x.bit_and(U64{per - 1})
+    entry_bits: (U64{1} << width) - U64{1}
+    out := U64{0}
+    loop k in 0..<per {
+        hit: U64{0} - ((U64{k}.bit_xor(lo) - U64{1}) >> 63)
+        out = out.bit_or((word >> (width * k)).bit_and(entry_bits).bit_and(hit))
+    }
+    out
 }
 
 #Test("Conditions, comparisons and selections agree with their plain forms at the word edges") {
@@ -222,11 +247,22 @@ memcmp_partial: fn(a: [U8], b: [U8], n: Int, skip_head: Int, skip_tail: Int) -> 
     memmove_left(buf, 0, 5, 2)
     assert(buf == [U8]{3, 4, 5, 0, 0})
     dst := [U8]{0, 0}
-    memcpy_offset(dst, 0, [U8]{9, 8, 7, 6}, 0, 1, 0, 2, 2)
+    memcpy_offset(dst, 0, [U8]{9, 8, 7, 6}, 0, U64{1}, 0, 2, 2)
     assert(dst == [U8]{8, 7})
     zeroize_if(ct_true(), dst, 0, 2)
     assert(dst == [U8]{0, 0})
     assert(memcmp([U8]{1, 2, 3}, 0, [U8]{1, 2, 3}, 0, 3) == 0)
     assert(memcmp([U8]{1, 2, 3}, 0, [U8]{1, 2, 4}, 0, 3) != 0)
     assert(memcmp_partial([U8]{1, 2, 3}, [U8]{9, 2, 3}, 3, 1, 0) == 0)
+    // A packed lookup reads each entry, bytes and 32-bit words alike.
+    bytes: [U64]{0x0706050403020100, 0xFFFEFDFCFBFAF9F8}
+    loop i in 0..<16 {
+        want: if i < 8 -> i else -> 240 + i
+        assert(table_entry(bytes, 3, U64{i}) == U64{want})
+    }
+    words: [U64]{0x89ABCDEF01234567, 0x00000000FFFFFFFF}
+    assert(table_entry(words, 1, U64{0}) == U64{0x01234567})
+    assert(table_entry(words, 1, U64{1}) == U64{0x89ABCDEF})
+    assert(table_entry(words, 1, U64{2}) == U64{0xFFFFFFFF})
+    assert(table_entry(words, 1, U64{3}) == U64{0})
 }

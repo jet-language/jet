@@ -1124,7 +1124,7 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
         kw_w_inverse(k, buf)
     }
     diff := U64{0}
-    plen := len - 8
+    plen := U64{len - 8}
     if padded {
         loop i in 0..<4 -> diff = diff.bit_or(U64.from_u8(buf[i].bit_xor(KWP_ICV2[i])))
         mli := U64{0}
@@ -1134,26 +1134,36 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
         room: U64{len - 8}
         over: ct_gt(mli, room)
         capped: mli.bit_and(over.bit_not()).bit_or(room.bit_and(over))
-        padding: room - capped
+        padding: room.wrapping_sub(capped)
         diff = diff.bit_or(over).bit_or(ct_gt(padding, U64{7}))
         zeros: padding.bit_and(U64{7})
         loop i in 0..<8 {
             // Byte 8 + (len - 16) + i is padding when i >= 8 - zeros.
-            inside: ct_gt(U64{i + 1}, U64{8} - zeros)
+            inside: ct_gt(U64{i + 1}, U64{8}.wrapping_sub(zeros))
             diff = diff.bit_or(inside.bit_and(U64.from_u8(buf[len - 8 + i])))
         }
-        plen = Int.from_u64(capped)
+        plen = capped
     } else {
         loop i in 0..<8 -> diff = diff.bit_or(U64.from_u8(buf[i].bit_xor(U8{KW_ICV1})))
     }
-    if diff != (U64{0}) {
+    if !kw_unwrap_ok(diff) {
         core.crypto.wipe(buf)
         return Err(.Auth)
     }
-    out := bytes_of(buf, 8, plen)
+    out := bytes_of(buf, 8, kw_unwrapped_len(plen))
     core.crypto.wipe(buf)
     Ok(out)
 }
+
+/// Whether a key unwrap's integrity check, length and padding all held:
+/// the combined verdict, revealed as mbedtls_nist_kw_unwrap returns it.
+kw_unwrap_ok: fn(diff: U64) -> Bool Never! { diff == U64{0} }
+
+/// An unwrapped key's length, revealed once kw_unwrap_ok holds: the caller
+/// is handed that many bytes. It is below 2^32 (the wrapped input is at
+/// most 2^32 bytes), so it is built as a 32-bit word: a wider one would
+/// test its range on the way to an Int.
+kw_unwrapped_len: fn(plen: U64) -> Int Never! { Int{wrapping(U32{plen})} }
 
 /// All ones when a > b, else zero, for a and b below 2^63, without a
 /// branch.
@@ -1192,11 +1202,14 @@ cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never
     }
 }
 
-/// What a padding check found in a decrypted block: the data bytes before
-/// the padding, 0 when `invalid`.
+/// What a padding check found in a decrypted block, as words under masks:
+/// the data bytes before the padding (0 when the padding is malformed) and
+/// `bad`, all ones when it is. Both stay secret until the cipher finishes
+/// (CipherLayer.jet `padding_len`, `padding_valid`); an Int would test
+/// its range on every use.
 CBCPaddingCheck: struct {
-    data_len: Int
-    invalid: Bool
+    data_len: U64
+    bad: U64
 }
 
 /// All ones when x is not zero, else zero, without a branch.
@@ -1215,7 +1228,7 @@ ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x.bit_or(U64{0} - x)) >> 63) }
 cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPaddingCheck Never! {
     total: U64{len}
     if mode == {
-        .Unpadded -> CBCPaddingCheck{data_len: len, invalid: false}
+        .Unpadded -> CBCPaddingCheck{data_len: total, bad: U64{0}}
         .PKCS7 | .ZerosAndLen -> {
             n: U64.from_u8(input[off + len - 1])
             bad := ct_gt(n, total).bit_or(ct_nonzero(n).bit_not())
@@ -1226,7 +1239,7 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
                 inside: ct_gt(U64{i + 1}, pad_idx)
                 bad = bad.bit_or(inside.bit_and(ct_nonzero(U64.from_u8(input[off + i]).bit_xor(want))))
             }
-            CBCPaddingCheck{data_len: Int.from_u64(pad_idx.bit_and(bad.bit_not())), invalid: bad != (U64{0})}
+            CBCPaddingCheck{data_len: pad_idx.bit_and(bad.bit_not()), bad: bad}
         }
         .OneAndZeros -> {
             in_padding := U64{0}.bit_not()
@@ -1242,7 +1255,7 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
                 in_padding = in_padding.bit_and(nonzero.bit_not())
                 i -= 1
             }
-            CBCPaddingCheck{data_len: Int.from_u64(at.bit_and(bad.bit_not())), invalid: bad != (U64{0})}
+            CBCPaddingCheck{data_len: at.bit_and(bad.bit_not()), bad: bad}
         }
         .Zeros -> {
             done := U64{0}
@@ -1255,7 +1268,7 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
                 at = U64{i}.bit_and(turned).bit_or(at.bit_and(turned.bit_not()))
                 i -= 1
             }
-            CBCPaddingCheck{data_len: Int.from_u64(at), invalid: false}
+            CBCPaddingCheck{data_len: at, bad: U64{0}}
         }
     }
 }

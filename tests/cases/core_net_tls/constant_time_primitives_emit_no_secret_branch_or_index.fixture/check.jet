@@ -16,7 +16,12 @@
 // algorithm ids, curve parameters), the public members of a struct whose
 // other members are secret (`public-field <type> <member>`: an RSA key's
 // modulus, placed by the log's `field` lines), the structs whose exact Int
-// or Bool fields hold secrets (`secret-struct <type>`), and the unlogged
+// or Bool fields hold secrets (`secret-struct <type>`), the enums whose tag
+// is public though their payload is not (`public-tag <type>`: which cipher
+// a key schedule belongs to), the functions whose findings are expected
+// (`expected <function> <reason>`: a scan of decrypted plaintext, which
+// branches on the record's content, not on a key; its findings are listed
+// apart and must exist), and the unlogged
 // callees and runtime routines that may be handed secret memory (`callee
 // <function>`, `runtime <symbol>`; a cleared routine's result is public). A
 // function or type is `module::name`, generic arguments dropped.
@@ -28,16 +33,24 @@
 // changes; a callee is walked once per pattern of secret arguments, so a
 // public call of a function stays public. A load from secret memory gives a
 // secret value, except the length and capacity words of a list header, the
-// tag of an Option or a Result, and an exact Int or Bool field of a struct
-// (the library keeps its secrets in fixed-width words and lists of them; its
-// Int and Bool fields are lengths, counters and API flags, but for the
-// `secret-struct` ones), which are public. The check fails, at every level
-// it is given, on:
+// tag of an Option or a Result or of a `public-tag` enum, and an exact Int
+// or Bool field of a struct (the library keeps its secrets in fixed-width
+// words and lists of them; its Int and Bool fields are lengths, counters and
+// API flags, but for the `secret-struct` ones), which are public; so the
+// address of such a field carries none of its struct's secrets, and a store
+// of a secret word into one is a finding of its own. A field is
+// placed by its struct's layout, read from the slot's type or, for a word
+// that addresses a list element (a list's data word, plus a multiple of the
+// element's size), from the element's type (find_elements), since an
+// optimized build types such an address as a plain word; a generic
+// struct's instance by its own layout (member_keys). The check fails, at
+// every level it is given, on:
 // - a conditional jump attributed to an instruction with a secret input; a
 //   jump to a stop (`jcc <cond> stop [s<slot>]`) when its condition reads a
 //   secret: the slot when the log names one, else the instruction's inputs;
 // - a memory operand outside the frame whose address is secret;
 // - a division with a secret operand, and a string operation whose count is;
+// - a secret word stored into a public Int or Bool field;
 // - a call through a secret register;
 // - an inline-asm template given a secret (a refusal: its bytes are opaque);
 // - a secret reaching a callee or runtime routine the log does not hold and
@@ -79,6 +92,13 @@ Check: struct {
     // that does not is never a pointer to secret bytes; see find_addresses).
     slot_size: [Int]
     slot_addr: [Bool]
+    // The type of the list element a word slot addresses ("" none, "?" no
+    // one type), the variant's payload type an enum slot holds and where
+    // it starts (see find_elements), and the instructions writing each slot.
+    slot_elem: [String]
+    slot_payload: [String]
+    slot_payload_at: [Int]
+    slot_defs: [[Int]]
     // Per instance: a function walked with one pattern of secret arguments
     // (`inst_by`: `<function>/<pattern>`), its slots' state from
     // `inst_base` on.
@@ -151,12 +171,16 @@ Spec: struct {
     // Struct members, by `<struct base>/<member>`, that hold public parts
     // of a value whose other members are secret (a key's modulus).
     public_fields: [String:Bool]
+    // Enums whose tag word is public while their payload is secret.
+    public_tags: [String:Bool]
+    // Functions whose findings are expected, with the reason.
+    expected: [String:String]
     // Parts of the source paths whose functions the check judges.
     checked: [String]
 }
 
 check_new: fn() -> Check Never! {
-    Check{fn_name: [String]{}, fn_base: [String]{}, fn_key: [String]{}, fn_file: [String]{}, fn_params: [Int]{}, fn_slot: [Int]{}, fn_op: [Int]{}, fn_row: [Int]{}, fn_rows: [Int]{}, slot_kind: [String]{}, slot_name: [String]{}, slot_type: [String]{}, slot_public: [Bool]{}, slot_size: [Int]{}, slot_addr: [Bool]{}, inst_fn: [Int]{}, inst_base: [Int]{}, inst_ret_value: [Bool]{}, inst_ret_contents: [Bool]{}, inst_by: [String:Int]{}, state_static: [Int]{}, value: [Bool]{}, contents: [Bool]{}, why_value: [Int]{}, why_value_in: [Int]{}, why_contents: [Int]{}, why_contents_in: [Int]{}, at_op: -1, at_inst: -1, at_declassified: -1, op_name: [String]{}, op_dst: [Int]{}, op_a: [Int]{}, op_b: [Int]{}, op_c: [Int]{}, op_args: [[Int]]{}, op_callee: [String]{}, op_text: [String]{}, op_declassified: [Bool]{}, row_at: [Int]{}, row_kind: [String]{}, row_text: [String]{}, by_base: [String:Int]{}, by_key: [String:Int]{}, field_offset: [String:Int]{}, field_size: [String:Int]{}, field_type: [String:String]{}, members: [String:[String]]{}}
+    Check{fn_name: [String]{}, fn_base: [String]{}, fn_key: [String]{}, fn_file: [String]{}, fn_params: [Int]{}, fn_slot: [Int]{}, fn_op: [Int]{}, fn_row: [Int]{}, fn_rows: [Int]{}, slot_kind: [String]{}, slot_name: [String]{}, slot_type: [String]{}, slot_public: [Bool]{}, slot_size: [Int]{}, slot_addr: [Bool]{}, slot_elem: [String]{}, slot_payload: [String]{}, slot_payload_at: [Int]{}, slot_defs: [[Int]]{}, inst_fn: [Int]{}, inst_base: [Int]{}, inst_ret_value: [Bool]{}, inst_ret_contents: [Bool]{}, inst_by: [String:Int]{}, state_static: [Int]{}, value: [Bool]{}, contents: [Bool]{}, why_value: [Int]{}, why_value_in: [Int]{}, why_contents: [Int]{}, why_contents_in: [Int]{}, at_op: -1, at_inst: -1, at_declassified: -1, op_name: [String]{}, op_dst: [Int]{}, op_a: [Int]{}, op_b: [Int]{}, op_c: [Int]{}, op_args: [[Int]]{}, op_callee: [String]{}, op_text: [String]{}, op_declassified: [Bool]{}, row_at: [Int]{}, row_kind: [String]{}, row_text: [String]{}, by_base: [String:Int]{}, by_key: [String:Int]{}, field_offset: [String:Int]{}, field_size: [String:Int]{}, field_type: [String:String]{}, members: [String:[String]]{}}
 }
 
 /// The slots function `f` declares.
@@ -217,23 +241,28 @@ read_log: fn(c: &Check, text: String) -> [String] Never! {
         }
         if line.starts_with("field ") {
             // field <struct> <offset> <size> <member> <type>, the type last
-            // since it may hold spaces.
+            // since it may hold spaces. A generic struct's member is also
+            // laid out under its instance's whole name, since instances
+            // differ in size and type (member_keys).
             words: line.split(" ").to_list()
             if words.len() >= 6 {
-                base: key_base(words[1])
-                key: "{base}/{words[4]}"
-                offset: number(words[2])
-                known: c.field_offset.get(key)
-                if known == None {
-                    keys := c.members.get(base) ?? [String]{}
-                    keys.push(key.copy())
-                    c.members[base.copy()] = keys
-                }
-                c.field_offset[key.copy()] = if (known ?? offset) == offset -> offset else -> -2
-                c.field_size[key.copy()] = number(words[3])
                 ty := words[5].copy()
                 loop w in 6..<words.len() -> ty = "{ty} {words[w]}"
-                c.field_type[key.copy()] = ty
+                offset: number(words[2])
+                owners := [String]{key_base(words[1])}
+                if words[1].contains("<") -> owners.push(words[1].copy())
+                loop owner in owners {
+                    key: "{owner}/{words[4]}"
+                    known: c.field_offset.get(key)
+                    if known == None {
+                        keys := c.members.get(owner) ?? [String]{}
+                        keys.push(key.copy())
+                        c.members[owner.copy()] = keys
+                    }
+                    c.field_offset[key.copy()] = if (known ?? offset) == offset -> offset else -> -2
+                    c.field_size[key.copy()] = number(words[3])
+                    c.field_type[key.copy()] = ty.copy()
+                }
             }
             next
         }
@@ -567,10 +596,130 @@ mark_address: fn(c: &Check, s: Int) -> Bool Never! {
 /// number.
 loads_address: fn(c: Check, spec: Spec, a: Int, offset: Int) -> Bool Never! {
     if a < 0 -> return true
-    at: field_at(c, spec, c.slot_type[a], offset)
+    at: access(c, spec, a, offset)
     if is_list(at.ty) -> return at.offset == 16
     if is_tagged(at.ty) && at.offset == 0 -> return false
+    if at.offset == 0 && spec.public_tags.get(key_base(at.ty)) != None -> return false
     !number_type(at.leaf)
+}
+
+/// Where an access `offset` bytes from static slot `a` lands (field_at): in
+/// the slot's own type; for a word addressing a list element
+/// (find_elements), in that element, at the offset modulo its size; and
+/// for an enum whose payload the function addresses as one variant's type
+/// (`slot_payload`), past the payload's start, in that type.
+access: fn(c: Check, spec: Spec, a: Int, offset: Int) -> FieldAt Never! {
+    if a < 0 -> return field_at(c, spec, "", offset)
+    ty: c.slot_type[a]
+    payload: c.slot_payload[a]
+    from: c.slot_payload_at[a]
+    if payload != "" && payload != "?" && offset >= from -> return field_at(c, spec, payload, offset - from)
+    elem: c.slot_elem[a]
+    if elem == "" || elem == "?" || aggregate_type(ty) -> return field_at(c, spec, ty, offset)
+    size: type_size(c, elem)
+    field_at(c, spec, elem, if size > 0 -> offset %% size else -> offset)
+}
+
+aggregate_type: fn(ty: String) -> Bool Never! {
+    is_struct(ty) || is_list(ty) || is_tagged(ty) || is_tuple(ty)
+}
+
+/// Finds the list element each word slot addresses (`slot_elem`), over
+/// every function at once: a load of a list's data word addresses its first
+/// element; a copy or move of an element address, and its sum with a
+/// multiple of the element's size (a constant, a product with one, or a sum
+/// of those), address an element too. A slot two rules give two types, or
+/// a sum with anything else, addresses no known element ("?"), and an
+/// access through it is placed by its own type. Also the variant each enum
+/// slot holds (`slot_payload`, at `slot_payload_at`): the type of the one
+/// payload address its function takes of it (an `offset` typed as a
+/// struct), "?" when it takes two.
+find_elements: fn(c: &Check, spec: Spec) Never! {
+    c.slot_elem = loop _ in 0..<c.slot_kind.len() -> ""
+    c.slot_defs = loop _ in 0..<c.slot_kind.len() -> [Int]{}
+    c.slot_payload = loop _ in 0..<c.slot_kind.len() -> ""
+    c.slot_payload_at = loop _ in 0..<c.slot_kind.len() -> 0
+    count: c.fn_op.len()
+    loop f in 0..<count {
+        base: c.fn_slot[f]
+        last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+        loop k in c.fn_op[f]..<last {
+            if c.op_dst[k] < 0 -> next
+            d: base + c.op_dst[k]
+            c.slot_defs[d].push(k)
+            if c.op_name[k] != "offset" || c.op_a[k] < 0 -> next
+            a: base + c.op_a[k]
+            enum_ty: c.slot_type[a]
+            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None || !is_struct(c.slot_type[d]) -> next
+            known: c.slot_payload[a]
+            if known == "" {
+                c.slot_payload[a] = c.slot_type[d].copy()
+                c.slot_payload_at[a] = c.op_b[k]
+            } else if known != c.slot_type[d] || c.slot_payload_at[a] != c.op_b[k] {
+                c.slot_payload[a] = "?"
+            }
+        }
+    }
+    loop {
+        changed := false
+        loop f in 0..<count {
+            base: c.fn_slot[f]
+            last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+            loop k in c.fn_op[f]..<last {
+                op: c.op_name[k]
+                if c.op_dst[k] < 0 || c.op_a[k] < 0 || op == "call_runtime" -> next
+                d: base + c.op_dst[k]
+                a: base + c.op_a[k]
+                elem := ""
+                if op == {
+                    "load" -> {
+                        at: access(c, spec, a, c.op_b[k])
+                        if is_list(at.ty) && at.offset == 16 -> elem = at.ty.removeprefix("[").removesuffix("]")
+                    }
+                    "copy" | "move" -> elem = c.slot_elem[a].copy()
+                    "add" | "sub" -> {
+                        b: if c.op_b[k] < 0 -> -1 else -> base + c.op_b[k]
+                        ea: c.slot_elem[a]
+                        eb: if b < 0 -> "" else -> c.slot_elem[b]
+                        if ea != "" && ea != "?" && eb == "" {
+                            elem = if scaled(c, base, c.op_b[k], type_size(c, ea), 0) -> ea.copy() else -> "?"
+                        } else if op == "add" && eb != "" && eb != "?" && ea == "" {
+                            elem = if scaled(c, base, c.op_a[k], type_size(c, eb), 0) -> eb.copy() else -> "?"
+                        } else if ea != "" || eb != "" {
+                            elem = "?"
+                        }
+                    }
+                    else -> {}
+                }
+                if elem == "" || c.slot_elem[d] == elem || c.slot_elem[d] == "?" -> next
+                c.slot_elem[d] = if c.slot_elem[d] == "" -> elem else -> "?"
+                changed = true
+            }
+        }
+        if !changed -> break
+    }
+}
+
+/// Whether every write of function slot `local` (its function's slots from
+/// `base`) gives a multiple of `size`: a constant one, a product with one, a
+/// sum of two, or a copy of one.
+scaled: fn(c: Check, base: Int, local: Int, size: Int, depth: Int) -> Bool Never! {
+    if local < 0 || size <= 0 || depth > 4 -> return false
+    defs: c.slot_defs[base + local]
+    if defs.len() == 0 -> return false
+    loop k in defs {
+        op: c.op_name[k]
+        ok := false
+        if op == {
+            "const" -> ok = c.op_a[k] %% size == 0
+            "mul" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) || scaled(c, base, c.op_b[k], size, depth + 1)
+            "add" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) && scaled(c, base, c.op_b[k], size, depth + 1)
+            "copy" | "move" -> ok = scaled(c, base, c.op_a[k], size, depth + 1)
+            else -> {}
+        }
+        if !ok -> return false
+    }
+    true
 }
 
 number_type: fn(ty: String) -> Bool Never! {
@@ -603,6 +752,16 @@ taint_result: fn(c: &Check, slot: Int, secret: Bool) -> Bool Never! {
     if slot < 0 -> return false
     if holds_word(c, slot) -> return set_value(c, slot, secret)
     set_contents(c, slot, secret)
+}
+
+/// Whether access `at` lands on an exact Int or Bool member of a struct
+/// that is no `secret-struct`: a public word. Exact by the member's
+/// declared type or by the type of `slot`, the word read or stored (an
+/// optimized build may type the word I64; -1 for none).
+exact_member: fn(c: Check, spec: Spec, at: FieldAt, slot: Int) -> Bool Never! {
+    if !is_struct(at.ty) || spec.secret_structs.get(key_base(at.ty)) != None -> return false
+    if at.leaf == "Int" || at.leaf == "Bool" -> return true
+    slot >= 0 && (type_of(c, slot) == "Int" || type_of(c, slot) == "Bool")
 }
 
 /// Whether `offset` into the struct of type `ty` falls in a member the spec
@@ -667,7 +826,7 @@ field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
                 start = 8
             }
         } else if is_struct(at) {
-            keys: c.members.get(key_base(at)) ?? [String]{}
+            keys: member_keys(c, at)
             loop key in keys {
                 from: c.field_offset.get(key) ?? -1
                 if from < 0 || off < from || off >= from + (c.field_size.get(key) ?? 0) -> next
@@ -709,6 +868,13 @@ tuple_elements: fn(ty: String) -> [String] Never! {
     out
 }
 
+/// The member keys of struct type `ty`: its own instance's layout when the
+/// log lays that out (a generic struct's instances differ), else its
+/// base's.
+member_keys: fn(c: Check, ty: String) -> [String] Never! {
+    c.members.get(ty) ?? c.members.get(key_base(ty)) ?? [String]{}
+}
+
 /// The size in bytes of a value of checked type `ty` held in place, -1 when
 /// the log does not tell it (an Option, a Result, an unlisted struct).
 type_size: fn(c: Check, ty: String) -> Int Never! {
@@ -728,7 +894,7 @@ type_size: fn(c: Check, ty: String) -> Int Never! {
         return (from + 7) /% 8 * 8
     }
     if !is_struct(ty) || is_tagged(ty) -> return -1
-    keys: c.members.get(key_base(ty)) ?? [String]{}
+    keys: member_keys(c, ty)
     if keys.len() == 0 -> return -1
     end := 0
     loop key in keys {
@@ -752,7 +918,14 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
     changed := false
     if op == {
         "copy" | "move" | "offset" -> {
-            if op == "offset" && field_at(c, spec, type_of(c, a), c.op_b[k]).public -> return false
+            if op == "offset" {
+                at: access(c, spec, c.state_static[a], c.op_b[k])
+                if at.public -> return false
+                // A reference past the struct's start to a public Int or
+                // Bool member (`&ctx.iv_off`) points at no secret; what is
+                // stored through it still reaches the struct.
+                if c.op_b[k] != 0 && type_of(c, d) == "Pointer" && exact_member(c, spec, at, -1) -> return set_contents(c, a, c.contents[d])
+            }
             changed = set_value(c, d, c.value[a]) || changed
             changed = set_contents(c, d, c.contents[a]) || changed
             changed = set_contents(c, a, c.contents[d]) || changed
@@ -775,14 +948,15 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
         }
         "neg" | "not" | "sqrt" | "convert" | "int_big" -> changed = set_value(c, d, c.value[a]) || changed
         "load" -> {
-            at: field_at(c, spec, type_of(c, a), c.op_b[k])
+            at: access(c, spec, c.state_static[a], c.op_b[k])
             if at.public -> return false
             ty: at.ty
             offset: at.offset
             changed = set_value(c, d, c.value[a]) || changed
             if is_list(ty) && (offset == 0 || offset == 8) -> return changed
             if is_tagged(ty) && offset == 0 -> return changed
-            if is_struct(ty) && (type_of(c, d) == "Int" || type_of(c, d) == "Bool") && spec.secret_structs.get(key_base(ty)) == None -> return changed
+            if offset == 0 && spec.public_tags.get(key_base(ty)) != None -> return changed
+            if exact_member(c, spec, at, d) -> return changed
             if is_list(ty) && offset == 16 {
                 changed = set_contents(c, d, c.contents[a]) || changed
                 changed = set_contents(c, a, c.contents[d]) || changed
@@ -793,6 +967,9 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
         }
         "store" | "stream_store" -> {
             v: slot_of(c, i, c.op_c[k])
+            // A word stored into a public member stays out of the struct's
+            // secrets; a secret one is a finding (findings_of).
+            if exact_member(c, spec, access(c, spec, c.state_static[a], c.op_b[k]), v) -> return false
             changed = set_contents(c, a, c.value[v] || c.contents[v]) || changed
         }
         "copy_bytes" -> {
@@ -873,7 +1050,8 @@ frame_register: fn(reg: String) -> Bool Never! {
 
 /// The way a secret reached `slots` (an instruction's inputs), newest first:
 /// the instruction that first set each bit, back to a root or at most eight
-/// steps.
+/// steps, each step to a slot the trail has not been through (a loop's
+/// counter and its sum set each other's bits).
 trail: fn(c: Check, slots: [Int]) -> String Never! {
     steps := [String]{}
     slot := -1
@@ -893,7 +1071,9 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
             }
         }
     }
+    through := [Int:Bool]{}
     loop slot >= 0 && steps.len() < 8 {
+        through[slot] = true
         k: if value -> c.why_value[slot] else -> c.why_contents[slot]
         g: if value -> c.why_value_in[slot] else -> c.why_contents_in[slot]
         if k < 0 {
@@ -904,7 +1084,7 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
         ins: inputs(c, g, k)
         slot = -1
         loop s in ins {
-            if c.value[s] {
+            if c.value[s] && through.get(s) == None {
                 slot = s
                 value = true
                 break
@@ -912,7 +1092,7 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
         }
         if slot < 0 {
             loop s in ins {
-                if c.contents[s] {
+                if c.contents[s] && through.get(s) == None {
                     slot = s
                     value = false
                     break
@@ -923,8 +1103,24 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
     steps.join(" <- ")
 }
 
-/// The findings of instance `i`, each one line, but for those `seen` (lines
-/// of another instance of the same function) holds.
+/// `line` as instruction `k` of function `f` reports it: marked
+/// "expected `<function>`: " when `k` belongs to an `expected` function,
+/// `f` itself or one inlined into it (the inline site of `k`, or one
+/// around that).
+marked: fn(c: Check, spec: Spec, f: Int, k: Int, line: String) -> String Never! {
+    if spec.expected.get(c.fn_base[f]) != None -> return "expected `{c.fn_base[f]}`: {line}"
+    site := c.op_site[k]
+    loop site > 0 {
+        row: c.fn_site[f] + site - 1
+        base: key_base(c.site_key[row])
+        if spec.expected.get(base) != None -> return "expected `{base}`: {line}"
+        site = c.site_outer[row]
+    }
+    line.copy()
+}
+
+/// The findings of instance `i`, each one line (marked), but for those
+/// `seen` (lines of another instance of the same function) holds.
 findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] Never! {
     out := [String]{}
     f: c.inst_fn[i]
@@ -986,11 +1182,24 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] 
         line: "{c.fn_base[f]} at `{c.op_text[k]}`: {problem} ({c.row_text[r]})"
         if seen.get(line) != None -> next
         seen[line] = true
-        out.push("{line}, from {trail(c, ins)}")
+        out.push(marked(c, spec, f, k, "{line}, from {trail(c, ins)}"))
     }
-    // Secrets that leave the log.
+    // Secret words stored into public members, and secrets that leave the
+    // log.
     loop k in c.fn_op[f]..<(if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()) {
         op: c.op_name[k]
+        if op == "store" || op == "stream_store" {
+            a: slot_of(c, i, c.op_a[k])
+            v: slot_of(c, i, c.op_c[k])
+            if a < 0 || v < 0 || !c.value[v] -> next
+            at: access(c, spec, c.state_static[a], c.op_b[k])
+            if !exact_member(c, spec, at, v) -> next
+            stored: "{c.fn_base[f]} at `{c.op_text[k]}`: a secret word stored into a public member of `{key_base(at.ty)}`"
+            if seen.get(stored) != None -> next
+            seen[stored.copy()] = true
+            out.push(marked(c, spec, f, k, "{stored}, from {trail(c, [v])}"))
+            next
+        }
         if op != "call" && op != "call_runtime" && op != "call_indirect" -> next
         ins: inputs(c, i, k)
         if !(any_value(c, ins) || any_contents(c, ins)) -> next
@@ -1010,7 +1219,7 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] 
         }
         if seen.get(line) != None -> next
         seen[line.copy()] = true
-        out.push("{line}, from {trail(c, ins)}")
+        out.push(marked(c, spec, f, k, "{line}, from {trail(c, ins)}"))
     }
     out
 }
@@ -1032,7 +1241,7 @@ judged: fn(spec: Spec, file: String, base: String) -> Bool Never! {
 /// The spec in `text`, less the directive lines in `dropped` (each must be
 /// one of its lines).
 read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
-    spec := Spec{roots: [String:[String]]{}, public: [String:Bool]{}, callees: [String:Bool]{}, runtime: [String:Bool]{}, secret_structs: [String:Bool]{}, public_types: [String:Bool]{}, public_fields: [String:Bool]{}, checked: [String]{}}
+    spec := Spec{roots: [String:[String]]{}, public: [String:Bool]{}, callees: [String:Bool]{}, runtime: [String:Bool]{}, secret_structs: [String:Bool]{}, public_types: [String:Bool]{}, public_fields: [String:Bool]{}, public_tags: [String:Bool]{}, expected: [String:String]{}, checked: [String]{}}
     seen := [String:Bool]{}
     loop raw in text.split("\n") {
         line: raw.trim()
@@ -1055,6 +1264,17 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
             "secret-struct" -> spec.secret_structs[words[1].copy()] = true
             "public-type" -> spec.public_types[words[1].copy()] = true
             "public-field" -> if words.len() == 3 -> spec.public_fields["{words[1]}/{words[2]}"] = true
+            "public-tag" -> spec.public_tags[words[1].copy()] = true
+            "expected" -> {
+                // The reason is required: an expected finding says why.
+                if words.len() < 3 {
+                    term.eprint("`{line}`: an expected function needs its reason")
+                    process.exit(2)
+                }
+                why := words[2].copy()
+                loop w in 3..<words.len() -> why = "{why} {words[w]}"
+                spec.expected[words[1].copy()] = why
+            }
             "check" -> spec.checked.push(words[1].copy())
             else -> {}
         }
@@ -1089,6 +1309,8 @@ run: fn() {
     }
     spec: read_spec(spec_text, dropped)
     failed := 0
+    // The expected functions some log finds something in.
+    hit := [String:Bool]{}
     loop i in (first + 1)..<argv.len() {
         path: argv[i]
         text: files.read(path) ?? {
@@ -1100,6 +1322,7 @@ run: fn() {
         problems: read_log(c, text)
         loop ty in c.slot_type -> c.slot_public.push(spec.public_types.get(key_base(ty)) != None)
         declassify_inlined(c, spec)
+        find_elements(c, spec)
         find_addresses(c, spec)
         loop problem in problems -> print("{path}: {problem}")
         failed += problems.len()
@@ -1160,6 +1383,7 @@ run: fn() {
         }
         reached := [String:Bool]{}
         findings := 0
+        expected := 0
         seen := [String:Bool]{}
         loop inst in 0..<c.inst_fn.len() {
             f: c.inst_fn[inst]
@@ -1167,11 +1391,23 @@ run: fn() {
             reached[c.fn_key[f].copy()] = true
             loop line in findings_of(c, spec, inst, seen) {
                 print("{path}: {line}")
-                findings += 1
+                if line.starts_with("expected `") {
+                    expected += 1
+                    hit[line.removeprefix("expected `").partition("`").head.copy()] = true
+                } else {
+                    findings += 1
+                }
             }
         }
         failed += findings
-        print("{path}: {c.fn_name.len()} functions, {reached.len()} reached by secrets in {c.inst_fn.len()} instances, {findings} findings, {missing} missing roots, {rounds} rounds")
+        print("{path}: {c.fn_name.len()} functions, {reached.len()} reached by secrets in {c.inst_fn.len()} instances, {findings} findings, {missing} missing roots, {expected} expected, {rounds} rounds")
+    }
+    // An expected function no log finds anything in is a stale directive.
+    loop (base, why) in spec.expected {
+        if hit.get(base) == None {
+            print("expected `{base}` ({why}) has no finding in any log")
+            failed += 1
+        }
     }
     if failed > 0 -> process.exit(1)
 }

@@ -656,11 +656,22 @@ finish_cbc: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
     cbc_run(ctx, blk, 0, bs, plain)
     core.crypto.wipe(blk)
     check: cipher.cbc_get_padding(pad, plain, 0, bs)
-    cipher.reserve(out, check.data_len)
-    loop i in 0..<check.data_len -> out.push(plain[i])
+    data_len: padding_len(check)
+    cipher.reserve(out, data_len)
+    loop i in 0..<data_len -> out.push(plain[i])
     core.crypto.wipe(plain)
-    Ok(!check.invalid)
+    Ok(padding_valid(check))
 }
+
+/// The data length and the verdict of the last block's padding check
+/// (cipher.cbc_get_padding), revealed where the cipher finishes:
+/// mbedtls_cipher_finish_padded hands both to its caller. The length is 0
+/// when the padding is malformed, and below the block size, so it is built
+/// from a 32-bit word: a wider one would test its range on the way to an
+/// Int.
+padding_len: fn(check: cipher.CBCPaddingCheck) -> Int Never! { Int{wrapping(U32{check.data_len})} }
+
+padding_valid: fn(check: cipher.CBCPaddingCheck) -> Bool Never! { check.bad == U64{0} }
 
 /// Flush the last block, appending it to `out`, and report whether its
 /// padding verified (mbedtls_cipher_finish_padded: true where mbedtls

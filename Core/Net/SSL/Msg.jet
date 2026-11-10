@@ -57,8 +57,9 @@ ssl_get_mode_from_transform: fn(t: ssldefs.SSLTransform) -> SSLMode Never! {
 /// The HMAC under `key` of add_data || data[doff..<doff+data_len_secret],
 /// computed with the same hash operations for every data_len_secret in
 /// min_len...max_len, so the record's padding length does not show in
-/// its timing (mbedtls_ct_hmac).
-ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [U8], doff: Int, data_len_secret: Int, min_len: Int, max_len: Int) -> [U8] Never! {
+/// its timing (mbedtls_ct_hmac). The secret length is a word, compared
+/// under masks only.
+ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [U8], doff: Int, data_len_secret: U64, min_len: Int, max_len: Int) -> [U8] Never! {
     ctx := hashes.hash_clone(key.inner)
     hashes.hash_update(ctx, add_data)
     hashes.hash_update_range(ctx, data, doff, min_len)
@@ -68,7 +69,7 @@ ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [U8], doff: Int, data
     loop offset in min_len..max_len {
         aux := hashes.hash_clone(ctx)
         aux_out := hashes.hash_finish(aux)
-        ctime.memcpy_if(ctime.size_eq(offset, data_len_secret), output, 0, aux_out, 0, size)
+        ctime.memcpy_if(ctime.uint_eq(U64{offset}, data_len_secret), output, 0, aux_out, 0, size)
         ssldefs.ssl_wipe(aux_out)
         if offset < max_len -> hashes.hash_update_range(ctx, data, doff + offset, 1)
     }
@@ -316,10 +317,13 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
     mode: ssl_get_mode_from_transform(t)
     if rec.cid_len != t.in_cid.len() || !ssldefs.ssl_range_eq(rec.cid, 0, t.in_cid, 0, rec.cid_len) -> return Err(.UnexpectedCID)
     auth_done := 0
-    padlen := 0
-    // The plaintext length before the padding comes off: public, where the
-    // padding length and the length after it are secret.
+    // A CBC record's length before the padding comes off: public, where
+    // the padding length and the content length after it (`content_len`)
+    // are secret until the MAC verdict. They are words under masks: an
+    // Int's arithmetic tests its range.
+    cbc := false
     cbc_len := 0
+    content_len := U64{0}
     correct := ctime.ct_true()
     if mode == {
         // The only stream cipher is NULL, off in this configuration.
@@ -383,59 +387,60 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
             if dec.len() != rec.data_len -> return Err(.InternalError)
             ssldefs.ssl_copy_into(buf, data, dec, 0, dec.len())
             ssldefs.ssl_wipe(dec)
-            padlen = Int.from_u8(buf[data + rec.data_len - 1])
-            if auth_done == 1 {
-                ge: ctime.size_ge(rec.data_len, padlen + 1)
-                correct = ctime.bool_and(ge, correct)
-                padlen = ctime.size_if_else_0(ge, padlen)
-            } else {
-                ge: ctime.size_ge(rec.data_len, t.maclen + padlen + 1)
-                correct = ctime.bool_and(ge, correct)
-                padlen = ctime.size_if_else_0(ge, padlen)
-            }
-            padlen += 1
+            cbc = true
             cbc_len = rec.data_len
+            len: U64{cbc_len}
+            pad: U64{buf[data + cbc_len - 1]}
+            need: U64{if auth_done == 1 -> 1 else -> t.maclen + 1}
+            ge: ctime.uint_ge(len, pad.wrapping_add(need))
+            correct = ctime.bool_and(ge, correct)
+            padlen: ctime.if_else_0(ge, pad).wrapping_add(U64{1})
             // Always read min(256, plaintext length) bytes at the end of
             // the plaintext, counting only the last padlen for the check.
-            pad_count := 0
-            padding_idx: rec.data_len - padlen
-            num_checks: if rec.data_len <= 256 -> rec.data_len else -> 256
-            start_idx: rec.data_len - num_checks
-            loop idx in start_idx..<rec.data_len {
-                a: ctime.size_ge(idx, padding_idx)
-                increment := ctime.size_if_else_0(a, 1)
-                b: ctime.size_eq(Int.from_u8(buf[data + idx]), padlen - 1)
-                increment = ctime.size_if_else_0(b, increment)
-                pad_count += increment
+            pad_count := U64{0}
+            padding_idx: len.wrapping_sub(padlen)
+            num_checks: if cbc_len <= 256 -> cbc_len else -> 256
+            start_idx: cbc_len - num_checks
+            loop idx in start_idx..<cbc_len {
+                a: ctime.uint_ge(U64{idx}, padding_idx)
+                b: ctime.uint_eq(U64{buf[data + idx]}, padlen.wrapping_sub(U64{1}))
+                pad_count = pad_count.wrapping_add(ctime.if_else_0(ctime.bool_and(a, b), U64{1}))
             }
-            correct = ctime.bool_and(ctime.size_eq(pad_count, padlen), correct)
-            padlen = ctime.size_if_else_0(correct, padlen)
-            rec.data_len -= padlen
+            correct = ctime.bool_and(ctime.uint_eq(pad_count, padlen), correct)
+            content_len = len.wrapping_sub(ctime.if_else_0(correct, padlen))
         }
     }
     if auth_done == 0 {
-        // Compute the MAC whatever the padding result (RFC 4346, CBCTIME).
-        rec.data_len -= t.maclen
-        add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-        // The extremes of data_len over every padlen, from the public
+        // Compute the MAC whatever the padding result (RFC 4346, CBCTIME),
+        // over the secret content length.
+        content_len = content_len.wrapping_sub(U64{t.maclen})
+        // The extremes of that length over every padlen, from the public
         // length before the padding came off (mbedtls's data_len + padlen,
         // the same value).
         max_len: cbc_len - t.maclen
         min_len: if max_len > 256 -> max_len - 256 else -> 0
+        // The additional data's length field is the secret length, its
+        // two bytes written from the word.
+        rec.data_len = max_len
+        add_data := ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
+        at: add_data.len() - 2
+        add_data[at] = wrapping(U8{content_len >> 8})
+        add_data[at + 1] = wrapping(U8{content_len})
         mac_expect := [U8]{}
         if t.md_dec == {
-            .Val(key) -> mac_expect = ssl_ct_hmac(key, add_data, buf, data, rec.data_len, min_len, max_len)
+            .Val(key) -> mac_expect = ssl_ct_hmac(key, add_data, buf, data, content_len, min_len, max_len)
             None -> return Err(.InternalError)
         }
         mac_peer := ssldefs.ssl_zeros(ssldefs.SSL_MAC_ADD)
-        ctime.memcpy_offset(mac_peer, 0, buf, data, rec.data_len, min_len, max_len, t.maclen)
+        ctime.memcpy_offset(mac_peer, 0, buf, data, content_len, min_len, max_len, t.maclen)
         if ctime.memcmp(mac_peer, 0, mac_expect, 0, t.maclen) != 0 -> correct = ctime.ct_false()
         auth_done += 1
         ssldefs.ssl_wipe(mac_peer)
         ssldefs.ssl_wipe(mac_expect)
     }
-    if !ctime.cond_is_true(correct) -> return Err(.InvalidMac)
+    if !ssl_record_authentic(correct) -> return Err(.InvalidMac)
     if auth_done != 1 -> return Err(.InternalError)
+    if cbc -> rec.data_len = ssl_authentic_len(content_len)
     if t.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
         // Remove the inner padding and take the true content type.
         if !ssl_parse_inner_plaintext(rec, buf) -> return Err(.InvalidRecord)
@@ -444,6 +449,15 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
         if !ssl_parse_inner_plaintext(rec, buf) -> return Err(.InvalidRecord)
     }
 }
+
+/// The verdict of a CBC record's padding and MAC checks, revealed once both
+/// are done: a record that fails is refused whatever went wrong in it.
+ssl_record_authentic: fn(correct: ctime.CtCond) -> Bool Never! { ctime.cond_is_true(correct) }
+
+/// A CBC record's content length, revealed once its MAC verdict is true:
+/// an authentic record's length is the one its sender chose, which the
+/// receiver hands on (a record is at most 2^14 + 2048 bytes).
+ssl_authentic_len: fn(len: U64) -> Int Never! { Int{wrapping(U32{len})} }
 
 // ---------------------------------------------------------------------------
 // Context helpers (ssl_misc.h).
