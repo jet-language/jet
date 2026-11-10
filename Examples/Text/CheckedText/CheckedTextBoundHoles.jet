@@ -1,0 +1,65 @@
+// A checked text type whose holes stay values. `Hole: Param` is what each
+// interpolation encodes to, and `build` assembles the literal from its parts
+// and those holes: `Query{"… {age} …"}` is `Query.build(parts, holes)`, so a
+// hole never becomes query text. `check` runs once, before the program runs,
+// on the literal parts joined by `{}`.
+
+#Error
+QueryError: enum { Unbalanced }
+
+Param: enum {
+    Number(Int)
+    Word(String)
+}
+
+Query: struct {
+    text: String
+    params: [Param]
+}
+
+impl Query.CheckedText {
+    Error: QueryError
+    Hole: Param
+
+    check: fn(text: String) QueryError! -[]> {
+        depth := 0
+        loop byte in text.bytes() {
+            if byte == (U8{40}) -> depth += 1
+            if byte == (U8{41}) {
+                if depth == 0 -> return Err(QueryError.Unbalanced)
+                depth -= 1
+            }
+        }
+        if depth != 0 -> return Err(QueryError.Unbalanced)
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> Param {
+        if T == {
+            Int -> Param.Number(value)
+            else -> Param.Word("{value}")
+        }
+    }
+
+    build: fn(parts: [String], holes: [Param]) -[]> Query {
+        text := parts[0].copy()
+        loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
+        Query{text: text, params: holes.copy()}
+    }
+}
+
+show: fn(param: Param) -> String {
+    if param == {
+        .Number(number) -> "number {number}"
+        .Word(word) -> "word \"{word}\""
+    }
+}
+
+run: fn() {
+    age := 42
+    name := "Ada'); DROP TABLE people; --"
+    query: Query{"MATCH (p:Person) WHERE p.age > {age} AND p.name = {name} RETURN p"}
+    print(query.text)
+    loop param in query.params -> print(show(param))
+    print(Query{"RETURN 1"}.params.len())
+}

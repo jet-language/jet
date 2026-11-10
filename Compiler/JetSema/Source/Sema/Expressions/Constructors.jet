@@ -1304,11 +1304,15 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
     }
     false
 }
+// `build` is set when the type assembles its literal from the parts and the
+// encoded holes; without it the type is a `distinct String` and the literal
+// is the joined text.
 SemaExpressionCheckedTextTarget: struct {
     owner: Symbol
     implementation_module_identity: String
     check: SemaRegistrationFunction
     encode_hole: SemaRegistrationFunction
+    build: SemaRegistrationFunction?
 }
 
 SemaExpressionCheckedTextLiteral: struct {
@@ -1323,13 +1327,10 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
     if program.registration_graph == .Val(graph) {
     registered_row: sema_type_graph_nominal_row(graph, owner.id.key) ?? return None
     registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
-    if registered.kind != SemaRegistrationNominalKind.Distinct -> return None
-    definition: sema_registration_nominal_source_item(registered.source) ?? return None
-    if definition == {
-        .Distinct(value) -> {
-            if value.base != Type.String -> return None
-        }
-        else -> return None
+    string_backed := false
+    if registered.kind == SemaRegistrationNominalKind.Distinct {
+        definition: sema_registration_nominal_source_item(registered.source) ?? return None
+        if definition == .Distinct(value) -> string_backed = value.base == Type.String
     }
     loop graph_module_index in 0..<graph.modules.len() {
         loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
@@ -1337,16 +1338,19 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
             if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != registered.identity_key && (graph.modules[graph_module_index].impls[implementation_index].target_module_identity != Val(registered.symbol.module_name) || graph.modules[graph_module_index].impls[implementation_index].target_type_name != registered.symbol.name) -> next
             check := SemaRegistrationFunction?{None}
             encode_hole := SemaRegistrationFunction?{None}
+            build := SemaRegistrationFunction?{None}
             loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
                 if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "check" -> check = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
                 if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "encode_hole" -> encode_hole = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
+                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "build" -> build = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
             }
-            if check != None && encode_hole != None {
+            if check != None && encode_hole != None && (string_backed || build != None) {
                 return Val(SemaExpressionCheckedTextTarget{
                     owner: registered.symbol,
                     implementation_module_identity: graph.modules[graph_module_index].module_identity,
                     check: check ?? return None,
                     encode_hole: encode_hole ?? return None,
+                    build: build,
                 })
             }
         }
@@ -1358,6 +1362,9 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
 sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     type_name: if receiver == {.Ident(name, _, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
     target: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    // A type that assembles itself through `build` is no String wrapper:
+    // its other statics (`SQL.raw`) are its own ordinary methods.
+    if target.build != None && method_name != "check" && method_name != "encode_hole" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     function: if method_name == "check" || method_name == "from" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     if owner_type_args.len() > 0 {
@@ -1382,7 +1389,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
     // The registered signature keeps its declared spelling (`-[]> String`
     // reads back as the named `String`) and the default failure route.
     hole_type: if checked.value.ty == {.Result(ok, _) -> ok else -> checked.value.ty}
-    if method_name == "encode_hole" && hole_type != Type.String && hole_type != (Type.Named{name: "String"}) {
+    if method_name == "encode_hole" && target.build == None && hole_type != Type.String && hole_type != (Type.Named{name: "String"}) {
         diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -1478,6 +1485,16 @@ sema_expression_checked_text_raw: fn(target: SemaExpressionCheckedTextTarget, ty
 sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionCheckedTextLiteral {
     target: sema_expression_checked_text_target(head, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
     type_name := if head == {.Named(name) -> name else -> panic("checked text target lost its named owner")}
+    // A type with `build` is also an ordinary record: only a quoted body is
+    // its checked literal, and `Query{text: …}` stays a struct literal.
+    building: target.build != None
+    if building {
+        quoted := false
+        if body == .Value(value) {
+            if value == .Str(_, _, _) -> quoted = true
+        }
+        if !quoted -> return SemaExpressionCheckedTextLiteral{handled: false, value: None}
+    }
     body_value: if body == {
         // copy: `value` is a payload of read parameter `body`, which keeps the original; the assigned `body_value` owns this one
         .Value(value) -> value.copy()
@@ -1493,23 +1510,16 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
+    // The checker sees the complete text; a type with `build` sees its
+    // literal parts joined by `{}`, one per hole, since its holes stay values.
     encoded_parts := [StrPart]{}
     loop part in parts {
         if part == {
             .Lit(_) -> encoded_parts.push(part)
             .Byte(value) -> encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)})
             .Interp(value, _) -> {
-                argument := CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
-                encoder := Expr.MethodCall{
-                    receiver: Expr.Ident{name: type_name, span: expr_span(value), id: AST_NODE_GENERATED},
-                    method: "encode_hole",
-                    method_span: expr_span(value),
-                    owner_type_args: [Type]{},
-                    type_args: [Type]{},
-                    args: [CallArg]{argument},
-                    id: AST_NODE_GENERATED,
-                }
-                encoded_parts.push(StrPart.Interp{expr: encoder, format: StrFormat.Display})
+                if building -> encoded_parts.push(StrPart.Lit{text: "{{}}"})
+                else -> encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value), format: StrFormat.Display})
             }
         }
     }
@@ -1549,7 +1559,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     // A hole the compiler cannot know (a local, a parameter, a call) makes
     // the complete text a run-time value: it is built and checked when the
     // literal runs. Only constant holes are checked here, before the program runs.
-    if !sema_expression_checked_text_holes_constant(parts, scopes) {
+    if !building && !sema_expression_checked_text_holes_constant(parts, scopes) {
         value: sema_expression_checked_text_runtime(head, target.owner.name, checked, span, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
@@ -1603,11 +1613,63 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         span: span,
         checked_text: Val(evaluation),
     })
-    value: text
-    result := sema_tree_node(head, TExprKind.DistinctCtor{argument: value}, span)
-    return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
+    if !building {
+        result := sema_tree_node(head, TExprKind.DistinctCtor{argument: text}, span)
+        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
+    }
+    return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_build(type_name, parts, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}
+}
+
+// `Type.encode_hole(value)` for one interpolation hole.
+sema_expression_checked_text_encoder: fn(type_name: String, value: Expr) -> Expr Never! {
+    span: expr_span(value)
+    argument := CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    Expr.MethodCall{
+        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
+        method: "encode_hole",
+        method_span: span,
+        owner_type_args: [Type]{},
+        type_args: [Type]{},
+        args: [CallArg]{argument},
+        id: AST_NODE_GENERATED,
+    }
+}
+
+// A literal of a type with `build` is `Type.build(parts, holes)`: the literal
+// pieces around the holes, and each hole as `Type.encode_hole(value)`, so a
+// hole reaches the value as the type's `Hole`, never as spliced text.
+sema_expression_checked_text_build: fn(type_name: String, parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    literal_exprs := [Expr]{}
+    hole_exprs := [Expr]{}
+    current := ""
+    loop part in parts {
+        if part == {
+            .Lit(text) -> current = "{current}{text}"
+            .Byte(value) -> current = "{current}{sema_expr_byte_text(value)}"
+            .Interp(value, _) -> {
+                literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: current}}, span: span, id: AST_NODE_GENERATED})
+                current = ""
+                hole_exprs.push(sema_expression_checked_text_encoder(type_name, value))
+            }
+        }
+    }
+    literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: current}}, span: span, id: AST_NODE_GENERATED})
+    args := [CallArg]{}
+    loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+    }
+    build_call := Expr.MethodCall{
+        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
+        method: "build",
+        method_span: span,
+        owner_type_args: [Type]{},
+        type_args: [Type]{},
+        args: args,
+        id: AST_NODE_GENERATED,
+    }
+    sema_check_expression(build_call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // Whether every hole of a checked text body is known before the program

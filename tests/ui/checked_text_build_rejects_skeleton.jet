@@ -1,0 +1,38 @@
+// A checked text type with `build` checks its literal parts joined by `{}`
+// before the program runs; an unbalanced skeleton is E2712 at the literal,
+// whatever the holes hold.
+
+#Error
+QueryError: enum { Unbalanced }
+
+Query: struct {
+    text: String
+    params: [String]
+}
+
+impl Query.CheckedText {
+    Error: QueryError
+    Hole: String
+
+    check: fn(text: String) QueryError! -[]> {
+        depth := 0
+        loop byte in text.bytes() {
+            if byte == (U8{40}) -> depth += 1
+            if byte == (U8{41}) -> depth -= 1
+        }
+        if depth != 0 -> return Err(QueryError.Unbalanced)
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+    build: fn(parts: [String], holes: [String]) -[]> Query {
+        Query{text: parts.join("?"), params: holes.copy()}
+    }
+}
+
+run: fn() {
+    close := ")"
+    query: Query{"MATCH (p WHERE p.name = {close}"}
+    print(query.text)
+}

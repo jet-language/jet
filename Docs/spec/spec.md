@@ -86,6 +86,15 @@ vocabulary](vocabulary.md).
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A).
+- A checked text type is any nominal with one `CheckedText` impl. A
+  `distinct String` type's literal is the joined text, with each hole passed
+  through `encode_hole`. A type that binds `Hole: T` and declares
+  `build: fn(parts: [String], holes: [Hole]) -[]> Owner` keeps its holes as
+  values: `Owner{"a {x} b"}` is `Owner.build(["a ", " b"],
+  [Owner.encode_hole(x)])`, and `check` accepts the parts joined by `{}`
+  before the program runs, or the literal is E2712. `Hole` without `build`
+  is E0907 (D-TEXTHEAD-HOLES1=A;
+  Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
   `name: value` (`sites: [...]`, `repeatable: true`, …) and its template
