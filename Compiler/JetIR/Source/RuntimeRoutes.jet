@@ -1393,7 +1393,9 @@ ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
 // keyed by runtime type: a struct's fields in constructor order or an enum's
 // variants in index order, each `name=kind` when it carries a member (Text,
 // Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>; a variant's
-// named members joined by `+`).
+// named members joined by `+`). Every row is read: its key is a runtime
+// handle row's runtime type or a route carrier's, or a member of another
+// row; a Core type whose declaration moved to Core source keeps no row here.
 IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cVaultError", variants: "InvalidName,NotFound,WrongType,Revoked,Locked,AuthorityDenied,Conflict,UnsupportedProvider,InvalidEncoding,DurabilityUnknown,Crypto=Tag.CryptoError,IO=Text+Text,Internal=Text", fields: ""},
@@ -1498,34 +1500,8 @@ IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "JetCoord2", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
     IRRecordSchema{jet_name: "JetCryptoJetcRaw", variants: "", fields: "value=Int,errno=Int,bytes=List.Byte,linux=Flag"},
     IRRecordSchema{jet_name: "JetCryptoJetcStat", variants: "", fields: "status=Int,errno=Int,dev=Int,ino=Int,len=Int,mtime=Int,mtime_ns=Int,nlink=Int,is_file=Flag,is_dir=Flag"},
-    IRRecordSchema{jet_name: "JetDataPlotAccessibility", variants: "", fields: "title=Text,description=Text,summary=Text,keyboard=Flag,announce_selection=Flag"},
-    IRRecordSchema{jet_name: "JetDataPlotAggregate", variants: "None,Count,Sum,Mean,Min,Max", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotAxis", variants: "", fields: "channel=Tag.JetDataPlotChannel,title=Text,visible=Flag,grid=Flag,ticks=Int"},
-    IRRecordSchema{jet_name: "JetDataPlotBackend", variants: "Terminal,Browser,Native,Export", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotCapability", variants: "", fields: "backend=Tag.JetDataPlotBackend,feature=Text,support=Tag.JetDataPlotSupport,reason=Text,replacement=Text"},
-    IRRecordSchema{jet_name: "JetDataPlotChannel", variants: "X,Y,Color,Size,Text,Detail", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotEncoding", variants: "", fields: "channel=Tag.JetDataPlotChannel,field=Rec.JetDataPlotField,aggregate=Tag.JetDataPlotAggregate"},
-    IRRecordSchema{jet_name: "JetDataPlotError", variants: "", fields: "kind=Tag.JetDataPlotErrorKind,operation=Text,field=OptText,channel=OptText,mark=OptText,expected=OptText,actual=OptText,index=OptInt,reason=Text"},
-    IRRecordSchema{jet_name: "JetDataPlotErrorKind", variants: "InvalidArgument,NonFinite,Unsupported,Empty,Limit", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotFacet", variants: "", fields: "field=Rec.JetDataPlotField,kind=Tag.JetDataPlotFacetKind,title=Text,columns=Int,rows=Int"},
-    IRRecordSchema{jet_name: "JetDataPlotFacetKind", variants: "Row,Column", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotField", variants: "", fields: "id=Text,name=Text,type_name=Text"},
-    IRRecordSchema{jet_name: "JetDataPlotFilterOp", variants: "Equal,NotEqual,Less,LessEqual,Greater,GreaterEqual", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotInteraction", variants: "Hover,Select,Zoom,Pan,Brush", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotLayout", variants: "", fields: "width=Float,height=Float,margin_top=Float,margin_right=Float,margin_bottom=Float,margin_left=Float"},
-    IRRecordSchema{jet_name: "JetDataPlotLegend", variants: "", fields: "channel=Tag.JetDataPlotChannel,title=Text,position=Tag.JetDataPlotLegendPosition,visible=Flag"},
-    IRRecordSchema{jet_name: "JetDataPlotLegendPosition", variants: "Top,Right,Bottom,Left", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotMark", variants: "Line,Bar,Point", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotRender", variants: "", fields: "backend=Tag.JetDataPlotBackend,format=Tag.JetDataPlotRenderFormat,body=Text,source=Rec.JetDataPlotSourceFacts,capabilities=List.Rec.JetDataPlotCapability"},
-    IRRecordSchema{jet_name: "JetDataPlotRenderFormat", variants: "Text,SVG", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotScaleKind", variants: "Linear,Log,Band,Point", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotSchema", variants: "", fields: "identity=Text,row_type=Text,columns=List.Rec.JetDataPlotField"},
-    IRRecordSchema{jet_name: "JetDataPlotSourceFacts", variants: "", fields: "table_plan_identity=Text,source_identity=Text,schema_identity=Text,row_type=Text,rows=Int,data_identity=Text,provenance=Text"},
-    IRRecordSchema{jet_name: "JetDataPlotSupport", variants: "Supported,Degraded,Unsupported", fields: ""},
-    IRRecordSchema{jet_name: "JetDataPlotValue", variants: "Text=Text,Integer=Int,Number=Float,Boolean=Flag,Null", fields: ""},
     IRRecordSchema{jet_name: "JetDate", variants: "", fields: "year=Int,month=Int,day=Int"},
     IRRecordSchema{jet_name: "JetDeliveryEvent", variants: "", fields: "sequence=Int,state=Tag.JetDeliveryState,attempts=Int,timestamp=Int,signature=Text"},
-    IRRecordSchema{jet_name: "JetDeliveryReceipt", variants: "", fields: "id=Text,state=Tag.JetDeliveryState,attempts=Int,retention_until=Int,deadline=Int,idempotency_key=Text,duplicate=Flag,authority=Text,generation=Int,signature=Text"},
     IRRecordSchema{jet_name: "JetDeliveryState", variants: "Pending,Accepted,Delivering,Delivered,DeadLettered,Cancelled", fields: ""},
     IRRecordSchema{jet_name: "JetDispatchState", variants: "Delivered,HandlerFailed,DroppedNewest,DroppedOldest,Closed,Cancelled,DeadlineExceeded", fields: ""},
     IRRecordSchema{jet_name: "JetDNSSrv", variants: "", fields: "priority=Int,weight=Int,port=Int,target=Text"},
@@ -1596,9 +1572,7 @@ IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "JetWebQueryStatus", variants: "Pending,Fresh,Stale,Fetching,Error,Offline", fields: ""},
     IRRecordSchema{jet_name: "JetWebTableFilter", variants: "", fields: "column=Text,value=Text"},
     IRRecordSchema{jet_name: "JetWebTablePageMode", variants: "Client,Server", fields: ""},
-    IRRecordSchema{jet_name: "JetWebTableSort", variants: "", fields: "column=Text,direction=Tag.JetWebTableSortDirection"},
     IRRecordSchema{jet_name: "JetWebTableSortDirection", variants: "Ascending,Descending", fields: ""},
-    IRRecordSchema{jet_name: "JetWebTableStatus", variants: "Idle,Loading,Ready,Error", fields: ""},
     IRRecordSchema{jet_name: "JetWsError", variants: "InvalidURL,InvalidHandshake,Protocol,MessageTooLarge=Int,IO=Text,Timeout,Closed,Cancelled,UnsupportedTarget", fields: ""},
     IRRecordSchema{jet_name: "LogField", variants: "", fields: "key=Text,value=Text,kind=Text,redacted=Flag"},
     IRRecordSchema{jet_name: "LogSpan", variants: "", fields: "id=Int,name=Text"},
@@ -1963,4 +1937,48 @@ ir_native_type: fn(name: String) -> IRNativeType? {
     // copy: the caller gets an owned type row, while the row stays in the global IR_NATIVE_TYPES
     // table, which can't be moved from.
     Val(IR_NATIVE_TYPES[position].copy())
+}
+
+// The names a generated record row can be read by: a route carrier's
+// handle or tag, and its members'.
+ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
+    if carrier == {
+        .Handle(name) | .HandleMut(name) -> out.push(name.copy())
+        .Tag(name, _) -> out.push(name.copy())
+        .List(elem) | .ListMut(elem) -> ir_route_carrier_names(elem, out)
+        .Option(some) -> ir_route_carrier_names(some, out)
+        .Tuple(items) -> { loop item in items -> ir_route_carrier_names(item, out) }
+        else -> {}
+    }
+}
+
+#Test("every generated record row is read by a runtime handle, a route or another row") {
+    readers := [String]{}
+    loop handle in IR_RUNTIME_HANDLES -> readers.push(handle.runtime.copy())
+    loop handle in IR_NATIVE_PROVIDER_HANDLES -> readers.push(handle.runtime.copy())
+    loop route in IR_RUNTIME_ROUTES {
+        loop param in route.params -> ir_route_carrier_names(param, readers)
+        if route.result == {
+            .Plain(carrier) -> ir_route_carrier_names(carrier, readers)
+            .Option(some) -> ir_route_carrier_names(some, readers)
+            .Result(ok, err) -> {
+                ir_route_carrier_names(ok, readers)
+                ir_route_carrier_names(err, readers)
+            }
+            .Tuple(items) -> { loop item in items -> ir_route_carrier_names(item, readers) }
+        }
+    }
+    loop row in IR_GENERATED_RECORDS {
+        loop part in "{row.variants},{row.fields}".split(",") {
+            loop kind in part.split("+") {
+                if kind.contains("Tag.") -> readers.push(kind.split("Tag.").to_list()[1].copy())
+                if kind.contains("Rec.") -> readers.push(kind.split("Rec.").to_list()[1].copy())
+            }
+        }
+    }
+    unread := [String]{}
+    loop row in IR_GENERATED_RECORDS {
+        if !readers.contains(row.jet_name) -> unread.push(row.jet_name.copy())
+    }
+    assert_eq(unread, [String]{})
 }
