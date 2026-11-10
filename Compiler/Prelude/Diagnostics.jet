@@ -2526,6 +2526,24 @@ SharedBusyWait: struct {
     }
 }
 
+TolerantFormDecode: struct {
+    member: String
+    impl Diagnostic {
+        code: "L0208"
+        severity: .Lint
+        lint_name: "tolerant_form_decode"
+        stage: [.Sema]
+        meaning: "A tolerant `core.http` form or query decode, listed for review"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
+        what: fn(self) -> String { "`{self.member}` keeps a broken escape as written and turns invalid UTF-8 into U+FFFD." }
+        why: fn(self) -> String { "The tolerant decoder follows the browser standard, so two different inputs can decode to the same value; code that picks a file or an account from that value must refuse bad input instead." }
+        fix: fn(self) -> String { "If the value names a file or an account, call `{self.member}_strict` and handle its `FormDecodeError`; otherwise keep this call. `jet fix --all` writes the strict call." }
+    }
+}
+
 CompilerExtension: struct {
     impl Diagnostic {
         code: "L1401"

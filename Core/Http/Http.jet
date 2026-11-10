@@ -328,7 +328,10 @@ __route_text: fn(request: HTTPRequest, name: String) -> String? Never! {
     raw: request.path.bytes()
     at: index_byte(raw, 63)
     if at < 0 -> return None
-    query_get(query_decode(slice_str(request.path, at + 1, raw.len())), name)
+    // Strict: a route input can name an identity, so a
+    // query that does not decode exactly gives no input.
+    fields: query_decode_strict(slice_str(request.path, at + 1, raw.len())) ?? return None
+    query_get(fields, name)
 }
 
 impl HTTPRequest {
@@ -393,9 +396,12 @@ impl HTTPRequest {
     }
 
     // `body(text)`.
-    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! {
+    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! { self.__with_body_value(Body.Text(text)) }
+
+    // `with_body(request, body)`: any body, bytes kept as bytes.
+    __with_body_value: fn(self, body: Body) -> HTTPRequest Never! {
         out := self.copy()
-        out.body = Body.Text(text)
+        out.body = body
         out.__body_set = true
         out
     }
@@ -1047,7 +1053,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
     if raw.len() - split > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
-    body_raw: slice_b(raw, split, raw.len())
+    body_len: raw.len() - split
     lines: split_lines(head)
     if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidMethod)
     parts: split_space_line(lines[0])
@@ -1079,7 +1085,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected: content_length(h)
-    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
+    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len) || (expected < 0 && body_len > 0) -> return Err(.InvalidFraming)
     fields := headers()
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
@@ -1087,10 +1093,10 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
         value: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         fields.fields.push(Header{name: name, value: trim(value)})
     }
-    // The body stays the wire bytes, sliced once after its length check
-    // (#4428). A read as text decodes it then, so a binary upload parses.
-    body := Body.Empty
-    if body_raw.len() > 0 -> body = Body.Bytes(body_raw)
+    // The body stays the wire bytes, sliced once after every length check
+    // (#4428, #4431). A read as text decodes it then, so a binary upload parses.
+    body_raw: slice_b(raw, split, raw.len())
+    body: if body_len > 0 -> Body.Bytes(body_raw) else -> Body.Empty
     Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
 }
 
@@ -1264,42 +1270,204 @@ query_encode: fn(q: Query) -> String Never! {
     s
 }
 
-query_decode: fn(text: String) -> Query Never! {
-    q := query()
+// Form and query decoding. One splitter and
+// one scanner serve every entry point. Tolerant decoding follows the WHATWG
+// application/x-www-form-urlencoded parser: + is a space, %HH is one byte, a
+// broken escape such as %QZ stays as written, and bytes that are not UTF-8
+// become U+FFFD, one per maximal invalid subpart. Strict decoding refuses
+// both instead; code whose decoded value picks a file, path, account or other
+// identity uses it, since %FF and %FE both read as U+FFFD when tolerant.
+FormPolicy: enum {
+    Tolerant
+    Strict
+}
+
+// Why a strict form or query decode refused its input.
+#Error
+FormDecodeError: enum {
+    // A % not followed by two hex digits.
+    Escape
+    // Decoded bytes that are not UTF-8.
+    UTF8
+    // Input above 1 MiB.
+    TooLarge
+}
+
+// The fields of a query or form, in order: one leading ? is stripped, empty
+// segments are skipped, a field without = has an empty value, and an empty
+// name and duplicate names are kept. Above 1 MiB a tolerant split is an
+// empty Query.
+__form_split: fn(text: String, policy: FormPolicy) -> Query FormDecodeError! {
     raw: text.bytes()
-    if raw.len() == 0 || raw.len() > C_MAX_BODY_BYTES -> return q
+    if raw.len() > C_MAX_BODY_BYTES {
+        if policy == FormPolicy.Strict -> return Err(.TooLarge)
+        return Ok(query())
+    }
+    pairs := [QueryPair]{}
     start := 0
-    if raw[0] == (U8{63}) -> start = 1
+    if raw.len() > 0 && raw[0] == (U8{63}) -> start = 1
     i := start
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{38}) {
             if i > start {
-                eq := -1
-                j := start
-                loop j < i {
-                    if raw[j] == (U8{61}) {
-                        eq = j
-                        break
-                    }
-                    j = j + 1
-                }
-                key_end := if eq >= 0 -> eq else -> i
-                value_start := if eq >= 0 -> eq + 1 else -> i
-                key: String.from_bytes(slice_b(raw, start, key_end)) ?? ""
-                value: String.from_bytes(slice_b(raw, value_start, i)) ?? ""
-                pairs := q.pairs.copy()
-                pairs.push(QueryPair{key: percent_decode(key), value: percent_decode(value)})
-                q = Query{pairs: pairs}
+                eq := start
+                loop eq < i && raw[eq] != (U8{61}) -> eq = eq + 1
+                value_start: if eq < i -> eq + 1 else -> i
+                key: __form_scan(raw, start, eq, policy) ?? return Err(err)
+                value: __form_scan(raw, value_start, i, policy) ?? return Err(err)
+                pairs.push(QueryPair{key: key, value: value})
             }
             start = i + 1
         }
         i = i + 1
     }
-    q
+    Ok(Query{pairs: pairs})
 }
+
+// Decodes raw[from..<to], one form component, once: %252F is %2F.
+__form_scan: fn(raw: [U8], from: Int, to: Int, policy: FormPolicy) -> String FormDecodeError! {
+    out := [U8]{}
+    i := from
+    loop i < to {
+        b: raw[i]
+        if b == (U8{43}) {
+            out.push(U8{32})
+            i = i + 1
+            next
+        }
+        if b == (U8{37}) {
+            if i + 2 < to {
+                hi: from_hex(raw[i + 1])
+                lo: from_hex(raw[i + 2])
+                if hi >= 0 && lo >= 0 {
+                    out.push(U8{hi * 16 + lo})
+                    i = i + 3
+                    next
+                }
+            }
+            if policy == FormPolicy.Strict -> return Err(.Escape)
+        }
+        out.push(b)
+        i = i + 1
+    }
+    if policy == FormPolicy.Strict -> return Ok(String.from_bytes(out) ?? return Err(.UTF8))
+    Ok(String.from_bytes(out) ?? __utf8_replacing(out))
+}
+
+// UTF-8 decoding with replacement: each maximal subpart of an invalid
+// sequence becomes one U+FFFD (FF: one; C0 AF: two; ED A0 80: three;
+// E2 28 A1: U+FFFD ( U+FFFD; a truncated E2 82: one).
+__utf8_replacing: fn(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        lead: Int.from_u8(bytes[at])
+        width := if lead < 128 -> 1 else -> 0
+        low := 128
+        high := 191
+        if lead >= 194 && lead <= 223 -> width = 2
+        if lead >= 224 && lead <= 239 {
+            width = 3
+            if lead == 224 -> low = 160
+            if lead == 237 -> high = 159
+        }
+        if lead >= 240 && lead <= 244 {
+            width = 4
+            if lead == 240 -> low = 144
+            if lead == 244 -> high = 143
+        }
+        good := 1
+        loop good < width && at + good < bytes.len() {
+            byte: Int.from_u8(bytes[at + good])
+            valid: if good == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
+            if !valid -> break
+            good = good + 1
+        }
+        if width > 0 && good == width {
+            loop k in 0..<width -> out.push(bytes[at + k])
+        } else {
+            out.push(U8{239})
+            out.push(U8{191})
+            out.push(U8{189})
+        }
+        at = at + good
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// One form value, tolerant: never fails.
+form_component_decode: fn(text: String) -> String Never! {
+    raw: text.bytes()
+    __form_scan(raw, 0, raw.len(), FormPolicy.Tolerant) ?? ""
+}
+
+// One form value, strict: Escape or UTF8 instead of replacing.
+form_component_decode_strict: fn(text: String) -> String FormDecodeError! {
+    raw: text.bytes()
+    __form_scan(raw, 0, raw.len(), FormPolicy.Strict)
+}
+
+query_decode: fn(text: String) -> Query Never! { __form_split(text, FormPolicy.Tolerant) ?? query() }
+query_decode_strict: fn(text: String) -> Query FormDecodeError! { __form_split(text, FormPolicy.Strict) }
 
 form_encode: fn(q: Query) -> String Never! { query_encode(q) }
 form_decode: fn(text: String) -> Query Never! { query_decode(text) }
+form_decode_strict: fn(text: String) -> Query FormDecodeError! { query_decode_strict(text) }
+
+#Test("form components decode once, tolerant by WHATWG replacement or strict by refusal") {
+    r: String.from_bytes([U8]{239, 191, 189}) ?? panic("U+FFFD")
+    assert_eq(form_component_decode("%FF"), r)
+    assert_eq(form_component_decode("%C0%AF"), "{r}{r}")
+    assert_eq(form_component_decode("%ED%A0%80"), "{r}{r}{r}")
+    assert_eq(form_component_decode("%E2(%A1"), "{r}({r}")
+    assert_eq(form_component_decode("%E2%82"), r)
+    assert_eq(form_component_decode("a+b%41%e2%82%ac"), "a bA€")
+    assert_eq(form_component_decode("%QZ%4"), "%QZ%4")
+    assert_eq(form_component_decode("%252F"), "%2F")
+    assert_eq(form_component_decode("%00").bytes(), [U8]{0})
+    assert(form_component_decode_strict("%QZ") == .Err(.Escape))
+    assert(form_component_decode_strict("ab%4") == .Err(.Escape))
+    assert(form_component_decode_strict("%FF") == .Err(.UTF8))
+    assert(form_component_decode_strict("%C0%AF") == .Err(.UTF8))
+    assert(form_component_decode_strict("%E2%82") == .Err(.UTF8))
+    assert_eq(form_component_decode_strict("a+%41%252F") ?? panic("strict component"), "a A%2F")
+}
+
+#Test("queries and forms split one way under both policies") {
+    r: String.from_bytes([U8]{239, 191, 189}) ?? panic("U+FFFD")
+    q: form_decode("?name=%FF+&&x=%41&path=%252F&flag&=e&x=2")
+    assert_eq(q.pairs.len(), 6)
+    assert_eq(query_get(q, "name"), Val("{r} "))
+    assert_eq(query_all(q, "x"), [String]{"A", "2"})
+    assert_eq(query_get(q, "path"), Val("%2F"))
+    assert_eq(query_get(q, "flag"), Val(""))
+    assert_eq(query_get(q, ""), Val("e"))
+    assert_eq(query_decode("?x=%QZ").pairs[0].value, "%QZ")
+    assert(form_decode_strict("name=%FF+&x=%41") == .Err(.UTF8))
+    assert(query_decode_strict("x=%QZ") == .Err(.Escape))
+    strict: query_decode_strict("?x=%41&&y") ?? panic("strict query")
+    assert_eq(strict.pairs.len(), 2)
+    assert_eq(query_get(strict, "y"), Val(""))
+    big: "a={"b".repeat(C_MAX_BODY_BYTES)}"
+    assert_eq(query_decode(big).pairs.len(), 0)
+    assert(query_decode_strict(big) == .Err(.TooLarge))
+    assert(form_decode_strict(big) == .Err(.TooLarge))
+}
+
+#Test("a binary body stays bytes through parse_request, with_body, request_with and response_ok") {
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    raw := "POST / HTTP/1.1{crlf}Host: example{crlf}Content-Length: 2{crlf}{crlf}".bytes()
+    raw.push(U8{255})
+    raw.push(U8{0})
+    req: parse_request(raw) ?? panic("binary upload framing")
+    assert_eq(body_as_bytes(req.body), [U8]{255, 0})
+    assert(req.text() == .Err(.UnsupportedEncoding))
+    assert(req.text() == .Err(.BodyConsumed))
+    assert_eq(body_as_bytes(with_body(req, body_bytes([U8]{255, 0})).body), [U8]{255, 0})
+    sent: request_with(Method.Post, "http://example/", headers(), body_bytes([U8]{255, 0}))
+    assert_eq(body_as_bytes(sent.body), [U8]{255, 0})
+    assert_eq(body_as_bytes(response_ok(body_bytes([U8]{255, 0})).body), [U8]{255, 0})
+}
 
 cookie: fn(name: String, value: String) -> Cookie Never! {
     Cookie{name: name, value: value, domain: "", path: "/", secure: false, http_only: false, same_site: "Lax", max_age: -1}
@@ -1362,8 +1530,9 @@ with_header: fn(req: HTTPRequest, name: String, value: String) -> HTTPRequest Ne
     req.__with_header(name, value)
 }
 
+// The body as given: Body.Bytes stays bytes.
 with_body: fn(req: HTTPRequest, body: Body) -> HTTPRequest Never! {
-    req.__with_body(body_as_text(body))
+    req.__with_body_value(body)
 }
 
 with_query: fn(url: String, q: Query) -> String Never! {
@@ -1393,7 +1562,8 @@ request_with: fn(method: Method, url: String, h: Headers, body: Body) -> HTTPReq
 }
 
 response_ok: fn(body: Body) -> HTTPResponse Never! {
-    __text_response(200, body_as_text(body))
+    fields: headers()
+    __response(200, body.copy(), fields)
 }
 
 response_json_headers: fn() -> Headers Never! { headers_set(headers(), "content-type", "application/json; charset=utf-8") }
@@ -1644,30 +1814,6 @@ percent_encode: fn(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-percent_decode: fn(text: String) -> String {
-    raw: text.bytes()
-    out := [U8]{}
-    i := 0
-    loop i < raw.len() {
-        if raw[i] == (U8{43}) {
-            out.push(U8{32})
-            i = i + 1
-            next
-        }
-        if raw[i] == (U8{37}) && i + 2 < raw.len() {
-            hi: from_hex(raw[i + 1])
-            lo: from_hex(raw[i + 2])
-            if hi >= 0 && lo >= 0 {
-                out.push(U8{hi * 16 + lo})
-                i = i + 3
-                next
-            }
-        }
-        out.push(raw[i])
-        i = i + 1
-    }
-    String.from_bytes(out) ?? text
-}
 base64_encode: fn(bytes: [U8]) -> String Never! {
     alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
     out := [U8]{}

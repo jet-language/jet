@@ -1,0 +1,8 @@
+// core-conformance: core.http.form_decode_strict
+use api: core.http
+
+run: fn() {
+    form: api.form_decode_strict("x=%41&path=%252F") ?? panic("strict form")
+    print(api.query_get(form, "path") ?? "missing")
+    print(api.form_decode_strict("name=%FF+&x=%41") == .Err(.UTF8))
+}

@@ -29,8 +29,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     assert_eq(r.body, "ok".bytes())
     assert_eq(r.headers.get("content-length"), Val("2"))
     assert_eq(devserver_query_param_raw_value(r.target, "q"), Val("a%20b"))
-    // #4428: original query_param(r.target,"q") == Some("a b") awaits
-    // public tolerant/lossy Core value decoding; not replaced by raw output.
+    assert_eq(devserver_query_param(r.target, "q"), Val("a b"))
 }
 
 // Preserving the hostile metadata with a valid Host.
@@ -132,8 +131,24 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     assert_eq(devserver_query_param_raw_value("/x?q={value}", "q"), Val(value))
 }
 
-// #4428 integration cases, explicitly unrun: body [0,255,128] must remain
-// [0,255,128]; query values a+b -> "a b", %G0%2% -> "%G0%2%",
-// %FF -> U+FFFD, %C3%28 -> U+FFFD + "(", %E2%82%AC -> "€".
-// No decoder symbol exists yet; these are not fake passing placeholder tests.
+// The #4428 query values through Core's tolerant form decoder, and a binary
+// body through Core's parser.
+#Test("query_values_decode_tolerantly_and_binary_bodies_stay_bytes") {
+    r: String.from_bytes([U8]{239, 191, 189}) ?? panic("U+FFFD")
+    assert_eq(devserver_query_param("/x?q=a+b", "q"), Val("a b"))
+    assert_eq(devserver_query_param("/x?q=%G0%2%", "q"), Val("%G0%2%"))
+    assert_eq(devserver_query_param("/x?q=%FF", "q"), Val(r))
+    assert_eq(devserver_query_param("/x?q=%C3%28", "q"), Val("{r}("))
+    assert_eq(devserver_query_param("/x?q=%E2%82%AC", "q"), Val("€"))
+    assert_eq(devserver_query_param("/x?%71=x", "q"), None)
+    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    raw := "POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 3{cr}\n{cr}\n".bytes()
+    raw.push(U8{0})
+    raw.push(U8{255})
+    raw.push(U8{128})
+    parsed: DevserverRequest.read(raw) ?? panic("binary upload rejected")
+    request: parsed ?? panic("missing request")
+    assert_eq(request.body, [U8]{0, 255, 128})
+}
+
 // Static traversal/authority and owned Canvas route tests (1275–1498) are T2.

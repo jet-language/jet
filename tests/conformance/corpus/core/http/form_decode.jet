@@ -2,5 +2,9 @@
 use api: core.http
 
 run: fn() {
-    print(api.form_decode("jet"))
+    form: api.form_decode("name=%FF+&x=%41&path=%252F&bad=%QZ")
+    print(api.query_get(form, "name") ?? "missing")
+    print(api.query_get(form, "x") ?? "missing")
+    print(api.query_get(form, "path") ?? "missing")
+    print(api.query_get(form, "bad") ?? "missing")
 }

@@ -1258,8 +1258,12 @@ rejected without a body allocation.
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
 | `exchange(method, url, body, header_lines)` | `HTTPResponse !HTTPError` | Validate and perform a request described by a method and header lines. |
-| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after the length check; a text read decodes it then. |
+| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after every length check; a text read decodes it then. |
+| `with_body(request, body)` / `request_with(method, url, headers, body)` / `response_ok(body)` | request/response | Carry the body as given: a `Body.Bytes` body stays bytes. |
 | `query()` / `query_get` / `query_all` / `query_set` | query values | Build and inspect repeated query pairs. |
+| `query_decode(text)` / `form_decode(text)` | `Query` | Split a query or an `application/x-www-form-urlencoded` form the WHATWG way: one leading `?` is stripped, empty segments are skipped, a field without `=` has an empty value, and duplicate names stay in order (`query_get` returns the first). `+` is a space and `%HH` one byte, decoded once; a broken escape such as `%QZ` stays as written, and bytes that are not UTF-8 become U+FFFD, one per maximal invalid subpart. Input above 1 MiB gives an empty `Query`. |
+| `query_decode_strict(text)` / `form_decode_strict(text)` | `Query !FormDecodeError` | The same split, refusing instead of replacing: `Escape` for a broken escape, `UTF8` for bytes that are not UTF-8, `TooLarge` above 1 MiB. Code whose decoded value picks a file, path, account or other identity uses these, since `%FF` and `%FE` both decode to U+FFFD when tolerant. |
+| `form_component_decode(text)` / `form_component_decode_strict(text)` | `String` / `String !FormDecodeError` | Decode one field name or value by the same rules. |
 | `cookie(name, value)` / `cookie_encode` / `cookies_parse` | cookie values | Construct, render, and parse bounded cookie fields. |
 | `basic_auth(user, password)` / `bearer_auth(token)` | `String` | Render authorization header values. |
 

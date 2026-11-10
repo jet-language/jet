@@ -1,0 +1,18 @@
+use {
+    http: core.http
+    core.http.[FormDecodeError, Query, query_get]
+}
+
+// L0208: each tolerant decode outside Core is listed for review.
+city: fn(body: String) -> String { query_get(http.form_decode(body), "city") ?? "" }
+
+page: fn(target: String) -> String { query_get(http.query_decode(target), "page") ?? "1" }
+
+// The strict siblings carry no advisory.
+account: fn(body: String) -> Query FormDecodeError! { http.form_decode_strict(body) }
+
+run: fn() {
+    print(city("city=Oslo"))
+    print(page("page=2"))
+    _: account("name=Ann") ?? panic("strict decode")
+}
