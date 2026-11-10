@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98796,
+    "rev": 98797,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75961,7 +75961,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T15:46:16.900Z",
+      "updated": "2026-11-10T15:49:33.438Z",
       "updatedBy": "Main",
       "criteriaLastN": 171
     },
@@ -194213,13 +194213,13 @@
       "explainer": "Words used here. A place is another process or machine that can run work. Encodable means a value can be turned into bytes and back. A grant is an effect a place allows.",
       "story": "Sam's app renders thumbnails. Under A, worker.run(render, job) sends each job to a render machine. The build refuses a job that needs files the machine does not grant.",
       "inWild": "// Ray sends a function and its arguments to a cluster worker:\nresult = area.remote(job)",
-      "detail": "What this ballot decides. Whether one task can run at another place, and which rules the build checks. Transport, discovery and identity come from D-SERVICE-IDENTITY1=D and are not reopened.\n\nToday, on the t6c compiler (dev 76955986d0), as on the seed. Probe t01 runs task area(job) and prints area 42, wire {\"width\":6,\"height\":7}. Probe t02 runs a task on Shared<Hits> and prints hits 1. Both run in this process only.\n\nProbe t03 is new. A top-level function with a plain Int argument and result changes a module-level shared holder, and prints bumped 5, hits 5. It passes the draft's four rules, yet its state cannot cross.\n\nWhat must exist first. A Place type in core.tasks backed by D-SERVICE-IDENTITY1=D's typed endpoint capabilities, and a transport for them. Neither exists on dev; Core declares no Place type. A says what the build checks once they do.\n\nWhat A does. place.run(area, job) returns the same task handle as task area(job), so join works the same way. The build checks five rules before it allows the call.\n\nFirst, the function is top-level, so it has no hidden captures. Second, every argument and the result encode, as Job does in t01. Third, no argument holds Shared, Pool IDs, handles or other process-tied state, so t02's form is refused.\n\nAn argument with an unpaid D-OWES1 duty is refused too, since the duty could not be paid here once the value leaves.\n\nFourth, the function and everything it calls read and write no module state. That covers module variables, module-level shared holders and #Persist values, so t03's bump is refused. Module constants are part of the code and may be read.\n\nThis is checked like the effect row, over the same call graph, and the refusal names the first line that touches module state.\n\nFifth, the function's effect row is covered by the place's grants. The place's type carries those grants, as a typed endpoint capability does under D-SERVICE-IDENTITY1=D. Effects act on the place's own resources: a file written there is the place's file.\n\nSame code. The call carries the identity of the build it came from. A place running a different build refuses the call with PlaceMismatch, so no task runs against code it was not checked with.\n\nFailure is typed. join on a moved task can also return PlaceLost when the place is unreachable, or PlaceMismatch, never a hidden retry. A stop at the place comes back as the same task failure join reports locally. That matches D-SERVICE-IDENTITY1=D's typed partition results.\n\nRatified decisions. A keeps D-SERVICE-IDENTITY1=D and D-ACTOR1=A unchanged, and uses the sendability rules tasks already follow. Actors can later place their task the same way.\n\nBeginner path. A beginner keeps writing task f(x); nothing changes. Expert path. Swap task for place.run, and the build lists each of the five rules a function breaks, with its line.\n\nDownsides of A, and what the design does about them. A moved task pays encoding and network time. The handle and its errors are the same, so measuring both forms is a one-word change.\n\nWhat remains. A top-level function rule refuses closures that would be convenient. Captured values become arguments, which the encode rule can then check.\n\nOther options. B keeps tasks local; remote work goes through typed service endpoints. C also moves closures whose captures encode, as Unison does. D places actors, not tasks, as Erlang and Akka do.\n\nTheir best cases. B adds nothing. C is the most convenient. D fits long-lived state. Their costs: B needs a service for every remote job. C hides what crosses the wire inside a closure. D makes one-shot work carry an actor's protocol.",
+      "detail": "What this ballot decides. Whether one task can run at another place, and which rules the build checks. Transport, discovery and identity come from D-SERVICE-IDENTITY1=D and are not reopened.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Probe t01 runs task area(job) and prints area 42, wire {\"width\":6,\"height\":7}. Probe t02 runs a task on Shared<Hits> and prints hits 1. Both run in this process only.\n\nProbe t03 is new. A top-level function with a plain Int argument and result changes a module-level shared holder, and prints bumped 5, hits 5. It passes the draft's four rules, yet its state cannot cross.\n\nWhat must exist first. A Place type in core.tasks backed by D-SERVICE-IDENTITY1=D's typed endpoint capabilities, and a transport for them. Neither exists on dev; Core declares no Place type. A says what the build checks once they do.\n\nWhat A does. place.run(area, job) returns a task handle with the same join and detach as task area(job). Only its failure type is wider, as described below. The build checks five rules before it allows the call.\n\nFirst, the function is top-level, so it has no hidden captures. That excludes today's task { … } block form, as in Examples/Concurrency/FreezeCapture.jet. Second, every argument and the result encode, as Job does in t01. Third, no argument holds Shared, Pool IDs, handles or other process-tied state, so t02's form is refused.\n\nAn argument with an unpaid D-OWES1 duty is refused too, since the duty could not be paid here once the value leaves.\n\nFourth, the function and everything it calls read and write no module state. That covers module variables, module-level shared holders and #Persist values, so t03's bump is refused. Module constants are part of the code and may be read.\n\nThis is checked like the effect row, over the same call graph, and the refusal names the first line that touches module state.\n\nFifth, the function's effect row is covered by the place's grants. The place's type carries those grants, as a typed endpoint capability does under D-SERVICE-IDENTITY1=D. Effects act on the place's own resources: a file written there is the place's file.\n\nSame code. The call carries the identity of the build it came from. A place running a different build refuses the call with PlaceMismatch, so no task runs against code it was not checked with.\n\nFailure is typed, never a hidden retry. TaskFailure is closed: Cancelled, DeadlineBlown and Panicked (CoreEnumPayloadRows.jet:22-24). Probe t05 drops the Panicked arm and gets E0307, so a new case would break every full match, as in t04.\n\nSo a moved task's join fails with PlaceFailure: Task carries the TaskFailure from the place, Lost means unreachable and Mismatch means another build. Local tasks keep TaskFailure unchanged, and join() ?? default reads the same in both forms. That matches D-SERVICE-IDENTITY1=D's typed partition results.\n\nRatified decisions. A keeps D-SERVICE-IDENTITY1=D and D-ACTOR1=A unchanged, and uses the sendability rules tasks already follow. Actors can later place their task the same way.\n\nBeginner path. A beginner keeps writing task f(x); nothing changes. Expert path. Swap task for place.run, and the build lists each of the five rules a function breaks, with its line.\n\nDownsides of A, and what the design does about them. A moved task pays encoding and network time. The handle keeps join and detach, so measuring both forms is a one-word change; only a full failure match adds two arms.\n\nWhat remains. A top-level function rule refuses closures that would be convenient. Captured values become arguments, which the encode rule can then check.\n\nOther options. B keeps tasks local; remote work goes through typed service endpoints. C also moves closures whose captures encode, as Unison does. D places actors, not tasks, as Erlang and Akka do.\n\nTheir best cases. B adds nothing. C is the most convenient. D fits long-lived state. Their costs: B needs a service for every remote job. C hides what crosses the wire inside a closure. D makes one-shot work carry an actor's protocol.",
       "options": [
         {
           "key": "A",
           "name": "Move a top-level task",
           "detail": "place.run(f, args) runs a top-level function elsewhere when its inputs, result, module-state use and effects fit.",
-          "technical": "core.tasks Place over D-SERVICE-IDENTITY1=D endpoints. Build checks: top-level function, encodable arguments and result, no process-tied state or unpaid duty. It also checks no module state in the call graph, and an effect row the place's grants cover. The call carries its build identity; join adds PlaceLost and PlaceMismatch.",
+          "technical": "core.tasks Place over D-SERVICE-IDENTITY1=D endpoints. Build checks: top-level function, encodable arguments and result, no process-tied state or unpaid duty. It also checks no module state in the call graph, and an effect row the place's grants cover.\n\nThe call carries its build identity. A moved join fails with PlaceFailure (Task, Lost, Mismatch); TaskFailure and local matches are unchanged.",
           "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Today (probe t01): task area(job) prints area 42, in this process.\n// Proposed (A): t: render_box.run(area, job); t.join() works the same.\n// A Shared<Hits> argument, or a function that touches module state (probe t03), is refused before the program runs."
         },
         {
@@ -194264,7 +194264,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "The task rules Jet already checks, plus encoding and grants, decide what may move. The handle stays the same, so local and remote are one word apart.",
+        "why": "The task rules Jet already checks, plus encoding and grants, decide what may move. The handle keeps join and detach, so local and remote are one word apart.",
         "gains": [
           "Remote work keeps the task handle.",
           "The build checks grants before running.",
@@ -194278,6 +194278,10 @@
           {
             "loss": "Closures cannot move.",
             "mitigation": "Captured values become arguments, which the encode rule checks."
+          },
+          {
+            "loss": "A moved task's join has a wider failure type.",
+            "mitigation": "join() ?? default reads the same; only a full match adds the Lost and Mismatch arms."
           }
         ],
         "whyNot": [
@@ -194301,9 +194305,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Adding PlaceLost and PlaceMismatch to the closed TaskFailure would break full matches (probe t05: E0307), so A now gives moved joins their own PlaceFailure. The top-level rule's exclusion of task { … } blocks is now stated."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/tm run for t01, t02 and t03; outputs are in probes/tm/out6. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-TASK-MOVE1/probes for t01 to t05. TaskFailure's cases are in Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet:22-24. The case-name count uses git grep -l on dev.",
       "surface": {
         "gist": "Should a task whose inputs and result encode be able to run at another place, checked against that place's grants?",
         "lesson": "A task is a piece of work that runs beside the rest of the program. Some work could just as well run on another machine. This vote decides whether Jet lets you send a task there, and what it checks first.",
@@ -194409,7 +194413,91 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:48:11.509Z"
+      "created": "2026-11-10T03:48:11.509Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "Adding PlaceLost and PlaceMismatch to TaskFailure would break every full match (t04, t05: E0307).",
+          "attempts": [
+            "Add the cases to TaskFailure; 32 files name its cases, and full matches such as ContextTaskInherit.jet would stop compiling.",
+            "Give a moved join its own PlaceFailure that wraps TaskFailure; local code is untouched."
+          ],
+          "result": "Removed by the second attempt; A now uses PlaceFailure."
+        },
+        {
+          "option": "A",
+          "loss": "Module state reached from the call graph cannot cross (t03).",
+          "attempts": [
+            "Refuse only the task's own function body; t03's bump would still pass through a helper.",
+            "Check the whole call graph like the effect row and name the first line that touches module state."
+          ],
+          "result": "Removed by the second attempt."
+        },
+        {
+          "option": "A",
+          "loss": "A moved task pays encoding and network time.",
+          "attempts": [
+            "Keep the handle's join and detach, so switching is one word and both forms can be measured.",
+            "Keep arguments plain encodable values, as Job in t01 is, with no hidden captures to inflate the payload."
+          ],
+          "result": "Reduced; the transport cost itself remains."
+        },
+        {
+          "option": "A",
+          "loss": "Closures and task { … } blocks cannot move.",
+          "attempts": [
+            "Allow closures whose captures encode (option C); what crosses is then hidden in the closure.",
+            "Turn captures into arguments, which the encode rule checks."
+          ],
+          "result": "Reduced to one rewrite per moved block."
+        },
+        {
+          "option": "B",
+          "loss": "Every remote job needs a service.",
+          "attempts": [
+            "Use D-SERVICE-IDENTITY1=D endpoints with a generated one-call service.",
+            "Use a shared job-runner service with typed requests."
+          ],
+          "result": "Reduced, not removed: a service per job shape remains."
+        },
+        {
+          "option": "C",
+          "loss": "What crosses the wire is hidden in the closure.",
+          "attempts": [
+            "List captured values in the build report.",
+            "Require captures to be written, as task &&owned { … } does."
+          ],
+          "result": "Reduced; written captures are A's arguments under another spelling."
+        },
+        {
+          "option": "D",
+          "loss": "One-shot work carries an actor's protocol.",
+          "attempts": [
+            "Spawn a one-message actor that replies once.",
+            "Wrap that in a helper function."
+          ],
+          "result": "Reduced, not removed: the helper rebuilds A on actors."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Moving a task: module state, closed TaskFailure and adversarial review",
+          "path": "Docs/audits/2026-11-10-task-move-review.md",
+          "note": "t01-t05 on a0.0.43: module state passes the draft rules (t03), TaskFailure matches are checked complete (t05 E0307), so moved joins get PlaceFailure; task { } blocks are excluded; peers."
+        },
+        {
+          "title": "Ray: remote functions (tasks)",
+          "url": "https://docs.ray.io/en/latest/ray-core/tasks.html"
+        },
+        {
+          "title": "Unison: distributed datasets",
+          "url": "https://www.unison-lang.org/articles/distributed-datasets/"
+        },
+        {
+          "title": "Erlang: spawn(Node, Fun)",
+          "url": "https://www.erlang.org/doc/apps/erts/erlang.html"
+        }
+      ]
     },
     {
       "id": "D-TCP-WRITE1",
@@ -199122,6 +199210,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:49:33.438Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TASK-MOVE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:47:21.924Z",
       "by": "Main",
