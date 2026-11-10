@@ -456,7 +456,7 @@ field access, for example — the arms refer to it as `it`, as in
 
 Inside a generic function the subject may be a type parameter, making a
 type table: `if T == { Int -> … Point -> … else -> … }`. Each arm names one
-type and is checked with `T` read as that type, including in its result and
+type, a list type as `[U8]`, and is checked with `T` read as that type, including in its result and
 its `return`s. `else` sees only `T`'s bounds and is required (E0003), because
 types are an open set. Matching is exact identity (a bare `2.5` is a
 `Decimal`, not a `Float`): a repeated type is an unreachable arm (E0365) and
@@ -661,6 +661,8 @@ and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
 package default can deny `auto_derive` through
 `policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
+A `Display` implementation also satisfies a `Printable` bound, and a list,
+fixed list or option is `Printable` when its element is.
 `#Codable` requests both codec directions; `#Encode` and `#Decode` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
 

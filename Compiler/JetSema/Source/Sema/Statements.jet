@@ -1614,24 +1614,42 @@ sema_stmt_type_switch_resolve: fn(name: String, environment: SemaScopeEnvironmen
 
 // One arm of a type table: the type it tests, or None after its error. Each
 // arm names one known type (E0119), and no type twice (E0365): matching is
-// exact type identity of the resolved type.
+// exact type identity of the resolved type. A list arm `[U8]` names the list
+// of that element type.
 sema_stmt_type_switch_target: fn(param: String, condition: Expr, earlier: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Type? {
-    head: sema_stmt_type_switch_head(param, condition) ?? {
+    element: sema_stmt_type_switch_list_element(param, condition)
+    head: element ?? (sema_stmt_type_switch_head(param, condition) ?? {
         diagnostics.push(sema_error("E0119", sema_stmt_type_switch_head_span(condition), "a type-table arm must name a type", "`if {param} == {{ … }}` compares the type `{param}`, not a value", "write a type such as `Int`, or `else`"))
         return None
-    }
-    target: sema_stmt_type_switch_resolve(head.name, environment, program) ?? {
-        diagnostics.push(sema_error("E0119", head.span, "`{head.name}` isn't a known type", "a type-table arm names one type: a primitive, a declared type, or an imported one", "check the spelling, or import the type"))
+    })
+    written: if element != None -> "[{head.name}]" else -> head.name.copy()
+    resolved: sema_stmt_type_switch_resolve(head.name, environment, program) ?? {
+        diagnostics.push(sema_error("E0119", head.span, "`{written}` isn't a known type", "a type-table arm names one type: a primitive, a declared type, or an imported one", "check the spelling, or import the type"))
         return None
     }
+    target: if element != None -> Type.List{element: resolved} else -> resolved
     identity: type_carrier_identity(target)
     loop seen in earlier {
         if type_carrier_identity(seen) == identity {
-            diagnostics.push(sema_error("E0365", head.span, "arm `{head.name}` is unreachable — that type is already handled", "an earlier arm already names the same type", "remove this arm or merge it with the one above"))
+            diagnostics.push(sema_error("E0365", head.span, "arm `{written}` is unreachable — that type is already handled", "an earlier arm already names the same type", "remove this arm or merge it with the one above"))
             return None
         }
     }
     Val(target)
+}
+
+// The element name of a list arm `T == [U8]`, or None for any other head.
+sema_stmt_type_switch_list_element: fn(param: String, condition: Expr) -> NamedSpan? {
+    if condition == .Binary(op, left, right, _, _) {
+        if op != BinOp.Eq -> return None
+        subject: if left == {.Ident(name, _, _) -> name else -> { return None }}
+        if subject != param -> return None
+        if right == .ListLit(elements, _, _) {
+            if elements.len() != 1 -> return None
+            if elements[0] == .Ident(name, span, _) -> return Val(NamedSpan{name: name.copy(), span: span})
+        }
+    }
+    None
 }
 
 // The written head of a type-table arm, `0` in `T == 0`, for its error.

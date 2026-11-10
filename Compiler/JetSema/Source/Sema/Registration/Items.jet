@@ -99,6 +99,8 @@ use {
         core_source_owns_type,
         diagnostic_registry_row,
         expr_span,
+        core_bare_source_module,
+        ir_runtime_handle_row,
         builtin_codec_trait_ref,
         name_count,
         name_find_bytes,
@@ -2519,16 +2521,26 @@ sema_registration_impl_on_trait: fn(definition: ImplDef) -> Diagnostic {
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
+// A runtime handle the module owns takes its Core impls the way a declared
+// nominal does; any other opaque type is named in the row's `impl_types`.
 sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     if !module_row.module_identity.starts_with("<corelib>/") -> return false
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+        if sema_registration_core_handle_owner(row.module_name, name) -> return true
         if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
         loop owner in row.impl_types {
             if owner == name -> return true
         }
     }
     false
+}
+
+// A runtime handle belongs to the Core module that exports it or, for a bare
+// prelude spelling (`Path`), to the module that declares that spelling.
+sema_registration_core_handle_owner: fn(module_name: String, name: String) -> Bool Never! {
+    if ir_runtime_handle_row(name) == None -> return false
+    core_module_has_type(module_name, name) || core_bare_source_module(name) == Val((module_name))
 }
 
 // The `sema_registration_source_owns_impl` relation for every module and impl
@@ -2541,8 +2553,12 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
         if !module_row.module_identity.starts_with("<corelib>/") -> next
         loop row in CORE_SOURCE_OWNED_ROWS {
             if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
-            loop owner in row.impl_types {
-                if !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) -> next
+            row_owners := row.impl_types.copy()
+            loop implementation in module_row.impls {
+                if sema_registration_core_handle_owner(row.module_name, implementation.target_type_name) && !row_owners.contains(implementation.target_type_name) -> row_owners.push(implementation.target_type_name.copy())
+            }
+            loop owner in row_owners {
+                if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) -> next
                 modules := owners.get(owner) ?? [Int]{}
                 if modules.contains(module_index) -> next
                 modules.push(module_index)

@@ -1,0 +1,26 @@
+// A checked text type whose `Error` is `Never` accepts every body: its
+// `check` cannot fail, so nothing is run before the program, and `build`
+// alone gives the literal its value.
+
+Words: struct {
+    text: String
+}
+
+impl Words.CheckedText {
+    Error: Never
+    Hole: String
+
+    check: fn(_text: String) Never! -[]> { Ok() }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "<{value}>" }
+
+    build: fn(parts: [String], holes: [String]) -[]> Words {
+        Words{text: "{parts.join("|")} [{holes.join(",")}]"}
+    }
+}
+
+run: fn() {
+    count := 3
+    print(Words{"a {count} b {count + 1}"}.text)
+    print(Words{"plain"}.text)
+}

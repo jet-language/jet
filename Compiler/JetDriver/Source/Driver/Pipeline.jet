@@ -119,6 +119,7 @@ use {
         OutputKind,
         Span,
         SymbolKind,
+        TComptimeReport,
         TComptimeValue,
         BodyNode,
         BodyTree,
@@ -1729,13 +1730,14 @@ jet_driver_comptime_flush: fn(
             return flushed
         }
         if source.kind == SemaComptimeItemKind.CheckedText {
-            if value == .Failed(_) {
+            if value == .Failed(report) {
                 evaluation: source.checked_text ?? {
                     diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a checked-text validation item lost its exact method request", "CheckedText literals evaluate their registered pure checker on the fully encoded body", "preserve the checked-text request through staged evaluation"))
                     flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                     return flushed
                 }
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2712", evaluation.span, "this checked text type rejected its body", "the type's pure `CheckedText.check` method must accept the complete literal body", "fix the body so it satisfies the type's declared text grammar"))
+                why: jet_driver_checked_text_reason(report) ?? "the type's pure `CheckedText.check` method must accept the complete literal body"
+                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2712", evaluation.span, "this checked text type rejected its body", why, "fix the body so it satisfies the type's declared text grammar"))
                 flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                 return flushed
             }
@@ -1746,6 +1748,33 @@ jet_driver_comptime_flush: fn(
         flushed.progressed = true
     }
     flushed
+}
+
+// The reason a CheckedText `check` gave for rejecting a body: its error when
+// that is a String, or the error's String `reason`/`message` field or one
+// String payload. Any other error shape gives the generic reason.
+jet_driver_checked_text_reason: fn(report: TComptimeReport) -> String? {
+    error: if report == {
+        .Told(value) -> value
+        .Clean(_) -> { return None }
+    }
+    if error == {
+        .String(text) -> return Val(text.copy())
+        .Struct(_, fields) -> {
+            loop field in fields {
+                if field.name == "reason" || field.name == "message" {
+                    if field.value == .String(text) -> return Val(text.copy())
+                }
+            }
+        }
+        .Enum(_, _, args) -> {
+            if args.len() == 1 {
+                if args[0].value == .String(text) -> return Val(text.copy())
+            }
+        }
+        else -> {}
+    }
+    None
 }
 
 // The names of `batch`'s evaluated entries from `start` on, the label of
