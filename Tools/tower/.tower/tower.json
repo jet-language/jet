@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98799,
+    "rev": 98800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55169,7 +55169,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-10T11:37:43.166Z",
+      "updated": "2026-11-10T16:00:21.114Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -183173,13 +183173,13 @@
       "cardId": "c0ygtwb9",
       "group": "syntax",
       "title": "##Pre: a rule on a function's arguments that must be decided while compiling",
-      "situation": "A function can carry a rule about its arguments, such as a lane count that must be 4, 8 or 16. Jet already agreed to check that rule while compiling whenever the values are fixed, and at run time otherwise. That agreement also said no new mark would be added.\n\nSome functions need the value always fixed, so a caller with a value read from input should never build. You suggested writing the rule with two hashes for that. We recommend A: two hashes on the rule, with callers keeping their usual arguments and one copy of the function.",
+      "situation": "A function can carry a rule about its arguments, such as a lane count that must be 4, 8 or 16. Jet already agreed to check that rule while compiling whenever the values are fixed, and at run time otherwise. That agreement also said no new mark would be added.\n\nSome functions need the value always fixed, so a caller with a value read from input should never build. The owner suggested writing the rule with two hashes for that. The recommendation is A: two hashes on the rule, with callers keeping their usual arguments and one copy of the function.",
       "gist": "Should ##Pre mean a rule that must be decided while compiling, so its parameters need no extra label?",
       "lesson": "A #Pre rule checks a function's arguments. Jet already decides it while compiling when the arguments are fixed. Some functions need the arguments to always be fixed, such as a lane count. This vote decides how a function says so: two hashes on the rule, or a number parameter.",
       "explainer": "Words used here. A contract is a rule written #Pre(condition, message) above a function. Known while compiling means the compiler can work out the value, such as a literal 8.\n\nA number parameter is a compile-time value in angle brackets, as in Ring<N: Int>. Each value gets its own copy of the function.",
       "story": "Ola ports a Jai math library. Its simd_sum adds 4, 8 or 16 numbers at a time. A caller that passes the lane count from user input should be refused while compiling, at the caller's line, with Ola's message.",
       "inWild": "// Jai: #modify runs for each use and may refuse it.\nsimd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    return lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\";\n} { ... }\n\n// Zig: a comptime parameter and @compileError in the body.\nfn simdSum(comptime lanes: u32, xs: []const f32) f32 {\n    if (lanes != 4 and lanes != 8) @compileError(\"lanes must be 4 or 8\");\n    ...\n}",
-      "detail": "What this ballot decides. How a function requires that some arguments are always known while compiling, and which markers may be written with two hashes. It does not change D-PRE-COMPILE1's rule for an ordinary #Pre.\n\nToday, with the t6c compiler on dev 76955986d0, the same as the seed. Probe j01 puts #Pre(lanes == 4 || lanes == 8 || lanes == 16, message) on simd_sum. simd_sum(8, xs) prints 10, and simd_sum(6, xs) stops at run time with E3005, #Pre contract failed: lanes must be 4, 8 or 16.\n\nProbe j05 shows the literal call is not yet decided while compiling: it prints before, then stops with E3005. That is PRE-COMPILE1, ratified and not yet built. Probe j02 shows ##Pre does not parse today: E0003, Expected a name after # in a statement marker.\n\nProbes j03 and j04 write simd_sum: fn<lanes: Int>(xs) and call simd_sum<8>(xs); the call gets E0003, Expected a type, found 8. Number parameters on functions are ratified by D-CONSTGEN2 and D-META-SPELL1=A but not built, so no option here is argued from that failure.\n\nThe rule under A. ##Pre(condition, message) is a #Pre that must be decided while compiling. Every parameter the condition reads must be known while compiling at every call. Callers pass those arguments in their usual place, as simd_sum(8, xs), with no label on the parameter. This is the form you proposed in q8sdri5o.\n\nAt each call the compiler decides the rule. False is a build error at the caller's line with the author's message. True leaves no run-time check. A run-time value, such as a number read from input, is a build error at the caller's line that names the ##Pre line and shows a fix.\n\nEngineering away the first downside, that run-time callers are refused. The fix jet offers is a match that turns a run-time value into known ones. Its arms are 4 -> simd_sum(4, xs) and 8 -> simd_sum(8, xs), plus a fallback arm. jet fix writes the match from the allowed values when the condition is a list of equalities.\n\nEngineering away the second downside, extra machine code. A parameter read only by ##Pre is checked at each call but stays an ordinary argument in the body, so simd_sum compiles once, not once per lane count. The body gets a copy per value only if it needs the value while compiling, as a number parameter would.\n\nEngineering away the third downside, wrappers that forward the value. sum_lanes: fn(lanes: Int, xs: [Int]) -> Int { simd_sum(lanes, xs) } would be refused, because lanes is not known inside one shared body. Under A, a parameter that the enclosing function's own ##Pre reads counts as known when passed on unchanged.\n\nSo ##Pre(lanes == 4 || lanes == 8, message) on sum_lanes makes that inner call legal. Each call of sum_lanes then decides both rules with its own value: sum_lanes(8, xs) builds, sum_lanes(16, xs) fails simd_sum's rule at that line. Number parameters forward the same way under B and D, as simd_sum<lanes>(xs).\n\nEngineering away the fourth downside, function values. A bare simd_sum used as a value is refused, because a call through it could not be checked; the error suggests a wrapper. sum4: fn(xs: [Int]) -> Int { simd_sum(4, xs) } is an ordinary function and is Jai's #bake_arguments under every option.\n\nThe marker rule for two hashes. A marker kind opts in with early: true in its impl Marker; Pre does, and a user marker with a Bool condition and a String message may. ## on a marker that has not opted in is a registered error. ##Post is refused, because a result is not known while compiling.\n\nSpellings agree with D-META-SPELL1=A: #run, #if and #loop for compile-time code, and <N: Int> for number parameters. ## is written only on markers, and # keeps every meaning D-META-HASH1=A gives it.\n\nWhat remains after the engineering. There are two ways to require a known value: ##Pre, which checks it, and <N: Int>, which builds a copy per value and can shape types such as [Int#N]. The cost is one more thing to learn; the mitigation is a rule of thumb shown in the error. Use <N: Int> when the value shapes a type, and ##Pre otherwise.\n\nBeginner path. Write #Pre as today; Jet decides it while compiling where it can. Write ##Pre only when a call with a run-time value must never build.\n\nExpert path. jet inspect on a call shows whether its #Pre was decided while compiling or kept for run time. A user marker can opt in to ## with early: true.\n\nOther options. B keeps PRE-COMPILE1 as ratified: #Pre is decided early when it can be, and a function that requires a known value uses a number parameter, simd_sum<8>(xs). C lets any marker be written with two hashes, with no opt-in. D is Zig's form: a number parameter plus a #run block in the body that stops the build with a message.\n\nB moves the lane count out of the argument list and into angle brackets, and makes a copy of the function per value. C allows ## on markers that have nothing to decide while compiling, such as #Post. D puts the rule inside the body, where a reader of the signature cannot see it.",
+      "detail": "What this ballot decides. How a function requires that some arguments are always known while compiling, and which markers may be written with two hashes. It does not change D-PRE-COMPILE1's rule for an ordinary #Pre.\n\nToday, with the a0.0.43 compiler (dev c460ba91e5). Probe j01 puts #Pre(lanes == 4 || lanes == 8 || lanes == 16, message) on simd_sum. simd_sum(8, xs) prints 10, and simd_sum(6, xs) stops at run time with E3005, #Pre contract failed: lanes must be 4, 8 or 16.\n\nProbe j05 shows the literal call is not yet decided while compiling: it prints before, then stops with E3005. That is PRE-COMPILE1, ratified and not yet built. Probe j02 shows ##Pre does not parse today: E0003, Expected a name after # in a statement marker.\n\nProbes j03 and j04 write simd_sum: fn<lanes: Int>(xs) and call simd_sum<8>(xs); the call gets E0003, Expected a type, found 8. Number parameters on functions are ratified by D-CONSTGEN2 and D-META-SPELL1=A but not built, so no option here is argued from that failure.\n\nThe rule under A. ##Pre(condition, message) is a #Pre that must be decided while compiling. Every parameter the condition reads must be known while compiling at every call. Callers pass those arguments in their usual place, as simd_sum(8, xs), with no label on the parameter. This is the owner's proposed form.\n\nAt each call the compiler decides the rule. False is a build error at the caller's line with the author's message. True leaves no run-time check. A run-time value, such as a number read from input, is a build error at the caller's line that names the ##Pre line and shows a fix.\n\nEngineering away the first downside, that run-time callers are refused. The fix jet offers is a match that turns a run-time value into known ones. Its arms are 4 -> simd_sum(4, xs) and 8 -> simd_sum(8, xs), plus a fallback arm. jet fix writes the match from the allowed values when the condition is a list of equalities.\n\nEngineering away the second downside, extra machine code. A parameter read only by ##Pre is checked at each call but stays an ordinary argument in the body, so simd_sum compiles once, not once per lane count. The body gets a copy per value only if it needs the value while compiling, as a number parameter would.\n\nEngineering away the third downside, wrappers that forward the value. sum_lanes: fn(lanes: Int, xs: [Int]) -> Int { simd_sum(lanes, xs) } would be refused, because lanes is not known inside one shared body. Under A, a parameter that the enclosing function's own ##Pre reads counts as known when passed on unchanged.\n\nSo ##Pre(lanes == 4 || lanes == 8, message) on sum_lanes makes that inner call legal. Each call of sum_lanes then decides both rules with its own value: sum_lanes(8, xs) builds, sum_lanes(16, xs) fails simd_sum's rule at that line. Number parameters forward the same way under B and D, as simd_sum<lanes>(xs).\n\nEngineering away the fourth downside, function values. A bare simd_sum used as a value is refused, because a call through it could not be checked; the error suggests a wrapper. sum4: fn(xs: [Int]) -> Int { simd_sum(4, xs) } is an ordinary function and is Jai's #bake_arguments under every option.\n\nThe marker rule for two hashes. A marker kind opts in with early: true in its impl Marker; Pre does, and a user marker with a Bool condition and a String message may. ## on a marker that has not opted in is a registered error. early is one new setting beside sites, repeatable and the others in Compiler/Prelude/Markers.jet:9-17, where Pre is declared (:66). ##Post is refused, because a result is not known while compiling.\n\nSpellings agree with D-META-SPELL1=A: #run, #if and #loop for compile-time code, and <N: Int> for number parameters. ## is written only on markers, and # keeps every meaning D-META-HASH1=A gives it. D-META-SPELL1=A was ratified on 2026-11-10 and is unbuilt: dev has no #run line and 2,816 comptime uses.\n\nWhat remains after the engineering. There are two ways to require a known value: ##Pre, which checks it, and <N: Int>, which builds a copy per value and can shape types such as [Int#N]. The cost is one more thing to learn; the mitigation is a rule of thumb shown in the error. Use <N: Int> when the value shapes a type, and ##Pre otherwise.\n\nBeginner path. Write #Pre as today; Jet decides it while compiling where it can. Write ##Pre only when a call with a run-time value must never build.\n\nExpert path. jet inspect on a call shows whether its #Pre was decided while compiling or kept for run time. A user marker can opt in to ## with early: true.\n\nOther options. B keeps PRE-COMPILE1 as ratified: #Pre is decided early when it can be, and a function that requires a known value uses a number parameter, simd_sum<8>(xs). C lets any marker be written with two hashes, with no opt-in. D is Zig's form: a number parameter plus a #run block in the body that stops the build with a message.\n\nB moves the lane count out of the argument list and into angle brackets, and makes a copy of the function per value. C allows ## on markers that have nothing to decide while compiling, such as #Post. D puts the rule inside the body, where a reader of the signature cannot see it.",
       "options": [
         {
           "key": "A",
@@ -183230,7 +183230,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A is the form you proposed: the rule sits on the signature and callers keep their usual argument list. One body serves every lane count.",
+        "why": "A is the owner's proposed form: the rule sits on the signature and callers keep their usual argument list. One body serves every lane count.",
         "gains": [
           "A run-time lane count is refused at the caller's line, with the author's message.",
           "Callers write simd_sum(8, xs), with no label on the parameter.",
@@ -183267,9 +183267,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Probes j01 to j06 match on a0.0.43, and the early setting is placed among the marker settings in Markers.jet. Owner-addressed wording and a card ID are removed, and D-META-SPELL1=A is marked as unbuilt."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/jg run and compare with the detail. Expected: j01 prints 10 then E3005, j02 to j04 E0003, j05 prints before then E3005. Outputs are in probes/jg/out6. Read D-PRE-COMPILE1 and D-META-SPELL1 in Tower. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-JAI-GENERIC1/probes. Expected: j01 prints 10 then E3005, j02 to j04 E0003, j05 prints before then E3005, j06 E0360. Marker settings are in Compiler/Prelude/Markers.jet. The #run and comptime counts use git grep -c on dev.",
       "surface": {
         "gist": "Should ##Pre mean a rule that must be decided while compiling, so its parameters need no extra label?",
         "lesson": "A #Pre rule checks a function's arguments, and Jet decides it while compiling when they are fixed. Some functions need them always fixed, such as a lane count. This vote decides how a function says so.",
@@ -183345,7 +183345,7 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A is your proposed form: the rule sits on the signature, and callers keep their usual arguments.",
+          "why": "A is the owner's proposed form: the rule sits on the signature, and callers keep their usual arguments.",
           "gains": [
             "Refused at the caller's line.",
             "One body for every lane count."
@@ -183375,7 +183375,100 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-09T19:38:09.043Z"
+      "created": "2026-11-09T19:38:09.043Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "A caller with a run-time value is refused.",
+          "attempts": [
+            "Fall back to a run-time check, as #Pre does; that drops the point of ##Pre.",
+            "Offer a fix: jet fix writes a match from the allowed values, 4 -> simd_sum(4, xs) and so on, with a fallback arm."
+          ],
+          "result": "Reduced to one generated match; the refusal is the point of A."
+        },
+        {
+          "option": "A",
+          "loss": "A forwarding wrapper such as sum_lanes could never build.",
+          "attempts": [
+            "Require every wrapper to take a number parameter; that is B for wrappers.",
+            "Count the enclosing function's own ##Pre-read parameters as known when passed on unchanged, so each outer call decides both rules."
+          ],
+          "result": "Removed by the second attempt."
+        },
+        {
+          "option": "A",
+          "loss": "One copy per value would add machine code.",
+          "attempts": [
+            "Copy the body per value, as a number parameter does.",
+            "Keep a parameter read only by ##Pre as an ordinary argument, so the body compiles once."
+          ],
+          "result": "Removed: one body, as j01's simd_sum is today."
+        },
+        {
+          "option": "A",
+          "loss": "Two ways to require a known value: ##Pre and <N: Int>.",
+          "attempts": [
+            "Drop <N: Int>; then a value cannot shape a type such as [Int#N].",
+            "Teach the rule of thumb in the error: <N: Int> when the value shapes a type, ##Pre otherwise."
+          ],
+          "result": "Reduced to one rule in the error text."
+        },
+        {
+          "option": "A",
+          "loss": "A bare simd_sum used as a function value is refused.",
+          "attempts": [
+            "Check calls through the value at run time; that reopens the run-time path.",
+            "Suggest a wrapper, sum4, an ordinary function, which is Jai's #bake_arguments."
+          ],
+          "result": "Reduced to one wrapper, the same under every option."
+        },
+        {
+          "option": "B",
+          "loss": "The lane count moves into angle brackets and each value builds a copy.",
+          "attempts": [
+            "Infer <lanes> from a literal argument.",
+            "Share one body when the parameter is not used in a type."
+          ],
+          "result": "Reduced; the second attempt is A's rule under another spelling."
+        },
+        {
+          "option": "C",
+          "loss": "## is accepted on markers with nothing to decide, such as #Post.",
+          "attempts": [
+            "Fail inside the marker's own code.",
+            "Add a registry opt-in; that is A."
+          ],
+          "result": "Removed only by becoming A."
+        },
+        {
+          "option": "D",
+          "loss": "The rule sits in the body, out of the signature.",
+          "attempts": [
+            "Show the #run check in docs and hover.",
+            "Add compile_error, which does not exist today, with the caller's line."
+          ],
+          "result": "Reduced, not removed: a reader of the signature still cannot see it."
+        }
+      ],
+      "reports": [
+        {
+          "title": "##Pre review: probes, marker settings and adversarial review",
+          "path": "Docs/audits/2026-11-10-jai-generic-review.md",
+          "note": "j01-j06 on a0.0.43 (PRE-COMPILE1 still unbuilt: j05 stops at run time); early fits Markers.jet's settings; D-META-SPELL1=A unbuilt (no #run, 2,816 comptime); Jai, Zig, C++ sources."
+        },
+        {
+          "title": "Jai community wiki: #modify and #bake_arguments",
+          "url": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Advanced"
+        },
+        {
+          "title": "Zig language reference: @compileError",
+          "url": "https://ziglang.org/documentation/master/#compileError"
+        },
+        {
+          "title": "C++ constraints and requires-clauses",
+          "url": "https://en.cppreference.com/w/cpp/language/constraints"
+        }
+      ]
     },
     {
       "id": "D-PRIM-BOOLSIZE1",
@@ -199396,6 +199489,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:00:21.114Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-JAI-GENERIC1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:57:52.965Z",
       "by": "Main",
