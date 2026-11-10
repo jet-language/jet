@@ -6,7 +6,9 @@
 // every call that reaches a row naming it or a case of it, and a denied case
 // blocks that case and the whole effect but not its other cases (E0749); a
 // row that names it may use only what it lists (E0756); and its
-// list holds no `!` entry (E0757).
+// list holds no `!` entry (E0757). Core's service effects are declared the
+// same way: a `-[DB]>` row may read a file, and a `-[!Net]>` caller of a
+// database driver that reaches the network is refused (E0749).
 use {
     jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
     jet_cli.[jet_cli_compile_file]
@@ -56,5 +58,8 @@ library_effect_fixture_accept: fn(file: String) {
     library_effect_fixture_reject("{ui_root}/library_effect_case_denial_whole_is_e0749.jet", "E0749")
     library_effect_fixture_reject("{fixture_root}/LibraryEffectNameDenied.fixture/LibraryEffectNameDenied.jet", "E0749")
     library_effect_fixture_accept("{fixture_root}/LibraryEffectCaseDenied.fixture/LibraryEffectCaseDenied.jet")
+    service_root: "tests/cases/effects/core_service_effect_kernel/input"
+    library_effect_fixture_accept("{service_root}/ok.jet")
+    library_effect_fixture_reject("{service_root}/net.jet", "E0749")
     print("library effects: passed")
 }

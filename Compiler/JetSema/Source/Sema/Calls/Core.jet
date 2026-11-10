@@ -1057,22 +1057,17 @@ sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], 
     Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
 }
 
-sema_call_core_effect_name: fn(effect_kind: Effect) -> String Never! {
-    sema_taint_effect_name(effect_kind)
-}
-
 // Record known root/leaf effects (including known purity) and enforce authored
 // transaction walls before the CoreCall reaches effect-graph collection.
 sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     leaf_name: record.effect_leaf ?? ""
     if record.effect_kind == {
-        .Val(effect_kind) -> {
+        .Val(root_name) -> {
             // A precise leaf under the call's own root replaces
             // that root, so a leaf grant (`FS.Read`, `Exec.Args`) covers the
             // call and the root still covers the leaf. A leaf under another
             // root (`Time.Wait` on a network call) adds to the root instead.
-            root_name: sema_call_core_effect_name(effect_kind)
             if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) -> effect_bound.push(EffectRowEntry{name: root_name, span: span})
         }
         .None -> {}

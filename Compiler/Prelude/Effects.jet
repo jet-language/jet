@@ -1,13 +1,16 @@
-// The effect vocabulary is written here, not in Rust.
+// The machine effects are written here, not in Rust.
 //
 // This is ordinary Jet source. Each type implements `Effect`: a struct is an
 // effect root with no members, and an enum is a closed family whose cases are
-// its leaves (`FS.Read`). Effect parsing, marker arguments (`#FX(Net, FS)`),
-// fact registration, manifest and `--allow`/`--deny` validation, diagnostics,
-// and reflection all read this list (Foundation's generated
-// Registry/EffectVocabulary.jet carries it to the compiler), so an effect
-// exists exactly when it is written here. The types' order is the canonical
-// order of a written effect row.
+// its leaves (`FS.Read`). These are what the machine does; Core declares the
+// services built on them (DB, Log, Secret) in Core/Effects/Effects.jet, each
+// with a `#FX(…)` line naming the machine effects it may use, and the Prelude
+// exports both. Effect parsing, marker arguments (`#FX(Net, FS)`), fact
+// registration, manifest and `--allow`/`--deny` validation, diagnostics, and
+// reflection all read the two lists (Foundation's generated
+// Registry/EffectVocabulary.jet carries them to the compiler), so an effect
+// exists exactly when it is written in one of them. The order here, then
+// Core's, is the canonical order of a written effect row.
 // `irreversible: fn(self) -> Bool` says which effects a `#Transact` rollback
 // can't take back; a family is irreversible when any of its cases is.
 // `Panic`, `Mem` and `Time.Wait` are deny-only: a policy may refuse them but
@@ -29,13 +32,6 @@ FS: enum {
 }
 
 IO: struct {
-    impl Effect {}
-}
-
-DB: enum {
-    Read
-    Write
-
     impl Effect {}
 }
 
@@ -62,10 +58,6 @@ Exec: enum {
     impl Effect {
         irreversible: fn(self) -> Bool { true }
     }
-}
-
-Log: struct {
-    impl Effect {}
 }
 
 GPU: struct {
@@ -101,10 +93,6 @@ FFI: enum {
 }
 
 Browser: struct {
-    impl Effect {}
-}
-
-Secret: struct {
     impl Effect {}
 }
 

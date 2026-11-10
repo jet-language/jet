@@ -1839,8 +1839,22 @@ user-chosen dotted leaves, for example `FS.Read` or `Net.HTTP.Get`. The root
 must be one of those names; descendants are checked by tree ancestry, so a
 bound on `FS` covers `FS.Read`. Foreign-language names such as `FFI.Go` and
 `FFI.Py` are leaves beneath `FFI`; the parent covers the whole foreign-call
-tree. The Prelude also registers common leaves such as `DB.Read`, `DB.Write`,
-`FS.Read`, `FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
+tree. The Prelude also registers common leaves such as `FS.Read`,
+`FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
+
+The compiler builds in the **machine effects**: `Net`, `FS`, `IO`, `Time`,
+`Rand`, `Env`, `Exec`, `GPU`, `FFI`, `Browser`, `Panic`, and `Mem`
+([Compiler/Prelude/Effects.jet](../../Compiler/Prelude/Effects.jet)). `DB`,
+`Log`, and `Secret` are Core's **service effects**, declared in
+[Core/Effects/Effects.jet](../../Core/Effects/Effects.jet) with `#FX(…)` above
+each one naming the machine effects it relies on: `DB` (with its cases
+`DB.Read` and `DB.Write`) on `Net` and `FS`, `Log` on `IO`, `FS`, and `Net`,
+and `Secret` on `Env`, `FS`, and `Net` (D-EFFTYPE-KERNEL1). A row that names
+a service effect may also do what its list names, so a `-[DB]>` function may
+read a file; a body that reaches anything else is E0740. A service effect is
+a bare name everywhere. Denials keep checking what a body really reaches, so
+a `-[!Net]>` function may call a `-[DB]>` function over a local SQLite file,
+while one that calls a driver that reaches the network is E0749.
 
 The Prelude writes each effect as a type implementing `Effect`, recognized by
 its in-body `impl Effect { … }` block. A struct is a root with no members; an

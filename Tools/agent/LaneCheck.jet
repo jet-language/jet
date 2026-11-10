@@ -32,7 +32,9 @@
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
 // then as `jet check Core` (every Core body, called or not), with this
 // checkout as the toolchain root; a runtime unit as itself, which the
-// compiler admits as that Core row. A Core path with no row fails.
+// compiler admits as that Core row. Core/Effects/Effects.jet, Core's service
+// effects, is part of the canonical effect source: it gets CoreSourceRows.jet's
+// check, then its own `jet check`. Any other Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
@@ -247,15 +249,9 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
     text := ""
     generated := 0
     if generator.len() > 0 {
-        command: generator.join(" ")
-        folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
-        receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
-        output: process.combined_output(receipt)
-        text = output
-        if receipt.code != 0 || receipt.signal != None {
-            generated = 1
-            text = "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"
-        }
+        ran: generator_check(repo, generator, relative)
+        text = ran.text
+        generated = ran.code
     }
     if !name.ends_with(".jet") || PRELUDE_GENERATOR_INPUTS.contains(name) -> return Val(Ran{code: generated, text: text})
     // A generator failure is reported beside the prelude check, not instead of it.
@@ -269,6 +265,28 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
         code = generated
     }
     Val(Ran{code: code, text: "{text}{checked.text}"})
+}
+
+// `generator` (a `--check` command) run for `relative`: code 1 and a closing
+// error line when a compiler copy of it differs.
+generator_check: fn(repo: String, generator: [String], relative: String) -[Env, Exec]> Ran Never! {
+    command: generator.join(" ")
+    folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
+    receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"}
+    output: process.combined_output(receipt)
+    if receipt.code != 0 || receipt.signal != None -> return Ran{code: 1, text: "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"}
+    Ran{code: 0, text: output}
+}
+
+// Core's service effects are no Core module: the compiler embeds them in its
+// canonical effect source, so their check is CoreSourceRows.jet's, as for
+// Prelude/Effects.jet, then the file's own `jet check`.
+CORE_EFFECTS_SOURCE: "Core/Effects/Effects.jet"
+
+core_effects_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    generated: generator_check(repo, [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}, CORE_EFFECTS_SOURCE)
+    checked: run_check(repo, jet, [String]{"check", target}, scratch)
+    Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
 }
 
 // --- compiler check ---------------------------------------------------------
@@ -331,6 +349,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
             print(PRELUDE_UNCHECKED)
             return 1
         }
+        relative == CORE_EFFECTS_SOURCE -> ran = core_effects_check(repo, jet, target, scratch)
         relative.starts_with("Core/") && relative.ends_with(".jet") -> ran = core_check(repo, jet, relative, target, scratch)
         else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
     }

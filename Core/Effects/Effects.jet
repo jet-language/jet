@@ -1,0 +1,26 @@
+// Core's service effects: what Core builds on the machine effects of
+// Compiler/Prelude/Effects.jet, declared the way a package declares a library
+// effect. The `#FX(…)` above each lists the machine effects a row naming it
+// may use; a denial still checks what each call really reaches, so `!Net`
+// catches a database driver that talks to a server and passes a local file.
+// The Prelude exports these with the machine effects, so rows name them bare
+// (`-[DB.Read]>`, `!Log`). The form is that of Effects.jet, and
+// Tools/agent/CoreSourceRows.jet reads both into the compiler.
+
+#FX(Net, FS)
+DB: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+#FX(IO, FS, Net)
+Log: struct {
+    impl Effect {}
+}
+
+#FX(Env, FS, Net)
+Secret: struct {
+    impl Effect {}
+}

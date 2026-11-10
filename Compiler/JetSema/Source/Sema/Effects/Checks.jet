@@ -12,6 +12,7 @@
 // grants.
 use jet_foundation.[
     EFFECT_VOCABULARY_ROOTS,
+    EFFECT_VOCABULARY_ROWS,
     MARKER_MEMO,
     authority_grantable_roots,
     authority_is_deny_only,
@@ -646,15 +647,32 @@ sema_effect_without_deny_only: fn(values: [String]) -> [String] Never! {
     result
 }
 
+// The effects of `inferred` no bound covers. A bound naming a Core service
+// effect (`DB`, `DB.Read`) also covers the machine effects the `#FX(…)` above
+// its declaration lists (sema_effect_core_kernel): a row, cap or scope naming
+// `DB` may use what a database driver needs. Denials never widen this way.
 sema_effect_uncovered: fn(inferred: [String], bounds: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in sema_effect_without_deny_only(inferred) {
         covered: loop bound in bounds {
             if sema_effect_covers(bound, effect_name) -> break true
+            through: loop listed in sema_effect_core_kernel(bound) {
+                if sema_effect_covers(listed, effect_name) -> break true
+            } ?? false
+            if through -> break true
         } ?? false
         if !covered -> sema_effect_set_add(result, effect_name)
     }
     result
+}
+
+// The machine effects a bound naming the Core service effect `name` admits:
+// its EFFECT_VOCABULARY_ROWS kernel, empty for a machine effect.
+sema_effect_core_kernel: fn(name: String) -> [String] Never! {
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name -> return row.kernel
+    }
+    [String]{}
 }
 
 sema_effect_covered: fn(inferred: [String], prohibited: [String]) -> [String] Never! {
@@ -2297,8 +2315,7 @@ sema_effect_with_instance_notes: fn(diagnostic: Diagnostic, notes: [SemaEffectIn
 // sema_call_core_record_effects records them on a call-site fact.
 sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
     leaf_name: record.effect_leaf ?? ""
-    if record.effect_kind == .Val(effect_kind) {
-        root_name: sema_call_core_effect_name(effect_kind)
+    if record.effect_kind == .Val(root_name) {
         if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) {
             if sema_effect_parse_name(root_name) == .Val(root) -> sema_effect_node_add_direct(nodes, node_index, root, span)
         }
