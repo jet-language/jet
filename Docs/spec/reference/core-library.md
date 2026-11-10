@@ -1276,6 +1276,8 @@ rejected without a body allocation.
 | `headers()` / `headers_get(h, name)` | `Headers` / `?String` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
 | `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct the checked empty, text, or byte body variants. |
+| `Body.reader(reader)` / `Body.reader(reader, length)` | `Body !HTTPError` | Take a `FileReader` and read its bytes when the body is made. With no length, read to end of file, at most 1 GiB. With a length, read exactly that many bytes: more than 1 GiB is `BodyTooLarge`, and a negative length or a source that ends short is `InvalidFraming`. The upload is not streamed. |
+| `Body.multipart(fields)` | `Body` | `multipart/form-data` text fields in map order. The boundary is the first `jet-http-boundary-%016x` that no field contains, and the body's first line is `--` plus that boundary, which the message's `Content-Type` names. |
 | `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
 | `get(url)` / `post(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot GET or POST calls with URL and body checks. |
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |

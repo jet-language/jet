@@ -105,35 +105,6 @@ sema_call_http_static_tree_arg: fn(value: TExpr, argument: CallArg) -> TCallArg 
     }
 }
 
-// The typed tree of an unbuilt Body constructor (core_unbuilt_call): only a
-// compile that lowers nothing keeps it, so it never reaches the IR.
-sema_call_http_unbuilt_body: fn(method_rust: String, args: [CallArg], values: [TExpr], result_type: Type, span: Span) -> TExpr Never! {
-    lowered := [TCallArg]{}
-    loop index in 0..<values.len() -> lowered.push(sema_call_http_static_tree_arg(values[index], args[index]))
-    symbol := symbol_id(SymbolKind.Function, "core.http", "Body", method_rust)
-    reference := TMethodRef{symbol: symbol, name: method_rust, mangled: false, trait_owner: None, operator_identity: None}
-    sema_tree_expr(
-        result_type,
-        TExprKind.StaticCall{
-            owner: TStaticOwner.Prelude{rooted: true, path: "JetHTTPBody", generics: [TPreludeArg]{}},
-            owner_type: None,
-            method: reference,
-            type_args: [Type]{},
-            args: lowered,
-        },
-        span,
-    )
-}
-
-// E2104 at a user call of an unbuilt Body constructor in a compile that
-// lowers it; true when reported.
-sema_call_http_body_unbuilt: fn(method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
-    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
-    row: core_unbuilt_call("core.http", "Body.{method}") ?? return false
-    diagnostics.push(sema_call_core_unbuilt_error("http.Body.{method}", row, span))
-    true
-}
-
 // A checked HTTP static constructor runs the `core.http` source function
 // `member`, typed by that function's own signature as core.http sees it.
 sema_call_http_core_static: fn(member: String, args: [CallArg], values: [TExpr], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -236,10 +207,6 @@ sema_call_http_static_ownership: fn(args: [CallArg], types: [Type], moving: [Int
     ownership.accepted && ownership.complete
 }
 
-sema_call_http_static_result: fn(ok: Type) -> Type Never! {
-    Type.Result{ok: ok, err: Type.Named{name: "HTTPError"}}
-}
-
 sema_call_try_http_static: fn(
     receiver: Expr,
     method: String,
@@ -305,18 +272,6 @@ sema_call_try_http_static: fn(
             if !sema_call_http_static_ownership(call_args, arg_types, moving, "{target.type_name}.{method}", scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    if target.type_name == "Body" && (method == "reader" || method == "multipart") {
-        if sema_call_http_body_unbuilt(method, span, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        // A compile that lowers nothing (`jet check`) keeps the call's type.
-        result_type := if method == "reader" -> sema_call_http_static_result(Type.Named{name: "Body"}) else -> Type.Named{name: "Body"}
-        rust_method := if {
-            method == "multipart" -> "from_multipart"
-            args.len() == 1 -> "from_reader"
-            else -> "from_reader_with_length"
-        }
-        built := sema_call_http_unbuilt_body(rust_method, args, values, result_type, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
-    }
     member := if {
         target.type_name == "Headers" -> "headers"
         method == "empty" -> "body_empty"
@@ -324,6 +279,9 @@ sema_call_try_http_static: fn(
         method == "text" && values.len() == 1 -> "body_text"
         method == "text" -> "__body_typed_text"
         method == "form" -> "__body_form"
+        method == "multipart" -> "__body_multipart"
+        method == "reader" && values.len() == 1 -> "__body_reader"
+        method == "reader" -> "__body_reader_sized"
         else -> "__body_json"
     }
     if method == "text" && values.len() == 2 {
@@ -333,7 +291,7 @@ sema_call_try_http_static: fn(
         values.push(sema_call_http_source_text(source, span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     member_type_args := if member == "__body_json" -> [Type]{values[0].ty} else -> [Type]{}
-    built: sema_call_http_core_static(member, args, values, member_type_args, span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    built: sema_call_http_core_static(member, call_args, values, member_type_args, span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
 }
 

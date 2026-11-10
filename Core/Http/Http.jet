@@ -14,7 +14,7 @@ use {
     provider: core.http.client
     http_url: core.net.url
     json_codec: core.encoding.json
-    core.files.[FileWriter]
+    core.files.[FileReader, FileWriter]
     routes: core.http.server
     core.http.server.[HTTPMux]
     core.prelude.[SourceLocation]
@@ -914,6 +914,48 @@ __body_form: fn(fields: [String:String]) -> Body Never! {
 __body_json: fn<T: Encode>(value: T) -> Body Never! {
     text: json_codec.to_string(value) ?? panic("http.Body.json: the value has no JSON form")
     body_text(text)
+}
+
+// `http.Body.reader(reader)`: the reader's bytes to end of file, at most
+// 1 GiB (BodyTooLarge past it).
+__body_reader: fn(reader: &&FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
+    source := reader.move()
+    __body_read(source, -1)
+}
+
+// `http.Body.reader(reader, length)`: exactly `length` (at most 1 GiB) of the
+// reader's bytes. A negative length, or a reader that ends short, is
+// InvalidFraming.
+__body_reader_sized: fn(reader: &&FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
+    source := reader.move()
+    if length < 0 -> return Err(.InvalidFraming)
+    if length > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_CONSUME_BYTES})
+    __body_read(source, length)
+}
+
+// Up to `want` bytes of `source` (to end of file when `want` is -1).
+__body_read: fn(source: &FileReader, want: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
+    cap: if want >= 0 -> want else -> C_MAX_CONSUME_BYTES + 1
+    out := [U8]{}
+    loop out.len() < cap {
+        room: cap - out.len()
+        piece: source.read(if room > C_BODY_CHUNK_BYTES -> C_BODY_CHUNK_BYTES else -> room) ?? return Err(.IO{operation: "read body"})
+        if piece.len() == 0 -> break
+        out.extend(piece)
+    }
+    if want >= 0 && out.len() != want -> return Err(.InvalidFraming)
+    if out.len() > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_CONSUME_BYTES})
+    Ok(body_bytes(out))
+}
+
+// `http.Body.multipart(fields)`: multipart/form-data text fields in map
+// order, delimited by the first `jet-http-boundary-%016x` no field contains.
+// The body's first line is `--` and that boundary; the message names it in
+// its Content-Type field (`multipart/form-data; boundary=...`).
+__body_multipart: fn(fields: [String:String]) -> Body Never! {
+    pairs := [Header]{}
+    loop (name, value) in fields -> pairs.push(Header{name: name.copy(), value: value.copy()})
+    body_text(provider.__client_multipart(pairs, provider.__client_boundary(pairs)))
 }
 
 body_as_text: fn(body: Body) -> String Never! {
