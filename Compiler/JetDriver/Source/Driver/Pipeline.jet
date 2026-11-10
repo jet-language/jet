@@ -144,6 +144,7 @@ use {
         jet_target_machine_wasm_no_os,
         jet_target_package_version_from_compiler_identity,
         target_os_key,
+        target_os_name,
         target_os_parse,
         source_file_id,
         symbol_id,
@@ -686,7 +687,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     SemaBuildFacts{
         package_name: package_name,
         package_version: package_version,
-        os: jet_target_active_os_name(target_machine.triple, host_os),
+        os: if target_os_parse(request.build_os) == .Val(selected) -> target_os_name(selected) else -> jet_target_active_os_name(target_machine, host_os),
         profile: request.profile,
         stamp_git: stamp_git,
         stamp_dirty: stamp_dirty,

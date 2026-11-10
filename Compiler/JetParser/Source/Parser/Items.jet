@@ -89,6 +89,7 @@ use {
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
         owned_trait_arithmetic_listed,
+        target_os_gates,
         target_os_key,
         target_os_named,
     ]
@@ -1864,7 +1865,7 @@ parser_function_web_partition: fn(state: &JetParserState, marker: Marker) -> Web
     if segments.len() > 1 && segments[0] == "OS" {
         os: segments[1..<segments.len()].join(".")
         if target_os_named(os) == None {
-            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
+            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known OS", "OS targets are {target_os_gates()}", "write `#Target(OS.Linux)` or another OS of the list")
             return None
         }
     } else if name != "Web" {

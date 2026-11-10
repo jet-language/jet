@@ -3,7 +3,7 @@ use {
         ByteSize, Diagnostic, MMIOAccess, MemoryRegion, ProviderContract, ProviderLimits,
         RuntimeLayer, SVDProvenance, SizeBudgetReport, TargetCapability,
         TargetDMAChannelFact, TargetInterruptFact, TargetMachine, TargetMachineError,
-        TargetRegisterBlockFact, TargetRegisterFact, TargetUnsafeGate, jet_target_abi_c,
+        TargetRegisterBlockFact, TargetRegisterFact, TargetUnsafeGate, jet_target_abi_c, jet_target_active_os_name,
         jet_target_allocator_json, jet_target_capabilities_for_core_usage, jet_target_capability_name,
         jet_target_environment_identity, jet_target_hardware_empty, jet_target_hardware_validate,
         jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_board_sensor_v1,
@@ -578,4 +578,15 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     refusal: jet_target_machine_error_diagnostic(sensor, .ExecutionTierUnsupported{tier: "dev", machine: "board.sensor_v1"})
     assert_eq(refusal.code, "E3314")
     assert_eq(refusal.what, "Target `board.sensor_v1` has an invalid `execution` fact: target machine `board.sensor_v1` does not support the `dev` tier.")
+}
+
+// `$build.os` folds each OS-less machine on its own OS, not the host's.
+#Test("build_os_folds_web_wasm_and_no_os_machines_on_their_own_os") {
+    assert_eq(jet_target_active_os_name(jet_target_machine_wasm_browser("0.0.1"), "linux"), "Web")
+    assert_eq(jet_target_active_os_name(jet_target_machine_wasm_wasi("0.0.1"), "linux"), "Wasm")
+    assert_eq(jet_target_active_os_name(jet_target_machine_wasm_no_os("0.0.1"), "linux"), "Freestanding")
+    assert_eq(jet_target_active_os_name(target_test_sensor_machine(), "macos"), "Freestanding")
+    assert_eq(jet_target_active_os_name(jet_target_machine_hosted("aarch64-apple-darwin", "0.0.1"), "linux"), "MacOS")
+    assert_eq(jet_target_active_os_name(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), "macos"), "Linux")
+    assert_eq(jet_target_active_os_name(jet_target_machine_hosted("riscv64gc-unknown-unknown", "0.0.1"), "windows"), "Windows")
 }

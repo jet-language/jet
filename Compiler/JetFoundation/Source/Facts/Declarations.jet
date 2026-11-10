@@ -248,16 +248,20 @@ TTraitDef: struct {
     methods: [TTraitMethod]
 }
 
-// The native OSes: the one list `#Target(OS.*)`, a `$build.os` dispatch and
-// the native values of the `os` build option read. A `web` or `freestanding`
-// target runs on no OS of this list.
+// The OSes a build runs on: the one list `#Target(OS.*)`, a `$build.os`
+// dispatch and the `os` build option read. Linux, macOS and Windows are the
+// native OSes; a web build runs in the browser, a Wasm build on a WebAssembly
+// host such as WASI, and a freestanding build on bare metal with no OS.
 TTargetOS: enum {
     Linux
     MacOS
     Windows
+    Web
+    Wasm
+    Freestanding
 }
 
-TARGET_OS_ALL: comptime { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows} }
+TARGET_OS_ALL: comptime { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows, TTargetOS.Web, TTargetOS.Wasm, TTargetOS.Freestanding} }
 
 // `OS.MacOS` is `MacOS`.
 target_os_name: fn(os: TTargetOS) -> String Never! {
@@ -265,12 +269,30 @@ target_os_name: fn(os: TTargetOS) -> String Never! {
         .Linux -> "Linux"
         .MacOS -> "MacOS"
         .Windows -> "Windows"
+        .Web -> "Web"
+        .Wasm -> "Wasm"
+        .Freestanding -> "Freestanding"
     }
+}
+
+// The gates of the list, as `#Target` writes them: `OS.Linux`, `OS.MacOS`, … .
+target_os_gates: fn() -> String Never! {
+    gates: loop os in TARGET_OS_ALL -> "`OS.{target_os_name(os)}`"
+    gates.join(", ")
 }
 
 // The `os` build option value and the impl gate spelling: `macos`.
 target_os_key: fn(os: TTargetOS) -> String Never! {
     target_os_name(os).lower()
+}
+
+// Whether a host triple can name `os`: Linux, macOS and Windows are native;
+// a web, Wasm or freestanding build names its OS through its target.
+target_os_native: fn(os: TTargetOS) -> Bool Never! {
+    if os == {
+        .Linux | .MacOS | .Windows -> true
+        .Web | .Wasm | .Freestanding -> false
+    }
 }
 
 // The OS a bare variant name (`MacOS`) names.

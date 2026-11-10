@@ -310,7 +310,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
 
 // Each TTargetOS case is listed once in TARGET_OS_ALL (the exhaustive match
 // fails to compile when a case is added), and the `os` build option values
-// are the keys of that list, then `web` and `freestanding`.
+// are the keys of that list.
 #Test("the os build option and the os dispatch read one os list") {
     loop os in TARGET_OS_ALL {
         listed := 0
@@ -326,13 +326,14 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
             .Linux -> 1
             .MacOS -> 1
             .Windows -> 1
+            .Web -> 1
+            .Wasm -> 1
+            .Freestanding -> 1
         }
     }
-    assert_eq(cases, 3)
+    assert_eq(cases, 6)
     expected := [String]{}
     loop os in TARGET_OS_ALL -> expected.push(target_os_key(os))
-    expected.push("web")
-    expected.push("freestanding")
     found := false
     loop row in JET_BUILD_OPTIONS {
         if row.name != "os" -> next

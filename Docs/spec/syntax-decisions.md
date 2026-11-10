@@ -5397,19 +5397,22 @@ run: fn() {
         .Linux   -> { b: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b: WinBackend{ name: "win32" }    print(b.label()) }
+        else     -> print("no native backend")
     }
 }
 ```
 
-`$build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
-bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `comptime if` chain
+`$build.os` resolves to the build's OS: the `--target=<triple>` OS bucket, the
+host OS when omitted, `.Web` for a web build, `.Wasm` for a Wasm target and
+`.Freestanding` for a machine with no OS (owner ruling on #6206, which replaced
+the fall-back to the host for those targets). Sema desugars the dispatch into a `comptime if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
 inside the taken arm is legal and dead arms never trip
 `E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
-set must cover `.Linux`, `.MacOS`, and `.Windows`, or carry an `else` — missing
+set must cover every OS of the one OS list (`.Linux`, `.MacOS`, `.Windows`,
+`.Web`, `.Wasm`, `.Freestanding`), or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
 compiles or fails identically on every platform). A non-`$build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.

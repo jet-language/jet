@@ -640,14 +640,19 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
     Val(build_parts[0])
 }
 
-// The OS `$build.os` folds on: the triple's OS, else the host's (`host_os` is
-// a key such as `macos`), else Linux. A web, Wasm or freestanding triple names
-// no OS, so it folds on the host's.
-jet_target_active_os_name: fn(target_triple: String, host_os: String) -> String Never! {
+// The OS `$build.os` folds on: Freestanding for a machine with no OS (a
+// bare-metal or no-OS Wasm machine), Web for the browser's Wasm triple, Wasm
+// for any other Wasm triple, else the triple's native OS, else the host's
+// (`host_os` is a key such as `macos`), else Linux.
+jet_target_active_os_name: fn(machine: TargetMachine, host_os: String) -> String Never! {
+    triple: machine.triple
     if {
-        target_triple.contains("windows") -> target_os_name(TTargetOS.Windows)
-        target_triple.contains("apple") || target_triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
-        target_triple.contains("linux") -> target_os_name(TTargetOS.Linux)
+        machine.no_os -> target_os_name(TTargetOS.Freestanding)
+        triple == "wasm32-unknown-unknown" -> target_os_name(TTargetOS.Web)
+        triple.starts_with("wasm") -> target_os_name(TTargetOS.Wasm)
+        triple.contains("windows") -> target_os_name(TTargetOS.Windows)
+        triple.contains("apple") || triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
+        triple.contains("linux") -> target_os_name(TTargetOS.Linux)
         else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
     }
 }
