@@ -16217,6 +16217,183 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-01",
       "retiredAt": "2026-11-10T03:51:39.515Z"
+    },
+    {
+      "id": "D-EDITOR-GRAMMAR1",
+      "cardId": "c08oghuo",
+      "group": "tooling",
+      "title": "Editor grammars follow the parser through a check that parses every example with tree-sitter",
+      "situation": "Editors color Jet code with a tree-sitter grammar, because they cannot call the compiler on every keystroke. Only its keyword lists are generated from the compiler. The rest is hand-written, and nothing checks it against the parser, so new syntax drifts silently. The vote decides how the grammar stays in step. We recommend a check that parses every feature example with tree-sitter and fails on any parse error.",
+      "gist": "Should a check parse every feature example with the editor grammar and fail when the grammar falls behind?",
+      "lesson": "A second grammar always drifts unless something compares it with the first. The cheapest comparison is to run both on the same files: anything the compiler accepts, the editor grammar must also parse. Rust's tree-sitter grammar and Zig's both test against real source files for this reason.",
+      "explainer": "",
+      "story": "Priya adds a new `where` form to the parser and an example that uses it. Today her editor colors the rest of the file wrong and nobody notices. Under A the check fails on her change and names the example line.",
+      "inWild": "# tree-sitter-rust tests its grammar against real crates\n$ tree-sitter parse 'examples/**/*.rs' --quiet --stat",
+      "detail": "Today. Tools/editors/tree-sitter/grammar.js has generated token lists (lines 15-26) and hand-written rules (lines 27-548). TextMate scopes and Zed queries are hand-written too. VS Code already runs `jet self lsp` for everything beyond coloring.\n\nTools/agent/editor-grammars.mjs renders the token lists from the compiler's Highlights.jet and Markers.jet. The guard tests/guards/grammar_highlight.jet checks those lists. The grammar has 14 small corpus tests, but nothing runs its rules over the examples.\n\nWhat A does. A new guard beside grammar_highlight.jet runs `tree-sitter parse` over every Examples/features .jet file (1,414 today). Any ERROR or MISSING node fails the guard with the file, line and column.\n\nThe guard runs in the same test gate as the existing grammar guard, so drift fails CI on the change that caused it. The tree-sitter tool is already in the dev shell (flake.nix and env.jet).\n\nEdge cases. Feature examples are meant to compile, and none of their expected outputs is a parse error. If a deliberate parse failure is added, the guard reads one skip list with a reason per file.\n\nGenerating the grammar from parser tables (option B) stays open. The parser has no grammar tables to generate from yet, so B would first need a parser change.\n\nOption C drops structural grammars and colors from the language server's semantic tokens. Editors would show plain text until the server answers, and Zed and GitHub need a static grammar.\n\nMoves under A, one card: write the guard and fix whatever drift it finds in grammar.js. The TextMate and Zed query files keep their generated keyword checks.\n\nPeers. tree-sitter-rust and tree-sitter-zig test against corpus files and real sources. rust-analyzer and clangd add semantic tokens on top of a static grammar, not instead of one.\n\nReview. Author: Claude (SurfaceDesign lane). No fresh adversarial pass has run on this draft.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the hand-written grammar; check it on every example",
+          "detail": "A guard parses every feature example with the tree-sitter grammar. Any parse error fails CI and names the file and line.\n\nThe grammar stays hand-written, but it can no longer fall behind unnoticed.",
+          "technical": "New guard beside tests/guards/grammar_highlight.jet: runs `tree-sitter parse --quiet` over Examples/features/**/*.jet and fails on ERROR or MISSING nodes. A skip list with reasons covers deliberate parse failures (none today).",
+          "code": "$ jet test tests/guards/editor_grammar_parse.jet\neditor grammar: parsed 1414 example files\n// illustrative failure after a new syntax form lands:\nerror: Examples/features/types/new_form.jet:12:9\n  tree-sitter produced an ERROR node\n  fix: add the rule to Tools/editors/tree-sitter/grammar.js\n       or regenerate its token lists"
+        },
+        {
+          "key": "B",
+          "name": "Generate the grammar from parser tables",
+          "detail": "The parser gains grammar tables, and the tree-sitter grammar is generated from them like the token lists.",
+          "technical": "Needs a table-driven description of the parser's rules, which does not exist yet; the hand-written parser would need one first.",
+          "code": "$ node Tools/agent/editor-grammars.mjs --write\ngenerated grammar.js from the parser's grammar tables\n// needs grammar tables the parser does not have yet"
+        },
+        {
+          "key": "C",
+          "name": "Color from the language server only",
+          "detail": "Drop the structural grammar and color code from the language server's semantic tokens. Keep only the generated keyword lists.",
+          "technical": "Deletes grammar.js rules and Zed queries; coloring waits for `jet self lsp`.",
+          "code": "// No tree-sitter grammar. The editor asks the\n// language server for semantic tokens; only the\n// generated keyword lists remain for first paint."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "tree-sitter-rust tests its grammar on corpus files and real code. Source: github.com/tree-sitter/tree-sitter-rust.",
+          "code": "$ tree-sitter test\n$ tree-sitter parse 'examples/**/*.rs' --quiet"
+        },
+        {
+          "lang": "Zig",
+          "note": "tree-sitter-zig runs its corpus in CI. Source: github.com/tree-sitter-grammars/tree-sitter-zig.",
+          "code": "$ tree-sitter test"
+        },
+        {
+          "lang": "C/C++",
+          "note": "clangd adds semantic tokens on top of a static grammar. Source: clangd.llvm.org/features.",
+          "code": "// textDocument/semanticTokens/full"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A catches drift now with tools already installed. Generating the grammar needs parser tables that do not exist, and semantic tokens alone leave editors blank at first.",
+        "gains": [
+          "Drift fails CI on the change.",
+          "No parser change needed.",
+          "Generation stays possible later."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B needs grammar tables the parser lacks, so drift goes unchecked meanwhile."
+          },
+          {
+            "key": "C",
+            "reason": "C shows plain text until the server answers and breaks Zed and GitHub coloring."
+          }
+        ],
+        "tradeoff": "The structural grammar stays hand-written, so a syntax change still needs a grammar edit."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Grammar split: Tools/editors/tree-sitter/grammar.js:15-26 (generated) and :27-548 (hand-written), census C2 row T5 (Docs/audits/2026-10-29-language-is-a-library-census.md:67). Existing guard: tests/guards/grammar_highlight.jet:1-11. Example count: git ls-files 'Examples/features/**/*.jet' | wc -l (1414 at dev 03c64ad0c4). tree-sitter in flake.nix:144 and env.jet:26.",
+      "surface": {
+        "gist": "Should a check parse every feature example with the editor grammar and fail when the grammar falls behind?",
+        "lesson": "A second grammar always drifts unless something compares it with the first. The cheapest comparison is to run both on the same files: anything the compiler accepts, the editor grammar must also parse. Rust's tree-sitter grammar and Zig's both test against real source files for this reason.",
+        "trio": {
+          "current": {
+            "note": "Today nothing checks the hand-written grammar rules against the parser.",
+            "code": "// Tools/editors/tree-sitter/grammar.js\n// lines 15-26: generated token lists\n// lines 27-548: hand-written rules; nothing checks them\n// against the parser, so new syntax can drift silently"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "tree-sitter-rust checks its grammar by parsing real source files.",
+            "code": "$ tree-sitter parse 'examples/**/*.rs' --quiet --stat"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the hand-written grammar; check it on every example",
+            "gist": "Run the editor grammar on every example; fail on any parse error.",
+            "gains": [
+              "Drift fails on the change that caused it.",
+              "Uses tools already in the dev shell.",
+              "Works today, with no parser change."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "$ jet test tests/guards/editor_grammar_parse.jet\neditor grammar: parsed 1414 example files\n// illustrative failure after a new syntax form lands:\nerror: Examples/features/types/new_form.jet:12:9\n  tree-sitter produced an ERROR node\n  fix: add the rule to Tools/editors/tree-sitter/grammar.js\n       or regenerate its token lists"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Generate the grammar from parser tables",
+            "gist": "One grammar source, generated for editors.",
+            "gains": [
+              "No hand-written second grammar."
+            ],
+            "losses": [
+              "The parser must first gain grammar tables.",
+              "Drift goes unchecked until then."
+            ],
+            "proposed": {
+              "code": "$ node Tools/agent/editor-grammars.mjs --write\ngenerated grammar.js from the parser's grammar tables\n// needs grammar tables the parser does not have yet"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Color from the language server only",
+            "gist": "No second grammar; the compiler colors everything.",
+            "gains": [
+              "Nothing to keep in step."
+            ],
+            "losses": [
+              "Plain text until the server answers.",
+              "Zed and GitHub need a static grammar."
+            ],
+            "proposed": {
+              "code": "// No tree-sitter grammar. The editor asks the\n// language server for semantic tokens; only the\n// generated keyword lists remain for first paint."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A catches drift now with tools already installed. Generating the grammar needs parser tables that do not exist, and semantic tokens alone leave editors blank at first.",
+          "gains": [
+            "Drift fails CI on the change.",
+            "No parser change needed.",
+            "Generation stays possible later."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B needs grammar tables the parser lacks, so drift goes unchecked meanwhile."
+            },
+            {
+              "key": "C",
+              "reason": "C shows plain text until the server answers and breaks Zed and GitHub coloring."
+            }
+          ],
+          "tradeoff": "The structural grammar stays hand-written, so a syntax change still needs a grammar edit."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A syntax change still needs a hand edit to grammar.js.",
+          "attempts": [
+            "Generate it now (option B): rejected, the parser has no tables yet."
+          ],
+          "result": "The guard names the failing example and line, so the edit is found at once."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T20:06:52.693Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-31",
+      "retiredAt": "2026-11-10T04:01:57.362Z"
     }
   ]
 }
