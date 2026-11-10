@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98788,
+    "rev": 98789,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75937,7 +75937,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T15:37:09.725Z",
+      "updated": "2026-11-10T15:38:32.889Z",
       "updatedBy": "Main",
       "criteriaLastN": 170
     },
@@ -188504,26 +188504,26 @@
       "id": "D-LANG-MIGRATE1",
       "cardId": "c0oev2ib",
       "group": "tooling",
-      "title": "Every breaking language change lands with a rewrite registered in jet fix, and the retired spelling's error names it",
-      "situation": "Jet changes its spelling often before 1.0, and the repository migrates itself with one-off scripts. Users' code gets no rewrite. A file that still writes the retired word prep gets an error saying there is no type called prep, and jet fix makes no change.\n\nThe library half is settled: a deprecated function can name its replacement, and jet fix moves callers. This ballot is the language half: every breaking language change would ship with a rewrite that jet fix applies.",
+      "title": "Every breaking language change lands with a rewrite registered in jet fix; errors still never teach retired spellings",
+      "situation": "Jet changes its spelling often before 1.0, and the repository migrates itself with one-off scripts. Users' code gets no rewrite. A file that still writes the retired word prep gets an error saying there is no type called prep, and jet fix makes no change.\n\nToday an owner rule says retired spellings get no teaching message and no jet fix rewrite, and it holds until this vote. D-TEACH-RECONCILE1=A already bars teaching. The recommendation keeps that bar and adds rewrites only, which changes the rule's rewrite half.",
       "gist": "Should every breaking language change land with a jet fix rewrite, so old code moves forward in one command?",
       "lesson": "When Jet changes how something is written, old programs stop compiling. This vote decides whether each such change must ship with an automatic rewrite. Then jet fix updates old code instead of leaving a confusing error.",
       "explainer": "Words used here. A breaking change makes code that compiled before stop compiling. A rewrite is a saved, replayable edit that turns the old form into the new one. A codemod plan is Jet's existing file format for such edits.",
-      "story": "Chen opens a project he last touched in October. Under A, jet check says prep was retired and jet fix rewrites it. One command later the project builds on today's Jet.",
+      "story": "Chen opens a project he last touched in October. Under A, jet check gives the ordinary error and says the project was locked with an older jet. jet fix rewrites the old word, and one command later the project builds.",
       "inWild": "// Rust ships each edition's rewrites in the compiler:\n$ cargo fix --edition",
-      "detail": "What this ballot decides. Whether a breaking language change may land without a rewrite users can run. Library items already have one: D-STRUCT-LIFE1=A and D-DEPRECATE-INLINE1=A.\n\nToday, on the t6c compiler (dev 76955986d0). Commit 5a467902a3 retired prep. Its message says the rewrite was a script in a scratch lane directory, outside the repository. Probe m05 writes LIMIT: prep { 2 + 3 } and gets E0119, there is no type called prep.\n\njet fix --dry-run on m05 prints no changes made. jet fix --edition=2027 now fails E2104: this jet migrates to edition 2026 only. The next spelling change is already ratified: D-META-SPELL1=A replaces comptime with #run. On t6c probe m06, comptime { 2 + 3 }, still prints 5, and probe m07, #run { 2 + 3 }, fails: no tag called run.\n\nCensus on dev. comptime appears 2,816 times in 1,013 Jet files, the size of the next migration. History holds 30 commits that say respell and 284 that mention a codemod. Every codemod plan file in the tree sits under tests. scripts/agent/migrate-corpus.sh was added in 23b8003a2b and later deleted.\n\nWhat A does. Each breaking language change adds one rewrite file in a new Compiler/Migrations directory. The file uses the codemod plan format of D-CODEMOD-BATCH1=A, and its name carries the decision ID and the toolchain version that made the change.\n\njet fix applies every rewrite between the toolchain recorded in .jet/lock and the running one, in order. A single file with no lock names its starting point: jet fix --since 0.4 file.jet. Rewrites chain: when D-META-SPELL1=A lands, its own rewrite turns comptime into #run, and jet fix applies both in order.\n\nRetired spellings, with no table to keep. Each rewrite file names the old form it matches. When a check already fails, Jet looks the failing site up in the rewrite files and adds one line: prep was retired in 0.4; jet fix writes comptime. Lookup happens only on failure, so a clean build pays nothing, and the hint never expires.\n\nA rewrite that cannot be automatic is marked manual in its file. jet fix then leaves one registered error at each site, naming the decision and the new form, instead of skipping it silently.\n\nThe landing rule. A change that breaks code lands together with its rewrite. The rewrite carries an old-spelling fixture, and the suite runs it and requires that the result checks clean. A change of meaning under an unchanged spelling counts too: its fixture must print the same output before and after jet fix. The repository migrates itself with the same file users get.\n\nAfter the 1.0 boundary, the same files become edition migrations, and jet fix --edition reads them. That matches the release policy: breaking changes need an edition bump and jet fix.\n\nRatified decisions. A keeps D-REL5: source is rewritten only by jet fix, on request. It keeps D-CODEMOD1=A and D-CODEMOD-BATCH1=A as the format. D-MUT-NEVER1=A already ratified a change together with its jet fix edit; A makes that the rule.\n\nBeginner path. Old code gets an error that names the fix, and one command applies it. Expert path. Each rewrite is a reviewable file with a fixture, and jet fix --dry-run shows every edit first.\n\nDownsides of A, and what the design does about them. Each breaking change costs its author one rewrite file and one fixture. The repository already writes that script for its own migration; A checks it in.\n\nWhat remains. A rewrite is only as good as its fixture. A rewrite that misses a form leaves the ordinary error at that site, and the hint still names the rewrite and its decision, so a user can report the gap.\n\nOther options. B keeps today's practice. C keeps a teaching error for each retired spelling but no rewrite, like Python 3's message for print without parentheses. D waits for editions: no rewrite rule before the 1.0 boundary.\n\nTheir best cases. B costs nothing and lets spelling move fastest. C tells users exactly what to write. D follows the release policy as written. Their costs: B strands old code. C makes users edit every site by hand. D strands everything written before 1.0.",
+      "detail": "What this ballot decides. Whether a breaking language change may land without a rewrite users can run. Library items already have one: D-STRUCT-LIFE1=A and D-DEPRECATE-INLINE1=A. This is the language half.\n\nThe rule in force. On 2026-11-10 Main recorded the owner rule on cards #6622 and #6281. Until this ballot is decided, retired spellings get the generic error, no teaching text and no jet fix rewrite. D-TEACH-RECONCILE1=A, ratified on 2026-11-05, already says no teaching of retired Jet spellings anywhere.\n\nSo the ballot has two halves. Teaching, a message that names the retired word and its new form, is settled against by D-TEACH-RECONCILE1=A. Rewriting, jet fix editing old code on request, is the open question. A adds rewrites and keeps the teaching bar. E adds both and would reverse D-TEACH-RECONCILE1=A for Jet's own spellings.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Commit 5a467902a3 retired prep, and its message says the rewrite was a script in a scratch directory. Probe m05 writes LIMIT: prep { 2 + 3 } and gets E0119, there is no type called prep. jet fix --dry-run prints no changes made, with or without --edition=2026.\n\njet fix --edition=2027 fails E2104: this jet migrates to edition 2026 only. The next spelling change is already ratified: D-META-SPELL1=A replaces comptime with #run. Probe m06, comptime { 2 + 3 }, still prints 5. Probe m07, #run { 2 + 3 }, fails E0733, no tag called run, and suggests the unrelated tag PII.\n\nHow often spelling breaks. Since 2026-09-10, 131 commits that touch the parser or checker say retire. comptime appears 2,816 times in 1,013 Jet files, the size of the next migration. History holds 30 respell commits and 284 that mention a codemod. All 22 codemod plan files in the tree sit under tests.\n\nWhat A does. Each breaking language change adds one rewrite file in a new Compiler/Migrations directory. The file uses the codemod plan format of D-CODEMOD-BATCH1=A. Its name carries the decision ID and the toolchain version that made the change.\n\njet fix applies every rewrite between the toolchain recorded in .jet/lock and the running one, in order. jet new already writes that record: a fresh project's lock has toolchain = a0.0.43 and a [[toolchain]] section. A file with no lock names its start: jet fix --since 0.4 file.jet.\n\nRewrites chain. When D-META-SPELL1=A lands, its rewrite turns comptime into #run, so jet fix on prep code applies both in order. A rewrite that cannot be automatic is marked manual; jet fix lists each such site in its own report and changes nothing there.\n\nNo teaching, by design. Under A the old word keeps the generic error, which names no retired form. A failing check adds one toolchain line only when the project's lock is older than the running jet. The line reads: this project was locked with a0.0.41; jet fix --dry-run shows 3 pending rewrites.\n\nThat line names no spelling, old or new, so it is not teaching under D-TEACH-RECONCILE1=A. It compares two version strings and counts rewrite files, only on failure, so a clean build pays nothing. A project with no lock gets no line.\n\nThe landing rule. A change that breaks code lands together with its rewrite. Its fixture holds the old spelling, and the suite requires the result to check clean. A change of meaning under an unchanged spelling counts too: its fixture must print the same output before and after jet fix. The repository migrates itself with the same file users get.\n\nAfter the 1.0 boundary, the same files become edition migrations that jet fix --edition reads. That matches the release policy: breaking changes need an edition bump and jet fix. A keeps D-REL5, so source is rewritten only by jet fix, on request, and D-CODEMOD1=A and D-CODEMOD-BATCH1=A as the format.\n\nBeginner path. Old code fails with the ordinary error and the toolchain line; jet fix updates it in one command. Expert path. Each rewrite is a reviewable file with a fixture, and jet fix --dry-run shows every edit first.\n\nDownsides of A, and what the design does about them. Each breaking change costs its author one rewrite file and one fixture. The repository already writes that script for its own migration; A checks it in. A user whose project has no lock sees no toolchain line and must know to run jet fix --since.\n\nWhat remains. A rewrite is only as good as its fixture. A missed form leaves the ordinary error, and jet fix --dry-run lists which rewrites ran, so a user can report the gap. A project made without jet new has no toolchain record until a build writes one.\n\nOther options. B keeps today's practice and the owner rule as it stands. C keeps a teaching error for each retired spelling but no rewrite, like Python 3's print message. D waits for editions: no rewrite rule before 1.0. E is A plus a hint naming the retired form and its rewrite.\n\nTheir best cases. B costs nothing and lets spelling move fastest. C tells users exactly what to write. D follows the release policy as written. E tells users why their code broke. Their costs. B strands old code. C and E reverse D-TEACH-RECONCILE1=A for Jet's spellings. C also leaves every edit to the user. D strands everything written before 1.0.",
       "options": [
         {
           "key": "A",
-          "name": "Rewrite with every change",
-          "detail": "A breaking change lands with a registered rewrite; jet fix applies every rewrite since the locked toolchain.",
-          "technical": "Compiler/Migrations holds one codemod plan per change, named by decision ID and toolchain version, each with an old-spelling fixture the suite replays. jet fix reads the lock's toolchain or --since. A failing check consults the plans' old forms and adds a hint naming the rewrite, so no per-spelling error rows exist. Manual rules leave a registered error at each site.",
-          "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Proposed (A): jet check: prep was retired in 0.4; jet fix writes comptime.\n// jet fix rewrites line 2 to LIMIT: comptime { 2 + 3 }, then the\n// D-META-SPELL1 rewrite chains it to LIMIT: #run { 2 + 3 }.\n// Today (probe m05): E0119, there is no type called prep; jet fix: no changes."
+          "name": "Rewrite with every change, no teaching",
+          "detail": "A breaking change lands with a registered rewrite; jet fix applies every rewrite since the locked toolchain. The old spelling keeps the generic error.",
+          "technical": "Compiler/Migrations holds one codemod plan per change, named by decision ID and toolchain version, each with an old-spelling fixture the suite replays. jet fix reads the lock's toolchain or --since. A failing check in a project whose lock is older adds one toolchain line naming the pending rewrite count, never a spelling. Keeps D-TEACH-RECONCILE1=A; changes the owner rule's rewrite half.",
+          "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Proposed (A): jet check: E0119, there is no type called prep, plus\n// this project was locked with a0.0.41; jet fix --dry-run shows 1 pending rewrite.\n// jet fix rewrites line 2 to LIMIT: comptime { 2 + 3 }; D-META-SPELL1's rewrite chains it to #run.\n// Today (probe m05): E0119; jet fix: no changes made."
         },
         {
           "key": "B",
           "name": "Keep today's practice",
-          "detail": "The repository migrates itself with one-off scripts; users rewrite by hand.",
+          "detail": "The repository migrates itself with one-off scripts; users rewrite by hand. The owner rule stays: no teaching and no rewrite.",
           "technical": "No change.",
           "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Today (B, probe m05): E0119; jet fix: no changes made."
         },
@@ -188531,7 +188531,7 @@
           "key": "C",
           "name": "Teaching errors only",
           "detail": "Each retired spelling keeps an error that names the new form; no rewrite.",
-          "technical": "A's registered errors without the rewrite files.",
+          "technical": "A per-spelling teaching error without the rewrite files. Reverses D-TEACH-RECONCILE1=A for Jet's own retired spellings.",
           "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Proposed (C): prep was retired; write comptime { 2 + 3 }."
         },
         {
@@ -188540,33 +188540,45 @@
           "detail": "Rewrites come only with editions after the 1.0 boundary.",
           "technical": "jet fix --edition gets rewrites at the boundary; before it, B.",
           "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Proposed (D): before 1.0, as B; after 1.0, jet fix --edition=2027."
+        },
+        {
+          "key": "E",
+          "name": "Rewrite and teach",
+          "detail": "As A, and a failing check on a retired form adds a hint naming it and its rewrite.",
+          "technical": "A plus a lookup of the failing site in the rewrite files' old forms, only on failure: prep was retired in 0.4; jet fix writes comptime. Reverses D-TEACH-RECONCILE1=A for Jet's own retired spellings; foreign words stay untaught.",
+          "code": "// Written before 2026-10-23, when prep was retired.\nLIMIT: prep { 2 + 3 }\n\nrun: fn() {\n    print(LIMIT)\n}\n// Proposed (E): jet check: E0119, plus prep was retired in 0.4; jet fix writes comptime.\n// jet fix rewrites line 2 as in A."
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Edition rewrites ship in the compiler.",
+          "note": "Edition rewrites ship in the toolchain; cargo fix --edition applies them.",
           "code": "cargo fix --edition"
         },
         {
           "lang": "Go",
-          "note": "go fix applies registered rewrites.",
+          "note": "go fix updates packages to use new APIs.",
           "code": "go fix ./..."
         },
         {
           "lang": "Python",
-          "note": "Python 3 names the new form but rewrites nothing.",
+          "note": "Python 3 names the new form for print but rewrites nothing in the interpreter; 2to3 was separate.",
           "code": "print \"hi\"   # Did you mean print(...)?"
+        },
+        {
+          "lang": "Dart",
+          "note": "dart fix applies data-driven fixes that a package ships for its own API changes.",
+          "code": "dart fix --apply"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "Old code moves forward in one command, and the repository migrates itself with the file users get. The script each change already needs is simply checked in.",
+        "why": "Old code moves forward in one command, and the repository migrates itself with the file users get. A keeps D-TEACH-RECONCILE1=A: no message names a retired spelling.",
         "gains": [
           "Old code updates in one command.",
-          "Retired spellings get a clear error.",
-          "The repository uses the users' rewrite."
+          "The repository uses the users' rewrite.",
+          "No teaching text; D-TEACH-RECONCILE1=A stands."
         ],
         "losses": [
           {
@@ -188574,8 +188586,12 @@
             "mitigation": "The repository already writes that script for itself; A checks it in."
           },
           {
-            "loss": "A rewrite that misses a form leaves the ordinary error at that site.",
-            "mitigation": "The failure hint still names the rewrite, and its fixture grows with each reported miss."
+            "loss": "The error does not say which word was retired.",
+            "mitigation": "A toolchain line counts pending rewrites when the lock is older, and jet fix --dry-run shows each edit."
+          },
+          {
+            "loss": "The owner rule's no-rewrite half changes.",
+            "mitigation": "Rewrites run only on request, by D-REL5; the teaching bar is untouched."
           }
         ],
         "whyNot": [
@@ -188585,23 +188601,27 @@
           },
           {
             "key": "C",
-            "reason": "C makes users edit every site by hand."
+            "reason": "C reverses D-TEACH-RECONCILE1=A and leaves every edit to the user."
           },
           {
             "key": "D",
             "reason": "D strands everything written before 1.0."
+          },
+          {
+            "key": "E",
+            "reason": "E reverses D-TEACH-RECONCILE1=A for Jet's own spellings to name the old word."
           }
         ],
-        "tradeoff": "One rewrite file per breaking change, for old code that never strands."
+        "tradeoff": "One rewrite file per breaking change, and errors that never name a retired word, for old code that never strands."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. A broke D-TEACH-RECONCILE1=A with a hint naming the retired word, so it now keeps the generic error plus a version-keyed line. The hint became option E, and every probe was rerun on a0.0.43."
       },
-      "checkInstructions": "Use the t6c compiler (dev 76955986d0) in $JET_SCRATCH_ROOT/lanes/BallotFix/probes/lm. Run jet check m05_prep.jet, jet fix --dry-run m05_prep.jet, jet fix --edition=2027 m05_prep.jet, and jet run on m06 and m07. Read the message of commit 5a467902a3. Census: git grep -c -w comptime and git log --grep counts on dev. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-LANG-MIGRATE1/probes, then jet fix --dry-run and jet fix --edition=2027 on m05. Run jet new in a scratch directory and read .jet/lock. The census uses git grep and git log on dev.",
       "surface": {
         "gist": "Should every breaking language change land with a jet fix rewrite, so old code moves forward in one command?",
         "lesson": "When Jet changes how something is written, old programs stop compiling. This vote decides whether each such change must ship with an automatic rewrite. Then jet fix updates old code instead of leaving a confusing error.",
@@ -188619,11 +188639,11 @@
         "options": [
           {
             "key": "A",
-            "name": "Rewrite each change",
+            "name": "Rewrite, no teaching",
             "gist": "Every breaking change ships its rewrite.",
             "gains": [
               "One command updates.",
-              "Clear errors."
+              "No teaching text."
             ],
             "losses": [
               "A file per change."
@@ -188654,7 +188674,8 @@
               "Clear errors."
             ],
             "losses": [
-              "Hand edits."
+              "Hand edits.",
+              "Reverses the teaching ruling."
             ],
             "proposed": {
               "code": "// prep was retired; write comptime"
@@ -188673,14 +188694,28 @@
             "proposed": {
               "code": "jet fix --edition=2027"
             }
+          },
+          {
+            "key": "E",
+            "name": "Rewrite and teach",
+            "gist": "A, plus a hint naming the old word.",
+            "gains": [
+              "Says why code broke."
+            ],
+            "losses": [
+              "Reverses the teaching ruling."
+            ],
+            "proposed": {
+              "code": "// prep was retired; jet fix writes comptime"
+            }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Old code moves forward in one command, using the rewrite the repository already needs.",
+          "why": "Old code moves forward in one command, and no message names a retired word.",
           "gains": [
             "One command updates.",
-            "Clear errors."
+            "Teaching ruling stands."
           ],
           "losses": [
             {
@@ -188695,11 +188730,15 @@
             },
             {
               "key": "C",
-              "reason": "Hand edits."
+              "reason": "Hand edits; reverses teaching ruling."
             },
             {
               "key": "D",
               "reason": "Pre-1.0 code strands."
+            },
+            {
+              "key": "E",
+              "reason": "Reverses teaching ruling."
             }
           ],
           "tradeoff": "A file per change, for old code that never strands."
@@ -188707,7 +188746,86 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:47:23.619Z"
+      "created": "2026-11-10T03:47:23.619Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "A hint naming the retired word breaks D-TEACH-RECONCILE1=A.",
+          "attempts": [
+            "Drop the spelling hint; the generic error stays as ratified.",
+            "Key a toolchain line to the lock version, not the spelling: it names a version and a rewrite count, never a word."
+          ],
+          "result": "Removed: A keeps the teaching ruling; the teaching hint moves to option E."
+        },
+        {
+          "option": "A",
+          "loss": "Projects without a lock have no starting toolchain.",
+          "attempts": [
+            "jet new already writes toolchain = a0.0.43 and [[toolchain]] into .jet/lock (probe: jet new lmnew).",
+            "A lockless file names its start: jet fix --since 0.4 file.jet; builds that write a lock record the toolchain (the D-EMBED-TOOLCHAIN1 build criterion)."
+          ],
+          "result": "Reduced: only a file never built in a project needs --since."
+        },
+        {
+          "option": "A",
+          "loss": "Each breaking change needs a rewrite file and fixture.",
+          "attempts": [
+            "Reuse the codemod plan format of D-CODEMOD-BATCH1=A, which the repository's own migrations already produce.",
+            "Have the landing rule run the fixture in the suite, so the rewrite the repository uses is the one users get."
+          ],
+          "result": "Reduced: the cost is checking in a script that is written anyway."
+        },
+        {
+          "option": "C",
+          "loss": "Every edit is by hand.",
+          "attempts": [
+            "Print the new form in the error so the edit is mechanical.",
+            "Offer a search pattern per retired word."
+          ],
+          "result": "Not removed; C also reverses D-TEACH-RECONCILE1=A."
+        },
+        {
+          "option": "D",
+          "loss": "Code written before 1.0 strands.",
+          "attempts": [
+            "Ship one bulk edition migration at 1.0 covering every earlier change.",
+            "Keep the repository's scripts for users; they live in scratch directories and are deleted."
+          ],
+          "result": "Not removed."
+        },
+        {
+          "option": "E",
+          "loss": "It reverses D-TEACH-RECONCILE1=A for Jet's spellings.",
+          "attempts": [
+            "Only look up the hint on failure, so clean builds pay nothing.",
+            "Limit it to Jet's own spellings; foreign words stay untaught."
+          ],
+          "result": "Not removed: the reversal is E's point."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Language migration: the teaching conflict, a0.0.43 probes and adversarial review",
+          "path": "Docs/audits/2026-11-10-lang-migrate-review.md",
+          "note": "The owner rule (#6622, #6281) and D-TEACH-RECONCILE1=A against A's hint; the version-keyed line; probes m01-m07, jet fix, jet new lock; retire-commit and comptime census; peers."
+        },
+        {
+          "title": "Rust edition guide: transitioning an existing project",
+          "url": "https://doc.rust-lang.org/edition-guide/editions/transitioning-an-existing-project-to-a-new-edition.html"
+        },
+        {
+          "title": "go command: update packages to use new APIs (go fix)",
+          "url": "https://pkg.go.dev/cmd/go#hdr-Update_packages_to_use_new_APIs"
+        },
+        {
+          "title": "Dart: dart fix",
+          "url": "https://dart.dev/tools/dart-fix"
+        },
+        {
+          "title": "Python 3.0: print is a function",
+          "url": "https://docs.python.org/3/whatsnew/3.0.html#print-is-a-function"
+        }
+      ]
     },
     {
       "id": "D-LIT-ADAPT1",
@@ -198803,6 +198921,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:38:32.889Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-LANG-MIGRATE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:37:11.516Z",
       "by": "Main",
