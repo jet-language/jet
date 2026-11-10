@@ -797,3 +797,80 @@ ascii_case: fn(b: U8, upper: Bool) -> U8 {
     assert_eq(capitalize("hELLO"), "Hello")
     assert_eq(title("hELLO wORLD"), "Hello World")
 }
+
+// String's line and field methods (BuiltinMethods CoreSource rows): the
+// compiler checks `text.first_lines(n)` as `__string_first_lines(text, n)`.
+// Lines follow `lines()`: LF ends a line, one CR before it is dropped, and a
+// final LF adds no empty line.
+
+// `text.trim_newlines()`: `text` without its trailing LFs, as shell `$(…)`
+// drops them. Any other trailing whitespace stays.
+__string_trim_newlines: fn(text: String) -> String Never! {
+    raw: text.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{10}) -> end = end - 1
+    if end == raw.len() -> return text.copy()
+    kept := [U8]{}
+    loop at in 0..<end -> kept.push(raw[at])
+    String.from_bytes(kept) ?? panic("dropping trailing LFs keeps whole UTF-8 scalars")
+}
+
+// `text.first_lines(n)`: the first `n` lines (`head -n`); every line when
+// there are fewer, none when `n` is not positive.
+__string_first_lines: fn(text: String, count: Int) -> [String] Never! {
+    lines: text.lines()
+    kept := [String]{}
+    loop at in 0..<lines.len() {
+        if at >= count -> return kept
+        kept.push(lines[at].copy())
+    }
+    kept
+}
+
+// `text.last_lines(n)`: the last `n` lines (`tail -n`); every line when
+// there are fewer, none when `n` is not positive.
+__string_last_lines: fn(text: String, count: Int) -> [String] Never! {
+    lines: text.lines()
+    start := lines.len() - count
+    if count <= 0 -> start = lines.len()
+    if start < 0 -> start = 0
+    kept := [String]{}
+    loop at in start..<lines.len() -> kept.push(lines[at].copy())
+    kept
+}
+
+// `text.has_line_prefix(prefix)`: whether some line starts with `prefix`
+// (`grep -q '^prefix'` with `prefix` read literally).
+__string_has_line_prefix: fn(text: String, prefix: String) -> Bool Never! {
+    loop line in text.lines() {
+        if line.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// `text.tsv_records()`: each line split on every tab, so an empty field
+// stays empty and a line with no tab is one field.
+__string_tsv_records: fn(text: String) -> [[String]] Never! {
+    records := [[String]]{}
+    loop line in text.lines() -> records.push(line.split("\t").to_list())
+    records
+}
+
+#Test("String line and field methods follow the lines() rule") {
+    assert_eq(__string_trim_newlines("out\n\n"), "out")
+    assert_eq(__string_trim_newlines("out \t"), "out \t")
+    assert_eq(__string_trim_newlines("\n"), "")
+    assert_eq(__string_first_lines("a\nb\r\nc\n", 2), [String]{"a", "b"})
+    assert_eq(__string_first_lines("a\nb", 5), [String]{"a", "b"})
+    assert_eq(__string_first_lines("a\nb", 0).len(), 0)
+    assert_eq(__string_last_lines("a\nb\nc\n", 2), [String]{"b", "c"})
+    assert_eq(__string_last_lines("a\nb", 5), [String]{"a", "b"})
+    assert_eq(__string_last_lines("a\nb", -1).len(), 0)
+    assert(__string_has_line_prefix("x\n## head\n", "## "))
+    assert(!__string_has_line_prefix("x ## head\n", "## "))
+    records: __string_tsv_records("k\tv\n\tempty\nlone\n")
+    assert_eq(records.len(), 3)
+    assert_eq(records[0], [String]{"k", "v"})
+    assert_eq(records[1], [String]{"", "empty"})
+    assert_eq(records[2], [String]{"lone"})
+}

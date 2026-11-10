@@ -57,9 +57,11 @@ BuiltinMethodLowering: enum {
     // Fixed-width overflow policy (`checked_add`, `wrapping_mul`, `rotate_left`, …).
     Overflow(prefix: String, operation: String)
     Atomic
-    // A call of the `core.regex` source helper `member(receiver, args…)`:
-    // String's pattern methods run the one regex engine.
-    RegexSource(member: String)
+    // A call of the Core source helper `owner.member(receiver, args…)`: the
+    // method's body is Jet in the `owner` module (String's pattern methods
+    // run the one core.regex engine), and the loader loads `owner` for the
+    // spelling.
+    CoreSource(owner: String, member: String)
 }
 
 BuiltinMethodRow: struct {
@@ -173,6 +175,14 @@ BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     // The fields between runs of whitespace: perl's `split ' '`, awk's fields.
     {receiver: BuiltinMethodReceiver.String, name: "words", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "words"}}},
     {receiver: BuiltinMethodReceiver.String, name: "lines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
+    // Shell-style line and field work, by the `lines()` rule: `head -n`,
+    // `tail -n`, `grep -q '^prefix'`, `$(…)`'s trailing-newline drop and
+    // tab-separated records.
+    {receiver: BuiltinMethodReceiver.String, name: "first_lines", parameters: [Type]{Type.Int}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.text.parse", member: "__string_first_lines"}},
+    {receiver: BuiltinMethodReceiver.String, name: "last_lines", parameters: [Type]{Type.Int}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.text.parse", member: "__string_last_lines"}},
+    {receiver: BuiltinMethodReceiver.String, name: "has_line_prefix", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.text.parse", member: "__string_has_line_prefix"}},
+    {receiver: BuiltinMethodReceiver.String, name: "trim_newlines", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.text.parse", member: "__string_trim_newlines"}},
+    {receiver: BuiltinMethodReceiver.String, name: "tsv_records", parameters: [Type]{}, result: Type.List{element: Type.List{element: Type.String}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.text.parse", member: "__string_tsv_records"}},
     {receiver: BuiltinMethodReceiver.String, name: "splitlines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
     {receiver: BuiltinMethodReceiver.String, name: "chars", parameters: [Type]{}, result: Type.List{element: Type.Char}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Chars}},
     {receiver: BuiltinMethodReceiver.String, name: "bytes", parameters: [Type]{}, result: Type.List{element: Type.IntN{signed: false, bits: 8}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Bytes{owned: false}}},
@@ -182,8 +192,11 @@ BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.String, name: "to_float", parameters: [Type]{}, result: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseFloat}},
     // One core.regex engine; a bad pattern is compile's RegexError. The
     // checked call has its source helper's declared result.
-    {receiver: BuiltinMethodReceiver.String, name: "matches", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Bool, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.RegexSource{member: "__string_matches"}},
-    {receiver: BuiltinMethodReceiver.String, name: "match", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.RegexSource{member: "__string_match"}},
+    {receiver: BuiltinMethodReceiver.String, name: "matches", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Bool, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.regex", member: "__string_matches"}},
+    {receiver: BuiltinMethodReceiver.String, name: "match", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.regex", member: "__string_match"}},
+    // A quoted pattern is a checked `Regex` literal here, so the call has no
+    // compile or failure step.
+    {receiver: BuiltinMethodReceiver.String, name: "has_line", parameters: [Type]{Type.Named{name: "Regex"}}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.regex", member: "__string_has_line"}},
 
     // Bytes: builder, read cursor and string-like reads (#1467).
     {receiver: BuiltinMethodReceiver.Bytes, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferMethod{method: "len"}}},

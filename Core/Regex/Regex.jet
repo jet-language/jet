@@ -332,6 +332,25 @@ __string_match: fn(text: String, pattern: String) -> String? RegexError! {
     find(compiled, text)
 }
 
+// `text.has_line(pattern)`: whether some line of `text` (the `lines()` rule)
+// matches `pattern`, so `^` and `$` anchor at each line. A quoted pattern at
+// the call is a checked `Regex` literal.
+__string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
+    loop line in text.lines() {
+        if is_match(pattern, line) -> return true
+    }
+    false
+}
+
+#Test("has_line matches each line on its own") {
+    pattern: compile("^(a|b)") ?? panic("the test pattern compiles")
+    assert(__string_has_line("x\nbeta\n", pattern))
+    assert(!__string_has_line("x a\ny b\n", pattern))
+    assert(!__string_has_line("", pattern))
+    ends: compile("z$") ?? panic("the test pattern compiles")
+    assert(__string_has_line("az\nq", ends))
+}
+
 find_all: fn(pattern: Regex, text: String) -> [String] Never! {
     out := [String]{}
     word: literal_text(pattern)

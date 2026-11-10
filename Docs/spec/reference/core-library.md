@@ -3119,6 +3119,27 @@ compile time), so the value can key a hash table. It is not cryptographic, and
 the value may differ between runs and compiler versions: never persist it or
 compare it across processes.
 
+Shell-style line and field work is a set of String methods. They need no
+import, and the line methods follow the `lines()` rule (LF ends a line, one
+CR before it is dropped, and a final LF adds no empty line). All but `words`
+are Jet bodies in `core.text.parse` (`has_line` in `core.regex`), which the
+compiler loads for the spelling:
+
+| Method | Returns | Shell | Meaning |
+|--------|---------|-------|---------|
+| `text.trim_newlines()` | `String` | `$(…)` | `text` without its trailing LFs; other trailing whitespace stays. |
+| `text.words()` | `[String]` | `set -- $x` | The fields between runs of Unicode White_Space; none is empty. |
+| `text.first_lines(n: Int)` | `[String]` | `head -n` | The first `n` lines; all of them when there are fewer, none when `n <= 0`. |
+| `text.last_lines(n: Int)` | `[String]` | `tail -n` | The last `n` lines, by the same rule. |
+| `text.has_line_prefix(prefix: String)` | `Bool` | `grep -q '^prefix'` | Whether some line starts with `prefix`, read literally. |
+| `text.has_line(pattern: Regex)` | `Bool` | `grep -qE` | Whether some line matches `pattern`; `^` and `$` anchor at each line. |
+| `text.tsv_records()` | `[[String]]` | `cut -f` | Each line split on every tab; empty fields stay, a line with no tab is one field. |
+
+`has_line` takes a quoted pattern as a checked `Regex` literal:
+`text.has_line("^(a|b)")` checks the pattern when the program compiles, so
+the call has no compile, flags or failure step, and a bad pattern is E0152 at
+the call. A `Regex` value built at run time is passed as is.
+
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),

@@ -52,7 +52,10 @@ sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics:
 
 // Rust `check_builtin_method` infers each argument with its parameter type as
 // the expected type, so `bytes.write([66, 67])` types the literal as [U8].
+// A quoted pattern in a `Regex` slot (`text.has_line(r"^(a|b)")`) is a checked
+// `Regex{…}` literal: the pattern is checked now, never at run time.
 sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expression_is_regex_head(required) && argument.expr == .Str(_, _, _) -> return sema_expression_typed_literal_regex(argument.expr, expr_span(argument.expr), None, environment, program, scopes, state, tail_store, context, diagnostics)
     reported: diagnostics.len()
     checked: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
     sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -129,17 +132,16 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
         .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
         // sema_call_try_value_method checks these rows as their source call.
-        .RegexSource(member) -> panic("the RegexSource row `{member}` is checked as its core.regex call")
+        .CoreSource(owner, member) -> panic("the CoreSource row `{owner}.{member}` is checked as its source call")
     }
 }
 
-// String's `.matches(pattern)`/`.match(pattern)` call their `core.regex`
-// source helper with the receiver first (one regex
-// engine), typed by the helper's declared result; the loader loads
-// core.regex for either spelling.
-sema_value_method_regex_source: fn(member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    unavailable: sema_error("E0906", span, "the source `core.regex.{member}` declaration is unavailable", "String's pattern methods run the core.regex engine", "restore the `core.regex` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.regex") ?? {
+// A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls its
+// Core source helper with the receiver first, typed by the helper's declared
+// result; the loader loads the helper's module for the spelling.
+sema_value_method_core_source: fn(owner: String, member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unavailable: sema_error("E0906", span, "the source `{owner}.{member}` declaration is unavailable", "this String method's body is the `{owner}` source helper", "restore the `{owner}` source module")
+    identity: sema_call_core_module_identity(environment, program, owner) ?? {
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -152,7 +154,8 @@ sema_value_method_regex_source: fn(member: String, receiver_value: TExpr, typed:
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(typed[0])}
+    args := [TCallArg]{sema_value_method_source_arg(receiver_value)}
+    loop argument in typed -> args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
@@ -333,7 +336,7 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, effect_row, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if row.lowering == .RegexSource(member) -> return sema_value_method_regex_source(member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
+    if row.lowering == .CoreSource(source_owner, member) -> return sema_value_method_core_source(source_owner, member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
     result := builtin_method_bind(row.result, receiver_value.ty)
     line: sema_source_line_at(environment.source_segments, span) ?? 0
     if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) {

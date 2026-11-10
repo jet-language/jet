@@ -6,6 +6,8 @@ use {
         AppRouteRoot,
         Expr,
         ast_visit_body,
+        BUILTIN_METHOD_ROWS,
+        BuiltinMethodLowering,
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
@@ -3339,10 +3341,11 @@ JetDriverCoreIdentifierDemand: struct {
     // helpers, and Float and F32 `pow`, lower to their `Core/Math/Math.jet`
     // source helpers, so core.math loads.
     math_receiver: Bool
-    // A `Regex{…}` checked literal (produced by `core.regex.compile`) or a
-    // `.matches(…)`/`.match(…)` receiver call (String's pattern methods run
-    // the `core.regex` engine): core.regex loads.
-    regex_source: Bool
+    // The Core source modules the spelling needs: a `Regex{…}` checked
+    // literal (produced by `core.regex.compile`) needs core.regex, and a
+    // receiver call of a CoreSource method row (`.matches(…)`,
+    // `.first_lines(…)`) needs the module of its source helper.
+    source_modules: [String]{[String]{}}
     // The owner module of each boundary typed literal the source spells
     // (`DateTime{"…"}` is core.time; boundary_head_owner_module): the
     // literal is checked by that module's CheckedText impl, so it loads.
@@ -3405,7 +3408,7 @@ JetDriverParsedUnit: struct {
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
-    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_receiver: false, regex_source: false, core_paths: [String]{}}
+    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_receiver: false, core_paths: [String]{}}
 }
 
 // The spellings the demand scan looks for, as ids of one lexed source's
@@ -3421,8 +3424,10 @@ JetDriverCoreDemandNames: struct {
     abs_name: Int
     pow_name: Int
     regex_name: Int
-    pattern_matches_name: Int
-    pattern_match_name: Int
+    // The CoreSource method row names and, at the same index, the module of
+    // each one's source helper.
+    source_method_names: [Int]
+    source_method_modules: [String]
     test_suite_name: Int
     expect_name: Int
     event_time_name: Int
@@ -3468,6 +3473,14 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
         jet_driver_core_demand_bare_row(bare_rows, bare[at], at)
         jet_driver_core_demand_bare_row(bare_rows, bare_alias[at], at)
     }
+    source_method_names := [Int]{}
+    source_method_modules := [String]{}
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.lowering == .CoreSource(owner, _) {
+            source_method_names.push(jet_driver_core_demand_name(tables, row.name))
+            source_method_modules.push(owner.copy())
+        }
+    }
     core_segments := [Int]{}
     loop row in CORE_MODULE_EXPORTS {
         parts: row.module_name.split(".").to_list()
@@ -3479,7 +3492,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     }
     typed_heads := [Int]{}
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads}
 }
 
 jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
@@ -3512,7 +3525,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                 loop previous >= from && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_receiver = true
             }
-            if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
+            if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE && !demand.source_modules.contains("core.regex") -> demand.source_modules.push("core.regex")
             if index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE {
                 loop at in 0..<names.typed_heads.len() {
                     if names.typed_heads[at] != name -> next
@@ -3533,7 +3546,11 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                     if token_decoded(tables, tokens[index]).ends_with("_rounded") -> demand.rounded_conversion = true
                 }
             }
-            if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
+            if name >= 0 && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN {
+                loop (at, method_name) in names.source_method_names {
+                    if method_name == name && !demand.source_modules.contains(names.source_method_modules[at]) -> demand.source_modules.push(names.source_method_modules[at].copy())
+                }
+            }
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
@@ -3641,7 +3658,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         output := jet_driver_demand_part_take(part)
         if output.option_or_err -> demand.option_or_err = true
         if output.math_receiver -> demand.math_receiver = true
-        if output.regex_source -> demand.regex_source = true
+        loop module_name in output.source_modules {
+            if !demand.source_modules.contains(module_name) -> demand.source_modules.push(module_name)
+        }
         loop module_name in output.typed_head_modules {
             if !demand.typed_head_modules.contains(module_name) -> demand.typed_head_modules.push(module_name)
         }
@@ -4943,13 +4962,13 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             }
         }
         // A checked `Regex{…}` literal is produced by the `core.regex.compile`
-        // source and String's `.matches`/`.match` run the core.regex engine,
-        // even when the caller has no explicit core.regex import.
-        if demand.regex_source {
-            if !bare_modules.contains("core.regex") -> bare_modules.push("core.regex")
-            jet_driver_reach_open(reach, "core.regex")
-            regex_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.regex", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
-            if regex_index == .Val(index) {
+        // source and a CoreSource String method runs its source helper, even
+        // when the caller has no explicit import of the helper's module.
+        loop module_name in demand.source_modules {
+            if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
+            jet_driver_reach_open(reach, module_name)
+            source_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if source_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)

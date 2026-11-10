@@ -131,24 +131,6 @@ is_upper_byte: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
 
 is_digit_byte: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 
-// The whitespace-separated words of `text`.
-words: fn(text: String) -> [String] Never! {
-    bytes: text.bytes()
-    out := [String]{}
-    start := -1
-    loop index in 0..<bytes.len() {
-        if {
-            is_space_byte(Int.from_u8(bytes[index])) -> {
-                if start >= 0 -> out.push(byte_slice(text, start, index))
-                start = -1
-            }
-            start < 0 -> start = index
-        }
-    }
-    if start >= 0 -> out.push(byte_tail(text, start))
-    out
-}
-
 // The comma-separated names of a list body, trimmed, empty ones dropped.
 names: fn(list: String) -> [String] Never! {
     out := [String]{}
@@ -2260,7 +2242,7 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
         comment: raw.find("//")
         line: (if comment < 0 -> raw else -> byte_slice(raw, 0, comment)).trim()
         if line == "" -> next
-        fields: words(line)
+        fields: line.words()
         place: "{path}:{index + 1}"
         if type_name == "" {
             if machine == .Val(known) {
