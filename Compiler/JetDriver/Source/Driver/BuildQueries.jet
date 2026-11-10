@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[Diagnostic, EffectRowEntry, Item, PolicyKey, Span, TComptimeValue, Type, policy_gate_allows, sha256_hex]
+    jet_foundation.[Diagnostic, EffectRowEntry, Item, PolicyKey, SourceFile, Span, TComptimeValue, Type, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -145,6 +145,9 @@ JetDriverBuildQueryResult: struct {
     nodes: [BuildGraphNode]{[BuildGraphNode]{}}
     // The entry package's authority, the policy its build actions run under.
     authority_policy: JetDriverAuthorityPolicy?{None}
+    // The virtual sources (jet_driver_generated_module_path) a failed final
+    // checked compile's reports name, so they render against generated text.
+    generated_source_files: [SourceFile]{[SourceFile]{}}
 }
 JetDriverBuildQueryResponse: struct {
     request: JetDriverCompileRequest
@@ -286,7 +289,8 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // final checked bundle below and every target compile of the plan
     // (the response's `generated`) load them beside the package's sources.
     // copy: each row's texts are views of the plan, which stays whole.
-    generated: loop generated_row in build_plan_selected_generated(plan) -> JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()}
+    selected_generated: build_plan_selected_generated(plan)
+    generated: loop generated_row in selected_generated -> JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()}
     // The final ordinary checked bundle, not the staging build callable,
     // owns all source/generated identities, even when no output was generated.
     original_generated_count: request.generated_modules.len()
@@ -313,7 +317,17 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     request.target_sources = [String]{}
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> errors.push(error)
-    if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
+    if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) {
+        loop loaded in sources.modules {
+            if loaded.physical_path == path {
+                jet_driver_build_generated_notes(errors, package, selected_generated, loaded.path, loaded.source)
+                break
+            }
+        }
+        failed := jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
+        failed.query.generated_source_files = checked.generated_source_files.move()
+        return failed
+    }
     // The nodes move out of the checked result: a `:` read of the field would copy them at `nodes.move()`.
     nodes: checked.build_nodes.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("completed build query lost its compiler node identities"))
     // copy: the plan installs its own node list, and `nodes` moves into the response's `nodes`
@@ -321,6 +335,21 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph: build_plan_graph(plan)
     return JetDriverBuildQueryResponse{request: request.move(), query: JetDriverBuildQueryResult{plan: Val(plan.move()), graph: Val(graph), generated: generated.move(), nodes: nodes.move(), diagnostics: errors.move(), complete: true, internal_problem: None, authority_policy: compiled.authority_policy.move()}}
+}
+// A report in a module `b.generate` made names the build file call that
+// made it, as its note (`detail`); the report itself names the module's
+// virtual source.
+jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String, rows: [BuildSessionGeneratedModule], build_path: String, build_source: String) Never! {
+    loop index in 0..<diagnostics.len() {
+        if diagnostics[index].detail != None -> next
+        note := String?{None}
+        loop row in rows {
+            if diagnostics[index].source_path != Val(jet_driver_generated_module_path(package, row.path)) -> next
+            note = Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module")
+            break
+        }
+        diagnostics[index].detail = note
+    }
 }
 // The package a build session spells its `.jet/generated/<package>/` and
 // contribution sources with: a manifest package's identity, or, for a build

@@ -5516,6 +5516,10 @@ retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
 [`Examples/Metaprogramming/BuildTime/BuildWriteGenerated`](../../Examples/Metaprogramming/BuildTime/BuildWriteGenerated/run.jet).
 
+A problem in a generated module is reported against that module's own text,
+under its virtual path `<build-generated>/<package identity>/.jet/generated/…`,
+with a note naming the `b.generate` call that produced it.
+
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
 setting and its type, and `build: fn` only computes a value (D-CONF-SPLIT1).

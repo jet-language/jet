@@ -9,7 +9,7 @@ use {
         JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
     ]
     jet_foundation.[
-        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
+        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, Span,
         build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
         diagnostic_render_all,
     ]
@@ -74,7 +74,7 @@ jet_cli_inspect_build_times: fn(file: String, json: Bool, color: Bool) -[FS]> Je
 
 jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
+    diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, query.generated_source_files)
     errors: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""
