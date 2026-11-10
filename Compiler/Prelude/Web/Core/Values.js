@@ -281,22 +281,17 @@ function jet_show(value) {
 }
 
 // I9: decimal formatting is one Prelude rail on the JS adapter
-// too. BigInt stays exact; Number carries the Float path. Rulings #4588, the
-// same steps as `fixed_half_away`: round `value * 10^places` half away from
-// zero, never print a negative zero, and past the exact Int range round the
-// value's exact expansion instead.
+// too. BigInt stays exact; Number carries the Float path. Owner ruling
+// 2026-10-05 (#4588), the same rounding as the runtime's `jet_fmt_decimal`:
+// round the exact binary value at `places` decimals half away from zero
+// (2.675 -> "2.67", 0.125 -> "0.13") and never print a negative zero.
 function jet_fmt_decimal(value, precision) {
   const number = Number(value);
   if (Number.isNaN(number)) return "NaN";
   if (number === Infinity) return "inf";
   if (number === -Infinity) return "-inf";
   const places = Math.max(0, Number(precision));
-  let scale = 1;
-  for (let index = 0; index < places && Number.isFinite(scale); index += 1) scale *= 10;
-  const rounded = Math.round(Math.abs(number * scale));
-  const text = rounded < 2 ** 63
-    ? jet_fmt_point(BigInt(rounded).toString(), places)
-    : jet_fmt_fixed_exact(Math.abs(number), places);
+  const text = jet_fmt_fixed_exact(Math.abs(number), places);
   return number < 0 && /[1-9]/.test(text) ? `-${text}` : text;
 }
 

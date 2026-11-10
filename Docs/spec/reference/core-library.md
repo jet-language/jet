@@ -3847,8 +3847,9 @@ with the source helpers, while application examples use public formatting.
 
 Calls run [`Core/Text/Fmt.jet`](../../../Core/Text/Fmt.jet); interpolation
 selectors and compile-time calls run the shared Prelude kernel with the same
-steps, so every tier prints the same text. Fixed-precision rounding scales by
-`10^frac` and rounds half away from zero; non-finite values print as ordinary
+steps, so every tier prints the same text. Fixed-precision rounding rounds the
+exact binary value at `frac` decimals, half away from zero (`decimal(2.675, 2)`
+is `2.67`: the stored binary value is just below 2.675); non-finite values print as ordinary
 `Float` text. `duration` does not emit unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
