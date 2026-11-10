@@ -1068,6 +1068,10 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
                 ir_list_insert(m, p, b, subject, element, operands[1], operands[2], span)
                 return -1
             }
+            .ListReplace -> {
+                if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return ir_fail_slot(b, span, "replace without an old and a new value")
+                return ir_list_replace(m, p, b, subject, element, operands[1], operands[2], span)
+            }
             .Sort -> return ir_list_sort(m, p, b, subject, element, false, span)
             .SplitWrite -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "split_write without a split point")
@@ -3652,7 +3656,7 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
         return Val(-1)
     }
     strings: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
-    lists: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_last_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
+    lists: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_last_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
     if !strings && !lists -> return None
     loop slot in inputs {
         if slot < 0 -> return Val(ir_fail_slot(b, span, "runtime route {name} argument without a value"))
@@ -3697,8 +3701,7 @@ ir_f32_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, leaf: Str
 // end;
 // `xs.contains(item)`: whether any element is equal; `xs.sum()` /
 // `xs.product()`: the exact Int sum from 0 / product from 1, in order; `xs ==
-// ys` (list_equal): equal lengths and elements; `xs.replace(i, v)`: a copy
-// whose in-range slot holds `v`, an index outside the List dropping `v`;
+// ys` (list_equal): equal lengths and elements;
 // `xs.starts_with(ys)` / `xs.ends_with(ys)`, `xs.min()` / `xs.max()`,
 // `xs.flatten()`, `xs.count(item)`, `xs.counts()`, `xs.union(ys)` /
 // `xs.intersection(ys)` / `xs.difference(ys)` and `xs.random()` below.
@@ -3708,7 +3711,7 @@ ir_list_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, input
     row: ir_list_element(m, p, b, list) ?? return ir_fail_slot(b, span, "runtime route {name} on {shown}")
     reducing: name == "jet_list_sum" || name == "jet_list_product"
     single: reducing || name == "jet_list_sum_fixed_f64" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_counts" || name == "jet_list_random"
-    expected: if single -> 1 else if name == "jet_list_replace" || name == "jet_list_slice" -> 3 else -> 2
+    expected: if single -> 1 else if name == "jet_list_slice" -> 3 else -> 2
     if inputs.len() != expected -> return ir_fail_slot(b, span, "runtime route {name} takes {expected} arguments, not {inputs.len()}")
     stride: ir_list_stride(m, row)
     if reducing {
@@ -3734,7 +3737,6 @@ ir_list_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, input
         return ir_equal(m, p, b, list, other, span)
     }
     result_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
-    if name == "jet_list_replace" -> return ir_list_replace(m, p, b, list, row, result_row, inputs[1], inputs[2], span)
     if name == "jet_list_slice" -> return ir_list_slice(m, p, b, list, row, result_row, inputs[1], inputs[2], span)
     if name == "jet_list_starts_with" || name == "jet_list_ends_with" {
         other: inputs[1]
@@ -4218,26 +4220,23 @@ ir_list_clone: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: I
     out
 }
 
-// `xs.replace(index, value)`: a copy of the List whose slot `index` (when in
-// range) drops its element and takes `value` over; out of range, `value` is
-// dropped and the copy is unchanged.
-ir_list_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, position: Int, incoming: Int, span: Span) -> Int Never! {
-    result_ty: m.types[result_row].ty
-    same_element: if ir_untag(result_ty) == .List(element) -> ir_value_type(m, p, element) == Val((row)) else -> false
-    if !same_element -> return ir_fail_slot(b, span, "List replace into {ir_type_name(result_ty)}")
-    index: ir_native_index(m, b, position, span)
+// `xs.replace(old, value)` in place: the first element equal to `old` drops
+// and takes `value` over, and the result is whether there was one; with
+// none, `value` is dropped and the List is unchanged.
+ir_list_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, old: Int, incoming: Int, span: Span) -> Int Never! {
+    found: ir_word_const(m, b, -1)
+    ir_list_remove_value(m, p, b, list, row, old, found, span)
     if ir_failed(b) -> return -1
     value: ir_adapt(m, p, b, incoming, row, span)
     if ir_failed(b) -> return -1
     owned: ir_own(m, p, b, value)
-    replica: ir_list_clone(m, p, b, list, row, result_row)
-    length: ir_load_word(m, b, replica, 0)
-    inside: ir_index_order(m, b, IROp.Lt, index, length)
+    zero: ir_word_const(m, b, 0)
+    hit: ir_bool_op(m, b, IROp.Ge, found, zero)
     drops: m.types[row].drop != ""
-    ir_open_if(b.f, inside, b.line)
-    data: ir_load_word(m, b, replica, 16)
+    ir_open_if(b.f, hit, b.line)
+    data: ir_load_word(m, b, list, 16)
     stride: ir_list_stride(m, row)
-    address: ir_element_address(m, b, data, index, stride)
+    address: ir_element_address(m, b, data, found, stride)
     if drops {
         replaced: ir_load_at(m, b, address, 0, row)
         ir_emit(b.f, IROp.Drop, -1, replaced, -1, -1, b.line)
@@ -4250,7 +4249,7 @@ ir_list_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: I
     }
     ir_end(b.f, b.line)
     b.fresh[owned] = false
-    replica
+    hit
 }
 
 // `text.split_once(sep)` / `text.cut_last(sep)`: the text before and after
@@ -4601,7 +4600,7 @@ IR_ROUTES_INLINE: comptime { [String]{
     "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_os_interrupt", "jet_rt_callback", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
-    "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
+    "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal",
     "jet_list_starts_with", "jet_list_ends_with", "jet_list_min", "jet_list_max", "jet_list_flatten",
     "jet_list_count", "jet_list_counts", "jet_list_union", "jet_list_intersection", "jet_list_difference", "jet_list_random",
 } }

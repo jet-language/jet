@@ -230,6 +230,15 @@ function jet_list_remove_value(xs, value) {
     : jet_option_some(xs.splice(position, 1)[0]);
 }
 
+// `xs.replace(old, new)`: the first item equal to `old` becomes `new`; whether
+// there was one.
+function jet_list_replace(xs, old, value) {
+  const position = xs.findIndex((item) => item === old);
+  if (position < 0) return false;
+  xs[position] = value;
+  return true;
+}
+
 function jet_list_remove_slot(xs, index, file, line) {
   const position = Number(index);
   if (!Number.isSafeInteger(position) || position < 0 || position >= xs.length) {

@@ -1,0 +1,38 @@
+// #5976 c11 (D-ONCE-VERB1=A): `xs.replace(old, new)` swaps the first element
+// equal to `old` for `new` in place and answers whether it found one.
+Tag: struct {
+    name: String
+}
+
+swap_in: fn(xs: &[Int], old: Int, new: Int) -> Bool {
+    xs.replace(old, new)
+}
+
+run: fn() {
+    xs := [3, 1, 3, 2]
+    print(xs.replace(3, 7))
+    print(xs)
+    print(xs.replace(3, 8))
+    print(xs)
+    print(xs.replace(5, 9))
+    print(xs)
+
+    empty := [Int]{}
+    print(empty.replace(1, 2))
+    print(empty.len())
+
+    words := ["a", "b", "a"]
+    print(words.replace("a", "z"))
+    print(words)
+    print(words.replace("q", "y"))
+    print(words)
+
+    tags := [Tag{name: "x"}, Tag{name: "y"}]
+    print(tags.replace(Tag{name: "y"}, Tag{name: "w"}))
+    print(tags.len())
+    print(tags[1].name)
+
+    ys := [4, 4]
+    print(swap_in(ys, 4, 6))
+    print(ys)
+}
