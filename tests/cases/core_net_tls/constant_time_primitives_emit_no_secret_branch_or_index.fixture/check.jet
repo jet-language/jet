@@ -9,7 +9,8 @@
 // the encoder wrote, attributed to the IR instruction it lowers.
 //
 // <spec> names the secrets (`root <function> <variable>...`), the functions
-// judged (`check <source path part>`), the functions whose result is public
+// judged (`check <source path part>`, or `check <function>` for one function
+// of a file that is not judged whole), the functions whose result is public
 // (`public <function>`: a tag compare's verdict, a text layout class), the
 // types public wherever they sit (`public-type <type>`: error kinds,
 // algorithm ids, curve parameters), the public members of a struct whose
@@ -1019,9 +1020,11 @@ root_matches: fn(root: String, base: String) -> Bool Never! {
     base == root
 }
 
-judged: fn(spec: Spec, file: String) -> Bool Never! {
+/// Whether the function `base` of source file `file` is judged: a `check`
+/// part names its file (a path part) or the function itself.
+judged: fn(spec: Spec, file: String, base: String) -> Bool Never! {
     loop part in spec.checked {
-        if file.contains(part) -> return true
+        if file.contains(part) || base == part -> return true
     }
     false
 }
@@ -1160,7 +1163,7 @@ run: fn() {
         seen := [String:Bool]{}
         loop inst in 0..<c.inst_fn.len() {
             f: c.inst_fn[inst]
-            if spec.checked.len() > 0 && !judged(spec, c.fn_file[f]) -> next
+            if spec.checked.len() > 0 && !judged(spec, c.fn_file[f], c.fn_base[f]) -> next
             reached[c.fn_key[f].copy()] = true
             loop line in findings_of(c, spec, inst, seen) {
                 print("{path}: {line}")

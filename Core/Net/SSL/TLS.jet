@@ -3929,6 +3929,17 @@ ct_rsa_key: fn() -> rsa.RSAContext {
         xsealed: vec_expert_xchacha_seal(key, xiv, aad, plain) ?? panic("expert XChaCha20-Poly1305 seal failed")
         assert_eq(ct_opened(vec_expert_xchacha_open(key, xiv, aad, xsealed)), 64)
     }
+    // The paths the tests below time: the bitsliced AES and the portable
+    // GHASH, HKDF and the TLS 1.3 key schedule, the TLS 1.2 PRF (extended
+    // master secret and Finished) and HMAC_DRBG.
+    assert_eq(ct_aes_portable(ct_bytes(r, 32), ct_bytes(r, 64)).len(), 64)
+    assert_eq(ct_ghash_portable(ct_bytes(r, 16), ct_bytes(r, 64)).len(), 16)
+    assert_eq(ct_opened(hashes.hkdf(.SHA256, ct_bytes(r, 32), ct_bytes(r, 32), ct_bytes(r, 16), 32)), 32)
+    assert_eq(ct_opened(hashes.hkdf(.SHA384, ct_bytes(r, 48), ct_bytes(r, 48), ct_bytes(r, 16), 48)), 48)
+    assert_eq(ct_tls13_schedule(ct_bytes(r, 32), ct_bytes(r, 32), ct_bytes(r, 32)).len(), 16)
+    assert_eq(ssl_tls_prf_generic(.SHA256, ct_bytes(r, 48), "extended master secret".bytes(), ct_bytes(r, 32), 48).len(), 48)
+    assert_eq(ssl_tls_prf_generic(.SHA384, ct_bytes(r, 48), "client finished".bytes(), ct_bytes(r, 48), 12).len(), 12)
+    assert_eq(ct_drbg(ct_bytes(r, 48)).len(), 32)
 }
 
 // ---------------------------------------------------------------------------
@@ -3940,8 +3951,10 @@ ct_rsa_key: fn() -> rsa.RSAContext {
 // portable GHASH that a host with AES-NI and PCLMULQDQ never runs, and what
 // TLS builds on the primitives: AEAD key set-up and sealing, HKDF and the
 // TLS 1.3 key schedule, the TLS 1.2 PRF and Finished, HMAC_DRBG, the record
-// layer's ssl_decrypt_buf, and Bignum's exp_mod and gcd_modinv_odd. They are
-// timed only; ct_entry above stays the emission check's entry.
+// layer's ssl_decrypt_buf, and Bignum's exp_mod and gcd_modinv_odd. ct_entry
+// above also enters all of these but the record layer, whose generic cipher
+// layer the emission check cannot judge yet (its context's cipher choice and
+// list words read as secret, and the choice reaches every cipher).
 
 /// ECDSA signing with a fixed key whose nonce generator is seeded from
 /// `seed`, so the nonce k is the secret that varies.
