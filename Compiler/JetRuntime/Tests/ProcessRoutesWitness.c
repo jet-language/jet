@@ -66,12 +66,9 @@ static void adapters(void){
  jet_rt_handle_drop_process_spec(clone);
  errno=0;assert(fcntl((int)assigned,F_GETFD)==-1&&errno==EBADF);
  errno=0;assert(fcntl((int)second,F_GETFD)==-1&&errno==EBADF);
- // A stdio slot and a handle the runtime cannot keep are refused without a
- // duplicate or a row.
+ // A stdio slot is refused without a duplicate or a row.
  Spec *stdio=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),fd,2,false,&stdio,&supported.value,&assigned,&error);
  assert(assigned==-1&&error==0&&!stdio->directories&&stdio->keep_refusal==-1);jet_rt_handle_drop_process_spec(stdio);
- Spec *unsupported=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),-3,100,false,&unsupported,&supported.value,&assigned,&error);
- assert(assigned==-1&&error==0&&!unsupported->directories&&unsupported->keep_refusal==-3);jet_rt_handle_drop_process_spec(unsupported);
  Spec *failed=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),-1,100,false,&failed,&supported.value,&assigned,&error);
  assert(supported.value&&assigned==-1&&error==EBADF&&!failed->directories&&failed->keep_refusal==EBADF&&!jet_rt_handle_eq_process_spec(s,failed));
  failed->keep_refusal=0;assert(jet_rt_handle_eq_process_spec(s,failed));

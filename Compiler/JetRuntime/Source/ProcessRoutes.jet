@@ -85,17 +85,14 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     // or above the child slot; the spawn moves it into the slot, so only a
     // slot this spec already passes is refused (assigned -1, errno 0).
     // A slot outside 3..2147483646 is refused the same way. A negative
-    // source is a handle with no descriptor (EBADF), or
-    // PROCESS_KEEP_REFUSED_UNSUPPORTED for a handle this runtime cannot keep.
-    // The spec records its first refusal for launch to report.
+    // source is a handle with no descriptor (EBADF). The spec records its
+    // first refusal for launch to report.
     result: value
     target: process_route_i32(child_fd)
     assigned := I64{-1}
     error := I64{0}
     refusal := I64{0}
-    if (source_fd == PROCESS_KEEP_REFUSED_UNSUPPORTED) {
-        refusal = PROCESS_KEEP_REFUSED_UNSUPPORTED
-    } else if (source_fd < I64{0}) {
+    if (source_fd < I64{0}) {
         error = I64{9}
         refusal = error
     } else if (child_fd < I64{3} || child_fd > I64{2147483646}) {

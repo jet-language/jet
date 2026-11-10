@@ -2482,8 +2482,8 @@ return it before any child starts. A slot outside 3 to 2147483646 is
 `IOError.InvalidInput` (`keep_open needs a descriptor slot from 3 to
 2147483646; 0 to 2 are the standard streams`), as is a slot the spec already
 keeps; a descriptor the host cannot duplicate is `IOError.Other` with the
-host's error. A `FileLock` is `IOError.Unsupported` (`keep_open does not keep
-a FileLock yet`).
+host's error. A kept `FileLock`'s duplicate shares its lock: the lock stays
+held while the child, or any process it starts, keeps the descriptor open.
 `Examples/Systems/Process/ProcessKeepOpen.jet` is the golden.
 #### Authority and output boundaries
 

@@ -28,10 +28,6 @@ process_execution_keep_refused: fn(spec: I64, err: I64) -> Bool {
         _ := process_execution_invalid(spec, rt_static_text("keep_open's descriptor slot is already kept for this process"), err)
         return true
     }
-    if (refusal == PROCESS_KEEP_REFUSED_UNSUPPORTED) {
-        _ := compiler_fs_error(HOST_IO_KIND_UNSUPPORTED, HOST_IO_OP_RESOLVE, process_execution_resource(spec), I64{0}, jet_rt_string_clone(rt_static_text("keep_open does not keep a FileLock yet")), err)
-        return true
-    }
     if (refusal > I64{0}) {
         _ := compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_RESOLVE, process_execution_resource(spec), refusal, host_errno_cause(refusal), err)
         return true

@@ -611,14 +611,13 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
 // refusal is recorded on the spec and returned by spawn, run, run_checked and
 // plan before any child exists: a slot outside 3 to 2147483646 or one the
 // spec already keeps is IOError.InvalidInput, and a failed duplication is
-// IOError.Other. A FileLock is IOError.Unsupported until the seed carries
-// `__lock_fd` (#6677 phase 1 of 2); -3 is the runtime's
-// PROCESS_KEEP_REFUSED_UNSUPPORTED source.
+// IOError.Other. A kept FileLock's duplicate shares its lock, so the lock
+// stays held while the child (or anything it starts) keeps the descriptor.
 __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | FileLock | Directory, at: Int?{None}) -[FS]> ProcessSpec Never! {
     fd: if handle == {
         .FileReader(reader) -> core.files.__reader_fd(reader) ?? -1
         .FileWriter(writer) -> core.files.__writer_fd(writer) ?? -1
-        .FileLock(_) -> -3
+        .FileLock(lock) -> core.files.__lock_fd(lock) ?? -1
         .Directory(directory) -> {
             held: core.files.__directory_fd(directory.handle)
             if held.available && held.held -> held.fd else -> -1
