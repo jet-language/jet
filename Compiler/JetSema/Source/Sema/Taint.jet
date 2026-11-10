@@ -8,6 +8,7 @@ use jet_foundation.[
     authority_grantable_roots,
     BinOp,
     BindPattern,
+    BUILTIN_METHOD_ROWS,
     CallArg,
     CompilerThreads,
     Diagnostic,
@@ -1245,7 +1246,27 @@ sema_taint_total_operator: fn(state: SemaTaintFlowState, op: BinOp, right: Expr)
     }
 }
 
-SEMA_TAINT_TOTAL_METHODS: [String]{"bit_and", "bit_or", "bit_xor", "bit_not", "wrapping_add", "wrapping_sub", "wrapping_mul", "len", "is_empty"}
+// Whether a call of `method` with `count` arguments cannot stop and does not
+// branch: a list's or a string's length query, or a built-in method whose
+// registry row (BUILTIN_METHOD_ROWS) of that name and arity lowers to `&`,
+// `|`, `^` or a bit not, or to a wrapping `+`, `-` or `*`.
+sema_taint_total_method: fn(method: String, count: Int) -> Bool Never! {
+    if count == 0 && (method == "len" || method == "is_empty") -> return true
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.name != method || row.parameters.len() != count -> next
+        if row.lowering == {
+            .Arithmetic(operation) -> {
+                if operation == .BitAnd || operation == .BitOr || operation == .BitXor -> return true
+            }
+            .BitNot -> return true
+            .Overflow(prefix, _) -> {
+                if prefix == "wrapping" -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
 
 sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never! {
     if value == {
@@ -1276,7 +1297,7 @@ sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never!
             return false
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            if !sema_taint_has(SEMA_TAINT_TOTAL_METHODS, method) || !sema_taint_total_expr(state, receiver) -> return false
+            if !sema_taint_total_method(method, args.len()) || !sema_taint_total_expr(state, receiver) -> return false
             loop argument in args {
                 if !sema_taint_total_expr(state, argument.expr) -> return false
             }
