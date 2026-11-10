@@ -71,15 +71,18 @@ scheduler_control_new: fn() -> I64 {
 // reaches only once it has found the control that holds its capture or owns
 // its stop. PREPARE begins a root stop's captured report. WRITE and
 // WRITE_WORD append `b` (an address or a word) of `c` bytes to the capture
-// `a`. EXIT publishes the captured report with status `a` to the root. DROP
-// discards the capture of control `a`. Each returns 1.
+// `a`. EXIT publishes the captured report with status `a` to the root; an
+// exit with no captured report (jet_rt_process_exit called directly, as an
+// `#Import(c)` caller does) has nothing to publish, so it returns 0 and the
+// trap ends the process with `a` itself. DROP discards the capture of
+// control `a`. The others return 1.
 #Export(c) jet_rt_trap_root: fn(op: I64, a: I64, b: I64, c: I64) -> I64 {
     if (op == TRAP_ROOT_PREPARE) {
         _ := scheduler_panic_check()
         scheduler_root_capture_begin()
     } else if (op == TRAP_ROOT_EXIT) {
         text: scheduler_root_capture_take(scheduler_control_current())
-        if (text == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (text == I64{0}) -> return I64{0}
         _ := scheduler_root_publish_owned(text, a)
     } else if (op == TRAP_ROOT_DROP) {
         jet_rt_string_drop(scheduler_root_capture_take(a))

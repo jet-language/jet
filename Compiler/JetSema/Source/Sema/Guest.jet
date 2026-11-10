@@ -13,6 +13,7 @@ use {
         TFuncKind,
         Type,
         diagnostic_registry_row,
+        runtime_c_export,
         type_name,
     ]
     jet_parser.[parser_guest_import_symbol]
@@ -239,6 +240,13 @@ sema_guest_record_symbol: fn(symbols: &[String:String], symbol: String, owner: S
     symbols[symbol] = description
 }
 
+// A Jet runtime export (RUNTIME_C_EXPORTS) is the runtime's own internals,
+// not a checked API: an `#Import(c)` that names one must be an audited
+// `#Unsafe` declaration. Ordinary C symbols stay ungated.
+sema_guest_runtime_import_error: fn(function: Func, symbol: String) -> Diagnostic Never! {
+    sema_error("E3101", function.name_span, "`#Import(c)` of the Jet runtime symbol `{symbol}` can only sit inside `#Unsafe`.", "The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.", "Gate the declaration with `#[Import(c), Unsafe(\"why this is safe\")]`, or call the Core function that wraps it.")
+}
+
 // Rust CheckInner `check_guest_import_surface` (every module),
 // `check_guest_export_surface` (the entry module) and
 // `check_guest_symbol_collisions` (the bundle), after registration and
@@ -250,7 +258,11 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         diagnostics := [Diagnostic]{}
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {
-                if parser_guest_import_symbol(function) != None {
+                if parser_guest_import_symbol(function) == .Val(symbol) {
+                    if runtime_c_export(symbol) && !function.is_unsafe {
+                        diagnostics.push(sema_guest_runtime_import_error(function, symbol))
+                        failed = true
+                    }
                     if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) {
                         failed = true
                     } else if !sema_guest_import_bridge_compatible(function) {

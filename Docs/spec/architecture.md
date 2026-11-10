@@ -17,8 +17,10 @@ Jet source
 ```
 
 This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).
-Every level reads the same Jet-owned IR and calls one runtime: the Prelude and
-Core, compiled once per Jet version and shipped with Jet. O0, O1 and O2 are all
+Every native level (O0, O1, O2) reads the same Jet-owned IR and calls one
+runtime: the Prelude and Core, compiled once per Jet version and shipped with
+Jet. The web tier does not yet: its JavaScript host still provides some runtime
+functions itself (I9; #6615 c7). O0, O1 and O2 are all
 the Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
 fallback until Jet O2 beats it on every required cell and covers every
 supported target (card #4013). The Cranelift JIT is retired (D-EXEC2).
@@ -1609,6 +1611,9 @@ use the same sema-owned C-safe type law. D-FFI-UNIFY1=A keeps the generated
 bridge, descriptor, and native symbol as one mechanism. Where a declaration
 uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
+An `#Import(c)` that names one of the Jet runtime's own C exports (the generated
+RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
+declaration, or it is E3101. Ordinary C symbols stay ungated.
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

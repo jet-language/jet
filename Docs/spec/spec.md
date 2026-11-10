@@ -339,8 +339,8 @@ execution tier.
 
 `print` is an ambient prelude operation. It accepts one or more printable
 arguments and writes one line per argument with a trailing newline. `eprint` is
-the ambient stderr twin. Stdout is buffered by the one runtime, the same on
-every tier: a terminal stdout is written at each line end, a pipe or file when
+the ambient stderr twin. Stdout is buffered the same way on every tier: a
+terminal stdout is written at each line end, a pipe or file when
 its buffer fills. Pending stdout is written before any stderr write, before
 every read of stdin (so all that was printed is out before the program waits
 for input), before a child process starts, and when the process stops. Stdin
