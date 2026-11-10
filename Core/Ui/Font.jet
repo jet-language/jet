@@ -514,19 +514,19 @@ draw_text: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, &cache:
 // The table readers, shaper and rasterizer behind the public items above:
 // not part of the surface.
 priv internal: module {
-    font_error: fn(reason: String) -> FontError {
+    font_error: fn(reason: String) -> FontError Never! {
         FontError{reason: reason}
     }
 
-    raw16: fn(b: [U8], at: Int) -> Int {
+    raw16: fn(b: [U8], at: Int) -> Int Never! {
         (Int.from_u8(b[at]) << 8) + Int.from_u8(b[at + 1])
     }
 
-    raw32: fn(b: [U8], at: Int) -> Int {
+    raw32: fn(b: [U8], at: Int) -> Int Never! {
         (raw16(b, at) << 16) + raw16(b, at + 2)
     }
 
-    signed16: fn(value: Int) -> Int {
+    signed16: fn(value: Int) -> Int Never! {
         if value >= 32768 -> value - 65536 else -> value
     }
 
@@ -546,7 +546,7 @@ priv internal: module {
         Ok(raw32(b, at))
     }
 
-    tag_text: fn(value: Int) -> String {
+    tag_text: fn(value: Int) -> String Never! {
         out := [U8]{}
         loop k in 0..<4 -> out.push(U8{(value >> (24 - k * 8)).bit_and(255)})
         String.from_bytes(out) ?? ""
@@ -568,7 +568,7 @@ priv internal: module {
         Ok(out)
     }
 
-    table: fn(tables: [String: TableSpan], name: String) -> TableSpan? {
+    table: fn(tables: [String: TableSpan], name: String) -> TableSpan? Never! {
         tables.get(name)
     }
 
@@ -577,7 +577,7 @@ priv internal: module {
         Ok()
     }
 
-    no_ranges: fn() -> Ranges {
+    no_ranges: fn() -> Ranges Never! {
         Ranges{starts: [Int]{}, ends: [Int]{}, values: [Int]{}}
     }
 
@@ -795,14 +795,14 @@ priv internal: module {
     }
 
     // 16.16 fixed-point multiply, rounded as FreeType's FT_MulFix rounds.
-    mul_fix: fn(a: Int, b: Int) -> Int {
+    mul_fix: fn(a: Int, b: Int) -> Int Never! {
         negative: (a < 0) != (b < 0)
         magnitude: ((if a < 0 -> -a else -> a) * (if b < 0 -> -b else -> b) + 32768) >> 16
         if negative -> -magnitude else -> magnitude
     }
 
     // Font units scaled by 16.16 factor `scale`, rounded as FreeType rounds.
-    scaled: fn(value: Int, scale: Int) -> Int {
+    scaled: fn(value: Int, scale: Int) -> Int Never! {
         if scale == UNSCALED -> value else -> mul_fix(value, scale)
     }
 
@@ -966,7 +966,7 @@ priv internal: module {
         Ok()
     }
 
-    value_size: fn(format: Int) -> Int {
+    value_size: fn(format: Int) -> Int Never! {
         size := 0
         loop bit in 0..<8 {
             if (format >> bit).bit_and(1) != 0 -> size += 2
@@ -974,7 +974,7 @@ priv internal: module {
         size
     }
 
-    value_record: fn(b: [U8], at: Int, format: Int) -> ValueRecord {
+    value_record: fn(b: [U8], at: Int, format: Int) -> ValueRecord Never! {
         out := ValueRecord{x_place: 0, y_place: 0, x_advance: 0}
         field := at
         if format.bit_and(1) != 0 {
@@ -989,7 +989,7 @@ priv internal: module {
         out
     }
 
-    adjust_of: fn(first: ValueRecord, second: ValueRecord) -> Adjust {
+    adjust_of: fn(first: ValueRecord, second: ValueRecord) -> Adjust Never! {
         Adjust{
             x_place1: first.x_place, y_place1: first.y_place, x_advance1: first.x_advance,
             x_place2: second.x_place, y_place2: second.y_place, x_advance2: second.x_advance,
@@ -1351,7 +1351,7 @@ priv internal: module {
     }
 
     // Identifies a font's bytes for the cache.
-    fingerprint: fn(bytes: [U8]) -> Int {
+    fingerprint: fn(bytes: [U8]) -> Int Never! {
         h := bytes.len() % 2147483647
         loop byte in bytes -> h = (h * 31 + Int.from_u8(byte)) % 2147483647
         h

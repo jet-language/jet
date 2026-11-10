@@ -529,6 +529,11 @@ draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, colo
     fill(target, x, y, width, height, pack_rgba(color), false)
 }
 
+// The built-in face, read once for the program: reading it checks every
+// outline and hashes the whole font, which is milliseconds, so text
+// measures and windows share this one.
+REGULAR: font.regular()
+
 // The built-in face and the glyph masks drawn with it. A window keeps one,
 // so its text reads and checks the face's tables once and draws each
 // glyph's mask once per size and quarter-pixel position.
@@ -538,7 +543,7 @@ Typeset: struct {
 }
 
 typeset: fn() -> Typeset {
-    Typeset{face: font.regular(), cache: font.cache()}
+    Typeset{face: REGULAR, cache: font.cache()}
 }
 
 // Text in Atkinson Hyperlegible Next at `size` pixels to the em: the first
@@ -601,7 +606,7 @@ draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size:
 // lines and a size below 1 measure 0.
 measure_text: fn(text: String, size: Int) -> Int Never! {
     if size < 1 -> return 0
-    face: font.regular()
+    face: REGULAR
     widest := 0
     loop line in text_lines(text) {
         if line != "" -> widest = max_int(widest, round_px(face.layout(line, Float{size}).advance))
