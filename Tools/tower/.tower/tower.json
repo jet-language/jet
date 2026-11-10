@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98777,
+    "rev": 98779,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56477,6 +56477,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Finding from the D-EMBED-TOOLCHAIN1 review: on a0.0.43, .jet/lock records no [[comptime_inputs]] rows for embed_file reads, against Docs/spec/spec.md:539. The CLI fills them only for generated sources (Compiler/JetCli/Source/Cli/InspectBuild.jet:267-275). Report: Docs/audits/2026-11-10-embed-toolchain-review.md, now linked from the ballot."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Port-bar judge first run (G6LeadB-7, not yet landed; dev c460ba91e5 + SUB, --runs 5): 0 of 10 tool entries pass. Parity 10/10; wall median lower on 9/10 (6 clean wins); tokens Jet/original 1.13x-7.32x on all 10; no review records yet. Full report with both sources and every measurement: Docs/audits/2026-11-10-port-bars-first-run.md (Tower docs)."
         },
         {
@@ -56815,7 +56820,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T14:43:02.498Z",
+      "updated": "2026-11-10T15:23:09.652Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -186961,87 +186966,87 @@
       "cardId": "c0qe89cl",
       "group": "tooling",
       "title": "Compiler packages read the toolchain's Core sources while building, through a toolchain: path prefix allowed only inside the toolchain tree",
-      "situation": "Jet's compiler needs facts from its own core library's source files, such as the list of effects. Today a script copies those facts into five compiler files, about 280 KB, each stamped with a checksum. Every core edit means running the script again, and 16 commits since October did only that.\n\nThe compiler cannot read those files itself while it is built. A build-time file read must name a path below the reading file, and the core library sits beside the compiler, not below it.\n\nWe recommend A: a toolchain: prefix names a file from the top of the Jet source tree, and only packages inside that tree may use it. Every other package keeps today's rule.",
+      "situation": "Jet's compiler needs facts from its own core library's source files, such as the list of effects. Today a script copies those facts into nine compiler files, about 1.2 MB, each stamped with a checksum. Every core edit means running the script again, and 509 commits since October touched those copies.\n\nThe compiler cannot read the core files itself while it is built. A build-time file read must name a path below the reading file, and the core library sits beside the compiler, not below it.\n\nWe recommend A: a toolchain: prefix names a file from the top of the Jet source tree, and only packages inside that tree may use it. Every other package keeps today's rule.",
       "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
       "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
       "explainer": "Words used here. embed_file reads a file while building and makes its text a constant. The toolchain tree is the directory holding Core/ and Compiler/Prelude/. A generated file is one a script writes.",
       "story": "Ivy adds an effect to Effects.jet. Under A, the next compiler build reads the file itself. No regenerate step, no SHA header to refresh, no stale table.",
       "inWild": "// Rust reaches files above the crate with a path macro:\ninclude_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../core/effects.rs\"))",
-      "detail": "What this ballot decides. How a compiler package names a toolchain source at build time. The embed rules of D-CTIO1 and D-CTFIND1 otherwise stay.\n\nThe call sites. CoreSources.jet holds the effect source, Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet and Core/Compiler/Meta.jet joined, as one literal. CoreStructureRows.jet holds bootstrap steps and module declarations from Core.jet; both are in JetCli. CoreSourceOwned.jet, EffectVocabulary.jet and OwnedTraitRows.jet in JetFoundation hold rows from Core.jet, CoreSourceParts.tsv, Core/*/Runtime and Traits.jet.\n\nCensus on dev 76955986d0. The five files total 279,898 bytes. Since 2026-10-01, 148 commits touched CoreSourceOwned.jet or CoreStructureRows.jet, 16 of them titled as regenerating the tables.\n\nProbes with the t6c compiler. In probes/et/pkg, src/module.jet embeds ../data.txt, a file inside the same package, and gets E0957. Its message says .. is refused even inside the package, so builds can audit inputs: this is the rule, not a bug. Probe e02 embeds core:Effects.jet and gets E0955, read as an ordinary relative path.\n\nProbe e03 spells a binding with #run embed_file, as D-META-SPELL1=A ratified, and gets E0733: #run is not built yet. Today's spelling is comptime { embed_file(...) }; the code here uses the ratified one.\n\nCore already resolves its own embeds. A Core file's embed_file reads beside it in the toolchain tree, JET_TOOLCHAIN_ROOT or the nearest tree, else the copy built into jet by Core/EmbeddedSources.jet. Only jet_cli may call core.devtools.toolchain_core_source, a gate sema checks by package identity.\n\nWhat A does. embed_file and find accept a toolchain: prefix, as in embed_file(\"toolchain:Compiler/Prelude/Effects.jet\"). The rest is a literal path from the toolchain root, with no .. and no absolute form, so E0957's rules still apply after the prefix.\n\nResolution. The prefix reads the tree the compile already takes Core from: JET_TOOLCHAIN_ROOT, else the nearest directory above the input that holds Core/ and Compiler/Prelude/ (Request.jet:300). So the tables always describe the Core the new compiler is compiled against.\n\nThere is no built-in-copy fallback. The gate below means a tree always exists when the prefix is allowed, so Core/EmbeddedSources.jet gains no files and the jet binary does not grow.\n\nThe gate. The prefix is allowed only in a package whose directory lies inside that tree. Anywhere else it is a new registered error, so Core's file layout never becomes a public interface. When JET_TOOLCHAIN_ROOT names a different tree, the error names both directories and says to unset it or point it here.\n\nRecording. Every toolchain: read records its SHA-256 in the package's .jet/lock, and the cache is keyed by content, as for every embed. The spec's lock exemption covers Core's own embeds, which belong to the running compiler. It does not cover these: the running compiler's pin cannot identify a checkout's edited files.\n\nThat recording costs no commit churn. None of the 19 tracked .jet/lock files lies under Compiler/, so compiler packages keep their locks local.\n\nRows that are derived, not copied, are computed by a #run function over the embedded text, in the package that needs them. CoreSourceRows.jet --write and --check retire for these rows, and the SHA-256 headers go away.\n\nRatified decisions. A keeps D-CTFIND1 and D-CTFIND2 and adds no ambient name, so D-PRELUDE-LAW1 holds. It fits D-BUILD-COREUNIT1=A: Core stays one compiler-known unit, not a dependency. It amends D-CTIO1's rule that embeds never leave the project root, for this prefix inside the toolchain tree only.\n\nBeginner path. Nothing changes; ordinary packages never see the prefix. Expert path. A compiler author embeds the source and derives rows in Jet, with no generator step.\n\nDownsides of A, and what the design does about them. Deriving rows by #run adds work to each compiler build. The results are keyed by each read file's digest, so only an edit to a file that is read reruns them.\n\nWhat remains. The gate is a location rule, not a declaration a reader sees in package.jet. The package's .jet/lock lists every toolchain: read with its digest, so the reads are still auditable.\n\nOther options. B adds a package.jet field, toolchain_reads, listing allowed globs. C gives Core a package.jet with an embeddable list and makes it a path dependency. D keeps today's generated files.\n\nTheir best cases. B shows every read in the manifest. C reuses deps and the lockfile. D needs no compiler change. Their costs: B writes each path twice, once in the field and once in source. C makes Core a dependency against D-BUILD-COREUNIT1=A. D keeps the regenerate churn.",
+      "detail": "What this ballot decides. How a compiler package names a toolchain source at build time. The embed rules of D-CTIO1 and D-CTFIND1 otherwise stay.\n\nScope, measured on dev c460ba91e5. The generator Tools/agent/CoreSourceRows.jet writes twelve files (CoreSourceRows.jet:2908-2921). Nine are derived tables in compiler and Jetpack packages: 1,240,667 bytes, touched by 509 commits since 2026-10-01. The earlier draft counted only five of them, 279,898 bytes. CoreCallRows.jet alone is 895,709 bytes.\n\nWhat stays generated under every option. Core/EmbeddedSources.jet, the in-place rows of Core/Compiler/Lang.jet and Compiler/Prelude/Core.jet, and one section of the core-library reference. They are Core or docs, not compiler tables.\n\nProbes with the a0.0.43 compiler. A file beside the reader embeds. A path with .. is E0957 even inside one package, by design. The spellings core: and toolchain: are both E0955 today: A is not built. The ratified #run spelling is E0733, so the code shown uses today's comptime { } block.\n\nCost, measured. Embedding a 279 KB copy of Core.jet and counting its 116 module rows at build time adds 44 ms and 21 MB to a cold check. A cached check takes about 1 ms more. The whole generator takes 3.09 s and 414 MB today.\n\nStaleness, measured. A cached build notices an edit to the embedded file: the count went 116, then 117 after one added row, then 116 after the revert. The driver records each read's SHA-256 (JetDriver ComptimeInputs.jet:54-57) and the cache keys on it.\n\nA defect found. The spec says every embed records its SHA-256 in .jet/lock (spec.md:539). On a0.0.43 a package that embeds a file builds and runs, and no .jet/lock is written. A's first build criterion is that lock record.\n\nWhat A does. embed_file and find accept a toolchain: prefix, as in embed_file(\"toolchain:Compiler/Prelude/Effects.jet\"). The rest is a literal path from the toolchain root, with no .. and no absolute form, so E0957's rules still apply after the prefix.\n\nResolution. The prefix reads the tree the compile already takes Core from: JET_TOOLCHAIN_ROOT, else the nearest directory above the input that holds Core/ and Compiler/Prelude/ (Request.jet:300). So the tables always describe the Core the new compiler is compiled against. There is no built-in-copy fallback, so the jet binary does not grow.\n\nThe gate. The prefix is allowed only in a package whose directory lies inside that tree. Anywhere else it is a new registered error, so Core's file layout never becomes a public interface. When JET_TOOLCHAIN_ROOT names a different tree, the error names both directories.\n\nDerived rows. A pure copy, such as the effect source, is an embed and runs no code. Row tables are computed by a function over the embedded text, in the package that needs them. The generator keeps only its four non-compiler outputs.\n\nRatified decisions. A keeps D-CTFIND1 and D-CTFIND2 and adds no ambient name, so D-PRELUDE-LAW1 holds. It fits D-BUILD-COREUNIT1=A: Core stays one compiler-known unit. It amends D-CTIO1 by one sentence: for a package inside the toolchain tree, the project is that tree. The compiler workspace already treats it so, naming ../Examples and ../tests in Compiler/package.jet:43-47.\n\nPeers. Go's embed refuses .. and files outside the module; Zig refuses an embed outside the package path. Rust's include_str! reads any relative path. Go's own compiler keeps a checked-in generated builtin.go, which is D at scale.\n\nBeginner path. Nothing changes; ordinary packages never see the prefix. Expert path. A compiler author embeds the source and derives rows in Jet, with no generator step.\n\nOther options. B adds one workspace grant in Compiler/package.jet, toolchain_reads, listing globs; members inherit it. C gives Core a package.jet and makes it a path dependency. D keeps today's generated files. B still needs A's location check, or any package could write the grant.",
       "options": [
         {
           "key": "A",
           "name": "toolchain: prefix, gated by location",
           "detail": "embed_file and find take toolchain: paths, allowed only inside the toolchain tree.",
-          "technical": "Prefix resolves against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else nearest); no built-in-copy fallback. E0957 rules apply after the prefix; new registered error outside that tree. Reads hash-recorded in .jet/lock, cache keyed by content. Amends D-CTIO1's project-root rule for this prefix only. Derived rows by #run; the generator retires for them.",
-          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet, proposed (A):\nJET_CLI_EFFECT_SOURCE: #run embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")\n// ...joined with Core/Effects/Effects.jet and Core/Compiler/Meta.jet, read the same way.\n// Today: a core: path is E0955 (probe e02); #run is E0733 until built (probe e03)."
+          "technical": "Prefix resolves against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else nearest); no built-in-copy fallback. E0957 rules apply after the prefix; new registered error outside that tree. Covers the nine derived compiler and Jetpack tables. First criterion: each read's SHA-256 lands in .jet/lock, which a0.0.43 does not write yet. Cache keyed by content, as measured today. Amends D-CTIO1 by one sentence.",
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet, proposed (A):\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"toolchain:Compiler/Prelude/Effects.jet\") }\n// ...joined with Core/Effects/Effects.jet and Core/Compiler/Meta.jet, read the same way.\n// Today: toolchain: is E0955 (probe e03); #run, the ratified successor of comptime { }, is E0733 (probe e04)."
         },
         {
           "key": "B",
-          "name": "Declared field",
-          "detail": "package.jet lists toolchain_reads globs; embeds must match them.",
-          "technical": "A's prefix plus a new manifest field; reads outside the globs stay E0957.",
-          "code": "// Compiler/JetCli/package.jet, proposed (B):\n//   toolchain_reads: [\"Compiler/Prelude/Effects.jet\"]\nJET_CLI_EFFECT_SOURCE: #run embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")"
+          "name": "One workspace grant",
+          "detail": "Compiler/package.jet lists toolchain_reads globs once; members inherit them, and embeds must match.",
+          "technical": "A's prefix plus a new manifest field on the workspace. Reads outside the globs stay E0957. A's location check is still needed, or any package could write the field.",
+          "code": "// Compiler/package.jet, proposed (B):\n//   toolchain_reads: [\"Compiler/Prelude/**\", \"Core/**\"]\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"toolchain:Compiler/Prelude/Effects.jet\") }"
         },
         {
           "key": "C",
           "name": "Core as a path dependency",
           "detail": "Prelude gets a package.jet with an embeddable list; compiler packages depend on it.",
           "technical": "deps: { jet_prelude: ../Prelude }; cross-package embed limited to declared files.",
-          "code": "// Compiler/JetCli/package.jet, proposed (C):\n//   deps: { jet_prelude: ../Prelude }\nJET_CLI_EFFECT_SOURCE: #run embed_file(\"jet_prelude/Effects.jet\")"
+          "code": "// Compiler/JetCli/package.jet, proposed (C):\n//   deps: { jet_prelude: ../Prelude }\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"jet_prelude/Effects.jet\") }"
         },
         {
           "key": "D",
           "name": "Keep generated files",
           "detail": "CoreSourceRows.jet keeps writing the rows and literals.",
           "technical": "No change.",
-          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet today (D):\n// Source SHA-256: b4561341...; generated, do not edit.\nJET_CLI_EFFECT_SOURCE: \"// The effect vocabulary is written here...\""
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet today (D):\n// Source SHA-256: b4561341...; generated, do not edit.\nJET_CLI_EFFECT_SOURCE: \"// The machine effects are written here...\""
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "include_str! takes any path, including ones above the crate.",
+          "note": "include_str! takes any relative path, including ones above the crate.",
           "code": "include_str!(\"../core/effects.rs\")"
         },
         {
           "lang": "Go",
-          "note": "go:embed refuses paths above the module, like E0957.",
+          "note": "go:embed refuses .. and files outside the module, like E0957. Go's own compiler keeps a generated builtin.go.",
           "code": "//go:embed effects.txt"
         },
         {
           "lang": "Zig",
-          "note": "The build script names each embeddable file.",
+          "note": "@embedFile outside the package path is an error; a build script adds other files by name.",
           "code": "exe.root_module.addAnonymousImport(\"effects\", ...)"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "The compiler reads its own Core sources the way Core already does, and the generator churn ends. Ordinary packages never gain access.",
+        "why": "The compiler reads its own Core sources the way Core already does, and the copying of nine tables ends. Ordinary packages never gain access.",
         "gains": [
-          "No regenerate step after Core edits.",
+          "No regenerate step for the nine derived compiler tables.",
           "One resolution rule for every toolchain read.",
           "Core's layout stays private."
         ],
         "losses": [
           {
-            "loss": "Derived rows cost #run work per compiler build.",
-            "mitigation": "The cache is keyed by each read file's digest; only an edit to a read file reruns them."
+            "loss": "Derived rows cost build work after an edit to a file they read.",
+            "mitigation": "Measured at 44 ms for a 279 KB scan; the cache is keyed by content, so unchanged files cost about 1 ms."
           },
           {
-            "loss": "The gate is not visible in package.jet.",
-            "mitigation": "The package's .jet/lock lists every toolchain: read with its digest."
+            "loss": "The permission is not visible in package.jet.",
+            "mitigation": "Every read spells toolchain: at its site, and the lock lists each read with its digest once that record is built."
           },
           {
-            "loss": "D-CTIO1's rule that embeds never leave the project root gains one exception.",
-            "mitigation": "The exception covers only packages inside the toolchain tree; every other package's rule is unchanged."
+            "loss": "D-CTIO1's rule that embeds never leave the project gains one sentence.",
+            "mitigation": "For packages inside the toolchain tree, the project is that tree; every other package's rule is unchanged."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B writes each path twice."
+            "reason": "B adds a manifest field and still needs A's location check."
           },
           {
             "key": "C",
@@ -187049,7 +187054,7 @@
           },
           {
             "key": "D",
-            "reason": "D keeps the regenerate churn."
+            "reason": "D keeps the regenerate churn: 509 commits in six weeks."
           }
         ],
         "tradeoff": "A location-gated prefix, for compiler tables that never go stale."
@@ -187059,16 +187064,16 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Four claims failed and were fixed: the five-file scope, the unwritten lock, B's doubled paths and the unbuilt #run spelling. A passes with a 44 ms measured cost and the lock record as its first criterion."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/et/pkg run (E0957). Then run probes/t6c.sh probes/et run (e02 E0955, e03 E0733); outputs are in each out6 directory. The rule is in Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet and the tree lookup in Compiler/JetCli/Source/Cli/Request.jet:300. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "With the a0.0.43 compiler (dev c460ba91e5), run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on probes, probes/pkg, probes/pkg_ok and probes/cost. Run timeit.sh with COLD=1 on cost/c0_none.jet and cost/c1_derive.jet, then cost/stale.sh. Run census.sh and census2.sh from the dev worktree.",
       "surface": {
         "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
-        "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
+        "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into nine compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
         "trio": {
           "current": {
             "note": "A script copies Core's text into the compiler.",
-            "code": "// Source SHA-256: 62146875...; do not edit."
+            "code": "// Source SHA-256: b4561341...; do not edit."
           },
           "wild": {
             "lang": "Go",
@@ -187082,11 +187087,11 @@
             "name": "Prefix",
             "gist": "toolchain: paths, inside the tree only.",
             "gains": [
-              "No regenerate step.",
+              "No regenerate step for nine tables.",
               "Layout stays private."
             ],
             "losses": [
-              "Build-time row work."
+              "About 44 ms of build work after an edit."
             ],
             "proposed": {
               "code": "embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")"
@@ -187094,16 +187099,17 @@
           },
           {
             "key": "B",
-            "name": "Field",
-            "gist": "Declare reads in package.jet.",
+            "name": "Grant",
+            "gist": "One workspace grant in package.jet.",
             "gains": [
-              "Reads in the manifest."
+              "The permission shows in the manifest."
             ],
             "losses": [
-              "Paths written twice."
+              "A new manifest field.",
+              "Still needs A's location check."
             ],
             "proposed": {
-              "code": "toolchain_reads: [\"Compiler/Prelude/Effects.jet\"]"
+              "code": "toolchain_reads: [\"Compiler/Prelude/**\", \"Core/**\"]"
             }
           },
           {
@@ -187128,7 +187134,7 @@
               "No compiler change."
             ],
             "losses": [
-              "Regenerate churn."
+              "509 commits of churn in six weeks."
             ],
             "proposed": {
               "code": "jet Tools/agent/CoreSourceRows.jet --write"
@@ -187137,25 +187143,25 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "The compiler reads Core the way Core does, and the churn ends.",
+          "why": "The compiler reads Core the way Core does, and the copying ends.",
           "gains": [
-            "No regenerate step.",
+            "No regenerate step for nine tables.",
             "Layout stays private."
           ],
           "losses": [
             {
-              "loss": "Build-time row work.",
-              "mitigation": "Cached by each read file's digest."
+              "loss": "Build work after an edit.",
+              "mitigation": "Measured at 44 ms; cached by each read file's content."
             },
             {
-              "loss": "One exception to the project-root rule.",
+              "loss": "One exception to the project rule.",
               "mitigation": "Only for packages inside the toolchain tree."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Paths written twice."
+              "reason": "A new field that still needs A's check."
             },
             {
               "key": "C",
@@ -187171,7 +187177,86 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:47:10.613Z"
+      "created": "2026-11-10T03:47:10.613Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "Derived rows cost build-time work.",
+          "attempts": [
+            "Key the cache by each read file's content; measured working on a0.0.43 (116, 117, 116 across an edit and a revert).",
+            "Split copies from derivations: a pure copy such as the effect source is an embed that runs no code; only row tables evaluate."
+          ],
+          "result": "Reduced. Up to about 3 s of cold work after an edit to a read file, against 3.09 s of manual generator time plus a commit today."
+        },
+        {
+          "option": "A",
+          "loss": "The permission is not visible in package.jet.",
+          "attempts": [
+            "List every read with its digest in .jet/lock; a0.0.43 writes no embed rows, so this becomes A's first build criterion.",
+            "Make each read self-describing: every site spells toolchain:, so one search lists all reads, as Go's go:embed lines do."
+          ],
+          "result": "Reduced. The permission stays a location rule, stated by the registered error."
+        },
+        {
+          "option": "A",
+          "loss": "D-CTIO1 gains an exception.",
+          "attempts": [
+            "Confine it to packages inside the toolchain tree.",
+            "Define the toolchain tree as those packages' project, as Compiler/package.jet already does for its test corpora."
+          ],
+          "result": "Reduced to one amended sentence; no other package's rule changes."
+        },
+        {
+          "option": "A",
+          "loss": "The first draft claimed the regenerate step ends, but covered five of twelve outputs.",
+          "attempts": [
+            "Widen A's scope to all nine derived compiler and Jetpack tables.",
+            "Name the four outputs that stay generated: EmbeddedSources, two in-place Core rewrites and one doc section."
+          ],
+          "result": "Removed as an overclaim; the gain now names its exact scope."
+        },
+        {
+          "option": "B",
+          "loss": "Each path is written twice.",
+          "attempts": [
+            "One glob grant instead of one entry per file.",
+            "Put the grant on the workspace so members inherit it."
+          ],
+          "result": "Removed. B's remaining cost is a public manifest field that still needs A's location check."
+        },
+        {
+          "option": "D",
+          "loss": "Regenerate churn and header conflicts.",
+          "attempts": [
+            "Run --write inside the land train.",
+            "Drop the SHA headers so merges stop conflicting."
+          ],
+          "result": "Not removed. Every Core edit still rewrites and commits up to 1.24 MB of tables."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Compiler packages reading Core sources: measurements and adversarial review",
+          "path": "Docs/audits/2026-11-10-embed-toolchain-review.md",
+          "note": "Generated-table census (nine tables, 1.24 MB, 509 commits), probes on a0.0.43, build cost, cache staleness, the missing lock record, peers."
+        },
+        {
+          "title": "Go embed rules (no .., nothing outside the module)",
+          "url": "https://github.com/golang/go/blob/master/src/embed/embed.go"
+        },
+        {
+          "title": "Rust include_str! (path relative to the current file)",
+          "url": "https://doc.rust-lang.org/std/macro.include_str.html"
+        },
+        {
+          "title": "Zig: embed of file outside package path is an error",
+          "url": "https://github.com/ziglang/zig/blob/master/src/Sema.zig"
+        },
+        {
+          "title": "Go's compiler keeps a generated builtin.go",
+          "url": "https://github.com/golang/go/blob/master/src/cmd/compile/internal/typecheck/builtin.go"
+        }
+      ]
     },
     {
       "id": "D-ERR-CONTRACT1",
@@ -198192,6 +198277,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:23:09.652Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T15:23:01.870Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EMBED-TOOLCHAIN1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:13:54.410Z",
       "by": "Main",
