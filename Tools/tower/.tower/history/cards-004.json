@@ -88551,6 +88551,119 @@
       "completedAt": "2026-11-07T05:56:13.784Z",
       "questions": [],
       "retiredAt": "2026-11-10T06:06:22.195Z"
+    },
+    {
+      "id": "c0tltpjp",
+      "num": 6631,
+      "title": "Guards package is red on dev: 15 failing tests from 6 roots",
+      "body": "Run of the tests/guards package (`jet test tests/guards/closed_lists.jet`, 108 tests) on dev 32469276fc with the a0_030 candidate s2 (eb94f67b7a chain): 93 pass, 15 fail from 6 roots. A seventh failure, example_artifacts (stale ignored Examples/features/io/.jet/build in the dev worktree), was build output and has been removed. Each criterion turns one root green.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Closed by Main: all 7 rows met. Guards on dev 7649dde491: 120/1. The one failure is a new closed list from be20ab0158 (InspectB.jet JetCLIInspectBPlan), not one of this card's roots; it went to CoreCliLead-2 under #6418."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "corpus_policy.jet:448 policy_manifest passes: the corpus manifest again retains all 38 audited findings (it has 37), so the 9 manifest/exception/inventory tests that share it pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0 (fixed by 3316d4ec39), seed a0_029: `jet test tests/guards` reports checked_manifest_has_all_audited_findings_and_provenance and every manifest, exception and inventory test passing (113 passed; the 3 failures are unrelated: closed_lists CheckReceipt, a decision ID in Loader.jet:918, stray Examples build output).",
+          "at": "2026-11-07T03:19:52.394Z"
+        },
+        {
+          "n": 2,
+          "text": "diagnostics_coverage.jet registered_unimplemented_codes_are_expected passes: every registered code that is never emitted (E0345, E0916, E0982, E1241, E1243, E1254, E1278-E1291, E1316, E1356, E1402, E1413, E1414, E1802 and the rest of the list) is emitted by its check or listed as expected with its card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0, seed a0_029: `jet test tests/guards` reports registered_unimplemented_codes_are_expected: pass.",
+          "at": "2026-11-07T03:19:53.377Z"
+        },
+        {
+          "n": 3,
+          "text": "diagnostics_coverage.jet runtime_user_error_codes_use_jet_panic_voice passes: Core/Http/Server.jet (lines 194, 202, 217, 958 and the rest) reports Jet error codes through the Jet panic voice, not raw panic.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0 (fixed by 3316d4ec39), seed a0_029: `jet test tests/guards` reports runtime_user_error_codes_use_jet_panic_voice: pass.",
+          "at": "2026-11-07T03:19:54.436Z"
+        },
+        {
+          "n": 4,
+          "text": "diagnostics_coverage.jet marker_name_literals_stay_in_the_registry passes: Compiler/JetParser/Source/Formatter (Formatter.jet:1572 NoPrelude, :1639 HTML, Items.jet and the rest) takes marker names from the registry instead of string literals.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0 (fixed by d86d7ead37), seed a0_029: `jet test tests/guards` reports marker_name_literals_stay_in_the_registry: pass.",
+          "at": "2026-11-07T03:19:55.612Z"
+        },
+        {
+          "n": 5,
+          "text": "syntax_reconciliation.jet s2_syntax_live_surface_has_no_retired_spellings passes: tests/ui/core_json_is_not_a_module.jet and its .stderr no longer spell the retired core.json, or the guard exempts negative ui fixtures that test the retirement diagnostic.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0 (fixed by 3316d4ec39), seed a0_029: `jet test tests/guards` reports live_surface_has_no_retired_spellings: pass.",
+          "at": "2026-11-07T03:19:56.732Z"
+        },
+        {
+          "n": 6,
+          "text": "truthfulness.jet s3_guard_docs_examples passes: no doc references the missing Examples/report.jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev aaa6331fc0 (fixed by 3316d4ec39), seed a0_029: `jet test tests/guards` reports docs_referenced_examples_exist: pass.",
+          "at": "2026-11-07T03:19:57.792Z"
+        },
+        {
+          "n": 7,
+          "text": "jet_cli's package tests pass: canonical_rewrite_rules_are_explicit_and_narrow, inspect_build and self_maintenance fail on dev 9ccbcd8065 (lane s1, `jet test Compiler/JetCli/Tests/LiveInspect.jet`: 75 passed, 3 failed).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "pkgrerun.sh in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env, private HOME and JET_TEST_STATE_DIR) on dev 4da1fce58e: Compiler/JetCli 31 passed, 0 failed, 0 skipped (canonical_rewrite_rules_are_explicit_and_narrow, inspect_build and self_maintenance included); Compiler/JetCli/Tests 97 passed, 0 failed (+1 expected-fail) in the same environment. MechC's 5384202a82.",
+          "at": "2026-11-07T06:14:31.441Z"
+        },
+        {
+          "n": 8,
+          "text": "jet_foundation's package tests pass: the 3 failures on dev d86d7ead37 (DiagnosticFormat sentence-case; GatesLints at Policy/GatesLints.jet:44; OwnedTraits at WebGraph.jet:388 with JetIR Build.jet:677) are fixed at their roots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "bda16e806d (MechD-3) fixes all three roots: the Prelude/Diagnostics.jet rows E0635, E3611, E3614 and E0436 open in sentence case (DiagnosticRows.jet and the e pages regenerated); the GatesLints declaration span is 14..21; WebGraph.jet and JetIR Build.jet ask OWNED_TRAITS. Proof on a dev 85dea10ff4 export with seed a0_029: gtest-at.sh Compiler/JetFoundation/Tests rc=0, 209 passed, 0 failed, 3 expected-fail. The expected-fail tests are the Outcome/ErrorReport.jet protocol tests, marked expected_fail in source and outside c8.",
+          "at": "2026-11-07T03:40:49.798Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": "c0pgowhn",
+      "needsAcceptance": false,
+      "created": "2026-11-07T01:50:34.932Z",
+      "updated": "2026-11-07T06:16:15.821Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-07T06:16:14.694Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:31:52.816Z"
     }
   ]
 }
