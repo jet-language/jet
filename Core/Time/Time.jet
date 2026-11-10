@@ -570,7 +570,24 @@ DateTime: struct { secs: Int, nanos: Int, leap_second: Bool }
 Period: struct { years_value: Int, months_value: Int, days_value: Int }
 ZoneInfo: struct { offset: Int, is_dst: Bool }
 ZoneTransition: struct { at: Int, info: Int }
-ZoneData: struct { transitions: [ZoneTransition], infos: [ZoneInfo] }
+// The TZif footer's POSIX TZ rule (RFC 8536 section 3.3) governs every
+// instant after the table's last transition: the standard offset and, for a
+// zone that keeps daylight saving, its offset and the two edges it runs
+// between. An edge's day is `Jn` (.Julian: 1 to 365, never counting
+// February 29), `n` (.Ordinal: 0 to 365, counting it) or `Mm.w.d`
+// (.Weekday: weekday `day`, 0 Sunday, of week `week`, 5 the last, of
+// `month`). `at` is the local wall-clock second, -167 to 167 hours.
+ZoneRuleForm: enum {
+    Julian
+    Ordinal
+    Weekday
+}
+ZoneRuleEdge: struct { form: ZoneRuleForm, month: Int, week: Int, day: Int, at: Int }
+ZoneSaving: struct { info: ZoneInfo, start: ZoneRuleEdge, end: ZoneRuleEdge }
+ZoneRule: struct { standard: ZoneInfo, saving: ZoneSaving? }
+// One change of offset: the UTC second it happens and the offsets around it.
+ZoneShift: struct { at: Int, before: Int, after: Int }
+ZoneData: struct { transitions: [ZoneTransition], infos: [ZoneInfo], rule: ZoneRule?{None} }
 // Zone tables never change after construction; plain borrowed reads do not
 // acquire scheduler permits or add Time / Time.Wait to civil operations.
 Zone: struct { name_value: String, data: ZoneData }
@@ -1255,10 +1272,197 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
     }
     transitions := [ZoneTransition]{}
     loop i in 0..<times.len() -> transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
-    data: ZoneData{transitions: transitions, infos: infos}
+    rule := ZoneRule?{None}
+    // A version 2+ file ends its 64-bit block with the footer rule.
+    if width == 8 -> rule = __civil_tzif_footer(bytes, base + counts[3] * 9 + counts[4] * 6 + counts[5] + counts[2] * 12 + counts[1] + counts[0])
+    data: ZoneData{transitions: transitions, infos: infos, rule: rule}
     Ok(Zone{name_value: name, data: data})
 }
+// The footer is the rule between two newlines; an empty one, or a file cut
+// before it, has no rule.
+__civil_tzif_footer: fn(bytes: [U8], at: Int) -> ZoneRule? TimeError! {
+    if at >= bytes.len() -> return Ok(None)
+    if bytes[at] != (U8{10}) -> return Err(TimeError{reason: "invalid tzif footer"})
+    end := at + 1
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    if end >= bytes.len() -> return Err(TimeError{reason: "invalid tzif footer"})
+    if end == at + 1 -> return Ok(None)
+    raw := [U8]{}
+    loop i in (at + 1)..<end -> raw.push(bytes[i])
+    Ok(Val(__civil_tz_rule(raw)))
+}
+__civil_tz_error: fn(raw: [U8]) -> TimeError Never! {
+    TimeError{reason: "invalid POSIX TZ rule: {String.from_bytes(raw) ?? ""}"}
+}
+__civil_tz_digit: fn(raw: [U8], at: Int) -> Bool Never! {
+    at < raw.len() && raw[at] >= (U8{48}) && raw[at] <= (U8{57})
+}
+// `std offset [dst [offset] [,start[/time],end[/time]]]`. POSIX offsets
+// count west of Greenwich, so `EST5` is UTC-5; daylight time defaults to an
+// hour ahead of standard time.
+__civil_tz_rule: fn(raw: [U8]) -> ZoneRule TimeError! {
+    std_offset: __civil_tz_time(raw, __civil_tz_name(raw, 0))
+    standard: ZoneInfo{offset: -std_offset.seconds, is_dst: false}
+    if std_offset.end == raw.len() -> return Ok(ZoneRule{standard: standard, saving: None})
+    at := __civil_tz_name(raw, std_offset.end)
+    saving_offset := standard.offset + 3600
+    if at < raw.len() && raw[at] != (U8{44}) {
+        dst_offset: __civil_tz_time(raw, at)
+        saving_offset = -dst_offset.seconds
+        at = dst_offset.end
+    }
+    info: ZoneInfo{offset: saving_offset, is_dst: true}
+    // A daylight zone written without edges takes the US ones, as POSIX
+    // hosts do.
+    if at == raw.len() {
+        start: ZoneRuleEdge{form: ZoneRuleForm.Weekday, month: 3, week: 2, day: 0, at: 7200}
+        end: ZoneRuleEdge{form: ZoneRuleForm.Weekday, month: 11, week: 1, day: 0, at: 7200}
+        return Ok(ZoneRule{standard: standard, saving: Val(ZoneSaving{info: info, start: start, end: end})})
+    }
+    if raw[at] != (U8{44}) -> return Err(__civil_tz_error(raw))
+    start: __civil_tz_edge(raw, at + 1)
+    if start.end >= raw.len() || raw[start.end] != (U8{44}) -> return Err(__civil_tz_error(raw))
+    end: __civil_tz_edge(raw, start.end + 1)
+    if end.end != raw.len() -> return Err(__civil_tz_error(raw))
+    Ok(ZoneRule{standard: standard, saving: Val(ZoneSaving{info: info, start: start.edge, end: end.edge})})
+}
+// The end of a zone abbreviation: three or more letters, or `<...>` quoting
+// letters, digits and signs.
+__civil_tz_name: fn(raw: [U8], at: Int) -> Int TimeError! {
+    end := at
+    if at < raw.len() && raw[at] == (U8{60}) {
+        end += 1
+        loop end < raw.len() && raw[end] != (U8{62}) {
+            byte: raw[end]
+            if !__civil_tz_digit(raw, end) && byte != (U8{43}) && byte != (U8{45}) && !(byte >= (U8{65}) && byte <= (U8{90})) && !(byte >= (U8{97}) && byte <= (U8{122})) -> return Err(__civil_tz_error(raw))
+            end += 1
+        }
+        if end >= raw.len() || end == at + 1 -> return Err(__civil_tz_error(raw))
+        return Ok(end + 1)
+    }
+    loop end < raw.len() && ((raw[end] >= (U8{65}) && raw[end] <= (U8{90})) || (raw[end] >= (U8{97}) && raw[end] <= (U8{122}))) -> end += 1
+    if end - at < 3 -> return Err(__civil_tz_error(raw))
+    Ok(end)
+}
+// A number of up to three digits.
+__civil_tz_number: fn(raw: [U8], at: Int) -> (value: Int, end: Int) TimeError! {
+    if !__civil_tz_digit(raw, at) -> return Err(__civil_tz_error(raw))
+    value := 0
+    end := at
+    loop __civil_tz_digit(raw, end) {
+        if end - at == 3 -> return Err(__civil_tz_error(raw))
+        value = value * 10 + Int.from_u8(raw[end]) - 48
+        end += 1
+    }
+    Ok((value: value, end: end))
+}
+// `[+|-]hh[:mm[:ss]]` in seconds, hours at most 167 (RFC 8536's extension).
+__civil_tz_time: fn(raw: [U8], at: Int) -> (seconds: Int, end: Int) TimeError! {
+    sign := 1
+    start := at
+    if start < raw.len() && (raw[start] == (U8{43}) || raw[start] == (U8{45})) {
+        if raw[start] == (U8{45}) -> sign = -1
+        start += 1
+    }
+    hours: __civil_tz_number(raw, start)
+    if hours.value > 167 -> return Err(__civil_tz_error(raw))
+    seconds := hours.value * 3600
+    end := hours.end
+    scale := 60
+    loop scale > 0 && end < raw.len() && raw[end] == (U8{58}) {
+        part: __civil_tz_number(raw, end + 1)
+        if part.value > 59 || part.end - end != 3 -> return Err(__civil_tz_error(raw))
+        seconds = seconds + part.value * scale
+        end = part.end
+        scale = scale /% 60
+    }
+    Ok((seconds: sign * seconds, end: end))
+}
+// `Jn`, `n` or `Mm.w.d`, then `/time`, which defaults to 02:00:00.
+__civil_tz_edge: fn(raw: [U8], at: Int) -> (edge: ZoneRuleEdge, end: Int) TimeError! {
+    if at >= raw.len() -> return Err(__civil_tz_error(raw))
+    edge := ZoneRuleEdge{form: ZoneRuleForm.Ordinal, month: 0, week: 0, day: 0, at: 7200}
+    end := at
+    if raw[at] == (U8{74}) {
+        day: __civil_tz_number(raw, at + 1)
+        if day.value < 1 || day.value > 365 -> return Err(__civil_tz_error(raw))
+        edge.form = ZoneRuleForm.Julian
+        edge.day = day.value
+        end = day.end
+    } else if raw[at] == (U8{77}) {
+        month: __civil_tz_number(raw, at + 1)
+        if month.value < 1 || month.value > 12 || month.end >= raw.len() || raw[month.end] != (U8{46}) -> return Err(__civil_tz_error(raw))
+        week: __civil_tz_number(raw, month.end + 1)
+        if week.value < 1 || week.value > 5 || week.end >= raw.len() || raw[week.end] != (U8{46}) -> return Err(__civil_tz_error(raw))
+        day: __civil_tz_number(raw, week.end + 1)
+        if day.value > 6 -> return Err(__civil_tz_error(raw))
+        edge.form = ZoneRuleForm.Weekday
+        edge.month = month.value
+        edge.week = week.value
+        edge.day = day.value
+        end = day.end
+    } else {
+        day: __civil_tz_number(raw, at)
+        if day.value > 365 -> return Err(__civil_tz_error(raw))
+        edge.day = day.value
+        end = day.end
+    }
+    if end < raw.len() && raw[end] == (U8{47}) {
+        time: __civil_tz_time(raw, end + 1)
+        edge.at = time.seconds
+        end = time.end
+    }
+    Ok((edge: edge, end: end))
+}
+// The day number (civil_day's count) an edge falls on in `year`.
+__civil_rule_day: fn(edge: ZoneRuleEdge, year: Int) -> Int Never! {
+    first: civil_day(new(year, 1, 1))
+    if edge.form == {
+        // February 29 is never counted, so `J60` is March 1 in every year.
+        .Julian -> if is_leap_year(year) && edge.day >= 60 -> first + edge.day else -> first + edge.day - 1
+        .Ordinal -> first + edge.day
+        .Weekday -> {
+            start: civil_day(new(year, edge.month, 1))
+            // civil_day counts from a Monday, so `day + 1` mod 7 is 0 on a Sunday.
+            day := start + civil_mod(edge.day - civil_mod(start + 1, 7), 7) + (edge.week - 1) * 7
+            loop day >= start + days_in_month(year, edge.month) -> day = day - 7
+            day
+        }
+    }
+}
+// The UTC second an edge falls on in `year`, read on a clock at `offset`.
+__civil_rule_edge_utc: fn(edge: ZoneRuleEdge, year: Int, offset: Int) -> Int Never! {
+    (__civil_rule_day(edge, year) - 719162) * 86400 + edge.at - offset
+}
+// The year a UTC second falls in on a clock at `offset`.
+__civil_rule_year: fn(seconds: Int, offset: Int) -> Int Never! {
+    civil_from_day(civil_floor(seconds + offset, 86400) + 719162).date_y
+}
+// The rule's two shifts in `year`: daylight time starting, then ending.
+__civil_rule_shifts: fn(rule: ZoneRule, year: Int) -> [ZoneShift] Never! {
+    saving: rule.saving ?? return [ZoneShift]{}
+    start: __civil_rule_edge_utc(saving.start, year, rule.standard.offset)
+    end: __civil_rule_edge_utc(saving.end, year, saving.info.offset)
+    [ZoneShift]{ZoneShift{at: start, before: rule.standard.offset, after: saving.info.offset}, ZoneShift{at: end, before: saving.info.offset, after: rule.standard.offset}}
+}
+__civil_rule_info: fn(rule: ZoneRule, seconds: Int) -> ZoneInfo Never! {
+    saving: rule.saving ?? return rule.standard
+    year: __civil_rule_year(seconds, rule.standard.offset)
+    start: __civil_rule_edge_utc(saving.start, year, rule.standard.offset)
+    end: __civil_rule_edge_utc(saving.end, year, saving.info.offset)
+    // A southern zone's daylight time runs across the new year.
+    inside: if start < end -> seconds >= start && seconds < end else -> seconds < end || seconds >= start
+    if inside -> return saving.info
+    rule.standard
+}
+// Whether the rule, not the table, holds at `seconds`: at or after the last
+// transition, or always for a table with none.
+__civil_rule_holds: fn(value: Zone, seconds: Int) -> Bool Never! {
+    count: value.data.transitions.len()
+    count == 0 || seconds >= value.data.transitions[count - 1].at
+}
 civil_zone_info: fn(value: Zone, seconds: Int) -> ZoneInfo Never! {
+    if value.data.rule == .Val(rule) && __civil_rule_holds(value, seconds) -> return __civil_rule_info(rule, seconds)
     lo := 0
     hi := value.data.transitions.len()
     loop lo < hi {
@@ -1268,6 +1472,24 @@ civil_zone_info: fn(value: Zone, seconds: Int) -> ZoneInfo Never! {
     index := 0
     if lo > 0 -> index = value.data.transitions[lo - 1].info
     value.data.infos[index]
+}
+// The table's shifts, then the rule's around `local` past the table's end.
+__civil_zone_shifts: fn(value: Zone, local: Int) -> [ZoneShift] Never! {
+    shifts := [ZoneShift]{}
+    loop i in 0..<value.data.transitions.len() {
+        transition: value.data.transitions[i]
+        before_index := 0
+        if i > 0 -> before_index = value.data.transitions[i - 1].info
+        shifts.push(ZoneShift{at: transition.at, before: value.data.infos[before_index].offset, after: value.data.infos[transition.info].offset})
+    }
+    rule: value.data.rule ?? return shifts
+    year: __civil_rule_year(local, 0)
+    loop y in (year - 1)..<(year + 2) {
+        loop shift in __civil_rule_shifts(rule, y) {
+            if __civil_rule_holds(value, shift.at - 1) -> shifts.push(shift)
+        }
+    }
+    shifts
 }
 civil_local_parts: fn(value: Zone, seconds: Int) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
     offset: civil_zone_info(value, seconds).offset
@@ -1284,7 +1506,13 @@ civil_local_utc: fn(value: Zone, date: LocalDate, t: LocalTime, disambiguation: 
     offsets := [Int]{}
     first := Int?{None}
     last := Int?{None}
-    loop info in value.data.infos {
+    // The rule's offsets count too: a footer may name one the table lacks.
+    candidates := value.data.infos.copy()
+    if value.data.rule == .Val(rule) {
+        candidates.push(rule.standard)
+        if rule.saving == .Val(saving) -> candidates.push(saving.info)
+    }
+    loop info in candidates {
         if offsets.contains(info.offset) -> next
         offsets.push(info.offset)
         candidate: saturating_sub_ns(local, info.offset)
@@ -1306,16 +1534,11 @@ civil_local_utc: fn(value: Zone, date: LocalDate, t: LocalTime, disambiguation: 
         if disambiguation == "later" -> return Ok(maximum)
         return Err(TimeError{reason: "ambiguous local time in {value.name_value}"})
     }
-    loop i in 0..<value.data.transitions.len() {
-        transition: value.data.transitions[i]
-        before_index := 0
-        if i > 0 -> before_index = value.data.transitions[i - 1].info
-        before: value.data.infos[before_index].offset
-        after: value.data.infos[transition.info].offset
-        if after > before && local >= saturating_add_ns(transition.at, before) && local < saturating_add_ns(transition.at, after) {
-            if disambiguation == "earlier" -> return Ok(saturating_sub_ns(local, after))
+    loop shift in __civil_zone_shifts(value, local) {
+        if shift.after > shift.before && local >= saturating_add_ns(shift.at, shift.before) && local < saturating_add_ns(shift.at, shift.after) {
+            if disambiguation == "earlier" -> return Ok(saturating_sub_ns(local, shift.after))
             if disambiguation == "reject" -> return Err(TimeError{reason: "nonexistent local time in {value.name_value}"})
-            return Ok(saturating_sub_ns(local, before))
+            return Ok(saturating_sub_ns(local, shift.before))
         }
     }
     if disambiguation == "reject" -> return Err(TimeError{reason: "local time is not valid in {value.name_value}"})
@@ -1333,9 +1556,32 @@ impl Zone {
         loop transition in self.data.transitions {
             if transition.at > utc_seconds -> return Val(transition.at)
         }
-        None
+        // Past the table, the footer rule's shifts follow.
+        rule: self.data.rule ?? return None
+        year: __civil_rule_year(utc_seconds, rule.standard.offset)
+        soonest := Int?{None}
+        loop y in year..<(year + 2) {
+            loop shift in __civil_rule_shifts(rule, y) {
+                if shift.at <= utc_seconds -> next
+                if soonest == .Val(earliest) && earliest <= shift.at -> next
+                soonest = Val(shift.at)
+            }
+        }
+        soonest
     }
     previous_transition: fn(self, utc_seconds: Int) -> Int? Never! {
+        if self.data.rule == .Val(rule) {
+            year: __civil_rule_year(utc_seconds, rule.standard.offset)
+            latest := Int?{None}
+            loop y in (year - 1)..<(year + 1) {
+                loop shift in __civil_rule_shifts(rule, y) {
+                    if shift.at >= utc_seconds || !__civil_rule_holds(self, shift.at - 1) -> next
+                    if latest == .Val(found) && found >= shift.at -> next
+                    latest = Val(shift.at)
+                }
+            }
+            if latest != None -> return latest
+        }
         i := self.data.transitions.len()
         loop i > 0 {
             i = i - 1
@@ -1860,6 +2106,57 @@ impl Instant {
     assert_eq(z.next_transition(3600) ?? -1, 10800)
     assert_eq(z.previous_transition(10800) ?? -1, 3600)
     assert_eq((parse_zoned("2024-03-01T12:00:00+00:00[UTC]") ?? panic("RFC9557")).format_rfc9557(), "2024-03-01T12:00:00Z[UTC]")
+}
+
+__civil_footer_test_stamp: fn(text: String) -> Int Never! {
+    (parse_rfc3339(text) ?? panic("stamp {text}")).to_timestamp()
+}
+
+#Test("A TZif footer rule governs instants past the table's last transition") {
+    us: __civil_tz_rule("EST5EDT,M3.2.0,M11.1.0".bytes()) ?? panic("US rule")
+    table: [ZoneTransition]{ZoneTransition{at: 0, info: 0}}
+    z: Zone{name_value: "test", data: ZoneData{transitions: table, infos: [ZoneInfo]{ZoneInfo{offset: -18000, is_dst: false}}, rule: Val(us)}}
+    july: __civil_footer_test_stamp("2045-07-15T12:00:00Z")
+    assert_eq(civil_zone_info(z, july).offset, -14400)
+    assert(civil_zone_info(z, july).is_dst)
+    assert_eq(civil_zone_info(z, __civil_footer_test_stamp("2045-01-15T12:00:00Z")).offset, -18000)
+    // 2045-03-12 and 2045-11-05 are the second Sunday of March and the
+    // first of November.
+    assert_eq(civil_zone_info(z, __civil_footer_test_stamp("2045-03-12T06:59:59Z")).offset, -18000)
+    assert_eq(civil_zone_info(z, __civil_footer_test_stamp("2045-03-12T07:00:00Z")).offset, -14400)
+    assert_eq(civil_zone_info(z, __civil_footer_test_stamp("2045-11-05T05:59:59Z")).offset, -14400)
+    assert_eq(civil_zone_info(z, __civil_footer_test_stamp("2045-11-05T06:00:00Z")).offset, -18000)
+    assert_eq(z.next_transition(july) ?? -1, __civil_footer_test_stamp("2045-11-05T06:00:00Z"))
+    assert_eq(z.previous_transition(july) ?? -1, __civil_footer_test_stamp("2045-03-12T07:00:00Z"))
+    gap: local_time(2, 30, 0)
+    if zoned_local(new(2045, 3, 12), gap, z, "reject") == .Ok(_) -> panic("a local time in the rule's gap is refused")
+    assert_eq((zoned_local(new(2045, 3, 12), gap, z, "compatible") ?? panic("gap")).to_datetime().to_timestamp(), __civil_footer_test_stamp("2045-03-12T07:30:00Z"))
+    overlap: local_time(1, 30, 0)
+    assert_eq((zoned_local(new(2045, 11, 5), overlap, z, "earlier") ?? panic("earlier")).to_datetime().to_timestamp(), __civil_footer_test_stamp("2045-11-05T05:30:00Z"))
+    assert_eq((zoned_local(new(2045, 11, 5), overlap, z, "later") ?? panic("later")).to_datetime().to_timestamp(), __civil_footer_test_stamp("2045-11-05T06:30:00Z"))
+    // A southern rule's daylight time runs across the new year.
+    sydney: __civil_tz_rule("AEST-10AEDT,M10.1.0,M4.1.0/3".bytes()) ?? panic("Sydney rule")
+    assert_eq(__civil_rule_info(sydney, july).offset, 36000)
+    assert_eq(__civil_rule_info(sydney, __civil_footer_test_stamp("2045-01-15T12:00:00Z")).offset, 39600)
+    // 2045-04-02 03:00 AEDT ends daylight time; 2045-10-01 02:00 AEST starts it.
+    assert_eq(__civil_rule_info(sydney, __civil_footer_test_stamp("2045-04-01T15:59:59Z")).offset, 39600)
+    assert_eq(__civil_rule_info(sydney, __civil_footer_test_stamp("2045-04-01T16:00:00Z")).offset, 36000)
+    assert_eq(__civil_rule_info(sydney, __civil_footer_test_stamp("2045-09-30T16:00:00Z")).offset, 39600)
+    // Quoted names, signed offsets, hours past 24 and Julian days.
+    fixed: __civil_tz_rule("<+0330>-3:30".bytes()) ?? panic("fixed rule")
+    assert_eq(fixed.standard.offset, 12600)
+    assert(fixed.saving == None)
+    greenland: __civil_tz_rule("<-02>2<-01>,M3.5.0/-1,M10.5.0/0".bytes()) ?? panic("negative edge time")
+    edges: greenland.saving ?? panic("Greenland saves daylight")
+    assert_eq(edges.start.at, -3600)
+    assert_eq(edges.info.offset, -3600)
+    always: __civil_tz_rule("<-03>3<-02>,0/0,J365/25".bytes()) ?? panic("all-year daylight")
+    assert_eq(__civil_rule_info(always, july).offset, -7200)
+    assert_eq(__civil_rule_info(always, __civil_footer_test_stamp("2045-01-15T12:00:00Z")).offset, -7200)
+    broken: [String]{"EST", "E5", "EST5EDT,M3.2.0", "EST5EDT,M13.1.0,M11.1.0", "EST5EDT,J0,J365", "<EST5", "EST5EDT,M3.2.0,M11.1.0x"}
+    loop text in broken {
+        if __civil_tz_rule(text.bytes()) == .Ok(_) -> panic("`{text}` is no POSIX TZ rule")
+    }
 }
 
 #Test("Zoned equality compares instant and immutable zone name without a guard") {

@@ -3167,7 +3167,10 @@ named IANA zones from TZif data. On native hosts, lookup checks
 lookup. Web/WASM uses its embedded zone data. A name with `..`, a leading
 `/`, or a leading `\` is rejected; an unavailable name returns `TimeError`
 with an `unknown IANA time zone` message that points to `JET_TZDB_DIR` or
-`TZDIR` (D-FREESTAND-TIME1).
+`TZDIR` (D-FREESTAND-TIME1). A version 2 or later TZif file's footer holds a
+POSIX TZ rule such as `EST5EDT,M3.2.0,M11.1.0`; offsets, transitions, gaps and
+overlaps past the table's last transition follow that rule. A malformed footer
+returns `TimeError`.
 
 ```jet
 use time: core.time
