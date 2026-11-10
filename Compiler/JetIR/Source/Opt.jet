@@ -60,8 +60,8 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
-// out of SSA), and the name of the functions whose IR before and after the
-// passes the report carries (`dump`, "" for none).
+// out of SSA), and the names of the functions whose IR before and after the
+// passes the report carries (`dump`, comma-separated, "" for none).
 IROptOptions: struct {
     level: Int
     small: Bool
@@ -97,7 +97,7 @@ ir_opt_options: fn(level: Int) -> IROptOptions Never! {
 
 // Options from the environment's values: JET_OPT_DISABLE (pass names,
 // comma-separated), JET_OPT_VERIFY and JET_OPT_SSA_STRESS ("1": on),
-// JET_OPT_DUMP (a function name).
+// JET_OPT_DUMP (function names, comma-separated).
 ir_opt_options_from: fn(level: Int, small: Bool, inline: IROptInline, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
     disabled := [String]{}
     if disable == .Val(text) {
@@ -220,15 +220,14 @@ IR_OPT_MIN_INSTRUCTIONS_PER_THREAD: 2000
 ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level: options.level
     report := ir_opt_report(level)
+    names: ir_opt_dump_names(options)
     if level <= 0 {
+        ir_opt_dump(m, names, "before", report)
         ir_opt_module_facts(m, options, report)
+        ir_opt_dump(m, names, "after", report)
         return report
     }
-    if options.dump != "" {
-        loop f in m.functions {
-            if f.name == options.dump -> report.dumps.push("before {ir_function_text(m, f)}")
-        }
-    }
+    ir_opt_dump(m, names, "before", report)
     // Before IR Lint reads the signatures: a return slot is a parameter.
     if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m)
     // IR Lint reads every callee's signature while the bodies are out.
@@ -286,12 +285,32 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions)
     if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
-    if options.dump != "" {
-        loop f in m.functions {
-            if f.name == options.dump -> report.dumps.push("after {ir_function_text(m, f)}")
+    ir_opt_dump(m, names, "after", report)
+    report
+}
+
+// The function names `options.dump` lists (JET_OPT_DUMP).
+ir_opt_dump_names: fn(options: IROptOptions) -> [String] Never! {
+    names := [String]{}
+    if options.dump == "" -> return names
+    loop name in options.dump.split(",") {
+        trimmed: name.trim()
+        if trimmed != "" -> names.push(trimmed)
+    }
+    names
+}
+
+// Each function of `m` that `names` lists, as IR text after `stage`.
+ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: &IROptReport) Never! {
+    if names.len() == 0 -> return
+    loop f in m.functions {
+        loop name in names {
+            if f.name == name {
+                report.dumps.push("{stage} {ir_function_text(m, f)}")
+                break
+            }
         }
     }
-    report
 }
 
 // O0's one pass: every body through the inline Int facts of the SSA round
