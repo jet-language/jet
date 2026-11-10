@@ -204,3 +204,24 @@ I did not diff them against the 2026-11-09 baseline.
 1. **F-ZERO-2, Low.** `Core/Net/Tls.jet:608-610` (with 617-618 [INFERENCE]): the 48-byte HMAC_DRBG seed for each TLS context is never wiped, so the connection's ephemeral keys can be recovered after close. **Fix:** wipe `seed` on every path in `__context_new`, build `material` at its exact capacity (and the same in ECDSA.jet:163-166), and add a test in Tls.jet asserting the seed buffer is zero after `__context_seeded`.
 
 All prior findings (F-ZERO-1, F-CT-1, F-TLS13-1, I-1, I-2 and the c14 dudect gaps) are fixed at dev `76955986d0`. The c16 CBC/Lucky13 fix is correct. Every dudect item c4 requires is present and passes per the integ REPORT. I-3 to I-6 are informational and do not block the verdict.
+
+## Confirmation 2026-11-10
+
+A read-only confirmation pass at dev `c460ba91e5`, with no tests run (test results are cited from the integration reports). Between the audit base `76955986d0` and `c460ba91e5`, only two submissions touch Core/Crypto or Core/Net/Tls*.jet: TlsLead-51 (Block, Cipher, CipherLayer, ConstTime, DES, SSL/Msg.jet, SSL/TLS.jet and the emission fixture) and TlsLead-53 (`f39b9ac11a`: Bignum.jet, ECDSA.jet and Tls.jet).
+
+|ID|Status at c460ba91e5|Evidence|
+|---|---|---|
+|F-ZERO-2 (Low)|Closed|`__context_new` wipes the seed on the length-mismatch return. `__context_seeded(endpoint, seed: &[U8])` reserves the material at its exact size, wipes the seed right after copying it (before its only error return), and wipes the material after `hmac_drbg_seed_buf`. `__identity_validate` builds its seed at its exact size after all of its early returns. `ecdsa_sign_det` builds `data` the same way and wipes `db` and `data`. The #Test "Seeding a TLS context wipes the seed…" passes.|
+|I-3 (Info)|Closed|`gcd_modinv_odd` wipes its working copy `ap`. Its early returns all come before `ap` exists.|
+|I-4 (Info)|Partly closed|Every explicit return in `sign_core` goes through `sign_failed`, which wipes `dl` and `work`; the success path wipes every attempt secret. **Residual I-4b:** four calls propagate their errors automatically and skip `sign_failed`: `derive_mpi` (ECDSA.jet:93), `ecp.gen_privkey` for k (108), `ecp.ecp_mul` (109) and `ecp.gen_privkey` for t (115). On those exits `dl` (the private key's limbs) and `work` are not wiped. They are reachable only through RNG or allocation failure. The fix is an explicit `?? return Err(sign_failed(dl, work, err))` at each one; it is tracked on #6694 c4.|
+|I-5 (Info)|Unchanged|The soak tier is still opt-in and below 10^5 samples.|
+|I-6 (Info)|Emission gap closed|TlsLead-51 adds `check Core/Net/SSL/Msg.jet` to the emission spec, and that case passes. The CBC path is still unreachable under Core's AEAD-only policy.|
+
+The TlsLead-51 diff adds no new finding:
+
+- `ctime.table_entry` reads every table word and selects with borrow masks. The ARIA, Camellia and DES S-boxes all go through it, and the DES PC1 tables are replaced by bit arithmetic.
+- In CBC record decryption, the padding and content lengths are masked words that stay in bounds whether the padding is bad or good. The record length is revealed only after the single `InvalidMac` verdict, as in Mbed TLS.
+- The cipher padding checks keep masked words until the final verdict.
+- The new `public` emission entries cover only verdicts, revealed lengths, configuration, the CCM counter block and connection IDs.
+
+Verdict: no Low-or-higher finding is open. One Info residual, I-4b, stays open until its fix lands.
