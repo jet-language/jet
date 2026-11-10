@@ -467,7 +467,7 @@ terminal_style_adapter: fn(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     return adapter
 }
 DevRevisionFacts: struct { accepted: U64?; candidate: U64?; diagnostic: U64? }
-DevStatusSnapshot: struct { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
+DevStatusSnapshot: struct { state: String; code: String; diagnostic: String; last_build_ms: U64; candidate: U64? }
 DevStatus: struct {
     version: AtomicU64; clients: Mutex<[String:Instant]>; state: Mutex<DevStatusSnapshot>
     browser_relay: Mutex<BrowserTrace.Relay?>; browser_trace_enabled: AtomicBool; command_receipt: Mutex<String?>
@@ -629,7 +629,7 @@ impl DevStatus {
         drop(state)
         self.refresh()
     }
-    mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+    mark_ready: fn(self: Self, elapsed_ms: U64, is_rebuild: Bool) -> Unit {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
             _: browser_relay.take()
