@@ -220,6 +220,16 @@ owned_trait_implies: fn(trait_name: String, other: String) -> Bool Never! {
     owned.requires.contains(other)
 }
 
+// The traits that require `trait_name`: a bound on any of them also admits
+// `trait_name`'s operators and methods (`Numeric` for `Add`).
+owned_trait_requirers: fn(trait_name: String) -> [String] Never! {
+    names := [String]{}
+    loop owned in OWNED_TRAITS {
+        if owned.requires.contains(trait_name) -> names.push(owned.name.copy())
+    }
+    names
+}
+
 // The traits a family marker derives (`auto_derive_family`, `Codable`) or
 // bundles (`bundle_family`, `CodableAsBase`), in table order; empty when
 // `marker` names no such family.

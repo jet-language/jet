@@ -3,7 +3,7 @@
 // or syntax constant keeps a second list of them.
 use {
     owned_traits_files: core.files
-    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_bundle_marker, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_literal, owned_trait_requires_listed, owned_trait_structural_names]
+    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_bundle_marker, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
 }
 
 // The one file that may list the owned trait names.
@@ -90,6 +90,11 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
     assert_eq(owned_trait_bundle_marker("Numeric") ?? "", "Numeric")
     assert(owned_trait_bundle_marker("Equatable") == None)
     assert_eq(owned_trait_requires_listed("Numeric"), "Add, Sub, Mul, and Comparable")
+    assert(owned_trait_implies("Numeric", "Comparable"))
+    assert(!owned_trait_implies("Comparable", "Numeric"))
+    assert(owned_trait_requirers("Add").contains("Numeric"))
+    assert(owned_trait_requirers("Comparable").contains("Numeric"))
+    assert_eq(owned_trait_requirers("Numeric").len(), 0)
 }
 
 #Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {

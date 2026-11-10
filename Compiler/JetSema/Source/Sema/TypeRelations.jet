@@ -41,6 +41,7 @@ use jet_foundation.[
     owned_trait_arithmetic,
     owned_trait_codec,
     owned_trait_implies,
+    owned_trait_requirers,
     owned_trait_structural,
     owned_trait_through_elements,
     sema_reserved_type_name,
@@ -1692,13 +1693,14 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
 }
 
 // A trait block or derive named `bound_name`, read in place: collecting the
-// blocks into locals copied every block with its methods.
+// blocks into locals copied every block with its methods. A derive also meets
+// the traits it requires (`#Numeric` gives `Comparable`).
 sema_type_blocks_or_derives_name: fn(blocks: [TraitImplBlock], derives: [NamedSpan], bound_name: String) -> Bool Never! {
     loop index in 0..<blocks.len() {
         if blocks[index].trait_name == bound_name -> return true
     }
     loop index in 0..<derives.len() {
-        if derives[index].name == bound_name -> return true
+        if owned_trait_implies(derives[index].name, bound_name) -> return true
     }
     false
 }
@@ -1793,6 +1795,14 @@ sema_type_generic_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? sema_type_builtin_trait_symbol(bound_name) ?? return None
     loop bound in current.bounds {
         if bound.key == trait_symbol.id.key -> return Val(true)
+    }
+    // A bound on a trait that requires `bound_name` admits it: `T: Numeric`
+    // has `+`, `-`, `*` and ordering.
+    loop requirer in owned_trait_requirers(bound_name) {
+        requirer_symbol: sema_type_graph_trait_symbol_at(graph, caller, requirer) ?? sema_type_builtin_trait_symbol(requirer) ?? next
+        loop bound in current.bounds {
+            if bound.key == requirer_symbol.id.key -> return Val(true)
+        }
     }
     return Val(false)
 }
