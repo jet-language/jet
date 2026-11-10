@@ -8,10 +8,7 @@
 //   `./my-env`
 use jetpack_foundation.[
     REF_CHANNEL_AUTO, REF_CHANNEL_LATEST, REF_CHANNEL_MAIN, REF_CHANNEL_MARKER, REF_PROVIDER_AT,
-    REF_SEPARATOR, REF_SOURCE_CARGO, REF_SOURCE_CRAN, REF_SOURCE_GITHUB, REF_SOURCE_JETPACK,
-    REF_SOURCE_JET_REGISTRY, REF_SOURCE_LUAROCKS, REF_SOURCE_NIXPKGS, REF_SOURCE_NPM,
-    REF_SOURCE_PATH, REF_SOURCE_PERL, REF_SOURCE_PHP, REF_SOURCE_PROVIDERS, REF_SOURCE_PYPI,
-    REF_SOURCE_RELEASES, REF_SOURCE_RUBY, REF_SOURCE_SWIFTPM,
+    REF_SEPARATOR, REF_SOURCE_JETPACK, REF_SOURCE_NIXPKGS,
 ]
 
 // Where a ref is resolved from. The built-in sources need no declaration;
@@ -52,32 +49,24 @@ RefSource: enum {
     // A pack-declared named source, e.g. `stable` -> a pinned nixpkgs.
     Named(String)
 
-    // The source token as written after the `@` in a ref.
+    // The source token as written after the `@` in a ref: the provider row
+    // that names this built-in source, or the declared name.
     label: fn(self) -> String Never! {
         if self == {
-            .Jetpack -> REF_SOURCE_JETPACK
-            .Nixpkgs -> REF_SOURCE_NIXPKGS
-            .Github -> REF_SOURCE_GITHUB
-            .Path -> REF_SOURCE_PATH
-            .Cran -> REF_SOURCE_CRAN
-            .LuaRocks -> REF_SOURCE_LUAROCKS
-            .RubyGems -> REF_SOURCE_RUBY
-            .Cpan -> REF_SOURCE_PERL
-            .Packagist -> REF_SOURCE_PHP
-            .JetRegistry -> REF_SOURCE_JET_REGISTRY
-            .Npm -> REF_SOURCE_NPM
-            .Cargo -> REF_SOURCE_CARGO
-            .PyPI -> REF_SOURCE_PYPI
-            .SwiftPM -> REF_SOURCE_SWIFTPM
-            .Releases -> REF_SOURCE_RELEASES
-            .Named(name) -> name
+            .Named(name) -> return name
+            else -> {}
         }
+        loop row in PROVIDER_ROWS {
+            if row.source == .Val(source) {
+                if source == self -> return row.name
+            }
+        }
+        panic("every built-in ref source has one provider row")
     }
 
-    // Whether `name` is one of the built-in source keywords. Reads
-    // `REF_SOURCE_PROVIDERS`, the one home for this set.
+    // Whether `name` is one of the built-in source keywords.
     is_builtin: fn(name: String) -> Bool Never! {
-        REF_SOURCE_PROVIDERS.contains(name)
+        RefSource.builtin(name) != None
     }
 
     // Resolve the source half of a `package@source` ref: a public built-in or
@@ -97,25 +86,10 @@ RefSource: enum {
         Err(RefError.UnknownSource{source: source, raw: raw, declared: table.declared_names()})
     }
 
+    // The built-in source the provider row `name` declares.
     builtin: fn(name: String) -> RefSource? Never! {
-        if name == {
-            REF_SOURCE_JETPACK -> Val(RefSource.Jetpack)
-            REF_SOURCE_NIXPKGS -> Val(RefSource.Nixpkgs)
-            REF_SOURCE_GITHUB -> Val(RefSource.Github)
-            REF_SOURCE_PATH -> Val(RefSource.Path)
-            REF_SOURCE_CRAN -> Val(RefSource.Cran)
-            REF_SOURCE_LUAROCKS -> Val(RefSource.LuaRocks)
-            REF_SOURCE_RUBY -> Val(RefSource.RubyGems)
-            REF_SOURCE_PERL -> Val(RefSource.Cpan)
-            REF_SOURCE_PHP -> Val(RefSource.Packagist)
-            REF_SOURCE_JET_REGISTRY -> Val(RefSource.JetRegistry)
-            REF_SOURCE_NPM -> Val(RefSource.Npm)
-            REF_SOURCE_CARGO -> Val(RefSource.Cargo)
-            REF_SOURCE_PYPI -> Val(RefSource.PyPI)
-            REF_SOURCE_SWIFTPM -> Val(RefSource.SwiftPM)
-            REF_SOURCE_RELEASES -> Val(RefSource.Releases)
-            else -> None
-        }
+        row: pkg_provider_row(name) ?? return None
+        row.source
     }
 }
 
@@ -146,24 +120,16 @@ ProviderKind: enum {
     // `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer
 
+    // The provider row's name; `Infer` has no row because it is resolved
+    // before any listing or diagnostic.
     label: fn(self) -> String Never! {
-        if self == {
-            .Nix -> "nix"
-            .Core -> "core"
-            .Cran -> "cran"
-            .LuaRocks -> "luarocks"
-            .RubyGems -> "ruby"
-            .Cpan -> "perl"
-            .Packagist -> "php"
-            .JetRegistry -> "jet-registry"
-            .Npm -> "npm"
-            .Cargo -> "cargo"
-            .PyPI -> "pypi"
-            .SwiftPM -> "swiftpm"
-            .JetPackage -> "jetpackage"
-            // Never user-shown: resolved before any listing or diagnostic.
-            .Infer -> "infer"
+        if self == ProviderKind.Infer -> return "infer"
+        loop row in PROVIDER_ROWS {
+            if row.kind == .Val(kind) {
+                if kind == self -> return row.name
+            }
         }
+        panic("every provider kind but Infer has one provider row")
     }
 
     // The variant identity folded into the trust-gate hash (`trust_lines`).
@@ -188,24 +154,50 @@ ProviderKind: enum {
     }
 
     // Parse a provider name from a source declaration's third argument.
-    // Recognized direct ecosystem roots retain their concrete kind; unknown
-    // names remain the default `nix` for named-source inference.
+    // A provider row with a kind keeps that concrete kind; every other name
+    // stays the default `nix` for named-source inference.
     parse: fn(name: String) -> ProviderKind Never! {
-        if name == {
-            "core" -> ProviderKind.Core
-            "cran" -> ProviderKind.Cran
-            "luarocks" -> ProviderKind.LuaRocks
-            "ruby" -> ProviderKind.RubyGems
-            "perl" -> ProviderKind.Cpan
-            "php" -> ProviderKind.Packagist
-            "jet-registry" -> ProviderKind.JetRegistry
-            "npm" -> ProviderKind.Npm
-            "cargo" -> ProviderKind.Cargo
-            "pypi" -> ProviderKind.PyPI
-            "swiftpm" -> ProviderKind.SwiftPM
-            "jetpackage" -> ProviderKind.JetPackage
-            else -> ProviderKind.Nix
+        row: pkg_provider_row(name) ?? return ProviderKind.Nix
+        row.kind ?? ProviderKind.Nix
+    }
+}
+
+// Federated provider families: the third view of the provider rows, beside
+// RefSource and ProviderKind. Their contracts and first-party split are in
+// Provider/Source/Federation/ProviderFamily.jet.
+ProviderFamily: enum {
+    Core
+    Nix
+    Path
+    Github
+    JetRegistry
+    Npm
+    PyPI
+    Cargo
+    SwiftPM
+    Maven
+    NuGet
+    Conan
+    Vcpkg
+    Homebrew
+    Binary
+
+    label: fn(self) -> String Never! {
+        loop row in PROVIDER_ROWS {
+            if row.family == .Val(family) {
+                if family == self -> return row.name
+            }
         }
+        panic("every provider family has one provider row")
+    }
+
+    // Every family, in provider-row order.
+    all: fn() -> [ProviderFamily] Never! {
+        families := [ProviderFamily]{}
+        loop row in PROVIDER_ROWS {
+            if row.family == .Val(family) -> families.push(family)
+        }
+        families
     }
 }
 

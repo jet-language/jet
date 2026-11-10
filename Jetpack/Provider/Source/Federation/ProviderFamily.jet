@@ -1,46 +1,11 @@
-// Federated provider families and their contracts under Jetpack authority
-// ported from jetpack::ProviderGraph.
+// Federated provider family contracts under Jetpack authority, ported from
+// jetpack::ProviderGraph. The families themselves are provider rows in
+// PackageModel/Source/Provider/ProviderRows.jet.
 //
 // External provider prefixes and trust-root configuration remain
 // owner-gated. A contract records the surface this build actually owns.
 
-ProviderFamily: enum {
-    Core
-    Nix
-    Path
-    Github
-    JetRegistry
-    Npm
-    PyPI
-    Cargo
-    SwiftPM
-    Maven
-    NuGet
-    Conan
-    Vcpkg
-    Homebrew
-    Binary
-
-    label: fn(self) -> String Never! {
-        if self == {
-            .Core -> "core"
-            .Nix -> "nix"
-            .Path -> "path"
-            .Github -> "github"
-            .JetRegistry -> "jet-registry"
-            .Npm -> "npm"
-            .PyPI -> "pypi"
-            .Cargo -> "cargo"
-            .SwiftPM -> "swiftpm"
-            .Maven -> "maven"
-            .NuGet -> "nuget"
-            .Conan -> "conan"
-            .Vcpkg -> "vcpkg"
-            .Homebrew -> "homebrew"
-            .Binary -> "binary"
-        }
-    }
-
+impl ProviderFamily {
     // Core, Nix, Path, and the Jet registry are local or first party.
     is_local_or_first_party: fn(self) -> Bool Never! {
         if self == {
@@ -78,16 +43,10 @@ ProviderFamilyContract: struct {
         }
     }
 
-    // The contract of every built-in family, in family order.
+    // The contract of every built-in family, in provider-row order.
     built_in: fn() -> [ProviderFamilyContract] Never! {
-        families: [ProviderFamily]{
-            ProviderFamily.Core, ProviderFamily.Nix, ProviderFamily.Path, ProviderFamily.Github,
-            ProviderFamily.JetRegistry, ProviderFamily.Npm, ProviderFamily.PyPI, ProviderFamily.Cargo,
-            ProviderFamily.SwiftPM, ProviderFamily.Maven, ProviderFamily.NuGet, ProviderFamily.Conan,
-            ProviderFamily.Vcpkg, ProviderFamily.Homebrew, ProviderFamily.Binary
-        }
         contracts := [ProviderFamilyContract]{}
-        loop family in families -> contracts.push(ProviderFamilyContract.for_family(family))
+        loop family in ProviderFamily.all() -> contracts.push(ProviderFamilyContract.for_family(family))
         contracts
     }
 }
