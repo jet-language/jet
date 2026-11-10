@@ -194,6 +194,11 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
     seen := [String:Bool]{}
     complete := true
     loop module_row_index in 0..<graph.modules.len() {
+        // The surface is the one the program's own `use` names. Core's
+        // imports are its implementation: which of that code a target reaches
+        // is settled where Core gates it on the target (`#build.target.os`,
+        // `#Target`) and by the denial row of the target's `core.target` facts.
+        if sema_module_is_core_source(graph.modules[module_row_index].module_identity) -> next
         diagnostic_start: diagnostics.len()
         loop imported_index in 0..<graph.modules[module_row_index].imports.len() {
             path := graph.modules[module_row_index].imports[imported_index].target_module_identity

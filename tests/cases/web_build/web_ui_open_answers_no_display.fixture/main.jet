@@ -1,0 +1,10 @@
+use ui: core.ui
+
+// A web build carries no display-server client: `ui.open` answers NoDisplay
+// instead of reaching the Wayland wire part.
+run: fn() {
+    if ui.open(width: 64, height: 48, title: "page") == {
+        .Ok(_) -> print("opened a window")
+        .Err(error) -> print("open: {error}")
+    }
+}
