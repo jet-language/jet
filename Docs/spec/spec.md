@@ -639,6 +639,12 @@ impl Circle.Shape {
 Outside a type body, `impl Shape { … }` on a trait names no type to implement
 it for and is E0301.
 
+A module that declares a trait may implement it for a built-in scalar or Core
+math type (`impl Int.Named { … }`). The module owns the trait, and under the
+orphan rule the owner of either the trait or the type may write the impl. An
+`impl Int.Trait` for a trait the module does not declare is E0301; wrap the
+built-in type in a type the module declares instead.
+
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
 and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,

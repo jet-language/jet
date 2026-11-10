@@ -2837,7 +2837,9 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     if trait_candidates.len() > 0 -> return trait_candidates
     // Fact tags remain on the checked value, not on declaration lookup.
     lookup_type: sema_expr_unwrap_tag(receiver_type)
-    receiver_name: sema_expr_type_base_name(lookup_type) ?? return candidates
+    // A built-in receiver has no nominal row; its user methods are the impls
+    // written for it (sema_expr_builtin_impl_method_candidates).
+    receiver_name: sema_expr_type_base_name(lookup_type) ?? return sema_expr_builtin_impl_method_candidates(graph, lookup_type, method, type_args, caller_module, caller_package, span, environment, program, diagnostics)
     // Native carrier methods live on registered impls, never fake nominals;
     // only the Core source modules indexed as owning this name's impls.
     if graph.source_impl_owner_modules.get(receiver_name) == .Val(owner_modules) {
@@ -2916,6 +2918,31 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
         }
     }
     if !found_owner -> return sema_call_local_method_candidates(environment, program, method, owner_type_args, type_args)
+    candidates
+}
+
+// The methods named `method` that impls written for the built-in receiver
+// `receiver` declare: `Named: trait` then `impl Int.Named { name: fn(self) … }`
+// (sema_registration_builtin_impl_allowed) gives `7.name()`. Only impls of a
+// trait the caller sees answer, the same visibility a trait method has on a
+// declared type. The impl's signature names types as its own module sees them.
+sema_expr_builtin_impl_method_candidates: fn(graph: SemaRegistrationGraph, receiver: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
+    candidates := [SemaCallMethodCandidate]{}
+    loop impl_row in sema_registration_impl_rows_named(graph, type_name(receiver)) {
+        implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+        if implementation.target_module_identity != None -> next
+        trait_symbol: implementation.trait_symbol ?? next
+        trait_row: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
+        if !sema_call_trait_visible(graph, graph.modules[trait_row.module_index].nominals[trait_row.row], caller_module, caller_package) -> next
+        loop function in implementation.methods {
+            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].symbol.name != "self" -> next
+            generics: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            owner_signature: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[impl_row.module_index].module_identity, generics)
+            method_ref: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            candidate: sema_call_method_candidate_from_registration(owner_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(receiver), function.parameters[0].convention, 1, method_ref, type_args, span, diagnostics) ?? next
+            candidates.push(candidate)
+        }
+    }
     candidates
 }
 

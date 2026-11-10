@@ -2468,7 +2468,7 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
             // In a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
-            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
+            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_builtin_impl_allowed(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
             if definition.trait_name == None && rows.nominals.get(definition.type_name) == .Val(nominal_index) && module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait {
@@ -2550,6 +2550,24 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
     graph.source_impl_owner_modules = owners.move()
 }
 
+// Whether a built-in target is this module's to extend: an operator hook
+// whose other operand it declares (sema_registration_opmix_builtin_impl), or
+// a trait it declares itself (`Named: trait` then `impl Int.Named`), since the
+// orphan rule lets the owner of either the trait or the type write the impl.
+// `items` are the module's program items.
+sema_registration_builtin_impl_allowed: fn(items: [Item], definition: ImplDef) -> Bool {
+    if sema_registration_opmix_builtin_impl(items, definition) -> return true
+    if definition.type_name.contains(".") -> return false
+    if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) -> return false
+    trait_name: definition.trait_name ?? return false
+    loop item_index in 0..<items.len() {
+        if items[item_index] == .Trait(declared) {
+            if declared.name == trait_name -> return true
+        }
+    }
+    false
+}
+
 // (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
 // `impl Int.Mul(Price)` is legal when this module declares `Price`.
@@ -2612,7 +2630,7 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
                 }
             }
             if owner_index < 0 {
-                if !sema_registration_opmix_builtin_impl(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
+                if !sema_registration_builtin_impl_allowed(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
                 next
             }
             owner_nominal: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
