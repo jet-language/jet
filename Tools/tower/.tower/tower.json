@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98925,
+    "rev": 98930,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56536,6 +56536,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~13:25, verbatim: \"For token count on scripts, we should get as close as we can with Jet and ways to get closer to competitors like syntax should be balloted. Other than syntax changes that is indicative of a gap in APIs which should be made to get us closer. Performance is the number one goal, tokens should be minimized/optimized but is not the main defining criteria\". Applied: c29-c33 are built without a ballot. New criteria cover the judge re-rank and the syntax ballots."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "PerfLead2 cut, 2026-11-10, on its t12 build with PortBars --runs 1. Parity passes on every fixture. tower-spec-apply 3314 to 2156 tokens (original 1273, so 1.69x where it was 2.60x); streamb10 873 to 464 (original 166, 2.80x where it was 5.26x); verify-rows 1325 to 1035 (original 181). The cuts: a sibling module Tools/agent/orchestrator/Roots.jet, no optional effect rows or Never annotations, and merged Dyn helpers. tower-spec-apply still spends tokens emulating JS behavior its fixtures pin (UTF-16 clip and length, \\\\s collapse, Object.entries order, truthiness). Ruling: a file with a `#!` line is a standalone script and can't import a sibling (E0603), so twins that use Roots drop the shebang and are run as `jet <file>`, which is how every twin is judged. All three bars still fail on tokens."
         },
         {
@@ -56948,21 +56953,39 @@
         },
         {
           "n": 32,
-          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). The public shape is an owner gate, so it is built only after a ballot ratifies it. `process.fail(code, message)`: print the message to stderr and exit with the code in one call. It saves 3 tokens per use.",
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. `process.fail(code, message)`: print the message to stderr and exit with the code in one call. It saves 3 tokens per use.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T17:40:14.551Z"
+          "at": "2026-11-10T18:18:22.068Z"
         },
         {
           "n": 33,
-          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10: a natural or version string order (the order of GNU `sort -V`) on lists of String. The verify-rows twin hand-writes it in about 350 tokens against an original of 181. The public shape is an owner gate, so it is built only after a ballot ratifies it.",
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10: a natural or version string order (the order of GNU `sort -V`) on lists of String. The verify-rows twin hand-writes it in about 350 tokens against an original of 181. Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T18:07:23.665Z"
+          "at": "2026-11-10T18:18:24.543Z"
+        },
+        {
+          "n": 34,
+          "text": "Owner instruction 2026-11-10 ~13:25 (\"Performance is the number one goal, tokens should be minimized/optimized but is not the main defining criteria\"): the port judge (Tools/gauntlet/PortBars.jet) and the tool-pairing text in AGENTS.md rank performance first. Identical output, wall time and peak memory are the bars that decide a switch. Source tokens are measured and reported for every entry and driven as low as Jet allows: every remaining token gap names a Core API criterion on this card (built) or a syntax ballot. A token loss alone no longer blocks a switch. The reasoning bar stays.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:18:26.739Z"
+        },
+        {
+          "n": 35,
+          "text": "Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides engineered away. From the port-bar measurement: `!` error propagation (2 tokens per fallible call), a filtering loop with an else arm plus list concatenation (13 on streamb10), and an open-ended slice `xs[2..]` (7). One ballot per mechanism, each linked to its report and given a different-family review.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:18:28.863Z"
         }
       ],
       "refs": [],
@@ -56975,12 +56998,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T18:18:18.808Z",
+      "updated": "2026-11-10T18:18:30.718Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 33
+      "criteriaLastN": 35
     },
     {
       "id": "c022g7qw",
@@ -200181,6 +200204,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T18:18:30.719Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T18:18:28.864Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#35 Owner instruction 2026-11-10 ~13:25: the syntax that would b"
+    },
+    {
+      "at": "2026-11-10T18:18:26.739Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#34 Owner instruction 2026-11-10 ~13:25 (\"Performance is the num"
+    },
+    {
+      "at": "2026-11-10T18:18:24.544Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#33: Owner instruction 2026-11-10 ~13:25: API gaps found by the token bars are built to bring Jet closer; only syntax goes to a ballot.; was: Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10: a natural or version string order (the order of GNU `sort -V`) on lists of String. The verify-rows twin hand-writes it in ab"
+    },
+    {
+      "at": "2026-11-10T18:18:22.068Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#32: Owner instruction 2026-11-10 ~13:25: API gaps found by the token bars are built to bring Jet closer; only syntax goes to a ballot.; was: Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots "
+    },
     {
       "at": "2026-11-10T18:18:18.808Z",
       "by": "Main",
