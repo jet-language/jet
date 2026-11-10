@@ -72,8 +72,13 @@ ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [U8], doff: Int, data
         ssldefs.ssl_wipe(aux_out)
         if offset < max_len -> hashes.hash_update_range(ctx, data, doff + offset, 1)
     }
+    // The context finishes, which wipes it, before the outer hash; the
+    // inner hash is wiped once absorbed.
+    rest := hashes.hash_finish(ctx)
+    ssldefs.ssl_wipe(rest)
     outer := hashes.hash_clone(key.outer)
     hashes.hash_update(outer, output)
+    ssldefs.ssl_wipe(output)
     hashes.hash_finish(outer)
 }
 
@@ -312,6 +317,9 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
     if rec.cid_len != t.in_cid.len() || !ssldefs.ssl_range_eq(rec.cid, 0, t.in_cid, 0, rec.cid_len) -> return Err(.UnexpectedCID)
     auth_done := 0
     padlen := 0
+    // The plaintext length before the padding comes off: public, where the
+    // padding length and the length after it are secret.
+    cbc_len := 0
     correct := ctime.ct_true()
     if mode == {
         // The only stream cipher is NULL, off in this configuration.
@@ -386,6 +394,7 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
                 padlen = ctime.size_if_else_0(ge, padlen)
             }
             padlen += 1
+            cbc_len = rec.data_len
             // Always read min(256, plaintext length) bytes at the end of
             // the plaintext, counting only the last padlen for the check.
             pad_count := 0
@@ -408,9 +417,10 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
         // Compute the MAC whatever the padding result (RFC 4346, CBCTIME).
         rec.data_len -= t.maclen
         add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-        // The extremes of data_len over every padlen; data_len + padlen
-        // does not depend on padlen.
-        max_len: rec.data_len + padlen
+        // The extremes of data_len over every padlen, from the public
+        // length before the padding came off (mbedtls's data_len + padlen,
+        // the same value).
+        max_len: cbc_len - t.maclen
         min_len: if max_len > 256 -> max_len - 256 else -> 0
         mac_expect := [U8]{}
         if t.md_dec == {
