@@ -324,11 +324,11 @@ pkg_effect_summary_line: fn(entries: [PackageEffects]) -> String Never! {
     "effects: {all.join(", ")} (across root + {dependency_count} dependenc{suffix})"
 }
 
-// The inferred effect row of the package named `name`; None when the build
+// The aggregated effects of the package named `name`; None when the build
 // loads none of its modules.
-pkg_effect_row_for: fn(entries: [PackageEffects], name: String) -> [String]? Never! {
+pkg_effect_entry_for: fn(entries: [PackageEffects], name: String) -> PackageEffects? Never! {
     loop entry in entries {
-        if entry.name == name -> return Val(entry.effects.copy())
+        if entry.name == name -> return Val(entry.copy())
     }
     None
 }
@@ -405,11 +405,20 @@ pkg_effect_grant_for: fn(manifest: PackageFacts, dependency: String) -> [String]
     None
 }
 
+// One effect a dependency's inferred row newly reaches, with the static call
+// path from the first reached function down to the function that performs it
+// (empty when the build saw no path), and that function's source location.
+PackageEffectReach: struct {
+    effect_name: String
+    chain: [String]
+    witness: EffectBudgetWitness?
+}
+
 // A dependency whose inferred effect row reaches effects the row the project
 // lock recorded for it doesn't cover: what a dependency update widened.
 PackageEffectGain: struct {
     name: String
-    effects: [String]
+    reaches: [PackageEffectReach]
 }
 
 // Record each dependency's inferred effect row (`entries`, one build's
@@ -434,19 +443,25 @@ pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects],
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]
         if package.is_root() -> next
-        inferred: pkg_effect_row_for(entries, package.name) ?? next
+        entry: pkg_effect_entry_for(entries, package.name) ?? next
         recorded: package.required_effect_roles()
         gained := [String]{}
-        loop effect_name in inferred {
+        reaches := [PackageEffectReach]{}
+        loop effect_name in entry.effects {
             // A deny-only right (`Panic`, `Mem`, `Time.Wait`) is never
             // granted, so the lock records none: a stop is refused by a
             // budget's `deny` (E1220), not recorded as a widening.
             if authority_is_deny_only(effect_name) -> next
-            if !authority_covers_any(recorded, effect_name) -> gained.push(effect_name.copy())
+            if authority_covers_any(recorded, effect_name) -> next
+            gained.push(effect_name.copy())
+            chain: entry.effect_chains.get(effect_name) ?? [String]{}
+            witness := EffectBudgetWitness?{None}
+            if chain.len() > 0 -> witness = entry.effect_witnesses.get(chain[chain.len() - 1])
+            reaches.push(PackageEffectReach{effect_name: effect_name.copy(), chain: chain, witness: witness})
         }
         first: package.effect_authority == None
         if !first && gained.len() == 0 -> next
-        if !first -> gains.push(PackageEffectGain{name: package.name.copy(), effects: gained.copy()})
+        if !first -> gains.push(PackageEffectGain{name: package.name.copy(), reaches: reaches})
         row := recorded.copy()
         loop effect_name in gained -> row.push(effect_name)
         granted := [String]{}
@@ -470,21 +485,26 @@ pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects],
 }
 
 // E3513: `--locked` refuses a dependency whose inferred effect row gained an
-// effect the project lock doesn't record for it.
-pkg_lock_e3513: fn(gain: PackageEffectGain) -> Diagnostic Never! {
-    diagnostic_from_registry("E3513", None,
-        "dependency `{gain.name}` now reaches {pkg_effect_gain_list(gain.effects)}, which `.jet/lock` doesn't record for it",
+// effect the project lock doesn't record for it, at the function that
+// performs it, with the call path into the dependency.
+pkg_lock_e3513: fn(dependency: String, reach: PackageEffectReach) -> Diagnostic Never! {
+    diagnostic := diagnostic_from_registry("E3513", None,
+        "dependency `{dependency}` now reaches `{reach.effect_name}`, which `.jet/lock` doesn't record for it",
         "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records",
-        "review the change to `{gain.name}`, then rerun without `--locked` to record its wider row")
+        "review the change to `{dependency}`, then rerun without `--locked` to record its wider row")
+    diagnostic = diagnostic_with_rights(diagnostic, "invocation", reach.chain, [String]{}, None)
+    if reach.witness == .Val(witness) {
+        diagnostic.span = Val(witness.span)
+        diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
+    }
+    diagnostic
 }
 
-// `effects` as prose: "`FS.Read`", "`FS.Read` and `Net`", "`A`, `B` and `C`".
-pkg_effect_gain_list: fn(effects: [String]) -> String Never! {
-    quoted := [String]{}
-    loop effect_name in effects -> quoted.push("`{effect_name}`")
-    if quoted.len() <= 1 -> return quoted.join("")
-    last: quoted.pop() ?? ""
-    "{quoted.join(", ")} and {last}"
+// The note a plain build prints for one widened effect: the dependency, the
+// effect, and the call path to it.
+pkg_lock_widened_note: fn(dependency: String, reach: PackageEffectReach) -> String Never! {
+    path: if reach.chain.len() > 0 -> " through {reach.chain.join(" → ")}" else -> ""
+    "note: `{dependency}` now reaches `{reach.effect_name}`{path}; `.jet/lock` records its wider effect row\n"
 }
 
 // E1220: a dependency reaches an effect outside this package's budget.

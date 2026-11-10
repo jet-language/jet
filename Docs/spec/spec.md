@@ -1977,9 +1977,10 @@ is not the price of running.
 Jetpack records each dependency's inferred effect row in the lock: the first
 build or run after `jet fetch` records it, and a refetch or update keeps it.
 When an update or an edit widens a dependency's row, the next build or run
-prints which package gained which effect and records the wider row; a row
-only widens. `jet build --locked` refuses the widening (E3513) and writes no
-lock. A dependency's line under `authority: { grants: { … } }` is its whole
+prints which package gained which effect, with the call path to it, and
+records the wider row; a row only widens. `jet build --locked` refuses each
+widened effect (E3513) at the function that performs it, with the same call
+path, and writes no lock. A dependency's line under `authority: { grants: { … } }` is its whole
 limit, in place of `allow`: `grants: { json: [], dice: [Rand] }` lets `dice`
 use only `Rand` and `json` nothing, even when `allow` lists more, and what a
 line grants passes `deny` for that dependency (`Panic` is deny-only, so no

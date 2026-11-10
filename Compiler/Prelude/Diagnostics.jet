@@ -7106,14 +7106,14 @@ LockedGenerationDrift: struct {
 
 LockedEffectRowWidened: struct {
     package: String
-    effects: String
+    effect_name: String
 
     impl Diagnostic {
         code: "E3513"
         stage: [.Build]
         meaning: "`--locked` dependency reaches an effect its recorded row doesn't cover"
         detail: true
-        what: fn(self) -> String { "Dependency `{self.package}` now reaches {self.effects}, which `.jet/lock` doesn't record for it." }
+        what: fn(self) -> String { "Dependency `{self.package}` now reaches `{self.effect_name}`, which `.jet/lock` doesn't record for it." }
         why: fn(self) -> String { "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records." }
         fix: fn(self) -> String { "Review the change to `{self.package}`, then rerun without `--locked` to record its wider row." }
     }

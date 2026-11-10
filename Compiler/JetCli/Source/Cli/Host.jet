@@ -1554,7 +1554,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     // A locked build refuses a widened dependency effect row before it writes
     // anything; a plain one records the rows once it has built.
     if options.locked {
-        checked: jet_cli_lock_effect_rows(file, result, true, color, json)
+        checked: jet_cli_lock_effect_rows(file, result, snapshot, true, color, json)
         if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
     }
     summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(jet_cli_effect_projection(authority))}\n"
@@ -1574,7 +1574,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         }
     }
     if built.exit_code == JET_DRIVER_EXIT_OK {
-        rows: if options.locked -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_effect_rows(file, result, false, color, json)
+        rows: if options.locked -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_effect_rows(file, result, snapshot, false, color, json)
         if rows.exit_code != JET_DRIVER_EXIT_OK -> return rows
         if json {
             built.stdout = jet_cli_build_effects_json(authority)
@@ -1936,7 +1936,7 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
     if jet_cli_authority_report(file, source, color, json, authority) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
     stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
     if stopped.move() == .Val(output) -> return JetCLIBuilt.Failed{output: output}
-    rows: jet_cli_lock_effect_rows(file, result, options.locked, color, json)
+    rows: jet_cli_lock_effect_rows(file, result, snapshot, options.locked, color, json)
     if rows.exit_code != JET_DRIVER_EXIT_OK -> return JetCLIBuilt.Failed{output: rows}
     jet_cli_write_notice(rows.stderr)
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))

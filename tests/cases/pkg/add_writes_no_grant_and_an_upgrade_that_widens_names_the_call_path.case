@@ -1,0 +1,34 @@
+# `jet add` writes the dependency and no grant line, and asks nothing: it
+# runs with no input and the manifest gains no `authority` row. An upgrade
+# that widens the dependency's inferred effect row is named with the call
+# path to the new effect: `jet build --locked` refuses it (E3513) at the
+# function that performs it without writing the lock, and a plain build
+# prints the path and records the wider row.
+fixture: fixtures/add-upgrade-widens
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: NO_COLOR=1
+step: jet add dep --path ./dep
+exit: 0
+file: package.jet ~ "dep" # the dependency is written
+file: package.jet !~ "authority" # no grant line, no budget
+file: package.jet !~ "grants" # no grant line
+step: jet build run.jet
+exit: 0
+stderr: !~ "now reaches" # the first row is recorded, not reported
+file: .jet/lock !~ "FS.Read" # the first row reaches nothing
+write: dep/package.jet dep.package.v2.template
+write: dep/dep.jet dep.v2.template
+step: jet build --locked run.jet
+exit: nonzero
+stderr: ~ "Error [jet.LockedEffectRowWidened]: Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it" # the upgrade widened the row
+stderr: ~ "Call chain: dep::greet → dep::load" # the call path to the new effect
+file: .jet/lock !~ "FS.Read" # a locked build writes no lock
+step: jet build run.jet
+exit: 0
+stderr: ~ "note: `dep` now reaches `FS.Read` through dep::greet → dep::load; `.jet/lock` records its wider effect row" # a plain build names the path
+file: .jet/lock ~ "FS.Read" # and records the wider row
+file: package.jet !~ "authority" # still no grant line
+step: jet build --locked run.jet
+exit: 0
+stderr: !~ "now reaches" # the recorded row covers it
