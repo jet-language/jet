@@ -118,7 +118,7 @@ jet_cli_foreign_binder: fn(root: String) -> JetCLIForeignBinder? Never! {
             subject: "C++ bindings",
             fix: "select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet inspect bind cpp`.",
         })
-        .C | .Rust | .Swift | .Com -> None
+        .C | .Rust | .Swift | .Com | .Asm -> None
     }
 }
 
@@ -435,7 +435,7 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             result: pkg_cpp_bind(path, cache, options)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "bound {jet_cli_foreign_count(result.bound.len(), "C++ member")} from `{path}` → {out}\n")
         }
-        .Dart | .C | .Rust | .Swift | .Com -> {}
+        .Dart | .C | .Rust | .Swift | .Com | .Asm -> {}
     }
     Err(ForeignBindError.Source("`inspect bind {binder.language.root()}` has no in-process binder"))
 }

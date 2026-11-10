@@ -79,35 +79,26 @@ pkg_worker_invoke_wrapper: fn(abi: String, suffix: String, call: String, command
     "const char* {abi}_invoke_{suffix}(int64_t h,const char*input,int64_t deadline){{return {call}(h,\"{command}\",input,deadline);}}\n"
 }
 
-// The persistent-worker languages sharing this supervisor. Each keeps its own
-// diagnostic wording for a failing tool.
-WorkerLanguage: enum {
-    PowerShell
-    Perl
-    Ruby
-    R
-    Octave
-    Php
-
-    label: fn(self) -> String Never! {
+// The persistent-worker languages sharing this supervisor (PowerShell, Perl,
+// Ruby, R, Octave and PHP) each keep their own diagnostic wording for a
+// failing tool.
+impl ForeignLanguage {
+    // The language's name in a worker diagnostic.
+    worker_label: fn(self) -> String Never! {
         if self == {
-            .PowerShell -> "PowerShell"
-            .Perl -> "Perl"
-            .Ruby -> "Ruby"
-            .R -> "R"
-            .Octave -> "Octave"
             .Php -> "PHP"
+            else -> self.debug_name()
         }
     }
 
     // The `ToolFailed` verb phrase: "`perl` rejected the Perl binding input".
-    action: fn(self) -> String Never! {
-        "rejected the {self.label()} binding input"
+    worker_action: fn(self) -> String Never! {
+        "rejected the {self.worker_label()} binding input"
     }
 
     // Why a failed tool run failed, from the captured streams. `stderr_only`
     // is the capture form that never falls back to stdout.
-    launder: fn(self, output: BinderToolOutput, stderr_only: Bool) -> String Never! {
+    worker_launder: fn(self, output: BinderToolOutput, stderr_only: Bool) -> String Never! {
         detail: if stderr_only || output.stderr.len() > 0 -> output.stderr else -> output.stdout
         text: String.from_bytes_lossy(detail)
         if self == {
@@ -116,34 +107,34 @@ WorkerLanguage: enum {
                 pkg_binder_launder_first_line(detail)
             }
             .Perl | .Ruby -> {
-                if text.contains("syntax error") || text.contains("compilation aborted") -> return "the script has a {self.label()} parse error"
-                "the {self.label()} compiler rejected the script"
+                if text.contains("syntax error") || text.contains("compilation aborted") -> return "the script has a {self.worker_label()} parse error"
+                "the {self.worker_label()} compiler rejected the script"
             }
-            .Octave -> pkg_binder_launder_first_line(detail)
             .R -> "the R parser returned a failure status"
             .Php -> BINDER_TOOL_FAILURE_DETAIL
+            else -> pkg_binder_launder_first_line(detail)
         }
     }
 }
 
 // Persistent bindings need the POSIX supervisor above.
-pkg_worker_require_supported_host: fn(language: WorkerLanguage, unix: Bool) ForeignBindError! {
+pkg_worker_require_supported_host: fn(language: ForeignLanguage, unix: Bool) ForeignBindError! {
     if unix -> return
-    return Err(ForeignBindError.Source("persistent {language.label()} bindings require a POSIX host process supervisor"))
+    return Err(ForeignBindError.Source("persistent {language.worker_label()} bindings require a POSIX host process supervisor"))
 }
 
 // Run one tool for a worker binder and return its stdout; a failing status is
 // `ToolFailed` with the language's laundered detail.
-pkg_worker_run_tool: fn(argv: [String], tool: String, language: WorkerLanguage, stderr_only: Bool) -[Exec, Time.Wait]> [U8] ForeignBindError! {
-    output: pkg_binder_capture(argv, None, tool, language.action())
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: language.action(), detail: language.launder(output, stderr_only)})
+pkg_worker_run_tool: fn(argv: [String], tool: String, language: ForeignLanguage, stderr_only: Bool) -[Exec, Time.Wait]> [U8] ForeignBindError! {
+    output: pkg_binder_capture(argv, None, tool, language.worker_action())
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: language.worker_action(), detail: language.worker_launder(output, stderr_only)})
     Ok(output.stdout)
 }
 
 // Compile a rendered bridge into `<cache>/lib<abi>.a`: the C source and
 // object live in the private `build` directory; `write_context` names the
 // bridge in a write failure. Returns the archive path.
-pkg_worker_build_archive: fn(language: WorkerLanguage, abi: String, build: String, cache: String, bridge: String, write_context: String) -[FS, Exec, Time.Wait]> String ForeignBindError! {
+pkg_worker_build_archive: fn(language: ForeignLanguage, abi: String, build: String, cache: String, bridge: String, write_context: String) -[FS, Exec, Time.Wait]> String ForeignBindError! {
     c: files.join(build, "{abi}.c")
     object: files.join(build, "{abi}.o")
     pkg_binder_write(c, bridge, write_context)

@@ -32,6 +32,7 @@ use {
         Diagnostic,
         Dimension,
         DimensionAxis,
+        EFFECT_VOCABULARY_LEAVES,
         EffectRowEntry,
         EnumDef,
         EnumGroup,
@@ -1115,13 +1116,14 @@ sema_registration_callback_boundary_param: fn(abi: SemaRegistrationCallableABI, 
     abi.is_c_abi && sema_registration_type_is_fn(effective_type)
 }
 
+// The effect an inline `#FFI(<lang>)` body runs under: the FFI leaf named by
+// the language, or the FFI root for a language with no leaf.
 sema_registration_inline_foreign_effect_root: fn(language: String) -> String Never! {
-    if language == {
-        "c" -> "FFI.C"
-        "asm" -> "FFI.Asm"
-        "cpp" -> "FFI.Cpp"
-        else -> "FFI.{language}"
+    wanted: "ffi.{language.lower()}"
+    loop leaf in EFFECT_VOCABULARY_LEAVES {
+        if leaf.lower() == wanted -> return leaf.copy()
     }
+    "FFI"
 }
 
 sema_registration_callable_abi_for_func: fn(func: Func) -> SemaRegistrationCallableABI Never! {

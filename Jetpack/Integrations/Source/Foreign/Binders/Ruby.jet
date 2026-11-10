@@ -5,7 +5,7 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
-        ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage,
+        ForeignBindError, ForeignBindResult, ForeignLanguage,
         pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
         pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
         pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
@@ -83,7 +83,7 @@ PKG_RUBY_RESERVED: [String]{"open", "cancel", "close", "decode_response", "Sessi
 
 // Bind the top-level one-argument methods of the Ruby script at `path`.
 pkg_ruby_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: WorkerLanguage.Ruby
+    language: ForeignLanguage.Ruby
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     ruby: pkg_binder_resolved_tool_path("ruby") ?? return Err(ForeignBindError.ToolMissing("ruby"))

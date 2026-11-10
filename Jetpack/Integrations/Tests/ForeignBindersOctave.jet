@@ -3,7 +3,7 @@ use {
     jetpack_integrations.[
         pkg_octave_parse_functions, pkg_octave_render_jet, pkg_octave_render_worker,
     ]
-    jet_pkg_model.[WorkerLanguage, pkg_worker_require_supported_host]
+    jet_pkg_model.[ForeignLanguage, pkg_worker_require_supported_host]
 }
 
 #Test("octave parses one matrix argument and rejects ambiguous outputs") {
@@ -52,7 +52,7 @@ use {
 }
 
 #Test("octave non posix hosts fail instead of emitting a facade") {
-    message: if pkg_worker_require_supported_host(WorkerLanguage.Octave, false) == {
+    message: if pkg_worker_require_supported_host(ForeignLanguage.Octave, false) == {
         .Ok(_) -> panic("a non-POSIX host was accepted")
         .Err(error) -> error.message()
     }

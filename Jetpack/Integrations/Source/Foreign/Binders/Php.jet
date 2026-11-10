@@ -6,7 +6,7 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
-        ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
+        ForeignBindError, ForeignBindResult, ForeignLanguage, pkg_ascii_lower,
         pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
         pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
         pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
@@ -148,7 +148,7 @@ PKG_PHP_RESERVED: [String]{"open", "take_error", "cancel", "close", "decode_resp
 
 // Bind the top-level one-argument functions of the PHP script at `path`.
 pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: WorkerLanguage.Php
+    language: ForeignLanguage.Php
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     php: pkg_binder_resolved_tool_path("php") ?? return Err(ForeignBindError.ToolMissing("php"))
@@ -175,11 +175,11 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
 
 // `php -n -l`: any failing status is reported as a parse error.
 pkg_php_lint: fn(php: String, script: String) ForeignBindError! -[Exec, Time.Wait]> {
-    if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", WorkerLanguage.Php, true) == {
+    if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", ForeignLanguage.Php, true) == {
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
-                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: (WorkerLanguage.Php).action(), detail: "the PHP source has a parse error"})
+                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: (ForeignLanguage.Php).worker_action(), detail: "the PHP source has a parse error"})
                 else -> return Err(error)
             }
         }
@@ -188,7 +188,7 @@ pkg_php_lint: fn(php: String, script: String) ForeignBindError! -[Exec, Time.Wai
 
 // Static discovery through PHP's own tokenizer.
 pkg_php_discover_functions: fn(php: String, script: String) -[Exec, Time.Wait]> [String] ForeignBindError! {
-    output: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", WorkerLanguage.Php, true)
+    output: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", ForeignLanguage.Php, true)
     pkg_php_parse_discovery(output)
 }
 

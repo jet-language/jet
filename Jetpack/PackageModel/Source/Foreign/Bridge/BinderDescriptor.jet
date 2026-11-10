@@ -7,7 +7,7 @@
 // hidden Rust bridge, and the C import stage read this one table.
 use {
     jetpack_foundation.[
-        ADA_MODULE_ROOT, BINDINGS_ROOT_SUBDIR, COBOL_MODULE_ROOT, COM_MODULE_ROOT, CPP_MODULE_ROOT,
+        ADA_MODULE_ROOT, ASM_MODULE_ROOT, BINDINGS_ROOT_SUBDIR, COBOL_MODULE_ROOT, COM_MODULE_ROOT, CPP_MODULE_ROOT,
         CS_MODULE_ROOT, C_MODULE_ROOT, DART_MODULE_ROOT, FORTRAN_MODULE_ROOT, GO_MODULE_ROOT,
         JAVA_MODULE_ROOT, JS_MODULE_ROOT, KW_RUST, LUA_MODULE_ROOT, OCTAVE_MODULE_ROOT,
         PASCAL_MODULE_ROOT, PERL_MODULE_ROOT, PHP_MODULE_ROOT, PWSH_MODULE_ROOT, PY_MODULE_ROOT,
@@ -20,78 +20,16 @@ use {
 FOREIGN_DESCRIPTOR_SCHEMA: "jet-ffi-descriptor-v1"
 FOREIGN_ABI_CONTRACT_VERSION: 1
 
-// Registered foreign language roots.
-ForeignLanguage: enum {
-    C
-    Cpp
-    Rust
-    Py
-    JS
-    Swift
-    Go
-    Java
-    DotNet
-    Tcl
-    Lua
-    Fortran
-    Cobol
-    Ada
-    Pascal
-    Dart
-    PowerShell
-    Perl
-    Ruby
-    Php
-    R
-    Octave
-    Com
-
-    // Every registered language in declaration order.
-    all: fn() -> [ForeignLanguage] Never! {
-        [ForeignLanguage]{
-            ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
-            ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
-            ForeignLanguage.DotNet, ForeignLanguage.Tcl, ForeignLanguage.Lua, ForeignLanguage.Fortran,
-            ForeignLanguage.Cobol, ForeignLanguage.Ada, ForeignLanguage.Pascal, ForeignLanguage.Dart,
-            ForeignLanguage.PowerShell, ForeignLanguage.Perl, ForeignLanguage.Ruby, ForeignLanguage.Php,
-            ForeignLanguage.R, ForeignLanguage.Octave, ForeignLanguage.Com
-        }
-    }
-
-    // The Rust `Debug` spelling of the variant; descriptor stamps embed it.
-    debug_name: fn(self) -> String Never! {
-        if self == {
-            .C -> "C"
-            .Cpp -> "Cpp"
-            .Rust -> "Rust"
-            .Py -> "Py"
-            .JS -> "JS"
-            .Swift -> "Swift"
-            .Go -> "Go"
-            .Java -> "Java"
-            .DotNet -> "DotNet"
-            .Tcl -> "Tcl"
-            .Lua -> "Lua"
-            .Fortran -> "Fortran"
-            .Cobol -> "Cobol"
-            .Ada -> "Ada"
-            .Pascal -> "Pascal"
-            .Dart -> "Dart"
-            .PowerShell -> "PowerShell"
-            .Perl -> "Perl"
-            .Ruby -> "Ruby"
-            .Php -> "Php"
-            .R -> "R"
-            .Octave -> "Octave"
-            .Com -> "Com"
-        }
-    }
-
+// The registered foreign languages are ForeignLanguage's cases, written from
+// the FFI effect's cases (Foreign/Bridge/ForeignLanguages.jet); each one's
+// binder row is in pkg_foreign_binders below.
+impl ForeignLanguage {
     // The `<lang>` mount root of `<lang>.<lib>`.
     root: fn(self) -> String Never! {
         if self == {
             .C -> C_MODULE_ROOT
             .Cpp -> CPP_MODULE_ROOT
+            .Asm -> ASM_MODULE_ROOT
             .Rust -> KW_RUST
             .Py -> PY_MODULE_ROOT
             .JS -> JS_MODULE_ROOT
@@ -134,6 +72,7 @@ ForeignLanguage: enum {
         if self == {
             .C -> ""
             .Cpp -> "jet_cpp_"
+            .Asm -> ""
             .Rust -> "jet_rust_"
             .Py -> "jet_py_"
             .JS -> "jet_js_"
@@ -160,7 +99,7 @@ ForeignLanguage: enum {
 
     abi_contract: fn(self) -> ForeignABIContract Never! {
         if self == {
-            .C | .Cpp | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignABIContract.c()
+            .C | .Cpp | .Asm | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignABIContract.c()
             .Rust -> ForeignABIContract.native()
             else -> ForeignABIContract.message()
         }
@@ -727,10 +666,11 @@ pkg_foreign_binders: fn() -> [BinderDescriptor] Never! {
     [BinderDescriptor]{
         pkg_binder_row(ForeignLanguage.C, BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.Cpp, BinderRuntime.ClangCppShim, BindingStubKind.CppHeader, BinderStatus.Active, ForeignABIContract.cxx(), pkg_binder_c_capabilities(), "FFI.Cpp", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Rust, BinderRuntime.LegacyRustExtern, BindingStubKind.RustExternBlock, BinderStatus.Planned, ForeignABIContract.native(), pkg_binder_planned_capabilities(), "FFI", ForeignProvider.Cargo, no_stub),
+        pkg_binder_row(ForeignLanguage.Asm, BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI.Asm", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Rust, BinderRuntime.LegacyRustExtern, BindingStubKind.RustExternBlock, BinderStatus.Planned, ForeignABIContract.native(), pkg_binder_planned_capabilities(), "FFI.Rust", ForeignProvider.Cargo, no_stub),
         pkg_binder_row(ForeignLanguage.Py, BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Py", ForeignProvider.PyPi, no_stub),
-        pkg_binder_row(ForeignLanguage.JS, BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, BinderStatus.Active, message, pkg_binder_target_capabilities(), "FFI", ForeignProvider.Npm, ForeignStubFile.Suffix("d.ts")),
-        pkg_binder_row(ForeignLanguage.Swift, BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI", ForeignProvider.SwiftPM, no_stub),
+        pkg_binder_row(ForeignLanguage.JS, BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, BinderStatus.Active, message, pkg_binder_target_capabilities(), "FFI.JS", ForeignProvider.Npm, ForeignStubFile.Suffix("d.ts")),
+        pkg_binder_row(ForeignLanguage.Swift, BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI.Swift", ForeignProvider.SwiftPM, no_stub),
         pkg_binder_row(ForeignLanguage.Go, BinderRuntime.GoCArchive, BindingStubKind.GoExports, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Go", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.Java, BinderRuntime.EmbeddedJVM, BindingStubKind.JVMClass, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Java", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.DotNet, BinderRuntime.EmbeddedDotNet, BindingStubKind.DotNetAssembly, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.DotNet", ForeignProvider.System, no_stub),

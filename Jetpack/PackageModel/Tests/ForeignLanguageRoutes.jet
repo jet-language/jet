@@ -30,6 +30,7 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
 #Test("unified_foreign_binder_registry_routes_active_and_planned_languages") {
     expected: [(language: ForeignLanguage, root: String, status: BinderStatus)]{
         (language: ForeignLanguage.C, root: "c", status: BinderStatus.Active),
+        (language: ForeignLanguage.Asm, root: "asm", status: BinderStatus.Planned),
         (language: ForeignLanguage.Rust, root: "rust", status: BinderStatus.Planned),
         (language: ForeignLanguage.Py, root: "py", status: BinderStatus.Active),
         (language: ForeignLanguage.JS, root: "js", status: BinderStatus.Active),
@@ -63,22 +64,17 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
 
 // tests/cffi.rs:646. Not ported: `ForeignNamespace::from_module_path` and its
 // display round trip; Jet has no dotted foreign-path model beside the root
-// table, so the port checks the root table and its declaration order.
+// table, so the port checks the root table and its declaration order, which
+// is the FFI effect's case order.
 #Test("unified_foreign_namespace_model_recognizes_every_registered_root") {
     roots: [(root: String, language: ForeignLanguage)]{
-        (root: "c", language: ForeignLanguage.C),
-        (root: "cpp", language: ForeignLanguage.Cpp),
-        (root: "rust", language: ForeignLanguage.Rust),
-        (root: "py", language: ForeignLanguage.Py),
-        (root: "js", language: ForeignLanguage.JS),
-        (root: "swift", language: ForeignLanguage.Swift),
         (root: "go", language: ForeignLanguage.Go),
         (root: "java", language: ForeignLanguage.Java),
         (root: "cs", language: ForeignLanguage.DotNet),
-        (root: "tcl", language: ForeignLanguage.Tcl),
-        (root: "lua", language: ForeignLanguage.Lua),
         (root: "fortran", language: ForeignLanguage.Fortran),
         (root: "cobol", language: ForeignLanguage.Cobol),
+        (root: "tcl", language: ForeignLanguage.Tcl),
+        (root: "lua", language: ForeignLanguage.Lua),
         (root: "ada", language: ForeignLanguage.Ada),
         (root: "pascal", language: ForeignLanguage.Pascal),
         (root: "dart", language: ForeignLanguage.Dart),
@@ -87,8 +83,15 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
         (root: "ruby", language: ForeignLanguage.Ruby),
         (root: "php", language: ForeignLanguage.Php),
         (root: "r", language: ForeignLanguage.R),
-        (root: "octave", language: ForeignLanguage.Octave),
         (root: "com", language: ForeignLanguage.Com),
+        (root: "c", language: ForeignLanguage.C),
+        (root: "cpp", language: ForeignLanguage.Cpp),
+        (root: "asm", language: ForeignLanguage.Asm),
+        (root: "py", language: ForeignLanguage.Py),
+        (root: "octave", language: ForeignLanguage.Octave),
+        (root: "rust", language: ForeignLanguage.Rust),
+        (root: "js", language: ForeignLanguage.JS),
+        (root: "swift", language: ForeignLanguage.Swift),
     }
     all: ForeignLanguage.all()
     assert_eq(all.len(), roots.len())

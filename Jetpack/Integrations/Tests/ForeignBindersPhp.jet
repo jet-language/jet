@@ -2,7 +2,7 @@
 // tokenizer or worker skip, as the Rust tests do, when no `php` is on PATH.
 use {
     jet_pkg_model.[
-        WorkerLanguage, pkg_binder_remove_tree_quiet, pkg_binder_resolved_tool_path,
+        ForeignLanguage, pkg_binder_remove_tree_quiet, pkg_binder_resolved_tool_path,
         pkg_worker_require_supported_host,
     ]
     jetpack_integrations.[pkg_php_render_jet, pkg_php_render_worker]
@@ -77,7 +77,7 @@ class Hidden { function method($input) {} }
 }
 
 #Test("php non posix hosts fail instead of emitting a posix facade") {
-    message: if pkg_worker_require_supported_host(WorkerLanguage.Php, false) == {
+    message: if pkg_worker_require_supported_host(ForeignLanguage.Php, false) == {
         .Ok(_) -> panic("a non-POSIX host was accepted")
         .Err(error) -> error.message()
     }
