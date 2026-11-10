@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98391,
+    "rev": 98393,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64670,6 +64670,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "c91 is not met: the Set type's methods (len, has, clear, shuffle, max, from, to_list...) still lower to runtime builtins (Compiler/JetIR/Source/RouteBuiltin.jet:52-212 jet_set_* and HashSet::clear; BuildSets.jet:520+), not the Jet set implementation. The core.collections.set module itself has no dispatcher row. c90 has a SUB in train 3 (Main-5976c90: the core_set_foundations cases gain O1 and O2 steps)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "c54-c58 probe (seed a0_042, dev e4096a0f3b, Examples/Systems/Terminal/Progress.jet). The golden passes on o0, o1 and o2 but pins only stdout. With stderr not a TTY, progress writes nothing at all (empty stderr at O0, O1 and O2), which breaks c56's 'non-TTY output emits one line per update'. On a pty it redraws one line per pull, e.g. '\\rwork 33% 1/3', then 2/3 and 3/3, plus step 1/3..3/3 and break 1/3. So c54 and c55 hold on a TTY, but no committed test sees the progress text. Next: make non-TTY emit one line per update, then pin both modes in a case (a pty step and a piped step) on O0, O1 and O2."
         },
         {
@@ -65462,11 +65467,11 @@
         {
           "n": 89,
           "text": "(was #3545 c1) Core source metadata owns every public core.collections.set function [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:51.841Z"
+          "evidence": "At dev e4096a0f3b, Compiler/Prelude/Core.jet:38-39 show core.collections.set exporting 19 names. Its source_module row (Core/Collections/Set.jet) owns 18 of them, every public function. The one export it does not own is the type StringSet, which is a type export and not a function. No dispatcher_row names core.collections.set. jet Tools/agent/CoreSourceRows.jet --check, which holds these rows to Core source, passes on that tree (seed a0_042).",
+          "at": "2026-11-10T02:31:33.615Z"
         },
         {
           "n": 90,
@@ -65639,7 +65644,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T02:16:39.138Z",
+      "updated": "2026-11-10T02:31:35.267Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -193835,6 +193840,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T02:31:35.267Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iuv3zr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T02:31:33.615Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#89"
+    },
     {
       "at": "2026-11-10T02:26:01.565Z",
       "by": "Main",
