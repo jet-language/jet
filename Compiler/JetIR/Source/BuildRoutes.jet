@@ -216,27 +216,6 @@ ir_list_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
     ir_list_fill_span(m, p, b, list, row, bounds[0], count, source, one, true)
 }
 
-// `xs.__fill(start, end, pattern)`: both bounds clamp into 0..len (as
-// slice does); an empty window or pattern writes nothing. Otherwise as
-// ir_list_fill.
-ir_list_fill_clamped: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, start_value: Int, end_value: Int, pattern: Int, span: Span) Never! {
-    start: ir_native_index(m, b, start_value, span)
-    end: ir_native_index(m, b, end_value, span)
-    if ir_failed(b) -> return
-    if ir_list_stride(m, row) == 0 -> return
-    length: ir_load_word(m, b, list, 0)
-    zero: ir_word_const(m, b, 0)
-    first: ir_word_clamp(m, b, start, zero, length)
-    last: ir_word_clamp(m, b, end, first, length)
-    count: ir_word_op(m, b, IROp.Sub, last, first)
-    period: ir_load_word(m, b, pattern, 0)
-    source: ir_load_word(m, b, pattern, 16)
-    some: ir_bool_op(m, b, IROp.Lt, zero, period)
-    ir_open_if(b.f, some, b.line)
-    ir_list_fill_span(m, p, b, list, row, first, count, source, period, false)
-    ir_end(b.f, b.line)
-}
-
 // The fill fast path: `count` elements of `list` from `first` (native words)
 // become copies of the `period` (> 0) elements at `source`, repeated. A
 // `single` source is the address of one value (a frame cell or an
@@ -1053,13 +1032,6 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
                 ir_list_fill(m, p, b, subject, element, operands[1], operands[2], repeat, span)
                 ir_release(m, b, operands[1])
                 ir_release(m, b, operands[2])
-                return -1
-            }
-            .ListFillClamped -> {
-                if operands.len() != 4 || operands[1] < 0 || operands[2] < 0 || operands[3] < 0 -> return ir_fail_slot(b, span, "fill without a window and a pattern")
-                if ir_list_element(m, p, b, operands[3]) != Val((element)) -> return ir_fail_slot(b, span, "fill from a List of another element type")
-                ir_list_fill_clamped(m, p, b, subject, element, operands[1], operands[2], operands[3], span)
-                ir_release(m, b, operands[3])
                 return -1
             }
             .ExtendList -> {
