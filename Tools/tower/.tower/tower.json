@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98657,
+    "rev": 98659,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56754,7 +56754,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T10:49:51.064Z",
+      "updated": "2026-11-10T11:23:18.144Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -63155,7 +63155,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T11:22:38.987Z",
+      "updated": "2026-11-10T11:23:19.466Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -187030,20 +187030,20 @@
       "cardId": "c0qe89cl",
       "group": "tooling",
       "title": "Compiler packages read the toolchain's Core sources while building, through a toolchain: path prefix allowed only inside the toolchain tree",
-      "situation": "Five compiler files hold rows copied from Core's sources by Tools/agent/CoreSourceRows.jet and OwnedTraitRows.jet, about 275 KB with SHA-256 headers. Each Core edit means regenerating them.\n\nThe packages cannot embed the sources instead. embed_file paths must be relative with no .. (E0957), and Core/ and Compiler/Prelude/ sit above Compiler/JetCli and Compiler/JetFoundation. On seed a0_042, even ../data.txt inside one package is E0957.",
+      "situation": "Jet's compiler needs facts from its own core library's source files, such as the list of effects. Today a script copies those facts into five compiler files, about 280 KB, each stamped with a checksum. Every core edit means running the script again, and 16 commits since October did only that.\n\nThe compiler cannot read those files itself while it is built. A build-time file read must name a path below the reading file, and the core library sits beside the compiler, not below it.\n\nWe recommend A: a toolchain: prefix names a file from the top of the Jet source tree, and only packages inside that tree may use it. Every other package keeps today's rule.",
       "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
       "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
       "explainer": "Words used here. embed_file reads a file while building and makes its text a constant. The toolchain tree is the directory holding Core/ and Compiler/Prelude/. A generated file is one a script writes.",
       "story": "Ivy adds an effect to Effects.jet. Under A, the next compiler build reads the file itself. No regenerate step, no SHA header to refresh, no stale table.",
       "inWild": "// Rust reaches files above the crate with a path macro:\ninclude_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../core/effects.rs\"))",
-      "detail": "What this ballot decides. How a compiler package names a toolchain source at build time. The embed rules of D-CTIO1 and D-CTFIND1 otherwise stay.\n\nThe call sites. CoreSources.jet holds Effects.jet as one literal, and CoreStructureRows.jet holds bootstrap steps and module declarations from Core.jet, both in JetCli. CoreSourceOwned.jet, EffectVocabulary.jet and OwnedTraitRows.jet in JetFoundation hold rows from Core.jet, CoreSourceParts.tsv, Core/*/Runtime and Traits.jet.\n\nCensus on the seed. The five files total 274,751 bytes. Since 2026-10-01, 144 commits touched CoreSourceOwned.jet or CoreStructureRows.jet, 12 of them titled as regenerating the tables.\n\nProbes on the seed. In probes/et/pkg, src/module.jet embeds ../data.txt, a file inside the same package, and gets E0957, path escapes the project with .. . Probe e02 embeds core:Effects.jet and gets E0955: the text is read as an ordinary relative path.\n\nCore already resolves its own embeds. A Core file's embed_file reads beside it in the toolchain tree, JET_TOOLCHAIN_ROOT or the nearest tree, else the copy built into jet by Core/EmbeddedSources.jet. Only jet_cli may call core.devtools.toolchain_core_source, a gate sema checks by package identity.\n\nWhat A does. embed_file and find accept a toolchain: prefix, as in embed_file(\"toolchain:Compiler/Prelude/Effects.jet\"). The rest is a literal path from the toolchain root, with no .. and no absolute form, so E0957's rules still apply after the prefix.\n\nResolution is Core's own rule: JET_TOOLCHAIN_ROOT, else the nearest tree, else the built-in copy. EmbeddedSources.jet adds the Compiler/Prelude files the prefix may name, so a jet with no checkout builds the same way.\n\nThe gate. The prefix is allowed only in a package whose directory lies inside the toolchain tree it resolves against. Anywhere else it is a new registered error, so Core's file layout never becomes a public interface.\n\nRows that are derived, not copied, are computed by a #run function over the embedded text, in the package that needs them. CoreSourceRows.jet --write and --check retire for these rows, and the SHA-256 headers go away.\n\nRatified decisions. A keeps D-CTIO1, D-CTFIND1 and D-CTFIND2, and keeps the spec rule that the lock does not record toolchain files, since the toolchain pin identifies them. It fits D-BUILD-COREUNIT1=A: Core stays one compiler-known unit, not a dependency.\n\nBeginner path. Nothing changes; ordinary packages never see the prefix. Expert path. A compiler author embeds the source and derives rows in Jet, with no generator step.\n\nDownsides of A, and what the design does about them. Deriving rows by #run adds work to each compiler build. The results are cached under the toolchain identity, so only a Core edit reruns them.\n\nWhat remains. The gate is a location rule, not a declaration a reader sees in package.jet. jet inspect build lists each toolchain: read, read from sema's literal paths.\n\nOther options. B adds a package.jet field, toolchain_reads, listing allowed globs. C gives Core a package.jet with an embeddable list and makes it a path dependency. D keeps today's generated files.\n\nTheir best cases. B shows every read in the manifest. C reuses deps and the lockfile. D needs no compiler change. Their costs: B writes each path twice, once in the field and once in source. C makes Core a dependency against D-BUILD-COREUNIT1=A. D keeps the regenerate churn.",
+      "detail": "What this ballot decides. How a compiler package names a toolchain source at build time. The embed rules of D-CTIO1 and D-CTFIND1 otherwise stay.\n\nThe call sites. CoreSources.jet holds the effect source, Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet and Core/Compiler/Meta.jet joined, as one literal. CoreStructureRows.jet holds bootstrap steps and module declarations from Core.jet; both are in JetCli. CoreSourceOwned.jet, EffectVocabulary.jet and OwnedTraitRows.jet in JetFoundation hold rows from Core.jet, CoreSourceParts.tsv, Core/*/Runtime and Traits.jet.\n\nCensus on dev 76955986d0. The five files total 279,898 bytes. Since 2026-10-01, 148 commits touched CoreSourceOwned.jet or CoreStructureRows.jet, 16 of them titled as regenerating the tables.\n\nProbes with the t6c compiler. In probes/et/pkg, src/module.jet embeds ../data.txt, a file inside the same package, and gets E0957. Its message says .. is refused even inside the package, so builds can audit inputs: this is the rule, not a bug. Probe e02 embeds core:Effects.jet and gets E0955, read as an ordinary relative path.\n\nProbe e03 spells a binding with #run embed_file, as D-META-SPELL1=A ratified, and gets E0733: #run is not built yet. Today's spelling is comptime { embed_file(...) }; the code here uses the ratified one.\n\nCore already resolves its own embeds. A Core file's embed_file reads beside it in the toolchain tree, JET_TOOLCHAIN_ROOT or the nearest tree, else the copy built into jet by Core/EmbeddedSources.jet. Only jet_cli may call core.devtools.toolchain_core_source, a gate sema checks by package identity.\n\nWhat A does. embed_file and find accept a toolchain: prefix, as in embed_file(\"toolchain:Compiler/Prelude/Effects.jet\"). The rest is a literal path from the toolchain root, with no .. and no absolute form, so E0957's rules still apply after the prefix.\n\nResolution. The prefix reads the tree the compile already takes Core from: JET_TOOLCHAIN_ROOT, else the nearest directory above the input that holds Core/ and Compiler/Prelude/ (Request.jet:300). So the tables always describe the Core the new compiler is compiled against.\n\nThere is no built-in-copy fallback. The gate below means a tree always exists when the prefix is allowed, so Core/EmbeddedSources.jet gains no files and the jet binary does not grow.\n\nThe gate. The prefix is allowed only in a package whose directory lies inside that tree. Anywhere else it is a new registered error, so Core's file layout never becomes a public interface. When JET_TOOLCHAIN_ROOT names a different tree, the error names both directories and says to unset it or point it here.\n\nRecording. Every toolchain: read records its SHA-256 in the package's .jet/lock, and the cache is keyed by content, as for every embed. The spec's lock exemption covers Core's own embeds, which belong to the running compiler. It does not cover these: the running compiler's pin cannot identify a checkout's edited files.\n\nThat recording costs no commit churn. None of the 19 tracked .jet/lock files lies under Compiler/, so compiler packages keep their locks local.\n\nRows that are derived, not copied, are computed by a #run function over the embedded text, in the package that needs them. CoreSourceRows.jet --write and --check retire for these rows, and the SHA-256 headers go away.\n\nRatified decisions. A keeps D-CTFIND1 and D-CTFIND2 and adds no ambient name, so D-PRELUDE-LAW1 holds. It fits D-BUILD-COREUNIT1=A: Core stays one compiler-known unit, not a dependency. It amends D-CTIO1's rule that embeds never leave the project root, for this prefix inside the toolchain tree only.\n\nBeginner path. Nothing changes; ordinary packages never see the prefix. Expert path. A compiler author embeds the source and derives rows in Jet, with no generator step.\n\nDownsides of A, and what the design does about them. Deriving rows by #run adds work to each compiler build. The results are keyed by each read file's digest, so only an edit to a file that is read reruns them.\n\nWhat remains. The gate is a location rule, not a declaration a reader sees in package.jet. The package's .jet/lock lists every toolchain: read with its digest, so the reads are still auditable.\n\nOther options. B adds a package.jet field, toolchain_reads, listing allowed globs. C gives Core a package.jet with an embeddable list and makes it a path dependency. D keeps today's generated files.\n\nTheir best cases. B shows every read in the manifest. C reuses deps and the lockfile. D needs no compiler change. Their costs: B writes each path twice, once in the field and once in source. C makes Core a dependency against D-BUILD-COREUNIT1=A. D keeps the regenerate churn.",
       "options": [
         {
           "key": "A",
           "name": "toolchain: prefix, gated by location",
           "detail": "embed_file and find take toolchain: paths, allowed only inside the toolchain tree.",
-          "technical": "Prefix resolved like Core's own embeds; built-in copy gains the Compiler/Prelude files; E0957 rules apply after the prefix; new registered error outside the toolchain tree. Derived rows computed by #run; generator retires for these rows.",
-          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet, proposed (A):\nJET_CLI_EFFECT_SOURCE: #run embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")\n// Today (probe e02): a core: path is E0955, read as a relative file."
+          "technical": "Prefix resolves against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else nearest); no built-in-copy fallback. E0957 rules apply after the prefix; new registered error outside that tree. Reads hash-recorded in .jet/lock, cache keyed by content. Amends D-CTIO1's project-root rule for this prefix only. Derived rows by #run; the generator retires for them.",
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet, proposed (A):\nJET_CLI_EFFECT_SOURCE: #run embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")\n// ...joined with Core/Effects/Effects.jet and Core/Compiler/Meta.jet, read the same way.\n// Today: a core: path is E0955 (probe e02); #run is E0733 until built (probe e03)."
         },
         {
           "key": "B",
@@ -187064,7 +187064,7 @@
           "name": "Keep generated files",
           "detail": "CoreSourceRows.jet keeps writing the rows and literals.",
           "technical": "No change.",
-          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet today (D):\n// Source SHA-256: 62146875...; generated, do not edit.\nJET_CLI_EFFECT_SOURCE: \"// The effect vocabulary is written here...\""
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet today (D):\n// Source SHA-256: b4561341...; generated, do not edit.\nJET_CLI_EFFECT_SOURCE: \"// The effect vocabulary is written here...\""
         }
       ],
       "comparisons": [
@@ -187096,11 +187096,15 @@
         "losses": [
           {
             "loss": "Derived rows cost #run work per compiler build.",
-            "mitigation": "Results cache under the toolchain identity; only Core edits rerun them."
+            "mitigation": "The cache is keyed by each read file's digest; only an edit to a read file reruns them."
           },
           {
             "loss": "The gate is not visible in package.jet.",
-            "mitigation": "jet inspect build lists every toolchain: read."
+            "mitigation": "The package's .jet/lock lists every toolchain: read with its digest."
+          },
+          {
+            "loss": "D-CTIO1's rule that embeds never leave the project root gains one exception.",
+            "mitigation": "The exception covers only packages inside the toolchain tree; every other package's rule is unchanged."
           }
         ],
         "whyNot": [
@@ -187124,9 +187128,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
       },
-      "checkInstructions": "With seed a0_042 on PATH, run jet run . in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/et/pkg, then jet run e02_core.jet in probes/et. The rule is in Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/et/pkg run (E0957). Then run probes/t6c.sh probes/et run (e02 E0955, e03 E0733); outputs are in each out6 directory. The rule is in Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet and the tree lookup in Compiler/JetCli/Source/Cli/Request.jet:300. Then run Tools/agent/ballots/Validate.jet on this payload.",
       "surface": {
         "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
         "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
@@ -187210,7 +187214,11 @@
           "losses": [
             {
               "loss": "Build-time row work.",
-              "mitigation": "Cached under the toolchain identity."
+              "mitigation": "Cached by each read file's digest."
+            },
+            {
+              "loss": "One exception to the project-root rule.",
+              "mitigation": "Only for packages inside the toolchain tree."
             }
           ],
           "whyNot": [
@@ -193804,20 +193812,20 @@
       "cardId": "c0iuv3zr",
       "group": "library",
       "title": "TCP writes keep the ratified Writer law, mark the short count must-use, and retire the five free-function spellings",
-      "situation": "A TCP stream can be written eight ways: send, tcp_write, tcp_write_bytes, tcp_write_all_bytes and tcp_write_text, plus the methods write, write_all and write_text. Three return a short count: send, tcp_write_bytes and stream.write.\n\nOn seed a0_042, client.write(bytes) with its count dropped compiles and runs. A write that sent only part of the bytes would pass unnoticed.",
+      "situation": "A network connection in Jet can be written eight ways. Three of them may send only the first part of the bytes and report how many went. Today a program can call one of those three, ignore the count, and compile and run. A partial send then passes unnoticed.\n\nWe recommend A. The counted write keeps its count, and ignoring it becomes a build error that points to the write-everything call. The five old free-function spellings retire. On today's code almost nothing breaks: no stream write outside those five functions ignores its count.",
       "gist": "Should TCP writes keep write's short count, make dropping it an error, and retire the five free-function spellings?",
       "lesson": "A network write may send only part of your bytes and tell you how many went. Jet has eight ways to write to a connection, and three can stop early. This vote picks the spellings to keep and how Jet stops a silent partial write.",
       "explainer": "Words used here. A short count is a write that reports sending fewer bytes than asked. Must-use means the compiler refuses a call whose result is ignored. Write-everything means the call loops until all bytes are sent.",
-      "story": "Ben sends a 2 MB reply with client.write(bytes) and ignores the count. Under A, the build stops on that line and suggests write_all.",
+      "story": "Ben sends a 2 MB reply with client.write(bytes) and ignores the count. Under A, the build stops on that line and tells him to call write_all, which sends every byte.",
       "inWild": "// Rust: write may be short; clippy flags an unused count.\nstream.write_all(b\"ping\")?;",
-      "detail": "What this ballot decides. Which TCP write spellings remain, and what happens when a caller drops a short count. Reading, Unix sockets and TLS keep their own names.\n\nThe ratified law. D-NETIO-CONTRACT2=B, with option A's laws, says write may return any positive prefix count and write_all loops until done. Compiler/Prelude/Traits.jet's Writer trait has exactly write -> Int and write_all.\n\nWhere they live. The methods are sema builtins in Compiler/JetSema/Source/Sema/Calls/NetworkHandles.jet:99-104. The free functions are in Core/Net/Net.jet:282-313, each a one-line call to a method.\n\nCensus on the seed. net.send has 0 callers. tcp_write has 1, tcp_write_bytes 1, tcp_write_all_bytes 39 in 25 files, tcp_write_text 20 in 8 files. TlsLead's untyped count of method calls in files importing core.net is write 72, write_all 136, write_text 14.\n\nProbes on the seed. t02 opens a local TCP pair, calls client.write with the count dropped, then write_all, and prints got pingpong. t01 shows a dropped pure result is E0433, but write has effects, so that rule does not apply.\n\nProbe t03 marks an effectful function #MustUse, and the dropped call is E0419. The marker works today; Core uses it on no write.\n\nWhat A does. stream.write keeps its count and gains #MustUse, so a dropped count is E0419. Its fix line names write_all. write_all and write_text stay the write-everything forms for bytes and text.\n\nThe five free functions go, each with a jet fix rewrite under D-CODEMOD1=A. tcp_write and tcp_write_text become write_text, tcp_write_all_bytes becomes write_all, tcp_write_bytes and send become write.\n\nRatified decisions. A keeps D-NETIO-CONTRACT1=A and D-NETIO-CONTRACT2=B. It uses D-DISCARD1=A's must-use rule as it stands. The Writer trait's write gains the same marker, so files and TLS match.\n\nBeginner path. Write stream.write_all(bytes) or stream.write_text(text). If you reach for write and drop the count, the error points to write_all. Expert path. n: stream.write(bytes) keeps the count for a hand-rolled send loop.\n\nDownsides of A, and what the design does about them. Existing code that drops write's count stops compiling. jet fix rewrites a dropped write to write_all when the result is unused, since that is what the caller meant.\n\nWhat remains. The plain name write stays the partial form, which surprises Go programmers. The E0419 fix line names write_all at the moment of surprise.\n\nOther options. B amends D-NETIO-CONTRACT2: write writes everything, as Go's io.Writer does, and write_some returns a count. C keeps all eight names and makes each write everything. D keeps today's surface.\n\nTheir best cases. B gives the short name the safe meaning. C breaks no caller. D costs nothing. Their costs: B changes the Writer law for files and TLS too. C keeps eight spellings for two jobs. D leaves the silent partial write.",
+      "detail": "What this ballot decides. Which TCP write spellings remain, and what happens when a caller drops a short count. Reading, Unix sockets and TLS keep their own names.\n\nThe ratified law. D-NETIO-CONTRACT2=B, with option A's laws, says write may return any positive prefix count and write_all loops until done. Compiler/Prelude/Traits.jet's Writer trait has exactly write -> Int and write_all.\n\nWhere they live. The methods are sema builtins in Compiler/JetSema/Source/Sema/Calls/NetworkHandles.jet:99-104. The free functions are in Core/Net/Net.jet:282-313, each a one-line call to a method.\n\nCensus on dev 76955986d0. net.send has 0 callers. tcp_write has 1, tcp_write_bytes 1, tcp_write_all_bytes 50 in 27 files, tcp_write_text 20 in 8 files. Method calls: write_all 187 in 116 files, write_text 49 in 35 files.\n\nDropped counts today. A statement-start .write( on a stream-named receiver appears 3 times on dev. Two are inside the retiring send and tcp_write_bytes (Net.jet:283, 304); the third, in TrustGate.jet:172, already writes .drop(reason). So A's new error breaks no caller outside the code it retires.\n\nProbes with the t6c compiler. t02 opens a local TCP pair, calls client.write with the count dropped, then write_all, and prints got pingpong. t01 shows a dropped pure result is E0433, but write has effects, so that rule does not apply.\n\nProbe t03 marks an effectful function #MustUse, and the dropped call is E0419. Probe t04 marks a trait method #MustUse and drops it through an impl and through a generic bound: both compile and run. The marker is accepted on a trait method and ignored, a building bug.\n\nProbe t05 gives #MustUse a reason and gets E0930: the marker's signature is MustUse(), so today its fix line cannot name write_all.\n\nA ninth spelling hides in the checker. TCPStream.write also accepts a String and writes its UTF-8 bytes (NetworkHandles.jet:318-320), returning a byte count that can split a character. Its one caller is net.send, which retires.\n\nWhat A does. TCPStream.write takes bytes only, keeps its count and is must-use, so a dropped count is E0419 with a fix line naming write_all. write_all and write_text stay the write-everything forms for bytes and text. Writer.write in Compiler/Prelude/Traits.jet gains #MustUse, so files and TLS match.\n\nCompiler work A needs. #MustUse gains an optional fix text, MustUse(fix: String), shown on E0419's fix line, as Rust's must_use takes a reason. A trait method's #MustUse applies to every impl and to calls through a bound, which fixes t04. The builtin write rows at NetworkHandles.jet:99-100 carry the same flag.\n\nThe five free functions go, each with a jet fix rewrite under D-CODEMOD1=A. tcp_write and tcp_write_text become write_text, tcp_write_all_bytes becomes write_all, tcp_write_bytes becomes write, and send(s, text) becomes s.write(text.bytes()). Each rewrite calls what the function called, so it keeps behavior and applies unattended.\n\nRatified decisions. A keeps D-NETIO-CONTRACT1=A and D-NETIO-CONTRACT2=B's write law. It uses D-DISCARD1=A's must-use rule as it stands and D-MARK-DISCARD1=A's .drop(reason) for a deliberate discard.\n\nBeginner path. Write stream.write_all(bytes) or stream.write_text(text). If you reach for write and drop the count, the error points to write_all. Expert path. n: stream.write(bytes) keeps the count for a hand-rolled send loop.\n\nDownsides of A, and what the design does about them. Code that drops write's count stops compiling; on dev that is no caller outside the retiring functions. For other code, jet fix offers write_all as a needs-review edit, since it sends the rest of the bytes too. jet fix --all applies it.\n\nWhat remains. The plain name write stays the partial form, which surprises Go programmers. The E0419 fix line names write_all at the moment of surprise.\n\nOther options. B amends D-NETIO-CONTRACT2: write writes everything, as Go's io.Writer does, and write_some returns a count. C keeps all eight names and makes each write everything. D keeps today's surface.\n\nTheir best cases. B gives the short name the safe meaning. C breaks no caller. D costs nothing. Their costs: B changes the Writer law for files and TLS too. C keeps eight spellings for two jobs. D leaves the silent partial write.",
       "options": [
         {
           "key": "A",
           "name": "Keep the law, must-use count",
           "detail": "write keeps its count and is #MustUse; write_all and write_text write everything; five free functions retire.",
-          "technical": "#MustUse on TCPStream.write and Writer.write; E0419 fix line names write_all; Core/Net/Net.jet:282-313 removed with jet fix rewrites. Keeps D-NETIO-CONTRACT2=B.",
-          "code": "run: fn() NetError! {\n    client := net.tcp_connect(addr)\n    client.write_all(\"ping\".bytes())\n    n: client.write(\"pong\".bytes())\n    print(\"sent {n}\")\n}\n// Today (probe t02): a dropped client.write count compiles.\n// Proposed (A): a dropped count is E0419, fix: write_all."
+          "technical": "Must-use on TCPStream.write (bytes only; the String overload retires) and on Writer.write; MustUse gains an optional fix text; a trait method's mark reaches impls and bounds. Core/Net/Net.jet:282-313 removed with jet fix rewrites. Keeps D-NETIO-CONTRACT2=B.",
+          "code": "run: fn() NetError! {\n    client := net.tcp_connect(addr)\n    client.write_all(\"ping\".bytes())\n    n: client.write(\"pong\".bytes())\n    print(\"sent {n}\")\n}\n// Today (probe t02): a dropped client.write count compiles.\n// Proposed (A): a dropped count is E0419, fix: call write_all to send every byte."
         },
         {
           "key": "B",
@@ -193870,11 +193878,11 @@
         "losses": [
           {
             "loss": "Code that drops write's count stops compiling.",
-            "mitigation": "jet fix rewrites an unused write to write_all."
+            "mitigation": "On dev no caller outside the retiring functions does; jet fix offers write_all for the rest."
           },
           {
             "loss": "write stays the partial form, unlike Go.",
-            "mitigation": "The E0419 fix line names write_all."
+            "mitigation": "The E0419 fix line names write_all at that moment."
           }
         ],
         "whyNot": [
@@ -193898,9 +193906,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
       },
-      "checkInstructions": "With seed a0_042 on PATH, run jet run on t01_discard.jet, t02_tcp.jet and t03_mustuse.jet in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/tw. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/tw run. Expected: t01 E0433, t02 prints got pingpong, t03 E0419, t04 runs (the trait-method mark is ignored), t05 E0930. Outputs are in probes/tw/out6. Then run Tools/agent/ballots/Validate.jet on this payload.",
       "surface": {
         "gist": "Should TCP writes keep write's short count, make dropping it an error, and retire the five free-function spellings?",
         "lesson": "A network write may send only part of your bytes and tell you how many went. Jet has eight ways to write to a connection, and three can stop early. This vote picks the spellings to keep and how Jet stops a silent partial write.",
@@ -193984,7 +193992,7 @@
           "losses": [
             {
               "loss": "Dropped counts break.",
-              "mitigation": "jet fix rewrites them to write_all."
+              "mitigation": "None on dev outside the retiring functions; jet fix offers write_all."
             }
           ],
           "whyNot": [
@@ -197739,6 +197747,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T11:23:19.466Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TCP-WRITE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-10T11:23:18.144Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EMBED-TOOLCHAIN1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T11:22:38.987Z",
       "by": "Main",
