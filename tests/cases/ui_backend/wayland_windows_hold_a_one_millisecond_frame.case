@@ -6,8 +6,12 @@
 # moved; over 600 frames after 60 to warm up, the drawing and the time
 # from one frame to the next (drawing, the copy to the shared buffer and
 # the commit) stay within 1 ms at the 99th percentile. Release builds
-# measured 144-186 us and 220-267 us on a loaded machine.
-requires: os:linux
+# measured 144-186 us and 220-267 us on a loaded machine. The limit is
+# wall time, so this case runs only on a quiet machine
+# (Tools/perf/frame-time/Main.jet); wayland_windows_draw_600_frames_at_2560x1440
+# runs the same frames, without the limit, in every batch.
+requires: os-name:linux
+requires: env:JET_TIMING_QUIET=1 # frame time is measured on an idle, pinned CPU
 fixture: wayland_windows_hold_a_one_millisecond_frame.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache

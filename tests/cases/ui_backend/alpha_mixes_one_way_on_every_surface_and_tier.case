@@ -5,7 +5,7 @@
 # and 20 + 12 = 32 of 13, alpha 20 + 235 = 255. So #1E1E20, as a design tool
 # mixes it, from a canvas fill, from a sprite's PNG texel (straight
 # 255,255,255,20), under a fully covered text pixel and through
-# core.ui.font.blend, at O0, O1 and O2 and built.
+# core.ui.font.blend, at O0, O1 and O2, built, and on the web.
 fixture: alpha_mixes_one_way_on_every_surface_and_tier.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -25,5 +25,11 @@ step build: jet build --optimize=full main.jet
 exit: 0
 step aot: built
 exit: 0
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty
+step: jet build --target web main.jet
+exit: 0
+step web: node .jet/build/app.js
+exit: 0 # run from the fixture, where the sprite's atlas is
 stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
 stderr: empty
