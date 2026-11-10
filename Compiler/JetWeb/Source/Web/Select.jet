@@ -13,7 +13,7 @@
 
 use {
     jet_backend.[LINK_FAULT_REPORT]
-    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_kind_name, ir_op_name, ir_x64_overflow_message]
+    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_x64_overflow_message]
     jet_foundation.[name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
 }
@@ -266,7 +266,7 @@ web_stop_if: fn(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Table
 
 web_numeric_stop: fn(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int, message: String) Never! {
     web_text(e, st, tables, f.source_file)
-    web_i64(e, f.code_line[at])
+    web_i64(e, ir_code_line_source(f.code_line[at]))
     web_text(e, st, tables, message)
     web_runtime(e, st, f, at, "jet_rt_numeric_stop", "lllll", "")
     web_stop_action(e, st)
@@ -279,7 +279,7 @@ web_located: fn(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Table
     web_get(e, left)
     web_get(e, right)
     web_text(e, st, tables, f.source_file)
-    web_i64(e, f.code_line[at])
+    web_i64(e, ir_code_line_source(f.code_line[at]))
     web_runtime(e, st, f, at, symbol, "lllll", "l")
     if !st.stop_points -> return web_set(e, dst)
     value: e.t2
@@ -1001,7 +1001,7 @@ web_word_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, t
             web_i64(e, if unsigned -> 1 else -> 0)
             web_i64(e, bits)
             web_text(e, st, tables, f.source_file)
-            web_i64(e, f.code_line[at])
+            web_i64(e, ir_code_line_source(f.code_line[at]))
             web_runtime(e, st, f, at, "jet_rt_fixed_shift_stop", "lllllll", "")
             web_stop_action(e, st)
             web_end(e)

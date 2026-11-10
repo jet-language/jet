@@ -1,0 +1,19 @@
+use fs: core.files
+
+#FX(FS)
+Disk: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+load: fn(path: String) -[Disk]> String {
+    return fs.read(path) ?? ""
+}
+
+keep: fn(path: String) -[!Disk.Write]> String {
+    load(path)
+}
+
+run: fn() { print(keep("x")) }

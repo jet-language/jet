@@ -520,10 +520,13 @@ With fix: Move every marker set above its declaration or into its body --markers
 With inspect gates: Evaluate past unsupported features (no guarantees)
 .TP
 .B --caps
-With explain effects: List every module cap written under a file or directory
+With explain effects: List every effect cap written under a file or directory
 .TP
 .B --watch
 With dev: Re-run on dependency changes (--watch=off runs once)
+.TP
+.B --port
+With dev: Serve the web build on this preview listener port, as --port=N (0 lets the listener choose)
 .TP
 .B --project
 With repl: Load package settings and imports from this directory
@@ -607,7 +610,7 @@ With cc/c++: Print the pinned virtual sysroot
 With cc/c++: Print the pinned compiler version
 .TP
 .B -v
-With cc/c++: Print pinned toolchain details or compile verbosely
+With build/jobs/check/run/dev/test/explain: Short form of --verbose; with cc/c++: Print pinned toolchain details or compile verbosely
 .TP
 .B --gate
 With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow
@@ -765,6 +768,15 @@ With build/run/dev/jobs/test/check: How hard to optimize: release, debug, or a n
 .B --optimize
 With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
 .TP
+.B -O0
+Short form of --optimize=none
+.TP
+.B -O1
+Short form of --optimize=basic
+.TP
+.B -O2
+Short form of --optimize=full
+.TP
 .B --bounds
 With build/run/dev/test/inspect: What a failed bounds check does: fatal, report or off
 .TP
@@ -799,7 +811,7 @@ With build/run/dev/test/inspect: More C libraries the native link resolves forei
 With build/run/dev/test/inspect: More native link inputs: -L<dir>, -l<name> or a .a archive path
 .TP
 .B --os
-With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web or freestanding
+With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web, wasm or freestanding
 .TP
 .B --min-os
 With build/run/dev/test/inspect: The oldest OS version the image runs on ("" is none)

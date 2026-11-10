@@ -23,7 +23,12 @@ provider_normalize_document: fn(family: ProviderFamily, document: String) -> Pro
         .Github -> ProviderFactReport.github_document(document)
         .Binary -> ProviderFactReport.binary_document(document)
         .Nix -> ProviderFactReport.nix_document(document)
-        .Core | .Path -> {
+        .Cran -> ProviderFactReport.cran_document(document)
+        .LuaRocks -> ProviderFactReport.luarocks_document(document)
+        .RubyGems -> ProviderFactReport.rubygems_document(document)
+        .Cpan -> ProviderFactReport.cpan_document(document)
+        .Packagist -> ProviderFactReport.packagist_document(document)
+        .Core | .Path | .JetPackage -> {
             facts := MetadataFacts.empty(family, "")
             facts.source_identity = "{family.label()}:document"
             ProviderFactReport{facts: facts, losses: [String]{"this provider has no foreign metadata document shape"}, conflicts: [String]{}, native_format: "", native_document: ""}
@@ -37,14 +42,16 @@ provider_normalize_document: fn(family: ProviderFamily, document: String) -> Pro
 // The native document's format label.
 provider_document_format: fn(family: ProviderFamily, document: String) -> String Never! {
     if family == {
-        .Npm | .Vcpkg | .Homebrew | .JetRegistry | .Github | .Binary | .SwiftPM -> "json"
+        .Npm | .Vcpkg | .Homebrew | .JetRegistry | .Github | .Binary | .SwiftPM | .RubyGems | .Cpan | .Packagist -> "json"
         .PyPI -> if provider_graph_json_parses(document) -> "json" else -> "python-metadata"
         .NuGet -> if provider_graph_json_parses(document) -> "json" else -> "xml"
         .Conan -> if provider_graph_json_parses(document) -> "json" else -> "conan"
         .Nix -> if provider_graph_json_parses(document) -> "json" else -> "nix"
         .Cargo -> "toml"
         .Maven -> "xml"
-        .Core | .Path -> "provider"
+        .Cran -> "dcf"
+        .LuaRocks -> "rockspec"
+        .Core | .Path | .JetPackage -> "provider"
     }
 }
 

@@ -44,7 +44,8 @@ BuildOptionRow: struct {
 
 JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
-    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
+    // `jet build` is full; `jet run`, `jet dev` and `jet test` are none.
+    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "full", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
     // A failed list bounds check: fatal stops the program (the stock), report
     // writes the failure to stderr and goes on with the access unchecked, off
     // drops the check.
@@ -101,10 +102,10 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // refuse (E3415).
     {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
     // The operating system the image runs on: the key of each TARGET_OS_ALL
-    // OS, in that order, then the OS-less `web` and `freestanding` targets. The
-    // native backend writes Linux x86-64 ELF images, and `jet build` also writes
-    // web builds (`--target web`), so every other value is refused (E2104).
-    {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web or freestanding"},
+    // OS, in that order. The native backend writes Linux x86-64 ELF images,
+    // and `jet build` also writes web builds (`--target web`), so every other
+    // value is refused (E2104).
+    {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "wasm", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web, wasm or freestanding"},
     // The oldest OS version the image runs on (a Mach-O image's minimum
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty
     // value is refused (E2104).
@@ -262,6 +263,18 @@ build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     head: argument.split("=").to_list()[0]
     loop row in JET_BUILD_OPTIONS {
         if build_option_flag(row.name) == head -> return Val(row.copy())
+    }
+    None
+}
+
+// The `--optimize=<value>` spelling of the short level flag `-O<n>`: the
+// optimize row's values are the levels in order (none is O0), so `-O1` is
+// `--optimize=basic`. None for any other word, which includes a level past
+// the last value.
+build_option_level_spelling: fn(word: String) -> String? {
+    row: build_option_row("optimize") ?? return None
+    loop (level, value) in row.values {
+        if word == ("-O{level}") -> return Val("{build_option_flag(row.name)}={value}")
     }
     None
 }

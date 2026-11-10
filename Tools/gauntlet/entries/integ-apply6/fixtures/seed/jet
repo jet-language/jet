@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# A stand-in for the seed's jet in the integ-apply6 fixture. Run as a generator
+# from the composed tree, it does what that generator does to the fixture's
+# files; as Tools/agent/RuntimeGenerators.jet it exits with a checksum of every
+# file of the tree and of the integ directory beside it, so its rc in the
+# REGEN line shows both runs left the same files.
+gen=$1; shift
+echo "stand-in jet $gen $* identity=$JET_COMPILER_IDENTITY root=$JET_TOOLCHAIN_ROOT"
+case "$gen" in
+  Tools/agent/CoreSourceRows.jet)
+    n=$(awk 'END {print NR}' Compiler/rows.tsv)
+    awk -v n="$n" '/^rows: / {print "rows: " n; next} {print}' Compiler/Rows.jet > Compiler/Rows.jet.new && mv Compiler/Rows.jet.new Compiler/Rows.jet ;;
+  Tools/agent/UnsafeRatchet.jet)
+    [ "$1" = --update ] || exit 3
+    printf '# Safety ledger\n\nunsafe blocks: %s\n' "$(awk 'END {print NR}' src/a.txt)" > Docs/spec/safety.md ;;
+  Tools/agent/DiagnosticRows.jet)
+    [ "$1" = --write ] || exit 3
+    echo "written by DiagnosticRows --write" >> docs/diag.txt ;;
+  Tools/agent/RuntimeGenerators.jet)
+    sum=$(cd .. && find . -path ./repo.git -prune -o -name .git -prune -o -name 'regen.*' -prune -o -type f -print | LC_ALL=C sort | xargs cksum | cksum)
+    exit $(( ${sum%% *} % 256 )) ;;
+  *) exit 9 ;;
+esac

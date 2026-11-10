@@ -101,6 +101,18 @@ ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
     ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ir_closure_share()))
 }
 
+// The row of the code word a function value of type `ty` holds at 8: a
+// Pointer whose checked type is IR_CODE_TYPE over `ty`, so IR Lint checks a
+// CallIndirect through it against the signature. A box of any other type
+// (a scope guard's, a hook's) holds a plain pointer.
+ir_code_row: fn(m: &IRModule, ty: Type) -> Int Never! {
+    if ir_untag(ty) == .Fn(_, _, _, _, _, _) {
+        code_ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{ir_untag(ty)}}
+        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}", ir_layout(IRTypeKind.Pointer, code_ty, 8, 8, IRClass.Pointer, false, 64, ""))
+    }
+    ir_pointer_row(m)
+}
+
 // Whether the value in `slot` is a function value.
 ir_closure_slot: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
     slot >= 0 && m.types[b.f.slot_type[slot]].clone == ir_closure_share()
@@ -195,7 +207,7 @@ ir_core_closure_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ki
         .ReactiveDerived(executable) -> return ir_reactive_derived(m, p, b, ty, executable, span)
         .ReactiveEffect(executable) -> return ir_reactive_effect(m, p, b, ty, executable, span)
         .UIReactiveRender(executable) -> return ir_reactive_rooted(m, p, b, executable, span)
-        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> return ir_ui_button_click(m, p, b, ty, label, shortcut, accessible_label, executable, span)
+        .UIClickSlot(executable) -> return ir_ui_click_slot(m, p, b, ty, executable, span)
         else -> return ir_fail_slot(b, span, "Core closure call {ir_core_closure_name(kind)}")
     }
 }

@@ -1,0 +1,310 @@
+// Remembered flags (#6606). Each flag a command takes is also that command's
+// setting `<command>.<flag>`: the command's dispatch form with a dot for each
+// space (`fmt`, `registry.publish`, `inspect.digest`) and the flag without its
+// dashes, with `_` for `-` (`check`, `no_sign`, `p`). A short form (`-u`)
+// shares its long flag's key, and a flag every command takes (`--color`) has
+// a key under every command. A flag whose registry row says why it is typed
+// each time (`typed`, a JET_CLI_FLAG_TYPED_REASONS row) has no setting: a
+// layer that names it is refused (E2117).
+//
+// A layer is one place that holds settings. The resolver takes the layers
+// lowest first, so a later layer's key wins over an earlier one's, and a flag
+// typed on the command line wins over every layer: the setting adds no word
+// for it. The resolver reads no file: which files are the layers, and how a
+// file writes its settings, is not decided yet.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[
+        Diagnostic, JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, JetCLIFlagSpec, JetCLIFlagValue,
+        diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_cli_flag_typed_reason,
+    ]
+}
+
+// One `key = value` a layer holds; `line` is its 1-based line in the layer,
+// 0 when the layer has no lines. The value is the data the layer was read as:
+// true or false, a string, or a list of strings, as JetCLIFlagValue says the
+// flag takes; any other value is refused (E2104).
+JetCLICommandSetting: struct {
+    key: String
+    value: Dyn
+    line: Int{0}
+}
+
+// One place that holds settings; `source` names it in diagnostics.
+JetCLICommandSettingLayer: struct {
+    source: String
+    settings: [JetCLICommandSetting]
+}
+
+// The words the layers add to one command line, or every problem they have.
+JetCLICommandSettingWords: enum {
+    Words(words: [String])
+    Refused(reports: [Diagnostic])
+}
+
+// A command that has settings: the word that dispatches it, which its flags
+// are scoped by, and its key prefix.
+JetCLISettingCommand: struct {
+    word: String
+    path: String
+}
+
+// One checked setting: the command it belongs to, its flag, and the words it
+// writes; or its report.
+JetCLISettingCheck: enum {
+    Flag(path: String, spec: JetCLIFlagSpec, words: [String])
+    Refused(report: Diagnostic)
+}
+
+// A flag the layers remember for this command line, and its words.
+JetCLISettingChosen: struct {
+    long: String
+    words: [String]
+}
+
+// The key name of a flag: `--no-sign` is `no_sign`, `-p` is `p`.
+jet_cli_setting_flag_name: fn(long: String) -> String Never! {
+    long.removeprefix("--").removeprefix("-").replace("-", "_")
+}
+
+// The key prefix of a dispatch word: `publish` is `registry.publish`.
+jet_cli_setting_command_path: fn(word: String) -> String Never! {
+    jet_cli_dispatch_form([String]{word.copy()}).replace(" ", ".") // copy: the caller keeps its word.
+}
+
+// Every command that has settings: each top-level command and each group
+// action dispatched under its own word (`publish`, `digest`). An action that
+// keeps its group's word (`inspect expand`) has its group's settings.
+jet_cli_setting_commands: fn() -> [JetCLISettingCommand] Never! {
+    commands := [JetCLISettingCommand]{}
+    loop command in JET_CLI_COMMANDS {
+        jet_cli_setting_command_add(commands, command.name)
+        loop action in command.actions {
+            index: jet_cli_handler_index(action.handler) ?? next
+            handler: JET_CLI_HANDLERS[index]
+            if handler.keeps_group -> next
+            jet_cli_setting_command_add(commands, handler.dispatch_word)
+        }
+    }
+    commands
+}
+
+jet_cli_setting_command_add: fn(commands: &[JetCLISettingCommand], word: String) Never! {
+    path: jet_cli_setting_command_path(word)
+    loop known in commands {
+        if known.path == path -> return
+    }
+    commands.push(JetCLISettingCommand{word: word.copy(), path: path}) // copy: the registry keeps its word.
+}
+
+// The flags `command` has settings for: every flag row it takes and has
+// built, short forms aside.
+jet_cli_setting_command_flags: fn(command: JetCLISettingCommand) -> [JetCLIFlagSpec] Never! {
+    form: command.path.replace(".", " ")
+    flags := [JetCLIFlagSpec]{}
+    loop spec in JET_CLI_FLAGS {
+        if spec.help.starts_with("Short form of ") -> next
+        if !jet_cli_flag_takes(spec, command.word) -> next
+        if !jet_cli_form_ported("{form} {spec.long}") -> next
+        flags.push(spec.copy()) // copy: the registry keeps its row.
+    }
+    flags
+}
+
+// Every setting key, persistable or not, of every command.
+jet_cli_setting_keys: fn(commands: [JetCLISettingCommand]) -> [String] Never! {
+    keys := [String]{}
+    loop command in commands {
+        loop spec in jet_cli_setting_command_flags(command) -> keys.push("{command.path}.{jet_cli_setting_flag_name(spec.long)}")
+    }
+    keys
+}
+
+// Where a setting is, as a diagnostic names it.
+jet_cli_setting_place: fn(source: String, line: Int) -> String Never! {
+    if line > 0 -> return "`{source}` line {line}"
+    "`{source}`"
+}
+
+// What a flag's setting takes, as a diagnostic says it.
+jet_cli_setting_wanted: fn(value: JetCLIFlagValue) -> String Never! {
+    if value == {
+        .Switch | .Bool -> "true or false"
+        .Value -> "one value, as a string"
+        .Optional -> "true, false or one value, as a string"
+        .Repeated -> "a list of strings, one per flag"
+    }
+}
+
+// What a setting holds, as a diagnostic says it.
+jet_cli_setting_held: fn(value: Dyn) -> String Never! {
+    if value == {
+        .Bool(_) -> "true or false"
+        .Text(text) -> if text == "" -> "an empty string" else -> "a string"
+        .Array(items) -> if jet_cli_setting_strings(items) == None -> "a list with an item that isn't a string" else -> "a list"
+        else -> "not true or false, a string or a list"
+    }
+}
+
+// The items of a list setting, or None when one isn't a string.
+jet_cli_setting_strings: fn(items: [Dyn]) -> [String]? Never! {
+    out := [String]{}
+    loop item in items {
+        if item == .Text(text) && text != "" {
+            out.push(text.copy()) // copy: the setting keeps its item.
+            next
+        }
+        return None
+    }
+    Val(out)
+}
+
+// The words one valued flag is written as: `--color=always`; a single-dash
+// flag takes its value as the next word (`-p server`).
+jet_cli_setting_valued: fn(long: String, value: String) -> [String] Never! {
+    if long.starts_with("--") -> return [String]{"{long}={value}"}
+    [String]{long.copy(), value.copy()} // copy: the caller keeps the flag and its value.
+}
+
+// The words a setting's value writes for `spec`, or None when the value is
+// not the shape the flag takes.
+jet_cli_setting_value_words: fn(spec: JetCLIFlagSpec, value: Dyn) -> [String]? Never! {
+    if value == {
+        .Bool(on) -> jet_cli_setting_on_words(spec, on)
+        .Text(text) -> if text != "" && (spec.value == .Value || spec.value == .Optional) -> Val(jet_cli_setting_valued(spec.long, text)) else -> None
+        .Array(items) -> jet_cli_setting_items_words(spec, jet_cli_setting_strings(items) ?? return None)
+        else -> None
+    }
+}
+
+// The words true or false writes for `spec`: a Value flag takes them as text.
+jet_cli_setting_on_words: fn(spec: JetCLIFlagSpec, on: Bool) -> [String]? Never! {
+    if spec.value == {
+        .Switch | .Optional -> if on -> Val([String]{spec.long.copy()}) else -> Val([String]{}) // copy: the registry keeps its row.
+        .Bool -> Val(if on -> [String]{spec.long.copy()} else -> [String]{"{spec.long}=false"}) // copy: the registry keeps its row.
+        .Value -> Val(jet_cli_setting_valued(spec.long, if on -> "true" else -> "false"))
+        .Repeated -> None
+    }
+}
+
+// The words a list writes for a Repeated `spec`: one flag per item.
+jet_cli_setting_items_words: fn(spec: JetCLIFlagSpec, items: [String]) -> [String]? Never! {
+    if spec.value != .Repeated -> return None
+    words := [String]{}
+    loop item in items {
+        loop word in jet_cli_setting_valued(spec.long, item) -> words.push(word)
+    }
+    Val(words)
+}
+
+// One setting checked against the registry: the command and flag its key
+// names, that the flag is persistable, and that the value is the flag's shape.
+jet_cli_setting_check: fn(commands: [JetCLISettingCommand], key: String, place: String, value: Dyn) -> JetCLISettingCheck Never! {
+    loop command in commands {
+        if !key.starts_with("{command.path}.") -> next
+        name: key.slice(command.path.len() + 1..<key.len())
+        loop spec in jet_cli_setting_command_flags(command) {
+            if jet_cli_setting_flag_name(spec.long) != name -> next
+            if spec.typed != "" {
+                row: diagnostic_registry_row("E2117") ?? panic("E2117 is not registered")
+                reason: (jet_cli_flag_typed_reason(spec.typed) ?? panic("flag `{spec.long}` names no typed reason `{spec.typed}`")).reason
+                what: jet_cli_setting_text(row.what, key, spec.long, place, reason)
+                why: jet_cli_setting_text(row.why, key, spec.long, place, reason)
+                fix: jet_cli_setting_text(row.fix, key, spec.long, place, reason)
+                return JetCLISettingCheck.Refused{report: diagnostic_from_registry("E2117", None, what, why, fix)}
+            }
+            words: jet_cli_setting_value_words(spec, value) ?? {
+                wanted: jet_cli_setting_wanted(spec.value)
+                return JetCLISettingCheck.Refused{report: diagnostic_from_registry("E2104", None, "`{key}` in {place} is {jet_cli_setting_held(value)}, but `{spec.long}` takes {wanted}.", jet_cli_why("E2104"), "Write `{key}` as {wanted}, or remove it.")}
+            }
+            return JetCLISettingCheck.Flag{path: command.path.copy(), spec: spec, words: words} // copy: the command list keeps its path.
+        }
+    }
+    fix := "Name a setting `<command>.<flag>` after a flag that command takes (`jet help <command>` lists them), or remove `{key}`."
+    if jet_cli_closest(key, jet_cli_setting_near_keys(commands, key)) == .Val(closest) -> fix = "Write `{closest}`, or remove `{key}`."
+    JetCLISettingCheck.Refused{report: diagnostic_from_registry("E2104", None, "`{key}` in {place} isn't a setting of any `jet` command.", jet_cli_why("E2104"), fix)}
+}
+
+// The keys a misspelled `key` is matched against: those of the command its
+// longest known prefix names (`fmt.chek` is matched against `fmt`'s), else
+// every command's.
+jet_cli_setting_near_keys: fn(commands: [JetCLISettingCommand], key: String) -> [String] Never! {
+    best := -1
+    loop (index, command) in commands {
+        if !key.starts_with("{command.path}.") -> next
+        if best < 0 || command.path.len() > commands[best].path.len() -> best = index
+    }
+    if best < 0 -> return jet_cli_setting_keys(commands)
+    jet_cli_setting_keys([JetCLISettingCommand]{commands[best].copy()}) // copy: the command list keeps its row.
+}
+
+// An E2117 row text with its holes filled.
+jet_cli_setting_text: fn(text: String, key: String, flag: String, source: String, reason: String) -> String Never! {
+    text.replace("{{key}}", key).replace("{{flag}}", flag).replace("{{source}}", source).replace("{{reason}}", reason)
+}
+
+// Is `spec` typed in `written`, as itself, `--flag=value` or a short form?
+// Words after `--` are the program's.
+jet_cli_setting_typed: fn(spec: JetCLIFlagSpec, written: [String]) -> Bool Never! {
+    short: "Short form of {spec.long}"
+    loop word in written {
+        if word == "--" -> return false
+        head: word.split("=").to_list()[0]
+        if head == spec.long -> return true
+        loop other in JET_CLI_FLAGS {
+            if other.long == head && other.help == short -> return true
+        }
+    }
+    false
+}
+
+// The words the layers add to the command line of the command `word`
+// dispatches, given the words typed after it (`written`). Every setting of
+// every layer is checked, for any command, so each problem a layer has is
+// reported at once; a layer with any problem adds nothing. The caller places
+// the words after the command's own words.
+jet_cli_command_settings_words: fn(word: String, written: [String], layers: [JetCLICommandSettingLayer]) -> JetCLICommandSettingWords Never! {
+    commands: jet_cli_setting_commands()
+    path: jet_cli_setting_command_path(word)
+    reports := [Diagnostic]{}
+    chosen := [JetCLISettingChosen]{}
+    loop layer in layers {
+        loop setting in layer.settings {
+            place: jet_cli_setting_place(layer.source, setting.line)
+            if jet_cli_setting_check(commands, setting.key, place, setting.value) == {
+                .Refused(report) -> reports.push(report)
+                .Flag(owner, spec, words) -> {
+                    if owner != path || jet_cli_setting_typed(spec, written) -> next
+                    jet_cli_setting_choose(chosen, spec.long, words)
+                }
+            }
+        }
+    }
+    if reports.len() > 0 -> return JetCLICommandSettingWords.Refused{reports: reports}
+    words := [String]{}
+    loop flag in chosen {
+        loop item in flag.words -> words.push(item.copy()) // copy: the chosen list keeps its words.
+    }
+    JetCLICommandSettingWords.Words{words: words}
+}
+
+// A later layer's value of a flag replaces an earlier one's; a list is never
+// merged.
+jet_cli_setting_choose: fn(chosen: &[JetCLISettingChosen], long: String, words: [String]) Never! {
+    found := -1
+    loop (index, flag) in chosen {
+        if flag.long == long -> found = index
+    }
+    if found >= 0 {
+        chosen[found] = JetCLISettingChosen{long: long.copy(), words: words.copy()} // copy: the caller keeps its flag and words.
+        return
+    }
+    chosen.push(JetCLISettingChosen{long: long.copy(), words: words.copy()}) // copy: the caller keeps its flag and words.
+}
+
+// A refused layer as the command's failure: every report on stderr, and the
+// typed reports a `--json` run prints in their place.
+jet_cli_command_settings_output: fn(reports: [Diagnostic], color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USAGE, failure: Val(JetDriverFailure{reports: reports.copy(), notice: ""})} // copy: the caller keeps its reports.
+}

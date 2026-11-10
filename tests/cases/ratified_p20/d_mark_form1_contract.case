@@ -1,0 +1,43 @@
+# D-MARK-FORM1 (#4284 c2): a marker, or one `#[A, B]` bracket group, sits right
+# before its target, and parentheses appear exactly when arguments are written.
+# Empty parentheses, adjacent markers outside one group, a marker at a site its
+# registry row does not list, and arguments that do not match the row's
+# signature are each one located registered error.
+fixture: d_mark_form1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_mark_form1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_mark_form1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_mark_form1_contract.stdout.expected
+stderr: empty
+step empty_parens: jet check empty_parens/main.jet
+exit: 1
+stderr: ~ "`#Inline()` has empty parentheses" # parentheses only with arguments
+stderr: ~ "--> main.jet:1:8" # located at the empty parentheses
+stderr: ~ "Fix: Write `#Inline`" # the bare form is the fix
+stderr: ~ "jet-lang.dev/e/E0999" # one registered code
+step adjacent: jet check adjacent/main.jet
+exit: 1
+stderr: ~ "Adjacent function markers belong in one bracket list" # one `#[A, B]` group
+stderr: ~ "--> main.jet:1:1" # located at the first marker
+stderr: ~ "jet-lang.dev/e/E0999" # one registered code
+step site: jet check site/main.jet
+exit: 1
+stderr: ~ "`#Inline` cannot attach at the Type site" # the registry row lists its sites
+stderr: ~ "--> main.jet:1:1" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0355" # one registered code
+step signature: jet check signature/main.jet
+exit: 1
+stderr: ~ "`#Pre` arguments do not match `Pre(condition: Value, message: String)`" # the row's signature
+stderr: ~ "--> main.jet:1:2" # located at the marker name
+stderr: ~ "jet-lang.dev/e/E0930" # one registered code

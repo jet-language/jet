@@ -1,0 +1,29 @@
+# 12 tasks block their carriers in libc sleep(1) on four carriers; a quick
+# task spawned after them finishes in under 100 ms, not after the sleeps
+# (#6403 c2). The monitor sees each carrier still on one job with its thread
+# off the CPU and starts another carrier for the queued work. Built programs
+# at O0, O1 and O2.
+requires: tool:cc|gcc|clang
+fixture: fixtures/blocked_foreign_call
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JET_SCHEDULER_THREADS=4
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "12 blockers done\nquick task under 100 ms true\n"
+stderr: empty
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "12 blockers done\nquick task under 100 ms true\n"
+stderr: empty
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "12 blockers done\nquick task under 100 ms true\n"
+stderr: empty

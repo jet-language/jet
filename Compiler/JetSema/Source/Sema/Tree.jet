@@ -440,7 +440,8 @@ TCoreClosureKind: enum {
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
-    UIButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda)
+    // A button's click handler, registered as the click slot Int it yields.
+    UIClickSlot(executable: TLambda)
     UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
     ReactiveDerived(executable: TLambda)
     ReactiveEffect(executable: TLambda)
@@ -689,7 +690,6 @@ THandleOp: enum {
     PathIsWithin
     PathToString
     PathWalk
-    UIBackendMethod(method: String)
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1124,14 +1124,8 @@ tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.
             tree_each_lambda_child(executable, visit)
         }
         .Guard(executable) -> tree_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> tree_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> tree_each_lambda_child(executable, visit)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> tree_each_lambda_child(executable, visit)
-        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
-            visit(label)
-            visit(shortcut)
-            visit(accessible_label)
-            tree_each_lambda_child(executable, visit)
-        }
     }
 
 }

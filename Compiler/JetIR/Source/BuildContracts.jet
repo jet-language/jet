@@ -43,6 +43,9 @@ ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContrac
     }
     failed: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Not, failed, condition, -1, -1, b.line)
+    // The message runs on the failing path only, which stops: a variable it
+    // moves still owns its value where the clause holds.
+    before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, failed, b.line)
     slot: ir_expr(m, p, b, contract.message)
     if ir_failed(b) -> return
@@ -59,6 +62,7 @@ ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContrac
     null: ir_word_const(m, b, 0)
     ir_stop(m, p, b, 3, message, null, null, report)
     ir_end(b.f, b.line)
+    ir_set_own_states(b, before)
     b.line = site
 }
 

@@ -78,6 +78,7 @@ ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Ne
         map.push(if slot < g.param_count -> ir_slot(guard, g.slot_type[slot], IRSlotKind.Param, -1, 0) else -> -1)
     }
     guard.result = g.result
+    guard.inline_sites = g.inline_sites.copy()
     loop k in 0..<at {
         written: g.dst[k]
         if written >= 0 && map[written] < 0 -> map[written] = ir_slot(guard, g.slot_type[written], IRSlotKind.Temp, -1, 0)
@@ -144,6 +145,7 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
     out.host_symbol = caller.host_symbol.copy()
+    out.inline_sites = caller.inline_sites.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)

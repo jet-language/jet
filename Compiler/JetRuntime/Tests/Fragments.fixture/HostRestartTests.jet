@@ -1,0 +1,30 @@
+// Real-runtime caller passes its argc/argv/envp with JET_RESTART_OLD=before,
+// no JET_RESTART_NEW and JET_TEST_READS_PATH=reads.log, then a restart
+// layout laid out as a main's startup stack: next_argv holds 3 arguments,
+// next_envp only JET_RESTART_NEW=after. The caller then checks reads.log
+// holds the read of JET_RESTART_OLD and none after the restart, whose
+// environment arms no recorder.
+#Export(c) jet_rt_host_restart_fixture: fn(argc: I64, argv: I64, envp: I64, next_argv: I64, next_envp: I64) -> I64 {
+    // Before any main registered the startup stack, a restart changes nothing.
+    if (jet_rt_host_restart(I64{3}, next_argv, next_envp) != I64{-1}) -> return I64{1}
+    jet_rt_host_main_arguments(argc, argv, envp)
+    old: rt_static_text("JET_RESTART_OLD")
+    new: rt_static_text("JET_RESTART_NEW")
+    if (jet_rt_arg_count() != argc || !jet_rt_env_present(old) || jet_rt_env_present(new)) -> return I64{2}
+    slot: jet_rt_alloc(I64{8}, I64{8})
+    if (jet_std_env_get(old, slot) != I64{1}) -> return I64{3}
+    before: rt_text_word(slot)
+    if !jet_rt_string_eq(before, rt_static_text("before")) -> return I64{4}
+    jet_rt_string_drop(before)
+    if (jet_rt_host_restart(I64{3}, next_argv, next_envp) != I64{0}) -> return I64{5}
+    if (jet_rt_arg_count() != I64{3} || jet_rt_env_present(old) || !jet_rt_env_present(new)) -> return I64{6}
+    // The logical environment is seeded again from the new startup stack.
+    rt_text_store(slot, I64{723})
+    if (jet_std_env_get(old, slot) != I64{0} || rt_text_word(slot) != I64{723}) -> return I64{7}
+    if (jet_std_env_get(new, slot) != I64{1}) -> return I64{8}
+    after: rt_text_word(slot)
+    if !jet_rt_string_eq(after, rt_static_text("after")) -> return I64{9}
+    jet_rt_string_drop(after)
+    jet_rt_free(slot, I64{8}, I64{8})
+    I64{0}
+}

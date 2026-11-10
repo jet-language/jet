@@ -658,14 +658,15 @@ mod_check_exports: fn(context: I64) -> I64 {
 // check_before_map: compiler identity first, then ABI, metadata, target,
 // exports and declared effects. Every refusal is tagged.
 mod_check: fn(context: I64) -> I64 {
-    // The runtime ships with its compiler at one package version
-    // (Compiler/JetRuntime/package.jet); a library from another is E1338.
-    if !mod_span_is(context, MOD_COMPILER_VERSION, rt_static_text("0.0.1")) {
+    // The runtime ships with its compiler at one Jet version (JET_VERSION,
+    // which tests/guards/jet_version.jet holds this literal to); a library
+    // from another is E1338.
+    if !mod_span_is(context, MOD_COMPILER_VERSION, rt_static_text("a0.0.43")) {
         reason: mod_reason(rt_static_text("Unsupported: "), rt_static_text("E1338: library `"))
         mod_push_span(reason, context, MOD_LIBRARY_NAME)
         jet_rt_string_builder_push(reason, rt_static_text("` was built by Jet `"))
         mod_push_span(reason, context, MOD_COMPILER_VERSION)
-        jet_rt_string_builder_push(reason, rt_static_text("`, but the loader uses Jet `0.0.1`"))
+        jet_rt_string_builder_push(reason, rt_static_text("`, but the loader uses Jet `a0.0.43`"))
         return reason
     }
     version: mod_word(context, MOD_ABI_VERSION)

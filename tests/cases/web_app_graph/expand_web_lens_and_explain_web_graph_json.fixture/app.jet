@@ -11,9 +11,9 @@ use ui: core.ui
 // `web.page` renders on the server: `/` reaches no effect and stays static.
 home: fn() -> WebPage { web.page("Hello", "world") }
 
-// `ui.button` is a browser-owned operation, so `/greet` reaches Browser and renders on the client.
+// `ui.mount` paints through the browser scene, so `/greet` reaches Browser and renders on the client.
 greet: fn() -> WebPage {
-    _go: ui.button("Go")
+    ui.mount(ui.null_backend(), ui.button("Go"))
     web.page("Greet", "hello")
 }
 

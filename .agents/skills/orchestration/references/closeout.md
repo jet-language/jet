@@ -25,8 +25,10 @@ patches do not substitute for milestone evidence.
 
 ## Compiler releases
 
-The a0_NNN releases in `~/.local/share/jet-seeds` carry a validated compiler
-from `dev` to `master`; `jet` on PATH runs `current`. After landings, run
+The a0.0.N releases in `~/.local/share/jet-seeds` carry a validated compiler
+from `dev` to `master`; `jet` on PATH runs `current`. `admit` refuses a HEAD
+whose `JET_VERSION` (Jetpack/PackageModel/Source/Manifest/Manifest.jet) is not
+the release it names, so the first landing after a release raises N. After landings, run
 `jet run Tools/release/Main.jet -- admit <dev HEAD>` on the newest HEAD, one run
 at a time (it holds a lock and takes a build slot). It builds the self-host
 chain from `current` without Rust and requires the fixed point, checks that the
@@ -34,17 +36,17 @@ runtime pack rebuilds byte for byte, runs the Jetpack census and the golden, ui
 and cases suites against `current`, and reports every result. A row `current`
 passes and the candidate loses needs a line in `--dispositions` naming its card.
 It releases only with at least `--min-gains` (default 10) gained rows. On a pass
-it assembles the next a0_NNN and publishes it, stopping at the first failure:
+it assembles the next a0.0.N and publishes it, stopping at the first failure:
 the commit must be on `origin/dev`, then the annotated tag (`TAG_MSG`) on it,
-`git push origin a0_NNN`, `jet run Tools/release/Main.jet -- candidate
-<seeds>/a0_NNN` and `jet run Tools/release/Main.jet -- publish <seeds>/a0_NNN`,
+`git push origin a0.0.N`, `jet run Tools/release/Main.jet -- candidate
+<seeds>/a0.0.N` and `jet run Tools/release/Main.jet -- publish <seeds>/a0.0.N`,
 the one route to a GitHub release (jet, IDENTITY, checksums, the seed archive
 and the signed candidate record). `candidate` signs with the `jet-release` key
 (`jet registry keygen --registry jet-release` once; the run does not start
 without it); `publish` refuses any release that no longer matches that record.
 Only a published release gets its `current.env` and PASS; a failed step leaves
 it unadmitted and prints the steps left. Main then runs the printed commands:
-`jet-use a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master` and the
+`jet-use a0.0.N`, `git merge --no-ff -F a0.0.N/MERGE_MSG` on `master` and the
 push of `master`. The tool never moves `current`, merges or pushes `master`.
 `jet-use` also rolls back, but only to a release whose evidence passed;
 `jet-which` names the current one.

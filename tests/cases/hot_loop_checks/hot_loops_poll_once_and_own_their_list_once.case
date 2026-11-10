@@ -9,10 +9,10 @@
 # every tier.
 fixture: hot_loops_poll_once_and_own_their_list_once.fixture
 env: NO_COLOR=1
-step: jet inspect decisions main.jet
+step: jet inspect decisions --optimize=basic main.jet
 env: JET_OPT_DUMP=step
 exit: 0
-stdout: ~ "O1:" # the default build runs the O1 passes
+stdout: ~ "O1:" # optimize: basic runs the O1 passes
 stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=step
@@ -22,9 +22,9 @@ stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
 step: jet inspect decisions --release main.jet
 exit: 0
 stdout: ~ "unique hoisted 1," # bump's list is made its own once, before its loop
-step: jet inspect decisions main.jet
+step: jet inspect decisions --optimize=basic main.jet
 exit: 0
-stdout: ~ "unique hoisted 1," # the default build hoists it too (Opt.jet: `unique` runs at O1)
+stdout: ~ "unique hoisted 1," # optimize: basic hoists it too (Opt.jet: `unique` runs at O1)
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=bump
 exit: 0

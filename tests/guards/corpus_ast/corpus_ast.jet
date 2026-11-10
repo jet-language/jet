@@ -1529,16 +1529,18 @@ policy_proof_matches: fn(proof: String, gate: String) -> Bool {
     (gate == "workload" && (proof == "compiled-workload-gate" || proof == "workload-gate"))
 }
 
-// Rust `is_declared_package_config_dir`: a `config/` candidate leaves the
+// Rust `is_declared_package_config_dir`: a candidate directory leaves the
 // corpus only when its sibling `package.jet` parses (uncomposed) and names it
 // under `configs:`; an unparsable manifest or undeclared directory stays.
 policy_declared_config: fn(root: String, candidate: String) -> Bool {
-    package_root: policy_slice_bytes(candidate, 0, candidate.bytes().len() - "/config".bytes().len())
+    segments: candidate.split("/").to_list()
+    name: segments[segments.len() - 1]
+    package_root: policy_slice_bytes(candidate, 0, candidate.bytes().len() - name.bytes().len() - 1)
     manifest_path: policy_join(root, "{package_root}/package.jet")
     source: policy_ast_files.read(manifest_path) ?? return false
     facts: PackageFacts.parse_uncomposed(source, manifest_path) ?? return false
     loop config in facts.configs {
-        if config == "config" || config.starts_with("config/") -> return true
+        if config == name || config.starts_with("{name}/") -> return true
     }
     false
 }
@@ -1977,7 +1979,7 @@ policy_ast_test_engine_entry_protocol: fn() PolicyError! {
     source: policy_ast_files.read("Jetpack/CLI/Source/Entry/Main.jet") ?? panic("read the engine entry: {err}")
     program: policy_parse_program("Jetpack/CLI/Source/Entry/Main.jet", source)
     assert(!policy_has_typed_cli_entry(program), "the engine entry must not grow a typed CLI entry")
-    symbols: [String]{"cli_jetpack_main", "ENGINE_PROTOCOL_FLAG", "COMPILER_VERSION", "EXTENSION_HOST_SUBCOMMAND", "BUILD_PLUGIN_HOST_SUBCOMMAND", "cli_run"}
+    symbols: [String]{"cli_jetpack_main", "ENGINE_PROTOCOL_FLAG", "JET_VERSION", "EXTENSION_HOST_SUBCOMMAND", "BUILD_PLUGIN_HOST_SUBCOMMAND", "cli_run"}
     loop symbol in symbols {
         assert(source.contains(symbol), "engine protocol lost {symbol}")
     }
@@ -2169,15 +2171,16 @@ policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
     guards_enter_root()
     policy_ast_test_manifest_scoped_inventory() ?? panic("{err.message}")
 }
-// Rust `is_declared_package_config_dir`: only a `config/` its sibling
+// Rust `is_declared_package_config_dir`: only a directory its sibling
 // `package.jet` declares under `configs:` leaves the corpus.
 policy_ast_test_declared_config_exclusion: fn() PolicyError! {
     manifest: policy_manifest()
-    declared: "Examples/Metaprogramming/BuildTime/CompilerAPIPackage/config"
+    declared: "Examples/Metaprogramming/BuildTime/CompilerAPIPackage/Config"
     discovery: policy_discover_manifest_files(manifest, ".")
     assert(discovery.config_candidates.contains(declared), "the package config directory is a discovery candidate")
-    assert(policy_declared_config(".", declared), "compiler_api_package declares configs: [\"config/release.jet\"]")
-    assert(!policy_declared_config(".", "Examples/Tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
+    assert(policy_declared_config(".", declared), "compiler_api_package declares configs: [\"Config/release.jet\"]")
+    assert(!policy_declared_config(".", "Examples/Metaprogramming/BuildTime/CompilerAPIPackage/Packages"), "a directory its package.jet does not declare stays in the corpus")
+    assert(!policy_declared_config(".", "Examples/Tooling/MissingPackage/Config"), "a config directory without a parsable package.jet stays in the corpus")
     inventory: policy_ast_inventory(manifest, ".")
     loop entry in inventory.files -> assert(!entry.path.starts_with("{declared}/"), "declared package config left in the corpus: {entry.path}")
     Ok()

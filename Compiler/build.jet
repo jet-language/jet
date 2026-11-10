@@ -5,15 +5,13 @@
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
 // rewritten and a hand edit is refused. The `runtime` step puts jet's runtime
 // pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet this build
-// made lowers the runtime, and the machine's C compiler builds Core's vendored
-// C. The pack carries no libc: a program's C closure links the musl sysroot
-// of jet's C toolchain pack (JetCli ForeignLink.jet).
+// made lowers the runtime, and no C compiler runs. The pack carries no C or
+// libc: a program's C closure links the musl sysroot of jet's C toolchain
+// pack (JetCli ForeignLink.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
     "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
-    "foreign/sqlite3/libsqlite3.a", "foreign/sqlite3/LICENSE",
-    "foreign/mbedtls/libmbedtls.a", "foreign/mbedtls/LICENSE", "foreign/mbedtls/VERSION",
     "provenance.json", "native.key",
 }
 // The runtime's folder, then the IR builder, optimizer and selector, the
@@ -32,7 +30,7 @@ PRELUDE_COPIES: [String]{
 KEYWORD_SOURCES: [String]{"JetLexer/Data/Lexer/Keywords.jet", "JetLexer/Source/Lexer/Tokens.jet", "JetLexer/Source/Lexer/Terminators.jet"}
 
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run the source generators with jet, and compile Core's vendored C with the machine's C toolchain") {
+    #Impure("run the source generators and the runtime pack step with jet") {
         prelude: b.run("prelude-sources", b.jet(), ["Exec", "FS"])
         prelude.arg("run")
         prelude.arg("--allow=FS")
@@ -51,9 +49,6 @@ build: fn(b: Build) -[Exec, FS]> {
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
         jet: b.add_executable("jet", ["JetCli/run.jet"], [prelude, keywords])
-        cc: b.probe("cc", "find_program", "cc")
-        ar: b.probe("ar", "find_program", "ar")
-        nm: b.probe("nm", "find_program", "nm")
         runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
         runtime.arg("run")
         runtime.arg("--allow=Env,Exec,FS")
@@ -61,13 +56,7 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.arg("--")
         runtime.arg("pack")
         runtime.file(b.host(jet), flag: "--jet=")
-        runtime.file(b.found(cc), flag: "--cc=")
-        runtime.file(b.found(ar), flag: "--ar=")
-        runtime.file(b.found(nm), flag: "--nm=")
-        runtime.file(b.dependency("sqlite3"), flag: "--sqlite3=")
-        runtime.file(b.dependency("mbedtls"), flag: "--mbedtls=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
-        runtime.input("JetCli/Source/Cli/native-c-policy.tsv", flag: "--policy=")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")

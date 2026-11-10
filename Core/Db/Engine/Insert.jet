@@ -1,0 +1,961 @@
+// INSERT: a port of SQLite 3.45.0 insert.c, the code generator for INSERT
+// statements (sqlite3Insert) and the constraint checks and record writes
+// UPDATE shares with it (sqlite3GenerateConstraintChecks,
+// sqlite3CompleteInsertion), with the table affinity routines, generated
+// columns and the AUTOINCREMENT bookkeeping. sqlite3OpenTable is Expr's,
+// sqlite3IndexAffinityStr Where's; sqlite3OpenTableAndIndices and
+// sqlite3AutoincrementEnd are Delete's, which DELETE calls too.
+//
+// This build of the engine has no triggers, foreign-key enforcement,
+// upsert, RETURNING or writable virtual tables, and no
+// SQLITE_ENABLE_NULL_TRIM or SQLITE_ENABLE_PREUPDATE_HOOK: the trigger
+// list is always empty, so no replace triggers are coded and no
+// uniqueness recheck follows them; an ON CONFLICT clause is an error; a
+// view or virtual table is read-only, so the VIEW and VUpdate paths are
+// not needed. The transfer optimization (xferOptimization) is not part of
+// this build: INSERT INTO t1 SELECT * FROM t2 runs through the
+// coroutine like any other INSERT ... SELECT, with the same result.
+// VdbeComment, VdbeCoverage, sqlite3VdbeVerifyAbortable and
+// sqlite3VdbeReleaseRegisters code nothing.
+use {
+    base: __core_db_base
+    ast: __core_db_ast
+    __core_db_ast.[SQLWalker]
+    tk: __core_db_tokenize
+    util: __core_db_util
+    conn: __core_db_conn
+    opc: __core_db_opcodes
+    aux: __core_db_vdbeaux
+    cg: __core_db_codegen
+    cat: __core_db_catalog
+    rs: __core_db_resolve
+    ex: __core_db_expr
+    we: __core_db_whereexpr
+    wh: __core_db_where
+    sel: __core_db_select
+    dl: __core_db_delete
+}
+
+// SQLITE_CORRUPT_SEQUENCE: sqlite_sequence is not a two-column rowid table.
+CORRUPT_SEQUENCE: 523
+
+// sqlite3TableAffinityStr: the affinities of table t's columns that are
+// stored (not VIRTUAL), trailing BLOB (and NONE) entries omitted.
+table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
+    z := [U8]{}
+    loop i in 0..<db.tables[t].cols.len() {
+        if db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 -> z.push(U8{db.tables[t].cols[i].affinity})
+    }
+    loop z.len() > 0 && Int.from_u8(z[z.len() - 1]) <= base.AFF_BLOB -> _: z.pop()
+    z
+}
+
+// sqlite3TableAffinity: apply table t's column affinities to the
+// registers from i_reg, or with i_reg 0 make them the P4 of the
+// OP_MakeRecord just coded. A STRICT table gets an OP_TypeCheck instead,
+// ahead of that OP_MakeRecord when i_reg is 0.
+table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_STRICT) != 0 {
+        if i_reg == 0 {
+            cg.v_append_p4(p, conn.P4.Table(t))
+            last: cg.v_last_addr(p)
+            if last < 0 -> return
+            prev: cg.v_op_at(p, last)
+            cg.v_change_opcode(p, last, opc.OP_TYPE_CHECK)
+            _: cg.op3(p, opc.OP_MAKE_RECORD, prev.p1, prev.p2, prev.p3)
+        } else {
+            n_nv_col: p.db.tables[t].n_nv_col
+            _: cg.op2(p, opc.OP_TYPE_CHECK, i_reg, n_nv_col)
+            cg.v_append_p4(p, conn.P4.Table(t))
+        }
+        return
+    }
+    z := [U8]{}
+    if p.db.tables[t].col_aff == .Val(c) {
+        z = c.copy()
+    } else {
+        z = table_affinity_str(p.db, t)
+        p.db.tables[t].col_aff = Val(z.copy())
+    }
+    n: z.len()
+    if n > 0 {
+        if i_reg != 0 {
+            _: cg.op4(p, opc.OP_AFFINITY, i_reg, n, 0, conn.P4.Text(z))
+        } else {
+            cg.v_change_p4(p, -1, conn.P4.Text(z))
+        }
+    }
+}
+
+// readsTable: whether the program so far opens table t of database i_db,
+// or one of its indices, for reading.
+reads_table: fn(p: &cg.Parse, i_db: Int, t: Int) -> Bool Never! {
+    i_end: cg.v_current_addr(p)
+    loop i in 1..<i_end {
+        if p.f.v.ops[i].opcode == opc.OP_OPEN_READ && p.f.v.ops[i].p3 == i_db {
+            tnum: p.f.v.ops[i].p2
+            if tnum == p.db.tables[t].tnum -> return true
+            ix := p.db.tables[t].index
+            loop ix >= 0 {
+                if tnum == p.db.indexes[ix].tnum -> return true
+                ix = p.db.indexes[ix].next
+            }
+        }
+    }
+    false
+}
+
+// exprColumnFlagUnion: the union of the colFlags of the columns an
+// expression references. col_flags is the table's colFlags when the walk
+// starts.
+ColumnFlagWalker: struct {
+    col_flags: [Int]
+    e_code: Int
+}
+
+impl ColumnFlagWalker.SQLWalker {
+    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].icolumn >= 0 {
+            self.e_code = self.e_code.bit_or(self.col_flags[a.exprs[e].icolumn])
+        }
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb: fn(&self) -> Bool Never! { false }
+    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+}
+
+// sqlite3ComputeGeneratedColumns: with the ordinary columns of table t in
+// the registers from i_reg_store, compute its STORED and VIRTUAL columns,
+// each after the generated columns it uses.
+compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: Int) Never! -[DB]> {
+    table_affinity(p, t, i_reg_store)
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_STORED) != 0 {
+        last: cg.v_last_addr(p)
+        if last >= 0 {
+            op: p.f.v.ops[last].opcode
+            if op == opc.OP_AFFINITY {
+                // The stored columns are not computed yet: give them the
+                // no-op affinity NONE.
+                if p.f.v.ops[last].p4 == .Text(z0) {
+                    z := z0.copy()
+                    ii := 0
+                    jj := 0
+                    loop jj < z.len() {
+                        cf: p.db.tables[t].cols[ii].col_flags
+                        ii += 1
+                        if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> next
+                        if cf.bit_and(conn.COLFLAG_STORED) != 0 -> z[jj] = U8{base.AFF_NONE}
+                        jj += 1
+                    }
+                    p.f.v.ops[last].p4 = conn.P4.Text(z)
+                }
+            } else if op == opc.OP_TYPE_CHECK {
+                // A STRICT table's generated columns are not checked.
+                p.f.v.ops[last].p3 = 1
+            }
+        }
+    }
+
+    // Mark every generated column not available, then compute those whose
+    // inputs are, until none is left or no progress is made.
+    n_col: p.db.tables[t].cols.len()
+    loop i in 0..<n_col {
+        cf: p.db.tables[t].cols[i].col_flags
+        if cf.bit_and(conn.COLFLAG_GENERATED) != 0 -> p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_NOTAVAIL)
+    }
+    w := ColumnFlagWalker{col_flags: [Int]{}, e_code: 0}
+    p.f.i_self_tab = -i_reg_store
+    redo := -1
+    loop {
+        progress := false
+        redo = -1
+        loop i in 0..<n_col {
+            cf: p.db.tables[t].cols[i].col_flags
+            if cf.bit_and(conn.COLFLAG_NOTAVAIL) == 0 -> next
+            p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_BUSY)
+            w.col_flags = [Int]{}
+            loop c in 0..<n_col -> w.col_flags.push(p.db.tables[t].cols[c].col_flags)
+            w.e_code = 0
+            ce: cat.column_expr(p.db, a, t, i)
+            _: ast.walk_expr<ColumnFlagWalker>(w, a, ce)
+            p.db.tables[t].cols[i].col_flags = util.clear_bits(p.db.tables[t].cols[i].col_flags, conn.COLFLAG_BUSY)
+            if w.e_code.bit_and(conn.COLFLAG_NOTAVAIL) != 0 {
+                redo = i
+                next
+            }
+            progress = true
+            x: cat.table_column_to_storage(p.db, t, i) + i_reg_store
+            ex.expr_code_generated_column(p, a, t, i, x)
+            p.db.tables[t].cols[i].col_flags = util.clear_bits(p.db.tables[t].cols[i].col_flags, conn.COLFLAG_NOTAVAIL)
+        }
+        if redo < 0 || !progress -> break
+    }
+    if redo >= 0 -> ast.error(a, "generated column loop on \"{ast.text(p.db.tables[t].cols[redo].name)}\"")
+    p.f.i_self_tab = 0
+}
+
+// autoIncBegin: the register that holds the largest rowid of
+// AUTOINCREMENT table t of database i_db (0 when t is not one, or during
+// VACUUM), with the AutoincInfo of the top-level Parse that tracks it.
+// Four registers: the table name, the largest rowid (the one returned),
+// its sqlite_sequence rowid and its value there.
+autoinc_begin: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, t: Int) -> Int Never! {
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) == 0 || p.db.m_db_flags.bit_and(conn.DBFLAG_VACUUM) != 0 -> return 0
+    seq: p.db.schemas[p.db.dbs[i_db].schema].seq_tab
+    if seq < 0 || !ex.has_rowid(p.db, seq) || ex.is_virtual(p.db, seq) || p.db.tables[seq].cols.len() != 2 {
+        a.ctx.nerr += 1
+        a.ctx.rc = CORRUPT_SEQUENCE
+        return 0
+    }
+    x := cg.top_ainc(p)
+    loop x >= 0 && p.aincs[x].tab != t -> x = p.aincs[x].next
+    if x < 0 {
+        // The table name, then the largest rowid, then the sqlite_sequence
+        // rowid and the original value.
+        _: cg.top_alloc_mem(p)
+        reg_ctr: cg.top_alloc_mem(p)
+        _: cg.top_alloc_mem(p)
+        _: cg.top_alloc_mem(p)
+        prior: cg.top_ainc(p)
+        p.aincs.push(cg.AutoincInfo{next: prior, tab: t, i_db: i_db, reg_ctr: reg_ctr})
+        x = p.aincs.len() - 1
+        cg.top_set_ainc(p, x)
+    }
+    p.aincs[x].reg_ctr
+}
+
+// sqlite3AutoincrementBegin: load each AUTOINCREMENT table's sqlite_sequence
+// entry into its registers. The top-level Parse's finish codes it, ahead
+// of the statement.
+autoincrement_begin: fn(p: &cg.Parse, a: &ast.AST) Never! {
+    x := p.f.ainc
+    loop x >= 0 {
+        info: p.aincs[x]
+        mem_id: info.reg_ctr
+        seq: p.db.schemas[p.db.dbs[info.i_db].schema].seq_tab
+        ex.open_table(p, a, 0, info.i_db, seq, opc.OP_OPEN_READ)
+        name: p.db.tables[info.tab].name.copy()
+        _: cg.v_load_string(p, mem_id - 1, name)
+        first: cg.v_op_list(p, [aux.VdbeOpList]{
+            dl.op_list_item(opc.OP_NULL, 0, mem_id, mem_id + 2),
+            dl.op_list_item(opc.OP_REWIND, 0, 10, 0),
+            dl.op_list_item(opc.OP_COLUMN, 0, 0, mem_id),
+            dl.op_list_item(opc.OP_NE, mem_id - 1, 9, mem_id),
+            dl.op_list_item(opc.OP_ROWID, 0, mem_id + 1, 0),
+            dl.op_list_item(opc.OP_COLUMN, 0, 1, mem_id),
+            dl.op_list_item(opc.OP_ADD_IMM, mem_id, 0, 0),
+            dl.op_list_item(opc.OP_COPY, mem_id, mem_id + 2, 0),
+            dl.op_list_item(opc.OP_GOTO, 0, 11, 0),
+            dl.op_list_item(opc.OP_NEXT, 0, 2, 0),
+            dl.op_list_item(opc.OP_INTEGER, 0, mem_id, 0),
+            dl.op_list_item(opc.OP_CLOSE, 0, 0, 0)
+        })
+        if first < 0 -> break
+        p.f.v.ops[first + 3].p5 = cg.JUMPIFNULL
+        if p.f.n_tab == 0 -> p.f.n_tab = 1
+        x = info.next
+    }
+}
+
+// checkConstraintExprNode: bit 1 when an expression uses a column that
+// ai_col marks changed (>= 0), bit 2 when it uses the rowid.
+CheckConstraintWalker: struct {
+    ai_col: [Int]
+    e_code: Int
+}
+
+impl CheckConstraintWalker.SQLWalker {
+    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        if a.exprs[e].op == tk.TK_COLUMN {
+            c: a.exprs[e].icolumn
+            if c >= 0 {
+                if self.ai_col[c] >= 0 -> self.e_code = self.e_code.bit_or(1)
+            } else {
+                self.e_code = self.e_code.bit_or(2)
+            }
+        }
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb: fn(&self) -> Bool Never! { false }
+    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+}
+
+// sqlite3ExprReferencesUpdatedColumn: whether expression e (a CHECK
+// constraint or an indexed expression) uses a column an UPDATE changes
+// (ai_chng[i] >= 0), or the rowid when chng_rowid.
+expr_references_updated_column: fn(a: &ast.AST, e: Int, ai_chng: [Int], chng_rowid: Bool) -> Bool Never! {
+    w := CheckConstraintWalker{ai_col: ai_chng.copy(), e_code: 0}
+    _: ast.walk_expr<CheckConstraintWalker>(w, a, e)
+    if !chng_rowid -> w.e_code = util.clear_bits(w.e_code, 2)
+    w.e_code != 0
+}
+
+// sqlite3GenerateConstraintChecks: check the NOT NULL, CHECK, rowid and
+// UNIQUE constraints of table t for the new row in the registers from
+// reg_new_data (the rowid, then the columns in storage order), and build
+// each changed index's record in its a_reg_idx register (0 skips the
+// index) and the table record in the last. reg_old_data is the old row of
+// an UPDATE (0 for an INSERT), pk_chng whether the rowid or PRIMARY KEY
+// may change, override_error the statement's ON CONFLICT (OE_DEFAULT for
+// none), ignore_dest where OE_IGNORE jumps, and ai_chng (UPDATE only) the
+// changed columns. True when a REPLACE may delete rows.
+generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [Int], i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, reg_old_data: Int, pk_chng: Bool, override_error: Int, ignore_dest: Int, ai_chng: [Int]?) -[DB]> Bool Never! {
+    is_update: reg_old_data != 0
+    n_col: p.db.tables[t].cols.len()
+    has_rowid: ex.has_rowid(p.db, t)
+    pk := -1
+    n_pk_field := 1
+    if !has_rowid {
+        pk = cat.primary_key_index(p.db, t)
+        n_pk_field = p.db.indexes[pk].n_key_col
+    }
+    seen_replace := false
+    b_affinity_done := false
+    has_ai_chng: ai_chng != None
+    chng: ai_chng ?? [Int]{}
+
+    // The NOT NULL constraints, in two passes when generated columns or
+    // ON CONFLICT REPLACE defaults are involved.
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_NOT_NULL) != 0 {
+        b2nd_pass := false
+        n_seen_replace := 0
+        n_generated := 0
+        loop {
+            loop i in 0..<n_col {
+                on_error := p.db.tables[t].cols[i].not_null
+                if on_error == ast.OE_NONE -> next
+                if i == p.db.tables[t].ipkey -> next
+                is_generated: p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0
+                if is_generated && !b2nd_pass {
+                    n_generated += 1
+                    next
+                }
+                if has_ai_chng && chng[i] < 0 && !is_generated -> next
+                if override_error != ast.OE_DEFAULT {
+                    on_error = override_error
+                } else if on_error == ast.OE_DEFAULT {
+                    on_error = ast.OE_ABORT
+                }
+                if on_error == ast.OE_REPLACE {
+                    if b2nd_pass || p.db.tables[t].cols[i].i_dflt == 0 -> on_error = ast.OE_ABORT
+                } else if b2nd_pass && !is_generated {
+                    next
+                }
+                i_reg: cat.table_column_to_storage(p.db, t, i) + reg_new_data + 1
+                if on_error == ast.OE_REPLACE {
+                    addr1: cg.op1(p, opc.OP_NOT_NULL, i_reg)
+                    n_seen_replace += 1
+                    dflt: cat.column_expr(p.db, a, t, i)
+                    ex.expr_code_copy(p, a, dflt, i_reg)
+                    cg.v_jump_here(p, addr1)
+                } else if on_error == ast.OE_ABORT || on_error == ast.OE_ROLLBACK || on_error == ast.OE_FAIL {
+                    if on_error == ast.OE_ABORT -> cg.may_abort(p)
+                    msg := p.db.tables[t].name.copy()
+                    msg.push(U8{46})
+                    loop b in p.db.tables[t].cols[i].name -> msg.push(b)
+                    _: cg.op3(p, opc.OP_HALT_IF_NULL, base.CONSTRAINT_NOTNULL, on_error, i_reg)
+                    cg.v_append_p4(p, conn.P4.Text(msg))
+                    cg.v_change_p5(p, cg.P5_CONSTRAINT_NOT_NULL)
+                } else {
+                    _: cg.op2(p, opc.OP_IS_NULL, i_reg, ignore_dest)
+                }
+            }
+            if n_generated == 0 && n_seen_replace == 0 -> break
+            if b2nd_pass -> break
+            b2nd_pass = true
+            if n_seen_replace > 0 && p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+                // A REPLACE default may change what generated columns compute.
+                compute_generated_columns(p, a, reg_new_data + 1, t)
+            }
+        }
+    }
+
+    // The CHECK constraints.
+    chk: p.db.tables[t].check
+    if chk >= 0 && p.db.flags.bit_and(conn.SQLITE_IGNORE_CHECKS) == 0 {
+        p.f.i_self_tab = -(reg_new_data + 1)
+        on_error := if override_error != ast.OE_DEFAULT -> override_error else -> ast.OE_ABORT
+        loop i in 0..<ast.list_len(a, chk) {
+            e: ast.list_expr(a, chk, i)
+            if has_ai_chng && !expr_references_updated_column(a, e, chng, pk_chng) -> next
+            if !b_affinity_done {
+                table_affinity(p, t, reg_new_data + 1)
+                b_affinity_done = true
+            }
+            all_ok: cg.v_make_label(p)
+            e_copy: ast.expr_dup(a, e, 0)
+            if !p.db.malloc_failed -> ex.expr_if_true(p, a, e_copy, all_ok, cg.JUMPIFNULL)
+            ast.expr_delete(a, e_copy)
+            if on_error == ast.OE_IGNORE {
+                _: cg.goto(p, ignore_dest)
+            } else {
+                z_name: a.lists[chk].items[i].ename
+                if on_error == ast.OE_REPLACE -> on_error = ast.OE_ABORT
+                cg.halt_constraint(p, base.CONSTRAINT_CHECK, on_error, z_name, cg.P5_CONSTRAINT_CHECK)
+            }
+            cg.v_resolve_label(p, all_ok)
+        }
+        p.f.i_self_tab = 0
+    }
+
+    // The rowid constraint: a changed rowid must not exist already. When it
+    // is REPLACE but the other constraints are not, it runs after them.
+    ipk_top := 0
+    ipk_bottom := 0
+    if pk_chng && pk < 0 {
+        addr_rowid_ok: cg.v_make_label(p)
+        on_error := p.db.tables[t].key_conf
+        if override_error != ast.OE_DEFAULT {
+            on_error = override_error
+        } else if on_error == ast.OE_DEFAULT {
+            on_error = ast.OE_ABORT
+        }
+        if on_error == ast.OE_REPLACE && on_error != override_error && p.db.tables[t].index >= 0 {
+            ipk_top = cg.op0(p, opc.OP_GOTO) + 1
+        }
+        if is_update {
+            // The rowid may not have changed after all.
+            _: cg.op3(p, opc.OP_EQ, reg_new_data, addr_rowid_ok, reg_old_data)
+            cg.v_change_p5(p, conn.CMP_NOTNULL)
+        }
+        _: cg.op3(p, opc.OP_NOT_EXISTS, i_data_cur, addr_rowid_ok, reg_new_data)
+        if on_error == ast.OE_REPLACE {
+            // The new row overwrites the table entry; its index entries go.
+            if p.db.tables[t].index >= 0 {
+                cg.multi_write(p)
+                dl.generate_row_index_delete(p, a, t, i_data_cur, i_idx_cur, None, -1)
+            }
+            seen_replace = true
+        } else if on_error == ast.OE_IGNORE {
+            _: cg.goto(p, ignore_dest)
+        } else {
+            if on_error != ast.OE_ROLLBACK && on_error != ast.OE_ABORT && on_error != ast.OE_FAIL -> on_error = ast.OE_ABORT
+            cg.rowid_constraint(p, on_error, t)
+        }
+        cg.v_resolve_label(p, addr_rowid_ok)
+        if ipk_top != 0 {
+            ipk_bottom = cg.op0(p, opc.OP_GOTO)
+            cg.v_jump_here(p, ipk_top - 1)
+        }
+    }
+
+    // The UNIQUE constraints, and the PRIMARY KEY of a WITHOUT ROWID table:
+    // build each changed index's new record and make sure it is unique.
+    // REPLACE indices are last in Table.pIndex.
+    ix := 0
+    idx := p.db.tables[t].index
+    loop idx >= 0 {
+        cur: idx
+        k: ix
+        idx = p.db.indexes[cur].next
+        ix += 1
+        if a_reg_idx[k] == 0 -> next
+        addr_unique_ok: cg.v_make_label(p)
+        if !b_affinity_done {
+            table_affinity(p, t, reg_new_data + 1)
+            b_affinity_done = true
+        }
+        i_this_cur: i_idx_cur + k
+
+        // Skip a partial index whose WHERE clause is not true.
+        pw: p.db.indexes[cur].part_idx_where
+        if pw >= 0 {
+            _: cg.op2(p, opc.OP_NULL, 0, a_reg_idx[k])
+            p.f.i_self_tab = -(reg_new_data + 1)
+            ex.expr_if_false_dup(p, a, pw, addr_unique_ok, cg.JUMPIFNULL)
+            p.f.i_self_tab = 0
+        }
+
+        // The index record of the new row.
+        reg_idx: a_reg_idx[k] + 1
+        n_column: p.db.indexes[cur].n_column
+        loop i in 0..<n_column {
+            i_field: p.db.indexes[cur].ai_column[i]
+            if i_field == conn.XN_EXPR {
+                p.f.i_self_tab = -(reg_new_data + 1)
+                ie: ast.list_expr(a, p.db.indexes[cur].col_expr, i)
+                ex.expr_code_copy(p, a, ie, reg_idx + i)
+                p.f.i_self_tab = 0
+            } else if i_field == conn.XN_ROWID || i_field == p.db.tables[t].ipkey {
+                _: cg.op2(p, opc.OP_INT_COPY, reg_new_data, reg_idx + i)
+            } else {
+                x: cat.table_column_to_storage(p.db, t, i_field) + reg_new_data + 1
+                _: cg.op2(p, opc.OP_SCOPY, x, reg_idx + i)
+            }
+        }
+        _: cg.op3(p, opc.OP_MAKE_RECORD, reg_idx, n_column, a_reg_idx[k])
+
+        // An UPDATE that leaves a WITHOUT ROWID PRIMARY KEY unchanged
+        // cannot collide on it.
+        if is_update && cur == pk && !pk_chng {
+            cg.v_resolve_label(p, addr_unique_ok)
+            next
+        }
+        on_error := p.db.indexes[cur].on_error
+        if on_error == ast.OE_NONE {
+            cg.v_resolve_label(p, addr_unique_ok)
+            next
+        }
+        if override_error != ast.OE_DEFAULT {
+            on_error = override_error
+        } else if on_error == ast.OE_DEFAULT {
+            on_error = ast.OE_ABORT
+        }
+
+        // A REPLACE on the PRIMARY KEY of a WITHOUT ROWID table with no
+        // other index needs no collision check: the insert overwrites.
+        if k == 0 && idx < 0 && cur == pk && on_error == ast.OE_REPLACE {
+            cg.v_resolve_label(p, addr_unique_ok)
+            next
+        }
+
+        n_key_col: p.db.indexes[cur].n_key_col
+        _: cg.op4_int(p, opc.OP_NO_CONFLICT, i_this_cur, addr_unique_ok, reg_idx, n_key_col)
+
+        // The key of the conflicting row.
+        reg_r: if cur == pk -> reg_idx else -> cg.get_temp_range(p, n_pk_field)
+        if is_update || on_error == ast.OE_REPLACE {
+            if has_rowid {
+                _: cg.op2(p, opc.OP_IDX_ROWID, i_this_cur, reg_r)
+                if is_update {
+                    // A conflict only when that row is not this one.
+                    _: cg.op3(p, opc.OP_EQ, reg_r, addr_unique_ok, reg_old_data)
+                    cg.v_change_p5(p, conn.CMP_NOTNULL)
+                }
+            } else {
+                pk_n_key: p.db.indexes[pk].n_key_col
+                if cur != pk {
+                    loop i in 0..<pk_n_key {
+                        x: cat.table_column_to_index(p.db, cur, p.db.indexes[pk].ai_column[i])
+                        _: cg.op3(p, opc.OP_COLUMN, i_this_cur, x, reg_r + i)
+                    }
+                }
+                if is_update {
+                    // A conflict only when the matched row's PRIMARY KEY is
+                    // not this row's old one.
+                    addr_jump := cg.v_current_addr(p) + pk_n_key
+                    op := opc.OP_NE
+                    reg_cmp: if p.db.indexes[cur].idx_type == ast.IDXTYPE_PRIMARYKEY -> reg_idx else -> reg_r
+                    loop i in 0..<pk_n_key {
+                        coll_name: p.db.indexes[pk].coll[i].copy()
+                        coll: cat.locate_coll_seq(p, a, coll_name)
+                        if i == pk_n_key - 1 {
+                            addr_jump = addr_unique_ok
+                            op = opc.OP_EQ
+                        }
+                        x: cat.table_column_to_storage(p.db, t, p.db.indexes[pk].ai_column[i])
+                        _: cg.op4(p, op, reg_old_data + 1 + x, addr_jump, reg_cmp + i, conn.P4.Coll(coll))
+                        cg.v_change_p5(p, conn.CMP_NOTNULL)
+                    }
+                }
+            }
+        }
+
+        // What a duplicate does.
+        if on_error == ast.OE_ROLLBACK || on_error == ast.OE_ABORT || on_error == ast.OE_FAIL {
+            cg.unique_constraint(p, on_error, cur)
+        } else if on_error == ast.OE_IGNORE {
+            _: cg.goto(p, ignore_dest)
+        } else {
+            e_mode: if cur == pk -> we.ONEPASS_SINGLE else -> we.ONEPASS_OFF
+            dl.generate_row_delete(p, a, t, i_data_cur, i_idx_cur, reg_r, n_pk_field, false, e_mode, i_this_cur)
+            seen_replace = true
+        }
+        cg.v_resolve_label(p, addr_unique_ok)
+        if reg_r != reg_idx -> cg.release_temp_range(p, reg_r, n_pk_field)
+    }
+
+    // The deferred REPLACE rowid check runs last.
+    if ipk_top != 0 {
+        _: cg.goto(p, ipk_top)
+        cg.v_jump_here(p, ipk_bottom)
+    }
+
+    // The table record.
+    if has_rowid {
+        n_nv_col: p.db.tables[t].n_nv_col
+        _: cg.op3(p, opc.OP_MAKE_RECORD, reg_new_data + 1, n_nv_col, a_reg_idx[ix])
+        if !b_affinity_done -> table_affinity(p, t, 0)
+    }
+    seen_replace
+}
+
+// sqlite3CompleteInsertion: write the records generate_constraint_checks
+// built: each changed index's, then the table's (a WITHOUT ROWID table's
+// record is its PRIMARY KEY index entry). update_flags is 0 for an INSERT,
+// else OPFLAG_ISUPDATE with perhaps OPFLAG_SAVEPOSITION; append_bias
+// says the rowid is likely the largest; use_seek that the OP_NoConflict
+// seeks may be reused (OPFLAG_USESEEKRESULT).
+complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, a_reg_idx: [Int], update_flags: Int, append_bias: Bool, use_seek: Bool) Never! {
+    has_rowid: ex.has_rowid(p.db, t)
+    i := 0
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        cur: ix
+        k: i
+        ix = p.db.indexes[cur].next
+        i += 1
+        if a_reg_idx[k] == 0 -> next
+        if p.db.indexes[cur].part_idx_where >= 0 {
+            // A row outside the partial index has a NULL record.
+            skip: cg.v_current_addr(p) + 2
+            _: cg.op2(p, opc.OP_IS_NULL, a_reg_idx[k], skip)
+        }
+        pik := if use_seek -> conn.OPFLAG_USESEEKRESULT else -> 0
+        if p.db.indexes[cur].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
+            pik = pik.bit_or(conn.OPFLAG_NCHANGE).bit_or(update_flags.bit_and(conn.OPFLAG_SAVEPOSITION))
+        }
+        n: if p.db.indexes[cur].uniq_not_null -> p.db.indexes[cur].n_key_col else -> p.db.indexes[cur].n_column
+        _: cg.op4_int(p, opc.OP_IDX_INSERT, i_idx_cur + k, a_reg_idx[k], a_reg_idx[k] + 1, n)
+        cg.v_change_p5(p, pik)
+    }
+    if !has_rowid -> return
+    pik := 0
+    if a.ctx.nested == 0 {
+        pik = conn.OPFLAG_NCHANGE.bit_or(if update_flags != 0 -> update_flags else -> conn.OPFLAG_LASTROWID)
+    }
+    if append_bias -> pik = pik.bit_or(conn.OPFLAG_APPEND)
+    if use_seek -> pik = pik.bit_or(conn.OPFLAG_USESEEKRESULT)
+    _: cg.op3(p, opc.OP_INSERT, i_data_cur, a_reg_idx[i], reg_new_data)
+    if a.ctx.nested == 0 -> cg.v_append_p4(p, conn.P4.Table(t))
+    cg.v_change_p5(p, pik)
+}
+
+// sqlite3Insert: code INSERT INTO src (column) select, or VALUES or
+// DEFAULT VALUES. src is a single-item SrcList; select is the SELECT or
+// VALUES list (-1 for DEFAULT VALUES); column the IdList (-1 for none);
+// on_error the OR clause (OE_DEFAULT for none); upsert the ON CONFLICT
+// clauses (-1 for none), which this build rejects. The statement owns and
+// deletes its arguments.
+insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_error: Int, upsert: Int) Never! -[DB]> {
+    select := select0
+    list := -1
+    if cg.n_err(a) == 0 {
+        // A single-row VALUES clause is kept as its expression list.
+        if select >= 0 && a.selects[select].sel_flags.bit_and(ast.SF_VALUES) != 0 && a.selects[select].prior < 0 {
+            list = a.selects[select].elist
+            a.selects[select].elist = -1
+            ast.select_delete(a, select)
+            select = -1
+        }
+        insert_body(p, a, src, select, list, column, on_error, upsert)
+    }
+    ast.src_list_delete(a, src)
+    ast.expr_list_delete(a, list)
+    ast.upsert_delete(a, upsert)
+    ast.select_delete(a, select)
+}
+
+// The body of sqlite3Insert up to its insert_cleanup label.
+insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) Never! -[DB]> {
+    t: dl.src_list_lookup(p, a, src)
+    if t < 0 -> return
+    si: ast.src_item(a, src, 0)
+    i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
+    if cg.auth_check(p, a, conn.AUTH_INSERT, Val(p.db.tables[t].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != 0 -> return
+    without_rowid: !ex.has_rowid(p.db, t)
+    g := p.up
+    if g.view_get_column_names(p, a, t) != 0 -> return
+    if dl.is_read_only(p, a, t) -> return
+
+    cg.get_vdbe(p)
+    if a.ctx.nested == 0 -> cg.v_count_changes(p)
+    cg.begin_write_operation(p, a, select >= 0, i_db)
+
+    // The AUTOINCREMENT counter, read from sqlite_sequence.
+    reg_autoinc: autoinc_begin(p, a, i_db, t)
+
+    // The registers of the new row: the rowid, then the columns.
+    n_col: p.db.tables[t].cols.len()
+    reg_rowid: p.f.n_mem + 1
+    reg_ins: reg_rowid
+    p.f.n_mem += n_col + 1
+    reg_data: reg_rowid + 1
+    tflags: p.db.tables[t].tab_flags
+
+    // Match the IDLIST to the table's columns; ipk_column is where the
+    // INTEGER PRIMARY KEY is in it. b_id_list_in_order says the columns come
+    // in storage order, so the SELECT can write straight into place.
+    ipk_column := -1
+    b_id_list_in_order := tflags.bit_and(ast.TF_OOO_HIDDEN.bit_or(ast.TF_HAS_STORED)) == 0
+    n_id: if column >= 0 -> a.idlists[column].items.len() else -> 0
+    if column >= 0 {
+        a.idlists[column].eu4 = ast.EU4_IDX
+        loop i in 0..<n_id -> a.idlists[column].items[i].u4 = -1
+        loop i in 0..<n_id {
+            z_name: a.idlists[column].items[i].name ?? [U8]{}
+            found := false
+            loop j in 0..<n_col {
+                if util.str_icmp(z_name, p.db.tables[t].cols[j].name) == 0 {
+                    a.idlists[column].items[i].u4 = j
+                    if i != j -> b_id_list_in_order = false
+                    if j == p.db.tables[t].ipkey -> ipk_column = i
+                    if p.db.tables[t].cols[j].col_flags.bit_and(conn.COLFLAG_STORED.bit_or(conn.COLFLAG_VIRTUAL)) != 0 {
+                        ast.error(a, "cannot INSERT into generated column \"{ast.text(p.db.tables[t].cols[j].name)}\"")
+                        return
+                    }
+                    found = true
+                    break
+                }
+            }
+            if !found {
+                if rs.is_rowid(z_name) && !without_rowid {
+                    ipk_column = i
+                    b_id_list_in_order = false
+                } else {
+                    z_tab: wh.src_item_text(a, si)
+                    ast.error(a, "table {z_tab} has no column named {ast.text(z_name)}")
+                    p.f.check_schema = true
+                    return
+                }
+            }
+        }
+    }
+
+    // The data: a SELECT or multi-row VALUES runs as a coroutine that
+    // yields one row at a time (templates 3 and 4); one that reads the
+    // table itself first fills an ephemeral table (template 4).
+    n_column := 0
+    src_tab := 0
+    use_temp_table := false
+    reg_from_select := 0
+    dest := ex.select_dest_init(cg.SRT_COROUTINE, 0)
+    if select >= 0 {
+        p.f.n_mem += 1
+        reg_yield: p.f.n_mem
+        addr_top: cg.v_current_addr(p) + 1
+        _: cg.op3(p, opc.OP_INIT_COROUTINE, reg_yield, 0, addr_top)
+        dest = ex.select_dest_init(cg.SRT_COROUTINE, reg_yield)
+        dest.i_sdst = if b_id_list_in_order -> reg_data else -> 0
+        dest.n_sdst = n_col
+        rc: sel.select(p, a, select, dest)
+        reg_from_select = dest.i_sdst
+        if rc != 0 || cg.n_err(a) != 0 -> return
+        cg.v_end_coroutine(p, reg_yield)
+        cg.v_jump_here(p, addr_top - 1)
+        n_column = ast.list_len(a, a.selects[select].elist)
+        if reads_table(p, i_db, t) -> use_temp_table = true
+        if use_temp_table {
+            src_tab = p.f.n_tab
+            p.f.n_tab += 1
+            reg_rec: cg.get_temp_reg(p)
+            reg_temp_rowid: cg.get_temp_reg(p)
+            _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, src_tab, n_column)
+            addr_l: cg.op1(p, opc.OP_YIELD, dest.i_sd_parm)
+            _: cg.op3(p, opc.OP_MAKE_RECORD, reg_from_select, n_column, reg_rec)
+            _: cg.op2(p, opc.OP_NEW_ROWID, src_tab, reg_temp_rowid)
+            _: cg.op3(p, opc.OP_INSERT, src_tab, reg_rec, reg_temp_rowid)
+            _: cg.goto(p, addr_l)
+            cg.v_jump_here(p, addr_l)
+            cg.release_temp_reg(p, reg_rec)
+            cg.release_temp_reg(p, reg_temp_rowid)
+        }
+    } else {
+        // A single-row VALUES clause, or DEFAULT VALUES.
+        src_tab = -1
+        if list >= 0 {
+            n_column = ast.list_len(a, list)
+            mark: p.ncs.len()
+            nc: rs.nc_push(p, rs.nc_new(-1, 0))
+            rc: rs.resolve_expr_list_names(p, a, nc, list)
+            rs.nc_release(p, mark)
+            if rc != 0 -> return
+        }
+    }
+
+    // Without an IDLIST the INTEGER PRIMARY KEY is where the table has it,
+    // counting the columns the data supplies.
+    if column < 0 && n_column > 0 {
+        ipk_column = p.db.tables[t].ipkey
+        if ipk_column >= 0 && tflags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+            i := ipk_column - 1
+            loop i >= 0 {
+                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 -> ipk_column -= 1
+                i -= 1
+            }
+        }
+        n_hidden := 0
+        if tflags.bit_and(ast.TF_HAS_GENERATED.bit_or(ast.TF_HAS_HIDDEN)) != 0 {
+            loop i in 0..<n_col {
+                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 -> n_hidden += 1
+            }
+        }
+        if n_column != n_col - n_hidden {
+            z_tab: wh.src_item_text(a, si)
+            ast.error(a, "table {z_tab} has {n_col - n_hidden} columns but {n_column} values were supplied")
+            return
+        }
+    }
+    if column >= 0 && n_column != n_id {
+        ast.error(a, "{n_column} values for {n_id} columns")
+        return
+    }
+
+    // The count of rows inserted.
+    reg_row_count := 0
+    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
+        p.f.n_mem += 1
+        reg_row_count = p.f.n_mem
+        _: cg.op2(p, opc.OP_INTEGER, 0, reg_row_count)
+    }
+
+    // Open the table and its indices; a register for each index record
+    // and, last, the table record.
+    opened: dl.open_table_and_indices(p, a, t, opc.OP_OPEN_WRITE, 0, -1, None)
+    i_data_cur: opened.data_cur
+    i_idx_cur: opened.idx_cur
+    a_reg_idx := [Int]{}
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        p.f.n_mem += 1
+        a_reg_idx.push(p.f.n_mem)
+        p.f.n_mem += p.db.indexes[ix].n_column
+        ix = p.db.indexes[ix].next
+    }
+    p.f.n_mem += 1
+    a_reg_idx.push(p.f.n_mem)
+    if upsert >= 0 {
+        ast.error(a, "ON CONFLICT DO UPDATE (upsert) is not supported in this build")
+        return
+    }
+
+    // The top of the insertion loop.
+    addr_ins_top := 0
+    addr_cont := 0
+    if use_temp_table {
+        addr_ins_top = cg.op1(p, opc.OP_REWIND, src_tab)
+        addr_cont = cg.v_current_addr(p)
+    } else if select >= 0 {
+        addr_ins_top = cg.op1(p, opc.OP_YIELD, dest.i_sd_parm)
+        addr_cont = addr_ins_top
+        // The SELECT's INTEGER PRIMARY KEY goes to the rowid register now,
+        // before its own slot is set to NULL below.
+        if ipk_column >= 0 -> _: cg.op2(p, opc.OP_COPY, reg_from_select + ipk_column, reg_rowid)
+    }
+
+    // The ordinary columns, in storage order from reg_data. The rowid and
+    // the generated columns come after.
+    n_hidden := 0
+    i_reg_store := reg_data
+    loop i in 0..<n_col {
+        store: i_reg_store
+        i_reg_store += 1
+        if i == p.db.tables[t].ipkey {
+            // The INTEGER PRIMARY KEY is the rowid: its slot holds NULL.
+            _: cg.op1(p, opc.OP_SOFT_NULL, store)
+            next
+        }
+        col_flags: p.db.tables[t].cols[i].col_flags
+        if col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
+            n_hidden += 1
+            if col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+                // A VIRTUAL column has no slot in the record.
+                i_reg_store -= 1
+                next
+            } else if col_flags.bit_and(conn.COLFLAG_STORED) != 0 {
+                next
+            } else if column < 0 {
+                // A hidden column not named gets its default.
+                dflt: cat.column_expr(p.db, a, t, i)
+                ex.expr_code_factorable(p, a, dflt, store)
+                next
+            }
+        }
+        k := 0
+        if column >= 0 {
+            j := 0
+            loop j < n_id && a.idlists[column].items[j].u4 != i -> j += 1
+            if j >= n_id {
+                // A column the IDLIST does not name gets its default.
+                dflt: cat.column_expr(p.db, a, t, i)
+                ex.expr_code_factorable(p, a, dflt, store)
+                next
+            }
+            k = j
+        } else if n_column == 0 {
+            // DEFAULT VALUES.
+            dflt: cat.column_expr(p.db, a, t, i)
+            ex.expr_code_factorable(p, a, dflt, store)
+            next
+        } else {
+            k = i - n_hidden
+        }
+        if use_temp_table {
+            _: cg.op3(p, opc.OP_COLUMN, src_tab, k, store)
+        } else if select >= 0 {
+            if reg_from_select != reg_data -> _: cg.op2(p, opc.OP_SCOPY, reg_from_select + k, store)
+        } else {
+            x: ast.list_expr(a, list, k)
+            y: ex.expr_code_target(p, a, x, store)
+            if y != store {
+                op: if ast.has(a, x, ast.EP_SUBQUERY) -> opc.OP_COPY else -> opc.OP_SCOPY
+                _: cg.op2(p, op, y, store)
+            }
+        }
+    }
+
+    // The new rowid: the one given, or OP_NewRowid when it is NULL or
+    // there is none.
+    end_of_loop: cg.v_make_label(p)
+    append_flag := false
+    if ipk_column >= 0 {
+        if use_temp_table {
+            _: cg.op3(p, opc.OP_COLUMN, src_tab, ipk_column, reg_rowid)
+        } else if select < 0 {
+            ipk: ast.list_expr(a, list, ipk_column)
+            if a.exprs[ipk].op == tk.TK_NULL {
+                _: cg.op3(p, opc.OP_NEW_ROWID, i_data_cur, reg_rowid, reg_autoinc)
+                append_flag = true
+            } else {
+                ex.expr_code(p, a, ipk, reg_rowid)
+            }
+        }
+        if !append_flag {
+            addr1: cg.op1(p, opc.OP_NOT_NULL, reg_rowid)
+            _: cg.op3(p, opc.OP_NEW_ROWID, i_data_cur, reg_rowid, reg_autoinc)
+            cg.v_jump_here(p, addr1)
+            _: cg.op1(p, opc.OP_MUST_BE_INT, reg_rowid)
+        }
+    } else if without_rowid {
+        _: cg.op2(p, opc.OP_NULL, 0, reg_rowid)
+    } else {
+        _: cg.op3(p, opc.OP_NEW_ROWID, i_data_cur, reg_rowid, reg_autoinc)
+        append_flag = true
+    }
+    // autoIncStep: track the largest rowid.
+    if reg_autoinc > 0 -> _: cg.op2(p, opc.OP_MEM_MAX, reg_autoinc, reg_rowid)
+
+    // The generated columns, which may use the rowid.
+    if tflags.bit_and(ast.TF_HAS_GENERATED) != 0 -> compute_generated_columns(p, a, reg_rowid + 1, t)
+
+    // Check the constraints and write the row.
+    is_replace: generate_constraint_checks(p, a, t, a_reg_idx, i_data_cur, i_idx_cur, reg_ins, 0, ipk_column >= 0, on_error, end_of_loop, None)
+    b_use_seek: !is_replace || !aux.has_sub_program(p.f.v)
+    complete_insertion(p, a, t, i_data_cur, i_idx_cur, reg_ins, a_reg_idx, 0, append_flag, b_use_seek)
+
+    if reg_row_count != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, reg_row_count, 1)
+
+    // The bottom of the insertion loop.
+    cg.v_resolve_label(p, end_of_loop)
+    if use_temp_table {
+        _: cg.op2(p, opc.OP_NEXT, src_tab, addr_cont)
+        cg.v_jump_here(p, addr_ins_top)
+        _: cg.op1(p, opc.OP_CLOSE, src_tab)
+    } else if select >= 0 {
+        _: cg.goto(p, addr_cont)
+        cg.v_jump_here(p, addr_ins_top)
+    }
+
+    // Store the largest rowids AUTOINCREMENT tables reached in
+    // sqlite_sequence.
+    if a.ctx.nested == 0 && p.f.trigger_tab < 0 -> dl.autoincrement_end(p, a)
+
+    // Return the number of rows inserted.
+    if reg_row_count != 0 -> dl.code_change_count(p, reg_row_count, "rows inserted")
+}

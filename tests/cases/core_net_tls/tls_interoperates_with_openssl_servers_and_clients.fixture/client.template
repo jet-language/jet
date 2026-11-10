@@ -1,0 +1,83 @@
+// #6694 c3: Core's TLS client against OpenSSL servers (`openssl s_server
+// -rev`, which sends each line back reversed). Each row names the server's
+// port, the version bounds and the client identity; the client checks the
+// server's chain against the two test roots and its name, sends a line and
+// reads it back.
+use {
+    files: core.files
+    net: core.net
+    tls: core.net.tls
+}
+
+Row: struct {
+    name: String
+    port: String
+    min: TLSVersion
+    max: TLSVersion
+    identity: Bool
+    alpn: [String]
+}
+
+row: fn(name: String, port: String, version: TLSVersion) -> Row {
+    Row{name: name, port: port, min: version, max: version, identity: false, alpn: [String]{}}
+}
+
+// The row's line, or the row's error.
+exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, Time.Wait]> String {
+    config := tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
+    config = config.with_version_bounds(min: r.min, max: r.max) ?? panic("version policy")
+    if r.identity {
+        config = config.with_client_identity(identity) ?? panic("client identity")
+    }
+    if r.alpn.len() > 0 {
+        config = config.with_alpn(r.alpn) ?? panic("ALPN policy")
+    }
+    tcp := net.tcp_connect("127.0.0.1:{r.port}") ?? panic("connect {r.name}")
+    budget: 10s
+    secure := tls.client(tcp, server_name: "localhost", config: config, deadline: budget) ?? return "{r.name}: {err}"
+    peer: secure.peer_identity()
+    version: if tls.is_tls13(peer.tls_version) -> "TLS 1.3" else -> "TLS 1.2"
+    secure.write_all("ping\n".bytes(), deadline: budget) ?? return "{r.name}: write: {err}"
+    reply := [U8]{}
+    loop {
+        got: secure.read(4096, deadline: budget) ?? return "{r.name}: read: {err}"
+        if got.len() == 0 -> break
+        reply.extend(got)
+        if reply[reply.len() - 1] == 10 -> break
+    }
+    secure.close() ?? return "{r.name}: close: {err}"
+    text: String.from_bytes(reply) ?? panic("reply text {r.name}")
+    "{r.name}: {version} {peer.cipher_suite} {peer.verified_server_name} {text.trim()}"
+}
+
+run: fn() {
+    rsa_ca: files.read_bytes("rsa-ca.pem") ?? panic("RSA CA fixture")
+    ec_ca: files.read_bytes("ec-ca.pem") ?? panic("EC CA fixture")
+    bundle := rsa_ca.copy()
+    bundle.extend(ec_ca)
+    roots: tls.RootCertificates.from_pem(bundle) ?? panic("validate CAs")
+    cert: files.read_bytes("client.cert.pem") ?? panic("client certificate fixture")
+    key: files.read_bytes("client.key.pem") ?? panic("client key fixture")
+    identity: tls.ClientIdentity.from_pem(cert, key) ?? panic("validate client identity")
+    mtls13 := row("TLS 1.3 client certificate", "{free-port:mtls13}", TLSVersion.TLS13)
+    mtls13.identity = true
+    mtls12 := row("TLS 1.2 client certificate", "{free-port:mtls12}", TLSVersion.TLS12)
+    mtls12.identity = true
+    alpn := row("TLS 1.3 ALPN h2", "{free-port:alpn}", TLSVersion.TLS13)
+    alpn.alpn = [String]{"h2", "http/1.1"}
+    rows: [Row]{
+        row("TLS 1.3 AES-128-GCM RSA-PSS", "{free-port:aes128}", TLSVersion.TLS13),
+        row("TLS 1.3 AES-256-GCM ECDSA", "{free-port:aes256}", TLSVersion.TLS13),
+        row("TLS 1.3 ChaCha20-Poly1305 ECDSA", "{free-port:chacha}", TLSVersion.TLS13),
+        row("TLS 1.3 HelloRetryRequest to P-384", "{free-port:p384}", TLSVersion.TLS13),
+        row("TLS 1.3 P-256", "{free-port:p256}", TLSVersion.TLS13),
+        row("TLS 1.2 ECDHE-ECDSA AES-128-GCM", "{free-port:ecdsa12}", TLSVersion.TLS12),
+        row("TLS 1.2 ECDHE-RSA AES-256-GCM", "{free-port:rsa12}", TLSVersion.TLS12),
+        row("TLS 1.2 ECDHE-RSA ChaCha20-Poly1305", "{free-port:chacha12}", TLSVersion.TLS12),
+        mtls13,
+        mtls12,
+        alpn,
+        row("TLS 1.3 SNI localhost", "{free-port:sni}", TLSVersion.TLS13),
+    }
+    loop r in rows -> print(exchange(r, roots, identity))
+}

@@ -195,24 +195,12 @@ provider_nix_cache_key: fn(identity: CacheIdentity) -> String Never! {
 provider_flake_ref: fn(spec: RefSpec, table: SourceTable) -> String Never! {
     if spec.source == {
         .Jetpack | .Nixpkgs -> "nixpkgs#{provider_nix_package_name(spec.package)}"
-        .Github -> "github:{spec.package}"
-        .Path -> "path:{spec.package}"
-        .Cran -> "cran:{spec.package}"
-        .LuaRocks -> "luarocks:{spec.package}"
-        .RubyGems -> "ruby:{spec.package}"
-        .Cpan -> "perl:{spec.package}"
-        .Packagist -> "php:{spec.package}"
-        .JetRegistry -> "jet-registry:{spec.package}"
-        .Npm -> "npm:{spec.package}"
-        .Cargo -> "cargo:{spec.package}"
-        .PyPI -> "pypi:{spec.package}"
-        .SwiftPM -> "swiftpm:{spec.package}"
-        .Releases -> "releases:{spec.package}"
         .Named(name) -> {
             upstream: table.upstream(name) ?? name
             package: if table.provider(name) == ProviderKind.Nix -> provider_nix_package_name(spec.package) else -> spec.package
             "{upstream}#{package}"
         }
+        else -> "{spec.source.label()}:{spec.package}"
     }
 }
 

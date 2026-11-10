@@ -21,7 +21,7 @@ use {
         evidence_outcome_test_state, evidence_report_encode, evidence_report_read, expr_span, foundation_json_quote,
     ]
     jet_parser.[parse_source]
-    jet_pkg_model.[COMPILER_VERSION, ClaimsGrade, WorkspaceDeclarationCache]
+    jet_pkg_model.[JET_VERSION, ClaimsGrade, WorkspaceDeclarationCache]
 }
 
 // `RUNTIME`: a program stop.
@@ -434,7 +434,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
     // compiler's own identity stands in for them.
     build_digest: jet_cli_prove_digest("jet-proof-build-v3", [JetCLIProveField]{
         jet_cli_prove_field("compiler", jet_cli_compiler_identity() ?? "unversioned"),
-        jet_cli_prove_field("jet_version", COMPILER_VERSION),
+        jet_cli_prove_field("jet_version", JET_VERSION),
         jet_cli_prove_field("target", jet_cli_prove_triple()),
         jet_cli_prove_field("profile", JET_BUILD_DEFAULT_PROFILE),
         jet_cli_prove_field("build_inputs", build_inputs),
@@ -720,7 +720,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         spec := cli_process.cmd(argv)
             .env(EVIDENCE_REPORT_ENV, report_path)
             .env(EVIDENCE_REPORT_ID_ENV, "prove:{short}")
-            .env(EVIDENCE_TOOLCHAIN_ENV, COMPILER_VERSION)
+            .env(EVIDENCE_TOOLCHAIN_ENV, JET_VERSION)
             .env(EVIDENCE_TARGET_ENV, jet_cli_prove_triple())
             .env(EVIDENCE_PROFILE_ENV, identity.profile)
             .env(EVIDENCE_SOURCE_REVISION_ENV, identity.source_digest)
@@ -1280,8 +1280,8 @@ jet_cli_prove_report: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
     target_members: loop member in identity.members -> "{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}"
     target: "{{\"inputSha256\":{foundation_json_quote(identity.input_sha256)},\"kind\":{foundation_json_quote(identity.kind)},\"members\":[{target_members.join(",")}],\"mir\":{identity.mir_json},\"root\":{foundation_json_quote(identity.root)}}}"
     triple: foundation_json_quote(jet_cli_prove_triple())
-    tool: "{{\"jet\":{foundation_json_quote(COMPILER_VERSION)},\"proofProducer\":\"jet-prove\",\"targetTriple\":{triple}}}"
-    candidate: "{{\"source\":{{\"sha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"contentSha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"inputSha256\":{jet_cli_prove_digest_json(identity.input_sha256)}}},\"compiler\":{{\"sha256\":{jet_cli_prove_digest_json(identity.build_digest)},\"version\":{foundation_json_quote(COMPILER_VERSION)}}},\"configuration\":{{\"coreAbi\":{foundation_json_quote(identity.core_abi)},\"lockSha256\":{jet_cli_prove_digest_json(identity.lock_digest)},\"profile\":{foundation_json_quote(identity.profile)}}},\"generatedArtifact\":{{\"semanticMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"optimizedMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"mir\":{identity.mir_json}}},\"targetTool\":{{\"triple\":{triple},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
+    tool: "{{\"jet\":{foundation_json_quote(JET_VERSION)},\"proofProducer\":\"jet-prove\",\"targetTriple\":{triple}}}"
+    candidate: "{{\"source\":{{\"sha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"contentSha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"inputSha256\":{jet_cli_prove_digest_json(identity.input_sha256)}}},\"compiler\":{{\"sha256\":{jet_cli_prove_digest_json(identity.build_digest)},\"version\":{foundation_json_quote(JET_VERSION)}}},\"configuration\":{{\"coreAbi\":{foundation_json_quote(identity.core_abi)},\"lockSha256\":{jet_cli_prove_digest_json(identity.lock_digest)},\"profile\":{foundation_json_quote(identity.profile)}}},\"generatedArtifact\":{{\"semanticMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"optimizedMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"mir\":{identity.mir_json}}},\"targetTool\":{{\"triple\":{triple},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
     result: jet_cli_prove_result(exit_code, tests, contracts, budgets, solver)
     text: "{{\"derivations\":[{derivations.join(",")}],\"diagnostics\":[{diagnostics.join(",")}],\"evidence\":[{evidence.join(",")}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{quoted_grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"candidateIdentity\":{candidate},\"summaries\":{summaries},\"target\":{target},\"tool\":{tool}}}"
     jet_cli_prove_canonical(text)
@@ -1365,7 +1365,7 @@ jet_cli_prove_contract_json: fn(contract: JetCLIProveContract) -[FS]> String Nev
 // A property row's `property` object.
 jet_cli_prove_property_json: fn(run: JetCLIProveProperty, item: JetCLIProveTestItem) -> String Never! {
     trace: if run.minimized == "" -> "[]" else -> "[{{\"name\":\"minimized_inputs\",\"value\":{foundation_json_quote(run.minimized)}}}]"
-    "{{\"caseIndex\":{run.case_index},\"effectiveSeed\":{run.seed},\"generatedCases\":{run.cases},\"shrinkTrace\":{trace},\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"toolchain\":{{\"jet\":{foundation_json_quote(COMPILER_VERSION)},\"targetTriple\":{foundation_json_quote(jet_cli_prove_triple())}}}}}"
+    "{{\"caseIndex\":{run.case_index},\"effectiveSeed\":{run.seed},\"generatedCases\":{run.cases},\"shrinkTrace\":{trace},\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"toolchain\":{{\"jet\":{foundation_json_quote(JET_VERSION)},\"targetTriple\":{foundation_json_quote(jet_cli_prove_triple())}}}}}"
 }
 
 // `source_line_for`: the 1-based `line` of `path`, when it can be read.
@@ -1611,7 +1611,7 @@ jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed:
         }
     }
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
-    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
     entry: jet_cli_comparison_index_entry(index, record, "proof", artifact_id, relative, bytes.len(), links, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
     jet_cli_record_index_publish_and_store(index, root, entry) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
 }

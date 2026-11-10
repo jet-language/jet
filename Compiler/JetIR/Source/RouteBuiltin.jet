@@ -445,6 +445,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .IndexOf -> return ir_builtin_plain_route("list_index_of", "jet_list_index_of", 2, [Bool]{true, true}, None)
         .Reverse -> return ir_builtin_plain_route("list_reverse", "jet_list_reverse", 1, [Bool]{true}, Val(Effect.Mem))
         .SwapList -> return ir_builtin_plain_route("list_swap", "jet_list_swap", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .ListFill -> return ir_builtin_plain_route("list_fill", "jet_list_fill", 4, [Bool]{true, false, false, true}, Val(Effect.Mem))
         .Sort -> return ir_builtin_plain_route("list_sort", "jet_list_sort", 1, [Bool]{true}, Val(Effect.Mem))
         .SortDesc -> return ir_builtin_plain_route("list_sort_desc", "jet_list_sort_desc", 1, [Bool]{true}, Val(Effect.Mem))
         .OrderingThen -> return ir_builtin_plain_route("ordering_then", "jet_ordering_then", 2, [Bool]{true, true}, None)
@@ -542,7 +543,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .ListSlice -> return ir_builtin_plain_route("list_slice", "jet_list_slice", 3, [Bool]{true, false, false}, None)
         .ListBinarySearch -> return ir_builtin_plain_route("list_binary_search", "jet_list_binary_search", 2, [Bool]{true, true}, None)
         .ListEqual -> return ir_builtin_plain_route("list_equal", "jet_list_equal", 2, [Bool]{true, true}, None)
-        .ListReplace -> return ir_builtin_plain_route("list_replace", "jet_list_replace", 3, [Bool]{true, false, false}, None)
+        .ListReplace -> return ir_builtin_plain_route("list_replace", "jet_list_replace", 3, [Bool]{true, false, false}, Val(Effect.Mem))
         else -> {}
     }
     ir_builtin_route_for_receiver(operation, receiver, carrier)

@@ -1709,7 +1709,10 @@ sema_expression_typed_literal_text_parts: fn(parts: [StrPart], kind: TypedHeadKi
                 context.allow_string_view_read = old_string_view
                 hole: checked ?? return None
                 trusted := kind == TypedHeadKind.HTML && sema_expression_typed_hole_is(hole.ty, "HTML")
-                if !trusted && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
+                // A DBValue is already a bound parameter: an `SQL{…}` hole
+                // binds it as-is (sema_expression_sql_hole_value), never as text.
+                bound: kind == TypedHeadKind.SQL && sema_expression_typed_hole_is(hole.ty, "DBValue")
+                if !trusted && !bound && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
                     diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
                     return None
                 }

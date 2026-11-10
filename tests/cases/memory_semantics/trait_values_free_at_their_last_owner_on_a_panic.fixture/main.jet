@@ -1,0 +1,55 @@
+// #6727: trait values ended before a panic stay ended, and one live at the
+// stop is still whole for the stopped cleanup: the scope guard that captured
+// it calls it, and its box (released with the guard's closure) is not ended
+// twice. The stop reports the count of the caller's own context and the one
+// live payload's.
+package: {
+    name: "trait_values_free_at_their_last_owner_on_a_panic"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+use scope: core.mem.scope
+
+Context: struct {
+    id: Int
+}
+
+Sink: trait {
+    finish: fn(&&self) -[]> Int
+    peek: fn(self) -[]> Int
+}
+
+Worker: struct {
+    context: Shared<Context>
+    n: Int
+}
+
+impl Worker.Sink {
+    finish: fn(&&self) -[]> Int {
+        self.n + 2
+    }
+    peek: fn(self) -[]> Int {
+        self.n + 1
+    }
+}
+
+make: fn(s: Shared<Context>, n: Int) -> Sink {
+    Worker{context: s.copy(), n: n}
+}
+
+stop_with: fn(s: Shared<Context>) {
+    total := 0
+    loop i in 0..<5 {
+        k: make(s, i)
+        total += k.peek() + make(s, i).finish()
+    }
+    held: make(s, 9)
+    _guard: scope.guard(() -> print("guard sees {held.peek()}"))
+    print("before the stop {total}")
+    panic("stop with {s.strong_count()} live")
+}
+
+run: fn() {
+    s := shared Context{id: 1}
+    stop_with(s)
+}

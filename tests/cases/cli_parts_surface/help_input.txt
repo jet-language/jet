@@ -1,0 +1,22 @@
+jet help input — What a program reads
+
+`input` is every line of the program's input: the files its arguments name,
+in order, else standard input. The names below read it the same way in a
+script and in `jet -e CODE [<files>]`.
+
+  input                  Each line, read as it is needed
+                           jet -e 'input.map((l) -> l.upper())' notes.txt
+  input.csv<Row>()       The lines as one CSV table, header first, decoded into [Row];
+                         a field Row lacks is a compile error
+                           input.csv<Sale>().map((s) -> s.amount).sum()
+  input.json<Row>()      Each JSON value, one per line or across lines, decoded into [Row]
+                           input.json<Event>().filter((e) -> e.level == "error")
+  input.edit(change)     Each named file rewritten in place, every line through change;
+                         with no file named, standard input printed changed
+                           jet -e 'input.edit((l) -> l.replace("http:", "https:"))' *.md
+  line.words()           The words of a line, split on whitespace
+                           jet -e 'input.map((l) -> l.words()[1])' log.txt
+  line.split(sep)        The fields of a line, split on sep
+                           jet -e 'input.map((l) -> l.split(",")[0])' data.txt
+  readline(prompt)       One line of standard input after a prompt (core.term)
+                           name: readline("name? ")

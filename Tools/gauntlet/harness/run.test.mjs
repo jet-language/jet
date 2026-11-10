@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { probeAxisTools, stageEntry } from "./run.mjs";
+import { loadEntries, probeAxisTools, runToolEntry, stageEntry } from "./run.mjs";
 
 const scratchRoot = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const execFileAsync = promisify(execFile);
@@ -234,5 +234,102 @@ test("parallel-grep para_map probe preserves byte-exact output", stagedEntryTest
     );
     assert.equal(result.stdout, expected);
     assert.doesNotMatch(result.stderr, /E0405|pair\.b/);
+  });
+});
+
+// A tool entry: the original count.mjs and its twin Count.jet (here a fake
+// jet that prints what the twin would) both read the fixture input.txt.
+async function writeToolEntry(root, { twinOutput }) {
+  const entryDir = path.join(root, "entries", "count");
+  await fs.mkdir(path.join(entryDir, "fixtures"), { recursive: true });
+  await fs.mkdir(path.join(entryDir, "expected"), { recursive: true });
+  await fs.mkdir(path.join(root, "Tools", "count"), { recursive: true });
+  await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "import fs from 'node:fs';\nfs.writeFileSync('seen.txt', '1');\nprocess.stdout.write(`${fs.readFileSync(process.argv[2], 'utf8').split('\\n').filter(Boolean).length}\\n`);\n");
+  await fs.writeFile(path.join(root, "Tools", "count", "Count.jet"), "// the twin's source; the fake jet below stands in for running it\n");
+  await fs.writeFile(path.join(entryDir, "fixtures", "input.txt"), "a\nb\nc\n");
+  await fs.writeFile(path.join(entryDir, "expected", "lines.out"), "3\n");
+  const entry = { name: "count", mode: "tool", tool: { original: "Tools/count/count.mjs", jet: "Tools/count/Count.jet", fixtures: "fixtures", cases: [{ args: ["input.txt"], expected: "expected/lines.out" }] } };
+  await fs.writeFile(path.join(entryDir, "entry.json"), JSON.stringify(entry));
+  await fs.mkdir(path.join(root, "entries", "sum", "jet"), { recursive: true });
+  await fs.writeFile(path.join(root, "entries", "sum", "entry.json"), JSON.stringify({ name: "sum", mode: "batch", languages: ["jet"] }));
+  const jetBin = path.join(root, "fake-jet");
+  await fs.writeFile(jetBin, `#!/bin/sh\nprintf ${JSON.stringify(twinOutput)}\n`);
+  chmodSync(jetBin, 0o755);
+  return { entryDir, entry, jetBin };
+}
+
+test("tool entries load apart from comparison entries and pass parity", stagedEntryTestOptions, async () => {
+  await withScratch("tool-entry", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "3\\n" });
+    const { loaded, tools, skipped } = await loadEntries(path.join(root, "entries"), null);
+    assert.deepEqual(loaded.map((item) => item.entry.name), ["sum"]);
+    assert.deepEqual(tools.map((item) => item.entry.name), ["count"]);
+    assert.deepEqual(skipped, []);
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.equal(result.status, "pass");
+    assert.deepEqual(result.cases.map((row) => [row.case, row.original.status, row.jet.status]), [[1, "pass", "pass"]]);
+    // The original wrote seen.txt into its own copy of the fixtures only.
+    assert.equal(await fs.readFile(path.join(root, "work", "case-1-original", "seen.txt"), "utf8"), "1");
+    await assert.rejects(fs.access(path.join(entryDir, "fixtures", "seen.txt")));
+  });
+});
+
+test("a tool twin whose output differs fails its case by byte", stagedEntryTestOptions, async () => {
+  await withScratch("tool-mismatch", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "4\\n" });
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.equal(result.status, "fail");
+    assert.equal(result.cases[0].original.status, "pass");
+    assert.equal(result.cases[0].jet.reason, "byte 0: expected \"3\\n\", got \"4\\n\" (length 2/2)");
+  });
+});
+
+test("a tool entry whose twin is missing is broken and runs nothing", stagedEntryTestOptions, async () => {
+  await withScratch("tool-broken", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "3\\n" });
+    await fs.rm(path.join(root, "Tools", "count", "Count.jet"));
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.equal(result.status, "broken");
+    assert.equal(result.reason, "tool.jet `Tools/count/Count.jet` does not exist");
+    assert.deepEqual(result.cases, []);
+  });
+});
+
+test("a tool case's env reaches both runs and its exit is the code both must give", stagedEntryTestOptions, async () => {
+  await withScratch("tool-env-exit", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "refused\\n" });
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "process.stdout.write(`${process.env.COUNT_MODE}\\n`);\nprocess.exit(3);\n");
+    await fs.writeFile(jetBin, "#!/bin/sh\nprintf '%s\\n' \"$COUNT_MODE\"\nexit 3\n");
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), "refused\n");
+    entry.tool.cases = [{ args: [], env: { COUNT_MODE: "refused" }, exit: 3, expected: "expected/lines.out" }];
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.equal(result.status, "pass");
+    entry.tool.cases = [{ args: [], env: { COUNT_MODE: "refused" }, expected: "expected/lines.out" }];
+    const strict = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.equal(strict.status, "fail");
+    assert.match(strict.cases[0].original.reason, /^exit 3, not 0/);
+  });
+});
+
+test("the jet a tool case's scripts run is the --jet-bin compiler", stagedEntryTestOptions, async () => {
+  await withScratch("tool-inner-jet", async (root) => {
+    const { entryDir, entry } = await writeToolEntry(root, { twinOutput: "" });
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "import { execFileSync } from 'node:child_process';\nprocess.stdout.write(execFileSync('jet', ['probe']));\n");
+    // The compiler the harness runs under, which runs the dev shell.
+    let shellJet = null;
+    for (const directory of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+      if (shellJet === null && await fs.access(path.join(directory, "jet"), fs.constants.X_OK).then(() => true, () => false)) shellJet = path.join(directory, "jet");
+    }
+    assert.notEqual(shellJet, null, "no jet on PATH");
+    // The named compiler: it runs the dev shell with the harness's own jet,
+    // answers `jet probe` with its $JET, and run as the twin asks the `jet`
+    // on PATH, as the original does.
+    const jetBin = path.join(root, "bin", "jet");
+    await fs.mkdir(path.dirname(jetBin), { recursive: true });
+    await fs.writeFile(jetBin, `#!/bin/sh\ncase "$1" in\n  */JetEnv.jet) exec ${JSON.stringify(shellJet)} "$@" ;;\n  probe) printf 'inner %s\\n' "$JET"; exit 0 ;;\nesac\nexec jet probe\n`);
+    chmodSync(jetBin, 0o755);
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), `inner ${jetBin}\n`);
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
   });
 });

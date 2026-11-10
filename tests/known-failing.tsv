@@ -1,13 +1,11 @@
 # repo-relative case or golden example ID, or a code-suite row ID	card	reason
 tests/ui/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary	#6425	check not ported: E0035
 tests/ui/comptime_int_pow_negative	#6425	check not ported: E3010
-tests/ui/comptime_io_rejected	#4926	E3410 names the effect class (`opening a file`), not the call `core.files.read()` (#4926 C4)
 tests/ui/computed_enum_range	#6425	check not ported: E0035
 tests/ui/crypto_secret_generic_name_collisions	#6006	check not ported: L0104
 tests/ui/ffi_boundary_evidence	#6425	check not ported: E3216
 tests/ui/ffi_inline_c_mismatch	#6425	check not ported: E3222
 tests/ui/import_ambiguous	#6425	check not ported: E0606
-tests/ui/impure_tier2_no_gate	#4926	E3410 names the effect class (`opening a file`), not the call `core.files.read()` (#4926 C4)
 tests/ui/inline_dep_unpinned	#6006	check not ported: L0203
 tests/ui/inline_package_traversal	#6425	check not ported: E1362
 tests/ui/manifest_bad_target_field	#6425	check not ported: E1216
@@ -87,7 +85,6 @@ tests/ui/cffi/foreign_js_inline_pub_member_list_reexports_the_namespace	#6366	`p
 tests/ui/crypto_release_entropy_seam	#6425	check not ported: E2702 caller-controlled salt (reports E0112: `password_hash_with_salt` now takes `Secret` for argument 1, and the fixture passes a String)
 tests/ui/crypto_secret_local_operations	#6425	check not ported: E0905 Encode, E0102 `clone`/`hash` on `Secret`, L0101 and L0103 (reports nothing)
 tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119 for `crypto.Secret` in a value and a type position (reports E0629 `crypto` is a module, not a value)
-tests/ui/generic_lambda_conflict	#6425	check not ported: E0904 inference conflict between argument 2 and the lambda return, with E0112 at the lambda (reports only E0112 at argument 2)
 tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
 tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
 tests/ui/freestanding_e3301	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
@@ -513,7 +510,7 @@ Examples/Interop/Languages/Cobol	#6418	`use cobol.payroll` reports E1002 (foreig
 Examples/Interop/Languages/Lua	#6418	`use lua.ops` reports E1002 (foreign root `lua` reserved); the foreign binding route is not built
 Examples/Interop/Languages/Octave	#6418	`jet inspect bind` reports E2104 not built yet; `use octave.scale` reports E1002 (foreign root `octave` reserved)
 Examples/Interop/Languages/Perl	#6418	`use perl.ops` reports E1002 (foreign root `perl` reserved); the foreign binding route is not built
-Examples/Interop/Languages/Php	#6418	`use php.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
+Examples/Interop/Languages/PHP	#6418	`use php.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
 Examples/Interop/Languages/PowerShell	#6418	`jet inspect bind` reports E2104 not built yet; `use pwsh.ops` reports E1002 (foreign root `pwsh` reserved)
 Examples/Interop/Languages/Python	#6418	`jet inspect bind` reports E2104 not built yet
 Examples/Interop/Languages/R	#6418	`use r.ops` reports E1002 (foreign root `r` reserved); the foreign binding route is not built
@@ -746,7 +743,7 @@ tests/cases/compiler_api/an_unselected_runtime_named_build_cannot_use_the_compil
 tests/cases/corelib/json_decode_lenient_surfaces_coercions.case	#5454	owner ruling q0z3918p C (decoded map values are dynamic, matched with .Int(n)) not built: Dyn.Object carries a [(key: String, value: Dyn)] list, so `m["port"]` is a list index that needs Int (E0108)
 tests/cases/corelib/yaml_full_nested_decode_and_features.case	#5454	owner ruling q0z3918p C (decoded map values are dynamic, matched with .Array(xs)) not built: Dyn.Object carries a [(key: String, value: Dyn)] list, so `top["flowlist"]` is a list index that needs Int (E0108)
 tests/cases/comptime_sequence_parity/sequence_return_shapes_match_rustc_backed_aot.case	#5454	owner ruling q0z3918p F (a Float-annotated lambda makes `[1.5, 2.5]` Float) not built: E0113 Decimal vs Float; the variants also need comptime materializing of Iter values (E0956) and the ParseError conversion under try_collect (E2402)
-tests/cases/cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region.case	#6418	`jet test --profile hardened` is not built yet (E2104), and `--profile=release` still runs the dev lifetime sentry (R0802); pointer spelling corrected (owner answer q0z3918p 2026-11-01)
+tests/cases/cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region.case	#6011	`jet test --profile hardened` is not built yet (E2104), and `--profile=release` still runs the dev lifetime sentry (R0802); pointer spelling corrected (owner answer q0z3918p 2026-11-01)
 tests/cases/jetpack_platform/platform_tier_gate_runs_native_package_offline_and_cleans_store.case	#3590	Jetpack/Store is assembled into the engine, not a package, so a lone-file `jet test` can't resolve its types
 tests/cases/jetpack_platform/platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output.case	#3590	Jetpack/Store is assembled into the engine, not a package, so a lone-file `jet test` can't resolve its types
 tests/cases/image/environment_image_omits_cloud_and_vault_facts_without_secret_names.case	#3590	Jetpack/Store is assembled into the engine, not a package, so the lone-file `jet test` Store ingest setup can't resolve its types
@@ -910,9 +907,8 @@ tests/cases/corelib/generated_internal_tagged_enum_round_trips_every_variant_sha
 tests/cases/corelib/io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty.case	#6661	the pty transcript matches the stream predicate the case forbids (`!~`)
 tests/cases/corelib/parenthesized_view_place_return_keeps_parameter_provenance.case	#6066	`jet test` ViewOutlivesOwner at fixture.jet:8: a parenthesized returned view place loses its parameter provenance
 tests/cases/custom/generic_struct_fns.case	#6661	`jet build fixture.jet` E0904 "Can't figure out what `T` should be here" at `Stack<Int>{ empty_stack() }`
-tests/cases/db_policy/sqlite_blob_round_trip_preserves_bytes_across_tiers.case	#6448	`jet run` ValueTypeMismatch: `DBValue` can't be used in a typed literal hole (main.jet:15)
 tests/cases/effects/cross_module_foreign_undo_bindings_keep_distinct_identities.case	#6366	foreign crate bridge fails to build: cargo E0428 `jet_ffi_mutate` is defined multiple times for two modules' undo bindings
-tests/cases/effects/strided_source_loop_projects_exact_arena_audit_multiplicity.case	#6066	MemoryDenialViolated: `!Mem.Alloc(above: 12)` cannot be proved through the open dispatch at exact.jet:11
+tests/cases/effects/strided_source_loop_projects_exact_arena_audit_multiplicity.case	#6066	MemoryDenialViolated: sema proves no byte size for the loop source list literal at exact.jet:9, so `!Mem.Alloc(above: 12)` rejects it (D-MEM-FACTS1); past it, `!Mem.Alloc(above: 12)` cannot be proved through the open dispatch at exact.jet:11
 tests/cases/ffi_callbacks_tasks/foreign_callback_reenters_jet_and_completes_on_a_jet_task.case	#6366	`jet build main.jet` E2104: passing a Jet function to a C callback parameter is not built yet (no native C callback trampoline)
 tests/cases/generics/generic_modules_complete_instantiation.case	#6661	UnknownName: nothing named `label` exists at body_items.jet:19 inside the instantiated generic module
 tests/cases/http_client_law/cookie_jar_enforces_per_domain_and_global_count_bounds.case	#3665	UnknownMethod: `strip_prefix` isn't a method on the value at main.jet:69

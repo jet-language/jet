@@ -266,7 +266,7 @@ cc_pack_names: fn(dir: String) -[FS]> [String] Never! {
 }
 
 // The combined jet+pack archive beside seed asset `asset`
-// (`jet-a0_NNN-linux-x64.tar.gz` gives `jet-a0_NNN-linux-x64-cc.tar.gz`).
+// (`jet-a0.0.N-linux-x64.tar.gz` gives `jet-a0.0.N-linux-x64-cc.tar.gz`).
 combined_asset_name: fn(asset: String) -> String Never! {
     "{asset.removesuffix(".tar.gz")}-cc.tar.gz"
 }
@@ -399,6 +399,9 @@ candidate_step: fn(dir: String, root: String, evidence: [String], signer: Signer
     names.extend(remote.released)
     name: if release.kind == "admitted" -> release.name.copy() else -> next_release_name(names)
     if contains_text(remote.released, name) -> problems.push(problem(REMOTE, "{name} is already a GitHub release"))
+    // The shipped jet prints its VERSION stamp as its release (`jet --version`).
+    stamp: release.version_stamp.split(" ").to_list()
+    if stamp.len() != 3 || stamp[0] != name || stamp[1] != release.commit -> problems.push(problem(STALE, "VERSION `{release.version_stamp}` does not name release {name} of {release.commit}"))
     asset: seed_asset_name(name, release.target)
     stage: files.join(dir, STAGE_DIR)
     staged := [Artifact]{}

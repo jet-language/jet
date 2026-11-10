@@ -16,7 +16,7 @@ use {
     ]
     jet_foundation.[diagnostic_theme_paint]
     jet_pkg_model.[
-        COMPILER_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
+        JET_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
         publication_resolve_publish_registry,
     ]
     jetpack_artifact_store.[ArtifactStore]
@@ -58,7 +58,6 @@ jet_cli_doctor_problem: fn(section: String, label: String, detail: String, fix: 
 // Every check in report order.
 jet_cli_doctor_run: fn(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
-    out.push(jet_cli_doctor_check_native_linker())
     out.push(jet_cli_doctor_artifact_store())
     out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
     out.push(jet_cli_doctor_cache_dir("package store", pkg_source_store_dir()))
@@ -96,11 +95,13 @@ jet_cli_doctor_command_ok: fn(argv: [String]) -[Exec, Time.Wait]> Bool Never! {
     jet_cli_doctor_stdout(argv) != None
 }
 
-jet_cli_doctor_check_native_linker: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
+// Jet links natively, so only C needs a C compiler: inline C and a package's
+// C sources.
+jet_cli_doctor_check_c_compiler: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
     if jet_cli_doctor_command_ok([String]{"cc", "--version"}) {
-        return jet_cli_doctor_ok("toolchain", "native linker (cc)", doctor_process.which("cc") ?? "found")
+        return jet_cli_doctor_ok("c-ffi", "C compiler (cc)", doctor_process.which("cc") ?? "found")
     }
-    jet_cli_doctor_problem("toolchain", "native linker (cc)", "not found on PATH", "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)", false)
+    jet_cli_doctor_note("c-ffi", "C compiler (cc)", "not found on PATH; only needed to compile C: install a C toolchain that provides `cc`, or run from `nix develop`")
 }
 
 // The language server row: start `jet self lsp`, send it `initialize` and read
@@ -187,6 +188,7 @@ jet_cli_doctor_io_kind: fn(error: IOError) -> String Never! {
 
 jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
+    out.push(jet_cli_doctor_check_c_compiler())
     // pkg-config discovers C libraries that are not in the hangar.
     if jet_cli_doctor_command_ok([String]{"pkg-config", "--version"}) {
         out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", "found"))
@@ -264,7 +266,7 @@ jet_cli_doctor_ffi_cache_dir: fn() -[Env]> String Never! {
 
 // A `--target` machine: the plan admitted only declared target machines.
 jet_cli_doctor_check_cross_target: fn(name: String) -> JetCLIDoctorCheck Never! {
-    machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
+    machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? {
         return jet_cli_doctor_problem("cross", name, "not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", false)
     }
     jet_cli_doctor_ok("cross", machine.name, "declared target machine ({machine.triple})")
@@ -315,7 +317,7 @@ jet_cli_doctor_plan: fn(raw: [String], jet_argv: [String], color: Bool) -> JetCL
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
+            machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? {
                 return jet_cli_fail("E3302", "target `{name}` is not available", "the name is not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", color, JET_DRIVER_EXIT_USAGE)
             }
             cross_target = Val(machine.name)

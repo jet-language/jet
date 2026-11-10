@@ -1,0 +1,9 @@
+// A denial of one case of a library effect leaves its other cases free:
+// `store.load` uses `store.Disk.Read`, which `!store.Disk.Write` allows.
+use store
+
+show: fn(path: String) -[!store.Disk.Write]> String {
+    store.load(path)
+}
+
+run: fn() { print(show("x")) }

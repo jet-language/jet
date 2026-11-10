@@ -1,0 +1,19 @@
+// A grant line is one dependency's whole limit: under `authority.grants`,
+// `dice` may use `Rand` and nothing else, and `words` may use nothing at all,
+// even though `allow` lists more for this package's own code. A later version
+// of either that reached further, say `words` starting to read files, would
+// stop the build with E1220, naming the dependency, the effect and the call
+// path.
+name: "grant_line_demo"
+version: "0.1.0"
+deps: {
+    dice: ./Dice,
+    words: ./Words,
+}
+authority: {
+    allow: [FS, IO, Mem.Alloc, Rand],
+    grants: {
+        dice: [Rand],
+        words: [],
+    },
+}

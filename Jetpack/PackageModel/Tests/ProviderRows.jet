@@ -1,0 +1,241 @@
+// Drift claims for the one provider registry: every provider surface reads
+// PROVIDER_ROWS, and every provider resolves through a ref source, a
+// provider kind and a federation family.
+use jet_pkg_model.[PROVIDER_ROWS, ProviderFamily, ProviderKind, RefSource, pkg_provider_is_external, pkg_provider_row]
+
+// Exhaustive: a new kind fails to compile here until it is listed below.
+pkg_test_provider_kind_ordinal: fn(kind: ProviderKind) -> Int {
+    if kind == {
+        .Nix -> 0
+        .Core -> 1
+        .Cran -> 2
+        .LuaRocks -> 3
+        .RubyGems -> 4
+        .Cpan -> 5
+        .Packagist -> 6
+        .JetRegistry -> 7
+        .Npm -> 8
+        .Cargo -> 9
+        .PyPI -> 10
+        .SwiftPM -> 11
+        .Maven -> 12
+        .NuGet -> 13
+        .Conan -> 14
+        .Vcpkg -> 15
+        .Homebrew -> 16
+        .Binary -> 17
+        .JetPackage -> 18
+        .Infer -> 19
+    }
+}
+
+// Exhaustive: a new family fails to compile here until it has a row.
+pkg_test_provider_family_ordinal: fn(family: ProviderFamily) -> Int {
+    if family == {
+        .Core -> 0
+        .Nix -> 1
+        .Path -> 2
+        .Github -> 3
+        .JetRegistry -> 4
+        .Npm -> 5
+        .PyPI -> 6
+        .Cargo -> 7
+        .SwiftPM -> 8
+        .Maven -> 9
+        .NuGet -> 10
+        .Conan -> 11
+        .Vcpkg -> 12
+        .Homebrew -> 13
+        .Binary -> 14
+        .Cran -> 15
+        .LuaRocks -> 16
+        .RubyGems -> 17
+        .Cpan -> 18
+        .Packagist -> 19
+        .JetPackage -> 20
+    }
+}
+
+// Exhaustive: a new built-in source fails to compile here until it has a row.
+pkg_test_ref_source_ordinal: fn(source: RefSource) -> Int {
+    if source == {
+        .Jetpack -> 0
+        .Nixpkgs -> 1
+        .Github -> 2
+        .Path -> 3
+        .Cran -> 4
+        .LuaRocks -> 5
+        .RubyGems -> 6
+        .Cpan -> 7
+        .Packagist -> 8
+        .JetRegistry -> 9
+        .Npm -> 10
+        .Cargo -> 11
+        .PyPI -> 12
+        .SwiftPM -> 13
+        .Maven -> 14
+        .NuGet -> 15
+        .Conan -> 16
+        .Vcpkg -> 17
+        .Homebrew -> 18
+        .Binary -> 19
+        .Releases -> 20
+        .Named(_) -> 21
+    }
+}
+
+PKG_TEST_PROVIDER_KINDS: [ProviderKind]{
+    ProviderKind.Nix, ProviderKind.Core, ProviderKind.Cran, ProviderKind.LuaRocks, ProviderKind.RubyGems,
+    ProviderKind.Cpan, ProviderKind.Packagist, ProviderKind.JetRegistry, ProviderKind.Npm, ProviderKind.Cargo,
+    ProviderKind.PyPI, ProviderKind.SwiftPM, ProviderKind.Maven, ProviderKind.NuGet, ProviderKind.Conan,
+    ProviderKind.Vcpkg, ProviderKind.Homebrew, ProviderKind.Binary, ProviderKind.JetPackage, ProviderKind.Infer,
+}
+
+PKG_TEST_REF_SOURCES: [RefSource]{
+    RefSource.Jetpack, RefSource.Nixpkgs, RefSource.Github, RefSource.Path, RefSource.Cran,
+    RefSource.LuaRocks, RefSource.RubyGems, RefSource.Cpan, RefSource.Packagist, RefSource.JetRegistry,
+    RefSource.Npm, RefSource.Cargo, RefSource.PyPI, RefSource.SwiftPM, RefSource.Maven,
+    RefSource.NuGet, RefSource.Conan, RefSource.Vcpkg, RefSource.Homebrew, RefSource.Binary,
+    RefSource.Releases,
+}
+
+pkg_test_provider_kind_rows: fn(kind: ProviderKind) -> [String] {
+    names := [String]{}
+    loop row in PROVIDER_ROWS {
+        if row.kind == .Val(candidate) {
+            if candidate == kind -> names.push(row.name)
+        }
+    }
+    names
+}
+
+pkg_test_provider_family_rows: fn(family: ProviderFamily) -> [String] {
+    names := [String]{}
+    loop row in PROVIDER_ROWS {
+        if row.family == .Val(candidate) {
+            if candidate == family -> names.push(row.name)
+        }
+    }
+    names
+}
+
+pkg_test_ref_source_rows: fn(source: RefSource) -> [String] {
+    names := [String]{}
+    loop row in PROVIDER_ROWS {
+        if row.source == .Val(candidate) {
+            if candidate == source -> names.push(row.name)
+        }
+    }
+    names
+}
+
+// Whether some row reachable by a ref source realizes through `kind`.
+pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
+    loop row in PROVIDER_ROWS {
+        if row.source == None -> next
+        if row.kind == .Val(candidate) {
+            if candidate == kind -> return true
+        }
+    }
+    false
+}
+
+#Test("provider rows name each provider once and own every source, kind and family") {
+    names := [String]{}
+    loop row in PROVIDER_ROWS {
+        assert(!names.contains(row.name), "provider `{row.name}` has one row")
+        names.push(row.name)
+        lookup: pkg_provider_row(row.name) ?? panic("provider `{row.name}` is found by name")
+        assert_eq(lookup.name, row.name)
+        assert_eq(pkg_provider_is_external(row.name), row.external)
+        assert_eq(RefSource.is_builtin(row.name), row.source != None)
+    }
+    assert(pkg_provider_row("gitlab") == None, "unknown providers have no row")
+    assert(!pkg_provider_is_external("gitlab"), "unknown providers are not external")
+    assert(!RefSource.is_builtin("gitlab"), "unknown providers are not built-in sources")
+
+    seen := [Int]{}
+    loop kind in PKG_TEST_PROVIDER_KINDS {
+        ordinal: pkg_test_provider_kind_ordinal(kind)
+        assert(!seen.contains(ordinal), "each kind is listed once")
+        seen.push(ordinal)
+        if kind == ProviderKind.Infer {
+            assert_eq(pkg_test_provider_kind_rows(kind).len(), 0)
+            assert_eq(kind.label(), "infer")
+            assert(ProviderKind.parse("infer") == ProviderKind.Nix, "the unresolved kind is never parsed")
+        } else {
+            rows: pkg_test_provider_kind_rows(kind)
+            assert(rows.len() > 0, "kind `{kind.identity()}` has a provider row")
+            assert_eq(kind.label(), rows[0])
+            assert(ProviderKind.parse(kind.label()) == kind, "kind `{kind.label()}` parses back from its row")
+        }
+    }
+    assert_eq(seen.len(), 20)
+
+    families: ProviderFamily.all()
+    family_seen := [Int]{}
+    loop family in families {
+        ordinal: pkg_test_provider_family_ordinal(family)
+        assert(!family_seen.contains(ordinal), "each family is listed once")
+        family_seen.push(ordinal)
+        rows: pkg_test_provider_family_rows(family)
+        assert(rows.len() > 0, "family `{family.label()}` has a provider row")
+        assert_eq(family.label(), rows[0])
+    }
+    assert_eq(family_seen.len(), 21)
+
+    source_seen := [Int]{}
+    loop source in PKG_TEST_REF_SOURCES {
+        ordinal: pkg_test_ref_source_ordinal(source)
+        assert(!source_seen.contains(ordinal), "each built-in source is listed once")
+        source_seen.push(ordinal)
+        rows: pkg_test_ref_source_rows(source)
+        assert_eq(rows.len(), 1)
+        assert_eq(source.label(), rows[0])
+        parsed: RefSource.builtin(source.label()) ?? panic("source `{source.label()}` parses back from its row")
+        assert(parsed == source, "source `{source.label()}` parses back to itself")
+    }
+    assert_eq(source_seen.len(), 21)
+    assert_eq(RefSource.Named("stable").label(), "stable")
+}
+
+// Every provider resolves through all three surfaces: a federation family,
+// a kind (or a kind inferred from the target), and a ref source that reaches
+// its kind.
+#Test("every provider resolves through a ref source, a provider kind and a federation family") {
+    no_source := [String]{}
+    no_kind := [String]{}
+    no_family := [String]{}
+    loop row in PROVIDER_ROWS {
+        if row.source == None -> no_source.push(row.name)
+        if row.kind == None -> no_kind.push(row.name)
+        if row.family == None -> no_family.push(row.name)
+    }
+    assert_eq(no_family.join(" "), "")
+    // `path` and `github` infer their kind from the target.
+    assert_eq(no_kind.join(" "), "path github")
+    // `core` is reached by inference from `path` and `github`; the others
+    // are reached by the source words that share their kind.
+    assert_eq(no_source.join(" "), "core nix jetpackage")
+    assert(pkg_test_kind_has_source(ProviderKind.Nix), "`nix` is reached by `jetpack`")
+    assert(pkg_test_kind_has_source(ProviderKind.JetPackage), "`jetpackage` is reached by `releases`")
+    loop kind in PKG_TEST_PROVIDER_KINDS {
+        if kind == ProviderKind.Infer || kind == ProviderKind.Core -> next
+        assert(pkg_test_kind_has_source(kind), "kind `{kind.label()}` is reached by a ref source")
+    }
+}
+
+#Test("a direct ref realizes through its source row's kind") {
+    loop source in PKG_TEST_REF_SOURCES {
+        row: pkg_provider_row(source.label()) ?? panic("source `{source.label()}` has a row")
+        if source == {
+            .Jetpack | .Nixpkgs | .Path | .Github -> assert(source.direct_kind() == None, "`{source.label()}` resolves through the source table or inference")
+            else -> assert(source.direct_kind() == row.kind, "`{source.label()}` realizes through its row's kind")
+        }
+    }
+    assert((RefSource.Releases.direct_kind() ?? ProviderKind.Infer) == ProviderKind.JetPackage, "release artifacts realize natively")
+    assert((RefSource.Maven.direct_kind() ?? ProviderKind.Infer) == ProviderKind.Maven, "a Maven ref keeps its concrete kind")
+    assert(ProviderKind.parse("releases") == ProviderKind.JetPackage, "a `releases` source declaration realizes natively")
+    assert(ProviderKind.parse("jetpack") == ProviderKind.Nix, "a `jetpack` source declaration realizes through nix")
+    assert(ProviderKind.parse("gitlab") == ProviderKind.Nix, "an unknown provider keeps named-source inference")
+}

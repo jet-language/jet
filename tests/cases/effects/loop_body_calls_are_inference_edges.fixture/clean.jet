@@ -1,0 +1,23 @@
+// A call inside a loop body is an inference edge: `is_guest` is infallible,
+// so `has_guest` and `run` stay infallible too.
+is_guest: fn(name: String) -> Bool { name.starts_with("guest") }
+
+has_guest: fn(names: [String]) -> Bool {
+    found: loop name in names {
+        if is_guest(name) -> break true
+    } ?? false
+    found
+}
+
+count_guests: fn(names: [String]) -> Int Never! {
+    hits := 0
+    loop name in names {
+        if has_guest([String]{name}) -> hits += 1
+    }
+    hits
+}
+
+run: fn() Never! {
+    names: [String]{"ann", "guest1", "bob"}
+    print("{has_guest(names)} {count_guests(names)}")
+}

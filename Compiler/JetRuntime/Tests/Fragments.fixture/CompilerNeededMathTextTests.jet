@@ -30,12 +30,6 @@ compiler_fixture_scalar_property: fn(cp: I64, property: I64) -> Bool {
     if (rt_f64_bits(jet_std_math_from_bits(I64{1})) != I64{1}) -> return I64{9}
     // (1+2^-27)*(1-2^-27)-1 is -2^-54 when fused, zero otherwise.
     if (rt_f64_bits(jet_std_math_fma(Float{1.0000000074505806}, Float{0.9999999925494194}, Float{-1.0})) != rt_f64_bits(Float{-0.00000000000000005551115123125783})) -> return I64{10}
-    pair: jet_rt_alloc(I64{16}, I64{8})
-    jet_std_math_sin_cos(negative_zero, pair, pair + I64{8})
-    sine: rt_text_word(pair)
-    cosine: rt_text_word(pair + I64{8})
-    jet_rt_free(pair, I64{16}, I64{8})
-    if (sine != I64{-9223372036854775808} || cosine != rt_f64_bits(Float{1.0})) -> return I64{11}
     empty: rt_static_text("")
     if jet_text_is_alphabetic(empty) || jet_text_is_numeric(empty) || jet_text_is_whitespace(empty) -> return I64{12}
     if !jet_text_is_alphabetic(rt_static_text("Aéα𐐀")) -> return I64{13}

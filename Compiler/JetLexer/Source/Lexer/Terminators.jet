@@ -296,6 +296,24 @@ skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
     return cursor
 }
 
+// Whether `source` may pin an inline dependency version, `use name#1.4`:
+// some `#` code token is followed, past comments, by a number. A source with
+// none pins nothing, so finding its pins needs no parse (JetCli ScriptDeps).
+// A `#` in a comment or a string, an attribute (`#Error`) and the `#!`
+// launch line are not code `#` tokens followed by a number.
+lex_may_pin_inline_version: fn(source: [U8]) -> Bool Never! {
+    facts: raw_token_facts(source, false)
+    index := 0
+    loop index * 4 < facts.len() {
+        if kind_at(facts, index) == K_HASH {
+            after: kind_at(facts, skip_comment_tokens(facts, index + 1))
+            if after == K_INT || after == K_FLOAT || after == K_UNIT_NUMBER -> return true
+        }
+        index += 1
+    }
+    false
+}
+
 dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != K_DOT -> return false
     cursor := skip_comment_tokens(facts, index + 1)

@@ -1,0 +1,35 @@
+// A marker that writes code types its template `-[Meta.Generate]>`, the row
+// of `Marker.expand`: it reads the marked type and adds checked declarations.
+// Writing no row means the same. The row may name nothing else, so a
+// template can't reach the file system or the network (E0774).
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            names: target.fields.len()
+            impl $tname {
+                describe: fn(self) -> String { "{$tname} has {$names} fields" }
+            }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Describe
+Order: struct {
+    id: Int
+    total: Int
+    paid: Bool
+}
+
+run: fn() {
+    print(Point{x: 1, y: 2}.describe())
+    print(Order{id: 7, total: 30, paid: true}.describe())
+}

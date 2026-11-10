@@ -92,6 +92,10 @@ vocabulary](vocabulary.md).
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
+  The template's row is `Meta.Generate`, which `expand` may write as
+  `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
+  but writes no declaration (E0775). Reading the program needs no effect,
+  and any other row entry is E0774 (D-META-LADDER1=A).
   A fixed named group instead is a field-less marker struct whose block sets
   `group: #[Inline, Scalar]`; it has at least two members and no parameters,
   and expands through the same
@@ -266,8 +270,14 @@ form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); the inner value must still
 be literal data, not a call or arithmetic expression.
-Inside a function, the same spellings are local bindings. A top-level executable statement is
-rejected with E0621; Jet does not synthesize an implicit runtime function.
+Inside a function, the same spellings are local bindings. A `comptime { … }` inside a function runs
+while building, before any call, so it reads the function's prepared `comptime` locals but not its
+run-time locals or parameters (E0640).
+In an entry file whose top level holds
+statements and no `run: fn`, every top-level line is the program's entry, in order: its statements
+run, and its bindings other than ALL_CAPS constants are locals of that entry, which the file's
+functions don't see (E0107 says to pass one as a parameter). A file with top-level statements and a
+`run: fn` is E0621.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,
 described below.
@@ -453,7 +463,10 @@ forms:
 ```jet
 loop value in source, stride if keep(value) -> value
 loop (key, value) in source -> key
-loop i := init, i < limit, i + 1 -> print(i)
+loop i := init, i < limit {
+    print(i)
+    i += 1
+}
 ```
 
 A source loop may use `-> expression` or a braced value body. Each accepted
@@ -622,6 +635,9 @@ impl Circle.Shape {
     area: fn(self) -> Float { 3.14159 * self.radius * self.radius }
 }
 ```
+
+Outside a type body, `impl Shape { … }` on a trait names no type to implement
+it for and is E0301.
 
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
@@ -862,6 +878,11 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 result: [Int#3]{2, 4, 6}
 [a, b, c]: result
 ```
+
+`[T#N].filled(value)` is a fixed list of `N` copies of `value`, which is
+evaluated once: `slots: [Int?#3].filled(None)`. A list type with no length
+has no static methods. `[Int?].filled(3, None)` is **E0311**, and the fix is
+the list literal `[Int?]{…}` or the fixed list `[Int?#N].filled(value)`.
 
 A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
 and `clear` on a fixed-size list are **E0964**. A literal index outside
@@ -1788,6 +1809,43 @@ propagates it through calls, and erases it before code generation. An empty set
 is purity; effects are not runtime values, handlers, or monads
 (D-EFF1, D-QUAL1, I3).
 
+### One rule on every rung
+
+Every place that holds code is a *rung* with an effect row: a `#FX` block or
+lambda, a function, a trait, a type, a module (an inline module, a file head,
+and the file where the module is declared), the package and the run. A
+written row is a ceiling (`FS, IO`: at most these) plus denials (`!Net`:
+never this, including through calls). The checker proves that what code
+reaches fits every ceiling above it and meets no denial above it. Rungs
+compose from the outermost inward: the nearest rung is checked first, a
+denial anywhere above always wins, and a row written inside a ceiling may
+only narrow it. Only the package and the run grant; every other rung only
+restricts.
+
+The spellings are one list syntax in two places. A function and a function
+type carry the row in the arrow: `-[FS.Read]> String`, `-[]>` for pure,
+`fn(T) -[Net]> U`, and `-[via f]>` to pass a function parameter's row
+through. Every other rung writes `#FX(...)`: above a module, a struct, an
+enum, a trait or a file's `use` lines, as an `#FX: (...)` line in a body, or
+around a block as `#FX(...) { ... }`. Inside the list, `!E` denies,
+`Mem.Alloc(above: N)` bounds a denial, and `#FX()` is pure. The package
+writes `authority: { allow, deny, grants }`, and the run takes `--allow`,
+`--deny` and `-A`.
+
+A row nobody writes is inferred: a function's from everything its body
+reaches, a type's from its methods, function fields and held types, a
+trait's from its implementations, and a dependency's from its code, recorded
+in the lock. So a program with no rows checks and runs, and an error appears
+only where someone wrote a limit or a grant is exceeded. Each such error has
+one registered code, with its what, why and fix text and a worked example,
+in the [diagnostics registry](../../Compiler/Prelude/Diagnostics.jet)
+(`jet explain E0749`). The examples in
+[`Examples/ErrorsAndEffects/Effects`](../../Examples/ErrorsAndEffects/Effects/)
+show every rung, each with golden output: `Effects.jet` (no rows),
+`Pure.jet` (functions), `EffectHigherOrder.jet` (function types),
+`TraitCap.jet`, `TypeCap.jet`, `ModuleCap.jet`, `FileScope.jet`,
+`LibraryEffect.jet` and `EffectAuthority.jet` (the package).
+
 ### Effect names and declarations
 
 The thirteen grantable roots are `Net`, `FS`, `IO`, `DB`, `Time`, `Rand`,
@@ -1796,8 +1854,22 @@ user-chosen dotted leaves, for example `FS.Read` or `Net.HTTP.Get`. The root
 must be one of those names; descendants are checked by tree ancestry, so a
 bound on `FS` covers `FS.Read`. Foreign-language names such as `FFI.Go` and
 `FFI.Py` are leaves beneath `FFI`; the parent covers the whole foreign-call
-tree. The Prelude also registers common leaves such as `DB.Read`, `DB.Write`,
-`FS.Read`, `FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
+tree. The Prelude also registers common leaves such as `FS.Read`,
+`FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
+
+The compiler builds in the **machine effects**: `Net`, `FS`, `IO`, `Time`,
+`Rand`, `Env`, `Exec`, `GPU`, `FFI`, `Browser`, `Panic`, and `Mem`
+([Compiler/Prelude/Effects.jet](../../Compiler/Prelude/Effects.jet)). `DB`,
+`Log`, and `Secret` are Core's **service effects**, declared in
+[Core/Effects/Effects.jet](../../Core/Effects/Effects.jet) with `#FX(…)` above
+each one naming the machine effects it relies on: `DB` (with its cases
+`DB.Read` and `DB.Write`) on `Net` and `FS`, `Log` on `IO`, `FS`, and `Net`,
+and `Secret` on `Env`, `FS`, and `Net` (D-EFFTYPE-KERNEL1). A row that names
+a service effect may also do what its list names, so a `-[DB]>` function may
+read a file; a body that reaches anything else is E0740. A service effect is
+a bare name everywhere. Denials keep checking what a body really reaches, so
+a `-[!Net]>` function may call a `-[DB]>` function over a local SQLite file,
+while one that calls a driver that reaches the network is E0749.
 
 The Prelude writes each effect as a type implementing `Effect`, recognized by
 its in-body `impl Effect { … }` block. A struct is a root with no members; an
@@ -1831,6 +1903,34 @@ name one of the view's declared leaves. A bare root remains valid. A root with
 no declared leaves remains open. The same rule applies to function effect
 rows, `#FX`, and package effect budgets. Declarations have no runtime
 representation. An unknown root is a language error, not a new effect.
+
+A package writes its own effect the same way, as a *library effect*: a
+struct or enum that implements `Effect`, with `#FX(…)` above it naming the
+kernel effects it relies on (D-EFFTYPE-USES1, D-DECL-TYPES1):
+
+```jet
+#FX(Net)
+Query: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+count: fn(sql: String) -[Query.Read]> Int { sql.len() }
+```
+
+A row that names a library effect, or one of its cases, may do what its
+list names and nothing else: a body that reaches another kernel effect is
+E0756. Inside its package the name is bare; elsewhere it is qualified by the
+name the package is imported under (`graph.Query`), and the bare name there
+is E0119. Denials keep checking what a body really reaches (D-PROP1), so
+`-[!Net]>` blocks a call into `Query`'s network work. A function uses a
+library effect when its row names it or one of its cases, so
+`-[!graph.Query]>` blocks every call that reaches such a function, and
+`-[!graph.Query.Write]>` only those that reach `Query.Write` or `Query`
+itself; either is E0749. The list above a library effect holds no `!`
+entries (E0757).
 
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.
@@ -1943,9 +2043,19 @@ is not the price of running.
 Jetpack records each dependency's inferred effect row in the lock: the first
 build or run after `jet fetch` records it, and a refetch or update keeps it.
 When an update or an edit widens a dependency's row, the next build or run
-prints which package gained which effect and records the wider row; a row
-only widens. `jet build --locked` refuses the widening (E3513) and writes no
-lock. Code run straight from a URL or the registry
+prints which package gained which effect, with the call path to it, and
+records the wider row; a row only widens. `jet build --locked` refuses each
+widened effect (E3513) at the function that performs it, with the same call
+path, and writes no lock. A dependency's line under `authority: { grants: { … } }` is its whole
+limit, in place of `allow`: `grants: { json: [], dice: [Rand] }` lets `dice`
+use only `Rand` and `json` nothing, even when `allow` lists more, and what a
+line grants passes `deny` for that dependency (`Panic` is deny-only, so no
+line grants it). A dependency that reaches an effect outside its limit fails
+the build with E1220, naming the dependency, the effect and the call path
+(D-AUTH-DEFAULT1). A grant line is one the user writes; `jet add` writes
+none. See
+[`Examples/Modules/Packages/GrantLine`](../../Examples/Modules/Packages/GrantLine/package.jet).
+Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
 own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and
 changed bytes or new effects ask again. Without a terminal it stops before
@@ -2023,15 +2133,32 @@ file's `use` lines, `#FX(...)` caps every function in the file. A plain entry
 is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
 at the offending function, with the cap as the secondary label. A row written
 inside a cap may only narrow it: a declared effect outside the ceiling, or one
-the cap denies, is E0749 even when the body never uses it. An
+the cap denies, is E0749 even when the body never uses it. A type's cap also
+binds the lambdas written in its methods, the trait default bodies it
+inherits, its `Close` impl, its function-typed fields and calls through its
+trait-value fields. A function-typed field whose row reaches outside the cap
+is E0755 at the field, and each method that calls it is E0749. An
 `#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
-inferred rows unchanged.
+inferred rows unchanged. A public type's, trait's or module's cap is part of
+its package's published API: widening or removing it under a non-major
+release is E1218, and narrowing or adding one is compatible.
+
+A type's inferred row is everything a value of it can reach: its methods'
+solved rows, the rows written on its function-typed fields, and the inferred
+rows of the types its fields and enum payloads hold, through lists, maps,
+optionals, results, tuples and type arguments. A trait's row is the union of
+its implementing types' rows. The rows are solved to a fixed point, so a
+recursive type, or a cycle of types that hold each other, settles on the
+union of every member's own effects.
 
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
-type's and module caps, the package `authority` rows, and `run`, each with the
-`file:line` that writes it, then what the site reaches and the call chain to
-each effect. `--caps` lists every module cap under a path.
+cap of the trait the method implements, the type rung, the module rungs (the
+inline module caps, the file-head cap and the caps where the file's module is
+declared), the
+package `authority` rows, and `run`, each with the `file:line` that writes
+it, then what the site reaches and the call chain to each effect. `--caps`
+lists every file-head, module, type and trait cap under a path.
 
 ### Higher-order and trait effects
 
@@ -2070,11 +2197,31 @@ impl Square.Shape {
 Every implementation must fit the bound or E0742 is reported. An impl method
 that writes no row takes the trait's bound as its ceiling, so
 `area: fn(self) -> Int { … }` is pure here; this holds for the Prelude's
-`CheckedText.check` and `encode_hole` too. A dynamic call
-uses the trait's declared bound because its concrete implementation is unknown
-at the call site. An unannotated method is inferred per implementation under
-static dispatch; a dynamic-dispatch call that needs a bound receives the
-annotate-the-method diagnostic (D-EFF2, D-EFF3).
+`CheckedText.check` and `encode_hole` too. A call through a trait value counts
+with the trait method's declared row. With no row, it counts with the ceiling
+of the trait's `#FX(...)` cap, and with neither, with the union of every
+implementation of the method in the program, in any package. A dynamic call
+of a row-less method that has no implementation to bound it, under an
+enclosing ceiling, receives the annotate-the-method diagnostic E0743 (D-EFF2,
+D-EFF3).
+
+Written above a trait, `#FX(...)` caps every implementation of the trait's
+methods, in any package, with the same list, including what each reaches
+through a call. An `impl Trait` block written in a struct's body and one
+written apart from the type are both bound. Reaching outside the cap is
+E0754 at the offending method, with the cap as the secondary label:
+
+```jet
+#FX(!FS)
+Source: trait { text: fn(self) -> String }
+```
+
+A call through a type parameter belongs to the caller that binds it. Inside
+`Traced: struct<T: Worker>`, `self.inner.work()` is not part of `Traced`'s
+rows or its cap; `Traced<Loud>` does `Traced`'s work plus `Loud`'s, charged
+where `Traced<Loud>` is written. A report there names the instantiation and
+the implementation it runs. A binding the compiler cannot see takes every
+implementation, as an unbound generic call does.
 
 ### Opaque cryptographic values
 
@@ -2146,9 +2293,11 @@ D-TLSSERVE1).
 the same way on every backend.
 `clear_background`, the 2D shapes (pixels, rectangles with outlines, gradients
 and rounded corners, lines, circles, ellipses, rings and sectors, triangles and
-regular polygons) and `draw_text` (a built-in 5x7 bitmap font scaled by whole
-pixels, whose width `measure_text` reports without an effect) paint an RGBA
-canvas the size of the window with src-over blending; the frame presents the
+regular polygons) and `draw_text` (anti-aliased Atkinson Hyperlegible Next at
+any pixel size, whose width `measure_text` reports without an effect) paint a
+premultiplied RGBA canvas the size of the window by core.ui's one blend rule,
+source-over on the sRGB bytes (each byte becomes `s + (d * (255 - a) + 127) / 255`
+for the premultiplied source byte `s`); the frame presents the
 canvas when the next frame begins unless the program presented its own pixels.
 `load_texture_atlas` decodes the atlas's PNG texture in Jet, and `draw_sprite`
 blits a named region of it onto the canvas. The collision checks
@@ -2477,12 +2626,21 @@ trait, tag, protocol, or constant. A constant is declared like any other item,
 `use limits.[MAX_ITEMS]` (3A). A `use` inside an inline-module body follows the
 same rule.
 
-A module is not a value. Binding, passing, returning, storing or interpolating
-a module, such as `m: text` or `show(lib.inner)`, reports **E0629**. A
-function the module offers is a value: `f: text.shout` is the function, as
-`shout` is after `use text.shout`.
+A module is a value: its `core.meta` `Module` record. `m: text` binds the
+`Module` of `text` and `show(lib.inner)` passes that of `lib.inner`. The
+compiler fills `name`, `file` (from the package root), `doc` (the `///`
+comment at the top of `module.jet`, or above an inline module) and `package`
+(its package's `Package`). A module body may open with field lines that set
+the rest, `maturity`, `category` and `deprecated`, before any binding:
+`category: "billing"`. A field line is checked against its field's type, and
+one that sets a compiler-filled field reports **E0111**. `pricing.category`
+reads a field, and a module argument to a generic module, as in
+`billing<pricing>`, reads as that module's `Module` in the instance. A Core
+module has no record, so binding or passing one, such as `m: math` after
+`use core.math`, reports **E0629**. A function the module offers is a value:
+`f: text.shout` is the function, as `shout` is after `use text.shout`.
 
-A type is not a value either: binding, passing or printing a type, such as
+A type is not a value: binding, passing or printing a type, such as
 `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
 read a compile-time fact of it such as `Rock.$fields`.
 
@@ -2556,6 +2714,14 @@ value kinds and types, scope, and cycles with **E0850**–**E0853** and
 **E0855**–**E0857**; a specialization identity collision is **E0859**. The
 value-argument example is `Examples/Modules/FactValueArguments.jet`.
 
+An instance's member bodies are its template's text, checked once per
+instance. An error in one is reported at the instance line
+(`int_cache: cache<Int>(64)`), with the template text it came from as a
+label; inline-module and instance members are named by their source paths
+(`int_cache.key_of`), never by their generated identities. A type parameter
+bound to a built-in scalar names that scalar as a static-call owner, so
+`K.parse(text)` in an `Int` instance reads as `Int.parse(text)`.
+
 ## Composable configuration modules
 
 A `module` declaration can contribute typed values to reserved configuration
@@ -2615,6 +2781,9 @@ recorded in `.jet/lock`. Mutable refs, unsupported native-build metadata,
 cycles, unsafe archive paths, source drift, and cache tampering fail closed.
 Offline reuse verifies sealed Hangar output without contacting the repository
 (D-JPK-PROVIDERS2).
+Every provider whose metadata Jetpack federates is also a `@source` word. A
+direct root without a native realization path, such as `@maven` or
+`@homebrew`, fails closed instead of falling through to Nix.
 
 Core and adapted packages can be realized without an installed Nix executable.
 A reference without a pinned compatibility output reports **E1272**; foreign
@@ -3080,9 +3249,13 @@ special functions, checked/saturating/wrapping integer families, and exact
 ratios. Exact ratio values expose numerator, denominator, string, float, zero,
 and arithmetic operations.
 
-The runtime computes the base libm family in Jet, ported from musl 1.2.5's
-algorithms: each result has musl's x86_64 bits on every build level and on the
-web, and the runtime imports no C math symbol.
+The base libm family's transcendental functions (trigonometric, inverse
+trigonometric, hyperbolic, inverse hyperbolic, exponential and logarithmic
+functions, `cbrt`, `hypot` and Float `pow`) are correctly rounded Jet source in
+Core, so each result has the same bits on every build level and on the web.
+The runtime computes only the exactly rounded `floor`, `ceil`, `trunc`,
+`round`, `fmod`, `fma` and `sqrt`, in Jet ported from musl 1.2.5, and imports
+no C math symbol.
 
 `round` returns the nearest integer with an exact half away from zero
 (`-2.5` becomes `-3`, and `2.5` becomes `3`). For `min` and `max`, one NaN
@@ -3228,7 +3401,11 @@ A C call records `FFI.C`. When no binding descriptor owns the declaration's
 effect row (a written `#Import c.<lib>: module` with no `c@` dependency
 descriptor), the checker cannot see what the C body does, so the call also
 reaches every effect: written ceilings (E0740) and `deny` rows (E0749) apply
-to it, and C `system` under `deny: [Exec]` is refused at check time. Core's
+to it, and C `system` under `deny: [Exec]` is refused at check time. A package
+`authority: { allow: […] }` row holds such a call by `FFI.C`, the explicit
+opt-in to foreign code that may do anything: a row without `FFI.C` is E0749
+naming it. A call whose descriptor declares its row is held to that row, and
+`FFI.C` covers neither another `FFI` leaf nor a Jet-side effect. Core's
 own C bindings are toolchain code whose public functions declare their rows.
 
 A C declaration binds by-value scalars, `String`, `Char`, and C-layout
@@ -3600,7 +3777,7 @@ not expose PHP exception text or source paths.
 or cancellation replaces the affected workers; `close(pool)` consumes the
 pool handle. Binding lint, C compilation, and archiving use bounded diagnostics
 and the descriptor/provenance record. See
-[`Examples/Interop/Languages/Php`](../../Examples/Interop/Languages/Php). (D-FFI-PHP1)
+[`Examples/Interop/Languages/PHP`](../../Examples/Interop/Languages/PHP). (D-FFI-PHP1)
 
 ### R
 
@@ -3669,7 +3846,7 @@ EXCEPINFO become `ComError` variants without vendor text. Calls carry
 **Evidence.** Provenance hashes the extracted type-library schema and generated
 surface. A released file-backed binding may omit the original `.tlb`, but when
 the input remains available its bytes must match the recorded hash. See
-[`Examples/Interop/Polyglot/PolyglotCom`](../../Examples/Interop/Polyglot/PolyglotCom). (D-FFI-COM1)
+[`Examples/Interop/Polyglot/PolyglotCOM`](../../Examples/Interop/Polyglot/PolyglotCOM). (D-FFI-COM1)
 
 ### Data-schema binders
 
@@ -4358,7 +4535,7 @@ than guessing at a partial value.
 | SemVer and dependency ranges | SemVer 2.0.0 versions and the documented comparator, caret, tilde, `x`, hyphen, whitespace-AND, and `||`-OR forms. A leading `v` is accepted for tag compatibility; an empty requirement means `*`. | Numeric overflow and leading zeroes, empty identifiers, invalid characters, wildcard-before-number forms, empty `||` alternatives, and ranges whose exclusive upper bound overflows `u64`. Pre-release numeric identifiers remain spec-unbounded and compare without integer conversion. |
 | C bind prototypes | Top-level `return_type name(parameters);` declarations for the documented scalar, `char*`, and `void` subset. Empty lists and `(void)` are accepted; scalar parameters may be unnamed. Unsupported but structurally valid types are reported as skipped. | Bodies, pointers, variadics, unbalanced lists, empty comma fields, trailing declarators, non-ASCII identifiers, and declarations without a return type. No guessed binding is emitted. |
 | Registry and advisory feeds | Each registry line is one UTF-8 JSON object with nonempty string `name`, `version`, `tier`, and `gate_status`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, and optional boolean `yanked`; `tier` is `core` or `community`, and `gate_status` records the five named gate states. The offline advisory file starts with `jet-advisory-feed-v1`, then a signed `feed|sequence|issued-unix|expires-unix|maturity-seconds|key-id|public-key|signature` header, exact `release|package#version|first-seen-unix|source-class` records, `advisory|id|package|affected|fixed-or-empty|title|severity` records, and exact `exception|package#version|reason|reviewer|expires-unix` records. Package source policy may add exact, expiring `PolicyException` records under `policy.exceptions`, with `id`, `scope`, `reason`, and `expires`. `key-id` is `sha256-` plus the hash of the decoded public-key bytes. `.jet/advisory-trust` pins the publisher key, minimum sequence, accepted digest, and revoked keys. The default third-party maturity window is 24 hours; first-party and workspace releases default to zero. See [registry tiers](registry-tiers.md). | Malformed or duplicate or nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, invalid tier or gate status, unsigned, untrusted, stale, expired, rolled-back, or forked advisory feeds, compromised keys, missing remote release records, invalid exact targets, advisory field-count errors, empty required fields, invalid affected or fixed versions, malformed or expired source exceptions, or `|` inside fields. Reads fail closed with **E2607**, **E2609**, **E2610**, or **E2611** rather than skipping security metadata. |
-| Registry API snapshots | `apis/<name>/<version>.api`, written once beside each published artifact: `api_version = 4`, `package = <name>`, `published_version = <version>`, then one sema-produced public API row per line, each starting with its kind (`const`, `distinct`, `enum`, `field`, `fn`, `impl`, `require`, `struct`, `trait`, `type`, `unit`, `variant`) and its dotted name. | A missing snapshot for an earlier published version, another `api_version`, a package or version that differs from the path, and a row with no kind are malformed (**E2607**); the publish stops before it mutates the registry. |
+| Registry API snapshots | `apis/<name>/<version>.api`, written once beside each published artifact: `api_version = 4`, `package = <name>`, `published_version = <version>`, then one sema-produced public API row per line, each starting with its kind (`cap`, `const`, `distinct`, `enum`, `field`, `fn`, `impl`, `require`, `struct`, `trait`, `type`, `unit`, `variant`) and its dotted name. A `cap` row is a written `#FX(…)` cap of a public type, trait or module (`cap Receipt #FX(IO, !FS)`); a file's head cap names its module, the entry file's the package. | A missing snapshot for an earlier published version, another `api_version`, a package or version that differs from the path, and a row with no kind are malformed (**E2607**); the publish stops before it mutates the registry. |
 
 ## REPL state, authority, and editing
 
@@ -4878,13 +5055,15 @@ The top-level `jet:` field pins the Jet compiler channel used for a package:
 ```jet
 name: "wordstats"
 version: "0.3.1"
-jet: "0.4"
+jet: "a0.0"
 ```
 
-A pin is a `MAJOR.MINOR` series, an exact `MAJOR.MINOR.PATCH`, or a named
-channel such as `main`, `stable`, or `nightly`. Comparison and wildcard forms
-such as `>=1.0.0` remain legacy minimum-version constraints and are not channel
-pins. A malformed channel pin is E1249. If `jet:` is absent, the running
+A pin is in Jet's own version spelling, `a0.0.N` (the leading letter is the
+release stage, `a` for alpha): an `aMAJOR.MINOR` series such as `a0.0`, an exact
+`aMAJOR.MINOR.PATCH` such as `a0.0.43`, or a named channel such as `main`,
+`stable`, or `nightly`. Comparison and wildcard forms such as `>=a0.0.43` remain
+minimum-version constraints and are not channel pins. A malformed channel pin,
+including an unstaged `0.4`, is E1249. If `jet:` is absent, the running
 compiler is used without a fetch.
 
 The resolved exact version is recorded in `.jet/lock` as a `[[toolchain]]`
@@ -5298,10 +5477,23 @@ probe runs before anything else does. Then whatever is ready runs: the ready
 steps together, up to `--threads` at once, then a ready target compiles. A
 failure stops only what waits on it, the rest of the graph still runs, and
 every failure is reported. Steps and targets that wait on each other are
-refused (E3502) before anything runs. Cached actions include declared input
+refused (E3502) before anything runs. A step's key covers its declared input
 content, argv, authority, toolchain, probes, signing identity, and
-generated-source hashes. A cache hit restores only declared outputs from the
-local CAS.
+generated-source hashes.
+
+A step's effects decide whether it is reused; nothing else does. An effect is
+ambient when its result is not fixed by the step's declared inputs. `FS`,
+`Exec` and `Env` are not: the sandbox lets the step read only its declared
+inputs, write only its tree, run only its tool and what is mounted (each
+identified by content in the key), and see only its declared variables (their
+values in the key). `Net`, `Time`, `Rand`, `IO`, `DB`, `Log` and `GPU` are. A
+step with no ambient effect is reused on an unchanged rebuild: its stored
+record restores only its declared outputs from the local CAS, and a changed
+input changes its key, so it runs again. Such a step must write an output. A
+step with an ambient effect always runs. The sandbox is what makes the
+readings hold, and no step runs outside it: a read of an undeclared file fails
+the step instead of reusing a stale result. Example:
+[`tests/cases/build_entry/run_steps_reuse_follows_their_effects.case`](../../tests/cases/build_entry/run_steps_reuse_follows_their_effects.case).
 
 When `jet build` runs the graph of a `build: fn`, it leaves two records under
 `.jet/build/` beside the build entry, whether or not the build succeeded. `receipt.json` is
@@ -5341,6 +5533,10 @@ inspection: `on` writes them, `off` writes none. It is the profile field
 retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
 [`Examples/Metaprogramming/BuildTime/BuildWriteGenerated`](../../Examples/Metaprogramming/BuildTime/BuildWriteGenerated/run.jet).
+
+A problem in a generated module is reported against that module's own text,
+under its virtual path `<build-generated>/<package identity>/.jet/generated/…`,
+with a note naming the `b.generate` call that produced it.
 
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every

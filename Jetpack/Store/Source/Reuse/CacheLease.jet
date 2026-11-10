@@ -298,6 +298,8 @@ CacheLease: struct {
     priv lease_root: String
     priv lease_lock_path: String
     priv live_lock: RuntimeLock?
+    // The child descriptor every child of this lease keeps the live lock at.
+    priv live_lock_child_fd: Int
     priv handed_off: Bool
     priv protocol_lease_id: String
     priv protocol_generation: Int
@@ -336,8 +338,10 @@ CacheLease: struct {
 
     // Pass every held directory into `spec` at its reserved descriptor and
     // record it in `binding`, so this lease's child text renders for that
-    // child. The live lease lock stays here: this process outlives the
-    // children it waits for.
+    // child. The child also keeps a copy of the live lease lock at a reserved
+    // descriptor: a descendant that outlives this process holds the container
+    // lock, so `release` and recovery leave the container intact until the
+    // whole process tree is gone.
     keep_open_for: fn(&self, spec: ProcessSpec, binding: &LeaseBinding) -> ProcessSpec LeaseHandoffError! {
         out := spec
         if sys.family() != "windows" {
@@ -350,6 +354,12 @@ CacheLease: struct {
                 .None -> {}
             }
             loop index in 0..<self.nix_projection_bindings.len() -> out = self.nix_projection_bindings[index].pass_into(out, binding)
+            // The lock is lent: the spec duplicates its descriptor and the
+            // lease keeps its own.
+            if self.live_lock == {
+                .Val(live) -> out = out.keep_open(live.owner, at: self.live_lock_child_fd)
+                .None -> {}
+            }
         }
         self.mark_process_handoff()
         Ok(out)
@@ -738,7 +748,7 @@ CacheLease: struct {
     // descendant may still hold the inherited lease lock, in which case
     // recovery owns cleanup and the whole container stays intact.
     release: fn(&&self) Never! {
-        lease := self
+        lease := self.move()
         lease.live_lock = None
         // The owner lock authenticates publication but cannot prove a
         // descendant exists; only the inherited container lock is the

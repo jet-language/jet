@@ -37,6 +37,8 @@ main_exit_root := I64{0}
 // runs another entry.
 main_process_ending := I64{0}
 main_root_control := I64{0}
+// jet_rt_main's 40-byte save area for main_root_control while it is set.
+main_root_save := I64{0}
 // jet_rt_main_stopped once a stop is published to main_root_control
 // (Scheduler.jet scheduler_control_publish), else 0: an entry nothing
 // stopped has nothing to take.
@@ -200,6 +202,17 @@ rt_main_stopped_address: fn() -> I64 {
     I64{0}
 }
 
+// A call the comptime server ran inside jet_rt_main's entry
+// (ComptimeServe.jet comptime_serve_loop) ends as that entry would: a stop
+// published to the root ends the process through jet_rt_main_stopped
+// instead of returning to the serve loop, which would answer as if the call
+// had returned (#6725).
+main_call_stopped: fn() {
+    stopped: main_stopped_code
+    root: main_root_control
+    if (stopped != I64{0} && root != I64{0}) -> _ := coll_call2(stopped, root, main_root_save)
+}
+
 // The start of a program that owns its main (JetIR EntryOwned.jet,
 // JetBackend Image/Object.jet x64_object_main): what jet_rt_main does before
 // the entry, less the process root and what only a root's program links.
@@ -250,6 +263,7 @@ rt_main_stopped_address: fn() -> I64 {
     root: jet_rt_root_begin(save)
     #Unsafe("only the main thread running jet_rt_main writes its root control") {
         main_root_control = root
+        main_root_save = save
     }
     #Unsafe("an idempotent install: every writer stores the same code address") {
         main_process_stop_code = rt_process_stop_claim_address()

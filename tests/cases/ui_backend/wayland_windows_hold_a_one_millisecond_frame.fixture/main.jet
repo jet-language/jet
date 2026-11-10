@@ -1,0 +1,393 @@
+package: {
+    name: "wayland_windows_hold_a_one_millisecond_frame"
+    authority: { allow: [Env, IO, Net, Time] }
+}
+use {
+    net: core.net
+    sys: core.sys
+    time: core.time
+    ui: core.ui
+}
+
+// A fake Wayland compositor on $WAYLAND_DISPLAY gives a window 2560x1440
+// and answers each commit's frame callback at once, so nothing but the
+// window paces it. The window paints a full scene once, then animates
+// it the way a dashboard does: twelve streaks gliding with translucent
+// heads, a counter, a bar graph and a blinking caret, each frame drawing
+// only what moved. Over 600 frames after 60 to warm up, a frame's drawing
+// and the time from one frame to the next, which adds the copy to the
+// shared buffer and the commit, both stay within 1 ms at the 99th
+// percentile: a thousand frames a second.
+
+WIDTH: 2560
+HEIGHT: 1440
+WARM_UP: 60
+MEASURED: 600
+LIMIT_NS: 1000000
+LANES: 12
+BARS: 64
+
+FakeBuffer: struct {
+    id: Int
+    pool: Int
+}
+
+Fake: struct {
+    stream: net.UnixStream
+    inbox: [U8]
+    out: [U8]
+    registry: Int
+    compositor: Int
+    shm: Int
+    wm_base: Int
+    surface: Int
+    chrome: Int
+    xdg_surface: Int
+    toplevel: Int
+    pools: [Int]
+    buffers: [FakeBuffer]
+    attached: Int
+    current: Int
+    chrome_pending: Int
+    chrome_shown: Int
+    callbacks: [Int]
+    serial: Int
+    configured: Bool
+    commits: Int
+    closing: Bool
+    failures: [String]
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor"}
+
+fake_put: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(&f: Fake) -[Net, Time]> {
+    if f.out.len() == 0 -> return
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if !f.closing -> f.failures.push("send failed: {err}")
+        return
+    }
+}
+
+fake_version: fn(interface: String) -> Int {
+    if interface == "wl_compositor" -> return 6
+    if interface == "xdg_wm_base" -> return 2
+    1
+}
+
+// A configure of the window's size, activated.
+fake_configure: fn(&f: Fake) {
+    f.serial += 1
+    args := fake_words([Int]{WIDTH, HEIGHT, 4})
+    fake_put(args, 4)
+    toplevel: f.toplevel
+    xdg_surface: f.xdg_surface
+    fake_event(f, toplevel, 0, args)
+    fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+}
+
+fake_pool: fn(f: Fake, object: Int) -> Int {
+    loop index in 0..<f.pools.len() {
+        if f.pools[index] == object -> return index
+    }
+    -1
+}
+
+// A content commit: the old buffer goes back, the frame callbacks are
+// done at once, and after the measured frames the window is asked to
+// close.
+fake_commit: fn(&f: Fake) {
+    f.commits += 1
+    if f.attached != 0 {
+        previous: f.current
+        f.current = f.attached
+        f.attached = 0
+        if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    }
+    loop id in f.callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    f.callbacks = [Int]{}
+    if f.commits == WARM_UP + MEASURED + 8 && !f.closing {
+        f.closing = true
+        toplevel: f.toplevel
+        fake_event(f, toplevel, 1, [U8]{})
+    }
+}
+
+fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        names := 0
+        loop interface in GLOBALS {
+            names += 1
+            args := fake_words([Int]{names})
+            loop b in fake_text(interface) -> args.push(b)
+            fake_put(args, fake_version(interface))
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        interface_length: fake_u32(body, 4)
+        interface: String.from_bytes(body[8..<(8 + interface_length - 1)]) ?? ""
+        id: fake_u32(body, 8 + ((interface_length + 3) /% 4) * 4 + 4)
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{0}))
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        return
+    }
+    if object == f.compositor {
+        if opcode == 0 && f.surface == 0 {
+            f.surface = fake_u32(body, 0)
+        } else if opcode == 0 && f.chrome == 0 {
+            f.chrome = fake_u32(body, 0)
+        }
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        f.pools.push(fake_u32(body, 0))
+        return
+    }
+    pool: fake_pool(f, object)
+    if pool >= 0 {
+        if opcode == 0 -> f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool})
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface {
+        if opcode == 1 -> f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if f.chrome != 0 && object == f.chrome {
+        if opcode == 1 -> f.chrome_pending = fake_u32(body, 0)
+        if opcode == 6 && f.chrome_pending != 0 {
+            previous: f.chrome_shown
+            f.chrome_shown = f.chrome_pending
+            f.chrome_pending = 0
+            if previous != 0 && previous != f.chrome_shown -> fake_event(f, previous, 0, [U8]{})
+        }
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                f.configured = true
+                fake_configure(f)
+                return
+            }
+            fake_commit(f)
+        }
+        return
+    }
+}
+
+fake_dispatch: fn(&f: Fake) {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            f.failures.push("malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        fake_request(f, object, word.bit_and(65535), f.inbox[(at + 8)..<(at + size)].copy())
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    f := Fake{
+        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
+        surface: 0, chrome: 0, xdg_surface: 0, toplevel: 0, pools: [Int]{}, buffers: [FakeBuffer]{},
+        attached: 0, current: 0, chrome_pending: 0, chrome_shown: 0, callbacks: [Int]{},
+        serial: 0, configured: false, commits: 0, closing: false, failures: [String]{},
+    }
+    quiet := 0
+    loop quiet < 40 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if !ready {
+            quiet += 1
+        } else {
+            quiet = 0
+            message: net.unix_receive(f.stream, 65536) ?? {
+                if !f.closing -> f.failures.push("receive failed: {err}")
+                return f
+            }
+            if message.bytes.len() == 0 -> return f
+            loop b in message.bytes -> f.inbox.push(b)
+            fake_dispatch(f)
+            fake_flush(f)
+        }
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+// ---- the window ----
+
+BACK: ui.color(11, 11, 13, 255)
+PANEL: ui.color(20, 20, 24, 255)
+GRID: ui.color(34, 34, 40, 255)
+INK: ui.color(236, 234, 230, 255)
+SOFT: ui.color(150, 150, 160, 255)
+RED: ui.color(232, 35, 42, 255)
+HEAD: ui.color(255, 59, 65, 140)
+
+lane_y: fn(lane: Int) -> Int { 200 + lane * 64 }
+
+// Where lane `lane`'s streak starts at frame `n`: gliding right at its
+// own speed, wrapping once it has left the window.
+streak_x: fn(lane: Int, n: Int) -> Int {
+    length: 240 + lane * 16
+    (n * (lane + 3)) %% (WIDTH + length) - length
+}
+
+paint_static: fn(frame: ui.Frame) {
+    frame.clear_background(BACK)
+    loop lane in 0..<LANES {
+        frame.draw_rectangle(0, lane_y(lane) + 32, frame.width, 1, GRID)
+        frame.draw_text("Lane {lane + 1}", 2380, lane_y(lane) - 12, 15, SOFT)
+    }
+    frame.draw_rectangle(48, 1060, frame.width - 96, 320, PANEL)
+    frame.draw_text("Throughput", 64, 1072, 15, SOFT)
+    frame.draw_text("Frames", 64, 72, 15, SOFT)
+}
+
+animate: fn(frame: ui.Frame, n: Int) {
+    loop lane in 0..<LANES {
+        length: 240 + lane * 16
+        y: lane_y(lane)
+        was: streak_x(lane, n - 1)
+        now: streak_x(lane, n)
+        frame.draw_rectangle(was, y - 1, length, 4, BACK)
+        frame.draw_rectangle(now, y, length, 2, if lane %% 3 == 0 -> RED else -> INK)
+        frame.draw_rectangle(now + length - 24, y - 1, 24, 4, HEAD)
+    }
+    frame.draw_rectangle(64, 96, 360, 40, BACK)
+    frame.draw_text("frame {n}", 64, 100, 24, INK)
+    if n %% 30 == 0 -> frame.draw_rectangle(440, 100, 2, 28, if (n /% 30) %% 2 == 0 -> RED else -> BACK)
+    bar: n %% BARS
+    height: 20 + (n * 37) %% 200
+    x: 80 + bar * 38
+    frame.draw_rectangle(x, 1120, 24, 240, PANEL)
+    frame.draw_rectangle(x, 1360 - height, 24, height, if height > 180 -> RED else -> SOFT)
+}
+
+percentile: fn(samples: [Int], p: Int) -> Int {
+    sorted := samples.copy()
+    sorted.sort()
+    if sorted.len() == 0 -> return 0
+    sorted[min(sorted.len() * p /% 100, sorted.len() - 1)]
+}
+
+min: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+
+client: fn() -[Env, IO, Net, Time]> {
+    window: ui.open(width: 1160, height: 720, title: "Budget") ?? {
+        print("open failed: {err}")
+        return
+    }
+    draws := [Int]{}
+    intervals := [Int]{}
+    last := -1
+    n := 0
+    width := 0
+    height := 0
+    loop frame in window.frames() {
+        started: time.start()
+        if last >= 0 && n > WARM_UP && intervals.len() < MEASURED -> intervals.push(started.start_ns - last)
+        last = started.start_ns
+        closed := false
+        loop event in frame.events() {
+            if event == .Close -> closed = true
+        }
+        if closed -> break
+        if frame.width != width || frame.height != height {
+            width = frame.width
+            height = frame.height
+            paint_static(frame)
+        }
+        animate(frame, n)
+        if n >= WARM_UP && draws.len() < MEASURED -> draws.push(time.elapsed(started).ns)
+        n += 1
+    }
+    draw_p99: percentile(draws, 99)
+    interval_p99: percentile(intervals, 99)
+    print("{width}x{height}: {draws.len()} frames drawn and {intervals.len()} frame to frame times measured")
+    print("draw p99 within 1 ms: {draw_p99 <= LIMIT_NS}")
+    print("frame to frame p99 within 1 ms: {interval_p99 <= LIMIT_NS}")
+    if draw_p99 > LIMIT_NS || interval_p99 > LIMIT_NS -> print("  draw p99 {draw_p99 /% 1000} us, frame to frame p99 {interval_p99 /% 1000} us")
+}
+
+run: fn() {
+    path: sys.get("WAYLAND_DISPLAY") ?? ""
+    if !path.starts_with("/") {
+        print("WAYLAND_DISPLAY must be an absolute socket path")
+        return
+    }
+    listener: net.unix_listen(path) ?? {
+        print("listen failed: {err}")
+        return
+    }
+    server: task { fake_serve(listener) }
+    client()
+    f: server.join() ?? panic("compositor task failed")
+    loop failure in f.failures -> print("FAIL {failure}")
+}

@@ -947,8 +947,8 @@ sema_stmt_unit_arm_form: fn(expr: Expr) -> Bool Never! {
 }
 
 sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    // E1403: each level of the chain is one source
-    // nesting level, as an `if` expression is in the Rust checker.
+    // E1403: an `if` is one source nesting level, and so is a whole
+    // else-if chain: each link is checked at its head's level.
     if !sema_enter_source_nesting(context, span, diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     // `if T == Int { … }` is the one-arm type test, checked
     // as a type-table arm: its body reads `T` as the named type.
@@ -988,7 +988,9 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
         .If(_, _, _, _, _, _, _) -> {
             else_is_elseif = true
             if else_body.len() == 0 {
+                sema_leave_source_nesting(context)
                 else_result = sema_stmt_check_unit_if(else_value, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+                context.source_nesting += 1
             }
         }
         else -> else_result = sema_stmt_check_unit_branch(else_body, else_value, [SemaConditionBinding]{}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "if.else@{span.start}", loop_depth)
@@ -5452,7 +5454,7 @@ sema_stmt_compound_result: fn(op: BinOp, place: Type, offered: Type, value: Expr
 sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     index: sema_scope_resolve_index(scopes, name)
     if index == None {
-        diagnostics.push(sema_unknown_name_in(name, name_span, scopes))
+        diagnostics.push(sema_unknown_name_at(name, name_span, environment, program, scopes))
         return None
     }
     binding: sema_scope_binding_row(environment, scopes, index)
@@ -5465,7 +5467,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if binding.symbol.kind == SymbolKind.Constant {
         if sema_stmt_module_storage_binding(environment, program, binding.symbol.id) == .Val(persists) {
             if !persists && context.unsafe_depth == 0 {
-                diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name}: shared Count{{value: 0}}`, written `{name}.value += 1`) or mark it `#Persist`; code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
+                diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name}: shared Count{{value: 0}}`, written `{name}.value += 1`); code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
                 return None
             }
             context.module_writes.push(TEffectSpan{name: name, span: name_span})
@@ -5899,9 +5901,8 @@ sema_stmt_tree_core_closure_touches_shared: fn(kind: TCoreClosureKind, arena: Bo
             false
         }
         .Realtime(rate, frames, _) -> sema_stmt_tree_expr_touches_shared(rate, arena) || sema_stmt_tree_expr_touches_shared(frames, arena)
-        .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_tree_expr_touches_shared(label, arena) || sema_stmt_tree_expr_touches_shared(shortcut, arena) || sema_stmt_tree_expr_touches_shared(accessible_label, arena)
         .UITextInputOnDrop(state, ime, _) -> sema_stmt_tree_expr_touches_shared(state, arena) || sema_stmt_tree_expr_touches_shared(ime, arena)
-        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
+        .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) | .UIClickSlot(_) -> false
     }
 }
 
@@ -6050,9 +6051,8 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
         .CoreClosureCall(kind) -> return if kind == {
             .Spawn(group, _, _, _) -> if group == .Val(value) -> sema_stmt_row_touches_shared(tree, value) else -> false
             .Realtime(rate, frames, _) -> sema_stmt_row_touches_shared(tree, rate) || sema_stmt_row_touches_shared(tree, frames)
-            .UIButtonOnClick(label, shortcut, accessible_label, _) -> sema_stmt_row_touches_shared(tree, label) || sema_stmt_row_touches_shared(tree, shortcut) || sema_stmt_row_touches_shared(tree, accessible_label)
             .UITextInputOnDrop(state, ime, _) -> sema_stmt_row_touches_shared(tree, state) || sema_stmt_row_touches_shared(tree, ime)
-            .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) -> false
+            .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) | .UIClickSlot(_) -> false
         }
         .FnValue(kind) -> {
             if kind == {
@@ -8046,7 +8046,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // E0364: inclusive `0..xs.len()` whose body
                         // indexes that same `xs` with this loop's index name.
                         if !exclusive && sema_stmt_range_end_len_root(end_expr) == .Val(len_root) && sema_stmt_index_root_with_stmts(body, len_root, var) {
-                            diagnostics.push(sema_error("E0364", expr_span(end_expr), "this range includes `{len_root}.len()`, one past the last index", "`{len_root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{len_root}`", "write `loop (i, item) in {len_root}` — or `loop i in {len_root}.indexes` — or `0..<{len_root}.len()`"))
+                            diagnostics.push(sema_error("E0364", expr_span(end_expr), "this range includes `{len_root}.len()`, one past the last index", "`{len_root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{len_root}`", "write `loop (i, item) in {len_root}` — or `loop i in {len_root}.indexes()` — or `0..<{len_root}.len()`"))
                         }
                         if label != None -> sema_scope_pop_loop_label(scopes)
                         sema_single_use_leave_scope(scopes, state, diagnostics)
@@ -8939,7 +8939,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
                 return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
             }
         }
-        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if $build.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""
@@ -8974,7 +8974,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         }
         if missing.len() != 0 {
             list: missing.join(", ")
-            diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `$build.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
+            diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `$build.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
             return false
         }
     }
@@ -9079,7 +9079,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
 }
 
 sema_stmt_os_dispatch_arm: fn(found: String, span: Span) -> Diagnostic {
-    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `$build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`", "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once", "write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback)")
+    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — an `$build.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`", "each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once", "write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)")
 }
 
 // A short display of a refused `$build.os` arm head.

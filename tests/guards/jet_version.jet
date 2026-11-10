@@ -1,0 +1,213 @@
+// Jet's own version has one spelling, `a0.0.N`, and one home: JET_VERSION in
+// the package model (#6729). This guard keeps the old spellings out of the
+// compiler, Core, Jetpack, Tools and tests sources (the `0.1.0`/`0.0.1`
+// self-version, `jet@0.x` identities, the `COMPILER_VERSION` constant and
+// release names spelled `a0_NNN`), and holds the few literal copies of the
+// version that cannot read the constant to JET_VERSION.
+use jv_files: core.files
+
+JV_MANIFEST: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+JV_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools", "tests"}
+JV_SELF: "tests/guards/jet_version.jet"
+
+// Spellings of an old self-version: a line holding one fails the census.
+JV_REFUSED: [String]{
+    "jet: \">=0.", "jet: \"0.", "jet: \\\">=0.", "jet: \\\"0.",
+    "toolchain: \"0.", "toolchain = \"0.", "toolchain = \\\"0.",
+    "Jet 0.1.0", "Jet 0.0.1", "Jet `0.1.0`", "Jet `0.0.1`",
+}
+
+// The files that still name a release `a0_NNN`, and how many lines do: the
+// releases published before the `a0.0.N` names, which count in the same
+// sequence. The list is closed, so a new `a0_NNN` name fails here.
+JVLegacyRow: struct {
+    path: String
+    lines: Int
+    why: String
+}
+
+JV_LEGACY: [JVLegacyRow]{
+    JVLegacyRow{path: "Compiler/JetCli/Source/Cli/Host.jet", lines: 2, why: "the a0_001 seed's limits"},
+    JVLegacyRow{path: "Tools/ci/CompiledWorkloadPeerLauncher.jet", lines: 1, why: "the a0_010 seed runtime's `stat` defect"},
+    JVLegacyRow{path: "Tools/release/Gate.jet", lines: 1, why: "release_number counts the a0_NNN seeds"},
+    JVLegacyRow{path: "Tools/release/Tests.jet", lines: 2, why: "next_release_name over a0_NNN seeds"},
+    JVLegacyRow{path: "tests/cases/web_app/app_hello_serves_home_and_save_action.case", lines: 1, why: "the a0_001 seed refuses the entry"},
+}
+
+// A copy of the version a source cannot import: the needle, with `{v}` for
+// JET_VERSION, must stand in the file.
+JVCopy: struct {
+    path: String
+    needle: String
+}
+
+JV_COPIES: [JVCopy]{
+    JVCopy{path: "Compiler/JetRuntime/Source/RouteMod.jet", needle: "mod_span_is(context, MOD_COMPILER_VERSION, rt_static_text(\"{{v}}\"))"},
+    JVCopy{path: "Compiler/JetRuntime/Source/RouteMod.jet", needle: "rt_static_text(\"`, but the loader uses Jet `{{v}}`\")"},
+    JVCopy{path: "tests/ui/jetlib_version_mismatch.stderr", needle: "but the loading program uses Jet `{{v}}`"},
+    JVCopy{path: "tests/ui/manifest_toolchain/stderr", needle: "but this is Jet {{v}}\n"},
+}
+
+// The JET_VERSION the package model declares.
+jv_declared: fn() -> String {
+    source: jv_files.read(JV_MANIFEST) ?? panic("read {JV_MANIFEST}: {err}")
+    loop line in source.lines() {
+        if line.starts_with("JET_VERSION: \"") -> return line.removeprefix("JET_VERSION: \"").removesuffix("\"").copy()
+    }
+    panic("{JV_MANIFEST} declares no JET_VERSION")
+}
+
+jv_is_digit: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    code >= 48 && code <= 57
+}
+
+jv_is_word: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    jv_is_digit(byte) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+// `a0.0.N`: N a positive decimal without a leading zero.
+jv_well_formed: fn(version: String) -> Bool Never! {
+    if !version.starts_with("a0.0.") -> return false
+    digits: version.removeprefix("a0.0.")
+    if digits == "" || digits.starts_with("0") -> return false
+    loop byte in digits.bytes() {
+        if !jv_is_digit(byte) -> return false
+    }
+    true
+}
+
+// Whether `line` holds `marker` as a word start (no letter, digit or `_`
+// before it) followed by a digit: `jet@0.1.0`, `a0_042`.
+jv_names_digit_after: fn(line: String, marker: String) -> Bool Never! {
+    parts: line.split(marker).to_list()
+    loop index in 1..<parts.len() {
+        before: parts[index - 1].bytes()
+        after: parts[index].bytes()
+        if after.len() == 0 || !jv_is_digit(after[0]) -> next
+        if before.len() > 0 && jv_is_word(before[before.len() - 1]) -> next
+        return true
+    }
+    false
+}
+
+// Whether `line` names the retired constant, not a longer identifier such as
+// RouteMod's `MOD_COMPILER_VERSION`.
+jv_names_retired_constant: fn(line: String) -> Bool Never! {
+    parts: line.split("COMPILER_VERSION").to_list()
+    loop index in 1..<parts.len() {
+        before: parts[index - 1].bytes()
+        after: parts[index].bytes()
+        if before.len() > 0 && jv_is_word(before[before.len() - 1]) -> next
+        if after.len() > 0 && jv_is_word(after[0]) -> next
+        return true
+    }
+    false
+}
+
+// The old self-version spellings on one line, as findings.
+jv_line_findings: fn(path: String, number: Int, line: String, out: &[String]) {
+    where: "{path}:{number}"
+    if jv_names_retired_constant(line) -> out.push("{where}: COMPILER_VERSION is retired; read JET_VERSION")
+    if jv_names_digit_after(line, "jet@") -> out.push("{where}: a compiler identity is `jet@<JET_VERSION>#<sha256>`")
+    loop refused in JV_REFUSED {
+        if line.contains(refused) -> out.push("{where}: `{refused}` spells an old Jet version; Jet is `a0.0.N`")
+    }
+}
+
+// Every file a census reads: no build output, history or installed packages.
+jv_walk: fn(path: String, out: &[String]) {
+    kind: jv_files.stat(path) ?? return
+    if kind.is_symlink -> return
+    if kind.is_dir {
+        loop child in (jv_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name == ".jet" || child.name == ".tower" || child.name == "target" || child.name == "node_modules" -> next
+            jv_walk("{path}/{child.name}", out)
+        }
+        return
+    }
+    if path != JV_SELF -> out.push(path.copy())
+}
+
+// One file into the census: its old spellings into `findings`, its count of
+// lines naming a release `a0_NNN` into `legacy`.
+jv_census_file: fn(path: String, text: String, findings: &[String], legacy: &[String:Int]) {
+    count := 0
+    number := 0
+    loop line in text.lines() {
+        number += 1
+        jv_line_findings(path, number, line, findings)
+        if jv_names_digit_after(line, "a0_") -> count += 1
+    }
+    if count > 0 -> legacy[path.copy()] = count
+}
+
+// The `a0_NNN` counts against JV_LEGACY, then every finding in order.
+jv_census_close: fn(legacy: [String:Int], findings: &[String]) {
+    loop path in legacy.keys() {
+        count: legacy[path]
+        allowed := -1
+        loop row in JV_LEGACY {
+            if row.path == path -> allowed = row.lines
+        }
+        if allowed < 0 {
+            findings.push("{path}: {count} line(s) name a release `a0_NNN`; releases are `a0.0.N`")
+        } else if count != allowed {
+            findings.push("{path}: {count} line(s) name a release `a0_NNN`, JV_LEGACY allows {allowed}; update its row")
+        }
+    }
+    loop row in JV_LEGACY {
+        if legacy.get(row.path) == None -> findings.push("{row.path}: no `a0_NNN` name left; delete its JV_LEGACY row")
+    }
+    findings.sort()
+}
+
+#Test("JET_VERSION is spelled a0.0.N and its literal copies match it") {
+    guards_enter_root()
+    version: jv_declared()
+    assert(jv_well_formed(version), "JET_VERSION `{version}` is not `a0.0.N`")
+    loop literal in JV_COPIES {
+        text: jv_files.read(literal.path) ?? panic("read {literal.path}: {err}")
+        needle: literal.needle.replace("{{v}}", version)
+        assert(text.contains(needle), "{literal.path} must hold `{needle}`: JET_VERSION is {version}")
+    }
+}
+
+#Test("no source spells an old Jet version") {
+    guards_enter_root()
+    paths := [String]{}
+    loop root in JV_ROOTS -> jv_walk(root, paths)
+    assert(paths.len() > 1000, "the census found only {paths.len()} files")
+    findings := [String]{}
+    legacy := [String:Int]{}
+    loop path in paths {
+        text: jv_files.read(path) ?? next
+        jv_census_file(path, text, findings, legacy)
+    }
+    jv_census_close(legacy, findings)
+    assert_eq(findings.join("\n"), "")
+}
+
+#Test("the census reads spellings, not longer names") {
+    assert(jv_well_formed("a0.0.43"))
+    assert(!jv_well_formed("a0.0.043"))
+    assert(!jv_well_formed("a0_043"))
+    assert(!jv_well_formed("0.1.0"))
+    assert(jv_names_digit_after("IDENTITY jet@0.0.1#aa", "jet@"))
+    assert(!jv_names_digit_after("IDENTITY jet@a0.0.43#aa", "jet@"))
+    assert(!jv_names_digit_after("let cfgjet@1 = 2", "jet@"))
+    assert(jv_names_digit_after("seeds/a0_042", "a0_"))
+    assert(!jv_names_digit_after("0x9f00_b0a0_4dc3", "a0_"))
+    assert(jv_names_retired_constant("use [COMPILER_VERSION]"))
+    assert(!jv_names_retired_constant("MOD_COMPILER_VERSION: 3"))
+    findings := [String]{}
+    legacy := [String:Int]{}
+    jv_census_file("Compiler/New.jet", "pin: \"jet: \\\">=0.1.0\\\"\"\nseed: \"a0_044\"\n", findings, legacy)
+    jv_census_file("Tools/release/Gate.jet", "a0_042\n", findings, legacy)
+    jv_census_close(legacy, findings)
+    assert(findings.contains("Compiler/New.jet:1: `jet: \\\">=0.` spells an old Jet version; Jet is `a0.0.N`"))
+    assert(findings.contains("Compiler/New.jet: 1 line(s) name a release `a0_NNN`; releases are `a0.0.N`"))
+    assert(!findings.contains("Tools/release/Gate.jet: 1 line(s) name a release `a0_NNN`; releases are `a0.0.N`"))
+    assert(findings.contains("Tools/release/Tests.jet: no `a0_NNN` name left; delete its JV_LEGACY row"))
+}

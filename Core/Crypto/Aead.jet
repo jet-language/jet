@@ -1,12 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/gcm.c, library/ccm.c, library/chacha20.c, library/poly1305.c, library/chachapoly.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the authenticated modes and their pieces.
 //
-// - AES-GCM (NIST SP 800-38D), with the GHASH of BearSSL's constant-time
+// - GCM (NIST SP 800-38D), with the GHASH of BearSSL's constant-time
 //   ghash_ctmul64 (Thomas Pornin): carry-less products from integer
 //   multiplies with holes, so no table index or branch depends on H or the
 //   data. On a host with PCLMULQDQ the same GHASH runs through
 //   core.crypto.__ghash_blocks; both compute SP 800-38D section 6.4.
-// - AES-CCM (NIST SP 800-38C, RFC 3610) and CCM* (IEEE 802.15.4-2011
+// - CCM (NIST SP 800-38C, RFC 3610) and CCM* (IEEE 802.15.4-2011
 //   annex B), as the mbedtls ccm.c state machine.
+// - GCM and CCM run on any 128-bit block cipher's forward direction
+//   (cipher.ForwardBlock): AES, ARIA and Camellia, as mbedtls's.
 // - ChaCha20 (RFC 8439 section 2.4), HChaCha20
 //   (draft-irtf-cfrg-xchacha-03 section 2.2), Poly1305 (RFC 8439 section
 //   2.5, in the 26-bit limbs of Andrew Moon's poly1305-donna) and
@@ -19,6 +23,7 @@
 use {
     core
     cipher: __core_crypto_cipher
+    __core_crypto_cipher.[ForwardBlock]
 }
 
 ZERO_BLOCK: [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -86,17 +91,15 @@ rev64: fn(v: U64) -> U64 Never! {
     (x << 32).bit_or(x >> 32)
 }
 
-/// An AES-GCM key: the AES encryption key and the hash subkey
-/// H = CIPH_K(0^128) (SP 800-38D section 7.1, step 1), as bytes for the
-/// host leaf and, in `hw`, as the words h0, h1, h0 ^ h1 and their bit
-/// reversals for the Jet GHASH.
-GCMKey: struct {
-    aes: cipher.AESKey
+/// A GHASH key: the hash subkey H = CIPH_K(0^128) (SP 800-38D section 7.1,
+/// step 1), as bytes for the host leaf and, in `hw`, as the words h0, h1,
+/// h0 ^ h1 and their bit reversals for the Jet GHASH.
+GHASHKey: struct {
     h: [U8]
     hw: [U64]
 }
 
-impl GCMKey.Close {
+impl GHASHKey.Close {
     close: fn(&&self) {
         h := self.h.move()
         core.crypto.wipe(h)
@@ -105,11 +108,17 @@ impl GCMKey.Close {
     }
 }
 
-/// The GCM key for a 16-, 24- or 32-byte AES key; None for any other length.
-gcm_key: fn(key: [U8]) -> GCMKey? Never! {
-    aes: cipher.aes_key(key, false) ?? return None
+/// A GCM key: the block cipher's encryption key (AES, ARIA or Camellia;
+/// any cipher.ForwardBlock) and its GHASH key.
+GCMKey: struct<K> {
+    c: K
+    g: GHASHKey
+}
+
+/// The GCM key over the encryption key `c` (mbedtls_gcm_setkey).
+gcm_key: fn<K: ForwardBlock>(c: K) -> GCMKey<K> Never! {
     h := cipher.zero_bytes(16)
-    cipher.encrypt_in_place(aes, h)
+    c.encrypt_one(h)
     h1: load_be64(h, 0)
     h0: load_be64(h, 8)
     h0r: rev64(h0)
@@ -121,13 +130,13 @@ gcm_key: fn(key: [U8]) -> GCMKey? Never! {
     hw[3] = h0r
     hw[4] = h1r
     hw[5] = h0r.bit_xor(h1r)
-    Val(GCMKey{aes: aes, h: h, hw: hw})
+    GCMKey<K>{c: c, g: GHASHKey{h: h, hw: hw}}
 }
 
 /// y = (y ^ X_i) . H for `count` 16-byte blocks X_i of `data` from `off`
 /// (SP 800-38D algorithm 2, one step per block). The host leaf runs them
 /// when it can; otherwise the Jet carry-less multiply does.
-ghash: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
     if count <= 0 -> return
     if core.crypto.__ghash_blocks(k.h, y, data, off, count) -> return
     ghash_portable(k, y, data, off, count)
@@ -135,7 +144,7 @@ ghash: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
 
 /// `ghash` on the Jet carry-less multiply alone.
 #Arithmetic(.Wrapping)
-ghash_portable: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+ghash_portable: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
     if count <= 0 -> return
     h0: k.hw[0]
     h1: k.hw[1]
@@ -185,7 +194,7 @@ ghash_portable: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never!
 }
 
 /// The bytes of y = y ^ X for a block X waiting in `acc`, multiplied in.
-ghash_acc: fn(k: GCMKey, acc: &[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) }
+ghash_acc: fn(k: GHASHKey, acc: &[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) }
 
 /// One GCM operation in flight (mbedtls_gcm_context after starts).
 /// - `ctr`: the next counter block; inc32(J0) at the start.
@@ -216,6 +225,12 @@ impl GCM.Close {
     }
 }
 
+/// A cleared GCM context (mbedtls_gcm_init): what a cipher-layer context
+/// holds until its first gcm_starts.
+gcm_state: fn() -> GCM Never! {
+    GCM{decrypt: false, ctr: cipher.zero_bytes(16), base: cipher.zero_bytes(16), acc: cipher.zero_bytes(16), stream: cipher.zero_bytes(16), ad_len: 0, len: 0}
+}
+
 // SP 800-38D section 5.2.1.1: len(P) <= 2^39 - 256 bits, len(A) <= 2^64 - 1
 // bits (mbedtls caps the AAD at 2^61 - 1 bytes).
 GCM_MAX_DATA: 68719476704
@@ -225,7 +240,7 @@ GCM_MAX_AAD: 2305843009213693951
 /// A 12-byte IV gives J0 = IV || 0^31 || 1; any other length GHASHes the
 /// zero-padded IV and its 64-bit bit length. None for an empty IV or one
 /// of 2^61 bytes or more (section 5.2.1.1: len(IV) <= 2^64 - 1 bits).
-gcm_starts: fn(k: GCMKey, decrypt: Bool, iv: [U8]) -> GCM? Never! {
+gcm_starts: fn<K: ForwardBlock>(k: GCMKey<K>, decrypt: Bool, iv: [U8]) -> GCM? Never! {
     if iv.len() == 0 || iv.len() > GCM_MAX_AAD -> return None
     j0 := cipher.zero_bytes(16)
     if iv.len() == 12 {
@@ -233,26 +248,26 @@ gcm_starts: fn(k: GCMKey, decrypt: Bool, iv: [U8]) -> GCM? Never! {
         j0[15] = U8{1}
     } else {
         whole: iv.len() /% 16
-        ghash(k, j0, iv, 0, whole)
+        ghash(k.g, j0, iv, 0, whole)
         rest: iv.len() - whole * 16
         if rest > 0 {
             last := cipher.zero_bytes(16)
             loop i in 0..<rest -> last[i] = iv[whole * 16 + i]
-            ghash(k, j0, last, 0, 1)
+            ghash(k.g, j0, last, 0, 1)
         }
         lengths := cipher.zero_bytes(16)
         store_be64(lengths, 8, U64{iv.len()} << 3)
-        ghash(k, j0, lengths, 0, 1)
+        ghash(k.g, j0, lengths, 0, 1)
     }
     base := j0.copy()
-    cipher.encrypt_in_place(k.aes, base)
+    k.c.encrypt_one(base)
     cipher.increment(j0, 4)
     Val(GCM{decrypt: decrypt, ctr: j0, base: base, acc: cipher.zero_bytes(16), stream: cipher.zero_bytes(16), ad_len: 0, len: 0})
 }
 
 /// Feed additional data (mbedtls_gcm_update_ad). False past the AAD limit
 /// or once data has started.
-gcm_update_ad: fn(k: GCMKey, st: &GCM, aad: [U8]) -> Bool Never! {
+gcm_update_ad: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, aad: [U8]) -> Bool Never! {
     if st.len > 0 -> return false
     if aad.len() > GCM_MAX_AAD - st.ad_len -> return false
     at := 0
@@ -260,11 +275,11 @@ gcm_update_ad: fn(k: GCMKey, st: &GCM, aad: [U8]) -> Bool Never! {
     if fill != 0 {
         chunk: min_int(16 - fill, aad.len())
         loop i in 0..<chunk -> st.acc[fill + i] = st.acc[fill + i].bit_xor(aad[i])
-        if fill + chunk == 16 -> ghash_acc(k, st.acc)
+        if fill + chunk == 16 -> ghash_acc(k.g, st.acc)
         at = chunk
     }
     whole: (aad.len() - at) /% 16
-    ghash(k, st.acc, aad, at, whole)
+    ghash(k.g, st.acc, aad, at, whole)
     at += whole * 16
     loop i in at..<aad.len() -> st.acc[i - at] = st.acc[i - at].bit_xor(aad[i])
     st.ad_len += aad.len()
@@ -274,11 +289,11 @@ gcm_update_ad: fn(k: GCMKey, st: &GCM, aad: [U8]) -> Bool Never! {
 /// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`
 /// (mbedtls_gcm_update), GHASHing the ciphertext. False past the
 /// SP 800-38D data limit.
-gcm_update: fn(k: GCMKey, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
     if len == 0 -> return true
     if len > GCM_MAX_DATA - st.len -> return false
     // The first data closes a partial AAD block.
-    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k, st.acc)
+    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k.g, st.acc)
     cipher.reserve(out, len)
     at := off
     end: off + len
@@ -292,22 +307,22 @@ gcm_update: fn(k: GCMKey, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -
             n += 1
             at += 1
         }
-        if n == 16 -> ghash_acc(k, st.acc)
+        if n == 16 -> ghash_acc(k.g, st.acc)
     }
     whole: (end - at) /% 16
     done := 0
     loop done < whole {
         chunk: min_int(whole - done, BULK_BLOCKS)
         first: out.len()
-        if st.decrypt -> ghash(k, st.acc, src, at, chunk)
-        cipher.blocks(k.aes, cipher.CTR32, st.ctr, src, at, chunk, out)
-        if !st.decrypt -> ghash(k, st.acc, out, first, chunk)
+        if st.decrypt -> ghash(k.g, st.acc, src, at, chunk)
+        k.c.ctr32_blocks(st.ctr, src, at, chunk, out)
+        if !st.decrypt -> ghash(k.g, st.acc, out, first, chunk)
         at += chunk * 16
         done += chunk
     }
     if at < end {
         loop i in 0..<16 -> st.stream[i] = st.ctr[i]
-        cipher.encrypt_in_place(k.aes, st.stream)
+        k.c.encrypt_one(st.stream)
         cipher.increment(st.ctr, 4)
         i := 0
         loop at < end {
@@ -325,14 +340,14 @@ gcm_update: fn(k: GCMKey, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -
 
 /// The first `tag_len` bytes of the tag (SP 800-38D section 7.1, steps 5
 /// to 7; mbedtls_gcm_finish). None unless 4 <= tag_len <= 16.
-gcm_finish: fn(k: GCMKey, st: &GCM, tag_len: Int) -> [U8]? Never! {
+gcm_finish: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, tag_len: Int) -> [U8]? Never! {
     if tag_len < 4 || tag_len > 16 -> return None
-    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k, st.acc)
-    if st.len %% 16 != 0 -> ghash_acc(k, st.acc)
+    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k.g, st.acc)
+    if st.len %% 16 != 0 -> ghash_acc(k.g, st.acc)
     lengths := cipher.zero_bytes(16)
     store_be64(lengths, 0, U64{st.ad_len} << 3)
     store_be64(lengths, 8, U64{st.len} << 3)
-    ghash(k, st.acc, lengths, 0, 1)
+    ghash(k.g, st.acc, lengths, 0, 1)
     out := cipher.zero_bytes(tag_len)
     loop i in 0..<tag_len -> out[i] = st.base[i].bit_xor(st.acc[i])
     Val(out)
@@ -340,7 +355,7 @@ gcm_finish: fn(k: GCMKey, st: &GCM, tag_len: Int) -> [U8]? Never! {
 
 /// GCM-AE (SP 800-38D section 7.1): the ciphertext of `plain` followed by
 /// its `tag_len`-byte tag.
-gcm_encrypt: fn(k: GCMKey, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+gcm_encrypt: fn<K: ForwardBlock>(k: GCMKey<K>, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
     st := gcm_starts(k, false, iv) ?? return Err(.Input)
     if !gcm_update_ad(k, st, aad) -> return Err(.Input)
     out := [U8]{}
@@ -353,7 +368,7 @@ gcm_encrypt: fn(k: GCMKey, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U
 
 /// GCM-AD (SP 800-38D section 7.2) of `sealed`, a ciphertext followed by a
 /// `tag_len`-byte tag: the plaintext, or .Auth when the tag does not verify.
-gcm_decrypt: fn(k: GCMKey, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+gcm_decrypt: fn<K: ForwardBlock>(k: GCMKey<K>, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
     if tag_len < 4 || tag_len > 16 || sealed.len() < tag_len -> return Err(.Input)
     len: sealed.len() - tag_len
     st := gcm_starts(k, true, iv) ?? return Err(.Input)
@@ -441,7 +456,7 @@ ccm_advance: fn(ctr: &[U8], q: Int, n: Int) Never! {
 
 /// B0 (SP 800-38C appendix A.2.1) enciphered into y once the nonce and the
 /// lengths are both set (ccm_calculate_first_block_if_ready).
-ccm_first_block: fn(k: cipher.AESKey, st: &CCM) -> Bool Never! {
+ccm_first_block: fn<K: ForwardBlock>(k: K, st: &CCM) -> Bool Never! {
     if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return true
     if st.tag_len == 0 {
         if st.mode == .StarEncrypt || st.mode == .StarDecrypt {
@@ -463,13 +478,13 @@ ccm_first_block: fn(k: cipher.AESKey, st: &CCM) -> Bool Never! {
         st.state = with_bit(st.state, CCM_ERROR)
         return false
     }
-    cipher.encrypt_in_place(k, st.y)
+    k.encrypt_one(st.y)
     true
 }
 
 /// Set the mode and the 7- to 13-byte nonce (mbedtls_ccm_starts):
 /// A_1 = (q - 1) || N || 1 and the nonce into B0.
-ccm_starts: fn(k: cipher.AESKey, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool Never! {
+ccm_starts: fn<K: ForwardBlock>(k: K, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool Never! {
     if iv.len() < 7 || iv.len() > 13 -> return false
     st.mode = mode
     st.q = 15 - iv.len()
@@ -487,7 +502,7 @@ ccm_starts: fn(k: cipher.AESKey, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool Neve
 /// Declare the AAD, message and tag lengths (mbedtls_ccm_set_lengths). The
 /// tag is 0 or 4 to 16 bytes and even; the AAD is below 0xff00 bytes, the
 /// two-byte encoding of SP 800-38C appendix A.2.2.
-ccm_set_lengths: fn(k: cipher.AESKey, st: &CCM, ad_len: Int, plain_len: Int, tag_len: Int) -> Bool Never! {
+ccm_set_lengths: fn<K: ForwardBlock>(k: K, st: &CCM, ad_len: Int, plain_len: Int, tag_len: Int) -> Bool Never! {
     if tag_len == 2 || tag_len > 16 || tag_len %% 2 != 0 -> return false
     if ad_len >= 65280 || ad_len < 0 || plain_len < 0 -> return false
     st.plain_len = plain_len
@@ -500,7 +515,7 @@ ccm_set_lengths: fn(k: cipher.AESKey, st: &CCM, ad_len: Int, plain_len: Int, tag
 
 /// CBC-MAC the next AAD bytes (mbedtls_ccm_update_ad); the first call
 /// prefixes the two-byte AAD length. False past the declared length.
-ccm_update_ad: fn(k: cipher.AESKey, st: &CCM, aad: [U8]) -> Bool Never! {
+ccm_update_ad: fn<K: ForwardBlock>(k: K, st: &CCM, aad: [U8]) -> Bool Never! {
     if has_bit(st.state, CCM_ERROR) -> return false
     if aad.len() == 0 -> return true
     if has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return false
@@ -519,7 +534,7 @@ ccm_update_ad: fn(k: cipher.AESKey, st: &CCM, aad: [U8]) -> Bool Never! {
         loop i in 0..<chunk -> st.y[offset + i] = st.y[offset + i].bit_xor(aad[at + i])
         st.processed += chunk
         at += chunk
-        if chunk + offset == 16 || st.processed == st.ad_len -> cipher.encrypt_in_place(k, st.y)
+        if chunk + offset == 16 || st.processed == st.ad_len -> k.encrypt_one(st.y)
     }
     if st.processed == st.ad_len {
         st.state = with_bit(st.state, CCM_AUTH_DATA_FINISHED)
@@ -533,7 +548,7 @@ ccm_update_ad: fn(k: cipher.AESKey, st: &CCM, aad: [U8]) -> Bool Never! {
 /// CBC pass for the MAC and one counter pass for the data; the counter
 /// pass never crosses a carry out of the counter's low two bytes, so the
 /// q-byte counter wraps exactly as mbedtls's does.
-ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+ccm_update: fn<K: ForwardBlock>(k: K, st: &CCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
     if has_bit(st.state, CCM_ERROR) -> return false
     if st.tag_len != 0 && st.processed + len > st.plain_len -> return false
     cipher.reserve(out, len)
@@ -552,11 +567,11 @@ ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &
             mac.clear()
             if decrypt {
                 first: out.len()
-                cipher.blocks(k, cipher.CTR32, counter, src, at, n, out)
-                cipher.blocks(k, cipher.CBC_ENC, st.y, out, first, n, mac)
+                k.ctr32_blocks(counter, src, at, n, out)
+                k.cbc_blocks(st.y, out, first, n, mac)
             } else {
-                cipher.blocks(k, cipher.CBC_ENC, st.y, src, at, n, mac)
-                cipher.blocks(k, cipher.CTR32, counter, src, at, n, out)
+                k.cbc_blocks(st.y, src, at, n, mac)
+                k.ctr32_blocks(counter, src, at, n, out)
             }
             core.crypto.wipe(counter)
             ccm_advance(st.ctr, st.q, n)
@@ -566,7 +581,7 @@ ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &
             chunk: min_int(16 - offset, end - at)
             st.processed += chunk
             loop i in 0..<16 -> ks[i] = st.ctr[i]
-            cipher.encrypt_in_place(k, ks)
+            k.encrypt_one(ks)
             last: chunk + offset == 16 || st.processed == st.plain_len
             loop i in 0..<chunk {
                 c: src[at + i]
@@ -575,7 +590,7 @@ ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &
                 out.push(p)
             }
             if last {
-                cipher.encrypt_in_place(k, st.y)
+                k.encrypt_one(st.y)
                 ccm_advance(st.ctr, st.q, 1)
             }
             at += chunk
@@ -590,7 +605,7 @@ ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &
 /// 6.1; mbedtls_ccm_finish), then the context clears for the next nonce.
 /// None unless every declared byte arrived and `tag_len` is the declared
 /// length.
-ccm_finish: fn(k: cipher.AESKey, st: &CCM, tag_len: Int) -> [U8]? Never! {
+ccm_finish: fn<K: ForwardBlock>(k: K, st: &CCM, tag_len: Int) -> [U8]? Never! {
     if has_bit(st.state, CCM_ERROR) -> return None
     if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return None
     if st.ad_len > 0 && !has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return None
@@ -598,7 +613,7 @@ ccm_finish: fn(k: cipher.AESKey, st: &CCM, tag_len: Int) -> [U8]? Never! {
     if tag_len != st.tag_len -> return None
     loop i in 0..<st.q -> st.ctr[15 - i] = U8{0}
     s0 := st.ctr.copy()
-    cipher.encrypt_in_place(k, s0)
+    k.encrypt_one(s0)
     mac := cipher.zero_bytes(tag_len)
     loop i in 0..<tag_len -> mac[i] = st.y[i].bit_xor(s0[i])
     core.crypto.wipe(s0)
@@ -612,7 +627,7 @@ ccm_finish: fn(k: cipher.AESKey, st: &CCM, tag_len: Int) -> [U8]? Never! {
 
 /// One whole CCM pass (ccm_auth_crypt): the output of `src` followed by the
 /// tag.
-ccm_crypt: fn(k: cipher.AESKey, mode: CCMMode, iv: [U8], aad: [U8], src: [U8], len: Int, tag_len: Int) -> [U8]? Never! {
+ccm_crypt: fn<K: ForwardBlock>(k: K, mode: CCMMode, iv: [U8], aad: [U8], src: [U8], len: Int, tag_len: Int) -> [U8]? Never! {
     st := ccm_state()
     if !ccm_starts(k, st, mode, iv) -> return None
     if !ccm_set_lengths(k, st, aad.len(), len, tag_len) -> return None
@@ -627,14 +642,14 @@ ccm_crypt: fn(k: cipher.AESKey, mode: CCMMode, iv: [U8], aad: [U8], src: [U8], l
 
 /// CCM generation-encryption (SP 800-38C section 6.1), or CCM* when
 /// `star`: the ciphertext of `plain` followed by its tag.
-ccm_encrypt: fn(k: cipher.AESKey, star: Bool, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+ccm_encrypt: fn<K: ForwardBlock>(k: K, star: Bool, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
     sealed: ccm_crypt(k, if star -> .StarEncrypt else -> .Encrypt, iv, aad, plain, plain.len(), tag_len) ?? return Err(.Input)
     Ok(sealed)
 }
 
 /// CCM decryption-verification (SP 800-38C section 6.2), or CCM* when
 /// `star`, of a ciphertext followed by a `tag_len`-byte tag.
-ccm_decrypt: fn(k: cipher.AESKey, star: Bool, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+ccm_decrypt: fn<K: ForwardBlock>(k: K, star: Bool, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
     if tag_len < 0 || sealed.len() < tag_len -> return Err(.Input)
     len: sealed.len() - tag_len
     opened := ccm_crypt(k, if star -> .StarDecrypt else -> .Decrypt, iv, aad, sealed, len, tag_len) ?? return Err(.Input)
@@ -654,11 +669,13 @@ word32: fn(b: [U8], off: Int) -> U32 Never! {
     U32{b[off]}.bit_or(U32{b[off + 1]} << 8).bit_or(U32{b[off + 2]} << 16).bit_or(U32{b[off + 3]} << 24)
 }
 
+// Little-endian, each byte the word's low bits (wrapping): no test of the
+// key stream's value.
 put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
-    out[at] = U8{w.bit_and(U32{255})}
-    out[at + 1] = U8{(w >> 8).bit_and(U32{255})}
-    out[at + 2] = U8{(w >> 16).bit_and(U32{255})}
-    out[at + 3] = U8{w >> 24}
+    out[at] = wrapping(U8{w})
+    out[at + 1] = wrapping(U8{w >> 8})
+    out[at + 2] = wrapping(U8{w >> 16})
+    out[at + 3] = wrapping(U8{w >> 24})
 }
 
 /// The 20 rounds (ten column-and-diagonal double rounds) of the ChaCha
@@ -1251,10 +1268,10 @@ chachapoly_decrypt: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8] 
 // ---------------------------------------------------------------------------
 
 #Test("The GCM specification's test cases 2 and 4 seal and open with AES-128") {
-    zero_key: gcm_key(cipher.zero_bytes(16)) ?? panic("GCM key")
+    zero_key: gcm_key(cipher.aes_key(cipher.zero_bytes(16), false) ?? panic("AES key"))
     sealed := gcm_encrypt(zero_key, cipher.zero_bytes(12), [U8]{}, cipher.zero_bytes(16), 16) ?? panic("seal")
     assert(sealed == [U8]{0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92, 0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2, 0xfe, 0x78, 0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd, 0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd, 0xdf})
-    k: gcm_key([U8]{0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08}) ?? panic("GCM key")
+    k: gcm_key(cipher.aes_key([U8]{0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08}, false) ?? panic("AES key"))
     iv: [U8]{0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88}
     plain: [U8]{0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09, 0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34, 0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39}
     aad: [U8]{0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2}
@@ -1302,13 +1319,13 @@ chachapoly_decrypt: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8] 
 #Test("The GHASH host leaf agrees with the Jet carry-less multiply on every block count and offset") {
     data := [U8]{}
     loop i in 0..<200 -> data.push(U8{(i * 53 + 7) %% 256})
-    k: gcm_key(cipher.bytes_of(data, 160, 16)) ?? panic("GCM key")
+    k: gcm_key(cipher.aes_key(cipher.bytes_of(data, 160, 16), false) ?? panic("AES key"))
     loop count in 0..<12 {
         loop off in ([Int]{0, 1, 5}) {
             fast := cipher.bytes_of(data, 176, 16)
             slow := cipher.bytes_of(data, 176, 16)
-            ghash(k, fast, data, off, count)
-            ghash_portable(k, slow, data, off, count)
+            ghash(k.g, fast, data, off, count)
+            ghash_portable(k.g, slow, data, off, count)
             assert(fast == slow)
         }
     }

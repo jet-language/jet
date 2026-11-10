@@ -323,47 +323,6 @@ ir_handle_loadable_route: fn(method: String) -> IRHandleRoute? {
     }
 }
 
-ir_handle_ui_route: fn(receiver: Type, method: String) -> IRHandleRoute? {
-    if receiver == {
-        .Named(_) | .Apply(_, _) -> {}
-        else -> return None
-    }
-    raw_name := ir_handle_nominal_name(receiver)
-    pieces := raw_name.split("::").to_list()
-    name := if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> raw_name
-    pieces = name.split(".").to_list()
-    name = if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> name
-    backend := if name == {
-        "NullBackend" -> "JetNullBackend"
-        "TUIBackend" -> "JetTuiBackend"
-        else -> {
-            return None
-        }
-    }
-    member := ""
-    if method == {
-        "measure" -> member = "measure_node"
-        "layout" -> member = "layout_node"
-        "paint" -> member = "paint_node"
-        "on_event" -> member = "dispatch_event"
-        "mount_default" -> member = "mount_node_default"
-        "mount" -> member = "mount_node"
-        "set_focus_group" -> member = "set_focus_group"
-        "focused_label" -> member = "focused_label"
-        else -> {}
-    }
-    if method == "commands" && name == "NullBackend" -> member = "paint_commands"
-    if (method == "frame_lines" || method == "render_count") && name == "TUIBackend" -> member = method
-    if member == "" -> return None
-    // The runtime borrows every input (UiBackends.jet), cloning what it keeps.
-    mask := if method == {
-        "measure" | "layout" | "mount" -> [Bool]{true, true, true}
-        "paint" | "on_event" | "mount_default" | "set_focus_group" -> [Bool]{true, true}
-        else -> [Bool]{true}
-    }
-    Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
-}
-
 ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
     is_date := kind == "Date" || kind == "LocalDate"
     prefix := if {
@@ -591,7 +550,6 @@ ir_handle_dynamic_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
         .MathMethod(type_name, method) -> return ir_handle_math_route(type_name, method)
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
         .LoadableMethod(method) -> return ir_handle_loadable_route(method)
-        .UIBackendMethod(method) -> return ir_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return ir_handle_civil_time_route(kind, method)
         .ProcessChildMethod(method) -> {
             if method == {

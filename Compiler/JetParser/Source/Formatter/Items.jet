@@ -2138,7 +2138,14 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand
             jfmt_newline(f)
         }
         if expand == .Val(span) -> jfmt_emit_leading(f, span.start)
-        jfmt_write(f, "expand: fn(self, target: Target) {{")
+        jfmt_write(f, "expand: fn(self, target: Target) ")
+        if declaration.row == .Val(effects) {
+            jfmt_write(f, "-[")
+            row_source: if declaration.row_span == .Val(row_span) -> jfmt_source_list_span_after(f, row_span.start, JFMT_DELIM_BRACKET) else -> JetFmtSourceList?{None}
+            jfmt_fmt_effect_row(f, effects, row_source)
+            jfmt_write(f, "]> ")
+        }
+        jfmt_write(f, "{{")
         jfmt_newline(f)
         f.indent += 1
         jfmt_fmt_derive_body_items(f, template, true)

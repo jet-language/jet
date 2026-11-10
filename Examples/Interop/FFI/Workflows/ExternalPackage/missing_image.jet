@@ -1,0 +1,7 @@
+use png: c.png
+
+run: fn() {
+    image: png.Image.open("MissingOrCorrupt.png", format: .RGBA) ?? panic("expected libpng error")
+    defer close(image)
+    print("unexpected decode: {image.width}x{image.height}")
+}

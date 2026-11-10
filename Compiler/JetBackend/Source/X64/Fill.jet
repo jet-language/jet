@@ -19,7 +19,7 @@
 // falls through its last byte.
 
 x64_fill_code: fn(width: Int, exact: Bool) -> [U8] Never! {
-    code := [U8]{}
+    code := x64_code()
     declines := [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
     // 0 <= first < end, end (and an exact value) inline.
@@ -40,13 +40,10 @@ x64_fill_code: fn(width: Int, exact: Bool) -> [U8] Never! {
     x64_mov_rr(code, X64_RCX, X64_R8)
     // cld; rep stosb (f3 aa), stosw (66 f3 ab), stosd (f3 ab) or stosq
     // (f3 48 ab).
-    x64_byte(code, 0xfc)
-    if width == 2 -> x64_byte(code, 0x66)
-    x64_byte(code, 0xf3)
-    if width == 8 -> x64_byte(code, 0x48)
-    x64_byte(code, if width == 1 -> 0xaa else -> 0xab)
+    x64_byte(code.bytes, 0xfc)
+    x64_rep_stos(code, width)
     x64_mov_ri(code, X64_RAX, 0)
-    end: code.len()
-    loop site in declines -> x64_patch_rel32(code, site, end)
-    code
+    end: code.bytes.len()
+    loop site in declines -> x64_patch_rel32(code.bytes, site, end)
+    code.bytes
 }

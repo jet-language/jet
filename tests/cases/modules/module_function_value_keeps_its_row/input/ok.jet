@@ -1,0 +1,21 @@
+pricing: module {
+    RATE: 3
+    total: fn(text: String) -> Int { text.len() * RATE }
+    tiers: module {
+        double: fn(text: String) -> Int { text.len() * 2 }
+    }
+    // A sibling function named as a value inside its own module.
+    pick: fn() -> fn(String) -> Int { total }
+}
+
+apply: fn(f: fn(String) -[]> Int, text: String) -> Int { f(text) }
+
+run: fn() {
+    print(apply(pricing.total, "abc"))
+    print(apply(pricing.tiers.double, "abc"))
+    f: pricing.total
+    print(f("ab"))
+    g: pricing.pick()
+    print(g("a"))
+    print(pricing.RATE)
+}

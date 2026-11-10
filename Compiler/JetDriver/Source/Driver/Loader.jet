@@ -108,8 +108,13 @@ use {
         sema_marker_rules_applied_row,
         sema_core_error_family_member,
         sema_eval_entry_show,
+        sema_script_entry,
         sema_source_words,
         sema_source_wanted_words,
+        sema_module_meta_declared_names,
+        sema_module_meta_value_reads,
+        sema_module_meta_carries,
+        sema_module_meta_field_lines,
         sema_unknown_module_alias,
     ]
     jet_pkg_model.[
@@ -233,6 +238,18 @@ jet_driver_authority_diagnostic: fn(span: Span, detail: String) -> Diagnostic {
     jet_driver_diagnostic("E1221", span, "the package's `authority:` block is malformed", detail, "`authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights")
 }
 
+// E1221's reason for an `FFI` right written with an argument, such as
+// `FFI.C("nativeffi")` (#6281 c144): that is the foreign-call effect naming
+// a library, not a memory denial, and an authority list names the right
+// alone. None for every other root.
+jet_driver_authority_ffi_argument: fn(name: String, place: String) -> String? {
+    if sema_effect_root(name) != "FFI" -> return None
+    open: name.find("(")
+    if open < 0 -> return None
+    right: String.from_bytes_lossy(name.bytes()[0..<open])
+    Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
+}
+
 jet_driver_is_ui_capability: fn(name: String) -> Bool Never! {
     loop call in CORE_CALLS {
         loop capability in call.ui_capabilities {
@@ -275,7 +292,7 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
                         root: sema_effect_root(name)
                         if {
                             !jet_driver_is_ui_capability(name) && sema_effect_parse_name(root) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect or UI capability"))
-                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`authority.needs`") ?? "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
                             root == "Panic" || root == "Mem" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is deny-only and cannot be declared in `authority.needs`"))
                             else -> needs.push(name)
                         }
@@ -339,8 +356,8 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
-            name.contains("(") && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
-            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
+            name.contains("(") && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
+            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> names.push(name)
         }
         item_index = item.next_index
@@ -556,16 +573,19 @@ jet_driver_manifest_field_value: fn(source: String, tokens: [Token], start_index
         }
         cursor += 1
     }
+    // The value's own text with comments dropped. The source between two
+    // tokens is whitespace and stays, so a record body keeps the newline
+    // that separates `harden: true` from the field after it (#6281 c140).
     text := ""
+    previous_end := -1
     loop token_index in start_index..<cursor {
         token: tokens[token_index]
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
-            start: token.span.start
-            end: token.span.end
-            if start >= 0 && end >= start && end <= source_bytes.len() {
-                text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
-            }
-        }
+        start: token.span.start
+        end: token.span.end
+        if start < 0 || end < start || end > source_bytes.len() -> next
+        if previous_end >= 0 && start > previous_end -> text = "{text}{String.from_bytes(source_bytes[previous_end..<start]) ?? ""}"
+        previous_end = end
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
     }
     JetDriverManifestFieldValue{text: text.trim(), next_index: cursor}
 }
@@ -2445,10 +2465,11 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
 }
 
 // The top-level names one package file contributes to its
-// package namespace, with their declaring spans.
-jet_driver_namespace_item_names: fn(items: [Item]) -> [NamedSpan] Never! {
+// package namespace, with their declaring spans, from item `from` on.
+jet_driver_namespace_item_names: fn(items: [Item], from: Int) -> [NamedSpan] Never! {
     names := [NamedSpan]{}
-    loop item in items {
+    loop (index, item) in items {
+        if index < from -> next
         if item == {
             .Func(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .Struct(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
@@ -2466,6 +2487,13 @@ jet_driver_namespace_item_names: fn(items: [Item]) -> [NamedSpan] Never! {
         }
     }
     names
+}
+
+// The first item of `module_row` that declares a name: a file module's
+// leading field lines set its Module record (sema_module_meta_field_lines).
+jet_driver_namespace_first_item: fn(module_row: JetDriverLoadedModule) -> Int Never! {
+    if module_row.declared_module == "" -> return 0
+    sema_module_meta_field_lines(module_row.program.items)
 }
 
 // The source bytes of one default (a parameter default or
@@ -2782,7 +2810,7 @@ jet_driver_bind_package_namespaces: fn(
             build_entry: loop item in modules[module_index].program.items {
                 if jet_driver_item_is_build_entry(item) -> break true
             } ?? false
-            loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
+            loop declared in jet_driver_namespace_item_names(modules[module_index].program.items, jet_driver_namespace_first_item(modules[module_index])) {
                 if (named_entry && declared.name == "run") || declared.name == role_command || (build_entry && declared.name == "build") {
                     member_private.push(declared.name)
                     next
@@ -2811,7 +2839,7 @@ jet_driver_bind_package_namespaces: fn(
         // A library package has no `run: fn`, not even in a `run.jet` home.
         if package.outputs.library && !package.outputs.executable {
             loop module_index in members {
-                loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
+                loop declared in jet_driver_namespace_item_names(modules[module_index].program.items, jet_driver_namespace_first_item(modules[module_index])) {
                     if declared.name != "run" -> next
                     unit: source_units[modules[module_index].source_unit_index]
                     diagnostics.push(jet_driver_diagnostic_at_source("E0625", Val(declared.span), unit.path, 0, "a library package can't declare `run: fn`", "a package is one namespace: an executable package has one `run: fn`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none.", "move the program into its own package or a loose file that uses this library, or make this package an executable."))
@@ -3434,6 +3462,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
         alias := -1
         if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
         if row.name == "SourceLocation" -> alias = jet_driver_core_demand_name(tables, "$here")
+        if row.name == "Phase" -> alias = jet_driver_core_demand_name(tables, "$phase")
         bare_alias.push(alias)
     }
     bare_rows := [Int]{}
@@ -4041,7 +4070,7 @@ jet_driver_inline_module_declares: fn(items: [Item], owner: String, member: Stri
 // Whether `items`, a module's top level, declare `member`: an item or a
 // nested module.
 jet_driver_items_declare: fn(items: [Item], member: String) -> Bool Never! {
-    loop named in jet_driver_namespace_item_names(items) {
+    loop named in jet_driver_namespace_item_names(items, 0) {
         if named.name == member -> return true
     }
     loop item in items {
@@ -4583,6 +4612,30 @@ jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, 
     }
 }
 
+// Whether a loaded module carries a core.meta Module record
+// (sema_module_meta_lower): one whose body sets a field, or that some source
+// of the compile reads as a value (sema_module_meta_mark_reads). A read may
+// come from any source, so this is known only once every source is loaded.
+// Core declares no record and reads none.
+jet_driver_module_meta_needed: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule]) -> Bool Never! {
+    names := [String:Bool]{}
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        sema_module_meta_declared_names(module_row.program.items, module_row.declared_module, names)
+    }
+    if names.len() == 0 -> return false
+    reads := [String:Bool]{}
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        sema_module_meta_value_reads(jet_driver_source_unit_text(request, source_units[module_row.source_unit_index]) ?? "", names, reads)
+    }
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if sema_module_meta_carries(module_row.program.items, module_row.declared_module, reads) -> return true
+    }
+    false
+}
+
 jet_driver_load: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     jet_driver_load_reach(request, true)
 }
@@ -4688,14 +4741,33 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     bare_modules := [String]{}
     reach := jet_driver_reach(use_driven)
     pending_index := 0
+    meta_decided := false
     // The current parse wave's results, last-first: every unit queued when
     // the wave starts is parsed at once, on the admitted compiler threads.
     parsed := [JetDriverParsedUnit]{}
     loop {
         if pending_index == pending.len() {
-            // Every queued unit is loaded: follow each deferred Core import
-            // whose alias reached code now spells as a path head; the load
-            // ends when none is left to follow.
+            // Every queued unit is loaded: when a module carries a Module
+            // record, its core.meta loads once, even when no source imports
+            // core.meta.
+            if !meta_decided {
+                meta_decided = true
+                if jet_driver_module_meta_needed(request, source_units, modules) {
+                    if !bare_modules.contains("core.meta") -> bare_modules.push("core.meta")
+                    jet_driver_reach_open(reach, "core.meta")
+                    meta_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.meta", false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                    if meta_index == .Val(index) {
+                        if !queued[index] {
+                            queued[index] = true
+                            pending.push(index)
+                        }
+                    }
+                    if pending_index < pending.len() -> next
+                }
+            }
+            // Then follow each deferred Core import whose alias reached code
+            // now spells as a path head; the load ends when none is left to
+            // follow.
             if !reach.enabled -> break
             followed := false
             loop edge_index in 0..<reach.edges.len() {
@@ -4796,7 +4868,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }
-        if request.eval_entry && !is_core && source_unit_index == (entry_index ?? -1) -> sema_eval_entry_show(program)
+        if !is_core && source_unit_index == (entry_index ?? -1) {
+            sema_script_entry(program)
+            if request.eval_entry -> sema_eval_entry_show(program)
+        }
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
         // lowercase nominal alias.

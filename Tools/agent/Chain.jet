@@ -37,8 +37,8 @@
 // args) and the canonical root. A stage whose key is in the store is REUSED:
 // copied out and verified, never rebuilt. The rest build at the canonical
 // root $JET_SCRATCH_ROOT/discovery/r14/snap: each build stage runs in the dev
-// shell (Tools/agent/JetEnv.jet --norust, which supplies the C toolchain and
-// static musl the runtime pack needs) in a private user and mount namespace
+// shell (Tools/agent/JetEnv.jet --norust: no Rust tool on PATH; the build
+// compiles no C and links no musl) in a private user and mount namespace
 // with the tree bound there, so equal sources give equal binaries whatever
 // the tree's path. Only
 // clean results are stored (rc 0, no keep-going rows, no `todo` traps). The
@@ -348,13 +348,12 @@ compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wa
 // A build stage (`jet build Compiler`, which makes jet and its runtime pack)
 // reads the compiler's source identity inputs (workspace files, every package
 // the compiler compiles, Core), the Prelude and runtime trees the toolchain
-// root serves, the pack recipe (Compiler/Toolchain), Core's vendored C (its
-// own packages, which the Core walk skips), every runtime source
-// sources.list names, and the dev-shell definition, which fixes the C
-// toolchain and musl. Sorted and unique.
+// root serves, the pack recipe (Compiler/Toolchain), every runtime source
+// sources.list names, and the dev-shell definition the stage runs in.
+// Sorted and unique.
 stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
     read := compiler_packages(tree, [String]{"inputs"})
-    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "Core/Vendor/Sqlite3", "Core/Vendor/Mbedtls", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
+    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
     sources: files.join(tree, "Compiler/JetRuntime/sources.list")
     if files.exists(sources) {
         text: files.read(sources) ?? fail("cannot read `{sources}`: {err}")
@@ -1357,7 +1356,7 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
 }
 
 build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
-    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
+    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build --optimize=basic --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
 }
 
 StageRun: struct {
@@ -1439,8 +1438,10 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
 
 // build_stage: NAME (jet, jet.o and its runtime pack jet-runtime/) built by
 // BUILDER_DIR/jet (sha BUILDER, its pack hash BUILDER_PACK) under IDENTITY:
-// `jet build --threads THREADS Compiler` at the canonical root, in the dev
-// shell, which supplies the C toolchain and static musl the pack links.
+// `jet build --optimize=basic --threads THREADS Compiler` at the canonical
+// root, in the dev shell with no Rust tool on PATH; the build compiles no C.
+// Every stage builds at `basic`, the level of the Compiler workspace's `ship`
+// profile, which builders older than these profiles take as a flag.
 // 0 built or reused, 1 failed, 3 a miss outside a run.
 build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     mat: build_mat(c, builder, builder_pack, identity, threads)
@@ -1489,7 +1490,7 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     files.create_dir_all("{c.work}/tmp") ?? ()
     builder_jet: files.join(builder_dir, "jet")
     vars: [String]{"JET_COMPILER_IDENTITY={identity}", "JET_TOOLCHAIN_ROOT={c.r.root}", "JET_KEEP_GOING=1", "JET_KEEP_GOING_REPORT={report}", "TMPDIR={c.work}/tmp", "PATH={norust_path()}"}
-    argv: [String]{builder_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", builder_jet.copy(), "build", "--threads", "{threads}", "Compiler"}
+    argv: [String]{builder_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", builder_jet.copy(), "build", "--optimize=basic", "--threads", "{threads}", "Compiler"}
     ran: stage_run(c, n, argv, vars, 3600, true)
     rows: keep_going_rows(report)
     built: files.join(build_out, "jet")

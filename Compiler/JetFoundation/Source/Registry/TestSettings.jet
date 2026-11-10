@@ -37,11 +37,15 @@ TestSettingKind: enum {
     Size
 }
 
+// `typed`: the JET_CLI_FLAG_TYPED_REASONS row that says why the flag is typed
+// each time instead of being the remembered setting `test.<name>`; empty when
+// it is that setting (a profile or `test: fn` writes any row).
 TestSettingRow: struct {
     name: String
     kind: TestSettingKind
     ported: Bool
     help: String
+    typed: String{""}
 }
 
 // One chosen value: its row's name, the canonical value text
@@ -70,30 +74,31 @@ TEST_SETTINGS_ENV: "JET_TEST_SETTINGS"
 JET_TEST_SETTINGS: comptime { [TestSettingRow]{
     {name: "fresh", kind: TestSettingKind.Switch, ported: true, help: "Bypass only cached test results (default off); the build cache remains reusable"},
     {name: "docs", kind: TestSettingKind.Switch, ported: true, help: "Run checked documentation examples only (default off)"},
-    {name: "filter", kind: TestSettingKind.Text, ported: true, help: "Only run tests and corpus rows whose name contains the text"},
+    {name: "filter", kind: TestSettingKind.Text, ported: true, help: "Only run tests and corpus rows whose name contains the text", typed: "operand"},
     {name: "capture", kind: TestSettingKind.Capture, ported: true, help: "Show test output for failed, all, or none of the tests (default failed)"},
-    {name: "update_snapshots", kind: TestSettingKind.Switch, ported: true, help: "Replace expected snapshot output and bless every selected corpus row"},
+    {name: "update_snapshots", kind: TestSettingKind.Switch, ported: true, help: "Replace expected snapshot output and bless every selected corpus row", typed: "destructive"},
     {name: "shuffle", kind: TestSettingKind.Seed, ported: true, help: "Run tests in the order the seed picks"},
     {name: "serial", kind: TestSettingKind.Switch, ported: true, help: "Run tests one at a time instead of the parallel default"},
     {name: "measure", kind: TestSettingKind.Switch, ported: true, help: "Measure `.measure` claims"},
     {name: "trace_tiers", kind: TestSettingKind.Switch, ported: true, help: "Report the tier each test ran at"},
-    // The optimize levels of a test run: none is `jet run`, basic `jet build`
-    // and full the release build. More than one runs the tests once per level.
+    // The optimize levels of a test run: none is `jet run`, basic
+    // `jet build --optimize=basic` and full `jet build`. More than one runs
+    // the tests once per level.
     {name: "optimize", kind: TestSettingKind.Levels, ported: true, help: "Run the tests at each listed optimize level: none, basic or full"},
     {name: "time_limit", kind: TestSettingKind.Duration, ported: true, help: "Bound each test's wall time, such as 60s"},
     {name: "opt_in", kind: TestSettingKind.Switch, ported: true, help: "Also run the corpus rows that are opt-in only"},
     // The same tests land in the same slice for the same tree. A sharded run
     // compares with its baseline but never writes it.
-    {name: "shard", kind: TestSettingKind.Shard, ported: true, help: "Run slice I of N of the selected tests and corpus rows, as I/N"},
+    {name: "shard", kind: TestSettingKind.Shard, ported: true, help: "Run slice I of N of the selected tests and corpus rows, as I/N", typed: "operand"},
     {name: "list", kind: TestSettingKind.Switch, ported: true, help: "Print the selected tests after filter and shard, run nothing, exit 0"},
     // Read before the slice: a shard of a list holds the listed rows its slice holds.
-    {name: "cases", kind: TestSettingKind.Path, ported: true, help: "Only run the tests and corpus rows the file names, one name or id per line"},
+    {name: "cases", kind: TestSettingKind.Path, ported: true, help: "Only run the tests and corpus rows the file names, one name or id per line", typed: "operand"},
     // The corpus pool's width and memory; 0 (unset) sizes it from the host.
     {name: "jobs", kind: TestSettingKind.Count, ported: true, help: "Run at most this many corpus entries at once (default: from the cores)"},
     {name: "memory", kind: TestSettingKind.Size, ported: true, help: "Bound the memory the running corpus entries claim together, such as 16G"},
     // The ui and lint blessing guard: `update_snapshots` refuses a snapshot
     // that renders fewer diagnostics unless its row is listed here.
-    {name: "allow_shrink", kind: TestSettingKind.Text, ported: true, help: "Let `update_snapshots` bless fewer diagnostics for the listed ui rows, comma-separated"},
+    {name: "allow_shrink", kind: TestSettingKind.Text, ported: true, help: "Let `update_snapshots` bless fewer diagnostics for the listed ui rows, comma-separated", typed: "destructive"},
     {name: "diagnostic_coverage", kind: TestSettingKind.Switch, ported: true, help: "Check the ui suite's emitted and rendered codes against tests/diagnostics_coverage_allowlist.tsv instead of its rows"},
     // One JSON verdict document, written as JET_CI_EVIDENCE_DIR's are.
     {name: "results", kind: TestSettingKind.Path, ported: true, help: "Write every selected test's verdict to the JSON file"},
@@ -114,7 +119,7 @@ JET_TEST_SETTINGS: comptime { [TestSettingRow]{
     {name: "seed", kind: TestSettingKind.Seed, ported: true, help: "Generated-grade base PRNG seed (default: fixed 0, reproducible)"},
     {name: "corpus", kind: TestSettingKind.Path, ported: false, help: "Generated-grade corpus directory (default: .jet/fuzz/<test>)"},
     {name: "watch", kind: TestSettingKind.Switch, ported: false, help: "Re-run on dependency changes"},
-    {name: "record", kind: TestSettingKind.Text, ported: true, help: "Record a named replay"},
+    {name: "record", kind: TestSettingKind.Text, ported: true, help: "Record a named replay", typed: "operand"},
     {name: "browser", kind: TestSettingKind.Text, ported: false, help: "Select browser engines for tests"},
     {name: "browser_retries", kind: TestSettingKind.Count, ported: false, help: "Retry each browser attempt up to five times"},
     {name: "browser_reporter", kind: TestSettingKind.Text, ported: false, help: "Browser report format: text, json, or html"},

@@ -89,6 +89,7 @@ use {
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
         owned_trait_arithmetic_listed,
+        target_os_gates,
         target_os_key,
         target_os_named,
     ]
@@ -1864,7 +1865,7 @@ parser_function_web_partition: fn(state: &JetParserState, marker: Marker) -> Web
     if segments.len() > 1 && segments[0] == "OS" {
         os: segments[1..<segments.len()].join(".")
         if target_os_named(os) == None {
-            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
+            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known OS", "OS targets are {target_os_gates()}", "write `#Target(OS.Linux)` or another OS of the list")
             return None
         }
     } else if name != "Web" {
@@ -1969,7 +1970,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                 field_markers := member_modifiers.markers
                 field_pub := member_modifiers.is_pub
                 field_package_pub := member_modifiers.is_package_pub
-                field_name: parser_struct_field_name(state)
+                field_name: parser_field_name(state, "in a struct field")
                 parser_expect(state, TOKEN_COLON, "`:` after a struct field name")
                 field_type: parser_parse_type(state, 0)
                 computed := Expr?{None}
@@ -2033,16 +2034,16 @@ parser_apply_struct_markers: fn(state: &JetParserState, value: &StructDef, marke
     value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(markers) else -> None
 }
 
-// A struct field name; a keyword followed by `:` names a field too (a
-// marker's `use` argument).
-parser_struct_field_name: fn(state: &JetParserState) -> Token {
+// A struct field name, or a record literal's: a keyword followed by `:`
+// names a field too (a marker's `use` argument, `Deprecated{use: …}`).
+parser_field_name: fn(state: &JetParserState, context: String) -> Token {
     token: parser_current(state)
     if token.kind != TOKEN_IDENT && token.kind != TOKEN_KW_TAG && parser_kind_at(state, 1) == TOKEN_COLON && parser_is_keyword_token(state, token) {
         parser_bump(state)
         spelling: parser_text(state, token)
         return parser_spelled_token(state, TOKEN_IDENT, token.span, spelling)
     }
-    parser_expect_name(state, "in a struct field")
+    parser_expect_name(state, context)
 }
 
 parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> EnumDef {
@@ -2596,7 +2597,13 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after trait members")
     trait_name: parser_value(state, name)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "trait `{trait_name}`")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers}
+    cap := parser_type_fx_cap(state, markers, trait_name)
+    if cap == .Val(written) {
+        scoped := written
+        scoped.scope = "trait"
+        cap = Val(scoped)
+    }
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap}
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list

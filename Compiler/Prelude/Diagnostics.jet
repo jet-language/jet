@@ -1126,8 +1126,8 @@ MissingRunFunction: struct {
         meaning: "No `run` function"
         detail: true
         what: fn(self) -> String { "This program has no `run` function" }
-        why: fn(self) -> String { "Running a program starts at `run: fn`, and the entry file doesn't define one" }
-        fix: fn(self) -> String { "Add `run: fn() {{ ... }}` to the entry file" }
+        why: fn(self) -> String { "A program starts at its top-level statements or its `run: fn`, and the entry file has neither" }
+        fix: fn(self) -> String { "Write the statements to run at the top level of the entry file, or add `run: fn() {{ ... }}`" }
     }
 }
 
@@ -1250,9 +1250,9 @@ ImmutableAssignment: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`x` was made with `:`, so it can't change" }
+        what: fn(self) -> String { "This name was made with `:`, so it can't change" }
         why: fn(self) -> String { "Only `:=` bindings (and `&` parameters) can be changed" }
-        fix: fn(self) -> String { "Declare it with `x := ...` instead" }
+        fix: fn(self) -> String { "Declare the name with `:=` instead of `:`" }
     }
 }
 
@@ -2523,6 +2523,24 @@ SharedBusyWait: struct {
         what: fn(self) -> String { "This unbounded loop polls `Shared` state without waiting" }
         why: fn(self) -> String { "An empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress" }
         fix: fn(self) -> String { "Wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly" }
+    }
+}
+
+TolerantFormDecode: struct {
+    member: String
+    impl Diagnostic {
+        code: "L0208"
+        severity: .Lint
+        lint_name: "tolerant_form_decode"
+        stage: [.Sema]
+        meaning: "A tolerant `core.http` form or query decode, listed for review"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
+        what: fn(self) -> String { "`{self.member}` keeps a broken escape as written and turns invalid UTF-8 into U+FFFD." }
+        why: fn(self) -> String { "The tolerant decoder follows the browser standard, so two different inputs can decode to the same value; code that picks a file or an account from that value must refuse bad input instead." }
+        fix: fn(self) -> String { "If the value names a file or an account, call `{self.member}_strict` and handle its `FormDecodeError`; otherwise keep this call. `jet fix --all` writes the strict call." }
     }
 }
 
@@ -5076,18 +5094,19 @@ ImportedScriptExecutes: struct {
         code: "E0620"
         meaning: "Imported script has executable top-level statements"
         what: fn(self) -> String { "Imported script `{self.file}` has executable top-level statements" }
-        why: fn(self) -> String { "Imported files provide declarations; executable code belongs in an explicit `run: fn`, so an import never gains a hidden side effect." }
-        fix: fn(self) -> String { "Move the statements into the entry file's `run: fn`, or import a declaration-only file." }
+        why: fn(self) -> String { "Imported files provide declarations; executable code belongs in the entry file, so an import never gains a hidden side effect." }
+        fix: fn(self) -> String { "Move the statements into the entry file, or import a declaration-only file." }
     }
 }
 
-TopLevelStatementsWithoutRun: struct {
+TopLevelStatementsBesideRun: struct {
     impl Diagnostic {
         code: "E0621"
         detail: true
-        what: fn(self) -> String { "Top-level executable statements require an explicit `run: fn`" }
-        why: fn(self) -> String { "Jet does not invent a runtime function for ordinary files; only an explicit `run: fn` executes code." }
-        fix: fn(self) -> String { "Move the statements into `run: fn`." }
+        meaning: "A file has top-level statements and a `run: fn`"
+        what: fn(self) -> String { "This file has top-level statements and a `run: fn`" }
+        why: fn(self) -> String { "A file's top-level statements are its entry, and so is `run: fn`; a program has one entry." }
+        fix: fn(self) -> String { "Move the statements into `run: fn`, or remove `run: fn` so the statements run." }
     }
 }
 
@@ -5171,6 +5190,20 @@ CompileTimeReadsStartupValue: struct {
         what: fn(self) -> String { "This compile-time code reads `{self.name}`, which is only known at startup" }
         why: fn(self) -> String { "`{self.name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `run: fn`. Compile-time code runs while building, before that value exists." }
         fix: fn(self) -> String { "Compute the value at runtime instead, or make `{self.name}` foldable: a pure expression that evaluates without failing." }
+    }
+}
+
+CompileTimeReadsRuntimeValue: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0640"
+        stage: [.Comptime]
+        meaning: "Compile-time code reads a run-time local or parameter of the function around it"
+        fix_next: "Compute the value at run time, or give the compile-time code a constant."
+        what: fn(self) -> String { "This compile-time code reads `{self.name}`, a run-time value of the function around it" }
+        why: fn(self) -> String { "Compile-time code runs once while building, before any call of the function, so `{self.name}` has no value yet." }
+        fix: fn(self) -> String { "Compute the value at run time without `comptime`, or read a constant or a `comptime` value instead of `{self.name}`." }
     }
 }
 
@@ -5437,11 +5470,11 @@ MissingDynamicEffectBound: struct {
 
     impl Diagnostic {
         code: "E0743"
-        meaning: "Dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling"
+        meaning: "Dynamic trait dispatch has no effect bound under an enclosing effect ceiling"
         detail: true
         what: fn(self) -> String { "Dynamic call `{self.trait_name}::{self.method}` has no effect bound." }
-        why: fn(self) -> String { "A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound." }
-        fix: fn(self) -> String { "Declare an effect row on the trait method, such as `-[]>` for pure dispatch, or move the dynamic call outside the bounded function." }
+        why: fn(self) -> String { "A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap." }
+        fix: fn(self) -> String { "Declare an effect row on the trait method, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move the dynamic call outside the bounded function." }
     }
 }
 
@@ -5679,6 +5712,46 @@ ProhibitedEffectReached: struct {
     }
 }
 
+TraitCapExceeded: struct {
+    impl Diagnostic {
+        code: "E0754"
+        meaning: "An implementation of a capped trait's method reaches or declares an effect outside the trait's `#FX(…)` cap"
+        what: fn(self) -> String { "An implementation of a trait's method reaches an effect outside the trait's `#FX(…)` ceiling or one the cap denies, or its row declares one" }
+        why: fn(self) -> String { "`#FX(…)` above a trait bounds every implementation of its methods, in any package and inherited defaults included, through every callee they can reach; a row on an implementation may only narrow it" }
+        fix: fn(self) -> String { "Remove the work that needs the effect from the implementation, narrow its row, or widen the trait's `#FX(…)` cap" }
+    }
+}
+
+TypeFieldCapExceeded: struct {
+    impl Diagnostic {
+        code: "E0755"
+        meaning: "A function-typed field of a capped type declares a row outside the type's `#FX(…)` cap"
+        what: fn(self) -> String { "A function-typed field's row declares an effect the type's `#FX(…)` cap denies or its ceiling leaves out" }
+        why: fn(self) -> String { "A method that calls the field runs its row, and `#FX(…)` above a type bounds every method of the type through every path it runs" }
+        fix: fn(self) -> String { "Narrow the field's row to fit the cap, move the field out of the type, or widen the type's `#FX(…)` cap" }
+    }
+}
+
+LibraryEffectReachOutside: struct {
+    impl Diagnostic {
+        code: "E0756"
+        meaning: "A function whose row names a library effect uses a kernel effect that library effect's `#FX(…)` doesn't list"
+        what: fn(self) -> String { "A function whose row names a library effect reaches a kernel effect the `#FX(…)` above that effect doesn't list" }
+        why: fn(self) -> String { "A library effect stands for the kernel effects listed above it, so a row that names it may do those and nothing else" }
+        fix: fn(self) -> String { "Add the kernel effect to the `#FX(…)` above the library effect, add it to the function's row, or stop using it" }
+    }
+}
+
+LibraryEffectListDenial: struct {
+    impl Diagnostic {
+        code: "E0757"
+        meaning: "The `#FX(…)` above a library effect holds a `!` entry"
+        what: fn(self) -> String { "A library effect's `#FX(…)` list denies an effect" }
+        why: fn(self) -> String { "The list above a library effect names the kernel effects it relies on, so it holds no `!` entries" }
+        fix: fn(self) -> String { "Remove the `!` entry; a function that must not use that effect denies it in its own row" }
+    }
+}
+
 UnknownEffectLeaf: struct {
     effect_name: String
 
@@ -5795,7 +5868,7 @@ OsDispatchSubjectMismatch: struct {
         detail: true
         what: fn(self) -> String { "A `comptime if … == {{ … }}` dispatch branches on `$build.os`." }
         why: fn(self) -> String { "`$build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time." }
-        fix: fn(self) -> String { "Write `comptime if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
+        fix: fn(self) -> String { "Write `comptime if $build.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
     }
 }
 
@@ -5804,11 +5877,11 @@ InvalidOsDispatchArm: struct {
 
     impl Diagnostic {
         code: "E-OSTARGET-DISPATCH-ARM"
-        meaning: "A `comptime if $build.os == {{ }}` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one"
+        meaning: "A `comptime if $build.os == {{ }}` arm head is not a bare OS variant, or repeats one"
         detail: true
-        what: fn(self) -> String { "`{self.found}` is not an OS arm — an `$build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`." }
-        why: fn(self) -> String { "Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once." }
-        fix: fn(self) -> String { "Write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback)." }
+        what: fn(self) -> String { "`{self.found}` is not an OS arm — an `$build.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`." }
+        why: fn(self) -> String { "Each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once." }
+        fix: fn(self) -> String { "Write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)." }
     }
 }
 
@@ -5821,7 +5894,7 @@ NonExhaustiveOsDispatch: struct {
         detail: true
         fix_next: "Add one dispatch arm for each missing OS or add an `else` catch-all."
         what: fn(self) -> String { "This `$build.os` dispatch doesn't cover every target OS — missing: {self.list}." }
-        why: fn(self) -> String { "A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run." }
+        why: fn(self) -> String { "A build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run." }
         fix: fn(self) -> String { "Add an arm for each missing OS ({self.list}), or an `else -> …` catch-all." }
     }
 }
@@ -5952,6 +6025,31 @@ AmbiguousCall: struct {
         what: fn(self) -> String { "This call to {self.callee} matches more than one callable body" }
         why: fn(self) -> String { "The call's bare arguments and labels bind to multiple candidate signatures, so named arguments are required to deconflict them" }
         fix: fn(self) -> String { "Name the arguments to choose one candidate: {self.rewrite}" }
+    }
+}
+
+MarkerRowOutsideContract: struct {
+    marker: String
+    entry: String
+
+    impl Diagnostic {
+        code: "E0774"
+        meaning: "A marker's `expand` row names an effect outside `Marker.expand`'s row, `Meta.Generate`"
+        what: fn(self) -> String { "`{self.entry}` in `{self.marker}`'s template row is outside `Marker.expand`'s row" }
+        why: fn(self) -> String { "A marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect" }
+        fix: fn(self) -> String { "Remove `{self.entry}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads" }
+    }
+}
+
+MarkerGeneratesOutsideRow: struct {
+    marker: String
+
+    impl Diagnostic {
+        code: "E0775"
+        meaning: "A marker's template writes declarations, but its `expand` row has no `Meta.Generate`"
+        what: fn(self) -> String { "`{self.marker}`'s template writes declarations, but its row has no `Meta.Generate`" }
+        why: fn(self) -> String { "A template whose row is `-[]>` only reads the program, so it may reject or warn but not add code" }
+        fix: fn(self) -> String { "Write `-[Meta.Generate]>` on `{self.marker}`'s `expand`, or remove the declarations its template writes" }
     }
 }
 
@@ -7065,14 +7163,14 @@ LockedGenerationDrift: struct {
 
 LockedEffectRowWidened: struct {
     package: String
-    effects: String
+    effect_name: String
 
     impl Diagnostic {
         code: "E3513"
         stage: [.Build]
         meaning: "`--locked` dependency reaches an effect its recorded row doesn't cover"
         detail: true
-        what: fn(self) -> String { "Dependency `{self.package}` now reaches {self.effects}, which `.jet/lock` doesn't record for it." }
+        what: fn(self) -> String { "Dependency `{self.package}` now reaches `{self.effect_name}`, which `.jet/lock` doesn't record for it." }
         why: fn(self) -> String { "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records." }
         fix: fn(self) -> String { "Review the change to `{self.package}`, then rerun without `--locked` to record its wider row." }
     }
@@ -7917,6 +8015,16 @@ InvalidMemberSpread: struct {
         what: fn(self) -> String { "A member-spread list entry is not a bare name." }
         why: fn(self) -> String { "`prefix.[a, b]` only expands field or package names off the prefix — calls and expressions are not members. During `jet check`, Jet reports this diagnostic." }
         fix: fn(self) -> String { "Write bare names like `default.[cargo, ripgrep]`." }
+    }
+}
+
+RejectOutsideTemplate: struct {
+    impl Diagnostic {
+        code: "E0962"
+        meaning: "`reject` called outside a marker's compile-time template"
+        what: fn(self) -> String { "`reject` runs only inside a marker's `expand` template." }
+        why: fn(self) -> String { "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker; ordinary code has no use site to report at, so the call has nothing to run." }
+        fix: fn(self) -> String { "Move the check into a marker's `expand: fn(self, target: Target)` body, or return an error value from this function instead." }
     }
 }
 
@@ -9300,13 +9408,13 @@ DependencyAuthorityExceeded: struct {
     impl Diagnostic {
         code: "E1220"
         stage: [.Jet]
-        meaning: "A transitive dependency uses an effect outside the `package.jet` `authority` budget (Panic names the stop site)"
+        meaning: "A transitive dependency uses an effect outside its limit: its `authority.grants` line when it has one, else the `package.jet` `authority` budget (Panic names the stop site)"
         detail: true
         no_fix: .Behavior
         fix_next: "Grant the required effect or change the source to stay within the declared authority."
-        what: fn(self) -> String { "`{self.dep}` uses the `{self.effect_name}` effect, which this package's budget doesn't allow." }
-        why: fn(self) -> String { "An `authority` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site." }
-        fix: fn(self) -> String { "For an ordinary effect, add `{self.effect_name}` to `authority.allow` or grant it to `{self.dep}` in `authority.grants`; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof." }
+        what: fn(self) -> String { "`{self.dep}` uses the `{self.effect_name}` effect, which its grant line or this package's budget doesn't allow." }
+        why: fn(self) -> String { "An `authority` budget fails the build when any dependency reaches an effect outside its limit; a dependency's grant line is its whole limit, in place of `allow`. The report names the call path, and a denied `Panic` row names the stop site." }
+        fix: fn(self) -> String { "For an ordinary effect, add `{self.effect_name}` to `{self.dep}`'s line in `authority.grants` (or to `authority.allow` when it has no line), or keep a version that stays inside it; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof." }
     }
 }
 
@@ -9736,7 +9844,7 @@ InvalidToolchainPin: struct {
         no_fix: .Behavior
         what: fn(self) -> String { "`{self.value}` is not a valid toolchain pin." }
         why: fn(self) -> String { "The `jet:` field pins which Jet toolchain builds this project; its value is a channel ref, not a version range. `>=1.0.0`-style constraints don't name one reproducible toolchain. A `jet build` run reports this toolchain error." }
-        fix: fn(self) -> String { "Write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`." }
+        fix: fn(self) -> String { "Write a channel: `jet: \"a0.0\"` (track the a0.0 series), `jet: \"a0.0.43\"` (exact), or a named channel like `jet: main`." }
     }
 }
 
@@ -10952,6 +11060,23 @@ UnhandledSourceExtension: struct {
         what: fn(self) -> String { "`jet {self.command}` doesn't handle `.{self.extension}` files like `{self.file}`." }
         why: fn(self) -> String { "Jet tells a file's language by its extension, and `jet {self.command}` takes {self.accepted}." }
         fix: fn(self) -> String { "Give `jet {self.command}` a `.jet` file; `jet run` and `jet build` also compile C (`.c`) and C++ (`.cc`, `.cpp`, `.cxx`)." }
+    }
+}
+
+FlagNotASetting: struct {
+    key: String
+    flag: String
+    source: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E2117"
+        stage: [.Jet]
+        meaning: "A settings layer names a flag that is typed each time it is meant: one that is destructive, names the operand of one run, or gives permissions (#6606)"
+        detail: true
+        what: fn(self) -> String { "`{self.key}` in {self.source} would remember `{self.flag}`, which you type each time you mean it." }
+        why: fn(self) -> String { "A settings file applies a flag to every run, but `{self.flag}` is typed each time: {self.reason}." }
+        fix: fn(self) -> String { "Remove `{self.key}` from {self.source}, and type `{self.flag}` on the command line of the run that needs it." }
     }
 }
 

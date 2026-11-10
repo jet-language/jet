@@ -1,0 +1,16 @@
+// Each ceiling leaves out one effect its call really has (#5976 c31).
+// Waiting is deny-only, so the three waits are shown by `!Time.Wait`.
+use {
+    net: core.net
+    ws: core.net.ws
+    core.http.[HTTPRequest]
+    core.net.[NetError, SocketAddr]
+    core.net.ws.[WsConn, WsError]
+}
+
+host_env_only: fn() -[Env]> String { net.gethostname() }
+addr_no_wait: fn() -[Net, !Time.Wait]> SocketAddr NetError! { net.socket_addr("localhost", 80) }
+dial_no_wait: fn() -[Net, !Time.Wait]> WsConn WsError! { ws.connect("ws://127.0.0.1:1/") }
+upgrade_no_wait: fn(req: HTTPRequest) -[Net, !Time.Wait]> WsConn WsError! { ws.upgrade(req) }
+upgrade_wait_only: fn(req: HTTPRequest) -[Time.Wait]> WsConn WsError! { ws.upgrade(req) }
+run: fn() {}

@@ -1,0 +1,17 @@
+# Indexing `split(...).to_list()` inside a function prep calls keeps the
+# String element type (no Never base) on O0, O1 and O2.
+fixture: prep_called_function_indexes_split_list_by_element_type.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "hello\nHELLO\n5\n"
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "hello\nHELLO\n5\n"
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "hello\nHELLO\n5\n"
+stderr: empty

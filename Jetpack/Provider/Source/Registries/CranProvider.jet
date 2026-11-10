@@ -180,43 +180,57 @@ provider_cran_parse_packages: fn(raw: String) -> [String: CranRecord] RegistryEr
     records := [String: CranRecord]{}
     paragraphs: provider_registry_crlf_to_lf(raw).split("\n\n").to_list()
     loop paragraph in paragraphs {
-        fields := [String: String]{}
-        current := ""
-        lines: provider_lines(paragraph)
-        loop line in lines {
-            if line.starts_with(" ") || line.starts_with("\t") {
-                if fields.get(current) == {
-                    .Val(value) -> fields[current] = "{value} {line.trim()}"
-                    .None -> {}
-                }
-                next
-            }
-            pair: line.split_once(":") ?? next
-            current = pair.before
-            fields[current] = pair.after.trim()
-        }
+        fields: provider_cran_dcf_fields(paragraph)
         name: fields.get("Package") ?? next
         version: fields.get("Version") ?? next
         if !provider_cran_valid_component(name) || !provider_cran_valid_component(version) {
             return Err(RegistryError.Reason("CRAN metadata contains unsafe package identity `{name}` version `{version}`"))
         }
-        dependencies := [CranDependency]{}
-        keys: [String]{"Depends", "Imports", "LinkingTo"}
-        loop key in keys {
-            value: fields.get(key) ?? next
-            items: value.split(",").to_list()
-            loop item in items {
-                dependency: provider_cran_parse_dependency(item) ?? next
-                if provider_cran_is_base_package(dependency.name) -> next
-                if provider_cran_has_dependency(dependencies, dependency.name) -> next
-                dependencies.push(dependency)
-            }
-        }
-        dependencies.sort_by(dependency -> dependency.name)
+        dependencies: provider_cran_record_dependencies(fields)
         records[name] = CranRecord{name, version, dependencies}
     }
     if records.len() == 0 -> return Err(RegistryError.Reason("CRAN PACKAGES metadata contained no package records"))
     Ok(records)
+}
+
+// One Debian-control paragraph's fields; a continuation line folds into the
+// field above it.
+provider_cran_dcf_fields: fn(paragraph: String) -> [String: String] Never! {
+    fields := [String: String]{}
+    current := ""
+    lines: provider_lines(paragraph)
+    loop line in lines {
+        if line.starts_with(" ") || line.starts_with("\t") {
+            if fields.get(current) == {
+                .Val(value) -> fields[current] = "{value} {line.trim()}"
+                .None -> {}
+            }
+            next
+        }
+        pair: line.split_once(":") ?? next
+        current = pair.before
+        fields[current] = pair.after.trim()
+    }
+    fields
+}
+
+// The installable `Depends`, `Imports`, and `LinkingTo` packages of one
+// paragraph, base packages and duplicates dropped, sorted by name.
+provider_cran_record_dependencies: fn(fields: [String: String]) -> [CranDependency] Never! {
+    dependencies := [CranDependency]{}
+    keys: [String]{"Depends", "Imports", "LinkingTo"}
+    loop key in keys {
+        value: fields.get(key) ?? next
+        items: value.split(",").to_list()
+        loop item in items {
+            dependency: provider_cran_parse_dependency(item) ?? next
+            if provider_cran_is_base_package(dependency.name) -> next
+            if provider_cran_has_dependency(dependencies, dependency.name) -> next
+            dependencies.push(dependency)
+        }
+    }
+    dependencies.sort_by(dependency -> dependency.name)
+    dependencies
 }
 
 provider_cran_has_dependency: fn(dependencies: [CranDependency], name: String) -> Bool Never! {

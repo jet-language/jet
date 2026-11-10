@@ -1,0 +1,61 @@
+package: {
+    name: "alpha_mixes_one_way"
+    version: "0.1.0"
+    authority: { allow: [Env, FS, IO, Net, Time] }
+}
+
+// #6701, D-UI-BLEND1: core.ui mixes alpha one way on every surface, source-
+// over on premultiplied sRGB bytes. Alpha 20 of white goes over Jet black,
+// #0B0B0D, four ways: a canvas fill, a sprite whose PNG texel is that white,
+// the most covered pixel of a text stem, and core.ui.font.blend with a fully
+// covered mask. Each prints the pixel it left.
+use {
+    ui: core.ui
+    font: core.ui.font
+}
+
+HEX: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
+
+run: fn() {
+    jet: ui.color(11, 11, 13, 255)
+    mist: ui.color(255, 255, 255, 20)
+    atlas: ui.load_texture_atlas("mist.atlas")
+    if !atlas.loaded() -> panic("mist.png did not decode")
+    window: ui.headless(width: 48, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("headless: {err}")
+    loop frame in window.frames() {
+        if frame.index > 0 -> break
+        frame.clear_background(jet)
+        frame.draw_rectangle(0, 0, 1, 1, mist)
+        frame.draw_sprite(atlas, "mist", 2, 0)
+        frame.draw_text("I", 4, 4, 40, mist)
+    }
+    screen: window.load_image_from_screen()
+    show("Canvas fill", ui.get_image_color(screen, 0, 0))
+    show("Sprite", ui.get_image_color(screen, 2, 0))
+    show("Text", brightest(screen))
+    // B, G, R, A: #0B0B0D opaque, as a premultiplied ARGB8888 word.
+    pixels := [U8]{13, 11, 11, 255}
+    font.blend(pixels, 1, 1, 4, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, 0x14FFFFFF, ui.UIRect{x: 0, y: 0, width: 1, height: 1})
+    print("Font blend: 0x{hex(Int.from_u8(pixels[3]))}{hex(Int.from_u8(pixels[2]))}{hex(Int.from_u8(pixels[1]))}{hex(Int.from_u8(pixels[0]))}")
+}
+
+// The text's most covered pixel: the brightest below the top rows, where
+// the stem covers whole pixels.
+brightest: fn(screen: ui.Image) -> ui.Color {
+    best := ui.get_image_color(screen, 0, 4)
+    loop y in 4..<screen.height() {
+        loop x in 0..<screen.width() {
+            seen: ui.get_image_color(screen, x, y)
+            if seen.r > best.r -> best = seen
+        }
+    }
+    best
+}
+
+show: fn(surface: String, color: ui.Color) {
+    print("{surface}: #{hex(color.r)}{hex(color.g)}{hex(color.b)}, alpha {color.a}")
+}
+
+hex: fn(byte: Int) -> String {
+    "{HEX[byte /% 16]}{HEX[byte %% 16]}"
+}

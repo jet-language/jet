@@ -4,6 +4,7 @@
 use {
     math: core.math
     jet_foundation.[
+        LIST_TYPE_OWNER,
         AST_NODE_GENERATED,
         AccessConvention,
         MARKER_NUMERIC,
@@ -17,6 +18,7 @@ use {
         TExprType,
         StmtKind,
         compiler_transfer_rows,
+        foundation_named_type,
         type_table_intern,
         Call,
         CallArg,
@@ -2741,7 +2743,7 @@ sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?)
     false
 }
 
-// Whether `symbol` is declared in Core: Core's own C bindings (SQLite, TLS) are
+// Whether `symbol` is declared in Core: Core's own bindings (the Jet SQLite engine, TLS) are
 // toolchain code whose public functions declare the rows they hold
 // (`core.db.open` is `-[DB]>`), so their calls are not open-world.
 sema_expr_call_core_binding: fn(symbol: SymbolID) -> Bool Never! {
@@ -3645,8 +3647,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if layout.handled -> return layout
-    ui := sema_call_try_ui_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if ui.handled -> return ui
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if stream.handled -> return stream
     process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -3971,6 +3971,9 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) -> return None
     if method == "routes" -> sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, diagnostics)
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" -> sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, diagnostics)
+    // Core declares the UI backends' `set_focus_group`, so its focus-ring lint
+    // runs ahead of the declared-method check, not among the builtin routes.
+    sema_call_ui_backend_lint(receiver_value, method, args, method_span, environment, program, scopes, diagnostics)
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
@@ -4130,14 +4133,24 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
 
 // `$here` is the `SourceLocation` of where it is written. `$caller` reaches
 // here only outside a parameter default (call sites and declarations replace
-// it there), which is E2427.
+// it there), which is E2427. `$phase` is the `Phase` of where it is
+// evaluated: `.Preparation` in comptime code, `.Build` in `fn build`, and
+// `.Runtime` anywhere else, so every tier reads the same constant.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if name == "$caller" {
         row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
     }
+    if name == "$phase" {
+        phase: if scopes.comptime_execution_depth > 0 -> "Preparation" else if (scopes.location_function ?? environment.function_name) == "build" -> "Build" else -> "Runtime"
+        return sema_check_expression(Expr.EnumLit{type_name: "Phase", variant: phase, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     sema_check_expression(sema_site_location_expr("SourceLocation", environment, program, scopes, span), expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+sema_site_root_name: fn(name: String) -> Bool Never! {
+    name == "$here" || name == "$caller" || name == "$phase"
 }
 
 sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4188,6 +4201,15 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     }
     // The ambient `input`, when no binding shadows it: the program's lines.
     if unresolved_index == None && name == "input" -> return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
+    // A module named as a value is its Module record (ModuleMeta.jet).
+    if unresolved_index != None && sema_expr_core_module_alias_visible(name, scopes) {
+        if program.registration_graph == .Val(graph) {
+            if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
+                read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, context, diagnostics)
+                if read.handled -> return read.value
+            }
+        }
+    }
     value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
         if !sema_has_error_since(diagnostics, diagnostics_before) {
             if {
@@ -4319,7 +4341,7 @@ sema_expr_ascii_letter: fn(byte: U8) -> Bool Never! {
 
 sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index: sema_scope_resolve_index(scopes, name) ?? {
-        diagnostics.push(sema_unknown_name_in(name, span, scopes))
+        diagnostics.push(sema_unknown_name_at(name, span, environment, program, scopes))
         return None
     }
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None
@@ -5576,7 +5598,7 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Bool(value, span, _) -> sema_expr_expected_owned(sema_node(context, Type.Bool, NodeKind.BoolLit{value: value}, span), expected, environment, program, diagnostics)
         .Unit(span, _) -> sema_expr_expected_owned(sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span), expected, environment, program, diagnostics)
         .Str(parts, span, _) -> sema_expr_check_string(parts, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5616,7 +5638,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             None
         }
         .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, context, diagnostics)
-        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> {
             checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
@@ -5751,6 +5773,20 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
 }
 
 sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // `[Int?].filled(…)` and `[Int?#3].filled(None)`: the parser gave the
+    // list type as the call's one owner type argument.
+    if receiver == .Ident(owner, _, _) && owner == LIST_TYPE_OWNER && owner_type_args.len() == 1 {
+        return sema_expr_check_list_type_static(owner_type_args[0], method, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    // `[T].with_capacity(n)` writes a list type where a receiver value goes.
+    // A list type is not a static owner, so name the `List` static rather
+    // than report `T` as an unknown value (E0107).
+    if receiver == .ListLit(elements, _, _) && elements.len() == 1 {
+        if elements[0] == .Ident(element, _, _) && sema_expr_names_list_element_type(element, scopes) {
+            diagnostics.push(sema_expr_list_type_static_error(Type.List{element: Type.Named{name: element}}, method, method_span))
+            return None
+        }
+    }
     // `expect(value).snapshot()` is the snapshot assertion builtin, unless a
     // local or function named `expect` shadows it.
     if method == "snapshot" && receiver == .Call(call, _) {
@@ -5829,6 +5865,74 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, scopes, state, diagnostics)
     }
     checked
+}
+
+// A static call on a written list type. `[T#N].filled(value)` is N copies of
+// one value: it is the hand-written form `v: T = value` then `[T#N]{v, …, v}`
+// in a frame of its own, so the value is checked against `T` and evaluated
+// once, every slot but the last shares it and the last takes it. A copy that
+// `T` refuses is refused there (E0211). Any other static is E0311.
+sema_expr_check_list_type_static: fn(written: Type, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if written == .FixedList(element, _) && method == "filled" {
+        if args.len() != 1 {
+            diagnostics.push(sema_error("E0104", method_span, "`{type_name(written)}.filled` expects 1 argument, got {args.len()}", "`filled` takes the one value every slot holds; the length is the type's `#N`", "Call `.filled(value)` with one value."))
+            return None
+        }
+        length: sema_loop_fixed_length(sema_expr_expected_type(written, environment, program)) ?? {
+            diagnostics.push(sema_error("E0311", method_span, "`{type_name(written)}.filled` needs a known length", "`filled` writes one copy of the value per slot, so the length must be a number when the program is built", "write the length as a number, as in `[{type_name(element)}#3].filled(value)`"))
+            return None
+        }
+        span: Span{start: method_span.start, end: args[0].span.end}
+        name: "__jet_filled_{method_span.start}"
+        binding: Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: method_span, sigil_span: None, pattern: None, ty: Val(element), ty_span: Val(method_span), init: args[0].expr.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+        slots: loop _ in 0..<length -> Expr.Ident{name: name, span: method_span, id: AST_NODE_GENERATED}
+        filled: Expr.TypedLit{head: Val(written.copy()), body: TypedLitBody.Elements{elements: slots}, span: span, id: AST_NODE_GENERATED}
+        return_type: scopes.return_type.copy()
+        mark: sema_scope_mark(scopes)
+        sema_scope_enter(scopes, state, "filled@{method_span.start}")
+        checked_binding: sema_check_statements([Stmt]{binding}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
+        if !checked_binding.complete {
+            sema_scope_leave(scopes, state)
+            return None
+        }
+        value: sema_check_expression(filled, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_scope_leave(scopes, state)
+            return None
+        }
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+        sema_scope_rollback(scopes, mark)
+        body := checked_binding.value
+        body.push(TStmt.ExprStmt{value: value, span: span})
+        return Val(sema_tree_node(value.ty, TExprKind.InlineBlock{body: body}, span))
+    }
+    diagnostics.push(sema_expr_list_type_static_error(written, method, method_span))
+    None
+}
+
+// E0311 for a static named through a list type, which has none but the
+// fixed array's `filled`. The fix names the list literal and `[T#N].filled`.
+sema_expr_list_type_static_error: fn(written: Type, method: String, method_span: Span) -> Diagnostic Never! {
+    shown: type_name(written)
+    element: if written == {
+        .List(inner) | .FixedList(inner, _) -> type_name(inner)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> shown.copy()
+    }
+    fixed: if written == .FixedList(_, _) -> true else -> false
+    why: if fixed -> "`{shown}` before `.` is a fixed-array type, whose one static is `filled`" else -> "`{shown}` before `.` is a list type, and a list type has no static methods; list statics belong to `List`"
+    fix: if {
+        fixed -> "write `{shown}.filled(value)` for a copy of one value in every slot, or the literal `{shown}{{…}}` for a fixed array of values"
+        method == "filled" -> "write the list literal `[{element}]{{…}}` for a list of values, or `[{element}#N].filled(value)` for a fixed array of N copies of one value"
+        else -> "write `List.try_with_capacity(n) ?? …` where `{shown}` is the expected type, for an empty list with room for n items, or `{shown}{{…}}` for a list of values"
+    }
+    sema_error("E0311", method_span, "`{shown}` has no `{method}`", why, fix)
+}
+
+// Whether `name`, written alone inside `[…]` before `.`, spells a type: a
+// type binding in scope or a primitive. A value binding of that name keeps
+// the ordinary one-element list literal.
+sema_expr_names_list_element_type: fn(name: String, scopes: SemaScopeTable) -> Bool Never! {
+    if sema_scope_resolve_index(scopes, name) == .Val(index) -> return scopes.bindings[index].symbol.kind == SymbolKind.Type
+    foundation_named_type(name) != (Type.Named{name: name})
 }
 
 // Whether the plain call `receiver.method(args)` resolves to a method that

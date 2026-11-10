@@ -333,7 +333,7 @@ jet_driver_build_walk: fn(host: JetDriverSharedBuildInputs, directory: String, l
 jet_driver_build_find_path_problem: fn(glob: String, span: Span) -> BuildSessionReply? Never! {
     if glob.starts_with("/") -> return Val(jet_driver_build_input_fail("E0957", "`find` glob must be relative", "an absolute glob reaches outside the project", "use a glob relative to this file's own directory", span))
     loop part in glob.split("/") {
-        if part == ".." -> return Val(jet_driver_build_input_fail("E0957", "`find` glob escapes the project with `..`", "`..` could read files outside your project; comptime inputs must stay inside it", "drop the `..` and use a glob under this file's directory", span))
+        if part == ".." -> return Val(jet_driver_build_input_fail("E0957", "`find` glob can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused even when it names a file inside the package", "drop the `..` and use a glob under this file's directory", span))
     }
     None
 }

@@ -1,0 +1,155 @@
+#!/usr/bin/env jet
+// VerifyRows.jet ROWS OUTDIR [JET]: runs every "criterion<TAB>profile<TAB>filter"
+// row of ROWS as `jet test Compiler --profile P --filter F` from the dev
+// worktree, six at a time on CPUs 0-11, each under a 600 s timeout with its
+// output in OUTDIR/C.P.F.out, and prints one line per row in `sort -V` order:
+// criterion, profile, filter, PASS count, FAIL count, rc. The Jet twin of
+// verify-rows.sh (gauntlet tool entry verify-rows).
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+}
+
+Row: struct {
+    criterion: String
+    profile: String
+    filter: String
+}
+
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> fallback.copy() else -> value
+}
+
+// What the machine's jet/env file sets `name` to (the default of its
+// `${NAME:-default}` form), None when it sets nothing.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
+    defaulted: "${{{name}:-"
+    found := ""
+    seen := false
+    loop line in text.lines() {
+        parts: line.trim().removeprefix("export ").partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
+// file, else `fallback`.
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    found: env_or(name, "")
+    if found != "" -> return found
+    env_file_value(name) ?? fallback.copy()
+}
+
+// The number after `"KEY":` in a testkit summary line, 0 when it has none.
+count: fn(summary: String, key: String) -> Int Never! {
+    summary.partition("\"{key}\":").tail.partition(",").head.partition("}}").head.trim().to_int() ?? 0
+}
+
+row_line: fn(row: Row, result: Result<ProcessReceipt, IOError>, out: String) -[FS, IO]> String Never! {
+    output := ""
+    rc := 127
+    if result == {
+        .Ok(receipt) -> {
+            output = receipt.output.copy()
+            rc = if {
+                receipt.timed_out -> 124
+                receipt.signal != None -> 128 + (receipt.signal ?? 0)
+                else -> receipt.code
+            }
+        }
+        .Err(error) -> output = "{error}\n"
+    }
+    files.write("{out}/{row.criterion}.{row.profile}.{row.filter}.out", output) ?? term.eprint("{out}: {err}")
+    summary := ""
+    loop line in output.lines() {
+        if line.starts_with("{{\"PASS\"") -> summary = line.copy()
+    }
+    "{row.criterion}\t{row.profile}\t{row.filter}\tPASS={count(summary, "PASS")}\tFAIL={count(summary, "FAIL")}\trc={rc}"
+}
+
+is_digit: fn(byte: Int) -> Bool Never! { byte >= 48 && byte <= 57 }
+
+// GNU `sort -V` weights outside digit runs: the end and digits 0, letters
+// themselves, `~` below everything, other bytes after letters.
+weight: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at >= bytes.len() -> return 0
+    byte: Int.from_u8(bytes[at])
+    if {
+        is_digit(byte) -> 0
+        (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) -> byte
+        byte == 126 -> -1
+        else -> byte + 256
+    }
+}
+
+digit_at: fn(bytes: [U8], at: Int) -> Bool Never! { at < bytes.len() && is_digit(Int.from_u8(bytes[at])) }
+
+text_at: fn(bytes: [U8], at: Int) -> Bool Never! { at < bytes.len() && !is_digit(Int.from_u8(bytes[at])) }
+
+// `sort -V` order: non-digit runs by weight, digit runs as numbers, then
+// plain byte order to break a tie.
+version_order: fn(left: String, right: String) -> Ordering Never! {
+    a: left.bytes()
+    b: right.bytes()
+    i := 0
+    j := 0
+    loop i < a.len() || j < b.len() {
+        loop text_at(a, i) || text_at(b, j) {
+            difference: weight(a, i) - weight(b, j)
+            if difference != 0 -> return difference <=> 0
+            i += 1
+            j += 1
+        }
+        loop digit_at(a, i) && Int.from_u8(a[i]) == 48 -> i += 1
+        loop digit_at(b, j) && Int.from_u8(b[j]) == 48 -> j += 1
+        first := 0
+        loop digit_at(a, i) && digit_at(b, j) {
+            if first == 0 -> first = Int.from_u8(a[i]) - Int.from_u8(b[j])
+            i += 1
+            j += 1
+        }
+        if digit_at(a, i) -> return Ordering.Greater
+        if digit_at(b, j) -> return Ordering.Less
+        if first != 0 -> return first <=> 0
+    }
+    left <=> right
+}
+
+fail: fn(message: String, code: Int) -[Exec, IO]> Never {
+    term.eprint(message)
+    process.exit(code)
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 2 || args.len() > 3 -> fail("usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]", 2)
+    out: args[1]
+    given: args.get(2) ?? "jet"
+    // A JET given as a relative path still names it from the worktree.
+    jet: if given.contains("/") && !given.starts_with("/") -> "{files.cwd() ?? ""}/{given}" else -> given.copy()
+    text: files.read(args[0]) ?? return fail("{args[0]}: {err}", 2)
+    files.create_dir_all(out) ?? term.eprint("{out}: {err}")
+    rows := [Row]{}
+    loop line in text.lines() {
+        cells: line.split("\t").to_list()
+        if cells.len() >= 3 -> rows.push(Row{criterion: cells[0].copy(), profile: cells[1].copy(), filter: cells[2].copy()})
+    }
+    // As roots.sh: JET_DEV_WORKTREE, else the checkout holding this program.
+    worktree: root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
+    cpus: loop cpu in 0..<12 -> cpu
+    specs: loop row in rows -> process.cmd([String]{jet, "test", "Compiler", "--profile", row.profile, "--filter", row.filter}).cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
+    results: process.run_all(specs, 6) ?? return fail("verify-rows: {err}", 1)
+    lines := loop at in 0..<rows.len() -> row_line(rows[at], results[at], out)
+    lines.sort_by((left: String, right: String) -> version_order(left, right))
+    loop line in lines -> print(line)
+}

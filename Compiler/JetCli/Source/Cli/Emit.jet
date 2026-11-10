@@ -17,7 +17,7 @@ use {
         jet_driver_report_problems,
     ]
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-    jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text]
+    jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text, ir_lint_module]
     jet_parser.[parse_source]
 }
 
@@ -55,7 +55,9 @@ jet_cli_emit_ast: fn(file: String, source: String, color: Bool, json: Bool, func
 // visible lints go to stderr); it prints the slot IR `jet build` builds from
 // the checked functions (every checked function for a program without an
 // entry), one `fn` node per function of the entry package, or the functions
-// `--fn` names.
+// `--fn` names. IR Lint checks the built module as `jet build` does at O0
+// (`ir.build`): its findings are an internal compiler error after the
+// printed IR.
 jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool, function: String?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     // Sema reports a program that selects no entry (E0101) among them.
     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -70,7 +72,7 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
     stderr: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
     checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     declarations := jet_driver_checked_declarations(checked)
-    built: if checked.entry_key == .Val(entry_key) -> ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), result.compiler_threads)
+    built := if checked.entry_key == .Val(entry_key) -> ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), result.compiler_threads)
     if built.failures.len() > 0 {
         census := [JetDriverIceRow]{}
         loop failure in built.failures -> jet_driver_ice_record(census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
@@ -81,7 +83,13 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
         if selected.len() == 0 -> return jet_cli_emit_missing_function(file, source, "ir", name, color, json)
     }
     nodes: loop row in selected -> jet_cli_emit_ir_function(built, built.program.functions[row])
-    jet_cli_emit_printed("ir", file, function, json, nodes, stderr)
+    printed: jet_cli_emit_printed("ir", file, function, json, nodes, stderr)
+    found: ir_lint_module(built.program, "ir.build", result.compiler_threads)
+    if found.len() == 0 -> return printed
+    census := [JetDriverIceRow]{}
+    loop finding in found -> jet_driver_ice_record(census, finding.function, finding.pass, finding.rule, finding.message)
+    ice: jet_cli_ice("IR Lint found `{file}`'s IR breaks its contract: {jet_driver_ice_text(census)}")
+    JetDriverVerbOutput{stdout: printed.stdout, stderr: "{stderr}{ice.stderr}", exit_code: ice.exit_code}
 }
 
 // The rows of the functions an emit prints: with `function`, those named so

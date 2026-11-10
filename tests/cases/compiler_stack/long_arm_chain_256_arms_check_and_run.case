@@ -1,0 +1,32 @@
+# #6281 c41 / #5971 c38: a flat 256-arm value table and a 256-link
+# statement else-if chain, both written by gen.jet, check and print the
+# same totals on O0, O1 and O2: a chain of any length is one source nesting
+# level. nested.jet writes 300 chains each inside the first arm of the one
+# before; that real nesting still passes the limit (E1403).
+fixture: long_arm_chain.fixture
+env: NO_COLOR=1
+step: jet run --allow=FS gen.jet 256
+exit: 0
+stdout: = ""
+step check: jet check table.jet
+exit: 0
+step o0: jet run --optimize=none table.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "1450\n1450\n"
+stderr: = ""
+step o1: jet run --optimize=basic table.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "1450\n1450\n"
+stderr: = ""
+step o2: jet run --optimize=full table.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "1450\n1450\n"
+stderr: = ""
+step nested: jet check nested.jet
+exit: 1
+stderr: ~ "[jet.NestingTooDeep]" # real nesting still reports E1403
+stderr: ~ "257 levels deep" # the first level past the limit
+stderr: ~ "limit is 256" # the limit itself is unchanged

@@ -182,8 +182,6 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
             if path.ends_with(".rs") || s2_syntax_skip(path) -> next
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
-                allowed: path.ends_with("tests/ui/foreign_declaration_binding.jet") && s2_syntax_old_binding(line)
-                if allowed -> next
                 loop code in codes {
                     if line.contains(code) -> failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
                 }
@@ -196,6 +194,43 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
 #Test("old_binding_migration_paths_stay_removed") {
     guards_enter_root()
     s2_syntax_old_binding_migration_paths_stay_removed()
+}
+
+// #6281 c106: the syntax registry (Compiler/JetFoundation/Data/Syntax) is the
+// one table of foreign-word facts, and the loop words #1887 fixed sit in the
+// same block as the foreign loop words. No other source of the paths that
+// read or teach Jet syntax (lexer, parser, formatter, sema, LSP, fix engine)
+// defines a foreign-word fact or carries its own list of foreign words.
+// Foreign-source readers (`jet import`) and editor palettes are not Jet syntax.
+s2_syntax_foreign_word_facts_have_one_table: fn() {
+    roots: [String]{"Compiler/JetFoundation/Source", "Compiler/JetLexer", "Compiler/JetParser/Source", "Compiler/JetSema/Source", "Compiler/JetLSP/Source", "Compiler/JetDriver/Source/FixEngine.jet", "Compiler/JetDriver/Source/Driver"}
+    words: [String]{"\"while\"", "\"for\"", "\"do\"", "\"repeat\"", "\"until\"", "\"continue\"", "\"fun\"", "\"func\"", "\"def\"", "\"function\"", "\"let\"", "\"var\"", "\"const\"", "\"val\"", "\"class\"", "\"switch\"", "\"match\""}
+    failures := [String]{}
+    loop root in roots {
+        loop path in s2_syntax_paths(root) {
+            if !path.ends_with(".jet") || s2_syntax_skip(path) -> next
+            source: s2_syntax_files_api.read(path) ?? next
+            loop (index, line) in source.lines() {
+                trimmed: s2_syntax_trim_start(line)
+                if trimmed.starts_with("FOREIGN_") && trimmed.contains(": \"") -> failures.push("{path}:{index + 1} defines a foreign-word fact outside the syntax registry")
+                quoted := 0
+                loop word in words {
+                    if line.contains(word) -> quoted += 1
+                }
+                if quoted >= 3 -> failures.push("{path}:{index + 1} lists foreign words outside the syntax registry")
+            }
+        }
+    }
+    assert(failures.is_empty(), "second foreign-word table:\n{failures.join("\n")}")
+    layout: s2_syntax_files_api.read("Compiler/JetFoundation/Data/Syntax/MathLayout.jet") ?? panic("read MathLayout registry")
+    facts: [String]{"KW_NEXT: \"next\"", "FOREIGN_CONTINUE: \"continue\"", "FOREIGN_WHILE: \"while\"", "FOREIGN_FOR: \"for\"", "FOREIGN_LET: \"let\"", "FOREIGN_VAR: \"var\"", "FOREIGN_CONST: \"const\"", "FOREIGN_SWITCH: \"switch\""}
+    loop fact in facts {
+        assert(layout.contains(fact), "MathLayout.jet lost the registry fact {fact}")
+    }
+}
+#Test("foreign_word_facts_have_one_table") {
+    guards_enter_root()
+    s2_syntax_foreign_word_facts_have_one_table()
 }
 
 s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged: fn() {

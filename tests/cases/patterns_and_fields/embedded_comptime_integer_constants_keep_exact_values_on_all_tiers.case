@@ -3,3 +3,9 @@ fixture: embedded_comptime_integer_constants_keep_exact_values_on_all_tiers/inpu
 step: jet run run.jet
 exit: 0 # tests/tir_patterns_and_fields.rs:1321 assert_tiers_agree
 stdout: = "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n" # tests/tir_patterns_and_fields.rs:1321 assert_tiers_agree
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n"

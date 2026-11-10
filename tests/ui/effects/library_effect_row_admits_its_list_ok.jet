@@ -1,0 +1,17 @@
+use fs: core.files
+
+#FX(FS)
+Store: enum {
+    Read
+    Write
+
+    impl Effect {}
+}
+
+load: fn(path: String) -[Store.Read]> String {
+    return fs.read(path) ?? ""
+}
+show: fn(path: String) -[Store, IO]> {
+    print(load(path))
+}
+run: fn() { show("x") }

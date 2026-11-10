@@ -22,30 +22,57 @@ ArithmeticMode: enum {
 }
 
 /// Effect roots that may appear in an `effect_name` row. The cases are the
-/// roots of Compiler/Prelude/Effects.jet, written by Tools/agent/CoreSourceRows.jet.
+/// machine roots of Compiler/Prelude/Effects.jet, then Core's service effects
+/// of Core/Effects/Effects.jet, then the metaprogramming effects of
+/// Core/Compiler/Meta.jet, written by Tools/agent/CoreSourceRows.jet.
 Effect: enum {
     Net
     FS
     IO
-    DB
     Time
     Rand
     Env
     Exec
-    Log
     GPU
     FFI
     Browser
-    Secret
     Panic
     Mem
+    DB
+    Log
+    Secret
+    Meta
 }
 
-/// Guest language named by `#Import`.
+/// Foreign language named by `#FFI(<lang>)`. The cases are the languages of
+/// the `FFI` effect in Compiler/Prelude/Effects.jet, written by
+/// Tools/agent/CoreSourceRows.jet; an inline body needs a language with an
+/// inline binder.
 FFILanguage: enum {
+    Go
+    Java
+    DotNet
+    Fortran
+    Cobol
+    Tcl
+    Lua
+    Ada
+    Pascal
+    Dart
+    PowerShell
+    Perl
+    Ruby
+    Php
+    R
+    Com
     C
     Cpp
     Asm
+    Py
+    Octave
+    Rust
+    JS
+    Swift
 }
 
 /// Inlining hint for `#Inline`.

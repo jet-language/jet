@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/pkwrite.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: writing public and private keys.
+//
+// A port of mbedtls 3.6.7's pkwrite.c without PSA keys: SubjectPublicKeyInfo,
+// PKCS#1 RSA keys, SEC1 EC keys on a named curve and RFC 8410 X25519 and
+// X448 keys, as DER or PEM.
+//
+// The DER writers fill buf[start..p] backwards from p, as mbedtls's fill
+// `buf` backwards from its end, and return the length written; the key
+// then starts at the new p. The PEM writers return the text, whose buffer
+// grows to fit it.
+use {
+    core
+    cipher: __core_crypto_cipher
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    ecp: __core_crypto_ecp
+    rsa: __core_crypto_rsa
+    pem: __core_crypto_pem
+    pk: __core_crypto_pk
+}
+
+/// The longest DER RSA public key (MBEDTLS_PK_RSA_PUB_DER_MAX_BYTES:
+/// 38 + 2 MPI_MAX_SIZE).
+PK_RSA_PUB_DER_MAX_BYTES: 2086
+
+/// The longest DER RSA private key (MBEDTLS_PK_RSA_PRV_DER_MAX_BYTES:
+/// 47 + 3 MPI_MAX_SIZE + 5 ceil(MPI_MAX_SIZE / 2)).
+PK_RSA_PRV_DER_MAX_BYTES: 5679
+
+/// The longest DER EC public key (MBEDTLS_PK_ECP_PUB_DER_MAX_BYTES:
+/// 30 + 2 ECP_MAX_BYTES).
+PK_ECP_PUB_DER_MAX_BYTES: 162
+
+/// The longest DER EC private key (MBEDTLS_PK_ECP_PRV_DER_MAX_BYTES:
+/// 29 + 3 ECP_MAX_BYTES).
+PK_ECP_PRV_DER_MAX_BYTES: 227
+
+/// The longest DER public key of any type (MBEDTLS_PK_WRITE_PUBKEY_MAX_SIZE
+/// as the DER bound).
+PUB_DER_MAX_BYTES: 2086
+
+/// The longest DER private key of any type.
+PRV_DER_MAX_BYTES: 5679
+
+// An RSA writer's failure as mbedtls reports it: the ASN.1 code as itself.
+rsa_failure: fn(e: rsa.RSAError) -> pk.PKError Never! {
+    if e == {
+        .Asn1(a) -> .Asn1(a)
+        else -> .RSA(e)
+    }
+}
+
+// pk_write_ec_pubkey: the uncompressed point.
+write_ec_pubkey: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    point: ecp.point_write_binary(key.ec.grp, key.ec.q, .Uncompressed, ecp.ECP_MAX_PT_LEN) ?? return Err(.Ecp(err))
+    len: asn1.write_raw_buffer(buf, p, start, point) ?? return Err(.Asn1(err))
+    Ok(len)
+}
+
+// pk_write_ec_param: the namedCurve OID.
+write_ec_param: fn(buf: &[U8], p: &Int, start: Int, id: ecp.GroupID) -> Int pk.PKError! {
+    oid: oids.oid_by_ec_grp(id) ?? return Err(.Oid(err))
+    len: asn1.write_oid(buf, p, start, oid) ?? return Err(.Asn1(err))
+    Ok(len)
+}
+
+// pk_write_ec_private: the private value as an OCTET STRING of the order's
+// length.
+write_ec_private: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    secret := ecp.write_key_ext(key.ec, ecp.ECP_MAX_BYTES) ?? return Err(.Ecp(err))
+    if asn1.write_octet_string(buf, p, start, secret) == {
+        .Ok(len) -> {
+            core.crypto.wipe(secret)
+            Ok(len)
+        }
+        .Err(e) -> {
+            core.crypto.wipe(secret)
+            Err(.Asn1(e))
+        }
+    }
+}
+
+/// The bare public key: an RSAPublicKey, or the uncompressed point of an EC
+/// key; FeatureUnavailable for any other type (mbedtls_pk_write_pubkey).
+pk_write_pubkey: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    kind: key.kind ?? return Err(.FeatureUnavailable)
+    if kind == .RSA {
+        len: rsa.rsa_write_pubkey(key.rsa, buf, p, start) ?? return Err(rsa_failure(err))
+        return Ok(len)
+    }
+    if kind == .ECKey -> return write_ec_pubkey(key, buf, p, start)
+    Err(.FeatureUnavailable)
+}
+
+/// A SubjectPublicKeyInfo (mbedtls_pk_write_pubkey_der).
+pk_write_pubkey_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    if p <= start -> return Err(.Asn1(.BufTooSmall))
+    len := pk_write_pubkey(key, buf, p, start)
+    if p - start < 1 -> return Err(.Asn1(.BufTooSmall))
+    p -= 1
+    buf[p] = U8{0}
+    len += 1
+    len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
+    len += asn1.write_tag(buf, p, start, asn1.ASN1_BIT_STRING) ?? return Err(.Asn1(err))
+    kind: key.kind ?? return Err(.FeatureUnavailable)
+    oid := [U8]{}
+    par_len := 0
+    has_par := true
+    if kind == .ECKey {
+        id: key.ec.grp.id
+        if {
+            pk.is_rfc8410_group(id) -> {
+                oid = oids.oid_by_ec_grp_algid(id) ?? return Err(.Oid(err))
+                has_par = false
+            }
+            else -> par_len = write_ec_param(buf, p, start, id)
+        }
+    }
+    if oid.len() == 0 -> oid = oids.oid_by_pk_alg(kind) ?? return Err(.Oid(err))
+    len += asn1.write_algorithm_identifier_ext(buf, p, start, oid, par_len, has_par) ?? return Err(.Asn1(err))
+    len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
+    len += asn1.write_tag(buf, p, start, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    Ok(len)
+}
+
+// pk_write_ec_rfc8410_der: a OneAsymmetricKey (RFC 8410) of version 0
+// holding a CurvePrivateKey.
+write_ec_rfc8410_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    len := write_ec_private(key, buf, p, start)
+    len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
+    len += asn1.write_tag(buf, p, start, asn1.ASN1_OCTET_STRING) ?? return Err(.Asn1(err))
+    oid: oids.oid_by_ec_grp_algid(key.ec.grp.id) ?? return Err(.Oid(err))
+    len += asn1.write_algorithm_identifier_ext(buf, p, start, oid, 0, false) ?? return Err(.Asn1(err))
+    len += asn1.write_int(buf, p, start, 0) ?? return Err(.Asn1(err))
+    len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
+    len += asn1.write_tag(buf, p, start, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    Ok(len)
+}
+
+// pk_write_ec_der: an ECPrivateKey (RFC 5915) of version 1 with the
+// curve's OID and the public key.
+write_ec_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    pub_len := write_ec_pubkey(key, buf, p, start)
+    if p - start < 1 -> return Err(.Asn1(.BufTooSmall))
+    p -= 1
+    buf[p] = U8{0}
+    pub_len += 1
+    pub_len += asn1.write_len(buf, p, start, pub_len) ?? return Err(.Asn1(err))
+    pub_len += asn1.write_tag(buf, p, start, asn1.ASN1_BIT_STRING) ?? return Err(.Asn1(err))
+    pub_len += asn1.write_len(buf, p, start, pub_len) ?? return Err(.Asn1(err))
+    pub_len += asn1.write_tag(buf, p, start, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(1)) ?? return Err(.Asn1(err))
+    len := pub_len
+    par_len := write_ec_param(buf, p, start, key.ec.grp.id)
+    par_len += asn1.write_len(buf, p, start, par_len) ?? return Err(.Asn1(err))
+    par_len += asn1.write_tag(buf, p, start, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED)) ?? return Err(.Asn1(err))
+    len += par_len
+    len += write_ec_private(key, buf, p, start)
+    len += asn1.write_int(buf, p, start, 1) ?? return Err(.Asn1(err))
+    len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
+    len += asn1.write_tag(buf, p, start, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    Ok(len)
+}
+
+/// The private key: a PKCS#1 RSAPrivateKey, a SEC1 ECPrivateKey, or an
+/// RFC 8410 OneAsymmetricKey for X25519 and X448 (mbedtls_pk_write_key_der).
+pk_write_key_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+    if p <= start -> return Err(.Asn1(.BufTooSmall))
+    kind: key.kind ?? return Err(.FeatureUnavailable)
+    if kind == .RSA {
+        len: rsa.rsa_write_key(key.rsa, buf, p, start) ?? return Err(rsa_failure(err))
+        return Ok(len)
+    }
+    if kind == .ECKey {
+        if pk.pk_is_rfc8410(key) -> return write_ec_rfc8410_der(key, buf, p, start)
+        return write_ec_der(key, buf, p, start)
+    }
+    Err(.FeatureUnavailable)
+}
+
+/// The SubjectPublicKeyInfo as a PEM "PUBLIC KEY" block
+/// (mbedtls_pk_write_pubkey_pem).
+pk_write_pubkey_pem: fn(key: pk.PKContext) -> [U8] pk.PKError! {
+    buf := cipher.zero_bytes(PUB_DER_MAX_BYTES)
+    p := buf.len()
+    len: pk_write_pubkey_der(key, buf, p, 0)
+    Ok(pem.pem_write_buffer("-----BEGIN PUBLIC KEY-----\n", "-----END PUBLIC KEY-----\n", cipher.bytes_of(buf, p, len)))
+}
+
+/// The private key as a PEM block: "RSA PRIVATE KEY", "EC PRIVATE KEY", or
+/// "PRIVATE KEY" for X25519 and X448 (mbedtls_pk_write_key_pem).
+pk_write_key_pem: fn(key: pk.PKContext) -> [U8] pk.PKError! {
+    kind: key.kind ?? return Err(.FeatureUnavailable)
+    label: if kind == {
+        .RSA -> "RSA PRIVATE KEY"
+        .ECKey -> if pk.pk_is_rfc8410(key) -> "PRIVATE KEY" else -> "EC PRIVATE KEY"
+        else -> return Err(.FeatureUnavailable)
+    }
+    buf := cipher.zero_bytes(PRV_DER_MAX_BYTES)
+    p := buf.len()
+    if pk_write_key_der(key, buf, p, 0) == {
+        .Ok(len) -> {
+            der := cipher.bytes_of(buf, p, len)
+            text: pem.pem_write_buffer("-----BEGIN {label}-----\n", "-----END {label}-----\n", der)
+            core.crypto.wipe(der)
+            core.crypto.wipe(buf)
+            Ok(text)
+        }
+        .Err(e) -> {
+            core.crypto.wipe(buf)
+            Err(e)
+        }
+    }
+}
+
+#Test("An EC public key writes as the SubjectPublicKeyInfo it was parsed from, and needs room") {
+    // secp256r1 generator point as an id-ecPublicKey SubjectPublicKeyInfo.
+    der: [U8]{
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+        0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0x6b, 0x17, 0xd1, 0xf2, 0xe1,
+        0x2c, 0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40, 0xf2, 0x77, 0x03, 0x7d, 0x81, 0x2d,
+        0xeb, 0x33, 0xa0, 0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96, 0x4f, 0xe3, 0x42, 0xe2, 0xfe,
+        0x1a, 0x7f, 0x9b, 0x8e, 0xe7, 0xeb, 0x4a, 0x7c, 0x0f, 0x9e, 0x16, 0x2b, 0xce, 0x33, 0x57, 0x6b,
+        0x31, 0x5e, 0xce, 0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5
+    }
+    key := pk.pk_new()
+    pk.pk_setup(key, Val(.ECKey)) ?? panic("setup")
+    pk.pk_ecc_set_group(key, .Secp256r1) ?? panic("group")
+    pk.pk_ecc_set_pubkey(key, cipher.bytes_of(der, 26, 65)) ?? panic("point")
+    buf := cipher.zero_bytes(PK_ECP_PUB_DER_MAX_BYTES)
+    p := buf.len()
+    len: pk_write_pubkey_der(key, buf, p, 0) ?? panic("write")
+    assert(len == der.len() && cipher.bytes_of(buf, p, len) == der)
+    small := cipher.zero_bytes(der.len() - 1)
+    q := small.len()
+    if pk_write_pubkey_der(key, small, q, 0) == {
+        .Ok(_) -> panic("fits")
+        .Err(e) -> assert(e == .Asn1(.BufTooSmall))
+    }
+}

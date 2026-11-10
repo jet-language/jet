@@ -20,9 +20,6 @@ CImportRow: struct {
 }
 
 CI_ALLOWED: [CImportRow]{
-    CImportRow{path: "Core/Db/Db.jet", count: 1, owner: "#6695: core.db binds the vendored SQLite until its Jet port"},
-    CImportRow{path: "Core/Net/Tls.jet", count: 1, owner: "#6694: core.net.tls binds the vendored mbedTLS until its Jet port"},
-    CImportRow{path: "Core/Vendor/Sqlite3/Fixture/run.jet", count: 1, owner: "#6695: the vendored SQLite build's proof program"},
     CImportRow{path: "Jetpack/Integrations/Source/Foreign/Binders/Octave.jet", count: 1, owner: "C-interop feature: the Octave binder's generated-module template"},
     CImportRow{path: "Tools/agent-eval/domain-foundations/prim-bridges/pkg/cpp_low.jet", count: 1, owner: "C-interop proof: a C++ library through its C bridge"},
     CImportRow{path: "Tools/agent-eval/domain-foundations/prim-bridges/pkg/zlib_run.jet", count: 1, owner: "C-interop proof: zlib through #Import c"},
@@ -31,9 +28,11 @@ CI_ALLOWED: [CImportRow]{
     CImportRow{path: "Tools/agent-eval/ffi-assurance/jet/run.jet", count: 1, owner: "C-interop proof: the FFI assurance driver"},
 }
 
-// Whether a source line declares a C import: the attribute starts the line.
+// Whether a source line declares a C import: the attribute starts the line,
+// alone or in an attribute list (`#[Import(c), Unsafe(...)]`).
 ci_declares: fn(line: String) -> Bool Never! {
     text: line.trim_start()
+    if text.starts_with("#[") -> return text.contains("Import(c)") || text.contains("FFI(c)")
     text.starts_with("#Import(c)") || text.starts_with("#Import c.") || text.starts_with("#FFI(c)")
 }
 
@@ -93,13 +92,13 @@ ci_findings: fn(found: [String:Int]) -> [String] Never! {
 }
 
 #Test("the census counts declarations, not mentions") {
-    source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n"
-    assert_eq(ci_count(source), 3)
+    source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n#[Import(c), Unsafe(\"audited\")]\n#[Unsafe(\"audited\"), FFI(c)]\n#[Unsafe(\"audited\"), FFI(cpp)]\n"
+    assert_eq(ci_count(source), 5)
     found := [String:Int]{}
     found["Compiler/New.jet"] = 1
-    found["Core/Db/Db.jet"] = 2
+    found["Tools/agent-eval/ffi-assurance/jet/run.jet"] = 2
     findings: ci_findings(found)
     assert(findings.len() == CI_ALLOWED.len() + 1)
     assert(findings.contains("Compiler/New.jet: 1 C declarations, and no CI_ALLOWED row; use Core APIs instead of C"))
-    assert(findings.contains("Core/Db/Db.jet: 2 C declarations, the list allows 1; update its CI_ALLOWED row"))
+    assert(findings.contains("Tools/agent-eval/ffi-assurance/jet/run.jet: 2 C declarations, the list allows 1; update its CI_ALLOWED row"))
 }

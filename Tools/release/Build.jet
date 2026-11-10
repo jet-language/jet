@@ -1,5 +1,5 @@
 // `build COMMIT`: build a compiler release from a dev commit, for
-// `candidate` and `publish` to gate, record and publish as the next a0_NNN
+// `candidate` and `publish` to gate, record and publish as the next a0.0.N
 // GitHub release.
 //
 //   jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
@@ -9,13 +9,14 @@
 // --check-gate says whether it would start and stops. It exports COMMIT (it
 // must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on
-// PATH: the seed builds s1 (`jet build Compiler` makes jet and the runtime
-// pack it lowers), s1 builds s2, s2 builds s3, and s2 and s3 must be
-// byte-identical. Every stage
+// PATH: the seed builds s1 (`jet build --optimize=basic Compiler` makes jet
+// and the runtime pack it lowers), s1 builds s2, s2 builds s3, and s2 and s3
+// must be byte-identical. Every stage
 // runs in the export as its working directory, so the images record source
 // directories relative to it. OUT (new or empty, outside the checkout and
 // /tmp) receives s2 as the release: jet, its aliases, jet-runtime/, IDENTITY
-// (`<seed version>#<sha256 of jet>`), COMMIT, SEED (the seed's identity),
+// (`jet@<JET_VERSION>#<sha256 of jet>`, the one the runtime step wrote),
+// COMMIT, VERSION (`<JET_VERSION> <commit> <date>`), SEED (the seed's identity),
 // BUILD.json (the runner target and the identities of s1, s2 and s3) and
 // SHA256SUMS. A shipped file that names this machine's personal information
 // (the rules of Tools/agent/LaneCheck.jet --patterns) or a build directory
@@ -26,14 +27,15 @@
 //   jet run Tools/release/Main.jet -- candidate OUT --evidence EVDIR...
 //   jet run Tools/release/Main.jet -- publish OUT
 //
-// The stages run in the dev shell (Tools/agent/JetEnv.jet), which supplies
-// the C toolchain and the static musl the runtime pack links.
+// The stages run in the dev shell (Tools/agent/JetEnv.jet). The runtime pack
+// links no C, so no stage needs a host C toolchain or musl for it.
 // Exit: 0 done, 1 a check failed, 2 the run could not start.
 
 use {
     files: core.files
     json: core.encoding.json
     term: core.term
+    time: core.time
 }
 
 BUILD_USAGE: "usage: jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)"
@@ -106,27 +108,28 @@ BuildRun: struct {
     tree: String
     work: String
     logs: String
-    version: String
     threads: Int
     vars: [Var]
 }
 
 // `builder` (a directory with jet and jet-runtime/) builds the stage `name`:
-// jet and the runtime pack it lowers.
+// jet, the runtime pack it lowers and IDENTITY, which names the built jet.
 build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Stage Never! {
     built: files.join(run.tree, "Compiler/JetCli/.jet/build/jet")
     built_pack: files.join(run.tree, "Compiler/JetCli/.jet/build/jet-runtime")
+    built_identity: files.join(run.tree, "Compiler/JetCli/.jet/build/IDENTITY")
     remove_tree(files.dirname(built))
     log: files.join(run.logs, "{name}.log")
     vars: with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity)})
     builder_jet: files.join(builder, "jet")
-    result: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), "build", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
+    result: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), "build", "--optimize=basic", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
     if result.rc != 0 || !files.exists(built) || !files.exists(files.join(built_pack, "native.key")) -> return Stage{dir: "", identity: "", error: "{name}: jet build Compiler rc={result.rc}: {tail_of(log, 6)}"}
     dir: files.join(run.work, name)
     files.create_dir_all(dir) ?? return Stage{dir: "", identity: "", error: "{name}: cannot create {dir}: {err}"}
     copy_file(built, files.join(dir, "jet"), true) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}: {err}"}
     if !copy_tree(built_pack, files.join(dir, "jet-runtime")) -> return Stage{dir: "", identity: "", error: "{name}: cannot copy {built_pack}"}
-    own: "{run.version}#{sha256_file(files.join(dir, "jet"))}"
+    own: (read_text(built_identity) ?? "").trim().copy()
+    if !own.starts_with("jet@") || own.partition("#").tail != sha256_file(files.join(dir, "jet")) -> return Stage{dir: "", identity: "", error: "{name}: {built_identity} `{own}` does not name the built jet"}
     say("build", "", "{name}: {own} ({result.wall}s)")
     Stage{dir: dir, identity: own, error: ""}
 }
@@ -145,7 +148,7 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     if missing.len() > 0 -> return build_fail(2, "seed {seed} lacks {missing.join(", ")}")
     seed_identity: (read_text(files.join(seed, "IDENTITY")) ?? "").trim().copy()
-    version: seed_identity.partition("#").head.copy()
+    version: seed_identity.partition("#").head
     seed_sha: sha256_file(files.join(seed, "jet"))
     if !version.starts_with("jet@") || version.len() < 5 || version.contains(" ") || seed_identity.partition("#").tail != seed_sha -> return build_fail(2, "seed IDENTITY {seed_identity} does not name the seed's jet (sha256 {short(seed_sha, 16)})")
     admission: preflight_gate("publish-release", root, seed, sha)
@@ -171,10 +174,12 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     made: [String]{work, logs, tmp}
     loop dir in made -> files.create_dir_all(dir) ?? return build_fail(1, "cannot create {dir}: {err}")
     if export_commit(root, sha, tree) == .Val(why) -> return build_fail(1, why)
+    jet_version: tree_jet_version(tree)
+    if jet_version == "" -> return build_fail(1, "{short(sha, 10)} declares no JET_VERSION in {JET_VERSION_SOURCE}")
     // The stages run behind the export's Tools/agent/JetEnv.jet with no Rust
     // on PATH (`in_dev_shell`).
     run: BuildRun{
-        root: root.copy(), tree: tree.copy(), work: work.copy(), logs: logs.copy(), version: version.copy(), threads: options.threads,
+        root: root.copy(), tree: tree.copy(), work: work.copy(), logs: logs.copy(), threads: options.threads,
         vars: [Var]{set_var("TMPDIR", tmp), set_var("JET_TOOLCHAIN_ROOT", tree), drop_var("JET")},
     }
     say("build", "", "chain of {short(sha, 10)} from seed {seed_identity} in {work}")
@@ -198,6 +203,7 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     encoded: json.to_string_pretty(record) ?? return build_fail(1, "BUILD.json cannot be encoded: {err}")
     failed: write_all([(path: String, text: String)]{
         (path: files.join(out, "IDENTITY"), text: "{s2.identity}\n"),
+        (path: files.join(out, "VERSION"), text: "{jet_version} {sha} {short(time.isoformat(time.now_utc()), 10)}\n"),
         (path: files.join(out, "COMMIT"), text: "{sha}\n"),
         (path: files.join(out, "SEED"), text: "{seed_identity}\n"),
         (path: files.join(out, "BUILD.json"), text: "{encoded}\n"),

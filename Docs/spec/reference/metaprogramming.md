@@ -209,7 +209,7 @@ compile-time name of the items.
 
 Jet has two related reflection paths:
 
-1. A compile-time fact read uses the `@` member form. Examples include
+1. A compile-time fact read is a `$` member of its subject. Examples include
    `Severity.$range`, `send_report.$effects`, `T.$layout`, and
    `$package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
@@ -242,9 +242,10 @@ run: fn() {
 
 `reflect.of(value)` is legal where value interpolation is legal. Its
 `type_name`, `path`, and `display` operations are always available; `fields()`
-is populated for a struct and is empty for a non-struct value. A generic
-reflection value retains the substituted field type, as the same example
-shows for `Box<Int>`.
+is populated for a struct and is empty for a non-struct value. A struct
+field's `value()` lists that struct's own fields, so `.fields()[i].value()`
+walks a nested value level by level. A generic reflection value retains the
+substituted field type, as the same example shows for `Box<Int>`.
 
 The fact plane is deliberately typed and closed. The feature examples read
 range, dimension, state, effect, sendability, movedness, attribution, origin,
@@ -264,11 +265,14 @@ spelling until a ballot names their `$` root.
 $build  $package  $phase  $program
 ```
 
-`$phase` reports the evaluation-site `Phase` value. The shared AST contract
-contains exactly `Preparation`, `Build`, and `Runtime`. Do not confuse that
-language phase with `CompilerStage`, which contains `Parsed`, `Resolved`,
-`Typed`, `Prepared`, and `Emitted` and describes when a checked fact becomes
-available.
+`$phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
+exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
+block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
+program. The evaluation site decides it, so `print($phase)` in `run` prints
+`Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
+shows both sites. Do not confuse that language phase with `CompilerStage`,
+which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and
+describes when a checked fact becomes available.
 
 Metadata queries use typed records and typed failure. The closed failure
 variants are:
@@ -308,19 +312,15 @@ Standard metadata inspection is read-only. The syntax ledger reserves
 existing `Generated` value. Generation cannot replace an existing body,
 signature, or type.
 
-More powerful operations have separate names and grants:
-
-- `compiler.advanced.register` registers an explicitly declared provider;
-- `compiler.advanced.register_expansion` registers a call-expansion provider;
-- `compiler.advanced.register_specialization` registers a specialization
-  provider; and
-- `compiler.advanced.session` opens a session only inside an authorized,
-  registered provider.
-
-The operation schema accepts typed `Generated` values, providers, opaque
-identities, and metadata records. An advanced compiler grant is not a
-filesystem, process, FFI, network, or secret permission. Those authorities
-remain on their own effect and package-policy rails.
+More powerful operations are effects, not a separate opt-in. The `Meta`
+effects in `core.compiler` (`Generate`, `Include`, `Rewrite`, `Types` and
+`Raw`) are allowed unless a row denies them, and reading the program needs
+none. Operations above checked generation also need the `Compiler` value,
+which only the root package's own build source makes (`b.compiler(app)`); a
+dependency can't make one, and a function that receives it acts for the root.
+A Meta effect is not a filesystem, process, FFI, network, or secret
+permission. Those authorities remain on their own effect and package-policy
+rails.
 
 ## Design boundary
 

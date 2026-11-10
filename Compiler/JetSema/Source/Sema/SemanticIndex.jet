@@ -152,7 +152,7 @@ sema_compiler_index_parameter_values: fn(parameters: [SemaRegistrationParameter]
     loop parameter in parameters {
         values.push(TComptimeValue.Struct{type_name: "CompilerParam", fields: [TComptimeField]{
             TComptimeField{name: "name", value: sema_compiler_index_string(parameter.symbol.name)},
-            TComptimeField{name: "ty", value: sema_compiler_index_string(type_name(parameter.ty))},
+            TComptimeField{name: "type", value: sema_compiler_index_string(type_name(parameter.ty))},
         }})
     }
     TComptimeValue.List{values: values}
@@ -189,7 +189,7 @@ sema_compiler_index_symbol_kind: fn(symbol: Symbol, registered_module: SemaRegis
                     loop field in nominal.fields {
                         fields.push(TComptimeValue.Struct{type_name: "CompilerField", fields: [TComptimeField]{
                             TComptimeField{name: "name", value: sema_compiler_index_string(field.symbol.name)},
-                            TComptimeField{name: "ty", value: sema_compiler_index_string(type_name(field.ty))},
+                            TComptimeField{name: "type", value: sema_compiler_index_string(type_name(field.ty))},
                         }})
                     }
                 }
@@ -215,7 +215,7 @@ sema_compiler_index_symbol_kind: fn(symbol: Symbol, registered_module: SemaRegis
         TComptimeField{name: "params", value: params},
         TComptimeField{name: "ret", value: sema_compiler_index_option_string(ret)},
         TComptimeField{name: "parent", value: sema_compiler_index_option_string(parent)},
-        TComptimeField{name: "ty", value: sema_compiler_index_option_string(ty)},
+        TComptimeField{name: "type", value: sema_compiler_index_option_string(ty)},
         TComptimeField{name: "fields", value: TComptimeValue.List{values: fields}},
         TComptimeField{name: "variants", value: sema_compiler_index_strings(variants)},
         TComptimeField{name: "mutable", value: mutable},

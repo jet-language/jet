@@ -25,12 +25,28 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
 
 // `reflect.of(x)` carries its checked names to the IR as text after the
 // value: the type name and canonical path (`module.Type`, the ledger
-// `T.reflect()` reads), then each stored struct field's name, type name and
-// path.
+// `T.reflect()` reads), then the value's stored struct fields as a preorder
+// tree (sema_call_reflection_field_args).
 sema_call_reflection_name_args: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [TExpr] {
     names: sema_call_reflection_type_names(ty, environment, program)
     args := [TExpr]{sema_call_reflection_text(names.type_name, span), sema_call_reflection_text(names.path, span)}
-    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return args
+    sema_call_reflection_field_args(ty, span, environment, program, scopes, [String]{}, args)
+    args
+}
+
+// One level of the field tree: the count of `ty`'s stored struct fields, then
+// each field's name, type name and path followed by its own level, so a
+// nested struct field reflects its fields too. A type already open on the
+// way down lists no fields again.
+sema_call_reflection_field_args: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, open: [String], args: &[TExpr]) {
+    count_at: args.len()
+    args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
+    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return
+    path: sema_call_reflection_type_names(ty, environment, program).path
+    if sema_call_reflection_has_name(open, path) -> return
+    inner := [String]{path}
+    loop name in open -> inner.push(name.copy())
+    count := 0
     loop field in definition.fields {
         if field.computed != None -> next
         field_ty: sema_shared_access_field_type(ty, field.name, environment, program, scopes) ?? next
@@ -38,8 +54,10 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, environment: SemaScopeE
         args.push(sema_call_reflection_text(field.name, span))
         args.push(sema_call_reflection_text(field_names.type_name, span))
         args.push(sema_call_reflection_text(field_names.path, span))
+        sema_call_reflection_field_args(field_ty, span, environment, program, scopes, inner, args)
+        count += 1
     }
-    args
+    args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: count, width: None}, span)
 }
 
 // A nominal type reflects as its declared name and `module.Name` path (the

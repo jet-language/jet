@@ -30,10 +30,10 @@
 //                                              Float32 (correctly rounded)
 //   IntBig       dst(Bool) a=Int slot b=bits   whether the exact Int is a big
 //                                              integer or an inline word outside
-//                                              the signed `b`-bit range (33..=63;
-//                                              IR_INT_INLINE_BITS is every inline
-//                                              word; a pass's guard; Build emits
-//                                              none)
+//                                              the signed `b`-bit range
+//                                              (2..=IR_INT_INLINE_BITS, which is
+//                                              every inline word; a pass's
+//                                              guard; Build emits none)
 //   Convert      dst  a=operand                numeric conversion by the slot
 //                                              types: Float/Float32 to a Word
 //                                              truncates toward zero (signed
@@ -48,6 +48,11 @@
 //   Call         dst? a=function b=args c=count
 //   CallRuntime  dst? a=name (symbol) b=args c=count
 //   CallIndirect dst? a=callee slot b=args c=count
+//                                              a function value's call: its
+//                                              code's row is IR_CODE_TYPE over
+//                                              the function type, the args its
+//                                              box then its parameters; any
+//                                              other callee is a plain pointer
 //   FunctionAddress dst a=function
 //   DataAddress  dst  a=data row
 //   Load         dst  a=base pointer slot b=byte offset
@@ -195,6 +200,13 @@ IRSlotKind: enum { Param Local Temp }
 // bits 63 and 62 agree).
 IR_INT_INLINE_BITS: 63
 
+// The checked type name of a function value's code word: the row of the
+// word a closure box holds at 8 is a Pointer of type
+// `Apply(IR_CODE_TYPE, [the function type])` (BuildCoreClosures.jet
+// ir_code_row), so IR Lint checks a CallIndirect through it against that
+// signature.
+IR_CODE_TYPE: "#code"
+
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the
 // source line a variable is declared on (0 none); `line[i]` the source line
@@ -223,6 +235,8 @@ IRFunction: struct {
     a: [Int]
     b: [Int]
     c: [Int]
+    // Each instruction's source line; from bit 32 up, the inline site it
+    // came from (ir_code_line_site; 0: the function's own code).
     code_line: [Int]
     args: [Int]
     // Open structured-control instructions while building (indexes into `op`).
@@ -239,6 +253,10 @@ IRFunction: struct {
     // The C symbol a host defines in this runtime export's place
     // (IR_HOST_PROVIDER, set by ir_build_library), else empty.
     host_symbol: String{""}
+    // The inline sites of the body (OptInline.jet ir_opt_splice), two words
+    // each: the function inlined there and the site it sits in (0: the
+    // function's own code). Site s (from 1) is words 2s - 2 and 2s - 1.
+    inline_sites: [Int]{[Int]{}}
 }
 
 // The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C
@@ -347,6 +365,11 @@ IRDataReloc: struct { offset: Int, target: Int, addend: Int, text: Bool }
 // report's) resolve from. `host_literals`: the compile-time literals that are
 // compiler values (BuildTypes.jet ir_host_literal), by the key their host
 // route names, which the compiler answers from the built module.
+// `struct_fields`: the merged module's struct members, one
+// `field <identity> <offset> <size> <member> <type>` line per stored member
+// of each struct the program reached (BuildMerge.jet ir_merge), for the
+// emission log; `<type>` is the member's checked type (`box` for a boxed
+// one), last since it may hold spaces.
 IRModule: struct {
     types: [IRType]
     type_keys: [String]
@@ -390,6 +413,7 @@ IRModule: struct {
     single_thread: Bool{false}
     debug_directory: String{""}
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
+    struct_fields: [String]{[String]{}}
 }
 
 ir_module_new: fn() -> IRModule Never! {
@@ -548,6 +572,27 @@ ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: In
     f.c.push(c)
     f.code_line.push(line)
     at
+}
+
+// Code line bit 32 (IRFunction.code_line): the inline site starts there.
+IR_CODE_LINE_SITE: 4294967296
+
+// The source line of code line `line`, without its inline site.
+ir_code_line_source: fn(line: Int) -> Int Never! {
+    if line >= IR_CODE_LINE_SITE -> line %% IR_CODE_LINE_SITE else -> line
+}
+
+// The inline site of code line `line` (IRFunction.inline_sites), 0 for the
+// function's own code.
+ir_code_line_site: fn(line: Int) -> Int Never! {
+    if line >= IR_CODE_LINE_SITE -> line /% IR_CODE_LINE_SITE else -> 0
+}
+
+// Code line `line`'s source line at inline site `site`. A line below 0
+// names no source line and takes no site.
+ir_code_line_at: fn(line: Int, site: Int) -> Int Never! {
+    source: ir_code_line_source(line)
+    if source < 0 -> source else -> source + site * IR_CODE_LINE_SITE
 }
 
 // Appends an operand list to the args pool; returns its start.

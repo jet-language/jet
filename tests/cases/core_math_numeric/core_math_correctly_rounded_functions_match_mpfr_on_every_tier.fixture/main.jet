@@ -47,6 +47,10 @@ ATANH: comptime { embed_file("corpus/atanh.txt") }
 CBRT: comptime { embed_file("corpus/cbrt.txt") }
 HYPOT: comptime { embed_file("corpus/hypot.txt") }
 POW: comptime { embed_file("corpus/pow.txt") }
+ERF: comptime { embed_file("corpus/erf.txt") }
+ERFC: comptime { embed_file("corpus/erfc.txt") }
+TGAMMA: comptime { embed_file("corpus/tgamma.txt") }
+LGAMMA: comptime { embed_file("corpus/lgamma.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -122,6 +126,10 @@ value: fn(name: String, a: [Float], w: [Int]) -> Float {
     if name == "cbrt" -> return math.cbrt(a[0])
     if name == "hypot" -> return math.hypot(a[0], a[1])
     if name == "pow" -> return a[0].pow(a[1])
+    if name == "erf" -> return math.erf(a[0])
+    if name == "erfc" -> return math.erfc(a[0])
+    if name == "tgamma" -> return math.gamma(a[0])
+    if name == "lgamma" -> return math.lgamma(a[0])
     panic("no corpus function {name}")
 }
 
@@ -201,4 +209,8 @@ run: fn() {
     check("cbrt", CBRT)
     check("hypot", HYPOT)
     check("pow", POW)
+    check("erf", ERF)
+    check("erfc", ERFC)
+    check("tgamma", TGAMMA)
+    check("lgamma", LGAMMA)
 }

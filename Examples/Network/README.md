@@ -15,7 +15,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [TLSPeerIdentity](TLSPeerIdentity.jet) — A real loopback TLS handshake uses only the checked-in test CA, then exposes the verified name, chain and version.
 - [URLMIME](URLMIME.jet)
 - [URLSourceLiteral](URLSourceLiteral.jet) — No import: the typed URL head loads its source-owned carrier and constructor.
-- [WsEcho](WsEcho.jet) — core.net.ws client/server echo over cleartext WebSocket.
+- [WSEcho](WSEcho.jet) — core.net.ws client/server echo over cleartext WebSocket.
 
 ## Browser
 
@@ -42,5 +42,5 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [HTTPServerLimits](HTTP/HTTPServerLimits.jet) — Reject ambiguous framing and oversized bodies before handlers run.
 - [HTTPServerMiddleware](HTTP/HTTPServerMiddleware.jet) — Middleware composes on the same Handler server engine.
 - [HTTPServerTrailers](HTTP/HTTPServerTrailers.jet) — Trailers live on HTTP messages, not Body.
-- [HTTPServerWasiP2](HTTP/HTTPServerWasiP2.jet) — The same HTTP server Prelude runs as a WASI Preview 2 Component.
+- [HTTPServerWASIP2](HTTP/HTTPServerWASIP2.jet) — The same HTTP server Prelude runs as a WASI Preview 2 Component.
 - [HTTPWebDefaults](HTTP/HTTPWebDefaults.jet) — The three defaults a browser front end plus a Jet API needs.

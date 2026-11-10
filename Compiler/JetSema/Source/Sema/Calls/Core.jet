@@ -663,12 +663,33 @@ sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: Sem
         .None -> None
     }
     if source == {
-        .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
+        .Val(target) -> {
+            sema_call_core_tolerant_form_lint(environment, module_name, member, member, span, diagnostics)
+            return Val(SemaCoreCallRoute.Source{target: target})
+        }
         .None -> {}
     }
     if diagnostics.len() != diagnostic_count -> return None
     record: sema_call_core_record(module_name, member, actual_arity, span, diagnostics) ?? return None
     Val(SemaCoreCallRoute.Core{record: record})
+}
+
+// L0208: a tolerant `core.http` query or form decode
+// outside Core is listed for review. Code that picks a file or an account
+// from the value moves to the strict sibling; the NeedsReview edit writes it,
+// so `jet fix` lists the call and only `jet fix --all` applies the edit (and
+// rolls it back when the caller doesn't handle the FormDecodeError). `written`
+// is the name at `span`; an import alias gets the advisory without the edit.
+sema_call_core_tolerant_form_lint: fn(environment: SemaScopeEnvironment, module_name: String, member: String, written: String, span: Span, diagnostics: &[Diagnostic]) {
+    if module_name != "core.http" || (member != "query_decode" && member != "form_decode") -> return
+    if environment.module_identity.starts_with("<corelib>/") -> return
+    row: diagnostic_registry_row("L0208") ?? panic("L0208 has no registry row")
+    lint: sema_lint("L0208", span, row.what.replace("{{member}}", member), row.why, row.fix.replace("{{member}}", member))
+    if written != member {
+        diagnostics.push(lint)
+        return
+    }
+    diagnostics.push(diagnostic_with_edit(lint, TextEdit{span: Span{start: span.end, end: span.end}, new_text: "_strict"}))
 }
 
 sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
@@ -689,7 +710,10 @@ sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, progr
         .None -> None
     }
     if source == {
-        .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
+        .Val(target) -> {
+            sema_call_core_tolerant_form_lint(environment, imported.module_name, member, requested_member, span, diagnostics)
+            return Val(SemaCoreCallRoute.Source{target: target})
+        }
         .None -> {}
     }
     if diagnostics.len() != diagnostic_count -> return None
@@ -863,7 +887,7 @@ sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
 // The F32-width members with their own `__<member>_f32` source.
 sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
     if member == {
-        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" -> true
+        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" | "erf" | "erfc" | "gamma" | "lgamma" -> true
         else -> false
     }
 }
@@ -1057,22 +1081,17 @@ sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], 
     Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
 }
 
-sema_call_core_effect_name: fn(effect_kind: Effect) -> String Never! {
-    sema_taint_effect_name(effect_kind)
-}
-
 // Record known root/leaf effects (including known purity) and enforce authored
 // transaction walls before the CoreCall reaches effect-graph collection.
 sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     leaf_name: record.effect_leaf ?? ""
     if record.effect_kind == {
-        .Val(effect_kind) -> {
+        .Val(root_name) -> {
             // A precise leaf under the call's own root replaces
             // that root, so a leaf grant (`FS.Read`, `Exec.Args`) covers the
             // call and the root still covers the leaf. A leaf under another
             // root (`Time.Wait` on a network call) adds to the root instead.
-            root_name: sema_call_core_effect_name(effect_kind)
             if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) -> effect_bound.push(EffectRowEntry{name: root_name, span: span})
         }
         .None -> {}
@@ -1369,9 +1388,6 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if $build.os` / `#Target(OS.*)`"))
-    }
-    if context.unsafe_depth == 0 && canonical_record.module_name == "core.ui" && (canonical_record.member == "__node_transfer" || canonical_record.member == "__accessibility_transfer" || canonical_record.member == "__shortcut_transfer") {
-        diagnostics.push(sema_error("E3101", span, "`{canonical_record.module_name}.{canonical_record.member}` requires an audited `#Unsafe` region", "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots", "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") {{ … }}`"))
     }
     actual_accesses: loop argument in args -> argument.convention
     signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {

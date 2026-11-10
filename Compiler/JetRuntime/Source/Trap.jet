@@ -104,6 +104,8 @@ trap_write_word_raw: fn(word: I64, count: I64) {
 // other (trap_footer): before jet_rt_main or a process exit has claimed a
 // status there is none to finish with (#6416).
 rt_trap_invalid_box_layout: fn() {
+    reason: rt_static_text("invalid box layout")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_root_prepare()
     jet_rt_stdout_flush()
     trap_invalid_layout_head()
@@ -129,6 +131,23 @@ trap_defect_prepare: fn() {
 trap_defect_exit: fn(status: I64) {
     secret_scrub()
     _ := trap_syscall(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// The one door of every runtime stop and defect (#6725): each routine that
+// reports, publishes or ends the process calls it before any of that, and
+// tests/guards/runtime_stop_door.jet holds every JetRuntime routine to it.
+// Served comptime code (ComptimeServe.jet) reports the stop to the compiler
+// here as `kind` and its words (JetBackend Image/ComptimeWire.jet: 1 a
+// message's bytes and length, 2 shift, 3 list bounds, 4 require, 5 todo) and
+// never comes back, so no served stop is published to the serve entry's
+// root and answered as the call's value. Any other program returns at once
+// to the caller's runtime path.
+trap_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    code: comptime_serve_stop_code
+    if (code == I64{0}) -> return
+    #Unsafe("the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words") {
+        _ := os_call5_i64(code, kind, a, b, c, d)
+    }
 }
 
 // A failed GS syscall cannot establish ownership of any TCB. Host stdout
@@ -273,7 +292,7 @@ trap_root_panic_report: fn(message: I64) -> I64 {
 trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // jet_runtime_stop_unwind carries the raw message into the task runner, not
     // this process report (jet_scheduler_panic_message).
-    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
     production_receipt_write(code, file, file_len, trap_line(line), I64{0}, I64{0})
     trap_header(code)
@@ -287,7 +306,7 @@ trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, me
 // and no root capture (Scheduler.jet scheduler_start_failed), exit 70. Served
 // comptime code reports it to the compiler as a panic message.
 trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
-    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
     trap_defect_prepare()
     trap_header_bytes(code)
     trap_write(message, message_len)
@@ -310,7 +329,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 #Export(c) jet_rt_coded_stop: fn(code: I64, message: I64) {
     data: rt_text_data(message)
     length: rt_text_len(message)
-    comptime_serve_stop(I64{1}, data, length, I64{0}, I64{0})
+    trap_stop(I64{1}, data, length, I64{0}, I64{0})
     code_data: rt_text_data(code)
     code_length: rt_text_len(code)
     word_length: if (code_length > I64{8}) -> I64{8} else -> code_length
@@ -345,7 +364,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 // type is {bits} bits wide)". The count prints in the shifted type's signedness
 // (1 = unsigned), as the seed's i128 operand does.
 #Export(c) jet_rt_fixed_shift_stop: fn(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
-    comptime_serve_stop(I64{2}, count, count_unsigned, bits, I64{0})
+    trap_stop(I64{2}, count, count_unsigned, bits, I64{0})
     message: jet_rt_string_builder_new()
     jet_rt_string_builder_push(message, rt_static_text("Shifting "))
     jet_rt_string_builder_push(message, if (direction == I64{0}) -> rt_static_text("left") else -> rt_static_text("right"))
@@ -366,6 +385,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 // so task publication never prints a report.
 trap_native_index_range_stop: fn() {
     message: trap_msg_native_index_range_text()
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
     if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_native_index_range_root()
 }
@@ -381,6 +401,7 @@ trap_native_index_range_root: fn() {
 // report stays unchanged even where the seed uses raw Rust arithmetic.
 #Export(c) jet_rt_panic_overflow: fn() {
     message: trap_msg_overflow_text()
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
     if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_header(I64{1})
     trap_msg_overflow()
@@ -389,6 +410,10 @@ trap_native_index_range_root: fn() {
 }
 
 #Export(c) jet_rt_panic_division_by_zero: fn() {
+    message: jet_rt_string_builder_new()
+    trap_build_msg_divide_zero(message)
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
+    jet_rt_string_drop(message)
     trap_header(I64{1})
     trap_msg_divide_zero()
     trap_msg_prelude_end()
@@ -396,7 +421,7 @@ trap_native_index_range_root: fn() {
 }
 
 #Export(c) jet_rt_panic_message: fn(message: I64, message_len: I64) {
-    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(I64{0})
     trap_write(message, message_len)
@@ -413,7 +438,7 @@ trap_native_index_range_root: fn() {
         if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
     }
-    comptime_serve_stop(I64{3}, len, native, I64{0}, I64{0})
+    trap_stop(I64{3}, len, native, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, native)
     published: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1})
     jet_rt_string_drop(message)
@@ -456,7 +481,7 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 // The list-index stop of compiled code (jet_runtime_stop): the IR's native word
 // index, reported at the indexing file and line.
 #Export(c) jet_rt_list_bounds_stop: fn(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
-    comptime_serve_stop(I64{3}, len, index, I64{0}, I64{0})
+    trap_stop(I64{3}, len, index, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, index)
     trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
@@ -486,6 +511,7 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 // retain the payload bytes and the host-fault exit class. Like
 // jet_rt_unreachable it exits at once: no program stop publication.
 trap_host_fault: fn(message: I64, length: I64) {
+    trap_stop(I64{1}, message, length, I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_write(message, length)
@@ -496,7 +522,7 @@ trap_host_fault: fn(message: I64, length: I64) {
 // IR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) jet_rt_unreachable: fn(reason: I64, length: I64) {
-    comptime_serve_stop(I64{1}, reason, length, I64{0}, I64{0})
+    trap_stop(I64{1}, reason, length, I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_msg_unreachable()
@@ -508,9 +534,11 @@ trap_host_fault: fn(message: I64, length: I64) {
 // Vec::with_capacity(capacity as usize) and growth overflow are foreign
 // Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
 rt_seq_capacity_overflow_stop: fn() {
+    reason: rt_static_text("capacity overflow")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
-    trap_write_static(rt_static_text("capacity overflow"))
+    trap_write_static(reason)
     trap_msg_newline()
     trap_defect_exit(I64{101})
 }
@@ -519,6 +547,28 @@ rt_seq_capacity_overflow_stop: fn() {
 // foreign String host defect, not a Jet record-variant or Root program stop.
 // Keep the raw reason and the x64 unsigned index, including negative I64.
 rt_seq_index_oob_stop: fn(length: I64, index: I64) {
+    // Unsigned index = 2 * half + lowBit. Both the decimal quotient and last
+    // digit fit signed I64; no MIN negation or unsigned cast is used.
+    half: (index >> I64{1}).bit_and(I64{9223372036854775807})
+    quotient: half /% I64{5}
+    last: (half % I64{5}) * I64{2} + (index.bit_and(I64{1}))
+    reason: jet_rt_string_builder_new()
+    rt_text_push_word(reason, I64{8462017926321696361}, I64{8})
+    rt_text_push_word(reason, I64{8462090116149485684}, I64{8})
+    rt_text_push_word(reason, I64{7307218077177046126}, I64{8})
+    rt_text_push_word(reason, I64{2338328219547429920}, I64{8})
+    rt_text_push_number(reason, length)
+    rt_text_push_word(reason, I64{7307218078150255136}, I64{8})
+    rt_text_push_word(reason, I64{7575186950109161760}, I64{8})
+    rt_text_push_word(reason, I64{8307}, I64{2})
+    if (index >= I64{0}) {
+        rt_text_push_number(reason, index)
+    } else {
+        rt_text_push_number(reason, quotient)
+        rt_text_push_word(reason, I64{48} + last, I64{1})
+    }
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    jet_rt_string_drop(reason)
     trap_defect_prepare()
     jet_rt_stdout_flush()
     alloc_write_word(I64{8462017926321696361}, I64{8})
@@ -532,11 +582,6 @@ rt_seq_index_oob_stop: fn(length: I64, index: I64) {
     if (index >= I64{0}) {
         alloc_write_size(index)
     } else {
-        // Unsigned index = 2 * half + lowBit. Both the decimal quotient and
-        // last digit fit signed I64; no MIN negation or unsigned cast is used.
-        half: (index >> I64{1}).bit_and(I64{9223372036854775807})
-        quotient: half /% I64{5}
-        last: (half % I64{5}) * I64{2} + (index.bit_and(I64{1}))
         alloc_write_size(quotient)
         alloc_write_word(I64{48} + last, I64{1})
     }
@@ -560,6 +605,7 @@ rt_record_variant_panic: fn() {
 trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     // Task bodies receive the original message, never the rendered report
     // (architecture.md TaskFailure.Panicked.
+    trap_stop(I64{1}, trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}, I64{0})
     if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
     production_receipt_write(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})))
     trap_header(I64{0})
@@ -581,7 +627,7 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
 }
 
 #Export(c) jet_todo_stop: fn(file: I64, line: I64, expected_type: I64) {
-    comptime_serve_stop(I64{5}, file, line, expected_type, I64{0})
+    trap_stop(I64{5}, file, line, expected_type, I64{0})
     trap_header(I64{2})
     trap_msg_todo()
     trap_write_handle(file)
@@ -610,7 +656,7 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
 }
 
 trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
-    comptime_serve_stop(I64{4}, kind, message, left, right)
+    trap_stop(I64{4}, kind, message, left, right)
     if (kind == I64{3}) {
         trap_contract_stop(descriptor, message, locals)
         return
@@ -694,6 +740,23 @@ trap_range_end: fn(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! 
 }
 
 trap_range_stop: fn(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) {
+    // The report's message, less its closing backtick, for served code.
+    reason: jet_rt_string_builder_new()
+    trap_build_msg_range_head(reason)
+    if view -> trap_build_msg_range_view(reason)
+    else -> trap_build_msg_range_slice(reason)
+    rt_text_push_word(reason, I64{32}, I64{1})
+    rt_text_push_number(reason, len)
+    trap_build_msg_range_items(reason)
+    rt_text_push_number(reason, start)
+    trap_build_msg_range_to(reason)
+    rt_text_push_number(reason, end)
+    trap_build_msg_range_open(reason)
+    if (exclusive != U8{0}) -> trap_build_msg_exclusive(reason)
+    else -> trap_build_msg_inclusive(reason)
+    rt_text_push_word(reason, I64{41}, I64{1})
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    jet_rt_string_drop(reason)
     trap_header(I64{0})
     trap_msg_range_head()
     if view -> trap_msg_range_view()

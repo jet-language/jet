@@ -60,8 +60,8 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
-// out of SSA), and the name of the functions whose IR before and after the
-// passes the report carries (`dump`, "" for none).
+// out of SSA), and the names of the functions whose IR before and after the
+// passes the report carries (`dump`, comma-separated, "" for none).
 IROptOptions: struct {
     level: Int
     small: Bool
@@ -97,7 +97,7 @@ ir_opt_options: fn(level: Int) -> IROptOptions Never! {
 
 // Options from the environment's values: JET_OPT_DISABLE (pass names,
 // comma-separated), JET_OPT_VERIFY and JET_OPT_SSA_STRESS ("1": on),
-// JET_OPT_DUMP (a function name).
+// JET_OPT_DUMP (function names, comma-separated).
 ir_opt_options_from: fn(level: Int, small: Bool, inline: IROptInline, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
     disabled := [String]{}
     if disable == .Val(text) {
@@ -214,17 +214,20 @@ IR_OPT_MIN_INSTRUCTIONS_PER_THREAD: 2000
 // as `threads` admits. A function's passes read only its own body and the
 // final bodies of its non-recursive callees, so a function runs once those
 // callees are done (ir_opt_scheduled) and every body is the one the
-// single-threaded bottom-up walk produces, for any thread count. The
-// report's instruction counts stay 0; ir_optimize_module_measured fills them.
+// single-threaded bottom-up walk produces, for any thread count. At O0 only
+// the inline Int facts run (ir_opt_module_facts). The report's instruction
+// counts stay 0; ir_optimize_module_measured fills them.
 ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level: options.level
     report := ir_opt_report(level)
-    if level <= 0 -> return report
-    if options.dump != "" {
-        loop f in m.functions {
-            if f.name == options.dump -> report.dumps.push("before {ir_function_text(m, f)}")
-        }
+    names: ir_opt_dump_names(options)
+    if level <= 0 {
+        ir_opt_dump(m, names, "before", report)
+        ir_opt_module_facts(m, options, report)
+        ir_opt_dump(m, names, "after", report)
+        return report
     }
+    ir_opt_dump(m, names, "before", report)
     // Before IR Lint reads the signatures: a return slot is a parameter.
     if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m)
     // IR Lint reads every callee's signature while the bodies are out.
@@ -282,12 +285,49 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions)
     if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
-    if options.dump != "" {
-        loop f in m.functions {
-            if f.name == options.dump -> report.dumps.push("after {ir_function_text(m, f)}")
+    ir_opt_dump(m, names, "after", report)
+    report
+}
+
+// The function names `options.dump` lists (JET_OPT_DUMP).
+ir_opt_dump_names: fn(options: IROptOptions) -> [String] Never! {
+    names := [String]{}
+    if options.dump == "" -> return names
+    loop name in options.dump.split(",") {
+        trimmed: name.trim()
+        if trimmed != "" -> names.push(trimmed)
+    }
+    names
+}
+
+// Each function of `m` that `names` lists, as IR text after `stage`.
+ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: &IROptReport) Never! {
+    if names.len() == 0 -> return
+    loop f in m.functions {
+        loop name in names {
+            if f.name == name {
+                report.dumps.push("{stage} {ir_function_text(m, f)}")
+                break
+            }
         }
     }
-    report
+}
+
+// O0's one pass: every body through the inline Int facts of the SSA round
+// trip (ir_opt_ssa_facts), the rules O1 and O2 apply, and nothing after
+// them. A comparison the ranges decide is its constant; the branch on it
+// stays. The facts read the module's view (ir_opt_view) for the stop
+// points and the `#unique<..>` helpers they know.
+ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptReport) Never! {
+    if !ir_opt_enabled(options, "range") || !ir_opt_enabled(options, "ssa") -> return
+    functions := [IRFunction]{}
+    compiler_transfer_rows<IRFunction>(functions, m.functions)
+    keys := [String]{}
+    loop f in functions -> keys.push(f.key.copy())
+    view := ir_opt_view(m, keys)
+    loop id in 0..<functions.len() -> _ := ir_opt_ssa_facts(view, functions[id], options, report)
+    compiler_transfer_rows<IRType>(m.types, view.types)
+    compiler_transfer_rows<IRFunction>(m.functions, functions)
 }
 
 // The entry form of versioning (OptVersion.jet) over the final bodies, and
@@ -661,24 +701,40 @@ ir_opt_lint: fn(m: IRModule, lint: IRLintContext, f: IRFunction, pass: String, r
 }
 
 // The SSA round trip: build, verify when asked, the inline Int facts
-// (OptRange.jet), and back to slots. No pass on the form gives a value a
-// new slot (the facts only drop reads, fold a compare into its own slot or
-// keep a read's slot), so the slot code stays valid as it is, and leaving
-// SSA (SsaOut.jet) runs only for verify and stress, which exercise it.
-// Without either, a function the facts cannot touch (no Int or word slot,
-// or "range" off) builds no form. An invalid form is an IR Lint row of
-// "ir.opt.ssa" (rule ssa.form), and the function leaves the round trip
-// as it came.
+// (OptRange.jet), and back to slots (ir_opt_ssa_facts), then Simplify over
+// what the facts decided. No pass on the form gives a value a new slot (the
+// facts only drop reads, fold a compare into its own slot or keep a read's
+// slot), so the slot code stays valid as it is, and leaving SSA (SsaOut.jet)
+// runs only for verify and stress, which exercise it. Without either, a
+// function the facts cannot touch (no Int or word slot, or "range" off)
+// builds no form. An invalid form is an IR Lint row of "ir.opt.ssa" (rule
+// ssa.form), and the function leaves the round trip as it came.
 ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) Never! {
-    if f.op.len() == 0 -> return
-    ranges: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
-    if !ranges && !options.verify && !options.stress -> return
+    if ir_opt_ssa_facts(m, f, options, report) <= 0 -> return
+    // The comparisons the ranges decided leave constant branches and Nops.
+    folded: report.branches_folded
+    ir_opt_simplify(m, f, report)
+    // A folded branch can leave one write where a phi merged one per arm (a
+    // range loop's test once its step's sign is decided), so the comparison
+    // is the value tested: one more round on a fresh form.
+    if report.branches_folded == folded -> return
     s := ir_ssa_build(f)
-    if options.verify {
-        errors: ir_ssa_verify(f, s)
-        loop error in errors -> report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
-        if errors.len() > 0 -> return
-    }
+    if !ir_opt_ssa_valid(f, s, options, report) -> return
+    more: ir_opt_int_facts(m, f, s)
+    report.int_facts += more
+    if more > 0 -> ir_opt_simplify(m, f, report)
+}
+
+// The SSA round trip's facts (O0 runs these alone, ir_opt_module_facts):
+// the form, verified when asked, its inline Int facts, and once the stop
+// points they dropped left the form stale, the facts of a fresh form. The
+// facts rewritten, -1 for an invalid form.
+ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) -> Int Never! {
+    if f.op.len() == 0 -> return 0
+    ranges: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
+    if !ranges && !options.verify && !options.stress -> return 0
+    s := ir_ssa_build(f)
+    if !ir_opt_ssa_valid(f, s, options, report) -> return -1
     traps: if ranges -> ir_range_traps(m, f) else -> 0
     facts := if ranges -> ir_opt_int_facts(m, f, s) else -> 0
     // The stop points the ranges dropped leave the form stale, and the values
@@ -686,11 +742,7 @@ ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROp
     // form.
     if facts > 0 && ir_range_traps(m, f) < traps {
         s = ir_ssa_build(f)
-        if options.verify {
-            errors: ir_ssa_verify(f, s)
-            loop error in errors -> report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
-            if errors.len() > 0 -> return
-        }
+        if !ir_opt_ssa_valid(f, s, options, report) -> return -1
         facts += ir_opt_int_facts(m, f, s)
     }
     report.int_facts += facts
@@ -703,23 +755,16 @@ ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROp
             report.ssa_fresh += stats.fresh
         }
     }
-    if facts == 0 -> return
-    // The comparisons the ranges decided leave constant branches and Nops.
-    folded: report.branches_folded
-    ir_opt_simplify(m, f, report)
-    // A folded branch can leave one write where a phi merged one per arm (a
-    // range loop's test once its step's sign is decided), so the comparison
-    // is the value tested: one more round on a fresh form.
-    if !ranges || report.branches_folded == folded -> return
-    s = ir_ssa_build(f)
-    if options.verify {
-        errors: ir_ssa_verify(f, s)
-        loop error in errors -> report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
-        if errors.len() > 0 -> return
-    }
-    more: ir_opt_int_facts(m, f, s)
-    report.int_facts += more
-    if more > 0 -> ir_opt_simplify(m, f, report)
+    facts
+}
+
+// Whether `f`'s SSA form `s` is valid: always without `options.verify`, else
+// each error the form check finds is an IR Lint row of "ir.opt.ssa".
+ir_opt_ssa_valid: fn(f: IRFunction, s: IRSsa, options: IROptOptions, report: &IROptReport) -> Bool Never! {
+    if !options.verify -> return true
+    errors: ir_ssa_verify(f, s)
+    loop error in errors -> report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
+    errors.len() == 0
 }
 
 // Per function, the direct Calls of it in the whole module.
@@ -1311,6 +1356,42 @@ ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
+}
+
+// count() counts i from 0 up to 10. O0 runs the inline Int facts alone: the
+// step, whose i stays within 0..10, is the plain add, and nothing else
+// changes (the test of i and its branch stay, no Simplify folds them).
+#Test("O0 marks a bounded counter's step and leaves the rest of the body") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("count", "test:count.jet::count", "", "count.jet", 1)
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    ten: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    step: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    ops: g.op.copy()
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    report: ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
+    assert(report.int_facts >= 1)
+    f: m.functions[0]
+    assert_eq(f.op.len(), ops.len())
+    loop (at, op) in ops -> assert(f.op[at] == op)
+    assert_eq(f.c[step], IR_OVERFLOW_WRAP)
 }
 
 // parse (the generated CLI parser) calls unknown, shared and callback, and

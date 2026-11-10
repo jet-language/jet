@@ -1,9 +1,11 @@
 // game-frame: 1200 frames of a 2D game scene on a 320x200 RGBA8 software
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
-// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
-// rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
-// every presented frame is written there as a PAM image.
+// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. The
+// canvas is premultiplied, as core.ui's is: a color premultiplies on entry,
+// (c * a + 127) / 255, and every rectangle clips to the canvas and blends
+// src-over per channel, alpha included: s + (d * (255 - a) + 127) / 255.
+// With JET_FRAME_CAPTURE set, every presented frame is written there as a
+// PAM image; the canvas is opaque, so its bytes are the straight ones.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,8 +41,8 @@ static uint32_t rgba(int r, int g, int b, int a) {
     return ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)a;
 }
 
-static int blend(int source, int target, int alpha) {
-    return (source * alpha + target * (255 - alpha) + 127) / 255;
+static int mul(int a, int b) {
+    return (a * b + 127) / 255;
 }
 
 static void fill(int x, int y, int width, int height, uint32_t color, int replace) {
@@ -49,7 +51,8 @@ static void fill(int x, int y, int width, int height, uint32_t color, int replac
     int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
     int x1 = x + width < W ? x + width : W, y1 = y + height < H ? y + height : H;
     if (x1 <= x0 || y1 <= y0) return;
-    int red = (int)(color >> 24), green = (int)((color >> 16) & 255), blue = (int)((color >> 8) & 255);
+    int red = mul((int)(color >> 24), alpha), green = mul((int)((color >> 16) & 255), alpha), blue = mul((int)((color >> 8) & 255), alpha);
+    int rest = 255 - alpha;
     int opaque = replace || alpha == 255;
     for (int row = y0; row < y1; ++row) {
         uint8_t *at = canvas + ((size_t)row * W + (size_t)x0) * 4;
@@ -61,10 +64,10 @@ static void fill(int x, int y, int width, int height, uint32_t color, int replac
                 at[2] = (uint8_t)blue;
                 at[3] = (uint8_t)alpha;
             } else {
-                at[0] = (uint8_t)blend(red, at[0], alpha);
-                at[1] = (uint8_t)blend(green, at[1], alpha);
-                at[2] = (uint8_t)blend(blue, at[2], alpha);
-                at[3] = (uint8_t)blend(alpha, at[3], alpha);
+                at[0] = (uint8_t)(red + mul(at[0], rest));
+                at[1] = (uint8_t)(green + mul(at[1], rest));
+                at[2] = (uint8_t)(blue + mul(at[2], rest));
+                at[3] = (uint8_t)(alpha + mul(at[3], rest));
             }
         }
     }

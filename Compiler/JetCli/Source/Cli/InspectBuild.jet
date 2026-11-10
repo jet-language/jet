@@ -9,7 +9,7 @@ use {
         JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
     ]
     jet_foundation.[
-        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
+        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, Span,
         build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
         diagnostic_render_all,
     ]
@@ -20,7 +20,7 @@ use {
     jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-        BuildStamp, ComptimeInput, pkg_effect_gain_list, pkg_lock_build_stamp, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_manifest_parse, pkg_sha256_hex,
+        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_lock_widened_note, pkg_manifest_parse, pkg_sha256_hex,
     ]
 }
 
@@ -74,7 +74,7 @@ jet_cli_inspect_build_times: fn(file: String, json: Bool, color: Bool) -[FS]> Je
 
 jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
+    diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, query.generated_source_files)
     errors: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""
@@ -408,10 +408,12 @@ jet_cli_workspace_member_needs: fn(directory: String, directories: [String]) -[F
 
 // A library target builds as its importers compile it: its source, with the
 // other sources it lists (`sources`) and the generated modules, checks clean
-// and nothing is written, so a clean check prints nothing.
+// and nothing is written, so a clean check prints nothing. Its snapshot holds
+// the target's whole folder, which every listed source is in
+// (jet_cli_prepare_snapshot).
 jet_cli_check_library: fn(file: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Check)
+    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Check, false, true)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     if prepared.move() == {
         .Refused(refusal) -> refusal
@@ -574,22 +576,28 @@ jet_cli_lock_reports: fn(reports: [Diagnostic], color: Bool) -> JetDriverVerbOut
 // After a build's or a run's checks pass: record each dependency's inferred
 // effect row (the compile's `package_effects`) in the lock of `file`'s
 // project (pkg_lock_record_effect_rows). The output's stderr names each
-// dependency whose row widened and the effects it gained; a `locked` build
-// (`jet build --locked`) writes nothing and refuses every widened row instead
-// (E3513). Without dependency rows or a project lock there is nothing to
-// record. `json` leaves the names out, as it does the effect summary.
-jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, locked: Bool, color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+// effect a dependency's row widened by, with the call path to it; a `locked`
+// build (`jet build --locked`) writes nothing and refuses every widened
+// effect instead (E3513), each at the dependency function that performs it,
+// presented against `snapshot`'s sources. Without dependency rows or a
+// project lock there is nothing to record. `json` leaves the notes out, as it
+// does the effect summary.
+jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, locked: Bool, color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     recorded := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if result.package_effects.len() == 0 -> return recorded
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
     gains: pkg_lock_record_effect_rows(root, result.package_effects, locked) ?? return jet_cli_lock_refusal(err, color)
     if locked && gains.len() > 0 {
         reports := [Diagnostic]{}
-        loop gain in gains -> reports.push(pkg_lock_e3513(gain))
-        return jet_cli_lock_reports(reports, color)
+        loop gain in gains {
+            loop reach in gain.reaches -> reports.push(pkg_lock_e3513(gain.name, reach))
+        }
+        return jet_cli_lock_reports(jet_driver_present_diagnostics(reports, snapshot, result.generated_source_files), color)
     }
     if json -> return recorded
-    loop gain in gains -> recorded.stderr = "{recorded.stderr}note: `{gain.name}` now reaches {pkg_effect_gain_list(gain.effects)}; `.jet/lock` records its wider effect row\n"
+    loop gain in gains {
+        loop reach in gain.reaches -> recorded.stderr = "{recorded.stderr}{pkg_lock_widened_note(gain.name, reach)}"
+    }
     recorded
 }
 

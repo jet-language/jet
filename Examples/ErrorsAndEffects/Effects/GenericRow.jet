@@ -1,0 +1,43 @@
+// A generic type's row belongs to each instance. What `Traced` does through
+// its type parameter is charged to the caller that writes the instance:
+// `Traced<Plain>` is pure, so `measure` may declare `-[]>`, while
+// `Traced<Parser>` does `Traced`'s work plus `Parser`'s printing, so `parse`
+// declares `IO`. Declaring `-[]>` on `parse` would stop the check with E0740,
+// naming `Traced<Parser>` and the `Parser::scan` it runs.
+Scan: trait {
+    scan: fn(self, input: String) -> Int
+}
+
+Plain: struct {
+    scale: Int
+}
+
+impl Plain.Scan {
+    scan: fn(self, input: String) -> Int { input.len() * self.scale }
+}
+
+Parser: struct {
+    scale: Int
+}
+
+impl Parser.Scan {
+    scan: fn(self, input: String) -> Int {
+        print("parser reads {input}")
+        input.len() * self.scale
+    }
+}
+
+Traced: struct<T: Scan> {
+    inner: T
+
+    traced: fn(self, input: String) -> Int { self.inner.scan(input) + 1 }
+}
+
+measure: fn(t: Traced<Plain>, input: String) -[]> Int { t.traced(input) }
+
+parse: fn(t: Traced<Parser>, input: String) -[IO]> Int { t.traced(input) }
+
+run: fn() {
+    print("plain: {measure(Traced<Plain>{inner: Plain{scale: 1}}, "abc")}")
+    print("parsed: {parse(Traced<Parser>{inner: Parser{scale: 10}}, "abc")}")
+}

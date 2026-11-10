@@ -14,21 +14,22 @@ A seed is one directory:
 | `jet` | The compiler, a static x86-64 Linux executable |
 | `jet-runtime/` | The prebuilt runtime pack the compiler links programs against; it must sit beside `jet` |
 | `jetpack` | The package-manager engine built by the same compiler (when the release has one) |
-| `IDENTITY` | `jet@<version>#<sha256 of jet>`, the identity the compiler reports and stamps into builds |
+| `IDENTITY` | `jet@a0.0.N#<sha256 of jet>`, the identity the compiler reports and stamps into builds |
+| `VERSION` | `a0.0.N <commit> <YYYY-MM-DD>`, the release stamp `jet --version` reports |
 | `SHA256SUMS` | The digest of every file above |
 
-`jet run Tools/release/Main.jet -- admit` assembles one for every `a0_NNN` release
+`jet run Tools/release/Main.jet -- admit` assembles one for every `a0.0.N` release
 only after the chain below reaches its fixed point with no Rust on `PATH`.
-Its stage-2 compiler becomes the seed of the next release.
+Its stage-2 compiler becomes the seed of the next release. The release tags
+through `a0_042` are spelled `a0_NNN`; the release after it is `a0.0.43`.
 
 ## From a fresh clone
 
-A clone, the latest published release and a C toolchain are enough: no
+A clone and the latest published release are enough: no
 `Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables,
-only `git`, `curl`, `jq`, OpenSSL 3, a C compiler (`cc`, `ar` and `nm` on
-`PATH`) and static musl (its `libc.a` and `crt1.o` in a `LIBRARY_PATH`
-folder or a usual library folder such as `/usr/lib/musl/lib`); `nix develop`
-supplies all of them. This fetches the latest release, checks its signed
+only `git`, `curl`, `jq` and OpenSSL 3; `nix develop` supplies all of them. A
+release tag whose own copy of this page also names a C compiler and archiver
+(`cc` and `ar`), `nm` or static musl needs those too. This fetches the latest release, checks its signed
 record, clones the release's tag, builds that compiler and its runtime pack
 with the release's seed, runs one row
 of the UI suite with it, runs an example, lands a patch on a scratch copy of
@@ -38,7 +39,7 @@ payload, and `NAME` and `EMAIL` your git identity.
 
 ```sh
 mkdir release && cd release
-curl -fsSL https://api.github.com/repos/jet-language/jet/releases/latest | jq -r '.assets[].browser_download_url | select(test("/(jet-a0_[0-9]+-linux-x64[.]tar[.]gz|CANDIDATE[.]json([.]sig)?|SHA256SUMS)$"))' | xargs -n1 curl -fsSLO
+curl -fsSL https://api.github.com/repos/jet-language/jet/releases/latest | jq -r '.assets[].browser_download_url | select(test("/(jet-a0[.]0[.][0-9]+-linux-x64[.]tar[.]gz|CANDIDATE[.]json([.]sig)?|SHA256SUMS)$"))' | xargs -n1 curl -fsSLO
 TAG=$(jq -r .name CANDIDATE.json)
 git clone --branch "$TAG" https://github.com/jet-language/jet ../jet
 test "sha256:$(jq -cS 'del(.content_digest)' CANDIDATE.json | tr -d '\n' | sha256sum | cut -d' ' -f1)" = "$(jq -r .content_digest CANDIDATE.json)"
@@ -74,9 +75,7 @@ a checkout, from the Core sources built into it), and its identity from the
 `JET_COMPILER_IDENTITY` override both ([Environment
 variables](../reference/environment.md)). `jet build Compiler` builds the
 compiler and then, with it, the runtime pack it lowers (`jet-runtime/`) and
-its `IDENTITY`; the pack step compiles the runtime's vendored C with the
-host C compiler and links static musl's `libc.a`. A missing compiler or musl
-stops the build before any step runs and names what it searched. The testkit
+its `IDENTITY`. The pack holds no C, and the build compiles no C. The testkit
 keeps its scratch in `$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
 
 A seed released before these defaults finds neither; run its build with
@@ -96,19 +95,18 @@ payload, with the rules Tower applies when a ballot is posted
 
 Run it from a checkout of the commit you want to build, in the Nix
 development environment (`Tools/agent/JetEnv.jet` or `nix develop`): each
-`jet build Compiler` also makes the runtime pack the new compiler lowers, and
-that step compiles the runtime's vendored C with the host C toolchain and
-links the static musl `libc.a` it finds on `LIBRARY_PATH`, both of which the
-development environment supplies. `SEED` is the seed directory and `WORK` a
+`jet build Compiler` also makes the runtime pack the new compiler lowers. Each
+stage builds at `--optimize=basic`, the level the release stages use. `SEED` is
+the seed directory and `WORK` a
 scratch directory outside the checkout.
 
 ```sh
-"$SEED/jet" build Compiler        # s1: Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
+"$SEED/jet" build --optimize=basic Compiler     # s1: Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
 mkdir -p "$WORK" && cp -r Compiler/JetCli/.jet/build "$WORK/s1"
-"$WORK/s1/jet" build Compiler     # s2, built by s1 with s1's own runtime pack
+"$WORK/s1/jet" build --optimize=basic Compiler  # s2, built by s1 with s1's own runtime pack
 ```
 
-The build writes `IDENTITY` (`jet@<version>#<sha256 of jet>`) beside the
+The build writes `IDENTITY` (`jet@a0.0.N#<sha256 of jet>`) beside the
 compiler it makes, so each stage runs under its own identity. Copy `s2` out
 the same way and build `s3` with it. The build is trusted when `s2` and `s3`
 are byte-identical, and the runtime pack `s2` builds is byte-identical to the
@@ -119,21 +117,21 @@ different seeds, for example a published seed and one rebuilt from the
 
 The jump from a seed to the commit you want must stay small, because a seed
 only builds sources its own language level accepts. To cross many releases,
-walk the release tags forward. Check out each `a0_NNN` tag in order, and build
+walk the release tags forward. Check out each release tag in order, and build
 it with the previous tag's `s2` as its seed.
 
 ## Where the first seed comes from
 
-1. **A local release.** `~/.local/share/jet-seeds/<a0_NNN>` holds every release
-   cut on this machine; `current` points at the admitted one.
-2. **A published release.** Each `a0_NNN` tag's GitHub release carries the
-   seed archive `jet-a0_NNN-<platform>-<arch>.tar.gz` and its `.sha256`, the
+1. **A local release.** `~/.local/share/jet-seeds/<release>` holds every release
+   cut on this machine, named by its tag; `current` points at the admitted one.
+2. **A published release.** Each `a0.0.N` tag's GitHub release carries the
+   seed archive `jet-a0.0.N-<platform>-<arch>.tar.gz` and its `.sha256`, the
    seed's `jet` and `IDENTITY`, `SHA256SUMS`, and the signed record
    `CANDIDATE.json` with its signature `CANDIDATE.json.sig`. The archive is the
    seed directory. [From a fresh clone](#from-a-fresh-clone) fetches and checks
    the latest; for an older one, download the same assets from
-   `https://github.com/jet-language/jet/releases/download/a0_NNN/` and run the
-   same checks, then check out the `a0_NNN` tag and run the chain with `SEED=seed`.
+   `https://github.com/jet-language/jet/releases/download/<tag>/` and run the
+   same checks, then check out that tag and run the chain with `SEED=seed`.
    `jet run Tools/release/Main.jet -- admit` publishes every release it admits: it
    tags the commit, then runs `jet run Tools/release/Main.jet -- candidate DIR`,
    which records and signs `CANDIDATE.json` with the key
@@ -145,5 +143,5 @@ it with the previous tag's `s2` as its seed.
    and the stage-zero tooling (`Tools/stage0-repack/`) that produced the
    self-hosted compilers before the release train existed. It needs a Rust
    toolchain and no Jet binary. Use it only when no release seed survives.
-   Then walk the release tags forward from the first `a0_NNN` after the branch
+   Then walk the release tags forward from the first release after the branch
    point.

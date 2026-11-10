@@ -1,0 +1,12 @@
+// A claim that drives a host tool missing from PATH ends there, reported
+// skipped with the tool named (testing.skip), never failed.
+#Test("a host tool that is not on PATH skips the claim that needs it") {
+    _: kit_require_tool("jet-testkit-absent-host-tool") ?? return
+    panic("`jet-testkit-absent-host-tool` is on PATH")
+}
+
+// A tool on PATH is found, and the claim goes on.
+#Test("a host tool on PATH is found by its absolute path") {
+    shell: kit_require_tool("sh") ?? return
+    assert(shell.starts_with("/") && shell.ends_with("/sh"), "sh resolved to {shell}")
+}

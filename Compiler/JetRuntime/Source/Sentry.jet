@@ -556,6 +556,7 @@ sentry_stop: fn(fault: I64, start: I64, alignment: I64, component: I64, fenced: 
         else -> TEST_SCOPE_R0801
     }
     test_scope_record_raw_stop(code, I64{5}, trap_word(detail), trap_word(wrapping(detail + I64{8})))
+    trap_stop(I64{1}, trap_word(detail), trap_word(wrapping(detail + I64{8})), I64{0}, I64{0})
     domain: jet_rt_stop_domain()
     if (domain != I64{0}) -> _ := scheduler_panic_check()
     obligation: services_msg_sentry_valid_ptr()

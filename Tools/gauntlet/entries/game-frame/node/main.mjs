@@ -1,9 +1,11 @@
 // game-frame: 1200 frames of a 2D game scene on a 320x200 RGBA8 software
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
-// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
-// rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
-// every presented frame is written there as a PAM image.
+// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. The
+// canvas is premultiplied, as core.ui's is: a color premultiplies on entry,
+// (c * a + 127) / 255, and every rectangle clips to the canvas and blends
+// src-over per channel, alpha included: s + (d * (255 - a) + 127) / 255.
+// With JET_FRAME_CAPTURE set, every presented frame is written there as a
+// PAM image; the canvas is opaque, so its bytes are the straight ones.
 import { writeFileSync } from "node:fs";
 
 const W = 320;
@@ -40,8 +42,8 @@ function rgba(r, g, b, a) {
   return ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
 }
 
-function blend(source, target, alpha) {
-  return Math.trunc((source * alpha + target * (255 - alpha) + 127) / 255);
+function mul(a, b) {
+  return Math.trunc((a * b + 127) / 255);
 }
 
 function fill(x, y, width, height, color, replace) {
@@ -52,9 +54,10 @@ function fill(x, y, width, height, color, replace) {
   const x1 = Math.min(x + width, W);
   const y1 = Math.min(y + height, H);
   if (x1 <= x0 || y1 <= y0) return;
-  const red = color >>> 24;
-  const green = (color >>> 16) & 255;
-  const blue = (color >>> 8) & 255;
+  const red = mul(color >>> 24, alpha);
+  const green = mul((color >>> 16) & 255, alpha);
+  const blue = mul((color >>> 8) & 255, alpha);
+  const rest = 255 - alpha;
   const opaque = replace || alpha === 255;
   for (let row = y0; row < y1; row += 1) {
     const stop = (row * W + x1) * 4;
@@ -65,10 +68,10 @@ function fill(x, y, width, height, color, replace) {
         canvas[at + 2] = blue;
         canvas[at + 3] = alpha;
       } else {
-        canvas[at] = blend(red, canvas[at], alpha);
-        canvas[at + 1] = blend(green, canvas[at + 1], alpha);
-        canvas[at + 2] = blend(blue, canvas[at + 2], alpha);
-        canvas[at + 3] = blend(alpha, canvas[at + 3], alpha);
+        canvas[at] = red + mul(canvas[at], rest);
+        canvas[at + 1] = green + mul(canvas[at + 1], rest);
+        canvas[at + 2] = blue + mul(canvas[at + 2], rest);
+        canvas[at + 3] = alpha + mul(canvas[at + 3], rest);
       }
     }
   }

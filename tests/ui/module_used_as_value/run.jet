@@ -1,24 +1,17 @@
-// A module is not a value: the folder module `text` and the inline module
-// `lib.inner` are each E0629 when bound, passed, returned, stored or printed.
-text: module
-lib: module
+// A Core module has no Module record, so it is not a value: `math` is E0629
+// each time it is bound, passed, returned, stored or printed.
+use core.math
 
 Box: struct { v: String }
 
 show: fn(s: String) { print(s) }
 
-pick: fn() -> String { text }
-
-pick_inner: fn() -> String { lib.inner }
+pick: fn() -> String { math }
 
 run: fn() {
-    m: text
-    n: lib.inner
-    show(text)
-    show(lib.inner)
-    b: Box{v: text}
-    c: Box{v: lib.inner}
-    print("{text} {lib.inner}")
-    print(text.shout("hi"))
-    print(lib.inner.f())
+    m: math
+    show(math)
+    b: Box{v: math}
+    print("{math}")
+    print(math.abs(-2))
 }

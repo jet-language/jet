@@ -366,20 +366,45 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
-    hit: store_find_verified_by_reference(verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
-    verified := hit ?? panic("record must verify")
-    lease_root: files.dirname(verified.lease.snapshot_root)
-    verified.lease.mark_process_handoff()
-    child: process.cmd([String]{"/bin/sh", "-c", "/bin/sleep 2 >/dev/null 2>&1 &"}).run() ?? panic("spawn")
-    assert(child.success)
-    verified.lease.release()
+    lease := store_test_verified_lease(verification, roots, ingested.entry)
+    lease_root: files.dirname(lease.snapshot_root)
+    // The lease is passed to a detached `sh` whose `sleep` holds the
+    // container lock after this process releases the lease.
+    store_test_spawn_leased_detached(lease, [String]{"/bin/sh", "-c", "sleep 2"})
+    lease.release()
     assert(files.exists(lease_root))
     assert_eq(store_recover_hangar(verification, roots) ?? panic("recover"), 0)
     assert(files.exists(lease_root))
-    time.sleep(time.duration_seconds(2))
-    assert_eq(store_recover_hangar(verification, roots) ?? panic("recover"), 1)
+    // Wait on the condition, not a fixed time: the container is reclaimed
+    // once the descendant has exited and the lock is idle (bounded at 10 s).
+    reclaimed: loop _ in 0..<100 {
+        time.sleep(time.duration_ms(100))
+        if (store_recover_hangar(verification, roots) ?? panic("recover")) == 1 -> break true
+    } ?? false
+    assert(reclaimed)
     assert(!files.exists(lease_root))
     store_test_drop_roots(roots)
+}
+
+// Start `argv` detached with `lease` passed to it (keep_open_for marks the
+// process handoff), and let it go. It is never waited on, because a wait
+// kills the child's whole process group. Its spec holds the passed locks
+// open until it is dropped, which happens here.
+store_test_spawn_leased_detached: fn(lease: &CacheLease, argv: [String]) -[FS, Env, Exec]> {
+    bound := LeaseBinding.empty()
+    spec: lease.keep_open_for(process.cmd(argv), bound) ?? panic("pass lease: {err.message()}")
+    if spec.detached().spawn() == {
+        .Ok(_) -> {}
+        .Err(error) -> panic("spawn leased child: {error}")
+    }
+}
+
+// The verified hit's lease alone, with the hit dropped here: a hit still in
+// scope keeps its own reference to a lease consumed out of it, and with it
+// the live lock, until that scope ends.
+store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
+    hit := (store_find_verified_by_reference(verification, roots, entry.reference, store_test_expectation(entry.out)) ? found -> found ! error -> panic("lookup")) ?? panic("record must verify")
+    hit.lease.move()
 }
 
 // Native getter/constructor proof retains real handles and hashing: #3593,

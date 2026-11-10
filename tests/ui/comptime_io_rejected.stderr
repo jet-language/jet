@@ -1,8 +1,8 @@
 Error [jet.ComptimeEffectWithoutImpure]: `core.files.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  --> tests/ui/comptime_io_rejected.jet:4:23
+  --> tests/ui/comptime_io_rejected.jet:4:21
     |
-  4 | DATA :: comptime { fs.read("config.txt") }
-    |                       ^^^^
+  4 | DATA: comptime { fs.read("config.txt") }
+    |                     ^^^^
  Why: Effectful Core APIs are not allowed in pure comptime evaluation
  Fix: Wrap the comptime binding in `#Impure("reason") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime
 More: jet-lang.dev/e/E3410

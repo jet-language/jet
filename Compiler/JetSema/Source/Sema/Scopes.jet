@@ -425,6 +425,10 @@ SemaComptimeBodySource: struct {
     prepared: [SemaComptimePreparedLocal]
     // The site is lexically inside an `#Impure` block.
     impure: Bool{false}
+    // The run-time locals and parameters visible at the site: the staged
+    // check names a read of one as a run-time value (E0640), not an unknown
+    // name.
+    runtime_locals: [String]{[String]{}}
 }
 
 SemaComptimeBodyValue: struct {
@@ -848,6 +852,10 @@ SemaScopeTable: struct {
     // A method call candidate carries the registered signature, which holds
     // only a declared `from` contract.
     method_return_views: [String:ViewProvenanceMap]{[String:ViewProvenanceMap]{}}
+    // A body comptime site's staged check: the run-time locals and
+    // parameters of the function around the site, which its compile-time
+    // code can't read (SemaComptimeBodySource.runtime_locals).
+    comptime_runtime_locals: [String]{[String]{}}
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:

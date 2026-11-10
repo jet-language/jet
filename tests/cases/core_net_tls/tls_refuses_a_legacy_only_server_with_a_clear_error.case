@@ -1,0 +1,27 @@
+# #6694: core.net.tls pins a modern policy (TLS 1.3, and TLS 1.2 ECDHE, with
+# AES-GCM or ChaCha20-Poly1305 over x25519, P-256 or P-384). An OpenSSL server
+# offering only TLS 1.2 CBC suites, and one offering only TLS 1.3 AES-CCM,
+# answer the ClientHello with a handshake_failure alert; the client's error
+# names the policy the server refused.
+requires: tool:openssl
+fixture: tls_refuses_a_legacy_only_server_with_a_clear_error.fixture
+copy: {root}/tests/fixtures/tls/custom-root.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+session cbc raw: openssl s_server -quiet -rev -accept {free-port:cbc} -cert server.cert.pem -key server.key.pem -tls1_2 -cipher AES128-SHA:AES256-SHA:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA384
+session ccm raw: openssl s_server -quiet -rev -accept {free-port:ccm} -cert server.cert.pem -key server.key.pem -tls1_3 -ciphersuites TLS_AES_128_CCM_SHA256
+sleep: 250ms
+write: main.jet tls_refuses_a_legacy_only_server_with_a_clear_error.fixture/main.template
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "TLS handshake with `localhost` failed: the peer refused every cipher suite, group and signature algorithm Core's TLS offers (TLS 1.3, or TLS 1.2 ECDHE, with AES-GCM or ChaCha20-Poly1305 over x25519, P-256 or P-384)\nTLS handshake with `localhost` failed: the peer refused every cipher suite, group and signature algorithm Core's TLS offers (TLS 1.3, or TLS 1.2 ECDHE, with AES-GCM or ChaCha20-Poly1305 over x25519, P-256 or P-384)\n"
+signal cbc: KILL
+close cbc
+exit: any # s_server is killed by the case; its exit status is not part of the contract
+signal ccm: KILL
+close ccm
+exit: any # s_server is killed by the case; its exit status is not part of the contract

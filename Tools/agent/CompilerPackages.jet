@@ -453,9 +453,9 @@ compiler_source_identity: fn(repo: String) -[FS]> String PackagesError! {
     registry: "Compiler/JetCli/Source/Cli/Registry.jet"
     manifest: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
     binary: quoted_line(files.read(files.join(repo, registry)) ?? "", "JET_CLI_BINARY")
-    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "COMPILER_VERSION")
+    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "JET_VERSION")
     if binary == "" -> return Err(PackagesError{message: "{registry} declares no JET_CLI_BINARY"})
-    if version == "" -> return Err(PackagesError{message: "{manifest} declares no COMPILER_VERSION"})
+    if version == "" -> return Err(PackagesError{message: "{manifest} declares no JET_VERSION"})
     "{binary}@{version}#{crypto.sha256(message).hex()}"
 }
 
@@ -940,7 +940,7 @@ unblock_uses: fn(text: String) -> String Never! {
         "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
         "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
         "Core/Text.jet", "text: 1\n",
-        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "COMPILER_VERSION: \"0.1.0\"\n",
+        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "JET_VERSION: \"a0.0.43\"\n",
     }
     loop at in 0..<(fixture.len() /% 2) {
         path: files.join(repo, fixture[2 * at])
@@ -954,8 +954,8 @@ unblock_uses: fn(text: String) -> String Never! {
     assert(!is_compiler_input(repo, "Compiler/JetLexer/Fixture/package.jet", roots))
     assert(!is_compiler_input(repo, "Compiler/JetCli/build/x.jet", roots))
     assert(!is_compiler_input(repo, "Tools/agent/Land.jet", roots))
-    // The same tree's identity from the retired preflight-receipt.mjs.
-    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@0.1.0#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
+    // The tree's identity: the version names no compiler input, so only its prefix follows it.
+    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@a0.0.43#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
     files.remove_all(repo) ?? ()
 }
 

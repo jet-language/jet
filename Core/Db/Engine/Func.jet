@@ -1,0 +1,2954 @@
+// The built-in SQL functions of SQLite 3.45.0 func.c: the scalar functions
+// (abs, char, hex, instr, length, like and glob, lower, printf, quote,
+// replace, round, substr, trim, unhex, upper and the rest), the aggregates
+// sum, total, avg, count, min, max and group_concat with their window
+// methods, the compile-option diagnostics of ctime.c and main.c, and
+// sqlite3RegisterLikeFunctions for PRAGMA case_sensitive_like. Of json.c,
+// json() and jsonb(); of pragma.c, sqlite3Pragma with PRAGMA table_info
+// and table_xinfo.
+//
+// Catalog.jet registers the functions (sqlite3RegisterBuiltinFunctions);
+// a FuncDef names its implementation by impl_id (cat.FI_*), and the Host
+// runs a call through builtin_call, which reads the arguments from the
+// call's context Vdbe.fctx and sets its result through the
+// sqlite3_result_* routines of VdbeApi. The built-ins whose C code is not
+// ported (date.c, the other json.c functions, alter.c and analyze.c) fail
+// with "The SQL function <name>() is not supported in this build".
+//
+// The build is that of RuntimePack.jet: SQLITE_SOUNDEX and the
+// load_extension() function are in; SQLITE_ENABLE_MATH_FUNCTIONS,
+// SQLITE_LIKE_DOESNT_MATCH_BLOBS, SQLITE_SUBSTR_COMPATIBILITY and
+// SQLITE_CASE_SENSITIVE_LIKE are not. The aggregate contexts are
+// conn.AggState slots (sqlite3_aggregate_context): SumCtx keeps rSum in r,
+// rErr in r_err, iSum in i, cnt in n, approx and ovrfl in approx and
+// overflow; CountCtx keeps n in i; min() and max() keep the best value in
+// m, with n set once it holds one (C tests the zeroed Mem's flags); the
+// GroupConcatCtx is described at its routines.
+
+use {
+    math: core.math
+    base: __core_db_base
+    __core_db_base.[Mem]
+    util: __core_db_util
+    __core_db_util.[UTFChar]
+    printf: __core_db_printf
+    mem: __core_db_mem
+    record: __core_db_record
+    tk: __core_db_tokenize
+    os: __core_db_os
+    conn: __core_db_conn
+    aux: __core_db_vdbeaux
+    opc: __core_db_opcodes
+    vs: __core_db_vdbeschema
+    api: __core_db_vdbeapi
+    cat: __core_db_catalog
+    ast: __core_db_ast
+    cg: __core_db_codegen
+    win: __core_db_window
+    bld: __core_db_build
+}
+
+// sqlite3_libversion and sqlite3_sourceid (sqlite3.h SQLITE_VERSION and
+// SQLITE_SOURCE_ID).
+SQLITE_VERSION: "3.45.0"
+SQLITE_SOURCE_ID: "2024-01-15 17:01:13 1066602b2b1976fe58b5150777cced894af17c803e068f5918390d6915b46e1d"
+
+// sqlite3azCompileOpt (ctime.c) as the RuntimePack.jet build of the C
+// library reported it, sorted A-Z. The C list also names its compiler
+// (COMPILER=gcc-<version>); with no C compiler in the build that entry is
+// left out.
+COMPILE_OPTIONS: [String]{
+    "ATOMIC_INTRINSICS=1", "DEFAULT_AUTOVACUUM", "DEFAULT_CACHE_SIZE=-2000", "DEFAULT_FILE_FORMAT=4",
+    "DEFAULT_FOREIGN_KEYS", "DEFAULT_JOURNAL_SIZE_LIMIT=-1", "DEFAULT_MMAP_SIZE=0", "DEFAULT_PAGE_SIZE=4096",
+    "DEFAULT_PCACHE_INITSZ=20", "DEFAULT_RECURSIVE_TRIGGERS", "DEFAULT_SECTOR_SIZE=4096", "DEFAULT_SYNCHRONOUS=2",
+    "DEFAULT_WAL_AUTOCHECKPOINT=1000", "DEFAULT_WAL_SYNCHRONOUS=2", "DEFAULT_WORKER_THREADS=0", "DIRECT_OVERFLOW_READ",
+    "ENABLE_API_ARMOR", "ENABLE_COLUMN_METADATA", "ENABLE_DBSTAT_VTAB", "ENABLE_FTS3",
+    "ENABLE_FTS3_PARENTHESIS", "ENABLE_FTS5", "ENABLE_LOAD_EXTENSION", "ENABLE_MEMORY_MANAGEMENT",
+    "ENABLE_RTREE", "ENABLE_STAT4", "HAVE_ISNAN", "MALLOC_SOFT_LIMIT=1024",
+    "MAX_ATTACHED=10", "MAX_COLUMN=2000", "MAX_COMPOUND_SELECT=500", "MAX_DEFAULT_PAGE_SIZE=8192",
+    "MAX_EXPR_DEPTH=1000", "MAX_FUNCTION_ARG=127", "MAX_LENGTH=1000000000", "MAX_LIKE_PATTERN_LENGTH=50000",
+    "MAX_MMAP_SIZE=0x7fff0000", "MAX_PAGE_COUNT=0xfffffffe", "MAX_PAGE_SIZE=65536", "MAX_SQL_LENGTH=1000000000",
+    "MAX_TRIGGER_DEPTH=1000", "MAX_VARIABLE_NUMBER=32766", "MAX_VDBE_OP=250000000", "MAX_WORKER_THREADS=8",
+    "MUTEX_PTHREADS", "SOUNDEX", "SYSTEM_MALLOC", "TEMP_STORE=1",
+    "THREADSAFE=1", "USE_URI",
+}
+
+// patternCompare's answers.
+MATCH: 0
+NOMATCH: 1
+NOWILDCARDMATCH: 2
+
+// hexdigits.
+HEX_DIGITS: "0123456789ABCDEF"
+
+// ---------------------------------------------------------------------------
+// Arguments.
+
+// The register of argument i of the call.
+arg_reg: fn(v: conn.Vdbe, i: Int) -> Int Never! { v.fctx.arg + i }
+
+// sqlite3_value_type of argument i.
+arg_type: fn(v: conn.Vdbe, i: Int) -> Int Never! { base.value_type(v.mem[v.fctx.arg + i]) }
+
+// sqlite3_value_text of argument i: its UTF-8 bytes (with no terminator),
+// None for NULL. The argument keeps its text form, as in C.
+arg_text: fn(v: &conn.Vdbe, i: Int) -> [U8]? Never! {
+    k: v.fctx.arg + i
+    if !mem.value_text(v.mem[k], base.UTF8) -> return None
+    Val(v.mem[k].z.copy())
+}
+
+// sqlite3_value_bytes of argument i.
+arg_bytes: fn(v: &conn.Vdbe, i: Int) -> Int Never! { mem.value_bytes(v.mem[v.fctx.arg + i], base.UTF8) }
+
+// sqlite3_value_blob of argument i: its bytes, None for C's NULL pointer
+// (a NULL or an empty blob).
+arg_blob: fn(v: &conn.Vdbe, i: Int) -> [U8]? Never! {
+    k: v.fctx.arg + i
+    if !mem.value_blob(v.mem[k]) -> return None
+    Val(v.mem[k].z.copy())
+}
+
+// sqlite3_value_int64, sqlite3_value_int and sqlite3_value_double of
+// argument i.
+arg_int64: fn(v: conn.Vdbe, i: Int) -> Int Never! { mem.int_value(v.mem[v.fctx.arg + i]) }
+arg_int: fn(v: conn.Vdbe, i: Int) -> Int Never! { mem.value_int(v.mem[v.fctx.arg + i]) }
+arg_double: fn(v: conn.Vdbe, i: Int) -> Float Never! { mem.real_value(v.mem[v.fctx.arg + i]) }
+
+// sqlite3SkipAccumulatorLoad.
+skip_accumulator_load: fn(v: &conn.Vdbe) Never! {
+    v.fctx.is_error = -1
+    v.fctx.skip_flag = true
+}
+
+// contextMalloc's size check: SQLITE_TOOBIG for n_byte past
+// SQLITE_LIMIT_LENGTH, false then.
+context_size_ok: fn(db: &conn.Conn, v: &conn.Vdbe, n_byte: Int) -> Bool Never! {
+    if n_byte > db.limits[ast.LIMIT_LENGTH] {
+        api.result_error_toobig(v)
+        return false
+    }
+    true
+}
+
+// Utf8Read / sqlite3Utf8Read on a zero-terminated string: the character
+// at z[at], 0 at the terminator (the end of z or a 0x00 byte).
+read_utf8: fn(z: [U8], at: Int) -> UTFChar Never! {
+    c: util.sql_byte(z, at)
+    if c < 128 -> return UTFChar{c: c, next: at + 1}
+    util.utf8_read(z, at, z.len())
+}
+
+// SQLITE_SKIP_UTF8: the offset past the character at z[at].
+skip_utf8: fn(z: [U8], at: Int) -> Int Never! {
+    i := at + 1
+    if util.sql_byte(z, at) >= 192 {
+        loop util.sql_byte(z, i).bit_and(192) == 128 -> i += 1
+    }
+    i
+}
+
+// memcmp(&a[i], &b[j], n) == 0, the n bytes being in range.
+bytes_equal: fn(a: [U8], i: Int, b: [U8], j: Int, n: Int) -> Bool Never! {
+    loop k in 0..<n {
+        if a[i + k] != b[j + k] -> return false
+    }
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Scalar functions.
+
+// minmaxFunc: the least (user_data 0) or greatest argument under the
+// function's collation; NULL if any argument is NULL.
+minmax_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    is_max: v.fctx.user_data != 0
+    coll: v.fctx.coll
+    best := 0
+    if arg_type(v, 0) == base.SQL_NULL -> return
+    loop i in 1..<v.fctx.argc {
+        if arg_type(v, i) == base.SQL_NULL -> return
+        cmp: record.mem_compare(v.mem[arg_reg(v, best)], v.mem[arg_reg(v, i)], coll)
+        // (cmp ^ mask) >= 0 with mask 0 for min() and -1 for max().
+        if (!is_max && cmp >= 0) || (is_max && cmp < 0) -> best = i
+    }
+    x: v.mem[arg_reg(v, best)]
+    api.result_value(db, v, x)
+}
+
+// typeofFunc.
+typeof_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    names: [String]{"integer", "real", "text", "blob", "null"}
+    t: arg_type(v, 0)
+    api.result_text(db, v, names[t - 1].bytes(), -1)
+}
+
+// subtypeFunc.
+subtype_func: fn(v: &conn.Vdbe) Never! {
+    t: mem.value_subtype(v.mem[arg_reg(v, 0)])
+    api.result_int(v, t)
+}
+
+// lengthFunc: characters of a text up to its first 0x00, bytes of a blob
+// or number.
+length_func: fn(v: &conn.Vdbe) Never! {
+    t: arg_type(v, 0)
+    if t == base.SQL_BLOB || t == base.SQL_INTEGER || t == base.SQL_FLOAT {
+        n: arg_bytes(v, 0)
+        api.result_int(v, n)
+    } else if t == base.SQL_TEXT {
+        z: arg_text(v, 0) ?? return
+        n := 0
+        i := 0
+        loop i < z.len() && z[i] != (U8{0}) {
+            c: Int.from_u8(z[i])
+            i += 1
+            if c >= 192 {
+                loop i < z.len() && Int.from_u8(z[i]).bit_and(192) == 128 -> i += 1
+            }
+            n += 1
+        }
+        api.result_int(v, n)
+    } else {
+        api.result_null(v)
+    }
+}
+
+// bytelengthFunc (octet_length).
+bytelength_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    t: arg_type(v, 0)
+    if t == base.SQL_BLOB {
+        n: arg_bytes(v, 0)
+        api.result_int(v, n)
+    } else if t == base.SQL_INTEGER || t == base.SQL_FLOAT {
+        m: if db.enc <= base.UTF8 -> 1 else -> 2
+        n: arg_bytes(v, 0)
+        api.result_int64(v, n * m)
+    } else if t == base.SQL_TEXT {
+        k: arg_reg(v, 0)
+        enc: if v.mem[k].enc <= base.UTF8 -> base.UTF8 else -> base.UTF16NATIVE
+        n: mem.value_bytes(v.mem[k], enc)
+        api.result_int(v, n)
+    } else {
+        api.result_null(v)
+    }
+}
+
+// absFunc.
+abs_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    t: arg_type(v, 0)
+    if t == base.SQL_INTEGER {
+        x: arg_int64(v, 0)
+        if x == base.I64_MIN {
+            api.result_error(db, v, "integer overflow".bytes(), -1)
+            return
+        }
+        api.result_int64(v, if x < 0 -> -x else -> x)
+    } else if t == base.SQL_NULL {
+        api.result_null(v)
+    } else {
+        r: arg_double(v, 0)
+        api.result_double(v, if r < 0.0 -> -r else -> r)
+    }
+}
+
+// instrFunc: 1 + the characters (bytes for two blobs) before the first
+// occurrence of the needle, 0 when there is none.
+instr_func: fn(v: &conn.Vdbe) Never! {
+    type_h: arg_type(v, 0)
+    type_n: arg_type(v, 1)
+    if type_h == base.SQL_NULL || type_n == base.SQL_NULL -> return
+    n_h := arg_bytes(v, 0)
+    n_n := arg_bytes(v, 1)
+    found := 1
+    if n_n > 0 {
+        h := [U8]{}
+        needle := [U8]{}
+        is_text := true
+        if type_h == base.SQL_BLOB && type_n == base.SQL_BLOB {
+            h = arg_blob(v, 0) ?? [U8]{}
+            needle = arg_blob(v, 1) ?? [U8]{}
+            is_text = false
+        } else if type_h != base.SQL_BLOB && type_n != base.SQL_BLOB {
+            h = arg_text(v, 0) ?? [U8]{}
+            needle = arg_text(v, 1) ?? [U8]{}
+        } else {
+            c1 := mem.mem_copy(v.mem[arg_reg(v, 0)])
+            _: mem.value_text(c1, base.UTF8)
+            h = c1.z.copy()
+            n_h = h.len()
+            c2 := mem.mem_copy(v.mem[arg_reg(v, 1)])
+            _: mem.value_text(c2, base.UTF8)
+            needle = c2.z.copy()
+            n_n = needle.len()
+        }
+        first: util.sql_byte(needle, 0)
+        at := 0
+        loop n_n <= n_h && (util.sql_byte(h, at) != first || !bytes_equal(h, at, needle, 0, n_n)) {
+            found += 1
+            loop {
+                n_h -= 1
+                at += 1
+                if !(is_text && util.sql_byte(h, at).bit_and(192) == 128) -> break
+            }
+        }
+        if n_n > n_h -> found = 0
+    }
+    api.result_int(v, found)
+}
+
+// printfFunc (printf and format).
+printf_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    if v.fctx.argc < 1 -> return
+    fmt: arg_text(v, 0) ?? return
+    args := [Mem]{}
+    loop i in 1..<v.fctx.argc -> args.push(mem.mem_copy(v.mem[arg_reg(v, i)]))
+    if mem.sql_printf(fmt, args, db.limits[ast.LIMIT_LENGTH]) == .Val(text) {
+        api.result_text(db, v, text, text.len())
+    } else {
+        api.result_null(v)
+    }
+}
+
+// substrFunc: p2 characters (bytes of a blob) of x from the 1-based p1;
+// a negative p1 counts from the end, a negative p2 takes the characters
+// before p1.
+substr_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    argc: v.fctx.argc
+    if arg_type(v, 1) == base.SQL_NULL || (argc == 3 && arg_type(v, 2) == base.SQL_NULL) -> return
+    p0type: arg_type(v, 0)
+    p1 := arg_int(v, 1)
+    z := [U8]{}
+    len := 0
+    if p0type == base.SQL_BLOB {
+        len = arg_bytes(v, 0)
+        z = arg_blob(v, 0) ?? return
+    } else {
+        z = arg_text(v, 0) ?? return
+        if p1 < 0 {
+            at := 0
+            loop util.sql_byte(z, at) != 0 {
+                at = skip_utf8(z, at)
+                len += 1
+            }
+        }
+    }
+    p2 := 0
+    neg_p2 := false
+    if argc == 3 {
+        p2 = arg_int(v, 2)
+        if p2 < 0 {
+            p2 = -p2
+            neg_p2 = true
+        }
+    } else {
+        p2 = db.limits[ast.LIMIT_LENGTH]
+    }
+    if p1 < 0 {
+        p1 += len
+        if p1 < 0 {
+            p2 += p1
+            if p2 < 0 -> p2 = 0
+            p1 = 0
+        }
+    } else if p1 > 0 {
+        p1 -= 1
+    } else if p2 > 0 {
+        p2 -= 1
+    }
+    if neg_p2 {
+        p1 -= p2
+        if p1 < 0 {
+            p2 += p1
+            p1 = 0
+        }
+    }
+    if p0type != base.SQL_BLOB {
+        at := 0
+        loop util.sql_byte(z, at) != 0 && p1 > 0 {
+            at = skip_utf8(z, at)
+            p1 -= 1
+        }
+        end := at
+        loop util.sql_byte(z, end) != 0 && p2 > 0 {
+            end = skip_utf8(z, end)
+            p2 -= 1
+        }
+        api.result_text64(db, v, z[at..<end].copy(), end - at, base.UTF8)
+    } else {
+        if p1 + p2 > len {
+            p2 = len - p1
+            if p2 < 0 -> p2 = 0
+        }
+        out: if p2 > 0 -> z[p1..<(p1 + p2)].copy() else -> [U8]{}
+        api.result_blob64(db, v, out, p2)
+    }
+}
+
+// roundFunc: x to n (0 ..= 30) decimal places, halves away from zero.
+round_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    n := 0
+    if v.fctx.argc == 2 {
+        if arg_type(v, 1) == base.SQL_NULL -> return
+        n = arg_int(v, 1)
+        if n > 30 -> n = 30
+        if n < 0 -> n = 0
+    }
+    if arg_type(v, 0) == base.SQL_NULL -> return
+    r := arg_double(v, 0)
+    if r < -4503599627370496.0 || r > 4503599627370496.0 {
+        // No fractional part to round.
+    } else if n == 0 {
+        half: if r < 0.0 -> Float{-0.5} else -> Float{0.5}
+        r = util.int_to_double(Int.from_float(math.trunc(r + half)) ?? 0)
+    } else {
+        z: printf.mprintf("%!.*f".bytes(), [Mem]{base.mem_int(n), base.mem_real(r)}, db.limits[ast.LIMIT_LENGTH]) ?? {
+            api.result_error_nomem(db, v)
+            return
+        }
+        r = util.atof(z, base.UTF8).value
+    }
+    api.result_double(v, r)
+}
+
+// upperFunc and lowerFunc: ASCII case folding.
+case_func: fn(db: &conn.Conn, v: &conn.Vdbe, upper: Bool) Never! {
+    z: arg_text(v, 0) ?? return
+    n: z.len()
+    if !context_size_ok(db, v, n + 1) -> return
+    out := [U8]{}
+    loop b in z {
+        c: Int.from_u8(b)
+        out.push(U8{if upper -> util.upper_byte(c) else -> util.lower_byte(c)})
+    }
+    api.result_text(db, v, out, n)
+}
+
+// randomFunc: a random integer, never -9223372036854775808.
+random_func: fn(v: &conn.Vdbe) Never! -[DB]> {
+    b: os.os_random_bytes(8)
+    u := 0
+    loop k in 0..<8 -> u += Int.from_u8(b[k]) << (8 * k)
+    // A negative r becomes -(r & LARGEST_INT64).
+    r: if u >= 9223372036854775808 -> 9223372036854775808 - u else -> u
+    api.result_int64(v, r)
+}
+
+// randomBlob: N random bytes, at least one.
+random_blob: fn(db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+    n := arg_int64(v, 0)
+    if n < 1 -> n = 1
+    if !context_size_ok(db, v, n) -> return
+    b: os.os_random_bytes(n)
+    api.result_blob(db, v, b, n)
+}
+
+// The compareInfo of a LIKE or GLOB function: its wildcards (0 for none),
+// its set opener and whether it folds ASCII case.
+LikeInfo: struct {
+    match_all: Int
+    match_one: Int
+    match_set: Int
+    no_case: Bool
+}
+
+// globInfo, likeInfoNorm and likeInfoAlt by cat.LIKE_INFO_*.
+like_info: fn(user_data: Int) -> LikeInfo Never! {
+    if user_data == cat.LIKE_INFO_GLOB -> return LikeInfo{match_all: 42, match_one: 63, match_set: 91, no_case: false}
+    LikeInfo{match_all: 37, match_one: 95, match_set: 0, no_case: user_data == cat.LIKE_INFO_NORM}
+}
+
+// patternCompare: whether str (from s_in) matches the GLOB or LIKE pattern
+// pat (from p_in); match_other is the escape character (LIKE) or '['
+// (GLOB). MATCH, NOMATCH, or NOWILDCARDMATCH when a wildcard could not
+// make it match.
+pattern_compare: fn(pat: [U8], p_in: Int, str: [U8], s_in: Int, info: LikeInfo, match_other: Int) -> Int Never! {
+    match_one: info.match_one
+    match_all: info.match_all
+    p := p_in
+    s := s_in
+    escaped := -1
+    loop {
+        rc := read_utf8(pat, p)
+        c := rc.c
+        p = rc.next
+        if c == 0 -> break
+        if c == match_all {
+            // Skip the run of "*" and "?" after the first "*", each "?"
+            // taking one input character.
+            loop {
+                r: read_utf8(pat, p)
+                c = r.c
+                p = r.next
+                if !(c == match_all || (c == match_one && match_one != 0)) -> break
+                if c == match_one {
+                    rs: read_utf8(str, s)
+                    s = rs.next
+                    if rs.c == 0 -> return NOWILDCARDMATCH
+                }
+            }
+            if c == 0 -> return MATCH
+            if c == match_other {
+                if info.match_set == 0 {
+                    r: read_utf8(pat, p)
+                    c = r.c
+                    p = r.next
+                    if c == 0 -> return NOWILDCARDMATCH
+                } else {
+                    // "[...]" right after the "*": try every start.
+                    loop util.sql_byte(str, s) != 0 {
+                        b: pattern_compare(pat, p - 1, str, s, info, match_other)
+                        if b != NOMATCH -> return b
+                        s = skip_utf8(str, s)
+                    }
+                    return NOWILDCARDMATCH
+                }
+            }
+            if c < 128 {
+                stop0: if info.no_case -> util.upper_byte(c) else -> c
+                stop1: if info.no_case -> util.lower_byte(c) else -> c
+                loop {
+                    loop {
+                        b: util.sql_byte(str, s)
+                        if b == 0 || b == stop0 || b == stop1 -> break
+                        s += 1
+                    }
+                    if util.sql_byte(str, s) == 0 -> break
+                    s += 1
+                    b: pattern_compare(pat, p, str, s, info, match_other)
+                    if b != NOMATCH -> return b
+                }
+            } else {
+                loop {
+                    r: read_utf8(str, s)
+                    s = r.next
+                    if r.c == 0 -> break
+                    if r.c != c -> next
+                    b: pattern_compare(pat, p, str, s, info, match_other)
+                    if b != NOMATCH -> return b
+                }
+            }
+            return NOWILDCARDMATCH
+        }
+        if c == match_other {
+            if info.match_set == 0 {
+                r: read_utf8(pat, p)
+                c = r.c
+                p = r.next
+                if c == 0 -> return NOMATCH
+                escaped = p
+            } else {
+                prior_c := 0
+                seen := false
+                invert := false
+                rs: read_utf8(str, s)
+                c = rs.c
+                s = rs.next
+                if c == 0 -> return NOMATCH
+                r := read_utf8(pat, p)
+                c2 := r.c
+                p = r.next
+                if c2 == 94 {
+                    invert = true
+                    r = read_utf8(pat, p)
+                    c2 = r.c
+                    p = r.next
+                }
+                if c2 == 93 {
+                    if c == 93 -> seen = true
+                    r = read_utf8(pat, p)
+                    c2 = r.c
+                    p = r.next
+                }
+                loop c2 != 0 && c2 != 93 {
+                    next: util.sql_byte(pat, p)
+                    if c2 == 45 && next != 93 && next != 0 && prior_c > 0 {
+                        r = read_utf8(pat, p)
+                        c2 = r.c
+                        p = r.next
+                        if c >= prior_c && c <= c2 -> seen = true
+                        prior_c = 0
+                    } else {
+                        if c == c2 -> seen = true
+                        prior_c = c2
+                    }
+                    r = read_utf8(pat, p)
+                    c2 = r.c
+                    p = r.next
+                }
+                if c2 == 0 || seen == invert -> return NOMATCH
+                next
+            }
+        }
+        rs: read_utf8(str, s)
+        c2: rs.c
+        s = rs.next
+        if c == c2 -> next
+        if info.no_case && util.lower_byte(c) == util.lower_byte(c2) && c < 128 && c2 < 128 -> next
+        if c == match_one && p != escaped && c2 != 0 -> next
+        return NOMATCH
+    }
+    if util.sql_byte(str, s) == 0 -> MATCH else -> NOMATCH
+}
+
+// sqlite3_strglob: 0 when str matches the GLOB pattern.
+str_glob: fn(pattern: [U8], str: [U8]) -> Int Never! { pattern_compare(pattern, 0, str, 0, like_info(cat.LIKE_INFO_GLOB), 91) }
+
+// sqlite3_strlike: 0 when str matches the LIKE pattern with escape esc.
+str_like: fn(pattern: [U8], str: [U8], esc: Int) -> Int Never! { pattern_compare(pattern, 0, str, 0, like_info(cat.LIKE_INFO_NORM), esc) }
+
+// likeFunc: like(pattern, string[, escape]) and glob(pattern, string).
+like_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    info := like_info(v.fctx.user_data)
+    n_pat: arg_bytes(v, 0)
+    if n_pat > db.limits[ast.LIMIT_LIKE_PATTERN_LENGTH] {
+        api.result_error(db, v, "LIKE or GLOB pattern too complex".bytes(), -1)
+        return
+    }
+    escape := info.match_set
+    if v.fctx.argc == 3 {
+        esc: arg_text(v, 2) ?? return
+        if util.utf8_char_len(esc, -1) != 1 {
+            api.result_error(db, v, "ESCAPE expression must be a single character".bytes(), -1)
+            return
+        }
+        escape = read_utf8(esc, 0).c
+        if escape == info.match_all -> info.match_all = 0
+        if escape == info.match_one -> info.match_one = 0
+    }
+    pat: arg_text(v, 0)
+    str: arg_text(v, 1)
+    if pat == .Val(zb) && str == .Val(za) {
+        api.result_int(v, if pattern_compare(zb, 0, za, 0, info, escape) == MATCH -> 1 else -> 0)
+    }
+}
+
+// nullifFunc.
+nullif_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    a: v.mem[arg_reg(v, 0)]
+    b: v.mem[arg_reg(v, 1)]
+    if record.mem_compare(a, b, v.fctx.coll) != 0 -> api.result_value(db, v, a)
+}
+
+// sqlite3_compileoption_used: whether option `name` (an "SQLITE_" prefix
+// optional, case folded, "NAME" matching "NAME=value") is in the build.
+compileoption_used: fn(name: [U8]) -> Bool Never! {
+    at: if util.str_nicmp(name, "SQLITE_".bytes(), 7) == 0 -> 7 else -> 0
+    opt: name[at..<name.len()].copy()
+    n: printf.c_len(opt)
+    loop o in COMPILE_OPTIONS {
+        ob: o.bytes()
+        if util.str_nicmp(opt, ob, n) == 0 && !tk.id_char(util.sql_byte(ob, n)) -> return true
+    }
+    false
+}
+
+// sqlite3_compileoption_get: compile option n, None when out of range.
+compileoption_get: fn(n: Int) -> [U8]? Never! {
+    if n >= 0 && n < COMPILE_OPTIONS.len() -> return Val(COMPILE_OPTIONS[n].bytes())
+    None
+}
+
+// sqlite3QuoteValue: append to the empty accumulator acc the SQL literal
+// of value m.
+quote_value: fn(acc: &printf.StrAccum, m: &Mem) Never! {
+    t: base.value_type(m)
+    if t == base.SQL_FLOAT {
+        r1: mem.real_value(m)
+        list := printf.new_mem_list([Mem]{base.mem_real(r1)})
+        printf.str_vappendf(acc, "%!.15g".bytes(), list)
+        if acc.text.len() > 0 {
+            r2: util.atof(acc.text, base.UTF8).value
+            if r1 != r2 {
+                printf.str_reset(acc)
+                again := printf.new_mem_list([Mem]{base.mem_real(r1)})
+                printf.str_vappendf(acc, "%!.20e".bytes(), again)
+            }
+        }
+    } else if t == base.SQL_INTEGER {
+        list := printf.new_mem_list([Mem]{base.mem_int(mem.int_value(m))})
+        printf.str_vappendf(acc, "%lld".bytes(), list)
+    } else if t == base.SQL_BLOB {
+        _: mem.value_blob(m)
+        blob: m.z.copy()
+        n: blob.len()
+        _: printf.str_accum_enlarge(acc, n * 2 + 4)
+        if acc.acc_error == 0 {
+            digits: HEX_DIGITS.bytes()
+            acc.text.push(U8{88})
+            acc.text.push(U8{39})
+            loop b in blob {
+                c: Int.from_u8(b)
+                acc.text.push(digits[(c >> 4).bit_and(15)])
+                acc.text.push(digits[c.bit_and(15)])
+            }
+            acc.text.push(U8{39})
+        }
+    } else if t == base.SQL_TEXT {
+        _: mem.value_text(m, base.UTF8)
+        list := printf.new_mem_list([Mem]{base.mem_text(m.z.copy(), base.UTF8)})
+        printf.str_vappendf(acc, "%Q".bytes(), list)
+    } else {
+        printf.str_append(acc, "NULL".bytes(), 0, 4)
+    }
+}
+
+// quoteFunc.
+quote_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    acc := printf.str_new(db.limits[ast.LIMIT_LENGTH])
+    quote_value(acc, v.mem[arg_reg(v, 0)])
+    if acc.acc_error != 0 {
+        api.result_null(v)
+        api.result_error_code(db, v, acc.acc_error)
+        return
+    }
+    api.result_text(db, v, acc.text, acc.text.len())
+}
+
+// unicodeFunc: the code point of the first character.
+unicode_func: fn(v: &conn.Vdbe) Never! {
+    z: arg_text(v, 0) ?? return
+    if util.sql_byte(z, 0) != 0 -> api.result_int(v, read_utf8(z, 0).c)
+}
+
+// charFunc: the text of the code points of the arguments; one out of
+// range is U+FFFD.
+char_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    out := [U8]{}
+    loop i in 0..<v.fctx.argc {
+        x := arg_int64(v, i)
+        if x < 0 || x > 1114111 -> x = 65533
+        c: x.bit_and(2097151)
+        if c < 128 {
+            out.push(U8{c})
+        } else if c < 2048 {
+            out.push(U8{192 + (c >> 6).bit_and(31)})
+            out.push(U8{128 + c.bit_and(63)})
+        } else if c < 65536 {
+            out.push(U8{224 + (c >> 12).bit_and(15)})
+            out.push(U8{128 + (c >> 6).bit_and(63)})
+            out.push(U8{128 + c.bit_and(63)})
+        } else {
+            out.push(U8{240 + (c >> 18).bit_and(7)})
+            out.push(U8{128 + (c >> 12).bit_and(63)})
+            out.push(U8{128 + (c >> 6).bit_and(63)})
+            out.push(U8{128 + c.bit_and(63)})
+        }
+    }
+    api.result_text64(db, v, out, out.len(), base.UTF8)
+}
+
+// hexFunc: the argument's bytes as upper-case hexadecimal text.
+hex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    k: arg_reg(v, 0)
+    _: mem.value_blob(v.mem[k])
+    blob: v.mem[k].z.copy()
+    n: blob.len()
+    if !context_size_ok(db, v, n * 2 + 1) -> return
+    digits: HEX_DIGITS.bytes()
+    out := [U8]{}
+    loop b in blob {
+        c: Int.from_u8(b)
+        out.push(digits[(c >> 4).bit_and(15)])
+        out.push(digits[c.bit_and(15)])
+    }
+    api.result_text64(db, v, out, out.len(), base.UTF8)
+}
+
+// strContainsChar: whether the n bytes of UTF-8 z hold character ch.
+str_contains_char: fn(z: [U8], n: Int, ch: Int) -> Bool Never! {
+    at := 0
+    loop at < n {
+        r: read_utf8(z, at)
+        if r.c == ch -> return true
+        at = r.next
+    }
+    false
+}
+
+// The blob unhexFunc decodes from text hex, a character of pass allowed
+// between the digit pairs; None (a NULL result) for any other character.
+unhex_decode: fn(hex: [U8], pass: [U8]) -> [U8]? Never! {
+    out := [U8]{}
+    at := 0
+    loop {
+        c := util.sql_byte(hex, at)
+        if c == 0 -> break
+        loop !util.is_xdigit(c) {
+            r: read_utf8(hex, at)
+            at = r.next
+            if !str_contains_char(pass, pass.len(), r.c) -> return None
+            c = util.sql_byte(hex, at)
+            if c == 0 -> return Val(out)
+        }
+        at += 1
+        d: util.sql_byte(hex, at)
+        at += 1
+        if !util.is_xdigit(d) -> return None
+        out.push(U8{(util.hex_to_int(c) << 4).bit_or(util.hex_to_int(d))})
+    }
+    Val(out)
+}
+
+// unhexFunc.
+unhex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    hex: arg_text(v, 0)
+    pass: if v.fctx.argc == 2 -> arg_text(v, 1) else -> Val([U8]{})
+    z_hex: hex ?? return
+    z_pass: pass ?? return
+    if !context_size_ok(db, v, z_hex.len() /% 2 + 1) -> return
+    if unhex_decode(z_hex, z_pass) == .Val(out) -> api.result_blob(db, v, out, out.len())
+}
+
+// zeroblobFunc.
+zeroblob_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    n := arg_int64(v, 0)
+    if n < 0 -> n = 0
+    rc: api.result_zeroblob64(db, v, n)
+    if rc != 0 -> api.result_error_code(db, v, rc)
+}
+
+// replaceFunc: A with every occurrence of B replaced by C.
+replace_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    z: arg_text(v, 0) ?? return
+    n_str: z.len()
+    pattern: arg_text(v, 1) ?? return
+    if util.sql_byte(pattern, 0) == 0 {
+        x: v.mem[arg_reg(v, 0)]
+        api.result_value(db, v, x)
+        return
+    }
+    n_pat: pattern.len()
+    rep: arg_text(v, 2) ?? return
+    n_rep: rep.len()
+    limit: db.limits[ast.LIMIT_LENGTH]
+    n_out := n_str + 1
+    if !context_size_ok(db, v, n_out) -> return
+    loop_limit: n_str - n_pat
+    out := [U8]{}
+    i := 0
+    loop i <= loop_limit {
+        if z[i] != pattern[0] || !bytes_equal(z, i, pattern, 0, n_pat) {
+            out.push(z[i])
+        } else {
+            if n_rep > n_pat {
+                n_out += n_rep - n_pat
+                if n_out - 1 > limit {
+                    api.result_error_toobig(v)
+                    return
+                }
+            }
+            loop b in rep -> out.push(b)
+            i += n_pat - 1
+        }
+        i += 1
+    }
+    loop k in i..<n_str -> out.push(z[k])
+    api.result_text(db, v, out, out.len())
+}
+
+// trimFunc: user_data 1 trims the left, 2 the right, 3 both; the
+// characters trimmed are those of the second argument, else a space.
+trim_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    if arg_type(v, 0) == base.SQL_NULL -> return
+    z: arg_text(v, 0) ?? return
+    chars := [U8]{}
+    starts := [Int]{}
+    lens := [Int]{}
+    if v.fctx.argc == 1 {
+        chars.push(U8{32})
+        starts.push(0)
+        lens.push(1)
+    } else {
+        chars = arg_text(v, 1) ?? return
+        at := 0
+        loop util.sql_byte(chars, at) != 0 {
+            next: skip_utf8(chars, at)
+            starts.push(at)
+            lens.push(next - at)
+            at = next
+        }
+    }
+    s := 0
+    n := z.len()
+    if starts.len() > 0 {
+        flags: v.fctx.user_data
+        if flags.bit_and(1) != 0 {
+            loop n > 0 {
+                len := -1
+                loop ci in 0..<starts.len() {
+                    l: lens[ci]
+                    if l <= n && bytes_equal(z, s, chars, starts[ci], l) {
+                        len = l
+                        break
+                    }
+                }
+                if len < 0 -> break
+                s += len
+                n -= len
+            }
+        }
+        if flags.bit_and(2) != 0 {
+            loop n > 0 {
+                len := -1
+                loop ci in 0..<starts.len() {
+                    l: lens[ci]
+                    if l <= n && bytes_equal(z, s + n - l, chars, starts[ci], l) {
+                        len = l
+                        break
+                    }
+                }
+                if len < 0 -> break
+                n -= len
+            }
+        }
+    }
+    api.result_text(db, v, z[s..<(s + n)].copy(), n)
+}
+
+// concatFuncCore: the non-NULL arguments first ..< first + argc joined by
+// sep.
+concat_core: fn(db: &conn.Conn, v: &conn.Vdbe, first: Int, argc: Int, sep: [U8]) Never! {
+    out := [U8]{}
+    loop i in first..<(first + argc) {
+        k: arg_bytes(v, i)
+        if k > 0 {
+            if arg_text(v, i) == .Val(x) {
+                if out.len() > 0 && sep.len() > 0 {
+                    loop b in sep -> out.push(b)
+                }
+                loop j in 0..<k -> out.push(x[j])
+            }
+        }
+    }
+    api.result_text64(db, v, out, out.len(), base.UTF8)
+}
+
+// soundexFunc.
+soundex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    codes: [Int]{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 1, 2, 3, 0, 1, 2, 0, 0, 2, 2, 4, 5, 5, 0,
+        1, 2, 6, 2, 3, 0, 1, 0, 2, 0, 2, 0, 0, 0, 0, 0,
+        0, 0, 1, 2, 3, 0, 1, 2, 0, 0, 2, 2, 4, 5, 5, 0,
+        1, 2, 6, 2, 3, 0, 1, 0, 2, 0, 2, 0, 0, 0, 0, 0,
+    }
+    z: arg_text(v, 0) ?? [U8]{}
+    i := 0
+    loop util.sql_byte(z, i) != 0 && !util.is_alpha(util.sql_byte(z, i)) -> i += 1
+    if util.sql_byte(z, i) == 0 {
+        api.result_text(db, v, "?000".bytes(), 4)
+        return
+    }
+    prev := codes[util.sql_byte(z, i).bit_and(127)]
+    out := [U8]{U8{util.upper_byte(util.sql_byte(z, i))}}
+    loop out.len() < 4 && util.sql_byte(z, i) != 0 {
+        code: codes[util.sql_byte(z, i).bit_and(127)]
+        if code > 0 {
+            if code != prev {
+                prev = code
+                out.push(U8{code + 48})
+            }
+        } else {
+            prev = 0
+        }
+        i += 1
+    }
+    loop out.len() < 4 -> out.push(U8{48})
+    api.result_text(db, v, out, 4)
+}
+
+// loadExt: load_extension(file[, entry]). Only with SQLITE_LoadExtFunc
+// set; the build has no shared libraries to open, so a load fails as
+// sqlite3LoadExtension's does when no file can be opened.
+load_ext: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    if db.flags.bit_and(conn.SQLITE_LOAD_EXT_FUNC) == 0 {
+        api.result_error(db, v, "not authorized".bytes(), -1)
+        return
+    }
+    file: arg_text(v, 0) ?? return
+    if v.fctx.argc == 2 -> _: arg_text(v, 1)
+    if db.flags.bit_and(conn.SQLITE_LOAD_EXTENSION) == 0 {
+        api.result_error(db, v, "not authorized".bytes(), -1)
+        return
+    }
+    n: printf.c_len(file)
+    shown: if n > os.MAX_PATHLEN -> os.MAX_PATHLEN else -> n
+    msg := "unable to open shared library [".bytes()
+    loop k in 0..<shown -> msg.push(file[k])
+    msg.push(U8{93})
+    api.result_error(db, v, msg, -1)
+}
+
+// sqlite3InvalidFunction: the stand-in sqlite3_overload_function installs
+// fails every call.
+invalid_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    i_op: v.fctx.i_op
+    def: vs.p4_func(v, i_op)
+    name: if def == .Val(f) -> f.name else -> [U8]{}
+    msg := "unable to use function ".bytes()
+    loop b in name -> msg.push(b)
+    loop b in " in the requested context".bytes() -> msg.push(b)
+    api.result_error(db, v, msg, -1)
+}
+
+// signFunc.
+sign_func: fn(v: &conn.Vdbe) Never! {
+    t: mem.value_numeric_type(v.mem[arg_reg(v, 0)])
+    if t != base.SQL_INTEGER && t != base.SQL_FLOAT -> return
+    x: arg_double(v, 0)
+    api.result_int(v, if x < 0.0 -> -1 else if x > 0.0 -> 1 else -> 0)
+}
+
+// ---------------------------------------------------------------------------
+// sum(), total() and avg().
+
+// kahanBabuskaNeumaierStep.
+kbn_step: fn(p: &conn.AggState, r: Float) Never! {
+    s: p.r
+    t: s + r
+    if math.abs_float(s) > math.abs_float(r) {
+        p.r_err = p.r_err + ((s - t) + r)
+    } else {
+        p.r_err = p.r_err + ((r - t) + s)
+    }
+    p.r = t
+}
+
+// kahanBabuskaNeumaierStepInt64: a large integer goes in two parts.
+kbn_step_int64: fn(p: &conn.AggState, x: Int) Never! {
+    if x <= -4503599627370496 || x >= 4503599627370496 {
+        sm: util.c_rem(x, 16384)
+        kbn_step(p, util.int_to_double(x - sm))
+        kbn_step(p, util.int_to_double(sm))
+    } else {
+        kbn_step(p, util.int_to_double(x))
+    }
+}
+
+// kahanBabuskaNeumaierInit.
+kbn_init: fn(p: &conn.AggState, x: Int) Never! {
+    if x <= -4503599627370496 || x >= 4503599627370496 {
+        sm: util.c_rem(x, 16384)
+        p.r = util.int_to_double(x - sm)
+        p.r_err = util.int_to_double(sm)
+    } else {
+        p.r = util.int_to_double(x)
+        p.r_err = 0.0
+    }
+}
+
+// sumStep: integers sum exactly until one overflows or a REAL arrives,
+// then the sum is approximate.
+sum_step: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 48)
+    t: mem.value_numeric_type(v.mem[arg_reg(v, 0)])
+    if k < 0 || t == base.SQL_NULL -> return
+    v.aggs[k].n += 1
+    x: arg_int64(v, 0)
+    if !v.aggs[k].approx {
+        if t != base.SQL_INTEGER {
+            kbn_init(v.aggs[k], v.aggs[k].i)
+            v.aggs[k].approx = true
+            r: arg_double(v, 0)
+            kbn_step(v.aggs[k], r)
+        } else if util.add_int64(v.aggs[k].i, x) == .Val(s) {
+            v.aggs[k].i = s
+        } else {
+            v.aggs[k].overflow = true
+            kbn_init(v.aggs[k], v.aggs[k].i)
+            v.aggs[k].approx = true
+            kbn_step_int64(v.aggs[k], x)
+        }
+    } else if t == base.SQL_INTEGER {
+        kbn_step_int64(v.aggs[k], x)
+    } else {
+        v.aggs[k].overflow = false
+        r: arg_double(v, 0)
+        kbn_step(v.aggs[k], r)
+    }
+}
+
+// sumInverse.
+sum_inverse: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 48)
+    t: mem.value_numeric_type(v.mem[arg_reg(v, 0)])
+    if k < 0 || t == base.SQL_NULL -> return
+    v.aggs[k].n -= 1
+    x: arg_int64(v, 0)
+    if !v.aggs[k].approx {
+        v.aggs[k].i = util.wrap_i64(v.aggs[k].i - x)
+    } else if t == base.SQL_INTEGER {
+        if x != base.I64_MIN {
+            kbn_step_int64(v.aggs[k], -x)
+        } else {
+            kbn_step_int64(v.aggs[k], base.I64_MAX)
+            kbn_step_int64(v.aggs[k], 1)
+        }
+    } else {
+        r: arg_double(v, 0)
+        kbn_step(v.aggs[k], -r)
+    }
+}
+
+// The approximate sum of a SumCtx: rSum + rErr unless rErr is NaN.
+sum_approx: fn(p: conn.AggState) -> Float Never! {
+    if math.is_nan(p.r_err) -> return p.r
+    p.r + p.r_err
+}
+
+// sumFinalize.
+sum_finalize: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    if k < 0 || v.aggs[k].n <= 0 -> return
+    if v.aggs[k].approx {
+        if v.aggs[k].overflow {
+            api.result_error(db, v, "integer overflow".bytes(), -1)
+        } else {
+            r: sum_approx(v.aggs[k])
+            api.result_double(v, r)
+        }
+    } else {
+        x: v.aggs[k].i
+        api.result_int64(v, x)
+    }
+}
+
+// avgFinalize.
+avg_finalize: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    if k < 0 || v.aggs[k].n <= 0 -> return
+    r: if v.aggs[k].approx -> sum_approx(v.aggs[k]) else -> util.int_to_double(v.aggs[k].i)
+    n: util.int_to_double(v.aggs[k].n)
+    api.result_double(v, r / n)
+}
+
+// totalFinalize.
+total_finalize: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    r := Float{0.0}
+    if k >= 0 {
+        r = if v.aggs[k].approx -> sum_approx(v.aggs[k]) else -> util.int_to_double(v.aggs[k].i)
+    }
+    api.result_double(v, r)
+}
+
+// ---------------------------------------------------------------------------
+// count(), min() and max().
+
+// countStep (step 1) and countInverse (step -1): count(*), or the
+// non-NULL values of count(x).
+count_step: fn(v: &conn.Vdbe, step: Int) Never! {
+    k: api.aggregate_context(v, 8)
+    if (v.fctx.argc == 0 || arg_type(v, 0) != base.SQL_NULL) && k >= 0 -> v.aggs[k].i += step
+}
+
+// countFinalize.
+count_finalize: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    n: if k >= 0 -> v.aggs[k].i else -> 0
+    api.result_int64(v, n)
+}
+
+// minmaxStep: keep the least (user_data 0) or greatest value; a step that
+// leaves the best value as it is skips the accumulator load.
+minmax_step: fn(v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 56)
+    if k < 0 -> return
+    a: v.fctx.arg
+    if arg_type(v, 0) == base.SQL_NULL {
+        if v.aggs[k].n != 0 -> skip_accumulator_load(v)
+    } else if v.aggs[k].n != 0 {
+        is_max: v.fctx.user_data != 0
+        cmp: record.mem_compare(v.aggs[k].m, v.mem[a], v.fctx.coll)
+        if (is_max && cmp < 0) || (!is_max && cmp > 0) {
+            v.aggs[k].m = mem.mem_copy(v.mem[a])
+        } else {
+            skip_accumulator_load(v)
+        }
+    } else {
+        v.aggs[k].m = mem.mem_copy(v.mem[a])
+        v.aggs[k].n = 1
+    }
+}
+
+// minMaxValueFinalize: the best value; finalizing releases it.
+minmax_value_finalize: fn(db: &conn.Conn, v: &conn.Vdbe, is_value: Bool) Never! {
+    k: api.aggregate_context(v, 0)
+    if k < 0 -> return
+    if v.aggs[k].n != 0 {
+        best: v.aggs[k].m
+        api.result_value(db, v, best)
+    }
+    if !is_value -> v.aggs[k].m = base.mem_null()
+}
+
+// ---------------------------------------------------------------------------
+// group_concat() and string_agg().
+//
+// The GroupConcatCtx: the accumulator's text is acc, its nAlloc and
+// accError ints[GC_N_ALLOC] and ints[GC_ACC_ERROR], and approx records a
+// nonzero mxAlloc (the limit is the connection's). nAccum is n,
+// nFirstSepLength i, and pnSepLengths is lens, in use (overflow) once
+// separators of different lengths are seen, holding the nAccum - 1
+// lengths between calls.
+
+GC_N_ALLOC: 0
+GC_ACC_ERROR: 1
+
+// sqlite3_str_append of the n bytes of z to the accumulator, its limit
+// mx, by sqlite3StrAccumEnlarge's rules.
+gc_append: fn(p: &conn.AggState, z: [U8], n: Int, mx: Int) Never! {
+    if p.ints[GC_ACC_ERROR] != 0 -> return
+    len: p.acc.len()
+    if len + n >= p.ints[GC_N_ALLOC] {
+        sz := len + n + 1
+        if sz + len <= mx -> sz += len
+        if sz > mx {
+            p.acc = [U8]{}
+            p.ints[GC_N_ALLOC] = 0
+            p.ints[GC_ACC_ERROR] = base.TOOBIG
+            return
+        }
+        p.ints[GC_N_ALLOC] = sz
+    }
+    loop k in 0..<n -> p.acc.push(z[k])
+}
+
+// groupConcatStep: the separator (',' by default) goes before every value
+// but the first.
+group_concat_step: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    if arg_type(v, 0) == base.SQL_NULL -> return
+    k: api.aggregate_context(v, 40)
+    if k < 0 -> return
+    if v.aggs[k].ints.len() == 0 {
+        v.aggs[k].ints.push(0)
+        v.aggs[k].ints.push(0)
+    }
+    limit: db.limits[ast.LIMIT_LENGTH]
+    first_term: !v.aggs[k].approx
+    v.aggs[k].approx = true
+    if v.fctx.argc == 1 {
+        if !first_term {
+            gc_append(v.aggs[k], ",".bytes(), 1, limit)
+        } else {
+            v.aggs[k].i = 1
+        }
+    } else if !first_term {
+        n_sep := arg_bytes(v, 1)
+        if arg_text(v, 1) == .Val(sep) {
+            gc_append(v.aggs[k], sep, n_sep, limit)
+        } else {
+            n_sep = 0
+        }
+        if n_sep != v.aggs[k].i || v.aggs[k].overflow {
+            if !v.aggs[k].overflow {
+                v.aggs[k].lens = [Int]{}
+                loop _j in 0..<(v.aggs[k].n - 1) -> v.aggs[k].lens.push(v.aggs[k].i)
+                v.aggs[k].overflow = true
+            }
+            v.aggs[k].lens.push(n_sep)
+        }
+    } else {
+        v.aggs[k].i = arg_bytes(v, 1)
+    }
+    v.aggs[k].n += 1
+    if arg_text(v, 0) == .Val(val) {
+        n_val: arg_bytes(v, 0)
+        gc_append(v.aggs[k], val, n_val, limit)
+    }
+}
+
+// groupConcatInverse: drop the oldest value and the separator after it.
+group_concat_inverse: fn(v: &conn.Vdbe) Never! {
+    if arg_type(v, 0) == base.SQL_NULL -> return
+    k: api.aggregate_context(v, 40)
+    if k < 0 -> return
+    if v.aggs[k].ints.len() == 0 {
+        v.aggs[k].ints.push(0)
+        v.aggs[k].ints.push(0)
+    }
+    _: arg_text(v, 0)
+    n_vs := arg_bytes(v, 0)
+    v.aggs[k].n -= 1
+    if v.aggs[k].overflow {
+        if v.aggs[k].n > 0 {
+            n_vs += v.aggs[k].lens[0]
+            v.aggs[k].lens = v.aggs[k].lens[1..<v.aggs[k].lens.len()].copy()
+        }
+    } else {
+        n_vs += v.aggs[k].i
+    }
+    if n_vs >= v.aggs[k].acc.len() {
+        v.aggs[k].acc = [U8]{}
+    } else {
+        v.aggs[k].acc = v.aggs[k].acc[n_vs..<v.aggs[k].acc.len()].copy()
+    }
+    if v.aggs[k].acc.len() == 0 {
+        v.aggs[k].approx = false
+        v.aggs[k].lens = [Int]{}
+        v.aggs[k].overflow = false
+    }
+}
+
+// groupConcatFinalize (sqlite3ResultStrAccum).
+group_concat_finalize: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    if k < 0 || v.aggs[k].ints.len() == 0 -> return
+    err: v.aggs[k].ints[GC_ACC_ERROR]
+    if err != 0 {
+        api.result_error_code(db, v, err)
+    } else if v.aggs[k].ints[GC_N_ALLOC] > 0 {
+        text: v.aggs[k].acc.copy()
+        api.result_text(db, v, text, text.len())
+    } else {
+        api.result_text(db, v, [U8]{}, 0)
+    }
+    v.aggs[k].acc = [U8]{}
+    v.aggs[k].ints[GC_N_ALLOC] = 0
+    v.aggs[k].lens = [Int]{}
+}
+
+// groupConcatValue: an empty accumulation is NULL (sqlite3_str_value).
+group_concat_value: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    k: api.aggregate_context(v, 0)
+    if k < 0 || v.aggs[k].ints.len() == 0 -> return
+    err: v.aggs[k].ints[GC_ACC_ERROR]
+    if err == base.TOOBIG {
+        api.result_error_toobig(v)
+    } else if err == base.NOMEM {
+        api.result_error_nomem(db, v)
+    } else if v.aggs[k].acc.len() == 0 {
+        api.result_null(v)
+    } else {
+        text: v.aggs[k].acc.copy()
+        api.result_text(db, v, text, text.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registration.
+
+// sqlite3RegisterLikeFunctions: like() with 2 and 3 arguments becomes the
+// connection's function, case-sensitive (likeInfoAlt) or not
+// (likeInfoNorm), as PRAGMA case_sensitive_like sets it. As
+// sqlite3CreateFunc refuses to replace a function while statements run,
+// it then changes nothing.
+register_like_functions: fn(db: &conn.Conn, case_sensitive: Bool) Never! {
+    info: if case_sensitive -> cat.LIKE_INFO_ALT else -> cat.LIKE_INFO_NORM
+    extra: if case_sensitive -> conn.FUNC_LIKE.bit_or(conn.FUNC_CASE) else -> conn.FUNC_LIKE
+    loop n_arg in 2..<4 {
+        if cat.find_function(db, "like".bytes(), n_arg, base.UTF8) == .Val(old) {
+            if old.flags.bit_and(conn.FUNC_ENCMASK) == base.UTF8 && old.n_arg == n_arg {
+                if db.n_vdbe_active > 0 {
+                    aux.error_with_msg(db, base.BUSY, "unable to delete/modify user-function due to active statements".bytes())
+                    return
+                }
+                conn.expire_prepared_statements(db, 0)
+            }
+        }
+        slot: cat.find_or_create_function(db, "like".bytes(), n_arg, base.UTF8)
+        db.funcs[slot].n_arg = n_arg
+        db.funcs[slot].flags = base.UTF8.bit_or(extra)
+        db.funcs[slot].user_data = info
+        db.funcs[slot].impl_id = cat.FI_LIKE
+        db.funcs[slot].has_sfunc = true
+        db.funcs[slot].has_step = false
+        db.funcs[slot].has_finalize = false
+        db.funcs[slot].has_value = false
+        db.funcs[slot].has_inverse = false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// json() and jsonb() (json.c).
+//
+// The part of json.c that json(X) and jsonb(X) run, the one-argument
+// jsonRemoveFunc that Catalog.jet registers them as: the JSON text parser
+// that translates text into JSONB (jsonTranslateTextToBlob, with its JSON5
+// extensions) and the JSONB renderer (jsonTranslateBlobToText). The
+// JsonCache of parsed arguments (sqlite3_get_auxdata) is left out, as it
+// only saves a reparse. Nothing here can fail to allocate, so the C
+// JsonParse.oom and JSTRING_OOM states have no counterpart; the parse of
+// an argument is never edited, so JsonParse.delta is always 0.
+
+// The JSONB element types (JSONB_*).
+JSONB_NULL: 0
+JSONB_TRUE: 1
+JSONB_FALSE: 2
+JSONB_INT: 3
+JSONB_INT5: 4
+JSONB_FLOAT: 5
+JSONB_FLOAT5: 6
+JSONB_TEXT: 7
+JSONB_TEXTJ: 8
+JSONB_TEXT5: 9
+JSONB_TEXTRAW: 10
+JSONB_ARRAY: 11
+JSONB_OBJECT: 12
+
+// The subtype of a JSON text result (ASCII 'J').
+JSON_SUBTYPE: 74
+
+// The deepest nesting of arrays and objects the parser accepts.
+JSON_MAX_DEPTH: 1000
+
+// JsonString.eErr's JSTRING_MALFORMED.
+JSTRING_MALFORMED: 2
+
+// struct JsonParse, for the translation of JSON text into JSONB: json is
+// zJson (nJson bytes, the text of the argument), blob is aBlob (nBlob
+// bytes); i_err, i_depth and has_nonstd are iErr, iDepth and hasNonstd.
+JSONParse: struct {
+    blob: [U8]
+    json: [U8]
+    i_err: Int
+    i_depth: Int
+    has_nonstd: Bool
+}
+
+// struct JsonString, for the rendering of JSONB into JSON text: buf is
+// zBuf (nUsed bytes), err is eErr.
+JSONString: struct {
+    buf: [U8]
+    err: Int
+}
+
+// z[at] of zero-terminated JSON text: 0 at the end.
+json_byte: fn(p: JSONParse, at: Int) -> Int Never! { util.sql_byte(p.json, at) }
+
+// jsonIsspace: the JSON whitespace of RFC 8259 (jsonSpaces).
+json_is_space: fn(c: Int) -> Bool Never! { c == 32 || c == 9 || c == 10 || c == 13 }
+
+// jsonIsOk: the bytes a JSON string holds as they are, all but the
+// control characters, '"', '\'' and '\\'.
+json_is_ok: fn(c: Int) -> Bool Never! { c >= 32 && c != 34 && c != 39 && c != 92 }
+
+// sqlite3JsonId1 and sqlite3JsonId2: the first and the later characters
+// of a JSON5 unquoted object label.
+json_id1: fn(c: Int) -> Bool Never! { tk.id_char(c) && !util.is_digit(c) }
+json_id2: fn(c: Int) -> Bool Never! { tk.id_char(c) }
+
+// jsonIs2Hex and jsonIs4Hex: two and four hexadecimal digits at z[at].
+json_is_2hex: fn(z: [U8], at: Int) -> Bool Never! { util.is_xdigit(util.sql_byte(z, at)) && util.is_xdigit(util.sql_byte(z, at + 1)) }
+json_is_4hex: fn(z: [U8], at: Int) -> Bool Never! { json_is_2hex(z, at) && json_is_2hex(z, at + 2) }
+
+// jsonIs4HexB: "u" and four hexadecimal digits at z[at], which makes a
+// label JSONB_TEXTJ.
+json_is_4hex_b: fn(z: [U8], at: Int) -> Bool Never! { util.sql_byte(z, at) == 117 && json_is_4hex(z, at + 1) }
+
+// ASCII lower case of byte c.
+json_lower: fn(c: Int) -> Int Never! { if c >= 65 && c <= 90 -> c + 32 else -> c }
+
+// sqlite3StrNICmp(&z[at], lit, strlen(lit)) == 0.
+json_nicmp: fn(z: [U8], at: Int, lit: String) -> Bool Never! {
+    b: lit.bytes()
+    loop k in 0..<b.len() {
+        if json_lower(util.sql_byte(z, at + k)) != json_lower(Int.from_u8(b[k])) -> return false
+    }
+    true
+}
+
+// strncmp(&z[at], lit, strlen(lit)) == 0.
+json_match: fn(z: [U8], at: Int, lit: String) -> Bool Never! {
+    b: lit.bytes()
+    loop k in 0..<b.len() {
+        if util.sql_byte(z, at + k) != Int.from_u8(b[k]) -> return false
+    }
+    true
+}
+
+// json5Whitespace: the bytes of JSON5 whitespace and comments at z[at].
+json5_whitespace: fn(z: [U8], at: Int) -> Int Never! {
+    n := 0
+    loop {
+        c: util.sql_byte(z, at + n)
+        c1: util.sql_byte(z, at + n + 1)
+        c2: util.sql_byte(z, at + n + 2)
+        if c == 9 || c == 10 || c == 11 || c == 12 || c == 13 || c == 32 {
+            n += 1
+        } else if c == 47 {
+            if c1 == 42 && c2 != 0 {
+                j := at + n + 3
+                loop util.sql_byte(z, j) != 47 || util.sql_byte(z, j - 1) != 42 {
+                    if util.sql_byte(z, j) == 0 -> return n
+                    j += 1
+                }
+                n = j + 1 - at
+            } else if c1 == 47 {
+                j := at + n + 2
+                loop util.sql_byte(z, j) != 0 {
+                    cj: util.sql_byte(z, j)
+                    if cj == 10 || cj == 13 -> break
+                    if cj == 226 && util.sql_byte(z, j + 1) == 128 && (util.sql_byte(z, j + 2) == 168 || util.sql_byte(z, j + 2) == 169) {
+                        j += 2
+                        break
+                    }
+                    j += 1
+                }
+                n = j - at
+                if util.sql_byte(z, at + n) != 0 -> n += 1
+            } else {
+                return n
+            }
+        } else if c == 194 && c1 == 160 {
+            n += 2
+        } else if c == 225 && c1 == 154 && c2 == 128 {
+            n += 3
+        } else if c == 226 && c1 == 128 && c2 >= 128 && (c2 <= 138 || c2 == 168 || c2 == 169 || c2 == 175) {
+            n += 3
+        } else if c == 226 && c1 == 129 && c2 == 159 {
+            n += 3
+        } else if c == 227 && c1 == 128 && c2 == 128 {
+            n += 3
+        } else if c == 239 && c1 == 187 && c2 == 191 {
+            n += 3
+        } else {
+            return n
+        }
+    }
+    n
+}
+
+// The type-and-size header of a JSONB node (jsonBlobAppendNode with no
+// payload): the payload follows it.
+json_blob_append_header: fn(p: &JSONParse, e_type: Int, sz: Int) Never! {
+    if sz <= 11 {
+        p.blob.push(U8{e_type.bit_or(sz << 4)})
+    } else if sz <= 255 {
+        p.blob.push(U8{e_type.bit_or(192)})
+        p.blob.push(U8{sz})
+    } else if sz <= 65535 {
+        p.blob.push(U8{e_type.bit_or(208)})
+        p.blob.push(U8{(sz >> 8).bit_and(255)})
+        p.blob.push(U8{sz.bit_and(255)})
+    } else {
+        p.blob.push(U8{e_type.bit_or(224)})
+        p.blob.push(U8{(sz >> 24).bit_and(255)})
+        p.blob.push(U8{(sz >> 16).bit_and(255)})
+        p.blob.push(U8{(sz >> 8).bit_and(255)})
+        p.blob.push(U8{sz.bit_and(255)})
+    }
+}
+
+// jsonBlobAppendNode: a node of type e_type whose payload is the sz bytes
+// of z at `from`.
+json_blob_append_node: fn(p: &JSONParse, e_type: Int, z: [U8], from: Int, sz: Int) Never! {
+    json_blob_append_header(p, e_type, sz)
+    loop k in from..<(from + sz) -> p.blob.push(z[k])
+}
+
+// jsonBlobAppendNode whose payload is the sz bytes of the JSON text at
+// `from`.
+json_blob_append_text: fn(p: &JSONParse, e_type: Int, from: Int, sz: Int) Never! {
+    json_blob_append_header(p, e_type, sz)
+    loop k in from..<(from + sz) -> p.blob.push(p.json[k])
+}
+
+// jsonBlobChangePayloadSize: make the header of the node at blob[i] give
+// a payload of sz bytes, growing or shrinking the header as it needs.
+json_blob_change_payload_size: fn(p: &JSONParse, i: Int, sz: Int) Never! {
+    sz_type: Int.from_u8(p.blob[i]) >> 4
+    n_extra := 4
+    if sz_type <= 11 {
+        n_extra = 0
+    } else if sz_type == 12 {
+        n_extra = 1
+    } else if sz_type == 13 {
+        n_extra = 2
+    }
+    n_needed := 4
+    if sz <= 11 {
+        n_needed = 0
+    } else if sz <= 255 {
+        n_needed = 1
+    } else if sz <= 65535 {
+        n_needed = 2
+    }
+    delta: n_needed - n_extra
+    if delta != 0 {
+        out := p.blob[0..<(i + 1)].copy()
+        if delta > 0 {
+            loop _ in 0..<delta -> out.push(U8{0})
+            loop k in (i + 1)..<p.blob.len() -> out.push(p.blob[k])
+        } else {
+            loop k in (i + 1 - delta)..<p.blob.len() -> out.push(p.blob[k])
+        }
+        p.blob = out
+    }
+    low: Int.from_u8(p.blob[i]).bit_and(15)
+    if n_needed == 0 {
+        p.blob[i] = U8{low.bit_or(sz << 4)}
+    } else if n_needed == 1 {
+        p.blob[i] = U8{low.bit_or(192)}
+        p.blob[i + 1] = U8{sz.bit_and(255)}
+    } else if n_needed == 2 {
+        p.blob[i] = U8{low.bit_or(208)}
+        p.blob[i + 1] = U8{(sz >> 8).bit_and(255)}
+        p.blob[i + 2] = U8{sz.bit_and(255)}
+    } else {
+        p.blob[i] = U8{low.bit_or(224)}
+        p.blob[i + 1] = U8{(sz >> 24).bit_and(255)}
+        p.blob[i + 2] = U8{(sz >> 16).bit_and(255)}
+        p.blob[i + 3] = U8{(sz >> 8).bit_and(255)}
+        p.blob[i + 4] = U8{sz.bit_and(255)}
+    }
+}
+
+// jsonTranslateTextToBlob: translate the JSON element at json[i] into
+// JSONB appended to blob. The offset past the element; 0 at the end of
+// the input; -1 for a syntax error; -2, -3, -4 and -5 for a '}', ']', ','
+// or ':' seen, with i_err at it.
+json_translate_text_to_blob: fn(p: &JSONParse, i_in: Int) -> Int Never! {
+    i := i_in
+    loop {
+        w: json_byte(p, i)
+        if json_is_space(w) {
+            i += 1
+            loop json_is_space(json_byte(p, i)) -> i += 1
+            next
+        }
+        if w == 11 || w == 12 || w == 47 || w == 194 || w == 225 || w == 226 || w == 227 || w == 239 {
+            j: json5_whitespace(p.json, i)
+            if j > 0 {
+                i += j
+                p.has_nonstd = true
+                next
+            }
+            p.i_err = i
+            return -1
+        }
+        break
+    }
+    c: json_byte(p, i)
+    if c == 123 -> return json_parse_object(p, i)
+    if c == 91 -> return json_parse_array(p, i)
+    if c == 34 || c == 39 -> return json_parse_string(p, i)
+    if c == 116 || c == 102 {
+        lit: if c == 116 -> "true" else -> "false"
+        n: lit.bytes().len()
+        if json_match(p.json, i, lit) && !util.is_alnum(json_byte(p, i + n)) {
+            p.blob.push(U8{if c == 116 -> JSONB_TRUE else -> JSONB_FALSE})
+            return i + n
+        }
+        p.i_err = i
+        return -1
+    }
+    if c == 43 || c == 45 || c == 46 || util.is_digit(c) -> return json_parse_number(p, i)
+    if c == 125 || c == 93 || c == 44 || c == 58 {
+        p.i_err = i
+        if c == 125 -> return -2
+        if c == 93 -> return -3
+        if c == 44 -> return -4
+        return -5
+    }
+    if c == 0 -> return 0
+    if c == 110 && json_match(p.json, i, "null") && !util.is_alnum(json_byte(p, i + 4)) {
+        p.blob.push(U8{JSONB_NULL})
+        return i + 4
+    }
+    json_parse_nan_inf(p, i)
+}
+
+// The object case of jsonTranslateTextToBlob, its '{' at json[i].
+json_parse_object: fn(p: &JSONParse, i: Int) -> Int Never! {
+    i_this: p.blob.len()
+    json_blob_append_header(p, JSONB_OBJECT, p.json.len() - i)
+    p.i_depth += 1
+    if p.i_depth > JSON_MAX_DEPTH {
+        p.i_err = i
+        return -1
+    }
+    i_start: p.blob.len()
+    j := i + 1
+    loop {
+        i_blob: p.blob.len()
+        x := json_translate_text_to_blob(p, j)
+        if x <= 0 {
+            if x == -2 {
+                j = p.i_err
+                if p.blob.len() != i_start -> p.has_nonstd = true
+                break
+            }
+            j += json5_whitespace(p.json, j)
+            op := JSONB_TEXT
+            c: json_byte(p, j)
+            is_label := json_id1(c)
+            if !is_label && c == 92 && json_is_4hex_b(p.json, j + 1) {
+                op = JSONB_TEXTJ
+                is_label = true
+            }
+            if !is_label {
+                if x != -1 -> p.i_err = j
+                return -1
+            }
+            k := j + 1
+            loop {
+                ck: json_byte(p, k)
+                if json_id2(ck) && json5_whitespace(p.json, k) == 0 {
+                    k += 1
+                } else if ck == 92 && json_is_4hex_b(p.json, k + 1) {
+                    op = JSONB_TEXTJ
+                    k += 1
+                } else {
+                    break
+                }
+            }
+            json_blob_append_text(p, op, j, k - j)
+            p.has_nonstd = true
+            x = k
+        }
+        t: Int.from_u8(p.blob[i_blob]).bit_and(15)
+        if t < JSONB_TEXT || t > JSONB_TEXTRAW {
+            p.i_err = j
+            return -1
+        }
+        j = x
+        if json_byte(p, j) == 58 {
+            j += 1
+        } else {
+            // A ':' after whitespace skips to parse_object_value.
+            colon := false
+            if json_is_space(json_byte(p, j)) {
+                j += 1
+                loop json_is_space(json_byte(p, j)) -> j += 1
+                if json_byte(p, j) == 58 {
+                    j += 1
+                    colon = true
+                }
+            }
+            if !colon {
+                x = json_translate_text_to_blob(p, j)
+                if x != -5 {
+                    if x != -1 -> p.i_err = j
+                    return -1
+                }
+                j = p.i_err + 1
+            }
+        }
+        x = json_translate_text_to_blob(p, j)
+        if x <= 0 {
+            if x != -1 -> p.i_err = j
+            return -1
+        }
+        j = x
+        c: json_byte(p, j)
+        if c == 44 {
+            j += 1
+            next
+        }
+        if c == 125 -> break
+        if json_is_space(c) {
+            j += 1
+            loop json_is_space(json_byte(p, j)) -> j += 1
+            c2: json_byte(p, j)
+            if c2 == 44 {
+                j += 1
+                next
+            }
+            if c2 == 125 -> break
+        }
+        x = json_translate_text_to_blob(p, j)
+        if x == -4 {
+            j = p.i_err + 1
+            next
+        }
+        if x == -2 {
+            j = p.i_err
+            break
+        }
+        p.i_err = j
+        return -1
+    }
+    json_blob_change_payload_size(p, i_this, p.blob.len() - i_start)
+    p.i_depth -= 1
+    j + 1
+}
+
+// The array case of jsonTranslateTextToBlob, its '[' at json[i].
+json_parse_array: fn(p: &JSONParse, i: Int) -> Int Never! {
+    i_this: p.blob.len()
+    json_blob_append_header(p, JSONB_ARRAY, p.json.len() - i)
+    i_start: p.blob.len()
+    p.i_depth += 1
+    if p.i_depth > JSON_MAX_DEPTH {
+        p.i_err = i
+        return -1
+    }
+    j := i + 1
+    loop {
+        x := json_translate_text_to_blob(p, j)
+        if x <= 0 {
+            if x == -3 {
+                j = p.i_err
+                if p.blob.len() != i_start -> p.has_nonstd = true
+                break
+            }
+            if x != -1 -> p.i_err = j
+            return -1
+        }
+        j = x
+        c: json_byte(p, j)
+        if c == 44 {
+            j += 1
+            next
+        }
+        if c == 93 -> break
+        if json_is_space(c) {
+            j += 1
+            loop json_is_space(json_byte(p, j)) -> j += 1
+            c2: json_byte(p, j)
+            if c2 == 44 {
+                j += 1
+                next
+            }
+            if c2 == 93 -> break
+        }
+        x = json_translate_text_to_blob(p, j)
+        if x == -4 {
+            j = p.i_err + 1
+            next
+        }
+        if x == -3 {
+            j = p.i_err
+            break
+        }
+        p.i_err = j
+        return -1
+    }
+    json_blob_change_payload_size(p, i_this, p.blob.len() - i_start)
+    p.i_depth -= 1
+    j + 1
+}
+
+// The string case of jsonTranslateTextToBlob, its '"' (or JSON5 '\'')
+// at json[i]: the payload is the text between the quotes as it is, typed
+// by the escapes it holds.
+json_parse_string: fn(p: &JSONParse, i: Int) -> Int Never! {
+    c_delim: json_byte(p, i)
+    if c_delim == 39 -> p.has_nonstd = true
+    opcode := JSONB_TEXT
+    j := i + 1
+    loop {
+        if json_is_ok(json_byte(p, j)) {
+            if !json_is_ok(json_byte(p, j + 1)) {
+                j += 1
+            } else if !json_is_ok(json_byte(p, j + 2)) {
+                j += 2
+            } else {
+                j += 3
+                next
+            }
+        }
+        c := json_byte(p, j)
+        if c == c_delim -> break
+        if c == 92 {
+            j += 1
+            c = json_byte(p, j)
+            if c == 34 || c == 92 || c == 47 || c == 98 || c == 102 || c == 110 || c == 114 || c == 116 || (c == 117 && json_is_4hex(p.json, j + 1)) {
+                if opcode == JSONB_TEXT -> opcode = JSONB_TEXTJ
+            } else if c == 39 || c == 48 || c == 118 || c == 10 || (c == 226 && json_byte(p, j + 1) == 128 && (json_byte(p, j + 2) == 168 || json_byte(p, j + 2) == 169)) || (c == 120 && json_is_2hex(p.json, j + 1)) {
+                opcode = JSONB_TEXT5
+                p.has_nonstd = true
+            } else if c == 13 {
+                if json_byte(p, j + 1) == 10 -> j += 1
+                opcode = JSONB_TEXT5
+                p.has_nonstd = true
+            } else {
+                p.i_err = j
+                return -1
+            }
+        } else if c <= 31 {
+            // Control characters are not allowed in strings.
+            p.i_err = j
+            return -1
+        } else if c == 34 {
+            opcode = JSONB_TEXT5
+        }
+        j += 1
+    }
+    json_blob_append_text(p, opcode, i + 1, j - 1 - i)
+    j + 1
+}
+
+// The number case of jsonTranslateTextToBlob, its '+', '-', '.' or digit
+// at json[i_in]. t's 0x01 bit marks JSON5, its 0x02 bit a float.
+json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
+    i := i_in
+    c0: json_byte(p, i)
+    t := 0
+    seen_e := false
+    j := 0
+    // 1: parse_number, 2: parse_number_2, 3: parse_number_finish.
+    stage := 1
+    if c0 == 43 {
+        p.has_nonstd = true
+    } else if c0 == 46 {
+        if !util.is_digit(json_byte(p, i + 1)) {
+            p.i_err = i
+            return -1
+        }
+        p.has_nonstd = true
+        t = 3
+        stage = 2
+    }
+    if stage == 1 && c0 <= 48 {
+        c1: json_byte(p, i + 1)
+        if c0 == 48 {
+            if (c1 == 120 || c1 == 88) && util.is_xdigit(json_byte(p, i + 2)) {
+                p.has_nonstd = true
+                t = 1
+                j = i + 3
+                loop util.is_xdigit(json_byte(p, j)) -> j += 1
+                stage = 3
+            } else if util.is_digit(c1) {
+                p.i_err = i + 1
+                return -1
+            }
+        } else if !util.is_digit(c1) {
+            // JSON5's "+Infinity" and "-Infinity", in any case, and
+            // "+inf" and "-inf".
+            if (c1 == 73 || c1 == 105) && json_nicmp(p.json, i + 1, "inf") {
+                p.has_nonstd = true
+                if c0 == 45 {
+                    json_blob_append_node(p, JSONB_FLOAT, "-9e999".bytes(), 0, 6)
+                } else {
+                    json_blob_append_node(p, JSONB_FLOAT, "9e999".bytes(), 0, 5)
+                }
+                return i + (if json_nicmp(p.json, i + 4, "inity") -> 9 else -> 4)
+            }
+            if c1 == 46 {
+                p.has_nonstd = true
+                t = t.bit_or(1)
+                stage = 2
+            } else {
+                p.i_err = i
+                return -1
+            }
+        } else if c1 == 48 {
+            c2: json_byte(p, i + 2)
+            if util.is_digit(c2) {
+                p.i_err = i + 1
+                return -1
+            }
+            if (c2 == 120 || c2 == 88) && util.is_xdigit(json_byte(p, i + 3)) {
+                p.has_nonstd = true
+                t = t.bit_or(1)
+                j = i + 4
+                loop util.is_xdigit(json_byte(p, j)) -> j += 1
+                stage = 3
+            }
+        }
+    }
+    if stage != 3 {
+        j = i + 1
+        loop {
+            c := json_byte(p, j)
+            if util.is_digit(c) {
+                j += 1
+                next
+            }
+            if c == 46 {
+                if t.bit_and(2) != 0 {
+                    p.i_err = j
+                    return -1
+                }
+                t = t.bit_or(2)
+                j += 1
+                next
+            }
+            if c == 101 || c == 69 {
+                if json_byte(p, j - 1) < 48 {
+                    if json_byte(p, j - 1) == 46 && j - 2 >= i && util.is_digit(json_byte(p, j - 2)) {
+                        p.has_nonstd = true
+                        t = t.bit_or(1)
+                    } else {
+                        p.i_err = j
+                        return -1
+                    }
+                }
+                if seen_e {
+                    p.i_err = j
+                    return -1
+                }
+                t = t.bit_or(2)
+                seen_e = true
+                c = json_byte(p, j + 1)
+                if c == 43 || c == 45 {
+                    j += 1
+                    c = json_byte(p, j + 1)
+                }
+                if c < 48 || c > 57 {
+                    p.i_err = j
+                    return -1
+                }
+                j += 1
+                next
+            }
+            break
+        }
+        if json_byte(p, j - 1) < 48 {
+            if json_byte(p, j - 1) == 46 && j - 2 >= i && util.is_digit(json_byte(p, j - 2)) {
+                p.has_nonstd = true
+                t = t.bit_or(1)
+            } else {
+                p.i_err = j
+                return -1
+            }
+        }
+    }
+    if json_byte(p, i) == 43 -> i += 1
+    json_blob_append_text(p, JSONB_INT + t, i, j - i)
+    j
+}
+
+// The default case of jsonTranslateTextToBlob: the names of aNanInfName,
+// in any case, Infinity a JSONB_FLOAT and NaN a JSONB_NULL.
+json_parse_nan_inf: fn(p: &JSONParse, i: Int) -> Int Never! {
+    names: [String]{"inf", "infinity", "NaN", "QNaN", "SNaN"}
+    c: json_lower(json_byte(p, i))
+    loop k in 0..<names.len() {
+        name: names[k].bytes()
+        if c != json_lower(Int.from_u8(name[0])) -> next
+        nn: name.len()
+        if !json_nicmp(p.json, i, names[k]) -> next
+        if util.is_alnum(json_byte(p, i + nn)) -> next
+        if k < 2 {
+            json_blob_append_node(p, JSONB_FLOAT, "9e999".bytes(), 0, 5)
+        } else {
+            p.blob.push(U8{JSONB_NULL})
+        }
+        p.has_nonstd = true
+        return i + nn
+    }
+    p.i_err = i
+    return -1
+}
+
+// jsonConvertTextToBlob: parse the whole of json into blob; true after an
+// error, the call's result then "malformed JSON".
+json_convert_text_to_blob: fn(db: &conn.Conn, v: &conn.Vdbe, p: &JSONParse) -> Bool Never! {
+    i := json_translate_text_to_blob(p, 0)
+    if i > 0 {
+        loop json_is_space(json_byte(p, i)) -> i += 1
+        if json_byte(p, i) != 0 {
+            i += json5_whitespace(p.json, i)
+            if json_byte(p, i) != 0 {
+                api.result_error(db, v, "malformed JSON".bytes(), -1)
+                return true
+            }
+            p.has_nonstd = true
+        }
+    }
+    if i <= 0 {
+        api.result_error(db, v, "malformed JSON".bytes(), -1)
+        return true
+    }
+    false
+}
+
+// jsonbPayloadSize: the header bytes n and payload bytes sz of the JSONB
+// node at a[i]; n 0 when the header is malformed or the payload runs past
+// the end.
+jsonb_payload_size: fn(a: [U8], i: Int) -> (n: Int, sz: Int) Never! {
+    n_blob: a.len()
+    if i >= n_blob -> return (n: 0, sz: 0)
+    x: Int.from_u8(a[i]) >> 4
+    sz := 0
+    n := 0
+    if x <= 11 {
+        sz = x
+        n = 1
+    } else if x == 12 {
+        if i + 1 >= n_blob -> return (n: 0, sz: 0)
+        sz = Int.from_u8(a[i + 1])
+        n = 2
+    } else if x == 13 {
+        if i + 2 >= n_blob -> return (n: 0, sz: 0)
+        sz = (Int.from_u8(a[i + 1]) << 8) + Int.from_u8(a[i + 2])
+        n = 3
+    } else if x == 14 {
+        if i + 4 >= n_blob -> return (n: 0, sz: 0)
+        sz = (Int.from_u8(a[i + 1]) << 24) + (Int.from_u8(a[i + 2]) << 16) + (Int.from_u8(a[i + 3]) << 8) + Int.from_u8(a[i + 4])
+        n = 5
+    } else {
+        if i + 8 >= n_blob || a[i + 1] != (U8{0}) || a[i + 2] != (U8{0}) || a[i + 3] != (U8{0}) || a[i + 4] != (U8{0}) -> return (n: 0, sz: 0)
+        sz = (Int.from_u8(a[i + 5]) << 24) + (Int.from_u8(a[i + 6]) << 16) + (Int.from_u8(a[i + 7]) << 8) + Int.from_u8(a[i + 8])
+        n = 9
+    }
+    if i + sz + n > n_blob -> return (n: 0, sz: 0)
+    (n: n, sz: sz)
+}
+
+// jsonAppendRaw: the n bytes of a at `from`.
+json_append_raw: fn(out: &JSONString, a: [U8], from: Int, n: Int) Never! {
+    loop k in from..<(from + n) -> out.buf.push(a[k])
+}
+
+// jsonAppendRaw of a literal.
+json_append_lit: fn(out: &JSONString, lit: String) Never! {
+    loop b in lit.bytes() -> out.buf.push(b)
+}
+
+// jsonAppendString: the n bytes of a at `from` as a JSON string, in
+// double quotes with '"', '\\' and the control characters escaped.
+json_append_string: fn(out: &JSONString, a: [U8], from: Int, n: Int) Never! {
+    out.buf.push(U8{34})
+    loop k in from..<(from + n) {
+        c: Int.from_u8(a[k])
+        if c == 34 || c == 92 {
+            out.buf.push(U8{92})
+            out.buf.push(U8{c})
+        } else if c >= 32 {
+            out.buf.push(U8{c})
+        } else {
+            // aSpecial.
+            e := 0
+            if c == 8 {
+                e = 98
+            } else if c == 9 {
+                e = 116
+            } else if c == 10 {
+                e = 110
+            } else if c == 12 {
+                e = 102
+            } else if c == 13 {
+                e = 114
+            }
+            out.buf.push(U8{92})
+            if e != 0 {
+                out.buf.push(U8{e})
+            } else {
+                hex: "0123456789abcdef".bytes()
+                json_append_lit(out, "u00")
+                out.buf.push(hex[c >> 4])
+                out.buf.push(hex[c.bit_and(15)])
+            }
+        }
+    }
+    out.buf.push(U8{34})
+}
+
+// jsonTranslateBlobToText: append the JSON text of the JSONB node at a[i]
+// to out; the offset past the node. A malformed node sets
+// JSTRING_MALFORMED (not every malformation is seen).
+json_translate_blob_to_text: fn(a: [U8], i: Int, out: &JSONString) -> Int Never! {
+    r: jsonb_payload_size(a, i)
+    n: r.n
+    sz: r.sz
+    if n == 0 {
+        out.err = out.err.bit_or(JSTRING_MALFORMED)
+        return a.len() + 1
+    }
+    at: i + n
+    typ: Int.from_u8(a[i]).bit_and(15)
+    if typ == JSONB_NULL {
+        json_append_lit(out, "null")
+        return i + 1
+    }
+    if typ == JSONB_TRUE {
+        json_append_lit(out, "true")
+        return i + 1
+    }
+    if typ == JSONB_FALSE {
+        json_append_lit(out, "false")
+        return i + 1
+    }
+    if typ == JSONB_INT || typ == JSONB_FLOAT {
+        json_append_raw(out, a, at, sz)
+    } else if typ == JSONB_INT5 {
+        // An integer in hexadecimal.
+        k := 2
+        c0: util.sql_byte(a, at)
+        if c0 == 45 {
+            out.buf.push(U8{45})
+            k += 1
+        } else if c0 == 43 {
+            k += 1
+        }
+        u := 0
+        overflow := false
+        loop k < sz {
+            d: util.sql_byte(a, at + k)
+            if !util.is_xdigit(d) {
+                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                break
+            } else if (u >> 60) != 0 {
+                overflow = true
+            } else {
+                u = u * 16 + util.hex_to_int(d)
+            }
+            k += 1
+        }
+        if overflow {
+            json_append_lit(out, "9.0e999")
+        } else {
+            json_append_lit(out, "{u}")
+        }
+    } else if typ == JSONB_FLOAT5 {
+        // A float missing the digits beside its '.'.
+        k := 0
+        if util.sql_byte(a, at) == 45 {
+            out.buf.push(U8{45})
+            k += 1
+        }
+        if util.sql_byte(a, at + k) == 46 -> out.buf.push(U8{48})
+        loop k < sz {
+            ch: a[at + k]
+            out.buf.push(ch)
+            if ch == (U8{46}) && (k + 1 == sz || !util.is_digit(util.sql_byte(a, at + k + 1))) -> out.buf.push(U8{48})
+            k += 1
+        }
+    } else if typ == JSONB_TEXT || typ == JSONB_TEXTJ {
+        out.buf.push(U8{34})
+        json_append_raw(out, a, at, sz)
+        out.buf.push(U8{34})
+    } else if typ == JSONB_TEXT5 {
+        json_text5_to_text(a, at, sz, out)
+    } else if typ == JSONB_TEXTRAW {
+        json_append_string(out, a, at, sz)
+    } else if typ == JSONB_ARRAY {
+        out.buf.push(U8{91})
+        j := at
+        i_end: at + sz
+        loop j < i_end {
+            j = json_translate_blob_to_text(a, j, out)
+            out.buf.push(U8{44})
+        }
+        if sz > 0 -> _: out.buf.pop()
+        out.buf.push(U8{93})
+    } else if typ == JSONB_OBJECT {
+        x := 0
+        out.buf.push(U8{123})
+        j := at
+        i_end: at + sz
+        loop j < i_end {
+            j = json_translate_blob_to_text(a, j, out)
+            out.buf.push(U8{if x.bit_and(1) != 0 -> 44 else -> 58})
+            x += 1
+        }
+        if x.bit_and(1) != 0 -> out.err = out.err.bit_or(JSTRING_MALFORMED)
+        if sz > 0 -> _: out.buf.pop()
+        out.buf.push(U8{125})
+    } else {
+        out.err = out.err.bit_or(JSTRING_MALFORMED)
+    }
+    at + sz
+}
+
+// The JSONB_TEXT5 case of jsonTranslateBlobToText: the sz bytes of JSON5
+// string at a[from] with its escapes made JSON.
+json_text5_to_text: fn(a: [U8], from: Int, sz: Int, out: &JSONString) Never! {
+    out.buf.push(U8{34})
+    at := from
+    sz2 := sz
+    loop sz2 > 0 {
+        k := 0
+        loop k < sz2 && a[at + k] != (U8{92}) && a[at + k] != (U8{34}) -> k += 1
+        if k > 0 {
+            json_append_raw(out, a, at, k)
+            if k >= sz2 -> break
+            at += k
+            sz2 -= k
+        }
+        if a[at] == (U8{34}) {
+            json_append_lit(out, "\\\"")
+            at += 1
+            sz2 -= 1
+            next
+        }
+        if sz2 < 2 {
+            out.err = out.err.bit_or(JSTRING_MALFORMED)
+            break
+        }
+        e: Int.from_u8(a[at + 1])
+        if e == 39 {
+            out.buf.push(U8{39})
+        } else if e == 118 {
+            json_append_lit(out, "\\u0009")
+        } else if e == 120 {
+            if sz2 < 4 {
+                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                sz2 = 2
+            } else {
+                json_append_lit(out, "\\u00")
+                json_append_raw(out, a, at + 2, 2)
+                at += 2
+                sz2 -= 2
+            }
+        } else if e == 48 {
+            json_append_lit(out, "\\u0000")
+        } else if e == 13 {
+            if sz2 > 2 && a[at + 2] == (U8{10}) {
+                at += 1
+                sz2 -= 1
+            }
+        } else if e == 10 {
+            // A line continuation.
+        } else if e == 226 {
+            // '\\' then U+2028 or U+2029 is whitespace.
+            if sz2 < 4 || a[at + 2] != (U8{128}) || (a[at + 3] != (U8{168}) && a[at + 3] != (U8{169})) {
+                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                sz2 = 2
+            } else {
+                at += 2
+                sz2 -= 2
+            }
+        } else {
+            json_append_raw(out, a, at, 2)
+        }
+        at += 2
+        sz2 -= 2
+    }
+    out.buf.push(U8{34})
+}
+
+// jsonParseFuncArg with no flags: the JSONB of argument i, which is JSONB
+// itself (a blob whose header covers it) or JSON text to translate. None
+// for NULL, or after an error ("malformed JSON") that is the result.
+json_parse_func_arg: fn(db: &conn.Conn, v: &conn.Vdbe, i: Int) -> [U8]? Never! {
+    e_type: arg_type(v, i)
+    if e_type == base.SQL_NULL -> return None
+    if e_type == base.SQL_BLOB {
+        blob: arg_blob(v, i) ?? [U8]{}
+        ok := blob.len() > 0 && Int.from_u8(blob[0]).bit_and(15) <= JSONB_OBJECT
+        if ok {
+            r: jsonb_payload_size(blob, 0)
+            ok = r.n != 0 && r.sz + r.n == blob.len() && !(Int.from_u8(blob[0]).bit_and(15) <= JSONB_FALSE && r.sz > 0)
+        }
+        if !ok {
+            api.result_error(db, v, "malformed JSON".bytes(), -1)
+            return None
+        }
+        return Val(blob)
+    }
+    text: arg_text(v, i) ?? [U8]{}
+    if text.len() == 0 {
+        api.result_error(db, v, "malformed JSON".bytes(), -1)
+        return None
+    }
+    p := JSONParse{blob: [U8]{}, json: text, i_err: 0, i_depth: 0, has_nonstd: false}
+    if json_convert_text_to_blob(db, v, p) -> return None
+    Val(p.blob)
+}
+
+// jsonReturnParse: the JSONB blob as the result of a jsonb function
+// (JSON_BLOB set in the user data), else its JSON text with subtype
+// JSON_SUBTYPE (jsonReturnString).
+json_return_parse: fn(db: &conn.Conn, v: &conn.Vdbe, blob: [U8]) Never! {
+    if api.user_data(v).bit_and(cat.JSON_BLOB) != 0 {
+        api.result_blob(db, v, blob, blob.len())
+        return
+    }
+    out := JSONString{buf: [U8]{}, err: 0}
+    _: json_translate_blob_to_text(blob, 0, out)
+    if out.err == 0 {
+        api.result_text64(db, v, out.buf, out.buf.len(), base.UTF8)
+    } else if out.err.bit_and(JSTRING_MALFORMED) != 0 {
+        api.result_error(db, v, "malformed JSON".bytes(), -1)
+    }
+    api.result_subtype(v, JSON_SUBTYPE)
+}
+
+// jsonRemoveFunc for json(X), jsonb(X) and json_remove(X): X as JSON text
+// or JSONB. json_remove's paths are not ported.
+json_remove_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    argc: v.fctx.argc
+    if argc < 1 -> return
+    if argc > 1 {
+        not_supported(db, v)
+        return
+    }
+    blob: json_parse_func_arg(db, v, 0) ?? return
+    json_return_parse(db, v, blob)
+}
+
+// The error of a built-in function whose C implementation is not in this
+// port: date.c, the json.c functions but json() and jsonb(), alter.c and
+// analyze.c.
+not_supported: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+    def: vs.p4_func(v, v.fctx.i_op)
+    name: if def == .Val(f) -> f.name else -> [U8]{}
+    msg := "The SQL function ".bytes()
+    loop b in name -> msg.push(b)
+    loop b in "() is not supported in this build".bytes() -> msg.push(b)
+    api.result_error(db, v, msg, -1)
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch.
+
+// The Host's call (Host.func_call) of method `method` (aux.FN_*) of the
+// built-in function the call runs, by its impl_id: the func.c functions
+// (cat.FI_SOUNDEX .. cat.FI_INVALID) as sqlite3RegisterBuiltinFunctions
+// binds them, json() and jsonb(), and the window functions of Window.jet.
+// Any other built-in fails with not_supported. An aggregate's xValue is
+// its xFinalize unless it has its own.
+builtin_call: fn(db: &conn.Conn, v: &conn.Vdbe, method: Int) Never! -[DB]> {
+    id: v.fctx.impl_id
+    step: method == aux.FN_STEP || method == aux.FN_SFUNC
+    inverse: method == aux.FN_INVERSE
+    fin: method == aux.FN_FINAL
+    if id == cat.FI_SOUNDEX {
+        soundex_func(db, v)
+    } else if id == cat.FI_LOAD_EXTENSION {
+        load_ext(db, v)
+    } else if id == cat.FI_COMPILEOPTION_USED {
+        name: arg_text(v, 0) ?? return
+        api.result_int(v, if compileoption_used(name) -> 1 else -> 0)
+    } else if id == cat.FI_COMPILEOPTION_GET {
+        if compileoption_get(arg_int(v, 0)) == .Val(opt) -> api.result_text(db, v, opt, opt.len())
+    } else if id == cat.FI_TRIM {
+        trim_func(db, v)
+    } else if id == cat.FI_MINMAX {
+        minmax_func(db, v)
+    } else if id == cat.FI_MINMAX_AGG {
+        if step {
+            minmax_step(v)
+        } else if !inverse {
+            minmax_value_finalize(db, v, !fin)
+        }
+    } else if id == cat.FI_TYPEOF {
+        typeof_func(db, v)
+    } else if id == cat.FI_SUBTYPE {
+        subtype_func(v)
+    } else if id == cat.FI_LENGTH {
+        length_func(v)
+    } else if id == cat.FI_OCTET_LENGTH {
+        bytelength_func(db, v)
+    } else if id == cat.FI_INSTR {
+        instr_func(v)
+    } else if id == cat.FI_PRINTF {
+        printf_func(db, v)
+    } else if id == cat.FI_UNICODE {
+        unicode_func(v)
+    } else if id == cat.FI_CHAR {
+        char_func(db, v)
+    } else if id == cat.FI_ABS {
+        abs_func(db, v)
+    } else if id == cat.FI_ROUND {
+        round_func(db, v)
+    } else if id == cat.FI_UPPER {
+        case_func(db, v, true)
+    } else if id == cat.FI_LOWER {
+        case_func(db, v, false)
+    } else if id == cat.FI_HEX {
+        hex_func(db, v)
+    } else if id == cat.FI_UNHEX {
+        unhex_func(db, v)
+    } else if id == cat.FI_CONCAT {
+        argc: v.fctx.argc
+        concat_core(db, v, 0, argc, [U8]{})
+    } else if id == cat.FI_CONCAT_WS {
+        n_sep: arg_bytes(v, 0)
+        sep: arg_text(v, 0) ?? return
+        argc: v.fctx.argc
+        concat_core(db, v, 1, argc - 1, sep[0..<n_sep].copy())
+    } else if id == cat.FI_RANDOM {
+        random_func(v)
+    } else if id == cat.FI_RANDOMBLOB {
+        random_blob(db, v)
+    } else if id == cat.FI_NULLIF {
+        nullif_func(db, v)
+    } else if id == cat.FI_SQLITE_VERSION {
+        api.result_text(db, v, SQLITE_VERSION.bytes(), -1)
+    } else if id == cat.FI_SQLITE_SOURCE_ID {
+        api.result_text(db, v, SQLITE_SOURCE_ID.bytes(), -1)
+    } else if id == cat.FI_SQLITE_LOG {
+        // errlogFunc: sqlite3_log with no SQLITE_CONFIG_LOG callback, which
+        // the build never installs, does nothing; the result is NULL.
+        _: arg_int(v, 0)
+        _: arg_text(v, 1)
+    } else if id == cat.FI_QUOTE {
+        quote_func(db, v)
+    } else if id == cat.FI_LAST_INSERT_ROWID {
+        api.result_int64(v, db.last_rowid)
+    } else if id == cat.FI_CHANGES {
+        api.result_int64(v, db.n_change)
+    } else if id == cat.FI_TOTAL_CHANGES {
+        api.result_int64(v, db.n_total_change)
+    } else if id == cat.FI_REPLACE {
+        replace_func(db, v)
+    } else if id == cat.FI_ZEROBLOB {
+        zeroblob_func(db, v)
+    } else if id == cat.FI_SUBSTR {
+        substr_func(db, v)
+    } else if id == cat.FI_SUM || id == cat.FI_TOTAL || id == cat.FI_AVG {
+        if step {
+            sum_step(v)
+        } else if inverse {
+            sum_inverse(v)
+        } else if id == cat.FI_SUM {
+            sum_finalize(db, v)
+        } else if id == cat.FI_TOTAL {
+            total_finalize(v)
+        } else {
+            avg_finalize(v)
+        }
+    } else if id == cat.FI_COUNT {
+        if step {
+            count_step(v, 1)
+        } else if inverse {
+            count_step(v, -1)
+        } else {
+            count_finalize(v)
+        }
+    } else if id == cat.FI_GROUP_CONCAT {
+        if step {
+            group_concat_step(db, v)
+        } else if inverse {
+            group_concat_inverse(v)
+        } else if fin {
+            group_concat_finalize(db, v)
+        } else {
+            group_concat_value(db, v)
+        }
+    } else if id == cat.FI_LIKE {
+        like_func(db, v)
+    } else if id == cat.FI_SIGN {
+        sign_func(v)
+    } else if id == cat.FI_INVALID {
+        invalid_func(db, v)
+    } else if id == cat.FI_JSON_REMOVE {
+        json_remove_func(db, v)
+    } else if id >= cat.FI_ROW_NUMBER && id <= cat.FI_LAG {
+        win.window_func_call(db, v, method)
+    } else if id != cat.FI_NOOP {
+        not_supported(db, v)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PRAGMA (pragma.c).
+//
+// sqlite3Pragma for the pragmas the build runs, table_info and
+// table_xinfo (PragTyp_TABLE_INFO). Any other name is one pragmaLocate
+// does not find, which C ignores, with no error and no result; the other
+// pragmas of pragma.c are not ported.
+
+// pragCName[8 .. 14]: the result columns of table_info (the first six)
+// and table_xinfo (all seven).
+PRAGMA_TABLE_INFO_COLUMNS: [String]{"cid", "name", "type", "notnull", "dflt_value", "pk", "hidden"}
+
+// sqlite3Pragma: code PRAGMA [schema.]name, PRAGMA [schema.]name=value or
+// PRAGMA [schema.]name(value); minus is nonzero for a '-' before value.
+pragma: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! -[DB]> {
+    cg.get_vdbe(p)
+    cg.v_run_only_once(p)
+    p.f.n_mem = 2
+    r: bld.two_part_name(p, a, name1, name2)
+    i_db: r.i_db
+    if i_db < 0 -> return
+    // A temp database named explicitly must be open.
+    if i_db == 1 && cg.open_temp_database(p, a) -> return
+    z_left: bld.name_from_token(a, r.name) ?? return
+    z_right: if minus != 0 -> Val("-{ast.tok_text(a, value)}".bytes()) else -> bld.name_from_token(a, value)
+    z_db: if name2.n > 0 -> Val(p.db.dbs[i_db].name.copy()) else -> None
+    if cg.auth_check(p, a, conn.AUTH_PRAGMA, Val(z_left.copy()), z_right, z_db) != 0 -> return
+    // db->busyHandler.nBusy = 0. C then offers the pragma to the VFS as
+    // SQLITE_FCNTL_PRAGMA; the unix and memdb VFSes of the build answer
+    // SQLITE_NOTFOUND for every pragma, so that step is left out.
+    loop b in 0..<p.db.btrees.len() -> p.db.btrees[b].pager.busy.n_busy = 0
+    // pragmaLocate.
+    i_arg := 0
+    if util.str_icmp(z_left, "table_info".bytes()) == 0 {
+        i_arg = 0
+    } else if util.str_icmp(z_left, "table_xinfo".bytes()) == 0 {
+        i_arg = 1
+    } else {
+        return
+    }
+    // PragFlg_NeedSchema.
+    g := p.up
+    if g.read_schema(p, a) != base.OK -> return
+    // setPragmaResultColumnNames.
+    n_col: 6 + i_arg
+    cg.v_set_num_cols(p, n_col)
+    loop i in 0..<n_col -> cg.v_set_col_name(p, i, conn.COLNAME_NAME, PRAGMA_TABLE_INFO_COLUMNS[i].bytes())
+    table_name: z_right ?? return
+    pragma_table_info(p, a, table_name, z_db, i_arg)
+}
+
+// PRAGMA table_info(table) and table_xinfo(table) (i_arg 1): a row for
+// each column of the table: cid, name, type, notnull, dflt_value, pk and,
+// for table_xinfo, hidden.
+pragma_table_info: fn(p: &cg.Parse, a: &ast.AST, table_name: [U8], z_db: [U8]?, i_arg: Int) Never! -[DB]> {
+    cg.code_verify_named_schema(p, a, z_db)
+    t: cat.locate_table(p, a, cat.LOCATE_NOERR, table_name, z_db)
+    if t < 0 -> return
+    pk: cat.primary_key_index(p.db, t)
+    p.f.n_mem = 7
+    g := p.up
+    _: g.view_get_column_names(p, a, t)
+    n_hidden := 0
+    n_tab_col: p.db.tables[t].cols.len()
+    loop i in 0..<n_tab_col {
+        col: p.db.tables[t].cols[i]
+        is_hidden := 0
+        if col.col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
+            if i_arg == 0 {
+                n_hidden += 1
+                next
+            }
+            if col.col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+                // GENERATED ALWAYS AS ... VIRTUAL.
+                is_hidden = 2
+            } else if col.col_flags.bit_and(conn.COLFLAG_STORED) != 0 {
+                // GENERATED ALWAYS AS ... STORED.
+                is_hidden = 3
+            } else {
+                is_hidden = 1
+            }
+        }
+        k := 0
+        if col.col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+            k = 1
+            if pk >= 0 {
+                ai: p.db.indexes[pk].ai_column
+                loop k <= n_tab_col && k - 1 < ai.len() && ai[k - 1] != i -> k += 1
+            }
+        }
+        ce: cat.column_expr(p.db, a, t, i)
+        dflt := base.mem_null()
+        if is_hidden < 2 && ce >= 0 {
+            if a.exprs[ce].token == .Val(z) -> dflt = printf.txt(z)
+        }
+        vals := [Mem]{base.mem_int(i - n_hidden), printf.txt(col.name), printf.txt(cat.column_decl_type(col, [U8]{})), base.mem_int(if col.not_null != 0 -> 1 else -> 0), dflt, base.mem_int(k)}
+        if i_arg != 0 -> vals.push(base.mem_int(is_hidden))
+        cg.v_multi_load(p, 1, vals, true)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests. The expected values are those of the C library of the build.
+
+// A call context: register 0 is the result, 1 the accumulator and the
+// arguments follow.
+func_test_vdbe: fn(id: Int, user_data: Int, args: [Mem]) -> conn.Vdbe Never! {
+    v := conn.vdbe_new()
+    v.mem.push(base.mem_null())
+    v.mem.push(base.mem_null())
+    loop m in args -> v.mem.push(m.copy())
+    v.fctx.out = 0
+    v.fctx.agg = 1
+    v.fctx.arg = 2
+    v.fctx.argc = args.len()
+    v.fctx.impl_id = id
+    v.fctx.user_data = user_data
+    v
+}
+
+// The text result of scalar function id on args.
+func_test_text: fn(id: Int, user_data: Int, args: [Mem]) -[DB]> String Never! {
+    db := conn.conn_new()
+    v := func_test_vdbe(id, user_data, args)
+    builtin_call(db, v, aux.FN_SFUNC)
+    if base.value_type(v.mem[0]) == base.SQL_NULL -> return "<null>"
+    _: mem.value_text(v.mem[0], base.UTF8)
+    String.from_bytes(v.mem[0].z) ?? ""
+}
+
+t: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
+
+#Test("substr, trim, replace and case folding match SQLite") {
+    assert_eq(func_test_text(cat.FI_SUBSTR, 0, [Mem]{t("hello"), base.mem_int(2), base.mem_int(3)}), "ell")
+    assert_eq(func_test_text(cat.FI_SUBSTR, 0, [Mem]{t("hello"), base.mem_int(-3)}), "llo")
+    assert_eq(func_test_text(cat.FI_SUBSTR, 0, [Mem]{t("hello"), base.mem_int(0), base.mem_int(2)}), "h")
+    assert_eq(func_test_text(cat.FI_SUBSTR, 0, [Mem]{base.mem_blob([U8]{}), base.mem_int(1), base.mem_int(1)}), "<null>")
+    assert_eq(func_test_text(cat.FI_TRIM, 3, [Mem]{t("  x  ")}), "x")
+    assert_eq(func_test_text(cat.FI_TRIM, 1, [Mem]{t("xxay"), t("x")}), "ay")
+    assert_eq(func_test_text(cat.FI_TRIM, 2, [Mem]{t("ayxx"), t("xy")}), "a")
+    assert_eq(func_test_text(cat.FI_REPLACE, 0, [Mem]{t("aaa"), t("a"), t("bb")}), "bbbbbb")
+    assert_eq(func_test_text(cat.FI_UPPER, 0, [Mem]{t("abcñ")}), "ABCñ")
+    assert_eq(func_test_text(cat.FI_LENGTH, 0, [Mem]{t("ñaña")}), "4")
+    assert_eq(func_test_text(cat.FI_OCTET_LENGTH, 0, [Mem]{t("ñaña")}), "6")
+    assert_eq(func_test_text(cat.FI_INSTR, 0, [Mem]{t("abc"), t("c")}), "3")
+    assert_eq(func_test_text(cat.FI_INSTR, 0, [Mem]{t("ñaña"), t("a")}), "2")
+    assert_eq(func_test_text(cat.FI_UNICODE, 0, [Mem]{t("ñ")}), "241")
+}
+
+#Test("quote, hex, unhex, char and printf render as SQLite does") {
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{t("it's")}), "'it''s'")
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{base.mem_real(0.1)}), "0.1")
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{base.mem_real(1.0 / 3.0)}), "3.33333333333333314e-01")
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{base.mem_blob([U8]{U8{171}, U8{205}})}), "X'ABCD'")
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{base.mem_null()}), "NULL")
+    assert_eq(func_test_text(cat.FI_QUOTE, 0, [Mem]{base.mem_int(12)}), "12")
+    assert_eq(func_test_text(cat.FI_HEX, 0, [Mem]{t("abc")}), "616263")
+    assert_eq(func_test_text(cat.FI_HEX, 0, [Mem]{base.mem_real(12.5)}), "31322E35")
+    assert_eq(func_test_text(cat.FI_HEX, 0, [Mem]{base.mem_null()}), "")
+    assert_eq(func_test_text(cat.FI_UNHEX, 0, [Mem]{t("AB CD")}), "<null>")
+    db := conn.conn_new()
+    u := func_test_vdbe(cat.FI_UNHEX, 0, [Mem]{t("AB CD"), t(" ")})
+    builtin_call(db, u, aux.FN_SFUNC)
+    assert_eq(u.mem[0].z.len(), 2)
+    assert_eq(Int.from_u8(u.mem[0].z[0]), 171)
+    assert_eq(Int.from_u8(u.mem[0].z[1]), 205)
+    assert_eq(func_test_text(cat.FI_UNHEX, 0, [Mem]{t("A BCD"), t(" ")}), "<null>")
+    assert_eq(func_test_text(cat.FI_CHAR, 0, [Mem]{base.mem_int(72), base.mem_int(105)}), "Hi")
+    assert_eq(func_test_text(cat.FI_PRINTF, 0, [Mem]{t("%d-%s-%5.2f"), base.mem_int(5), t("x"), base.mem_real(3.14159)}), "5-x- 3.14")
+    assert_eq(func_test_text(cat.FI_CONCAT, 0, [Mem]{t("a"), base.mem_null(), t("b"), base.mem_int(1)}), "ab1")
+    assert_eq(func_test_text(cat.FI_CONCAT_WS, 0, [Mem]{t("-"), t("a"), base.mem_null(), t("b")}), "a-b")
+    assert_eq(func_test_text(cat.FI_SOUNDEX, 0, [Mem]{t("Robert")}), "R163")
+    assert_eq(func_test_text(cat.FI_SOUNDEX, 0, [Mem]{t("Tymczak")}), "T522")
+    assert_eq(func_test_text(cat.FI_SOUNDEX, 0, [Mem]{t("")}), "?000")
+}
+
+#Test("round, abs, sign and typeof follow SQLite") {
+    assert_eq(func_test_text(cat.FI_ROUND, 0, [Mem]{base.mem_real(2.5)}), "3.0")
+    assert_eq(func_test_text(cat.FI_ROUND, 0, [Mem]{base.mem_real(-2.5)}), "-3.0")
+    assert_eq(func_test_text(cat.FI_ROUND, 0, [Mem]{base.mem_real(1.23456), base.mem_int(2)}), "1.23")
+    assert_eq(func_test_text(cat.FI_ABS, 0, [Mem]{base.mem_int(-3)}), "3")
+    assert_eq(func_test_text(cat.FI_ABS, 0, [Mem]{t("x")}), "0.0")
+    db := conn.conn_new()
+    o := func_test_vdbe(cat.FI_ABS, 0, [Mem]{base.mem_int(base.I64_MIN)})
+    builtin_call(db, o, aux.FN_SFUNC)
+    assert_eq(o.fctx.is_error, base.ERROR)
+    assert_eq(String.from_bytes(o.mem[0].z) ?? "", "integer overflow")
+    assert_eq(func_test_text(cat.FI_SIGN, 0, [Mem]{base.mem_real(-2.5)}), "-1")
+    assert_eq(func_test_text(cat.FI_SIGN, 0, [Mem]{t("a")}), "<null>")
+    assert_eq(func_test_text(cat.FI_TYPEOF, 0, [Mem]{base.mem_real(1.0)}), "real")
+    assert_eq(func_test_text(cat.FI_TYPEOF, 0, [Mem]{base.mem_blob([U8]{})}), "blob")
+    assert_eq(func_test_text(cat.FI_NULLIF, 0, [Mem]{base.mem_int(1), base.mem_int(1)}), "<null>")
+    assert_eq(func_test_text(cat.FI_NULLIF, 0, [Mem]{base.mem_int(1), base.mem_int(2)}), "1")
+}
+
+#Test("LIKE and GLOB match as patternCompare does") {
+    norm: cat.LIKE_INFO_NORM
+    assert_eq(func_test_text(cat.FI_LIKE, norm, [Mem]{t("A"), t("a")}), "1")
+    assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_ALT, [Mem]{t("A"), t("a")}), "0")
+    assert_eq(func_test_text(cat.FI_LIKE, norm, [Mem]{t("a%"), t("ABC")}), "1")
+    assert_eq(func_test_text(cat.FI_LIKE, norm, [Mem]{t("a\\_c"), t("abc"), t("\\")}), "0")
+    assert_eq(func_test_text(cat.FI_LIKE, norm, [Mem]{t("a\\_c"), t("a_c"), t("\\")}), "1")
+    assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_GLOB, [Mem]{t("[a-c]*"), t("abc")}), "1")
+    assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_GLOB, [Mem]{t("[^a-c]"), t("x")}), "1")
+    assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_GLOB, [Mem]{t("*[ab]"), t("b")}), "1")
+    assert_eq(str_glob("a*?".bytes(), "a".bytes()), NOWILDCARDMATCH)
+    db := conn.conn_new()
+    e := func_test_vdbe(cat.FI_LIKE, norm, [Mem]{t("a"), t("a"), t("xy")})
+    builtin_call(db, e, aux.FN_SFUNC)
+    assert_eq(String.from_bytes(e.mem[0].z) ?? "", "ESCAPE expression must be a single character")
+}
+
+#Test("the compile options are those of the build") {
+    assert(compileoption_used("SQLITE_THREADSAFE".bytes()))
+    assert(compileoption_used("threadsafe=1".bytes()))
+    assert(!compileoption_used("THREADSAFE=2".bytes()))
+    assert(!compileoption_used("THREAD".bytes()))
+    assert_eq(String.from_bytes(compileoption_get(0) ?? [U8]{}) ?? "", "ATOMIC_INTRINSICS=1")
+    assert(compileoption_get(COMPILE_OPTIONS.len()) == None)
+    assert_eq(func_test_text(cat.FI_SQLITE_VERSION, 0, [Mem]{}), "3.45.0")
+}
+
+// Runs the steps of aggregate id over values, then method `last`.
+agg_run: fn(db: &conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -[DB]> conn.Vdbe Never! {
+    v := func_test_vdbe(id, user_data, rows[0])
+    loop row in rows {
+        loop j in 0..<row.len() -> v.mem[2 + j] = row[j].copy()
+        v.fctx.argc = row.len()
+        builtin_call(db, v, aux.FN_STEP)
+    }
+    builtin_call(db, v, last)
+    v
+}
+
+#Test("sum, total, avg, count, min, max and group_concat aggregate as SQLite") {
+    db := conn.conn_new()
+    rows: [[Mem]]{[Mem]{base.mem_int(1)}, [Mem]{base.mem_real(2.5)}, [Mem]{base.mem_null()}, [Mem]{base.mem_int(4)}}
+    assert_eq(agg_run(db, cat.FI_SUM, 0, rows, aux.FN_FINAL).mem[0].r, 7.5)
+    assert_eq(agg_run(db, cat.FI_TOTAL, 0, rows, aux.FN_FINAL).mem[0].r, 7.5)
+    assert_eq(agg_run(db, cat.FI_AVG, 0, rows, aux.FN_FINAL).mem[0].r, 2.5)
+    assert_eq(agg_run(db, cat.FI_COUNT, 0, rows, aux.FN_FINAL).mem[0].i, 3)
+    assert_eq(agg_run(db, cat.FI_MINMAX_AGG, 0, rows, aux.FN_FINAL).mem[0].i, 1)
+    assert_eq(agg_run(db, cat.FI_MINMAX_AGG, 1, rows, aux.FN_FINAL).mem[0].i, 4)
+    g: agg_run(db, cat.FI_GROUP_CONCAT, 0, rows, aux.FN_FINAL)
+    assert_eq(String.from_bytes(g.mem[0].z) ?? "", "1,2.5,4")
+    sep: [[Mem]]{[Mem]{base.mem_int(1), t("; ")}, [Mem]{base.mem_real(2.5), t("; ")}, [Mem]{base.mem_int(4), t("; ")}}
+    gs: agg_run(db, cat.FI_GROUP_CONCAT, 0, sep, aux.FN_FINAL)
+    assert_eq(String.from_bytes(gs.mem[0].z) ?? "", "1; 2.5; 4")
+    over: [[Mem]]{[Mem]{base.mem_int(9223372036854775807)}, [Mem]{base.mem_int(1)}}
+    o: agg_run(db, cat.FI_SUM, 0, over, aux.FN_FINAL)
+    assert_eq(o.fctx.is_error, base.ERROR)
+    assert_eq(String.from_bytes(o.mem[0].z) ?? "", "integer overflow")
+    back: [[Mem]]{[Mem]{base.mem_int(9223372036854775807)}, [Mem]{base.mem_int(1)}, [Mem]{base.mem_real(-1.0)}}
+    assert_eq(agg_run(db, cat.FI_SUM, 0, back, aux.FN_FINAL).mem[0].r, 9223372036854775808.0)
+    big: [[Mem]]{[Mem]{base.mem_real(1e308)}, [Mem]{base.mem_real(1e308)}, [Mem]{base.mem_real(-1e308)}}
+    assert_eq(agg_run(db, cat.FI_SUM, 0, big, aux.FN_FINAL).mem[0].r, math.INFINITY)
+}
+
+#Test("group_concat as a window drops its oldest value with its separator") {
+    db := conn.conn_new()
+    v := func_test_vdbe(cat.FI_GROUP_CONCAT, 0, [Mem]{base.mem_int(1), t("-")})
+    builtin_call(db, v, aux.FN_STEP)
+    builtin_call(db, v, aux.FN_VALUE)
+    assert_eq(String.from_bytes(v.mem[0].z) ?? "", "1")
+    v.mem[2] = base.mem_int(2)
+    v.mem[3] = t("++")
+    builtin_call(db, v, aux.FN_STEP)
+    builtin_call(db, v, aux.FN_VALUE)
+    assert_eq(String.from_bytes(v.mem[0].z) ?? "", "1++2")
+    v.mem[2] = base.mem_int(1)
+    v.mem[3] = t("-")
+    builtin_call(db, v, aux.FN_INVERSE)
+    v.mem[2] = base.mem_int(3)
+    v.mem[3] = t("")
+    builtin_call(db, v, aux.FN_STEP)
+    builtin_call(db, v, aux.FN_VALUE)
+    assert_eq(String.from_bytes(v.mem[0].z) ?? "", "23")
+    v.mem[2] = base.mem_int(2)
+    v.mem[3] = t("++")
+    builtin_call(db, v, aux.FN_INVERSE)
+    v.mem[2] = base.mem_int(4)
+    v.mem[3] = t("::")
+    builtin_call(db, v, aux.FN_STEP)
+    builtin_call(db, v, aux.FN_VALUE)
+    assert_eq(String.from_bytes(v.mem[0].z) ?? "", "3::4")
+}
+
+#Test("case_sensitive_like makes like() the connection's own") {
+    db := conn.conn_new()
+    register_like_functions(db, true)
+    def: cat.find_function(db, "like".bytes(), 2, base.UTF8) ?? panic("like() is missing")
+    assert_eq(def.user_data, cat.LIKE_INFO_ALT)
+    assert(def.flags.bit_and(conn.FUNC_CASE) != 0)
+    assert(def.flags.bit_and(conn.FUNC_UNSAFE) == 0)
+    register_like_functions(db, false)
+    back: cat.find_function(db, "like".bytes(), 3, base.UTF8) ?? panic("like() is missing")
+    assert_eq(back.user_data, cat.LIKE_INFO_NORM)
+    assert(back.flags.bit_and(conn.FUNC_CASE) == 0)
+}
+
+// The hex of the result of jsonb() on JSON text s.
+jsonb_test_hex: fn(s: String) -[DB]> String Never! {
+    db := conn.conn_new()
+    v := func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
+    builtin_call(db, v, aux.FN_SFUNC)
+    digits: HEX_DIGITS.bytes()
+    out := [U8]{}
+    loop b in v.mem[0].z {
+        c: Int.from_u8(b)
+        out.push(digits[c >> 4])
+        out.push(digits[c.bit_and(15)])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// json() of jsonb() of JSON text s.
+json_test_round_trip: fn(s: String) -[DB]> String Never! {
+    db := conn.conn_new()
+    b := func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
+    builtin_call(db, b, aux.FN_SFUNC)
+    func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_blob(b.mem[0].z.copy())})
+}
+
+#Test("jsonb() stores the JSONB of SQLite 3.45.0 and json() reads it back") {
+    reading: "{{\"sensor\":\"ünit-7\",\"count\":2,\"big\":9007199254740993,\"ratio\":0.1,\"ok\":true,\"tags\":[\"a\",\"b\"]}}"
+    assert_eq(jsonb_test_hex(reading), "CC456773656E736F7277C3BC6E69742D3757636F756E74133237626967C3103930303731393932353437343039393357726174696F35302E31276F6B0147746167734B17611762")
+    assert_eq(json_test_round_trip(reading), reading)
+    cases: [String]{"null", "true", "false", "0.1", "-17", "9007199254740993", "123456789012345678901234567890", "\"tab\\tquote\\\"é\"", "[1,[2,{{\"k\":null}}]]", "{{\"a\":{{\"b\":[true,false]}}}}"}
+    hexes: [String]{"00", "01", "02", "35302E31", "332D3137", "C31039303037313939323534373430393933", "C31E313233343536373839303132333435363738393031323334353637383930", "C80E7461625C7471756F74655C22C3A9", "9B13316B13323C176B00", "8C17615C17622B0102"}
+    loop i in 0..<cases.len() {
+        assert_eq(jsonb_test_hex(cases[i]), hexes[i])
+        assert_eq(json_test_round_trip(cases[i]), cases[i])
+    }
+    assert_eq(jsonb_test_hex("{{\"k\" : [1, 2]}}"), "7C176B4B13311332")
+    external: util.hex_to_blob("8c57636f756e741332".bytes())
+    assert_eq(func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_blob(external)}), "{{\"count\":2}}")
+}
+
+// json() of JSON text s.
+json_test_text: fn(s: String) -[DB]> String Never! { func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{t(s)}) }
+
+#Test("json() takes JSON5 and rejects malformed JSON as SQLite does") {
+    assert_eq(json_test_text("{{a:1,}}"), "{{\"a\":1}}")
+    assert_eq(json_test_text("[0x1F,-0x10]"), "[31,-16]")
+    assert_eq(json_test_text(" [1 , 2 ] "), "[1,2]")
+    assert_eq(json_test_text("{{a:.5, b:5.}}"), "{{\"a\":0.5,\"b\":5.0}}")
+    assert_eq(json_test_text("Infinity"), "9e999")
+    assert_eq(json_test_text("'x\\'y\\x41'"), "\"x'y\\u0041\"")
+    assert_eq(json_test_text("[nan,-inf]"), "[null,-9e999]")
+    assert_eq(json_test_text("/* c */ [1] // x"), "[1]")
+    assert_eq(json_test_text("{{"), "malformed JSON")
+    assert_eq(func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_blob([U8]{U8{19}})}), "malformed JSON")
+    assert_eq(func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_null()}), "<null>")
+}
+
+#Test("a built-in whose C code is not ported fails by name") {
+    db := conn.conn_new()
+    def: cat.find_function(db, "json_array".bytes(), 1, base.UTF8) ?? panic("json_array() is missing")
+    v := func_test_vdbe(def.impl_id, def.user_data, [Mem]{base.mem_int(1)})
+    v.fctx.i_op = aux.add_op4(db, v, opc.OP_FUNCTION, 0, 0, 0, conn.P4.FuncDef(def))
+    builtin_call(db, v, aux.FN_SFUNC)
+    assert_eq(v.fctx.is_error, base.ERROR)
+    assert_eq(String.from_bytes(v.mem[0].z) ?? "", "The SQL function json_array() is not supported in this build")
+}
+
+#Test("PRAGMA table_info names its columns and other pragmas do nothing") {
+    g := cg.CodegenTestGen{calls: 0}
+    p := cg.parse_new(conn.conn_new(), g)
+    a := ast.stmt_ast("PRAGMA table_info")
+    none: ast.SQLTok{z: -1, n: 0}
+    pragma(p, a, ast.SQLTok{z: 7, n: 10}, ast.SQLTok{z: 0, n: 0}, none, 0)
+    assert_eq(p.f.v.n_res_column, 6)
+    assert_eq(String.from_bytes(p.f.v.col_names[0].z) ?? "", "cid")
+    assert_eq(String.from_bytes(p.f.v.col_names[5].z) ?? "", "pk")
+    h := cg.CodegenTestGen{calls: 0}
+    q := cg.parse_new(conn.conn_new(), h)
+    b := ast.stmt_ast("PRAGMA foreign_keys")
+    pragma(q, b, ast.SQLTok{z: 7, n: 12}, ast.SQLTok{z: 0, n: 0}, none, 0)
+    assert_eq(q.f.v.n_res_column, 0)
+    assert(a.ctx.nerr == 0 && b.ctx.nerr == 0)
+}
+
+// A column of the table_info test's table.
+pragma_test_col: fn(name: String, typ: String, not_null: Int, flags: Int) -> conn.Column Never! {
+    conn.Column{name: name.bytes(), typ: typ.bytes(), coll: [U8]{}, not_null: not_null, ctype: 0, affinity: base.AFF_BLOB, sz_est: 1, h_name: util.str_ihash(name.bytes()), i_dflt: 0, col_flags: flags}
+}
+
+// The rows a pragma's program loads, a line each: its integer and text
+// cells, NULL as nothing, with '|' between them.
+pragma_test_rows: fn(v: conn.Vdbe) -> String Never! {
+    out := [U8]{}
+    cells := 0
+    loop op in v.ops {
+        if op.opcode == opc.OP_RESULT_ROW {
+            out.push(U8{10})
+            cells = 0
+            next
+        }
+        if op.opcode != opc.OP_INTEGER && op.opcode != opc.OP_STRING8 && op.opcode != opc.OP_NULL -> next
+        if cells > 0 -> out.push(U8{124})
+        cells += 1
+        if op.opcode == opc.OP_INTEGER {
+            loop b in "{op.p1}".bytes() -> out.push(b)
+        } else if op.p4 == .Text(z) {
+            loop b in z -> out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+#Test("PRAGMA table_info lists a table's columns as SQLite does") {
+    db := conn.conn_new()
+    main: conn.schema_alloc(db)
+    db.dbs.push(conn.DBSlot{name: "main".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: main})
+    db.dbs.push(conn.DBSlot{name: "temp".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: conn.schema_alloc(db)})
+    t := conn.table_new()
+    t.name = "t".bytes()
+    t.schema = main
+    t.ipkey = 0
+    t.cols.push(pragma_test_col("id", "INTEGER", 0, conn.COLFLAG_PRIMKEY.bit_or(conn.COLFLAG_HASTYPE)))
+    t.cols.push(pragma_test_col("name", "TEXT", 1, conn.COLFLAG_HASTYPE))
+    t.cols.push(pragma_test_col("v", "", 0, 0))
+    db.tables.push(t)
+    _: conn.hash_insert(db.schemas[main].tbl_hash, "t".bytes(), 0)
+    g := cg.CodegenTestGen{calls: 0}
+    p := cg.parse_new(db, g)
+    a := ast.stmt_ast("PRAGMA table_info(t)")
+    pragma(p, a, ast.SQLTok{z: 7, n: 10}, ast.SQLTok{z: 0, n: 0}, ast.SQLTok{z: 18, n: 1}, 0)
+    assert(a.ctx.nerr == 0)
+    assert_eq(pragma_test_rows(p.f.v), "0|id|INTEGER|0||1\n1|name|TEXT|1||0\n2|v||0||0\n")
+}

@@ -105,7 +105,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
         spec := if step == {
             .Fetch(url, sha256) -> {
                 if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
-                ActionSpec.cached([String]{"jet-fetch", url, sha256})
+                ActionSpec.new([String]{"jet-fetch", url, sha256})
                     .with_kind(.Generic)
                     .with_inputs([String]{"."})
                     .with_cap(.Net)
@@ -120,7 +120,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
                 tool_path: recipe_realized_tool(tools, tool)
                 argv := [String]{tool_path}
                 loop arg in args -> argv.push(arg.copy())
-                ActionSpec.cached(argv)
+                ActionSpec.new(argv)
                     .with_kind(.Compile)
                     .with_inputs([String]{"."})
                     .with_cap(.Exec)
@@ -132,7 +132,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
                     .with_label("recipe.tool", tool)
             }
             .Install(src, dest) -> {
-                ActionSpec.cached([String]{"jet-install", src, dest})
+                ActionSpec.new([String]{"jet-install", src, dest})
                     .with_kind(.SourceArchive)
                     .with_inputs([String]{src})
                     .with_cap(.FS)
@@ -143,7 +143,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
                     .with_label("install.dest", dest)
             }
             .InstallTree(src, dest) -> {
-                ActionSpec.cached([String]{"jet-install-tree", src, dest})
+                ActionSpec.new([String]{"jet-install-tree", src, dest})
                     .with_kind(.SourceArchive)
                     .with_inputs([String]{src})
                     .with_cap(.FS)

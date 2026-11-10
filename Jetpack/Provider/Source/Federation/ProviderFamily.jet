@@ -1,51 +1,28 @@
-// Federated provider families and their contracts under Jetpack authority
-// ported from jetpack::ProviderGraph.
+// Federated provider family contracts under Jetpack authority, ported from
+// jetpack::ProviderGraph. The families themselves are provider rows in
+// PackageModel/Source/Provider/ProviderRows.jet.
 //
 // External provider prefixes and trust-root configuration remain
 // owner-gated. A contract records the surface this build actually owns.
 
-ProviderFamily: enum {
-    Core
-    Nix
-    Path
-    Github
-    JetRegistry
-    Npm
-    PyPI
-    Cargo
-    SwiftPM
-    Maven
-    NuGet
-    Conan
-    Vcpkg
-    Homebrew
-    Binary
-
-    label: fn(self) -> String Never! {
+impl ProviderFamily {
+    // Core, Nix, Path, the Jet registry, and native Jet release artifacts
+    // are local or first party.
+    is_local_or_first_party: fn(self) -> Bool Never! {
         if self == {
-            .Core -> "core"
-            .Nix -> "nix"
-            .Path -> "path"
-            .Github -> "github"
-            .JetRegistry -> "jet-registry"
-            .Npm -> "npm"
-            .PyPI -> "pypi"
-            .Cargo -> "cargo"
-            .SwiftPM -> "swiftpm"
-            .Maven -> "maven"
-            .NuGet -> "nuget"
-            .Conan -> "conan"
-            .Vcpkg -> "vcpkg"
-            .Homebrew -> "homebrew"
-            .Binary -> "binary"
+            .Core | .Nix | .Path | .JetRegistry | .JetPackage -> true
+            else -> false
         }
     }
 
-    // Core, Nix, Path, and the Jet registry are local or first party.
-    is_local_or_first_party: fn(self) -> Bool Never! {
-        if self == {
-            .Core | .Nix | .Path | .JetRegistry -> true
-            else -> false
+    // Whether a native provider adapter fetches and verifies this family's
+    // bytes: its provider row's kind dispatches to a realizing adapter.
+    has_realizing_adapter: fn(self) -> Bool Never! {
+        row: pkg_provider_row(self.label()) ?? return false
+        kind: row.kind ?? return false
+        if provider_for(kind) == {
+            .Unsupported(_) -> false
+            else -> true
         }
     }
 }
@@ -65,7 +42,7 @@ ProviderFamilyContract: struct {
     // capabilities stay false until a real provider adapter supplies them.
     for_family: fn(family: ProviderFamily) -> ProviderFamilyContract Never! {
         first_party: family.is_local_or_first_party()
-        byte_owner: first_party || family == ProviderFamily.Binary
+        byte_owner: first_party || family == ProviderFamily.Binary || family.has_realizing_adapter()
         ProviderFamilyContract{
             family: family,
             parses_refs: true,
@@ -78,16 +55,10 @@ ProviderFamilyContract: struct {
         }
     }
 
-    // The contract of every built-in family, in family order.
+    // The contract of every built-in family, in provider-row order.
     built_in: fn() -> [ProviderFamilyContract] Never! {
-        families: [ProviderFamily]{
-            ProviderFamily.Core, ProviderFamily.Nix, ProviderFamily.Path, ProviderFamily.Github,
-            ProviderFamily.JetRegistry, ProviderFamily.Npm, ProviderFamily.PyPI, ProviderFamily.Cargo,
-            ProviderFamily.SwiftPM, ProviderFamily.Maven, ProviderFamily.NuGet, ProviderFamily.Conan,
-            ProviderFamily.Vcpkg, ProviderFamily.Homebrew, ProviderFamily.Binary
-        }
         contracts := [ProviderFamilyContract]{}
-        loop family in families -> contracts.push(ProviderFamilyContract.for_family(family))
+        loop family in ProviderFamily.all() -> contracts.push(ProviderFamilyContract.for_family(family))
         contracts
     }
 }

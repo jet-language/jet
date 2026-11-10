@@ -48,9 +48,11 @@ vault_test_state_ensure: fn() -> I64 {
 // Foreign panic precedent: flush stdout, exact body + LF on stderr, exit101;
 // no Jet program stop publication, atexit, or Rust thread/backtrace prefix.
 vault_test_borrow_stop: fn() {
+    reason: rt_static_text("RefCell already borrowed")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
-    trap_write_static(rt_static_text("RefCell already borrowed"))
+    trap_write_static(reason)
     trap_msg_newline()
     trap_defect_exit(I64{101})
 }

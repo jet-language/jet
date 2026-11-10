@@ -663,10 +663,10 @@ policy_discover_manifest_files: fn(manifest: PolicyManifest, root: String) -> Po
             kind: file_type ?? panic("entry stat succeeded")
             if kind.is_symlink -> next
             if kind.is_dir {
-                // A `config/` directory beside a `package.jet` is a candidate; the
+                // A directory beside a `package.jet` is a config candidate; the
                 // caller that owns the package parser decides whether the package
-                // declares it (Rust `is_declared_package_config_dir`).
-                if entry.name == "config" && policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> candidates.push(child.copy())
+                // declares it under `configs:` (Rust `is_declared_package_config_dir`).
+                if policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> candidates.push(child.copy())
                 if !policy_skip_directory(entry.name) -> pending.push(child)
             } else if kind.is_file && child.ends_with(".jet") {
                 paths.push(child)

@@ -1,0 +1,277 @@
+// Example names (#6720): every directory and file under Examples/ is
+// TitleCase with its initialisms in capitals (`HTTPServer`, `OSIDs`,
+// `WebWASMCallback`), and a golden stream follows its program
+// (`Foo.jet` -> `Foo.out`, `Foo.err.out`). Three kinds of name follow other
+// rules, each because a tool finds it by that spelling:
+//   - role files (`run.jet`, `package.jet`, ...) keep their fixed names;
+//   - a `.jet` file inside a project is a module, and a module name is
+//     snake_case; so is a directory module (a folder holding `module.jet`);
+//   - the EXAMPLE_NAME_KEPT paths below, each with the code that requires it.
+// Names starting with `.` (tool state) and `fixture-state/` (the `.jet/`
+// state a golden run stages) are not example names and are not walked.
+use example_name_files: core.files
+
+// The initialisms a name spells in capitals. A TitleCased spelling of one
+// (`Http`, `Json`, `Ids`) is a finding.
+EXAMPLE_NAME_ACRONYMS: [String]{
+    "TLS", "HTTP", "HTTPS", "JSON", "SQL", "URL", "CSV", "API", "HTML", "CSS",
+    "GPU", "TCP", "UDP", "DNS", "IO", "UI", "CLI", "REPL", "LSP", "FFI", "SIMD",
+    "UTF8", "XML", "YAML", "TOML", "UUID", "JWT", "SHA", "AES", "RSA", "WASM",
+    "WASI", "JIT", "AST", "IR", "OS", "ID", "PNG", "PCM", "CPU", "RNG", "CRDT",
+    "EETF", "COM", "PHP", "WS", "MOTD", "CA", "EDA",
+}
+
+// The files a tool finds by exact name: the command role files and reserved
+// sources (Compiler/JetCli/Source/Cli/Entry.jet:75-77) and the directory
+// module file (`name/module.jet`, Compiler/JetDriver/Source/Driver/Loader.jet:2377-2381).
+EXAMPLE_NAME_ROLE_FILES: [String]{
+    "run.jet", "build.jet", "dev.jet", "test.jet", "package.jet", "pkg.jet",
+    "env.jet", "config.jet", "workspace.jet", "module.jet",
+}
+
+// A folder holding one of these is a project: golden discovery runs it as one
+// entry and every `.jet` file in it is a module of that project
+// (Compiler/JetTestKit/Source/Golden.jet:18-37).
+EXAMPLE_NAME_PROJECT_MARKERS: [String]{"run.jet", "package.jet", "workspace.jet"}
+
+// A path relative to Examples/ and the code that requires its spelling.
+ExampleNameKept: struct {
+    path: String
+    why: String
+}
+
+// Recorded state trees laid out by a tool, not named by an author.
+EXAMPLE_NAME_SKIPPED: [ExampleNameKept]{
+    ExampleNameKept{path: "Tooling/Performance/Hello/evidence", why: "recorded `.jet` budget state, laid out by Compiler/JetCli/Source/Cli/BudgetStore.jet:68-69,83,336"},
+    ExampleNameKept{path: "Tooling/Performance/HTTPReady/evidence", why: "recorded `.jet` budget state, laid out by Compiler/JetCli/Source/Cli/BudgetStore.jet:68-69,83,336"},
+}
+
+EXAMPLE_NAME_FOREIGN_STEM: "a foreign source's stem is its library name (Compiler/JetCli/Source/Cli/ForeignBind.jet:230-241), which names the binding module `<language>.<lib>` and its cache `.jet/bindings/<language>/<lib>.jet` (Compiler/JetDriver/Source/Driver/ForeignProviders.jet:131-133); a module name is snake_case (Compiler/JetFoundation/Data/Syntax/Spellings.jet:313)"
+EXAMPLE_NAME_HEADER_STEM: "a header's basename is the C library `#Import c.<lib>` names (Compiler/JetDriver/Source/Driver/ForeignProviders.jet:144-173)"
+EXAMPLE_NAME_PLUGIN_STEM: "a plugin artifact's stem names its interface snapshot `plugin__<stem>.api` (Compiler/JetSema/Source/Sema/Registration/PluginInterfaces.jet:119-135,262-270; Compiler/JetDriver/Source/Driver/PluginFacts.jet:17-20)"
+
+EXAMPLE_NAME_KEPT: [ExampleNameKept]{
+    ExampleNameKept{path: "Apps/Web/JetWeb/Public/index.html", why: "the static mount serves a directory through `index.html` (Core/Http/Server.jet:1580)"},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/BorrowedView/reader.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/FallibleClose/handle.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/NullableReturn/names.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/PartialSuccess/stream.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/PointerCount/sums.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Adaptations/StatusOut/status.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/CBind/Include/c.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/OpaqueHandles/Include/expat.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/OpaqueHandles/Include/z.h", why: EXAMPLE_NAME_HEADER_STEM},
+    ExampleNameKept{path: "Interop/FFI/Projections/Go/go.mod", why: "the Go toolchain reads the module file `go.mod`; Examples/Interop/FFI/Projections/Build.sh:39-45 runs `go run .` in module mode there"},
+    ExampleNameKept{path: "Interop/Languages/Cobol/payroll.cob", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/Cobol/payroll.cpy", why: "the copybook the program copies by name (Examples/Interop/Languages/Cobol/payroll.cob:5 `COPY \"payroll.cpy\"`), named for its library"},
+    ExampleNameKept{path: "Interop/Languages/Lua/ops.lua", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/Octave/scale.m", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/PHP/ops.php", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/Perl/ops.pl", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/PowerShell/ops.ps1", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/Python/ops.py", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/R/ops.R", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Languages/Ruby/ops.rb", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotAda/geodesy.adb", why: "GNAT stages the body as `<spec stem>.adb` (Jetpack/PackageModel/Source/Foreign/Binders/Ada.jet:85-92)"},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotAda/geodesy.ads", why: "the Ada spec stem must be an identifier and names the GNAT unit (Jetpack/PackageModel/Source/Foreign/Binders/Ada.jet:85-92)"},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotDart/callbacks.dart", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotFortran/matrix.f90", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotGo/handles.go", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Interop/Polyglot/PolyglotTcl/eda.tcl", why: EXAMPLE_NAME_FOREIGN_STEM},
+    ExampleNameKept{path: "Modules/Jetpack/Epoch5/flake.nix", why: "the env fallback projects the foreign shell file `flake.nix` (Jetpack/Foundation/Source/Syntax.jet:440)"},
+    ExampleNameKept{path: "Modules/Packages/PluginFailure/failure_guest.wat", why: EXAMPLE_NAME_PLUGIN_STEM},
+    ExampleNameKept{path: "Modules/Packages/PluginFailure/malformed_guest.wasm", why: EXAMPLE_NAME_PLUGIN_STEM},
+    ExampleNameKept{path: "Modules/Packages/SandboxMathKit/mathkit.wasm", why: EXAMPLE_NAME_PLUGIN_STEM},
+    ExampleNameKept{path: "Tooling/DevLoop/JobRunner.seed_data.out", why: "the golden stream of the `seed_data` job is labelled by the job's function name (Examples/Tooling/DevLoop/JobRunner.jet:13), which is snake_case (Compiler/JetFoundation/Data/Syntax/Spellings.jet:305)"},
+}
+
+example_name_upper: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 65 && Int.from_u8(byte) <= 90 }
+example_name_lower: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 97 && Int.from_u8(byte) <= 122 }
+example_name_digit: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }
+
+// `[A-Z][A-Za-z0-9]*`
+example_name_title: fn(word: String) -> Bool Never! {
+    bytes: word.bytes()
+    if bytes.len() == 0 || !example_name_upper(bytes[0]) -> return false
+    loop byte in bytes {
+        if !example_name_upper(byte) && !example_name_lower(byte) && !example_name_digit(byte) -> return false
+    }
+    true
+}
+
+// `[a-z][a-z0-9_]*`
+example_name_snake: fn(word: String) -> Bool Never! {
+    bytes: word.bytes()
+    if bytes.len() == 0 || !example_name_lower(bytes[0]) -> return false
+    loop byte in bytes {
+        if !example_name_lower(byte) && !example_name_digit(byte) && byte != (U8{95}) -> return false
+    }
+    true
+}
+
+// `[a-z0-9]+`: a stream or type suffix after the stem (`.err.out`, `.cert.pem`).
+example_name_suffix: fn(word: String) -> Bool Never! {
+    bytes: word.bytes()
+    if bytes.len() == 0 -> return false
+    loop byte in bytes {
+        if !example_name_lower(byte) && !example_name_digit(byte) -> return false
+    }
+    true
+}
+
+// Whether `word` spells `acronym` TitleCased at `at` (`Http` for HTTP), with
+// an optional plural `s`, and the next letter starts a new word.
+example_name_acronym_at: fn(word: [U8], at: Int, acronym: [U8]) -> Bool Never! {
+    if at + acronym.len() > word.len() || word[at] != acronym[0] -> return false
+    loop index in 1..<acronym.len() {
+        expected: Int.from_u8(acronym[index])
+        actual: Int.from_u8(word[at + index])
+        if example_name_upper(acronym[index]) {
+            if actual != expected + 32 -> return false
+        } else if actual != expected {
+            return false
+        }
+    }
+    end: at + acronym.len()
+    if end >= word.len() || !example_name_lower(word[end]) -> return true
+    word[end] == (U8{115}) && (end + 1 >= word.len() || !example_name_lower(word[end + 1]))
+}
+
+// The initialisms `word` spells TitleCased instead of in capitals.
+example_name_lowered_acronyms: fn(word: String) -> [String] Never! {
+    bytes: word.bytes()
+    found := [String]{}
+    loop acronym in EXAMPLE_NAME_ACRONYMS {
+        letters: acronym.bytes()
+        loop at in 0..<bytes.len() {
+            if example_name_acronym_at(bytes, at, letters) {
+                found.push(acronym.copy())
+                break
+            }
+        }
+    }
+    found
+}
+
+// What is wrong with a TitleCase name, if anything.
+example_name_title_problem: fn(word: String) -> String? Never! {
+    if !example_name_title(word) -> return Val("`{word}` is not TitleCase")
+    lowered: example_name_lowered_acronyms(word)
+    if lowered.len() > 0 -> return Val("`{word}` spells {lowered.join(", ")} in lowercase; write initialisms in capitals")
+    None
+}
+
+// What is wrong with a directory name, if anything.
+example_name_directory_problem: fn(path: String, name: String) -> String? {
+    if example_name_files.is_file("{path}/module.jet") {
+        // `name: module` loads `name/module.jet` (Loader.jet:2377-2381).
+        if example_name_snake(name) -> return None
+        return Val("directory module `{name}` is named like its `name: module` declaration, in snake_case")
+    }
+    // `src/` is a stock entry location (Compiler/JetCli/Source/Cli/Entry.jet:80).
+    if name == "src" -> return None
+    example_name_title_problem(name)
+}
+
+// What is wrong with a file name, if anything.
+example_name_file_problem: fn(name: String, in_project: Bool) -> String? Never! {
+    if EXAMPLE_NAME_ROLE_FILES.contains(name) -> return None
+    parts: name.split(".").to_list()
+    stem: parts[0]
+    loop index in 1..<parts.len() {
+        if !example_name_suffix(parts[index]) -> return Val("suffix `.{parts[index]}` of `{name}` is not lowercase")
+    }
+    if in_project && name.ends_with(".jet") {
+        if example_name_snake(stem) -> return None
+        return Val("`{name}` is a project module, and a module name is snake_case (Compiler/JetFoundation/Data/Syntax/Spellings.jet:313)")
+    }
+    example_name_title_problem(stem)
+}
+
+example_name_listed: fn(rows: [ExampleNameKept], relative: String) -> Bool Never! {
+    loop row in rows {
+        if row.path == relative -> return true
+    }
+    false
+}
+
+example_name_walk: fn(root: String, directory: String, in_project: Bool, findings: &[String]) {
+    entries: example_name_files.list_dir(directory) ?? panic("list {directory}: {err}")
+    project := in_project
+    loop entry in entries {
+        if EXAMPLE_NAME_PROJECT_MARKERS.contains(entry.name) -> project = true
+    }
+    loop entry in entries {
+        if entry.name.starts_with(".") || entry.name == "fixture-state" -> next
+        relative: entry.path.removeprefix("{root}/")
+        if example_name_listed(EXAMPLE_NAME_SKIPPED, relative) -> next
+        kind: example_name_files.stat(entry.path) ?? panic("stat {entry.path}: {err}")
+        if kind.is_dir && !kind.is_symlink {
+            if example_name_directory_problem(entry.path, entry.name) == .Val(problem) -> findings.push("{entry.path}: {problem}")
+            example_name_walk(root, entry.path, project, findings)
+            next
+        }
+        if example_name_listed(EXAMPLE_NAME_KEPT, relative) -> next
+        if example_name_file_problem(entry.name, project) == .Val(problem) -> findings.push("{entry.path}: {problem}")
+    }
+}
+
+// Every name under `root` that breaks the rule, sorted.
+example_name_findings: fn(root: String) -> [String] {
+    findings := [String]{}
+    example_name_walk(root, root, false, findings)
+    findings.sort()
+    findings
+}
+
+#Test("example names are TitleCase with initialisms in capitals") {
+    guards_enter_root()
+    findings: example_name_findings("Examples")
+    assert(findings.len() == 0, "Examples/ names break the naming rule (Docs/spec/contributing/examples.md):\n{findings.join("\n")}")
+}
+
+#Test("every kept example name still exists") {
+    guards_enter_root()
+    loop row in EXAMPLE_NAME_KEPT {
+        assert(example_name_files.is_file("Examples/{row.path}"), "EXAMPLE_NAME_KEPT names a missing file; delete its row: {row.path}")
+    }
+    loop row in EXAMPLE_NAME_SKIPPED {
+        assert(example_name_files.is_dir("Examples/{row.path}"), "EXAMPLE_NAME_SKIPPED names a missing directory; delete its row: {row.path}")
+    }
+}
+
+#Test("the name rule rejects planted bad names") {
+    root: example_name_files.mkdtemp("example-names") ?? panic("a temporary directory cannot be made: {err}")
+    planted: [String]{
+        "Good.jet", "Good.out", "Good.err.out", "HTTPServer.jet", "OSIDs.jet", "README.md",
+        "snake_case.jet", "kebab-case.jet", "lowerFirst.jet", "HttpServer.jet", "OSIds.jet", "WebWasmCallback.jet", "Utf8Text.jet", "Good.Err.out",
+        "Project/run.jet", "Project/helper_module.jet", "Project/Helper.jet", "Project/Assets/Logo.png", "Project/assets/Logo.png", "Project/banner/module.jet", "Project/Banner/module.jet",
+        "Data/sample.txt", "Data/Sample.txt", "Json/Typed.jet", ".jet/state.jet", "fixture-state/cache/plugin__x.api",
+    }
+    loop name in planted {
+        path: "{root}/{name}"
+        if name.contains("/") -> example_name_files.create_dir_all(example_name_files.dirname(path)) ?? panic("create {path}: {err}")
+        example_name_files.write(path, "") ?? panic("write {path}: {err}")
+    }
+    flagged := [String]{}
+    loop finding in example_name_findings(root) {
+        named: finding.split_once(": ") ?? panic("a finding names no reason: {finding}")
+        flagged.push(named.before.removeprefix("{root}/"))
+    }
+    assert_eq(flagged, [String]{
+        "Data/sample.txt",
+        "Good.Err.out",
+        "HttpServer.jet",
+        "Json",
+        "OSIds.jet",
+        "Project/Banner",
+        "Project/Helper.jet",
+        "Project/assets",
+        "Utf8Text.jet",
+        "WebWasmCallback.jet",
+        "kebab-case.jet",
+        "lowerFirst.jet",
+        "snake_case.jet",
+    })
+    example_name_files.remove_all(root) ?? panic("cleanup {root}: {err}")
+}

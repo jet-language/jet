@@ -1,0 +1,15 @@
+# A multi-line `policy:` block whose fields sit on their own lines parses:
+# the newline after `harden: true` separates it from `lints:`, so the
+# package reader does not see `harden: truelints: …` and refuse it with
+# E1215 (#6281 c140).
+fixture: multiline_policy_block_reads_harden_and_the_next_field.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+stderr: ~ "has no problems" # the check line names the file, whose path varies
+stderr: !~ "E1215" # the multi-line policy block is not misread
+step: jet run main.jet
+exit: 0
+stdout: = "hardened\n"

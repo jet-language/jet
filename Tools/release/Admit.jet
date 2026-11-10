@@ -1,9 +1,10 @@
-// `admit COMMIT`: the release gate of the a0_NNN compiler train.
+// `admit COMMIT`: the release gate of the a0.0.N compiler train.
 //
 //   jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
 //        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse DIR] [--seeds DIR] [--work DIR] [--check-gate]
 //
-// COMMIT is a commit on dev. The current release is `SEEDS/current` (default
+// COMMIT is a commit on dev whose JET_VERSION (Jetpack/PackageModel Manifest.jet)
+// is the next release, a0.0.N. The current release is `SEEDS/current` (default
 // $JET_SEEDS, Tools/agent/roots.sh); it is the chain's seed. The release column, the
 // compiler the suites and the Jetpack census compare against, is the current release when
 // its jet is the one it was released as (SHA256SUMS lists its sha256, and RELEASE.json records
@@ -28,42 +29,50 @@
 //             tree), and must finish if the release's census did; `Check.jet --hosted` builds
 //             the jetpack engine that ships beside jet.
 //   suites    the golden, ui and cases test profiles (each side runs them in one kit pool,
-//             `jet test Compiler --profile corpora`, run by s2 with `--compiler` naming the
-//             release column's jet, then s2) on COMMIT's fixtures, compared per (suite, case,
-//             tier). A row the release passes and s2 fails twice is lost; a lost row needs a
+//             `jet test Compiler --profile corpora`, run by s2 with `--compiler` naming s2,
+//             then the release column's jet) on COMMIT's fixtures, compared per (suite, case,
+//             tier). Every candidate row runs. The release column runs the rows that can
+//             differ from s2's (release_picks): those s2 fails, those a known-failing line
+//             owns (s2's or the release's ledger), and those whose files changed since the
+//             release's commit; any other row passes on s2 with the files and ledger the
+//             release had, and counts as passing on the release. A row the release passes
+//             and s2 fails twice is lost; a lost row needs a
 //             disposition line `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in
 //             --dispositions. No failing row may be untracked: each one needs a known-failing
 //             line, a host skip or an opt-in, or (for a lost row) a disposition; a REFUSED row
 //             no ledger line owns counts as untracked.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
-// The candidate's suite rows start only once the cheap checks (chain, pack, jetpack) are
-// clean: they are the expensive part (AGENTS.md, expensive launches are gated). The
-// release's rows need only the chain's s2, so they run beside pack and jetpack; a check that
-// fails then waits for them to end and blocks the suites.
+// The candidate's suite rows need the jetpack engine that serves them, so they start once
+// the chain, cc-pack and jetpack-engine checks pass, and run beside pack and jetpack; a
+// check that fails then waits for them to end and blocks the suites. The release column's
+// rows follow, picked from the candidate's.
 //
-// Pass: assembles SEEDS/a0_NNN (the next number) with jet (its Core sources built in),
-// jet-runtime/, jetpack, IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS,
-// RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and evidence/, then publishes it, each step
-// only after the one before succeeds: COMMIT must be on origin/dev; `git tag -a a0_NNN -F
-// TAG_MSG COMMIT`; `git push origin a0_NNN`; then the new jet runs `jet run
-// Tools/release/Main.jet -- candidate SEEDS/a0_NNN` and `-- publish SEEDS/a0_NNN` from this
+// Pass: assembles SEEDS/a0.0.N (the next number) with jet (its Core sources built in),
+// jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<sha256 of jet>`), RELEASE, VERSION
+// (`a0.0.N COMMIT <date>`, which `jet --version` prints), the C toolchain pack,
+// SOURCE, SHA256SUMS, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and evidence/, then
+// publishes it, each step only after the one before succeeds: COMMIT must be on
+// origin/dev; `git tag -a a0.0.N -F TAG_MSG COMMIT`; `git push origin a0.0.N`; then the
+// new jet runs `jet run Tools/release/Main.jet -- candidate SEEDS/a0.0.N` and `-- publish
+// SEEDS/a0.0.N` from this
 // checkout, signing with the jet-release key (`jet registry keygen --registry jet-release`
 // writes it to $JET_KEYS_DIR, default ~/.jet/keys; the run does not start without it). Only
-// then does it write SEEDS/a0_NNN/current.env and print PASS with the commands left for
-// Main: make it current (jet-use) and merge it to master as `Merge dev: a0_NNN <summary>`.
+// then does it write SEEDS/a0.0.N/current.env and print PASS with the commands left for
+// Main: make it current (jet-use) and merge it to master as `Merge dev: a0.0.N <summary>`.
 // Fail: no current.env and no PASS. A failed check, or a publication step that fails before
-// the tag reaches origin, leaves no SEEDS/a0_NNN (the assembled directory moves to
-// SEEDS/.a0_NNN.unpublished-PID and the local tag is deleted); once the tag is on origin,
-// SEEDS/a0_NNN stays without current.env and the gate prints the steps left. The evidence
+// the tag reaches origin, leaves no SEEDS/a0.0.N (the assembled directory moves to
+// SEEDS/.a0.0.N.unpublished-PID and the local tag is deleted); once the tag is on origin,
+// SEEDS/a0.0.N stays without current.env and the gate prints the steps left. The evidence
 // stays in the work directory. The gate never repoints `current`, merges or pushes master.
 // One release run at a time (a lock in the work root); the run takes the release slot of
 // Tools/agent/Chain.jet (`slot --release`: CPUs 8-31, no other slot job meanwhile), and
-// every suite process runs inside that slot's memory cap. Each shard's `jet test` gets
-// `--memory` (the slot's SLOT_MEMORY_MAX, 16G when unset, split across the shards of the
-// sides running at once), because a pool left to size itself reads the host's MemAvailable
-// and every shard would claim all of it, and `--jobs` (the slot's threads, SLOT_CPUS, split
-// the same way); --jobs N caps each pool at N entries at once (N/2 while both sides run).
+// every suite process runs inside that slot's memory cap. Each side's rows run in --shards
+// (default 8) `jet test` processes at once, one side at a time; each gets `--memory` (the
+// slot's SLOT_MEMORY_MAX, 16G when unset, split across them), because a pool left to size
+// itself reads the host's MemAvailable and every process would claim all of it, and
+// `--jobs` (the slot's threads, SLOT_CPUS, split the same way); --jobs N caps each pool at
+// N entries at once.
 // --filter narrows the suites for dry runs of the gate itself: such a run is never a
 // release (RELEASE.json scope `filtered`, which jet-use refuses) and is never tagged or
 // published.
@@ -131,7 +140,7 @@ is_count: fn(text: String) -> Bool Never! {
 
 // The options of `admit`; every problem is collected at once.
 parse_admit_args: fn(args: [String]) -> AdmitOptions Never! {
-    options := AdmitOptions{commit: "", summary: "", dispositions: "", min_gains: 10, shards: 4, jobs: 0, timeout: 0, filter: "", reuse: "", seeds: "", work: "", check_gate: false, errors: [String]{}}
+    options := AdmitOptions{commit: "", summary: "", dispositions: "", min_gains: 10, shards: 8, jobs: 0, timeout: 0, filter: "", reuse: "", seeds: "", work: "", check_gate: false, errors: [String]{}}
     values: [String]{"--summary", "--dispositions", "--filter", "--reuse", "--seeds", "--work"}
     counts: [String]{"--min-gains", "--shards", "--jobs", "--timeout"}
     index := 0
@@ -195,13 +204,12 @@ cpu_count: fn(list: String) -> Int Never! {
     total
 }
 
-// The pool settings of each of `shards` `jet test` runs of each of `sides`
-// sides sharing one slot at once: the slot's memory cap (`slot_memory`, 16G
-// when unset) split across all of them, since each pool alone would size its
-// budget from the whole cgroup room, and the slot's threads (`slot_cpus`)
-// split the same way, at least 1 each; a given --jobs N is split across the
-// sides only.
-shard_pool: fn(options: AdmitOptions, shards: Int, sides: Int, slot_memory: String, slot_cpus: String) -> [String] Never! {
+// The pool settings of each of `processes` `jet test` runs sharing one slot
+// at once: the slot's memory cap (`slot_memory`, 16G when unset) split across
+// all of them, since each pool alone would size its budget from the whole
+// cgroup room, and the slot's threads (`slot_cpus`) split the same way, at
+// least 1 each, or a given --jobs N.
+shard_pool: fn(options: AdmitOptions, processes: Int, slot_memory: String, slot_cpus: String) -> [String] Never! {
     digits := ""
     loop byte in slot_memory.bytes() {
         code: Int.from_u8(byte)
@@ -210,10 +218,10 @@ shard_pool: fn(options: AdmitOptions, shards: Int, sides: Int, slot_memory: Stri
     }
     parsed: Int.parse(digits) ?? 0
     gib: if parsed > 0 -> parsed else -> 16
-    share: gib /% (shards * sides)
+    share: gib /% processes
     pool := [String]{"--memory={if share < 1 -> 1 else -> share}G"}
     threads: cpu_count(slot_cpus)
-    jobs: if options.jobs > 0 -> options.jobs /% sides else -> threads /% (shards * sides)
+    jobs: if options.jobs > 0 -> options.jobs else -> threads /% processes
     if options.jobs > 0 || threads > 0 -> pool.push("--jobs={if jobs < 1 -> 1 else -> jobs}")
     pool
 }
@@ -531,7 +539,6 @@ SeedRelease: struct {
     dir: String
     name: String
     identity: String
-    version: String
     jet: String
     jet_sha: String
     jetpack: String
@@ -543,7 +550,7 @@ SeedRelease: struct {
 }
 
 no_seed: fn(error: String) -> SeedRelease Never! {
-    SeedRelease{dir: "", name: "", identity: "", version: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", release_name: "", genuine: "", error: error.copy()}
+    SeedRelease{dir: "", name: "", identity: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", release_name: "", genuine: "", error: error.copy()}
 }
 
 // The seed in `dir`. Its jet is genuine when SHA256SUMS lists its sha256 for
@@ -563,7 +570,6 @@ seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
     info.dir = dir.copy()
     info.name = files.basename(dir).copy()
     info.identity = (read_text(files.join(dir, "IDENTITY")) ?? "").trim().copy()
-    info.version = info.identity.partition("#").head.copy()
     info.jet = files.join(dir, "jet")
     info.jet_sha = sha256_file(info.jet)
     if files.exists(files.join(dir, "jetpack")) -> info.jetpack = files.join(dir, "jetpack")
@@ -833,8 +839,9 @@ chain_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     }
     sha: sha256_file(s2)
     // RELEASE.json records both chain stages so Tools/release can check the
-    // fixed point from the seed alone.
-    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "{ctx.release.version}#{sha}", jetpack: "", s2: "{ctx.release.version}#{sha}", s3: "{ctx.release.version}#{sha256_file(s3)}"}
+    // fixed point from the seed alone. The tree's JET_VERSION is the next
+    // release (run_gate), so each names `jet@<next>`.
+    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{sha}", jetpack: "", s2: "jet@{ctx.next}#{sha}", s3: "jet@{ctx.next}#{sha256_file(s3)}"}
     ctx.built = true
     row(ctx, "chain", "PASS", "fixed point s2 == s3 (jet {short(sha, 16)}) from {ctx.release.name}, no Rust ({stages.join(", ")}; {verdict_note})")
 }
@@ -865,11 +872,11 @@ pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     built: files.join(ctx.tree, "Compiler/JetCli/.jet/build")
     remove_tree(built)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
-    // s2 builds the toolchain: the jet it builds is s2's bytes at the fixed
-    // point, and the runtime pack beside it is that jet's lowering. The pack
-    // compiles the runtime's vendored C with a host C toolchain and links
-    // static musl, which only the dev shell supplies until jet does.
-    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "Compiler"})
+    // s2 builds the toolchain at `basic`, as every chain stage does: the jet
+    // it builds is s2's bytes at the fixed point, and the runtime pack beside
+    // it is that jet's lowering. It runs behind the dev shell with no Rust
+    // tool on PATH.
+    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "--optimize=basic", "Compiler"})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
     pack: files.join(built, "jet-runtime")
     if result.rc != 0 || !files.exists(files.join(pack, "native.key")) {
@@ -1113,34 +1120,35 @@ suite_vars: fn(base: [Var], tree: String, rows_tree: String, identity: String, j
 // and cases profiles, and each row names its suite.
 CORPORA_PROFILE: "corpora"
 
-// One side's kit processes for test profile `profile`: --shards `jet test
-// Compiler --profile <profile>` processes at once (one for a retry or a
-// rerun). s2 runs every one, and `--compiler` names the side's jet that
-// builds and runs the rows; the jetpack beside that jet serves them. `sides`
-// is how many sides' processes share the slot at once (shard_pool).
+// One side's kit processes for test profile `profile`: `shards` `jet test
+// Compiler --profile <profile>` processes, which the slot runs at once with
+// nothing else (shard_pool). s2 runs every one, and `--compiler` names the
+// side's jet that builds and runs the rows; the jetpack beside that jet
+// serves them. A `label_tag` run (a `--cases` list in `extra`) takes no
+// --filter: its list comes from a run that did.
 SuiteBatch: struct {
     labels: [String]
     jobs: [Job]
 }
 
-suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String], sides: Int) -[Env]> SuiteBatch Never! {
+suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
     release: side == "release"
     jet: if release -> ctx.baseline.jet.copy() else -> ctx.candidate.jet.copy()
     identity: if release -> ctx.baseline.identity.copy() else -> ctx.candidate.identity.copy()
     root: if release -> ctx.release_tree.copy() else -> ctx.tree.copy()
-    retry: label_tag != ""
-    shards: if retry -> 1 else -> ctx.options.shards
+    listed: label_tag != ""
+    count: if shards < 1 -> 1 else -> shards
     kit: files.join(ctx.work, "kit")
     out := SuiteBatch{labels: [String]{}, jobs: [Job]{}}
-    loop index in 1..<shards + 1 {
-        label: "{side}-{profile}{if retry -> "-{label_tag}" else -> ""}-{index}"
+    loop index in 1..<count + 1 {
+        label: "{side}-{profile}{if listed -> "-{label_tag}" else -> ""}-{index}"
         vars: suite_vars(ctx.vars, ctx.tree, root, identity, jet)
         // Suite rows run host tools (C compilers, interpreters) that only
         // the dev shell supplies until jet does.
         argv := in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", profile.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})
-        if !retry -> argv.push("--shard={index}/{shards}")
-        argv.extend(shard_pool(ctx.options, shards, sides, sys.get("SLOT_MEMORY_MAX") ?? "", sys.get("SLOT_CPUS") ?? ""))
-        if ctx.options.filter != "" && !retry -> argv.push("--filter={ctx.options.filter}")
+        if count > 1 -> argv.push("--shard={index}/{count}")
+        argv.extend(shard_pool(ctx.options, count, sys.get("SLOT_MEMORY_MAX") ?? "", sys.get("SLOT_CPUS") ?? ""))
+        if ctx.options.filter != "" && !listed -> argv.push("--filter={ctx.options.filter}")
         if ctx.options.timeout > 0 -> argv.push("--time-limit={ctx.options.timeout}s")
         argv.extend(extra.copy())
         out.labels.push(label.copy())
@@ -1174,7 +1182,8 @@ suite_rows: fn(ctx: &Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRu
     SuiteRun{rows: rows, error: errors.join("; ")}
 }
 
-// One side's run of test profile `profile`, alone in the slot.
+// One side's run of test profile `profile` in one kit process, alone in the
+// slot: a retry or a rerun of a `--cases` list.
 suite_run: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String]) -[Env, Exec, FS, Time, Time.Wait]> SuiteRun Never! {
     batch: suite_batch(ctx, side, profile, label_tag, extra, 1)
     suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
@@ -1328,43 +1337,220 @@ merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRo
     out
 }
 
-// Where an earlier run of this gate keeps the release rows of `suite` for
-// COMMIT under the same release, engine, filter and time limit.
+// Where an earlier run of this gate keeps the release rows it ran of `suite`
+// for COMMIT under the same release, engine, filter and time limit.
 release_cache: fn(ctx: &Ctx, suite: String) -[FS]> String Never! {
     engine: if ctx.baseline.jetpack != "" -> sha256_file(ctx.baseline.jetpack) else -> ""
     key: cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.sha, suite, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
     files.join(files.join(ctx.work_root, "cache"), "kit-{suite}-{key}.json")
 }
 
-// The release rows of every suite of SUITES from release_cache; None unless
-// every suite has them.
-cached_release: fn(ctx: &Ctx) -[FS]> SuiteRun? Never! {
+// The release rows release_cache holds for the suites of SUITES.
+cached_rows: fn(ctx: &Ctx) -[FS]> [SuiteRow] Never! {
     rows := [SuiteRow]{}
     loop suite in SUITES {
-        cache: release_cache(ctx, suite)
-        if !files.exists(cache) -> return None
-        parsed: json.parse(read_text(cache) ?? "") ?? return None
-        if parsed == .Array(items) {
-            rows.extend(rows_of(items))
-        } else {
-            return None
-        }
+        text: read_text(release_cache(ctx, suite)) ?? ""
+        if text == "" -> next
+        parsed: json.parse(text) ?? Dyn.Null
+        if parsed == .Array(items) -> rows.extend(rows_of(items))
     }
-    Val(SuiteRun{rows: rows, error: ""})
+    rows
 }
 
-// The release side's rows from its corpora batch, kept in release_cache
-// when every process wrote its rows.
-fresh_release: fn(ctx: &Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
-    release: suite_rows(ctx, batch, results)
-    if release.error == "" {
-        loop suite in SUITES {
-            cache: release_cache(ctx, suite)
-            files.create_dir_all(files.dirname(cache)) ?? ()
-            files.write(cache, rows_json(suite_part(release, suite).rows)) ?? ()
+// The accepted-failing ledger of Compiler/package.jet's corpus profiles
+// (their `baseline`), relative to a tree.
+KNOWN_LEDGER: "tests/known-failing.tsv"
+
+// The row IDs a ledger names (JetTestKit kit_known_load): a line of three
+// tab-separated fields; blank lines and `#` comments name none.
+ledger_ids: fn(text: String) -> [String: Bool] Never! {
+    out := [String: Bool]{}
+    loop raw in text.split("\n").to_list() {
+        line: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() == 3 -> out[fields[0].copy()] = true
+    }
+    out
+}
+
+// Whether a ledger owns row `id` (JetTestKit kit_known_ledger): a ledger ID
+// names the row's path, a project entry's directory, or a file entry without
+// `.jet`.
+ledger_owns: fn(known: [String: Bool], id: String) -> Bool Never! {
+    if known.has_key(id) -> return true
+    if !id.ends_with(".jet") -> return false
+    if id.ends_with("/run.jet") && known.has_key(id.removesuffix("/run.jet")) -> return true
+    known.has_key(id.removesuffix(".jet"))
+}
+
+// What picks the release column's rows (release_picks).
+ReleaseRule: struct {
+    // Run every row: the files COMMIT changed are unknown.
+    every: Bool
+    // The files COMMIT changed since the release's commit.
+    paths: [String]
+    // The row IDs the release's own ledger (KNOWN_LEDGER in its tree) names.
+    known: [String: Bool]
+    // Each row ID's sources (row_sources).
+    sources: [String: String]
+}
+
+// A row ID the release column runs, and why.
+ReleasePick: struct {
+    id: String
+    reason: String
+}
+
+// Whether `text` holds any of `names`.
+names_any: fn(text: String, names: [String]) -> Bool Never! {
+    loop name in names {
+        if text.contains(name) -> return true
+    }
+    false
+}
+
+// The row IDs of the candidate's `rows` the release column runs: every ID
+// with a row s2 fails (a host skip aside) or passes against a known-failing
+// line, every ID the release's ledger owns, and every ID whose files changed
+// since the release's commit: a changed path that is the row's file or lies
+// under its directory (rerun_ids), a changed tests/ or Examples/ file under
+// no row's directory whose name the row's sources hold, or anything at all
+// when the row's sources name the checkout (`{root}`). Any other row has the
+// files and ledger lines the release had and passes on s2, so it counts as
+// passing on the release (judged_release). An opt-in ID never runs: a
+// `--cases` list runs the opt-in rows that the full kit run leaves opt-in on
+// both sides.
+release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
+    ids := [String: Bool]{}
+    dirs := [String: Bool]{}
+    opt_in := [String: Bool]{}
+    loop item in rows {
+        ids[item.id.copy()] = true
+        dirs[files.dirname(item.id)] = true
+        if item.status == "OPT-IN" -> opt_in[item.id.copy()] = true
+    }
+    changed := [String: Bool]{}
+    touched := [String: Bool]{}
+    names := [String]{}
+    loop path in rule.paths {
+        changed[path.copy()] = true
+        held := false
+        dir := files.dirname(path)
+        loop dir != "" && dir != "/" {
+            touched[dir.copy()] = true
+            if dirs.has_key(dir) -> held = true
+            dir = files.dirname(dir)
+        }
+        if held || ids.has_key(path) || !has_prefix(path, REUSE_ROWS) -> next
+        name: files.basename(path)
+        if !names.contains(name) -> names.push(name.copy())
+    }
+    out := [ReleasePick]{}
+    picked := [String: Bool]{}
+    loop item in rows {
+        if picked.has_key(item.id) || opt_in.has_key(item.id) -> next
+        source: rule.sources.get(item.id) ?? ""
+        reason: if {
+            rule.every -> "every row"
+            !passes(item.status) && item.status != "SKIP-HOST" -> "failing on s2"
+            item.status == "UNEXPECTED-PASS" || ledger_owns(rule.known, item.id) -> "known-failing"
+            changed.has_key(item.id) || touched.has_key(files.dirname(item.id)) -> "changed"
+            source.contains("{{root}}") -> "reading the checkout"
+            names_any(source, names) -> "naming a changed file"
+            else -> ""
+        }
+        if reason == "" -> next
+        picked[item.id.copy()] = true
+        out.push(ReleasePick{id: item.id.copy(), reason: reason})
+    }
+    out
+}
+
+// Each row ID's sources under `tree`: its file, then the `.case` sidecar
+// that holds a `.jet` entry's steps (a project's beside its directory).
+row_sources: fn(tree: String, rows: [SuiteRow]) -[FS]> [String: String] Never! {
+    out := [String: String]{}
+    loop item in rows {
+        if out.has_key(item.id) -> next
+        sidecar: if {
+            item.id.ends_with("/run.jet") -> "{item.id.removesuffix("/run.jet")}.case"
+            item.id.ends_with(".jet") -> "{item.id.removesuffix(".jet")}.case"
+            else -> ""
+        }
+        text := read_text(files.join(tree, item.id)) ?? ""
+        if sidecar != "" -> text = "{text}\n{read_text(files.join(tree, sidecar)) ?? ""}"
+        out[item.id.copy()] = text
+    }
+    out
+}
+
+// The release column judge_suites compares: the rows the release ran, then
+// the rows of each ID it did not run that s2 passes, skips on this host or
+// leaves opt-in. release_picks runs every other ID, so such a row has the
+// files and ledger lines the release had and passes on s2: it passes on the
+// release too (a host skip and an opt-in are the kit's, the same on both
+// sides).
+judged_release: fn(ran: [SuiteRow], candidate: [SuiteRow]) -> [SuiteRow] Never! {
+    seen := [String: Bool]{}
+    loop item in ran -> seen[item.id.copy()] = true
+    out := ran.copy()
+    loop item in candidate {
+        if !seen.has_key(item.id) && (item.status == "PASS" || item.status == "SKIP-HOST" || item.status == "OPT-IN") -> out.push(item.copy())
+    }
+    out
+}
+
+// The release column's rows for the candidate's: the IDs release_picks
+// names, from release_cache where an earlier run of this gate ran them, the
+// rest run now as a `--cases` list in --shards kit processes, kept in
+// release_cache when every process wrote its rows.
+release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> SuiteRun Never! {
+    diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", ctx.baseline.commit, ctx.sha})
+    paths := [String]{}
+    if diff.rc == 0 {
+        loop line in diff.out.split("\n").to_list() {
+            if line.trim() != "" -> paths.push(line.trim().copy())
         }
     }
-    release
+    rule: ReleaseRule{every: diff.rc != 0, paths: paths.copy(), known: ledger_ids(read_text(files.join(ctx.release_tree, KNOWN_LEDGER)) ?? ""), sources: row_sources(ctx.tree, candidate.rows)}
+    picks: release_picks(candidate.rows, rule)
+    cached: cached_rows(ctx)
+    have := [String: Bool]{}
+    loop item in cached -> have[item.id.copy()] = true
+    all_ids := [String: Bool]{}
+    loop item in candidate.rows -> all_ids[item.id.copy()] = true
+    wanted := [String]{}
+    counts := [String: Int]{}
+    loop pick in picks {
+        counts[pick.reason.copy()] = (counts.get(pick.reason) ?? 0) + 1
+        if !have.has_key(pick.id) -> wanted.push(pick.id.copy())
+    }
+    out := SuiteRun{rows: cached.copy(), error: ""}
+    if wanted.len() > 0 {
+        list: files.join(ctx.work, "kit/release-picks.txt")
+        files.write(list, keys_text(wanted)) ?? ()
+        batch: suite_batch(ctx, "release", CORPORA_PROFILE, "picked", [String]{"--cases={list}"}, if wanted.len() < ctx.options.shards -> wanted.len() else -> ctx.options.shards)
+        fresh: suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
+        out.rows.extend(fresh.rows.copy())
+        out.error = fresh.error.copy()
+        if fresh.error == "" {
+            loop suite in SUITES {
+                cache: release_cache(ctx, suite)
+                files.create_dir_all(files.dirname(cache)) ?? ()
+                files.write(cache, rows_json(suite_part(out, suite).rows)) ?? ()
+            }
+        }
+    }
+    reasons := [String]{}
+    order: [String]{"every row", "failing on s2", "known-failing", "changed", "reading the checkout", "naming a changed file"}
+    loop reason in order {
+        count: counts.get(reason) ?? 0
+        if count > 0 -> reasons.push("{count} {reason}")
+    }
+    why: if diff.rc != 0 -> "; git diff {short(ctx.baseline.commit, 10)} {short(ctx.sha, 10)} failed, so every row runs: {diff.err}" else -> ""
+    row(ctx, "release-column", "NOTE", "{picks.len()} of {all_ids.len()} row IDs run on {ctx.baseline.name} ({if reasons.len() > 0 -> reasons.join(", ") else -> "none"}; {picks.len() - wanted.len()} from the release cache); the rest pass on s2 with the files and ledger lines the release had, so they count as passing there{why}")
+    out
 }
 
 // An earlier run's rows (--reuse): they stand, except those a changed file
@@ -1410,18 +1596,22 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 }
 
 // Each suite's verdict from both sides' rows: `release[i]` and
-// `candidate[i]` are SUITES[i]'s. The retry runs every lost row and every
+// `candidate[i]` are SUITES[i]'s, the release's the rows it ran, judged as
+// judged_release completes them. The retry runs every lost row and every
 // untracked timeout of every suite again on their own, in one candidate kit
 // run: a row that missed its wall-clock limit under the kit's load has not
 // failed if it passes by itself.
 judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     firsts := [Compared]{}
+    judged := [[SuiteRow]]{}
     seen := [String: Bool]{}
     lines := [String]{}
     loop (index, suite) in SUITES {
         files.write(files.join(ctx.work, "evidence/kit-release-{suite}.json"), rows_json(release[index].rows)) ?? ()
         files.write(files.join(ctx.work, "evidence/kit-candidate-{suite}.json"), rows_json(candidate[index].rows)) ?? ()
-        compared: compare_suites(release[index].rows, candidate[index].rows, [SuiteRow]{}, ctx.dispositions)
+        column: judged_release(release[index].rows, candidate[index].rows)
+        compared: compare_suites(column, candidate[index].rows, [SuiteRow]{}, ctx.dispositions)
+        judged.push(column.copy())
         firsts.push(compared.copy())
         if release[index].error != "" || candidate[index].error != "" -> next
         loop lost in compared.lost {
@@ -1451,13 +1641,14 @@ judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -
         }
         compared := firsts[index].copy()
         retried: suite_part(again, suite)
-        if retried.rows.len() > 0 -> compared = compare_suites(release[index].rows, candidate[index].rows, retried.rows, ctx.dispositions)
+        if retried.rows.len() > 0 -> compared = compare_suites(judged[index], candidate[index].rows, retried.rows, ctx.dispositions)
         ctx.suites.push(SuiteResult{suite: suite.copy(), compared: compared.copy()})
         open := [LostRow]{}
         loop lost in compared.lost {
             if !lost.disposed -> open.push(lost.copy())
         }
-        summary: "{compared.rows} rows: {compared.gained.len()} gained, {compared.lost.len()} lost ({compared.lost.len() - open.len()} dispositioned), {compared.added.len()} new passing, {compared.flaky.len()} passed on retry"
+        taken: judged[index].len() - release[index].rows.len()
+        summary: "{compared.rows} rows ({taken} not run on the release: release-column): {compared.gained.len()} gained, {compared.lost.len()} lost ({compared.lost.len() - open.len()} dispositioned), {compared.added.len()} new passing, {compared.flaky.len()} passed on retry"
         if open.len() > 0 {
             row(ctx, "suite:{suite}", "FAIL", "{summary}; lost without a disposition: {lost_shown(open, 6)}")
         } else {
@@ -1682,6 +1873,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     failed: write_all([(path: String, text: String)]{
         (path: files.join(temp, "IDENTITY"), text: "{ctx.candidate.identity}\n"),
         (path: files.join(temp, "RELEASE"), text: "{ctx.next}\n"),
+        (path: files.join(temp, "VERSION"), text: "{ctx.next} {ctx.sha} {date}\n"),
         (path: files.join(temp, "SOURCE"), text: "{ctx.sha} (dev, {ctx.next}: self-hosted s2 of {short(ctx.sha, 9)} from seed {ctx.release.name}; {verified}; Tools/release admit {date})\n"),
         (path: files.join(ctx.work, "current.env"), text: env_text),
         (path: files.join(temp, "MERGE_MSG"), text: "Merge dev: {ctx.next} {summary}\n\n{body}\n"),
@@ -1798,6 +1990,12 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
         term.eprint("admit: {why}")
         return 2
     }
+    // The release prints the version its tree declares, so that version must be the release's name.
+    declared: tree_jet_version(ctx.tree)
+    if declared != ctx.next {
+        term.eprint("admit: {short(ctx.sha, 10)} declares JET_VERSION `{declared}` in {JET_VERSION_SOURCE}, but the next release is {ctx.next}; set it to \"{ctx.next}\" on dev first")
+        return 2
+    }
     files.write(files.join(ctx.tree, ".chain-base"), "{ctx.sha}\n") ?? ()
     if export_commit(ctx.root, ctx.baseline.commit, ctx.release_tree) == .Val(why) {
         term.eprint("admit: {why}")
@@ -1806,45 +2004,39 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     baseline_stage(ctx)
     chain_stage(ctx)
     cc_pack_stage(ctx)
-    // A fresh gate starts the release side's rows as soon as the chain and
-    // cc-pack pass: they need only s2 (their runner) and the current
-    // release, so they run beside pack, jetpack and jetpack-engine, each
-    // side's processes taking half the slot's pool (shard_pool). The
-    // candidate's rows wait for those checks and the engine that serves
-    // them, and start only when every check is clean. Each side runs every
-    // suite in one kit pool, so no suite waits for another's slowest shard.
-    early: ctx.built && options.reuse == "" && failed_rows(ctx).len() == 0
-    cached: if early -> cached_release(ctx) else -> None
-    run_release := early
-    if cached == .Val(_) -> run_release = false
-    release_batch: if run_release -> suite_batch(ctx, "release", CORPORA_PROFILE, "", [String]{}, 2) else -> SuiteBatch{labels: [String]{}, jobs: [Job]{}}
-    release_finished := [Finished]{}
-    candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
-    clean := false
-    task.group sides(limit: 1) {
-        started: task run_batch(release_batch.jobs.copy())
+    // A fresh gate starts the candidate's rows as soon as the chain, cc-pack
+    // and the jetpack engine that serves them pass, so they run beside pack
+    // and jetpack, in --shards kit processes with the slot to themselves
+    // that each run every suite in one pool, so no suite waits for another's
+    // slowest shard. When pack or jetpack fails, the gate waits for those
+    // rows and judges none. The release column runs after them, on the rows
+    // release_picks names from theirs.
+    early: ctx.built && options.reuse == ""
+    if ctx.built {
+        hosted_stage(ctx)
+    } else {
+        blocked: [String]{"pack", "jetpack", "jetpack-engine"}
+        loop check in blocked -> row(ctx, check, "BLOCKED", "no s2: the chain failed")
+    }
+    launch: early && failed_rows(ctx).len() == 0
+    batch: if launch -> suite_batch(ctx, "candidate", CORPORA_PROFILE, "", [String]{}, options.shards) else -> SuiteBatch{labels: [String]{}, jobs: [Job]{}}
+    finished := [Finished]{}
+    task.group candidate_rows(limit: 1) {
+        started: task run_batch(batch.jobs.copy())
         if ctx.built {
             pack_stage(ctx)
             jetpack_stage(ctx)
-            hosted_stage(ctx)
-        } else {
-            blocked: [String]{"pack", "jetpack", "jetpack-engine"}
-            loop check in blocked -> row(ctx, check, "BLOCKED", "no s2: the chain failed")
         }
-        preflight := [Dyn]{}
-        loop found in ctx.rows -> preflight.push(Dyn.Object([String: Dyn]{"check": text_dyn(found.check), "status": text_dyn(found.status), "detail": text_dyn(found.detail)}))
-        files.write(files.join(work, "preflight.json"), "{json.to_string_pretty(Dyn.Object([String: Dyn]{"commit": text_dyn(ctx.sha), "rows": Dyn.Array(preflight)})) ?? "{{}}"}\n") ?? ()
-        clean = failed_rows(ctx).len() == 0
-        if early && clean {
-            batch: suite_batch(ctx, "candidate", CORPORA_PROFILE, "", [String]{}, 2)
-            candidate = suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
-        }
-        release_finished = started.join() ?? [Finished]{}
+        finished = started.join() ?? [Finished]{}
     }
-    if !clean {
-        loop suite in SUITES -> row(ctx, "suite:{suite}", "BLOCKED", "not launched: the cheap checks above are not clean (preflight.json)")
+    preflight := [Dyn]{}
+    loop found in ctx.rows -> preflight.push(Dyn.Object([String: Dyn]{"check": text_dyn(found.check), "status": text_dyn(found.status), "detail": text_dyn(found.detail)}))
+    files.write(files.join(work, "preflight.json"), "{json.to_string_pretty(Dyn.Object([String: Dyn]{"commit": text_dyn(ctx.sha), "rows": Dyn.Array(preflight)})) ?? "{{}}"}\n") ?? ()
+    if failed_rows(ctx).len() > 0 {
+        loop suite in SUITES -> row(ctx, "suite:{suite}", "BLOCKED", "{if launch -> "not judged" else -> "not launched"}: the cheap checks above are not clean (preflight.json)")
     } else if early {
-        release: cached ?? fresh_release(ctx, release_batch, release_finished)
+        candidate: suite_rows(ctx, batch, finished)
+        release: if candidate.error == "" -> release_rows(ctx, candidate) else -> SuiteRun{rows: [SuiteRow]{}, error: "not run: the candidate's rows are incomplete"}
         judge_suites(ctx, (loop suite in SUITES -> suite_part(release, suite)), (loop suite in SUITES -> suite_part(candidate, suite)))
         disposition_note(ctx)
     } else {

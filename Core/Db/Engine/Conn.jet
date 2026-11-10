@@ -1349,14 +1349,13 @@ btree_slot_free: fn(db: &Conn, s: Int) Never! {
 }
 
 // The state of a Btree slot to give btree_open (the connection's BtDB).
-bt_db_of: fn(db: Conn, i_db: Int) -> btree.BtDB Never! {
+bt_db_of: fn(db: Conn) -> btree.BtDB Never! {
     b := btree.bt_db_default()
     b.flags = db.flags
     b.n_savepoint = db.n_savepoint
     b.n_vdbe_read = db.n_vdbe_read
     b.temp_in_memory = temp_in_memory(db)
     b.is_interrupted = db.is_interrupted
-    if i_db >= 0 && i_db < db.dbs.len() -> b.db_name = String.from_bytes(db.dbs[i_db].name) ?? "main"
     b
 }
 

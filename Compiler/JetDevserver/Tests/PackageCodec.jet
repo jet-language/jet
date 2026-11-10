@@ -171,7 +171,7 @@ semindex_package_codec_test_package_fixture: fn() -> [String] Never! {
     [String]{
         `name: "demo"
 version: "0.1.0"
-jet: "0.4"
+jet: "a0.0"
 authority: { allow: [FS], deny: [Net], grants: { "textkit": [IO] } }
 services: { cache: { enable: true, ports: [6379], ready: "ping" } }
 environments: { dev: Environment{ tools: ["git"], services: { cache: { enable: true, ports: [6379] } }, secrets: { token: "x" } } }
@@ -192,7 +192,7 @@ semindex_package_codec_test_shared_package: fn(facts: PackageFacts, index_json: 
     found := false
     loop origin in facts.provenance["outputs.app"] { if origin.ends_with("release.jet") -> found = true }
     assert(found)
-    fields: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"0.4"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"allow":["FS"],"deny":["Net"],"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority"`}
+    fields: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"a0.0"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"allow":["FS"],"deny":["Net"],"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority"`}
     loop field in fields -> assert(index_json.contains(field))
     assert(index_json.contains("release.jet"))
 }

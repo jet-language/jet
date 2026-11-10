@@ -1,0 +1,75 @@
+// #6727: a returned trait value (a new one, a move parameter handed back,
+// one inside an Option, either arm of an `if`) is its caller's, which ends
+// it; a returned value the caller drops unread ends at once. Every
+// payload's `Shared` context is released once, so the count is back to the
+// caller's own when each scenario returns.
+package: {
+    name: "trait_values_free_at_their_last_owner_when_returned"
+    authority: { allow: [IO] }
+}
+
+Context: struct {
+    id: Int
+}
+
+Sink: trait {
+    finish: fn(&&self) -[]> Int
+    peek: fn(self) -[]> Int
+}
+
+Worker: struct {
+    context: Shared<Context>
+    n: Int
+}
+
+impl Worker.Sink {
+    finish: fn(&&self) -[]> Int {
+        self.n + 2
+    }
+    peek: fn(self) -[]> Int {
+        self.n + 1
+    }
+}
+
+make: fn(s: Shared<Context>, n: Int) -> Sink {
+    Worker{context: s.copy(), n: n}
+}
+
+handed_back: fn(&&k: Sink) -> Sink {
+    k
+}
+
+maybe: fn(s: Shared<Context>, n: Int) -> Sink? {
+    if n > 0 -> return Val(make(s, n))
+    None
+}
+
+either: fn(s: Shared<Context>, a: Int, b: Int) -> Sink {
+    left: make(s, a)
+    right: make(s, b)
+    if a > b -> left else -> right
+}
+
+returned: fn(s: Shared<Context>) {
+    a: handed_back(make(s, 1))
+    b: maybe(s, 2) ?? make(s, 0)
+    c: maybe(s, 0) ?? make(s, 3)
+    d: either(s, 4, 5)
+    print("returned {a.peek()} {b.peek()} {c.peek()} {d.peek()} live {s.strong_count()}")
+}
+
+discarded: fn(s: Shared<Context>) {
+    loop i in 0..<4 {
+        _: make(s, i)
+        _: maybe(s, i)
+    }
+    print("discarded {handed_back(make(s, 6)).peek()} live {s.strong_count()}")
+}
+
+run: fn() {
+    s := shared Context{id: 1}
+    returned(s)
+    print("returned dropped {s.strong_count()}")
+    discarded(s)
+    print("discarded dropped {s.strong_count()}")
+}

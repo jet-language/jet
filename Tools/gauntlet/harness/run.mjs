@@ -34,6 +34,18 @@ function toolVersionCommand(tool) {
 }
 
 const ENTRY_MODES = ["batch", "batch-steps", "service", "web", "web-app"];
+// A tool entry pairs a repository script with its Jet twin (AGENTS.md,
+// Tooling in other languages); runToolEntry runs its parity cases.
+const TOOL_MODE = "tool";
+const TOOL_INTERPRETERS = Object.freeze({
+  ".mjs": ["node"],
+  ".js": ["node"],
+  ".cjs": ["node"],
+  ".ts": ["node"],
+  ".py": ["python3"],
+  ".sh": ["bash"],
+  ".bash": ["bash"],
+});
 const MATRIX_UNCOVERED_DEFAULTS = [];
 const COMPARISON_METRICS = [
   "runtime_wall_seconds",
@@ -2460,10 +2472,14 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   return finish({ entry, status, stage: entryStage, languages, rows, comparisons: comparisons(entry, languages, rows, tiers), jet_tiers: tiers });
 }
 
+// Comparison entries (ENTRY_MODES) go to `loaded`; tool entries (TOOL_MODE)
+// go to `tools`, which never join the matrix denominator; anything else is
+// `skipped`.
 async function loadEntries(entriesDir, selected) {
   const loaded = [];
+  const tools = [];
   const skipped = [];
-  if (!(await exists(entriesDir))) return { loaded, skipped };
+  if (!(await exists(entriesDir))) return { loaded, tools, skipped };
   for (const item of (await fs.readdir(entriesDir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
     if (!item.isDirectory() || (selected && item.name !== selected)) continue;
     const dir = path.join(entriesDir, item.name);
@@ -2472,7 +2488,8 @@ async function loadEntries(entriesDir, selected) {
       const entry = JSON.parse(await fs.readFile(file, "utf8"));
       const nameDeclared = Object.hasOwn(entry, "name");
       entry.name ??= item.name;
-      if (!ENTRY_MODES.includes(entry.mode)) {
+      if (entry.mode === TOOL_MODE) tools.push({ dir, entry, directoryName: item.name });
+      else if (!ENTRY_MODES.includes(entry.mode)) {
         console.warn(`WARN ${entry.name}: skipped mode ${entry.mode ?? "missing"}`);
         skipped.push({ name: entry.name, reason: `mode ${entry.mode ?? "missing"} is not batch` });
       } else loaded.push({ dir, entry, directoryName: item.name, nameDeclared });
@@ -2481,7 +2498,76 @@ async function loadEntries(entriesDir, selected) {
       skipped.push({ name: item.name, reason: `invalid entry.json: ${error.message}` });
     }
   }
-  return { loaded, skipped };
+  return { loaded, tools, skipped };
+}
+
+// The command that runs a tool's original: the interpreter its extension
+// names, else the file itself through its `#!` line.
+function toolCommand(script) {
+  return [...(TOOL_INTERPRETERS[path.extname(script)] ?? []), script];
+}
+
+// Runs a tool entry's parity cases (Tools/agent/ScriptPairing.jet checks the
+// entry's shape). Each case runs the original (`tool.original`) and the Jet
+// twin (`tool.jet`), both paths under `root` (the repository), with the
+// case's `args` and `env` (variables added to the harness environment); each
+// must exit with the case's `exit` (0 when it names none) and print the
+// case's `expected` file byte for byte. A `jetBin` given as a path is also the
+// `jet` the scripts run: its directory goes first on PATH and it is $JET,
+// which the dev shell's `jet` runs (a case's `env` may still set either); a
+// bare name is left to the caller's PATH. Every run starts in its own fresh
+// copy, under `workDir`, of the entry's `tool.fixtures` directory (an empty
+// directory when it has none; symbolic links are copied as they are, so a
+// relative one still points inside the copy), so a tool that writes files
+// changes neither the entry nor the other run.
+async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
+  const tool = isObject(entry.tool) ? entry.tool : {};
+  const issues = [];
+  for (const field of ["original", "jet"]) {
+    if (typeof tool[field] !== "string" || tool[field] === "") issues.push(`tool.${field} is not a path`);
+    else if (!(await exists(path.join(root, tool[field])))) issues.push(`tool.${field} \`${tool[field]}\` does not exist`);
+  }
+  if (!Array.isArray(tool.cases) || tool.cases.length === 0) issues.push("tool.cases is empty");
+  const provenance = {
+    entry_json_sha256: await fileSha256(path.join(dir, "entry.json")),
+    corpus_tree_sha256: await treeSha256(dir),
+  };
+  if (issues.length) return { name: entry.name, original: tool.original ?? null, jet: tool.jet ?? null, status: "broken", reason: issues.join("; "), cases: [], provenance };
+  const fixtures = typeof tool.fixtures === "string" ? path.join(dir, tool.fixtures) : null;
+  const named = jetBin.includes(path.sep) ? path.resolve(jetBin) : null;
+  const inner = named === null ? {} : { PATH: `${path.dirname(named)}${path.delimiter}${process.env.PATH ?? ""}`, JET: named };
+  const programs = {
+    original: toolCommand(path.join(root, tool.original)),
+    jet: [jetBin, path.join(root, tool.jet)],
+  };
+  const cases = [];
+  for (const [index, item] of tool.cases.entries()) {
+    const args = Array.isArray(item?.args) ? item.args.map(String) : [];
+    const env = isObject(item?.env) ? Object.fromEntries(Object.entries(item.env).map(([name, value]) => [name, String(value)])) : {};
+    const exitCode = Number.isInteger(item?.exit) ? item.exit : 0;
+    const expectedPath = path.join(dir, String(item?.expected ?? ""));
+    const expected = await exists(expectedPath) ? await fs.readFile(expectedPath) : null;
+    const row = { case: index + 1, args, env, exit: exitCode, expected: item?.expected ?? null };
+    for (const [side, command] of Object.entries(programs)) {
+      if (expected === null) {
+        row[side] = { status: "fail", reason: `expected output \`${item?.expected ?? ""}\` does not exist` };
+        continue;
+      }
+      const cwd = path.join(workDir, `case-${index + 1}-${side}`);
+      await fs.rm(cwd, { recursive: true, force: true });
+      if (fixtures === null) await fs.mkdir(cwd, { recursive: true });
+      else await fs.cp(fixtures, cwd, { recursive: true, verbatimSymlinks: true });
+      const result = await runProcess(cwd, [...command, ...args], { env: { ...inner, ...env } });
+      const reason = result.code !== exitCode
+        ? `exit ${result.code}, not ${exitCode}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
+        : mismatch(expected, result.stdout);
+      row[side] = reason === null ? { status: "pass" } : { status: "fail", reason };
+    }
+    row.status = row.original.status === "pass" && row.jet.status === "pass" ? "pass" : "fail";
+    cases.push(row);
+  }
+  const status = cases.every((row) => row.status === "pass") ? "pass" : "fail";
+  return { name: entry.name, original: tool.original, jet: tool.jet, status, cases, provenance };
 }
 
 async function readLiveTowerCards() {
@@ -3889,8 +3975,8 @@ async function main() {
   const toolchains = await toolchainFingerprint(runDir, jetBin);
   const dev = await devAvailable(jetBin, runDir);
   if (!dev) console.warn("WARN jet dev unavailable; skipping Jet dev tier");
-  const { loaded, skipped } = axisOnly
-    ? { loaded: [], skipped: [] }
+  const { loaded, tools, skipped } = axisOnly
+    ? { loaded: [], tools: [], skipped: [] }
     : await loadEntries(entriesDir, options.entry);
   // The machine-ceiling references and, when given, the asm-parity run that measured them.
   const ceilingReferences = JSON.parse(await fs.readFile(path.join(repoDir, CEILING_POLICY.references), "utf8"));
@@ -3927,6 +4013,20 @@ async function main() {
     }
     console.error(`gauntlet: entry ${item.entry.name} done`);
   }
+  const toolResults = [];
+  for (const item of tools) {
+    console.error(`gauntlet: tool ${item.entry.name} ...`);
+    try {
+      toolResults.push(await runToolEntry(item.dir, item.entry, jetBin, path.join(runDir, "tools", item.directoryName)));
+    } catch (error) {
+      console.error(`gauntlet: tool ${item.entry.name} CRASHED: ${error.message}`);
+      toolResults.push({ name: item.entry.name, original: item.entry.tool?.original ?? null, jet: item.entry.tool?.jet ?? null, status: "broken", reason: `harness error: ${error.message}`, cases: [] });
+    }
+    console.error(`gauntlet: tool ${item.entry.name} done`);
+  }
+  // `--entry` naming a tool entry runs only its parity cases, and the exit
+  // status is their verdict.
+  const toolOnly = options.entry !== null && loaded.length === 0 && tools.length > 0;
   const covered = axisOnly ? new Set() : new Set(results.flatMap((result) => result.entry.cells ?? []));
   const uncovered = axisOnly ? [] : (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
   const tower = axisOnly ? null : await readLiveTowerCards();
@@ -3991,6 +4091,7 @@ async function main() {
       run_count: options.runs ?? "entry perf policy (7 for perf, 3 otherwise)",
     },
     entries: results,
+    tools: toolResults,
   };
   // One file per run. Full-matrix runs own the bare <date>.json; partial and
   // axis runs carry their scope so a later partial run never overwrites the
@@ -4031,6 +4132,15 @@ async function main() {
     }
   }
   for (const item of skipped) console.log(`${item.name}\t-\tskipped\t-\t-\t-`);
+  for (const tool of toolResults) {
+    console.log(`tool\t${tool.name}\t${tool.status}\t${tool.original ?? "-"}\t${tool.jet ?? "-"}`);
+    if (tool.reason) console.log(`tool-reason\t${tool.name}\t${tool.reason}`);
+    for (const row of tool.cases) {
+      for (const side of ["original", "jet"]) {
+        if (row[side].status !== "pass") console.log(`tool-case\t${tool.name}\t${row.case}\t${side}\t${row[side].reason}`);
+      }
+    }
+  }
   if (sourceMeasurements) {
     console.log("source\tjet_loc\tpython_loc\tloc_ratio\tjet_source_tokens\tpython_source_tokens\tsource_token_delta");
     for (const item of sourceMeasurements.entries) {
@@ -4052,7 +4162,9 @@ async function main() {
       }
     }
   }
-  if (!publication.complete) process.exitCode = 1;
+  const toolsPass = toolResults.every((tool) => tool.status === "pass");
+  if (toolOnly) process.exitCode = toolsPass ? 0 : 1;
+  else if (!publication.complete || !toolsPass) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -4075,6 +4187,8 @@ export {
   probeMatches,
   probeAxisTools,
   stageEntry,
+  loadEntries,
+  runToolEntry,
   STRICT_PERFORMANCE_POLICY,
   strictPerformancePolicyIssues,
   CEILING_POLICY,

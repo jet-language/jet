@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,26 +13,23 @@ function receipt(t) {
   const abi = JSON.stringify([{ symbol: 'jet_rt_alloc_init', parameters: [], result: null }]);
   const threads = 'jet_rt_alloc_init';
   const source = hash('runtime'), backend = hash('backend'), lifecycle = hash('lifecycle');
-  const compiler = hash('compiler'), vendoredRecipe = hash('vendored recipe');
-  const archive = Buffer.from('vendored archive bytes');
-  const recipe = nativePackRecipe(source, backend, lifecycle, compiler, vendoredRecipe);
-  const key = hash(JSON.stringify({ format: 'jet-native-runtime/v3', source, abi: hash(abi), threads: hash(threads), backend, lifecycle, vendored: [hash(archive)] }));
+  const compiler = hash('compiler');
+  const recipe = nativePackRecipe(source, backend, lifecycle, compiler);
+  const key = hash(JSON.stringify({ format: 'jet-native-runtime/v4', source, abi: hash(abi), threads: hash(threads), backend, lifecycle }));
   const directory = root;
-  mkdirSync(join(directory, 'foreign', 'sqlite3'), { recursive: true });
   const provenance = { backend: 'jet-native', runtimeKey: key, rustObjects: 0, llvmObjects: 0,
     source: { sha256: source }, backendInputs: { sha256: backend }, lifecycle: { sha256: lifecycle },
-    vendoredC: { recipeSha256: vendoredRecipe, archives: [{ name: 'sqlite3', path: 'foreign/sqlite3/libsqlite3.a', sha256: hash(archive) }] },
     compilerSha256: compiler,
     recipeSha256: recipe, objectSha256: hash(object), packSha256: hash(pack), imageSha256: hash(image), abiSha256: hash(abi), threadsSha256: hash(threads) };
   const publish = () => writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance));
   publish();
   writeFileSync(join(root, 'native.key'), key + '\n');
-  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['jet_runtime.pack.o', pack], ['jet_runtime.image', image], ['runtime.abi.json', abi], ['runtime.threads', threads], ['runtime.exports', 'jet_rt_alloc_init\n'], ['foreign/sqlite3/libsqlite3.a', archive]]) writeFileSync(join(directory, name), bytes);
+  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['jet_runtime.pack.o', pack], ['jet_runtime.image', image], ['runtime.abi.json', abi], ['runtime.threads', threads], ['runtime.exports', 'jet_rt_alloc_init\n']]) writeFileSync(join(directory, name), bytes);
   return { root, directory, provenance, recipe, key, pack, publish };
 }
 
 test('toolchain recipe changes for every semantic/ABI producer input', () => {
-  const inputs = ['source', 'backend', 'lifecycle', 'compiler', 'vendored'];
+  const inputs = ['source', 'backend', 'lifecycle', 'compiler'];
   const expected = nativePackRecipe(...inputs);
   assert.equal(nativePackRecipe(...inputs), expected);
   for (let index = 0; index < inputs.length; index++) {
@@ -44,28 +41,17 @@ test('matching cached receipt admits held artifact bytes', t => {
   const f = receipt(t), admitted = readNativeRuntimePack(f.root, f.recipe);
   assert.equal(admitted.key, f.key);
   assert.deepEqual(admitted.pack, f.pack);
-  assert.equal(admitted.files.size, 8);
+  assert.equal(admitted.files.size, 7);
 });
 test('changed recipe and every damaged artifact refuse reuse', t => {
   const f = receipt(t);
   assert.throws(() => readNativeRuntimePack(f.root, hash('new recipe')), /recipe/);
-  for (const name of ['jet_runtime_jet.o', 'jet_runtime.pack.o', 'jet_runtime.image', 'runtime.abi.json', 'runtime.threads', 'foreign/sqlite3/libsqlite3.a']) {
+  for (const name of ['jet_runtime_jet.o', 'jet_runtime.pack.o', 'jet_runtime.image', 'runtime.abi.json', 'runtime.threads']) {
     const admitted = readNativeRuntimePack(f.root);
     writeFileSync(join(f.directory, name), 'damaged');
     assert.throws(() => readNativeRuntimePack(f.root), /digest mismatch/);
     writeFileSync(join(f.directory, name), admitted.files.get(name));
   }
-});
-test('a pack without its vendored C archives refuses reuse', t => {
-  const f = receipt(t);
-  const archives = f.provenance.vendoredC.archives;
-  f.provenance.vendoredC.archives = []; f.publish();
-  assert.throws(() => readNativeRuntimePack(f.root), /vendored C archives/);
-  f.provenance.vendoredC.archives = [{ ...archives[0], path: 'foreign/sqlite3/../../jet_runtime.pack.o' }]; f.publish();
-  assert.throws(() => readNativeRuntimePack(f.root), /foreign\/<lib>/);
-  f.provenance.vendoredC.archives = archives; f.publish();
-  rmSync(join(f.directory, 'foreign/sqlite3/libsqlite3.a'));
-  assert.throws(() => readNativeRuntimePack(f.root), /ENOENT/);
 });
 test('key traversal, symbol inventory drift and inconsistent identity refuse reuse', t => {
   const f = receipt(t);

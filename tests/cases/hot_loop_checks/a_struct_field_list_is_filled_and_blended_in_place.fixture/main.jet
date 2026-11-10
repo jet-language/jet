@@ -1,0 +1,75 @@
+// A canvas whose list fields its loops fill and blend through `&Canvas`:
+// each field is made its own once, before its loop, the fills are one
+// reduction each, and a checked conversion `?? fallback` takes the fallback
+// for every value outside the target, on every tier.
+Canvas: struct {
+    width: Int
+    bytes: [U8]
+    words: [U32]
+}
+
+run: fn() {
+    canvas := Canvas{width: 4, bytes: [U8]{1, 2, 3, 4, 5, 6, 7, 8}, words: [U32]{1, 2, 3, 4}}
+    shared: canvas.bytes.copy()
+    fill_bytes(canvas, 200)
+    fill_words(canvas, U32{0xC8C8C8C8})
+    print("Bytes{show_bytes(canvas.bytes)} kept{show_bytes(shared)}")
+    print("Words{show_words(canvas.words)}")
+    // The fields are their own now: the second fill writes in place.
+    fill_bytes(canvas, 7)
+    print("Again{show_bytes(canvas.bytes)} kept{show_bytes(shared)}")
+    // Empty frozen fields: no fill writes, a push grows them.
+    empty := Canvas{width: 0, bytes: [U8]{}, words: [U32]{}}
+    fill_bytes(empty, 1)
+    empty.words.push(U32{3})
+    print("Empty{show_bytes(empty.bytes)} grown{show_words(empty.words)}")
+    blend_words(canvas, 0x10203040, 128)
+    print("Blended{show_words(canvas.words)}")
+    values: [Int]{-1, 0, 255, 256, 4294967295, 4294967296}
+    loop value in values {
+        print("Int {value}: U8 {U8.from_int(value) ?? U8{9}} U32 {U32.from_int(value) ?? U32{9}} U64 {U64.from_int(value) ?? U64{9}}")
+    }
+    wides: [U64]{U64{0}, U64{4294967295}, U64{4294967296}, U64{18446744073709551615}}
+    loop wide in wides {
+        narrow: U32.from_u64(wide) ?? U32{7}
+        reason: U32.from_u64(wide) ?? U32{err.len()}
+        print("U64 {wide}: {narrow} {reason}")
+    }
+}
+
+show_bytes: fn(xs: [U8]) -> String {
+    text := ""
+    loop x in xs -> text = "{text} {x}"
+    text
+}
+
+show_words: fn(xs: [U32]) -> String {
+    text := ""
+    loop x in xs -> text = "{text} {x}"
+    text
+}
+
+fill_bytes: fn(canvas: &Canvas, value: Int) {
+    loop i in 0..<canvas.bytes.len() -> canvas.bytes[i] = U8{value}
+}
+
+fill_words: fn(canvas: &Canvas, value: U32) {
+    loop i in 0..<canvas.words.len() -> canvas.words[i] = value
+}
+
+#Arithmetic(.Wrapping)
+blend_words: fn(canvas: &Canvas, source: Int, alpha: Int) {
+    sw: U64.from_int(source) ?? U64{0}
+    a: U64.from_int(alpha) ?? U64{0}
+    inv: U64{255} - a
+    src_rb: sw.bit_and(U64{0x00FF00FF}) * a
+    src_ag: (sw >> 8).bit_and(U64{0x00FF00FF}) * a
+    loop i in 0..<canvas.words.len() {
+        d: U64.from_u32(canvas.words[i])
+        rb: src_rb + d.bit_and(U64{0x00FF00FF}) * inv + U64{0x00800080}
+        ag: src_ag + (d >> 8).bit_and(U64{0x00FF00FF}) * inv + U64{0x00800080}
+        rb2: ((rb + (rb >> 8).bit_and(U64{0x00FF00FF})) >> 8).bit_and(U64{0x00FF00FF})
+        ag2: ((ag + (ag >> 8).bit_and(U64{0x00FF00FF})) >> 8).bit_and(U64{0x00FF00FF})
+        canvas.words[i] = U32.from_u64(rb2.bit_or(ag2 << 8)) ?? U32{0}
+    }
+}

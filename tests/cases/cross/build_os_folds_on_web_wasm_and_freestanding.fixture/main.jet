@@ -1,0 +1,10 @@
+// Each OS-less target folds `$build.os` on its own arm, never on the host's.
+run: fn() {
+    comptime if $build.os == {
+        .Web -> print("web arm")
+        .Wasm -> print("wasm arm")
+        .Freestanding -> print("freestanding arm")
+        else -> print("native arm")
+    }
+    print($build.os)
+}

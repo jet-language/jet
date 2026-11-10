@@ -100,6 +100,16 @@ SourceLocation: struct {
 }
 impl SourceLocation.Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
 
+// The phase an expression is evaluated in: `$phase` is `.Preparation` in
+// preparation and compile-time code, `.Build` in a package's `fn build`, and
+// `.Runtime` in the running program. The evaluation site decides it, never
+// the optimizer: the same expression reads the same phase on every tier.
+Phase: enum {
+    Preparation
+    Build
+    Runtime
+}
+
 // A refusal the compiler reports. An error type is a struct whose fields are
 // the holes of its texts; its impl gives each text as one string literal that
 // reads only `self` fields, so `jet explain` can print it without running code.

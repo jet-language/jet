@@ -763,7 +763,7 @@ op_open_ephemeral: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[
         v.csr[ci].bt = slot
         vfs_flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_DELETEONCLOSE).bit_or(os.OPEN_TRANSIENT_DB)
         flags: btree.BTREE_OMIT_JOURNAL.bit_or(btree.BTREE_SINGLE).bit_or(r.p5)
-        owner: conn.bt_db_of(db, -1)
+        owner: conn.bt_db_of(db)
         rc = btree.btree_open(db.btrees[slot], None, owner, flags, vfs_flags, false, false, false, false)
         if rc == base.OK {
             unused := 0

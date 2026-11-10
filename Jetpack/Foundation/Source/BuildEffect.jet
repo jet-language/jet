@@ -78,6 +78,28 @@ BuildEffect: enum {
         }
     }
 
+    // Whether a build action declaring this effect can give a different
+    // result with the same declared inputs. The native sandbox confines FS
+    // to the action's work tree and declared folders, Exec to its tool and
+    // what is mounted (identified by content in the key), and Env to its
+    // declared variables (their values in the key), so those are not. Net
+    // is: an action fetches no bytes pinned by a content hash in its key.
+    // Time, Rand, IO, DB, Log and GPU reach outside the declared inputs.
+    ambient: fn(self) -> Bool Never! {
+        if self == {
+            .FS -> false
+            .Exec -> false
+            .Env -> false
+            .Net -> true
+            .IO -> true
+            .DB -> true
+            .Time -> true
+            .Rand -> true
+            .Log -> true
+            .GPU -> true
+        }
+    }
+
     // The effects in canonical table order, keeping repeats.
     sorted: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
         out := effects

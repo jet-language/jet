@@ -277,6 +277,71 @@ provider_test_locked_facts: fn(record: SemanticRecord) -> ProviderFacts {
     assert(provider_test_has(vcpkg.losses, [String]{"no non-empty `name`"}))
 }
 
+#Test("cran luarocks ruby perl and php documents normalize through their providers' readers") {
+    hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    cran: "Package: glue\nVersion: 1.7.0\nLicense: MIT + file LICENSE\nDepends: R (>= 3.6)\nImports: methods,\n    rlang (>= 1.1.0)\n"
+    luarocks: "package = \"inspect\"\nversion = \"3.1.3-0\"\nsource = {{\n   url = \"https://example.invalid/inspect-3.1.3.tar.gz\",\n   sha256 = \"{hash}\"\n}}\ndescription = {{\n   license = \"MIT\"\n}}\ndependencies = {{\n   \"lua >= 5.1\"\n}}\nbuild = {{\n   type = \"builtin\",\n   modules = {{ inspect = \"inspect.lua\" }}\n}}\n"
+    ruby: "{{\"name\":\"rake\",\"version\":\"13.2.1\",\"platform\":\"ruby\",\"licenses\":[\"MIT\"],\"sha\":\"{hash}\",\"dependencies\":{{\"development\":[{{\"name\":\"minitest\",\"requirements\":\">= 5\"}}],\"runtime\":[]}}}}"
+    perl: "{{\"_source\":{{\"distribution\":\"Try-Tiny\",\"version\":\"0.31\",\"download_url\":\"https://cpan.metacpan.org/authors/id/E/ET/ETHER/Try-Tiny-0.31.tar.gz\",\"checksum_sha256\":\"{hash}\",\"license\":[\"mit\"],\"dependency\":[{{\"relationship\":\"requires\",\"phase\":\"runtime\",\"module\":\"Exporter\",\"version\":\"5.57\"}},{{\"relationship\":\"requires\",\"phase\":\"runtime\",\"module\":\"perl\",\"version\":\"5.006\"}}]}}}}"
+    php: "{{\"packages\":{{\"acme/widget\":[{{\"name\":\"acme/widget\",\"version\":\"v1.2.3\",\"license\":[\"MIT\"],\"dist\":{{\"type\":\"zip\",\"url\":\"https://example.invalid/widget.zip\",\"shasum\":\"0123456789abcdef0123456789abcdef01234567\",\"reference\":\"abc\"}},\"require\":{{\"php\":\">=8.1\",\"psr/log\":\"^3.0\"}},\"autoload\":{{\"psr-4\":{{\"Acme\\\\Widget\\\\\":\"src/\"}}}}}}]}}}}"
+    cases: [(family: ProviderFamily, document: String, format: String, reference: String)]{
+        (family: ProviderFamily.Cran, document: cran, format: "dcf", reference: "glue@cran#version=1.7.0"),
+        (family: ProviderFamily.LuaRocks, document: luarocks, format: "rockspec", reference: "inspect@luarocks#version=3.1.3-0"),
+        (family: ProviderFamily.RubyGems, document: ruby, format: "json", reference: "rake@ruby#version=13.2.1"),
+        (family: ProviderFamily.Cpan, document: perl, format: "json", reference: "Try-Tiny@perl#version=0.31"),
+        (family: ProviderFamily.Packagist, document: php, format: "json", reference: "acme/widget@php#version=1.2.3")
+    }
+    loop entry in cases {
+        report: provider_normalize_document(entry.family, entry.document)
+        provider_test_valid(report, "{entry.family.label()} report is lossless")
+        assert_eq(report.native_format, entry.format)
+        lock: report.lock_record("app", entry.reference, "x86_64-linux") ?? panic("{entry.family.label()} lock retains exact identity")
+        locked: provider_test_locked_facts(lock)
+        assert_eq(locked.native_document, entry.document)
+        assert_eq(locked.qualified_reference(), entry.reference)
+    }
+    cran_report: provider_normalize_document(ProviderFamily.Cran, cran)
+    assert_eq(cran_report.facts.dependencies, [String]{"rlang"})
+    assert_eq(cran_report.facts.license, "MIT + file LICENSE")
+    assert_eq(cran_report.facts.first_typed("provider.cran.requirement.rlang") ?? "", ">= 1.1.0")
+    luarocks_report: provider_normalize_document(ProviderFamily.LuaRocks, luarocks)
+    assert_eq(luarocks_report.facts.integrity_hash, hash)
+    assert_eq(luarocks_report.facts.dependencies, [String]{"lua"})
+    assert_eq(luarocks_report.facts.scripts.len(), 0)
+    ruby_report: provider_normalize_document(ProviderFamily.RubyGems, ruby)
+    assert_eq(ruby_report.facts.dev_dependencies, [String]{"minitest"})
+    assert_eq(ruby_report.facts.license, "MIT")
+    perl_report: provider_normalize_document(ProviderFamily.Cpan, perl)
+    assert_eq(perl_report.facts.dependencies, [String]{"Exporter"})
+    assert_eq(perl_report.facts.integrity_hash, hash)
+    php_report: provider_normalize_document(ProviderFamily.Packagist, php)
+    assert_eq(php_report.facts.dependencies, [String]{"psr/log"})
+    assert_eq(php_report.facts.license, "MIT")
+    assert(php_report.facts.typed.has_key("provider.php.psr4.Acme\\Widget\\"))
+}
+
+#Test("cran luarocks ruby perl and php documents report what they can't carry") {
+    cran: provider_normalize_document(ProviderFamily.Cran, "Package: glue\nVersion: 1.7.0\n\nPackage: rlang\nVersion: 1.1.0\n")
+    provider_test_invalid(cran)
+    assert(provider_test_has(cran.losses, [String]{"2 package paragraphs"}))
+    luarocks: provider_normalize_document(ProviderFamily.LuaRocks, "package = \"inspect\"\nversion = \"3.1.3-0\"\nsource = {{ url = \"https://example.invalid/inspect.tar.gz\" }}\nbuild = {{ type = \"make\" }}\n")
+    provider_test_invalid(luarocks)
+    assert(provider_test_has(luarocks.losses, [String]{"needs a SHA-256 source hash"}))
+    assert_eq(luarocks.facts.scripts, [String]{"build.type=make"})
+    ruby: provider_normalize_document(ProviderFamily.RubyGems, "{{\"name\":\"rake\",\"version\":\"13.2.1\",\"licenses\":7}}")
+    provider_test_invalid(ruby)
+    assert(provider_test_has(ruby.losses, [String]{"gem `licenses`"}))
+    perl: provider_normalize_document(ProviderFamily.Cpan, "{{\"distribution\":\"Try-Tiny\",\"version\":\"0.31\",\"download_url\":\"https://example.invalid/t.tar.gz\",\"checksum_sha256\":\"\"}}")
+    provider_test_invalid(perl)
+    assert(provider_test_has(perl.losses, [String]{"unsafe or unhashed"}))
+    php: provider_normalize_document(ProviderFamily.Packagist, "{{\"packages\":{{\"acme/widget\":[{{\"version\":\"1.0.0\",\"dist\":{{\"type\":\"zip\",\"url\":\"https://example.invalid/a.zip\",\"shasum\":\"0123456789abcdef0123456789abcdef01234567\"}}}},{{\"version\":\"1.1.0\",\"dist\":{{\"type\":\"zip\",\"url\":\"https://example.invalid/b.zip\",\"shasum\":\"0123456789abcdef0123456789abcdef01234567\"}}}}]}}}}")
+    provider_test_invalid(php)
+    assert(provider_test_has(php.losses, [String]{"2 releases", "exactly one"}))
+    native: provider_normalize_document(ProviderFamily.JetPackage, "{{}}")
+    provider_test_invalid(native)
+    assert(provider_test_has(native.losses, [String]{"no foreign metadata document shape"}))
+}
+
 #Test("provider conformance retains real lock shapes and rejects hooks") {
     nuget: "{{\n  \"targets\":{{\"net8.0\":{{\"widget/1.2.3\":{{\"type\":\"package\",\"dependencies\":{{\"serde\":\"1.0.0\"}}}}}}}},\n  \"libraries\":{{\"widget/1.2.3\":{{\"type\":\"package\",\"sha512\":\"sha512-widget\"}}}},\n  \"projectFileDependencyGroups\":{{\"net8.0\":[\"widget >= 1.0.0\"]}}\n        }}"
     report: provider_normalize_document(ProviderFamily.NuGet, nuget)

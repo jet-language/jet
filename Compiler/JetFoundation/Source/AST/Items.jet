@@ -58,6 +58,10 @@ Program: struct {
     // An `#FX(…)` written at the head of the file, above a `use` line: a cap
     // on every function in the file. Sema names it after the file.
     file_cap: ModuleCap?{None}
+    // The names an entry file of top-level statements binds at its top
+    // level: locals of its generated `run: fn` (JetSema
+    // sema_script_entry), which its functions don't see.
+    entry_locals: [String]{[String]{}}
 }
 
 // One `debug(…)` call as written. `name_start` keys it to the call's
@@ -257,6 +261,10 @@ MarkerDecl: struct {
     group: [Marker]?{None}
     params: [MarkerDeclParam]
     body: [DeriveBodyItem]?
+    // The effect row written on `expand`, `-[…]>`, and its span. None: the
+    // row of `Marker.expand`, `Meta.Generate`.
+    row: [EffectRowEntry]?{None}
+    row_span: Span?{None}
     span: Span
 }
 
@@ -291,12 +299,13 @@ CodeModule: struct {
     markers: [Marker]{[Marker]{}}
 }
 
-// A module's or a type's `#FX(…)` cap. Its plain entries are the ceiling and
-// its `!` entries are denials: for every function inside the module, nested
-// modules and type bodies included, or for every method of the type, trait
-// impls written apart from its body included. Sema checks each function's
-// solved row against it. `scope` is `module` or `type`; `owner` is the
-// module's or the type's name.
+// A module's, a type's or a trait's `#FX(…)` cap. Its plain entries are the
+// ceiling and its `!` entries are denials: for every function inside the
+// module, nested modules and type bodies included, for every method of the
+// type, trait impls written apart from its body included, or for every
+// implementation of the trait's methods in any package. Sema checks each
+// function's solved row against it. `scope` is `module`, `type` or `trait`;
+// `owner` is the module's, the type's or the trait's name.
 ModuleCap: struct {
     owner: String
     scope: String{"module"}
@@ -610,6 +619,8 @@ TraitDef: struct {
     methods: [TraitMethodSig]
     // The markers written above `trait` and as lines in its body.
     markers: [Marker]{[Marker]{}}
+    // `#FX(…)` above the trait, or an `#FX: (…)` line in its body.
+    cap: ModuleCap?{None}
 }
 
 // One trait constant requirement. `ty` is written in the trait's module;

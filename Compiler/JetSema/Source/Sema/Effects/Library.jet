@@ -1,0 +1,221 @@
+// Library effects (E0756, E0757).
+//
+// A library effect is a struct or enum outside the Prelude that implements
+// `Effect`; the `#FX(…)` above it names the kernel effects it relies on. A
+// row that names it may do what it lists. Inside its package the name is
+// bare (`Query`, or a case `Query.Read`); elsewhere it is qualified by the
+// name the package is imported under (`graph.Query`), like any other item.
+// Denials keep checking what a body really reaches: `!Net` blocks a library
+// effect's network work wherever it runs, and `!graph.Query` blocks every
+// call that reaches a function whose row names `graph.Query` or a case of it.
+use jet_foundation.[
+    EFFECT_VOCABULARY_ROOTS,
+    Diagnostic,
+    Item,
+    ModuleCap,
+    Span,
+    diagnostic_with_rights,
+]
+
+SemaLibraryEffect: struct {
+    package_identity: String
+    name: String
+    cases: [String]
+    kernel: [String]
+}
+
+// One name a module may write for a library effect, and the kernel effects
+// it stands for. `token` names the effect, or the case, the same way in
+// every module: the declaring package's identity, `/`, then the name as that
+// package writes it (`Query`, `Query.Read`).
+SemaLibraryEffectName: struct {
+    written: String
+    kernel: [String]
+    token: String
+}
+
+// A `!` entry of a function row that names a library effect or a case.
+SemaLibraryEffectDenial: struct {
+    name: SemaLibraryEffectName
+    span: Span
+}
+
+// `name` is a struct or enum in `items` that implements `Effect` (the parser
+// writes its effect declaration beside the type) and is no Prelude effect.
+sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
+    if EFFECT_VOCABULARY_ROOTS.contains(name) -> return false
+    typed := false
+    declared := false
+    loop item in items {
+        if item == {
+            .Struct(definition) -> { if definition.name == name -> typed = true }
+            .Enum(definition) -> { if definition.name == name -> typed = true }
+            .EffectDecl(declaration) -> { if declaration.name == name -> declared = true }
+            else -> {}
+        }
+    }
+    typed && declared
+}
+
+// The kernel effects a library effect's `#FX(…)` lists; a `!` entry or a
+// name that is no kernel effect lists nothing (E0757, E0119).
+sema_library_effect_kernel_list: fn(cap: ModuleCap?) -> [String] Never! {
+    kernel := [String]{}
+    written: cap ?? return kernel
+    loop entry in written.entries {
+        if entry.name.starts_with("!") -> next
+        effect_name: sema_effect_parse_name(entry.name) ?? next
+        sema_effect_set_add(kernel, effect_name)
+    }
+    kernel
+}
+
+sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity: String, items: [Item]) Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                if sema_library_effect_declared(items, definition.name) {
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap)})
+                }
+            }
+            .Enum(definition) -> {
+                if sema_library_effect_declared(items, definition.name) {
+                    cases: loop variant in definition.variants -> variant.name
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap)})
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+// Every library effect the graph's source modules declare.
+sema_library_effects: fn(graph: SemaRegistrationGraph) -> [SemaLibraryEffect] Never! {
+    effects := [SemaLibraryEffect]{}
+    loop module_row in graph.modules {
+        if module_row.module_identity == graph.canonical_effect_module_identity -> next
+        sema_library_effect_collect(effects, module_row.package_identity, module_row.program.items)
+    }
+    effects
+}
+
+sema_library_effect_add_names: fn(names: &[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
+    token: "{declared.package_identity}/{declared.name}"
+    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token})
+    loop case_name in declared.cases -> names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}"})
+}
+
+// The library effect names `source` may write: its own package's bare, and
+// each imported package's under the name it is imported as.
+sema_library_effect_view: fn(effects: [SemaLibraryEffect], source: SemaRegistrationModule) -> [SemaLibraryEffectName] Never! {
+    names := [SemaLibraryEffectName]{}
+    if effects.len() == 0 -> return names
+    loop declared in effects {
+        if declared.package_identity == source.package_identity -> sema_library_effect_add_names(names, "", declared)
+    }
+    loop import_row in source.imports {
+        if import_row.target_package_identity == source.package_identity -> next
+        alias: import_row.declaration.alias
+        if alias == "" -> next
+        loop declared in effects {
+            if declared.package_identity == import_row.target_package_identity -> sema_library_effect_add_names(names, "{alias}.", declared)
+        }
+    }
+    names
+}
+
+// The library effect a written name stands for, or None when `written`
+// names no library effect this module sees.
+sema_library_effect_find: fn(view: [SemaLibraryEffectName], written: String) -> SemaLibraryEffectName? Never! {
+    loop name in view {
+        if name.written == written -> return Val(name.copy())
+    }
+    None
+}
+
+// `e0756`: a function whose row names a library effect reaches a kernel
+// effect that effect doesn't list. The span is the row's first entry.
+sema_library_effect_reach_diagnostic: fn(node: SemaEffectNode, over: [String]) -> Diagnostic {
+    sorted := over.copy()
+    sorted.sort()
+    over_list: sema_effect_show(sorted)
+    written: loop row in node.library_rows -> row.written
+    effects: sema_effect_show(written)
+    listed := [String]{}
+    loop row in node.library_rows {
+        loop name in row.kernel -> sema_effect_set_add(listed, name)
+    }
+    stands: if listed.len() == 0 -> "no kernel effect" else -> "`{sema_effect_show(listed)}`"
+    span: node.row_span ?? node.name_span
+    diagnostic: sema_error("E0756", span, "`{node.name}` uses `{over_list}`, which `{effects}` doesn't list", "a row that names the library effect `{effects}` may do what the `#FX(…)` above it lists, here {stands}; `{over_list}` is not among them", "add `{over_list}` to the `#FX(…)` above `{effects}`, add it to `{node.name}`'s row, or stop using it in `{node.name}`")
+    diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
+}
+
+// `e0757`: a `!` entry in the `#FX(…)` above a library effect.
+sema_library_effect_list_denial_diagnostic: fn(name: String, entry: String, span: Span) -> Diagnostic {
+    sema_error("E0757", span, "the `#FX(…)` above the library effect `{name}` denies `{entry}`", "the list above a library effect names the kernel effects it relies on, so it holds no `!` entries", "remove `!{entry}`; a caller that must not use `{entry}` writes `-[!{entry}]>` itself")
+}
+
+// The `#FX(…)` above each library effect in `items` holds no `!` entry.
+sema_library_effect_check_lists: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
+            .Enum(definition) -> sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
+            else -> {}
+        }
+    }
+}
+
+sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?, diagnostics: &[Diagnostic]) {
+    written: cap ?? return
+    if !sema_library_effect_declared(items, name) -> return
+    loop entry in written.entries {
+        if entry.name.starts_with("!") -> diagnostics.push(sema_library_effect_list_denial_diagnostic(name, entry.name.slice(1, entry.name.len()), entry.span))
+    }
+}
+
+// The library effects each node reaches: those its own row names, and every
+// one a function it can call reaches. Empty rows when no node denies one.
+sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] Never! {
+    any_denial: loop node in nodes {
+        if node.library_denials.len() > 0 -> break true
+    } ?? false
+    reached := (loop _ in nodes -> [String]{})
+    if !any_denial -> return reached
+    pending := [SemaEffectPending]{}
+    loop (index, node) in nodes {
+        loop row in node.library_rows {
+            if sema_effect_set_add(reached[index], row.token) -> pending.push(SemaEffectPending{node: index, name: row.token.copy()})
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        incoming: pending[cursor]
+        cursor += 1
+        loop caller in callers[incoming.node] {
+            if sema_effect_set_add(reached[caller], incoming.name) -> pending.push(SemaEffectPending{node: caller, name: incoming.name})
+        }
+    }
+    reached
+}
+
+// `e0749`: a function that denies a library effect, or one of its cases,
+// reaches a function whose row names it, one of its cases, or (for a
+// denied case) the whole effect.
+sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
+    loop denial in node.library_denials {
+        denied: denial.name
+        loop token in reached {
+            hit: if {
+                token == denied.token -> denied.written.copy()
+                token.starts_with("{denied.token}.") -> "{denied.written}{token.slice(denied.token.len(), token.len())}"
+                denied.token.starts_with("{token}.") -> denied.written.slice(0, denied.written.len() - (denied.token.len() - token.len()))
+                else -> next
+            }
+            diagnostic: sema_error("E0749", denial.span, "`{node.name}` reaches the library effect `{hit}`, which it prohibits with `-[!{denied.written}]>`", "a `-[!{denied.written}]>` row means the function and every callee it can reach must not use `{denied.written}`; a function uses a library effect when its row names the effect or one of its cases", "remove the call that introduces `{hit}`, or drop the `-[!{denied.written}]>` prohibition")
+            diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
+            break
+        }
+    }
+}

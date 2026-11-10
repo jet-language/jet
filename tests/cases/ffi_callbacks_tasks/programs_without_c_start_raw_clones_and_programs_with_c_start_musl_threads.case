@@ -1,0 +1,68 @@
+# #6689 c1: both link shapes, at O0, O1 and O2. A program that links no C
+# starts its task threads as raw clones: its image holds no pthread function
+# and no musl startup, so the runtime object asks libc for no pthread symbol.
+# A program whose C closure links keeps today's threads: its musl startup hands
+# the runtime the link's C thread functions (JetBackend Image/StaticLink.jet
+# link_thread_create, over pthread_create), and C called from its tasks runs
+# on musl threads with their own musl state, never on a thread that shares
+# the initial thread's. The C dependency is a source directory, which Jet
+# compiles itself.
+requires: os:unix
+fixture: programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads.fixture
+write: clink/package.jet clink/package.template
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --optimize=none main.jet
+cwd: pure
+exit: 0
+step: {work}/pure/.jet/build/main
+exit: 0
+stdout: = "tasks 16 sum 1240\n"
+step: node {work}/symbols.mjs {work}/pure/.jet/build/main
+exit: 0
+stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
+step: jet build --optimize=none main.jet
+cwd: clink
+exit: 0
+step: {work}/clink/.jet/build/main
+exit: 0
+stdout: = "C ran on a musl thread of its own: true\nC shared the initial thread's musl state off it: false\n"
+step: node {work}/symbols.mjs {work}/clink/.jet/build/main
+exit: 0
+stdout: = "pthread functions: true\nmusl startup: true\nJet startup: false\nC thread functions handed to the runtime: true\n"
+step: jet build --optimize=basic main.jet
+cwd: pure
+exit: 0
+step: {work}/pure/.jet/build/main
+exit: 0
+stdout: = "tasks 16 sum 1240\n"
+step: node {work}/symbols.mjs {work}/pure/.jet/build/main
+exit: 0
+stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
+step: jet build --optimize=basic main.jet
+cwd: clink
+exit: 0
+step: {work}/clink/.jet/build/main
+exit: 0
+stdout: = "C ran on a musl thread of its own: true\nC shared the initial thread's musl state off it: false\n"
+step: node {work}/symbols.mjs {work}/clink/.jet/build/main
+exit: 0
+stdout: = "pthread functions: true\nmusl startup: true\nJet startup: false\nC thread functions handed to the runtime: true\n"
+step: jet build --optimize=full main.jet
+cwd: pure
+exit: 0
+step: {work}/pure/.jet/build/main
+exit: 0
+stdout: = "tasks 16 sum 1240\n"
+step: node {work}/symbols.mjs {work}/pure/.jet/build/main
+exit: 0
+stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
+step: jet build --optimize=full main.jet
+cwd: clink
+exit: 0
+step: {work}/clink/.jet/build/main
+exit: 0
+stdout: = "C ran on a musl thread of its own: true\nC shared the initial thread's musl state off it: false\n"
+step: node {work}/symbols.mjs {work}/clink/.jet/build/main
+exit: 0
+stdout: = "pthread functions: true\nmusl startup: true\nJet startup: false\nC thread functions handed to the runtime: true\n"

@@ -5,10 +5,11 @@
 // casing.
 //
 // What breaks (the spec's publish section lists the same rules): a removed or
-// changed row, except a fn whose solved effect row only narrowed; a `variant`
-// added to an existing enum; a `require` added to an existing trait; a
-// `field` without a default added to an existing struct whose row is not
-// sealed (`{ .. }`). Every other added row is compatible.
+// changed row, except a fn whose solved effect row only narrowed and a `cap`
+// whose `#FX(…)` ceiling only narrowed; a `variant` added to an existing
+// enum; a `require` added to an existing trait; a `field` without a default
+// added to an existing struct whose row is not sealed (`{ .. }`). Every other
+// added row is compatible, a new `cap` included.
 use {
     jet_foundation.[Diagnostic, PublicAPIItem, diagnostic_from_registry]
     jet_pkg_model.[PackageCapabilitySnapshot, pkg_api_snapshot_line_name]
@@ -74,7 +75,7 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
         if replacement >= 0 {
             matched[replacement] = true
             item: new[replacement]
-            if publication_api_effects_narrowed(old_item, item) -> next
+            if publication_api_effects_narrowed(old_item, item) || publication_api_cap_narrowed(old_item, item) -> next
             changes.push(PublicationBreakingChange{
                 description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
                 item_name: old_item.name.copy(),
@@ -147,6 +148,47 @@ publication_api_effects_narrowed: fn(old: PublicAPIItem, new: PublicAPIItem) -> 
     if before.effects.contains("*") -> return true
     loop name in after.effects {
         if !before.effects.contains(name) -> return false
+    }
+    true
+}
+
+// `cap Receipt #FX(IO, !FS)` as its ceiling (the allowed effects, `Panic`
+// aside, as in the checker) and its denials.
+PublicationAPICap: struct {
+    allowed: [String]
+    denied: [String]
+}
+
+publication_api_cap: fn(signature: String) -> PublicationAPICap? Never! {
+    parts: signature.split_once(" #FX(") ?? return None
+    inner: parts.after.removesuffix(")")
+    cap := PublicationAPICap{allowed: [String]{}, denied: [String]{}}
+    if inner == "" -> return Val(cap)
+    loop name in inner.split(", ") {
+        if name.starts_with("!") {
+            cap.denied.push(name.removeprefix("!"))
+        } else if name != "Panic" && !name.starts_with("Panic.") {
+            cap.allowed.push(name.copy())
+        }
+    }
+    Val(cap)
+}
+
+// A cap that keeps every denial and allows nothing it did not still holds
+// every dependent's assumption about the code under it. An empty ceiling
+// bounds nothing: giving it effects narrows the cap, and emptying a ceiling
+// widens it.
+publication_api_cap_narrowed: fn(old: PublicAPIItem, new: PublicAPIItem) -> Bool Never! {
+    if old.kind != "cap" || new.kind != "cap" -> return false
+    before: publication_api_cap(old.signature) ?? return false
+    after: publication_api_cap(new.signature) ?? return false
+    loop name in before.denied {
+        if !after.denied.contains(name) -> return false
+    }
+    if before.allowed.len() == 0 -> return true
+    if after.allowed.len() == 0 -> return false
+    loop name in after.allowed {
+        if !before.allowed.contains(name) -> return false
     }
     true
 }

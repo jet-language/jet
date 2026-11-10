@@ -18,7 +18,7 @@ use {
     jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
     jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_identity, sema_budget_provider_kind, sema_budget_safe_relative_path]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_pkg_model.[JET_VERSION]
 }
 
 JET_CLI_BUDGET_USAGE: "jet budget check [--json] [--verbose] [--quiet] [--annotations auto|none|github] | jet budget update --baseline <name> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--quiet] [--annotations auto|none|github]"
@@ -403,7 +403,7 @@ jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure
     stdlib: jet_cli_budget_stdlib_id(entry) ?? return Err(jet_cli_budget_failure("cannot hash the Core sources of this toolchain"))
     fields: [CanonicalJSONField]{
         CanonicalJSONField{key: "compiler_build_id", value: CanonicalJSON.String(budget_crypto.sha256(compiler_bytes).hex())},
-        CanonicalJSONField{key: "jet_version", value: CanonicalJSON.String(COMPILER_VERSION)},
+        CanonicalJSONField{key: "jet_version", value: CanonicalJSON.String(JET_VERSION)},
         CanonicalJSONField{key: "runner_id", value: CanonicalJSON.String(runner)},
         CanonicalJSONField{key: "stdlib_id", value: CanonicalJSON.String(stdlib)},
     }

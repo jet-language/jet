@@ -1,6 +1,6 @@
 # #6125: `:` folds at build time as an optimization, on every tier.
 # The slot IR `jet emit --ir` prints is what O0 compiles unchanged; `jet inspect
-# decisions` prints it again after the O1 (default) and O2 (--release) passes.
+# decisions` prints it again after the O1 (--optimize=basic) and O2 (--release) passes.
 fixture: immutable_constants_fold_at_build_time_on_every_tier.fixture
 env: NO_COLOR=1
 # C1: block-local Int arithmetic holds its folded value before any pass runs.
@@ -17,10 +17,10 @@ stdout: ~ "add s" # a sum that may leave i64 is computed at run time
 step: jet emit --ir main.jet --fn mutable_kept
 exit: 0
 stdout: ~ "add s" # a `:=` binding never folds
-step: jet inspect decisions main.jet
+step: jet inspect decisions --optimize=basic main.jet
 env: JET_OPT_DUMP=local_fold
 exit: 0
-stdout: ~ "O1:" # the default build runs the O1 passes
+stdout: ~ "O1:" # optimize: basic runs the O1 passes
 stdout: ~ "const s5 <- 70" # O1 folds the use site too
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=local_fold

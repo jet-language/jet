@@ -399,6 +399,10 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
             index: initializer.row.index()
             if index < decl_rows.len() && decl_rows[index] >= 0 -> targets.push(decl_rows[index])
         }
+        // A `?` calls its declared error conversion (`impl Source -> Target`)
+        // by key, with no call node.
+        .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
+        .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
         else -> {}
     }
 }

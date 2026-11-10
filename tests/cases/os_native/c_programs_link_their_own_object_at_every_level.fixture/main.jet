@@ -1,0 +1,10 @@
+// A program whose only C is a checked foreign declaration: live code decides
+// its closure (musl's getpid), so it links the Jet-only runtime object.
+use c: c.c
+#Import c.c: module {
+    getpid: fn() -> I32 = "getpid"
+}
+
+run: fn() {
+    print("pid positive={c.getpid() > I32{0}}")
+}

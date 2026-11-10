@@ -6,8 +6,8 @@ use {
     jet_pkg_model.[
         EffectBudgetImport, EffectBudgetModule, EffectBudgetProgram, EffectBudgetWitness,
         EffectProjection, PackageEffectSummary, PackageEffects, PackageFacts, PackageGrant,
-        pkg_compute_package_effects, pkg_effect_enforce, pkg_effect_gain_list, pkg_effect_summary_json_for_entry,
-        pkg_effect_summary_line_for_entry, pkg_lock_e3513, pkg_lock_record_effect_rows, pkg_render_effect_projection_json,
+        pkg_compute_package_effects, pkg_effect_enforce, pkg_effect_summary_json_for_entry,
+        pkg_effect_summary_line_for_entry, pkg_lock_e3513, pkg_lock_record_effect_rows, pkg_lock_widened_note, pkg_render_effect_projection_json,
     ]
     jet_foundation.[Span, authority_holds]
     jetpack_foundation.[UNIFIED_LOCK_FILE]
@@ -123,6 +123,30 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
 }
 
+#Test("a grant line is the dependency's whole limit and names the call path") {
+    manifest := pkg_test_budget_manifest([String]{"FS", "Net"})
+    chains: [String: [String]]{"Net": [String]{"dep::fetch", "dep::dial"}}
+    entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, chains, [String]{}, None)}
+    // `allow` lists Net, so without a line the dependency may use it.
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+    // An empty line pins the dependency below `allow`.
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{}}}
+    pinned: pkg_effect_enforce(entries, manifest)
+    assert_eq(pinned.len(), 1)
+    assert_eq(pinned[0].code, "E1220")
+    assert(pinned[0].what.contains("`dep` function `dep::dial` uses the `Net` effect"))
+    assert(pinned[0].what.contains("authority.grants"))
+    assert_eq(pinned[0].call_chain, [String]{"dep::fetch", "dep::dial"})
+    // A line that covers the effect lets it through even when `allow` doesn't.
+    manifest.authority.allow = Val([String]{"FS"})
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{"Net"}}}
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+    // What the line grants passes `deny` too: the line is written for this
+    // one dependency.
+    manifest.authority.deny = Val([String]{"Net"})
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+}
+
 #Test("a written allow row is a ceiling over the root package's own code") {
     manifest := pkg_test_budget_manifest([String]{"FS"})
     entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String: [String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
@@ -137,6 +161,30 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     manifest.authority.deny = Val([String]{"Net"})
     manifest.authority.allow = Val([String]{"Net"})
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+}
+
+// #6281 c146: a foreign call is held to the written `allow` row by the
+// effects it has. An undescribed C call has `FFI.C`, the opt-in to "foreign
+// code may do anything"; a descriptor-owned binding has its descriptor's
+// root; `FFI.C` never covers another FFI leaf or a Jet-side effect.
+#Test("a written allow row holds each foreign call to the effects it has") {
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "IO"}, [String: [String]]{"FFI.C": [String]{"run::run"}}, [String]{}, None)}
+    omitted: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"IO", "Mem.Alloc"}))
+    assert_eq(omitted.len(), 1)
+    assert_eq(omitted[0].code, "E0749")
+    assert(omitted[0].what.contains("`FFI.C`"))
+    assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"})).len(), 0)
+    assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI", "IO", "Mem.Alloc"})).len(), 0)
+    described: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.Fortran"}, [String: [String]]{"FFI.Fortran": [String]{"run::run"}}, [String]{}, None)}
+    fortran: pkg_effect_enforce(described, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
+    assert_eq(fortran.len(), 1)
+    assert_eq(fortran[0].code, "E0749")
+    assert(fortran[0].what.contains("`FFI.Fortran`"))
+    jet_side: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "Net"}, [String: [String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
+    net: pkg_effect_enforce(jet_side, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
+    assert_eq(net.len(), 1)
+    assert_eq(net[0].code, "E0749")
+    assert(net[0].what.contains("`Net`"))
 }
 
 #Test("panic budget ignores allow omission but honors denial") {
@@ -182,29 +230,37 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert(json.contains("\"authority\":\"package.jet authority\""), json)
 }
 
-#Test("the lock records a dependency's first effect row silently and names each widening") {
+#Test("the lock records a dependency's first effect row silently and names each widening with its call path") {
     root: files.tmpdir("effect-rows-") ?? panic("scratch")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("managed dir")
     lock_path: files.join(root, UNIFIED_LOCK_FILE)
     files.write(lock_path, "version = 1\n\n[[package]]\nname = \"app\"\nversion = \"0.1.0\"\nsource = {{ root = \".\" }}\nfingerprint = \"\"\ndependencies = [\"dep\"]\n\n[[package]]\nname = \"dep\"\nversion = \"0.1.0\"\nsource = {{ path = \"./dep\" }}\nfingerprint = \"sha256-00\"\ndependencies = []\n\n[root]\ndependencies = [\"dep\"]\n") ?? panic("seed")
     pure: [PackageEffects]{pkg_test_package_effects("root", [String]{"IO"}, [String: [String]]{}, [String]{}, None), pkg_test_package_effects("dep", [String]{}, [String: [String]]{}, [String]{}, None)}
     // A stop is deny-only: never named as a gain nor recorded.
-    reading: [PackageEffects]{pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String: [String]]{}, [String]{}, None)}
+    witness: EffectBudgetWitness{path: "/workspace/app/dep/dep.jet", span: Span{start: 40, end: 44}}
+    reading := pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String: [String]]{"FS.Read": [String]{"dep::greet", "dep::load"}}, [String]{}, None)
+    reading.effect_witnesses = [String: EffectBudgetWitness]{"dep::load": witness}
+    widening: [PackageEffects]{reading}
     first: pkg_lock_record_effect_rows(root, pure, false) ?? panic("record first")
     assert_eq(first.len(), 0)
     recorded: files.read(lock_path) ?? panic("read first")
     assert(recorded.contains("effect-authority = \"package.jet authority\""), recorded)
     assert(!recorded.contains("IO"), recorded)
     // `--locked` names the widening and writes nothing.
-    refused: pkg_lock_record_effect_rows(root, reading, true) ?? panic("check locked")
+    refused: pkg_lock_record_effect_rows(root, widening, true) ?? panic("check locked")
     assert_eq(refused.len(), 1)
     assert_eq(refused[0].name, "dep")
-    assert_eq(refused[0].effects, [String]{"FS.Read"})
+    assert_eq(refused[0].reaches.len(), 1)
+    assert_eq(refused[0].reaches[0].effect_name, "FS.Read")
+    assert_eq(refused[0].reaches[0].chain, [String]{"dep::greet", "dep::load"})
     assert_eq(files.read(lock_path) ?? panic("read locked"), recorded)
-    report: pkg_lock_e3513(refused[0])
+    report: pkg_lock_e3513(refused[0].name, refused[0].reaches[0])
     assert_eq(report.code, "E3513")
     assert_eq(report.what, "Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it")
-    widened: pkg_lock_record_effect_rows(root, reading, false) ?? panic("record widened")
+    assert_eq(report.call_chain, [String]{"dep::greet", "dep::load"})
+    assert_eq(report.span, Val(Span{start: 40, end: 44}))
+    assert_eq(pkg_lock_widened_note(refused[0].name, refused[0].reaches[0]), "note: `dep` now reaches `FS.Read` through dep::greet → dep::load; `.jet/lock` records its wider effect row\n")
+    widened: pkg_lock_record_effect_rows(root, widening, false) ?? panic("record widened")
     assert_eq(widened.len(), 1)
     wider: files.read(lock_path) ?? panic("read widened")
     assert(wider.contains("effects = [\"FS.Read\"]"), wider)
@@ -214,10 +270,4 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(narrower.len(), 0)
     assert_eq(files.read(lock_path) ?? panic("read narrower"), wider)
     files.remove_all(root).drop("cleanup")
-}
-
-#Test("a widening names its effects as prose") {
-    assert_eq(pkg_effect_gain_list([String]{"FS.Read"}), "`FS.Read`")
-    assert_eq(pkg_effect_gain_list([String]{"FS.Read", "Net"}), "`FS.Read` and `Net`")
-    assert_eq(pkg_effect_gain_list([String]{"Env", "FS.Read", "Net"}), "`Env`, `FS.Read` and `Net`")
 }

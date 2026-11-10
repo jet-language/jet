@@ -14,7 +14,7 @@ use {
 COMMIT: "1111111111111111111111111111111111111111"
 TREE: "2222222222222222222222222222222222222222"
 OTHER_COMMIT: "4444444444444444444444444444444444444444"
-SEED_IDENTITY: "jet@0.0.1#3333333333333333333333333333333333333333333333333333333333333333"
+SEED_IDENTITY: "jet@a0.0.25#3333333333333333333333333333333333333333333333333333333333333333"
 TARGET: "linux-x64"
 
 // The fake publisher: it logs each call, and `release create` records the
@@ -151,10 +151,11 @@ make_build: fn(dir: String, jet: String) Never! -[FS]> {
     put(files.join(dir, "jet"), jet)
     files.set_mode(files.join(dir, "jet"), 493) ?? panic("chmod jet: {err}")
     sha: jet_sha(dir)
-    identity: "jet@0.0.1#{sha}"
+    identity: "jet@a0.0.26#{sha}"
     put(files.join(dir, "jet-runtime/native.key"), "runtime-key-1\n")
     put_json(files.join(dir, "jet-runtime/provenance.json"), object([String: Dyn]{"compilerSha256": Dyn.Text(sha)}))
     put(files.join(dir, "IDENTITY"), "{identity}\n")
+    put(files.join(dir, "VERSION"), "a0.0.26 {COMMIT} 2026-01-02\n")
     write_sums(dir)
     put(files.join(dir, "COMMIT"), "{COMMIT}\n")
     put(files.join(dir, "SEED"), "{SEED_IDENTITY}\n")
@@ -181,7 +182,7 @@ new_fixture: fn(label: String) -[FS, Env]> Fixture Never! {
         dir: dir,
         evidence: [String]{runner(scratch, "ev1", dir, 0, 1, "PASS", passing_rows())},
         signer: Signer{seed_path: seed_path, public_key: public_of(seed_bytes(7))},
-        remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0_025", commit: OTHER_COMMIT}}, local_tags: [String]{"a0_025"}, released: [String]{"a0_025"}, on_origin_dev: true, tree: TREE, problems: [Problem]{}},
+        remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0.0.25", commit: OTHER_COMMIT}}, local_tags: [String]{"a0.0.25"}, released: [String]{"a0.0.25"}, on_origin_dev: true, tree: TREE, problems: [Problem]{}},
         programs: Programs{gh: [String]{gh}, jet: [String]{jet}},
     }
 }
@@ -261,10 +262,10 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     dir: fixture.dir
     record: read_tree(files.join(dir, CANDIDATE_FILE))
     sha: jet_sha(dir)
-    identity: "jet@0.0.1#{sha}"
-    asset: "jet-a0_026-{TARGET}.tar.gz"
+    identity: "jet@a0.0.26#{sha}"
+    asset: "jet-a0.0.26-{TARGET}.tar.gz"
     assert_eq(text_field(record, "schema"), CANDIDATE_SCHEMA)
-    assert_eq(text_field(record, "name"), "a0_026")
+    assert_eq(text_field(record, "name"), "a0.0.26")
     assert_eq(text_field(field(record, "source"), "commit"), COMMIT)
     assert_eq(text_field(field(record, "source"), "tree"), TREE)
     assert_eq(text_field(field(record, "source"), "repository"), "example/jet")
@@ -308,7 +309,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert(notes.contains("- Commit: {COMMIT}"))
     assert(notes.contains("- Seed: `{SEED_IDENTITY}`"))
     assert(notes.contains("- Gate: `Tools/agent/VerifyFull.jet` passed on this commit with this binary (2 checks from 1 runner)."))
-    assert(notes.contains("gh release download -R example/jet -p 'jet-a0_*-{TARGET}.tar.gz*'"))
+    assert(notes.contains("gh release download -R example/jet -p 'jet-a0.0.*-{TARGET}.tar.gz*'"))
     digest: text_field(record, "content_digest")
     assert_eq(content_digest(record) ?? panic("digest {err.text}"), digest)
     signature: (files.read(files.join(dir, SIGNATURE_FILE)) ?? panic("sig {err}")).trim().copy()
@@ -317,8 +318,23 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert_eq(files.read(files.join(files.join(dir, STAGE_DIR), CANDIDATE_FILE)) ?? panic("staged record {err}"), files.read(files.join(dir, CANDIDATE_FILE)) ?? panic("record {err}"))
     dry: publish(fixture, dry_run: true)
     expect_clean(dry, "DRY-RUN")
-    assert(dry.report.join("\n").contains("gh release create a0_026 -R example/jet --target {COMMIT} --title a0_026 --notes-file NOTES.md --latest {asset}"))
+    assert(dry.report.join("\n").contains("gh release create a0.0.26 -R example/jet --target {COMMIT} --title a0.0.26 --notes-file NOTES.md --latest {asset}"))
     assert_eq(gh_log(fixture), [String]{})
+}
+
+#Test("candidate refuses a release whose VERSION stamp names another release or commit") {
+    stamps: [String]{"a0.0.27 {COMMIT} 2026-01-02", "a0.0.26 {OTHER_COMMIT} 2026-01-02", ""}
+    loop (index, stamp) in stamps {
+        fixture: new_fixture("stamp-{index}")
+        path: files.join(fixture.dir, "VERSION")
+        if stamp == "" {
+            files.remove(path) ?? panic("rm VERSION {err}")
+        } else {
+            put(path, "{stamp}\n")
+        }
+        write_sums(fixture.dir)
+        expect(candidate(fixture), "BLOCKED", STALE, "does not name release a0.0.26 of {COMMIT}")
+    }
 }
 
 #Test("publish refuses a release directory that no longer matches its signed record") {
@@ -342,11 +358,11 @@ texts: fn(items: [Dyn]) -> [String] Never! {
                 section = "`tests`"
             }
             edit == "asset" -> {
-                put(files.join(files.join(dir, STAGE_DIR), "IDENTITY"), "jet@0.0.1#{"0".repeat(64)}\n")
+                put(files.join(files.join(dir, STAGE_DIR), "IDENTITY"), "jet@a0.0.26#{"0".repeat(64)}\n")
                 section = "`artifacts.release`"
             }
             else -> {
-                put(files.join(dir, "SEED"), "jet@0.0.1#{"5".repeat(64)}\n")
+                put(files.join(dir, "SEED"), "jet@a0.0.25#{"5".repeat(64)}\n")
                 section = "`toolchain.seed`"
             }
         }
@@ -467,24 +483,24 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 
 #Test("nondeterminism blocks: a chain without a fixed point, an archive that packs differently") {
     chain: new_fixture("chain")
-    identity: "jet@0.0.1#{jet_sha(chain.dir)}"
-    write_build(chain.dir, identity, "jet@0.0.1#{"7".repeat(64)}")
+    identity: "jet@a0.0.26#{jet_sha(chain.dir)}"
+    write_build(chain.dir, identity, "jet@a0.0.26#{"7".repeat(64)}")
     expect(candidate(chain), "BLOCKED", NONDETERMINISM, "no fixed point")
     unrecorded: new_fixture("chain-missing")
     write_build(unrecorded.dir, "", "")
     expect(candidate(unrecorded), "BLOCKED", NONDETERMINISM, "no record of the chain's fixed point")
     archive: new_fixture("pack")
     expect_clean(candidate(archive), "CANDIDATE")
-    staged: files.join(files.join(archive.dir, STAGE_DIR), "jet-a0_026-{TARGET}.tar.gz")
+    staged: files.join(files.join(archive.dir, STAGE_DIR), "jet-a0.0.26-{TARGET}.tar.gz")
     first: files.read_bytes(staged) ?? panic("archive {err}")
     assert_eq(repack_problems(archive.dir, staged, 90).len(), 0)
-    assert_eq(files.read_bytes(files.join(archive.dir, "audit/090-repack/jet-a0_026-{TARGET}.tar.gz")) ?? panic("repack {err}"), first)
+    assert_eq(files.read_bytes(files.join(archive.dir, "audit/090-repack/jet-a0.0.26-{TARGET}.tar.gz")) ?? panic("repack {err}"), first)
     changed := first.copy()
     changed.push(U8{0})
     files.write_bytes(staged, changed) ?? panic("rewrite {err}")
     repacked: repack_problems(archive.dir, staged, 91)
-    assert(has_problem(repacked, NONDETERMINISM, "packing jet-a0_026-{TARGET}.tar.gz twice gave different bytes"))
-    assert(files.exists(files.join(archive.dir, "audit/091-repack/jet-a0_026-{TARGET}.tar.gz")))
+    assert(has_problem(repacked, NONDETERMINISM, "packing jet-a0.0.26-{TARGET}.tar.gz twice gave different bytes"))
+    assert(files.exists(files.join(archive.dir, "audit/091-repack/jet-a0.0.26-{TARGET}.tar.gz")))
 }
 
 #Test("a partial publication blocks, keeps the stage and the audit, and a rerun refuses to create again") {
@@ -492,19 +508,19 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     expect_clean(candidate(fixture), "CANDIDATE")
     put(files.join(fixture.scratch, "gh/mode"), "partial\n")
     outcome: publish(fixture)
-    expect(outcome, "PARTIAL", PARTIAL, "GitHub lacks jet-a0_026-{TARGET}.tar.gz.sha256")
+    expect(outcome, "PARTIAL", PARTIAL, "GitHub lacks jet-a0.0.26-{TARGET}.tar.gz.sha256")
     expect(outcome, "PARTIAL", PARTIAL, "gh release create exited 1")
     assert(files.exists(files.join(files.join(fixture.dir, STAGE_DIR), "jet")))
     calls: gh_log(fixture)
     assert_eq(calls.len(), 2)
-    assert(calls[0].starts_with("release create a0_026 -R example/jet --target {COMMIT}"))
-    assert(calls[1].starts_with("release view a0_026"))
-    rerun: publish(released(fixture, "a0_026"))
+    assert(calls[0].starts_with("release create a0.0.26 -R example/jet --target {COMMIT}"))
+    assert(calls[1].starts_with("release view a0.0.26"))
+    rerun: publish(released(fixture, "a0.0.26"))
     expect(rerun, "PARTIAL", PARTIAL, "GitHub lacks")
-    assert(rerun.report.join("\n").contains("gh release upload a0_026"))
+    assert(rerun.report.join("\n").contains("gh release upload a0.0.26"))
     again: gh_log(fixture)
     assert_eq(again.len(), 3)
-    assert(again[2].starts_with("release view a0_026"))
+    assert(again[2].starts_with("release view a0.0.26"))
     assert(files.exists(files.join(fixture.dir, "audit/002-publish.json")))
     assert(files.exists(files.join(fixture.dir, "audit/003-publish.json")))
 }
@@ -517,7 +533,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     complete: new_fixture("complete")
     expect_clean(candidate(complete), "CANDIDATE")
     expect_clean(publish(complete), "PUBLISHED")
-    expect_clean(publish(released(complete, "a0_026")), "PUBLISHED")
+    expect_clean(publish(released(complete, "a0.0.26")), "PUBLISHED")
     calls: gh_log(complete)
     creates := 0
     loop call in calls {
@@ -565,34 +581,37 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 }
 
 #Test("an admitted release needs a full passing RELEASE.json of its own identity, and its tag on origin") {
-    identity: "jet@0.0.1#{"a".repeat(64)}"
-    good: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text("a0_026"), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("PASS"), "scope": Dyn.Text("full"), "identity": Dyn.Text(identity)})
+    identity: "jet@a0.0.26#{"a".repeat(64)}"
+    good: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text("a0.0.26"), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("PASS"), "scope": Dyn.Text("full"), "identity": Dyn.Text(identity)})
     assert_eq(admission_problems(good, identity).len(), 0)
-    bad: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text(""), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("FAIL"), "scope": Dyn.Text("filtered: io"), "identity": Dyn.Text("jet@0.0.1#b")})
+    bad: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text(""), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("FAIL"), "scope": Dyn.Text("filtered: io"), "identity": Dyn.Text("jet@a0.0.26#b")})
     found: admission_problems(bad, identity)
     assert(has_problem(found, ADMISSION, "verdict is FAIL, not PASS"))
     assert(has_problem(found, ADMISSION, "scope is filtered: io, not full"))
-    assert(has_problem(found, ADMISSION, "admitted jet@0.0.1#b, not {identity}"))
+    assert(has_problem(found, ADMISSION, "admitted jet@a0.0.26#b, not {identity}"))
     assert(has_problem(found, ADMISSION, "name or commit is missing"))
     release := read_release("/nonexistent")
     release.kind = "admitted"
     release.commit = "c".repeat(40)
-    remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0_026", commit: "d".repeat(40)}}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: TREE, problems: [Problem]{}}
-    assert(has_problem(remote_problems(release, remote, "a0_026"), REMOTE, "names {"d".repeat(40)}"))
-    assert(has_problem(remote_problems(release, remote, "a0_027"), REMOTE, "is missing"))
+    remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0.0.26", commit: "d".repeat(40)}}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: TREE, problems: [Problem]{}}
+    assert(has_problem(remote_problems(release, remote, "a0.0.26"), REMOTE, "names {"d".repeat(40)}"))
+    assert(has_problem(remote_problems(release, remote, "a0.0.27"), REMOTE, "is missing"))
 }
 
 #Test("the GitHub slug, origin tags and next release name come from git's own output") {
     assert_eq(github_slug("git@github.com:jet-language/jet"), "jet-language/jet")
     assert_eq(github_slug("https://github.com/jet-language/jet.git\n"), "jet-language/jet")
     assert_eq(github_slug("https://gitlab.com/jet-language/jet.git"), "")
-    tags: remote_tags("aaa\trefs/tags/a0_021\nbbb\trefs/tags/a0_021^{{}}\nccc\trefs/tags/a0_025\n")
+    tags: remote_tags("aaa\trefs/tags/a0.0.21\nbbb\trefs/tags/a0.0.21^{{}}\nccc\trefs/tags/a0.0.25\n")
     assert_eq(tags.len(), 2)
-    assert_eq(tag_commit(tags, "a0_021"), Val("bbb"))
-    assert_eq(tag_commit(tags, "a0_025"), Val("ccc"))
-    assert_eq(next_release_name([String]{"a0_005", "a0_025", "v1", "a0_02x"}), "a0_026")
-    assert_eq(next_release_name([String]{}), "a0_001")
-    assert_eq(next_release_name([String]{"a0_099"}), "a0_100")
+    assert_eq(tag_commit(tags, "a0.0.21"), Val("bbb"))
+    assert_eq(tag_commit(tags, "a0.0.25"), Val("ccc"))
+    assert_eq(next_release_name([String]{"a0.0.5", "a0.0.25", "v1", "a0.0.2x", "a0.0.026", "a0.0."}), "a0.0.26")
+    assert_eq(next_release_name([String]{}), "a0.0.1")
+    assert_eq(next_release_name([String]{"a0.0.99"}), "a0.0.100")
+    // The seeds published as a0_NNN before the a0.0.N names count in the one sequence.
+    assert_eq(next_release_name([String]{"a0_041", "a0_042", "a0_04x"}), "a0.0.43")
+    assert_eq(next_release_name([String]{"a0_042", "a0.0.43"}), "a0.0.44")
 }
 
 kit_row: fn(id: String, tier: String, status: String) -> SuiteRow Never! {
@@ -712,18 +731,20 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(parse_admit_args([String]{"a", "b", "--summary"}).errors, [String]{"one commit, not a and b", "--summary needs a value"})
 }
 
-#Test("the shards of the sides at once split the slot memory cap and the threads instead of each claiming the whole room") {
+#Test("the kit processes the slot runs at once split its memory cap and threads instead of each claiming the whole room") {
     plain: parse_admit_args([String]{"abc"})
-    assert_eq(shard_pool(plain, 4, 1, "16G", ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 4, 1, "", ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 1, 1, "24G", ""), [String]{"--memory=24G"})
-    assert_eq(shard_pool(plain, 16, 1, "8G", ""), [String]{"--memory=1G"})
-    assert_eq(shard_pool(plain, 4, 2, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
-    assert_eq(shard_pool(plain, 4, 1, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
-    assert_eq(shard_pool(plain, 16, 2, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
+    assert_eq(plain.shards, 8)
+    assert_eq(shard_pool(plain, 4, "16G", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 4, "", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 1, "24G", ""), [String]{"--memory=24G"})
+    assert_eq(shard_pool(plain, 16, "8G", ""), [String]{"--memory=1G"})
+    // The release slot under the default --shards 8.
+    assert_eq(shard_pool(plain, 8, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 16, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
     three: parse_admit_args([String]{"abc", "--jobs", "3"})
-    assert_eq(shard_pool(three, 4, 1, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
-    assert_eq(shard_pool(three, 4, 2, "64G", ""), [String]{"--memory=8G", "--jobs=1"})
+    assert_eq(shard_pool(three, 4, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(three, 8, "64G", ""), [String]{"--memory=8G", "--jobs=3"})
 }
 
 #Test("a CPU list counts its CPUs") {
@@ -735,8 +756,8 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
 }
 
 #Test("a suite's runner reads the candidate's tree and its rows read their side's tree") {
-    vars: suite_vars([Var]{set_var("TMPDIR", "/tmp/x")}, "/work/tree", "/work/release-tree", "jet@0.0.1#aa", "/release/jet")
-    assert_eq((loop found in vars -> "{found.name}={found.value}"), [String]{"TMPDIR=/tmp/x", "JET_COMPILER_IDENTITY=jet@0.0.1#aa", "JET_TOOLCHAIN_ROOT=/work/tree", "JET_TEST_TOOLCHAIN_ROOT=/work/release-tree", "JET=/release/jet"})
+    vars: suite_vars([Var]{set_var("TMPDIR", "/tmp/x")}, "/work/tree", "/work/release-tree", "jet@a0.0.26#aa", "/release/jet")
+    assert_eq((loop found in vars -> "{found.name}={found.value}"), [String]{"TMPDIR=/tmp/x", "JET_COMPILER_IDENTITY=jet@a0.0.26#aa", "JET_TOOLCHAIN_ROOT=/work/tree", "JET_TEST_TOOLCHAIN_ROOT=/work/release-tree", "JET=/release/jet"})
 }
 
 // A seed `name` in `dir` whose jet holds `jet`, released as itself: its
@@ -744,7 +765,7 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
 put_seed: fn(dir: String, jet: String, name: String) -[FS]> String Never! {
     put(files.join(dir, "jet"), jet)
     sha: sha256_file(files.join(dir, "jet"))
-    identity: "jet@0.0.1#{sha}"
+    identity: "jet@{name}#{sha}"
     put(files.join(dir, "IDENTITY"), "{identity}\n")
     put(files.join(dir, "jet-runtime/README"), "pack\n")
     put(files.join(dir, "SOURCE"), "{COMMIT} (dev, {name})\n")
@@ -753,26 +774,26 @@ put_seed: fn(dir: String, jet: String, name: String) -[FS]> String Never! {
     identity
 }
 
-// A seeds directory as a boot seed leaves it: `current` is boot-a0_041, a
-// jet built from a later tree that carries a0_041's release files, and
-// a0_041 is the published release.
+// A seeds directory as a boot seed leaves it: `current` is boot-a0.0.25, a
+// jet built from a later tree that carries a0.0.25's release files, and
+// a0.0.25 is the published release.
 boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     seeds: files.mkdtemp("jet-release-{label}-") ?? panic("scratch: {err}")
-    put_seed(files.join(seeds, "a0_041"), "published jet\n", "a0_041")
-    boot: files.join(seeds, "boot-a0_041")
+    put_seed(files.join(seeds, "a0.0.25"), "published jet\n", "a0.0.25")
+    boot: files.join(seeds, "boot-a0.0.25")
     put(files.join(boot, "jet"), "boot jet\n")
-    put(files.join(boot, "IDENTITY"), "jet@0.0.1#{sha256_file(files.join(boot, "jet"))}\n")
+    put(files.join(boot, "IDENTITY"), "jet@a0.0.26#{sha256_file(files.join(boot, "jet"))}\n")
     put(files.join(boot, "jet-runtime/README"), "pack\n")
     copied: [String]{"SOURCE", "SHA256SUMS", "RELEASE.json"}
-    loop name in copied -> put(files.join(boot, name), files.read(files.join(seeds, "a0_041/{name}")) ?? panic("read {name}: {err}"))
-    files.symlink("boot-a0_041", files.join(seeds, "current")) ?? panic("current: {err}")
+    loop name in copied -> put(files.join(boot, name), files.read(files.join(seeds, "a0.0.25/{name}")) ?? panic("read {name}: {err}"))
+    files.symlink("boot-a0.0.25", files.join(seeds, "current")) ?? panic("current: {err}")
     seeds
 }
 
 #Test("a current release whose jet is the one it was released as is the release column") {
     seeds: files.mkdtemp("jet-release-genuine-") ?? panic("scratch: {err}")
-    identity: put_seed(files.join(seeds, "a0_041"), "published jet\n", "a0_041")
-    files.symlink("a0_041", files.join(seeds, "current")) ?? panic("current: {err}")
+    identity: put_seed(files.join(seeds, "a0.0.25"), "published jet\n", "a0.0.25")
+    files.symlink("a0.0.25", files.join(seeds, "current")) ?? panic("current: {err}")
     current: release_info(seeds)
     assert_eq(current.error, "")
     assert_eq(current.genuine, "")
@@ -787,30 +808,30 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     seeds: boot_seeds("boot")
     current: release_info(seeds)
     assert_eq(current.error, "")
-    assert_eq(current.name, "boot-a0_041")
-    assert_eq(current.identity, "jet@0.0.1#{sha256_file(files.join(seeds, "boot-a0_041/jet"))}")
+    assert_eq(current.name, "boot-a0.0.25")
+    assert_eq(current.identity, "jet@a0.0.26#{sha256_file(files.join(seeds, "boot-a0.0.25/jet"))}")
     assert(current.genuine.contains("SHA256SUMS does not list its jet"))
     assert(current.genuine.contains("RELEASE.json records identity"))
     column: baseline_info(seeds, current)
     assert_eq(column.error, "")
-    assert_eq(column.name, "a0_041")
-    assert_eq(column.jet_sha, sha256_file(files.join(seeds, "a0_041/jet")))
-    assert_eq(column.identity, "jet@0.0.1#{column.jet_sha}")
+    assert_eq(column.name, "a0.0.25")
+    assert_eq(column.jet_sha, sha256_file(files.join(seeds, "a0.0.25/jet")))
+    assert_eq(column.identity, "jet@a0.0.25#{column.jet_sha}")
     assert_eq(column.commit, COMMIT)
-    assert_eq(column_text(column.name, column.identity, column.jet_sha, column.commit), "a0_041 ({column.identity}), jet {column.jet_sha}, tree {COMMIT}")
+    assert_eq(column_text(column.name, column.identity, column.jet_sha, column.commit), "a0.0.25 ({column.identity}), jet {column.jet_sha}, tree {COMMIT}")
 }
 
 #Test("a run is refused when neither the current release nor the one it names has its released jet") {
     missing: boot_seeds("missing")
-    files.rename(files.join(missing, "a0_041"), files.join(missing, "kept")) ?? panic("rename: {err}")
+    files.rename(files.join(missing, "a0.0.25"), files.join(missing, "kept")) ?? panic("rename: {err}")
     gone: baseline_info(missing, release_info(missing))
-    assert(gone.error.starts_with("no baseline: the jet of boot-a0_041 is not the release its files name (SHA256SUMS does not list its jet"))
-    assert(gone.error.ends_with("and {files.join(missing, "a0_041")} does not exist"))
+    assert(gone.error.starts_with("no baseline: the jet of boot-a0.0.25 is not the release its files name (SHA256SUMS does not list its jet"))
+    assert(gone.error.ends_with("and {files.join(missing, "a0.0.25")} does not exist"))
     tampered: boot_seeds("tampered")
-    put(files.join(tampered, "a0_041/jet"), "rebuilt jet\n")
+    put(files.join(tampered, "a0.0.25/jet"), "rebuilt jet\n")
     rebuilt: baseline_info(tampered, release_info(tampered))
-    assert(rebuilt.error.contains(", nor is {files.join(tampered, "a0_041")}'s: SHA256SUMS does not list its jet"))
-    assert(rebuilt.error.contains("IDENTITY jet@0.0.1#"))
+    assert(rebuilt.error.contains(", nor is {files.join(tampered, "a0.0.25")}'s: SHA256SUMS does not list its jet"))
+    assert(rebuilt.error.contains("IDENTITY jet@a0.0.25#"))
 }
 
 #Test("a lost row is one the release passes and the candidate fails on both runs") {
@@ -871,6 +892,63 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     merged: merged_rows(rows, [SuiteRow]{kit_row("tests/cases/b/z.case", "-", "PASS")}, [String]{"tests/cases/b/z.case"})
     assert_eq(row_ids(merged), [String]{"tests/cases/a/x.case", "tests/cases/a/y.case", "tests/cases/b/z.case"})
     assert_eq(merged[2].status, "PASS")
+}
+
+#Test("a ledger names its row IDs and owns a project by its directory and a file entry by its stem") {
+    known: ledger_ids("# id\tcard\treason\n\ntests/golden/a\t#1\twhy\ntests/ui/b.jet\t#2\twhy\ntests/cases/c.case\t#3\twhy\nshort\tline\n")
+    assert_eq(known.len(), 3)
+    assert(ledger_owns(known, "tests/golden/a/run.jet"))
+    assert(ledger_owns(known, "tests/golden/a.jet"))
+    assert(ledger_owns(known, "tests/ui/b.jet"))
+    assert(ledger_owns(known, "tests/cases/c.case"))
+    assert(!ledger_owns(known, "tests/golden/ab.jet"))
+    assert(!ledger_owns(known, "tests/cases/c"))
+}
+
+#Test("the release column runs the rows that can differ from s2's, each ID once, and never an opt-in row") {
+    rows: [SuiteRow]{
+        kit_row("tests/ui/fail/x.jet", "o0", "FAIL"),
+        kit_row("tests/ui/known/x.jet", "o0", "KNOWN-FAILING"),
+        kit_row("tests/ui/fixed/x.jet", "o0", "UNEXPECTED-PASS"),
+        kit_row("tests/ui/ledger/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/edited/x.jet", "o0", "PASS"),
+        kit_row("tests/cases/p/x.case", "-", "PASS"),
+        kit_row("tests/cases/q/help.case", "-", "PASS"),
+        kit_row("tests/cases/r/core.case", "-", "PASS"),
+        kit_row("tests/ui/tiers/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/tiers/x.jet", "o1", "FAIL"),
+        kit_row("tests/ui/fail/x.jet", "o1", "FAIL"),
+        kit_row("tests/ui/same/x.jet", "o0", "PASS"),
+        kit_row("tests/ui/host/x.jet", "o0", "SKIP-HOST"),
+        kit_row("tests/cases/opt/run.case", "-", "OPT-IN"),
+    }
+    paths: [String]{"tests/ui/edited/x.jet", "tests/cases/p/fixtures/main.jet", "tests/cli/help.txt", "tests/cases/opt/fixture.jet", "Compiler/JetCli/Source/Cli/Main.jet"}
+    sources: [String: String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n", "tests/ui/same/x.jet": "run: fn() {{}}\n"}
+    picks: release_picks(rows, ReleaseRule{every: false, paths: paths, known: ledger_ids("tests/ui/ledger/x\t#1\twhy\n"), sources: sources})
+    assert_eq((loop pick in picks -> "{pick.id} {pick.reason}"), [String]{
+        "tests/ui/fail/x.jet failing on s2",
+        "tests/ui/known/x.jet failing on s2",
+        "tests/ui/fixed/x.jet known-failing",
+        "tests/ui/ledger/x.jet known-failing",
+        "tests/ui/edited/x.jet changed",
+        "tests/cases/p/x.case changed",
+        "tests/cases/q/help.case naming a changed file",
+        "tests/cases/r/core.case reading the checkout",
+        "tests/ui/tiers/x.jet failing on s2",
+    })
+    every: release_picks(rows, ReleaseRule{every: true, paths: [String]{}, known: [String: Bool]{}, sources: [String: String]{}})
+    assert_eq(every.len(), 11)
+    assert(!(loop pick in every -> pick.id.copy()).contains("tests/cases/opt/run.case"))
+}
+
+#Test("the release column counts a row it did not run as passing only where s2 passes it, skips it on this host or leaves it opt-in") {
+    ran: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "PASS")}
+    candidate: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("b.jet", "o1", "PASS"), kit_row("c.jet", "o0", "PASS"), kit_row("d.jet", "o0", "SKIP-HOST"), kit_row("e.jet", "o0", "OPT-IN"), kit_row("f.jet", "o0", "FAIL")}
+    column: judged_release(ran, candidate)
+    assert_eq(row_ids(column), [String]{"a.jet", "b.jet", "c.jet", "d.jet", "e.jet"})
+    result: compare_suites(column, candidate, [SuiteRow]{}, [Disposition]{})
+    assert_eq(result.gained.len(), 1)
+    assert_eq(lost_ids(result).len(), 0)
 }
 
 #Test("a dispositioned lost row is tracked by its card, not untracked") {

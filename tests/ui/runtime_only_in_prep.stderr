@@ -1,0 +1,8 @@
+Error [jet.ComptimeEffectWithoutImpure]: `core.process.args()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  --> tests/ui/runtime_only_in_prep.jet:6:43
+    |
+  6 | ARGUMENT_COUNT: comptime { process.args().len() }
+    |                                           ^^^
+ Why: Effectful Core APIs are not allowed in pure comptime evaluation
+ Fix: Wrap the comptime binding in `#Impure("reason") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime
+More: jet-lang.dev/e/E3410

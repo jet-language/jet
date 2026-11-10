@@ -1,0 +1,66 @@
+// The one provider registry. Every provider name Jetpack knows is one row,
+// and each row states which surfaces own it: the built-in `RefSource` a
+// `package@source` ref resolves to, the `ProviderKind` a source declaration
+// realizes through, the federation family that normalizes its metadata, and
+// whether its references must name the provider and an exact identity.
+// `RefSource`, `ProviderKind`, `ProviderFamily` and `pkg_provider_is_external`
+// all read this table, so a provider can't be added to one surface and
+// forgotten in another without the drift claims in Tests/ProviderRows.jet
+// failing.
+//
+// Several source words realize through one provider: `jetpack` and
+// `nixpkgs` through `nix`, and `releases` through `jetpackage`. The first
+// row holding a kind or family names it, so a provider's own row comes
+// before the source words that share it. `path` and `github` hold no kind
+// because theirs is inferred from the target (`envmodel_infer_provider_kind`).
+use jetpack_foundation.[
+    REF_SOURCE_BINARY, REF_SOURCE_CARGO, REF_SOURCE_CONAN, REF_SOURCE_CRAN,
+    REF_SOURCE_GITHUB, REF_SOURCE_HOMEBREW, REF_SOURCE_JETPACK, REF_SOURCE_JET_REGISTRY,
+    REF_SOURCE_LUAROCKS, REF_SOURCE_MAVEN, REF_SOURCE_NIXPKGS, REF_SOURCE_NPM,
+    REF_SOURCE_NUGET, REF_SOURCE_PATH, REF_SOURCE_PERL, REF_SOURCE_PHP, REF_SOURCE_PYPI,
+    REF_SOURCE_RELEASES, REF_SOURCE_RUBY, REF_SOURCE_SWIFTPM, REF_SOURCE_VCPKG,
+]
+
+ProviderRow: struct {
+    name: String
+    source: RefSource?
+    kind: ProviderKind?
+    family: ProviderFamily?
+    external: Bool
+}
+
+// In federation family order: `ProviderFamilyContract.built_in` follows it.
+PROVIDER_ROWS: [ProviderRow]{
+    ProviderRow{name: "core", source: None, kind: Val(ProviderKind.Core), family: Val(ProviderFamily.Core), external: false},
+    ProviderRow{name: "nix", source: None, kind: Val(ProviderKind.Nix), family: Val(ProviderFamily.Nix), external: false},
+    ProviderRow{name: REF_SOURCE_PATH, source: Val(RefSource.Path), kind: None, family: Val(ProviderFamily.Path), external: false},
+    ProviderRow{name: REF_SOURCE_GITHUB, source: Val(RefSource.Github), kind: None, family: Val(ProviderFamily.Github), external: true},
+    ProviderRow{name: REF_SOURCE_JET_REGISTRY, source: Val(RefSource.JetRegistry), kind: Val(ProviderKind.JetRegistry), family: Val(ProviderFamily.JetRegistry), external: true},
+    ProviderRow{name: REF_SOURCE_NPM, source: Val(RefSource.Npm), kind: Val(ProviderKind.Npm), family: Val(ProviderFamily.Npm), external: true},
+    ProviderRow{name: REF_SOURCE_PYPI, source: Val(RefSource.PyPI), kind: Val(ProviderKind.PyPI), family: Val(ProviderFamily.PyPI), external: true},
+    ProviderRow{name: REF_SOURCE_CARGO, source: Val(RefSource.Cargo), kind: Val(ProviderKind.Cargo), family: Val(ProviderFamily.Cargo), external: true},
+    ProviderRow{name: REF_SOURCE_SWIFTPM, source: Val(RefSource.SwiftPM), kind: Val(ProviderKind.SwiftPM), family: Val(ProviderFamily.SwiftPM), external: true},
+    ProviderRow{name: REF_SOURCE_MAVEN, source: Val(RefSource.Maven), kind: Val(ProviderKind.Maven), family: Val(ProviderFamily.Maven), external: true},
+    ProviderRow{name: REF_SOURCE_NUGET, source: Val(RefSource.NuGet), kind: Val(ProviderKind.NuGet), family: Val(ProviderFamily.NuGet), external: true},
+    ProviderRow{name: REF_SOURCE_CONAN, source: Val(RefSource.Conan), kind: Val(ProviderKind.Conan), family: Val(ProviderFamily.Conan), external: true},
+    ProviderRow{name: REF_SOURCE_VCPKG, source: Val(RefSource.Vcpkg), kind: Val(ProviderKind.Vcpkg), family: Val(ProviderFamily.Vcpkg), external: true},
+    ProviderRow{name: REF_SOURCE_HOMEBREW, source: Val(RefSource.Homebrew), kind: Val(ProviderKind.Homebrew), family: Val(ProviderFamily.Homebrew), external: true},
+    ProviderRow{name: REF_SOURCE_BINARY, source: Val(RefSource.Binary), kind: Val(ProviderKind.Binary), family: Val(ProviderFamily.Binary), external: true},
+    ProviderRow{name: REF_SOURCE_CRAN, source: Val(RefSource.Cran), kind: Val(ProviderKind.Cran), family: Val(ProviderFamily.Cran), external: true},
+    ProviderRow{name: REF_SOURCE_LUAROCKS, source: Val(RefSource.LuaRocks), kind: Val(ProviderKind.LuaRocks), family: Val(ProviderFamily.LuaRocks), external: true},
+    ProviderRow{name: REF_SOURCE_RUBY, source: Val(RefSource.RubyGems), kind: Val(ProviderKind.RubyGems), family: Val(ProviderFamily.RubyGems), external: true},
+    ProviderRow{name: REF_SOURCE_PERL, source: Val(RefSource.Cpan), kind: Val(ProviderKind.Cpan), family: Val(ProviderFamily.Cpan), external: true},
+    ProviderRow{name: REF_SOURCE_PHP, source: Val(RefSource.Packagist), kind: Val(ProviderKind.Packagist), family: Val(ProviderFamily.Packagist), external: true},
+    ProviderRow{name: "jetpackage", source: None, kind: Val(ProviderKind.JetPackage), family: Val(ProviderFamily.JetPackage), external: false},
+    ProviderRow{name: REF_SOURCE_JETPACK, source: Val(RefSource.Jetpack), kind: Val(ProviderKind.Nix), family: Val(ProviderFamily.Nix), external: false},
+    ProviderRow{name: REF_SOURCE_NIXPKGS, source: Val(RefSource.Nixpkgs), kind: Val(ProviderKind.Nix), family: Val(ProviderFamily.Nix), external: false},
+    ProviderRow{name: REF_SOURCE_RELEASES, source: Val(RefSource.Releases), kind: Val(ProviderKind.JetPackage), family: Val(ProviderFamily.JetPackage), external: false},
+}
+
+// The row named `name`, if Jetpack knows that provider.
+pkg_provider_row: fn(name: String) -> ProviderRow? Never! {
+    loop row in PROVIDER_ROWS {
+        if row.name == name -> return Val(row)
+    }
+    None
+}

@@ -1,0 +1,1216 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_tls13_server.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: the TLS 1.3 server handshake.
+//
+// A port of mbedtls 3.6.7's ssl_tls13_server.c under the default
+// mbedtls_config.h. MBEDTLS_USE_PSA_CRYPTO is off there, so the key
+// exchanges run on the handshake's ECDH and DHM contexts and the PSA-only
+// key checks of the certificate choice are not compiled;
+// MBEDTLS_SSL_EARLY_DATA and MBEDTLS_SSL_RECORD_SIZE_LIMIT are off, so the
+// early_data and record_size_limit extensions, EndOfEarlyData and the
+// early-data checks are not ported. mbedtls_ssl_tls13_crypto_init is PSA's
+// initialization, which has no counterpart here.
+//
+// Messages are read at in_buf offsets and written at out_buf offsets. As
+// in C, an error pends its fatal alert (MBEDTLS_SSL_PEND_FATAL_ALERT), which
+// ssl_handshake_step sends when the step fails.
+use {
+    core
+    __core_crypto_bignum.[RNG]
+    hashes: __core_crypto_md
+    ctime: __core_crypto_ctime
+    oids: __core_crypto_oid
+    x509: __core_crypto_x509
+    x509crt: __core_crypto_x509crt
+    ssldefs: __core_net_ssl_defs
+    suites: __core_net_ssl_ciphersuites
+    sslmsg: __core_net_ssl_msg
+    ssltls: __core_net_ssl_tls
+    keys13: __core_net_ssl_keys13
+    gen13: __core_net_ssl_gen13
+}
+
+// The outcomes of matching an offered PSK identity
+// (SSL_TLS1_3_PSK_IDENTITY_*).
+SSL_SRV13_PSK_IDENTITY_MATCH: 0
+SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE: 1
+SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH: 2
+
+// The outcomes of checking an offered PSK binder (SSL_TLS1_3_BINDER_*).
+SSL_SRV13_BINDER_MATCH: 0
+SSL_SRV13_BINDER_DOES_NOT_MATCH: 1
+
+// The outcomes of parsing a ClientHello (SSL_CLIENT_HELLO_*).
+SSL_SRV13_CLIENT_HELLO_OK: 0
+SSL_SRV13_CLIENT_HELLO_HRR_REQUIRED: 1
+SSL_SRV13_CLIENT_HELLO_TLS1_2: 2
+
+// The length of a ClientHello's legacy_session_id at most
+// (sizeof(session->id)).
+SSL_SRV13_SESSION_ID_MAX_LEN: 32
+
+/// The PSK the ClientHello's pre_shared_key extension offered and we
+/// accepted (mbedtls_ssl_tls13_psk_attributes): its type, the key exchange
+/// mode it allows and the ciphersuite it goes with.
+SSLTLS13PskAttributes: struct {
+    psk_type: Int{0}
+    key_exchange_mode: Int{0}
+    ciphersuite_info: suites.SSLCiphersuite?{None}
+}
+
+// ---------------------------------------------------------------------------
+// The ciphersuite.
+
+// A ciphersuite the client offered that we offer and that suits TLS 1.3
+// (ssl_tls13_validate_peer_ciphersuite), None otherwise.
+ssl_srv13_validate_peer_ciphersuite: fn(ssl: ssldefs.SSLContext, cipher_suite: Int) -> suites.SSLCiphersuite? Never! {
+    if !ssltls.ssl_tls13_cipher_suite_is_offered(ssl, cipher_suite) -> return None
+    ciphersuite_info: suites.ssl_ciphersuite_from_id(cipher_suite)
+    if !ssltls.ssl_validate_ciphersuite(ssl, ciphersuite_info, ssl.tls_version, ssl.tls_version) -> return None
+    ciphersuite_info
+}
+
+// Whether a valid ciphersuite suits the PSK it is chosen for: the
+// ticket's own ciphersuite when its id is given, else one over the PSK's
+// hash when that is given, else any.
+ssl_srv13_suite_suits_psk: fn(info: suites.SSLCiphersuite, id: Int, psk_ciphersuite_id: Int, psk_hash_alg: hashes.Md?) -> Bool Never! {
+    if psk_ciphersuite_id != 0 -> return id == psk_ciphersuite_id
+    if psk_hash_alg == {
+        .Val(md) -> return info.mac == md
+        None -> {}
+    }
+    true
+}
+
+// The first ciphersuite of the client's list in_buf[cipher_suites..<
+// cipher_suites_end] that we accept for the PSK, None when there is none or
+// the list's length is odd (ssl_tls13_select_ciphersuite). A PSK hash of
+// None is C's PSA_ALG_NONE.
+ssl_srv13_select_ciphersuite: fn(ssl: ssldefs.SSLContext, cipher_suites: Int, cipher_suites_end: Int, psk_ciphersuite_id: Int, psk_hash_alg: hashes.Md?) -> suites.SSLCiphersuite? Never! {
+    if (cipher_suites_end - cipher_suites).bit_and(1) != 0 -> return None
+    p := cipher_suites
+    loop p < cipher_suites_end {
+        id: ssldefs.ssl_get_u16(ssl.in_buf, p)
+        p += 2
+        if ssl_srv13_validate_peer_ciphersuite(ssl, id) == {
+            .Val(info) -> {
+                if ssl_srv13_suite_suits_psk(info, id, psk_ciphersuite_id, psk_hash_alg) -> return Val(info)
+            }
+            None -> {}
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// The pre-shared keys the client offers (RFC 8446 4.2.9, 4.2.11).
+
+// The psk_key_exchange_modes extension in_buf[buf..<end]
+// (ssl_tls13_parse_key_exchange_modes_ext, RFC 8446 4.2.9): the key
+// exchange modes the client allows with a PSK.
+ssl_srv13_parse_key_exchange_modes_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
+    p := buf
+    ssltls.ssl_chk_buf_read(ssl, p, end, 1) ?? return Err(err)
+    ke_modes_len: ssldefs.ssl_u8(ssl.in_buf, p)
+    p += 1
+    // There are two modes only, so a longer list is malformed.
+    if ke_modes_len > 2 {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+        return Err(.HandshakeFailure)
+    }
+    ssltls.ssl_chk_buf_read(ssl, p, end, ke_modes_len) ?? return Err(err)
+    ke_modes := 0
+    loop _ in 0..<ke_modes_len {
+        mode: ssldefs.ssl_u8(ssl.in_buf, p)
+        p += 1
+        if mode == ssldefs.SSL_TLS1_3_PSK_MODE_PURE {
+            ke_modes = ke_modes.bit_or(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK)
+        } else if mode == ssldefs.SSL_TLS1_3_PSK_MODE_ECDHE {
+            ke_modes = ke_modes.bit_or(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL)
+        } else {
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+            return Err(.IllegalParameter)
+        }
+    }
+    ssl.handshake.tls13_kex_modes = ke_modes
+}
+
+// Free a session C's ssl_tls13_offered_psks_check_identity_match_ticket
+// parsed (mbedtls_ssl_session_free).
+ssl_srv13_session_free: fn(session: &ssldefs.SSLSession) Never! {
+    ssldefs.ssl_session_wipe(session)
+    session = ssldefs.SSLSession{}
+}
+
+// Whether the ticket's session can be resumed: a TLS 1.3 session whose
+// ticket we issued no later than now, within the lifetime tickets may have
+// and with the client's view of its age within the tolerance of ours
+// (RFC 8446 4.2.11, 4.6.1, 8.3).
+ssl_srv13_ticket_usable: fn(session: ssldefs.SSLSession, obfuscated_ticket_age: Int) -> Bool Never! {
+    if session.tls_version != ssldefs.SSL_VERSION_TLS1_3 -> return false
+    now: ssldefs.ssl_ms_time()
+    if now < session.ticket_creation_time -> return false
+    server_age: now - session.ticket_creation_time
+    if server_age > ssldefs.SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME * 1000 -> return false
+    // The client's age is in milliseconds, offset by ticket_age_add modulo
+    // 2^32.
+    client_age: (obfuscated_ticket_age - session.ticket_age_add).bit_and(0xFFFFFFFF)
+    age_diff: server_age - client_age
+    age_diff >= -ssldefs.SSL_TLS1_3_TICKET_AGE_TOLERANCE && age_diff <= ssldefs.SSL_TLS1_3_TICKET_AGE_TOLERANCE
+}
+
+// Whether the identity in_buf[identity..<identity + identity_len] is a
+// ticket we issued, parsed into `session` when it matches
+// (ssl_tls13_offered_psks_check_identity_match_ticket): MATCH, or
+// MATCH_BUT_PSK_NOT_USABLE for an expired or unsuitable ticket of ours,
+// else DOES_NOT_MATCH.
+ssl_srv13_offered_psks_check_identity_match_ticket: fn(ssl: &ssldefs.SSLContext, identity: Int, identity_len: Int, obfuscated_ticket_age: Int, session: &ssldefs.SSLSession) -> Int Never! {
+    parse := if ssl.conf.f_ticket_parse == {
+        .Val(cb) -> cb.call
+        None -> return SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH
+    }
+    if identity_len == 0 -> return SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH
+    // The parser decrypts its own copy of the ticket: C copies it too, since
+    // the binders come after it.
+    ticket: ssldefs.ssl_bytes_of(ssl.in_buf, identity, identity_len)
+    if parse(ticket) == {
+        .Ok(s) -> session = s
+        .Err(e) -> {
+            // An expired ticket is ours but not usable; one that does not
+            // authenticate, or any other failure, is not ours.
+            if e == {
+                .SessionTicketExpired -> return SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE
+                else -> return SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH
+            }
+        }
+    }
+    if !ssl_srv13_ticket_usable(session, obfuscated_ticket_age) {
+        ssl_srv13_session_free(session)
+        return SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE
+    }
+    SSL_SRV13_PSK_IDENTITY_MATCH
+}
+
+// Whether we know the offered identity in_buf[identity..<identity +
+// identity_len], installing its key as the handshake's PSK when we do
+// (ssl_tls13_offered_psks_check_identity_match): a ticket of ours, an
+// identity the PSK callback knows, or the configured one, compared in
+// constant time. `psk_type` is set to the PSK's type and `session` to a
+// ticket's session.
+ssl_srv13_offered_psks_check_identity_match: fn(ssl: &ssldefs.SSLContext, identity: Int, identity_len: Int, obfuscated_ticket_age: Int, psk_type: &Int, session: &ssldefs.SSLSession) -> Int ssldefs.SSLError! {
+    psk_type = ssldefs.SSL_TLS1_3_PSK_EXTERNAL
+    ticket_ret: ssl_srv13_offered_psks_check_identity_match_ticket(ssl, identity, identity_len, obfuscated_ticket_age, session)
+    if ticket_ret == SSL_SRV13_PSK_IDENTITY_MATCH {
+        psk_type = ssldefs.SSL_TLS1_3_PSK_RESUMPTION
+        ssltls.ssl_set_hs_psk(ssl, session.resumption_key) ?? return Err(err)
+        return Ok(SSL_SRV13_PSK_IDENTITY_MATCH)
+    }
+    if ticket_ret == SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE -> return Ok(SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE)
+    offered: ssldefs.ssl_bytes_of(ssl.in_buf, identity, identity_len)
+    // The PSK callback gives the identity's key, which C's callback sets as
+    // the handshake's PSK itself; a callback that fails refuses it.
+    if ssl.conf.f_psk != None {
+        lookup := if ssl.conf.f_psk == {
+            .Val(cb) -> cb.call
+            None -> return Ok(SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+        }
+        found := if lookup(offered) == {
+            .Ok(r) -> r
+            .Err(_) -> return Ok(SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+        }
+        key: found.psk ?? return Ok(SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+        accepted: if ssltls.ssl_set_hs_psk(ssl, key) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+        return Ok(if accepted -> SSL_SRV13_PSK_IDENTITY_MATCH else -> SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+    }
+    ours: ssl.conf.psk_identity ?? return Ok(SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+    if ours.len() == identity_len && ctime.memcmp(ours, 0, offered, 0, identity_len) == 0 {
+        key: ssl.conf.psk ?? [U8]{}
+        ssltls.ssl_set_hs_psk(ssl, key) ?? return Err(err)
+        return Ok(SSL_SRV13_PSK_IDENTITY_MATCH)
+    }
+    Ok(SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH)
+}
+
+// Whether the binder in_buf[binder..<binder + binder_len] is the one the
+// handshake's PSK makes over the transcript so far
+// (ssl_tls13_offered_psks_check_binder_match, RFC 8446 4.2.11.2), compared
+// in constant time.
+ssl_srv13_offered_psks_check_binder_match: fn(ssl: &ssldefs.SSLContext, binder: Int, binder_len: Int, psk_type: Int, psk_hash_alg: hashes.Md) -> Int ssldefs.SSLError! {
+    hash_len: hashes.md_size(psk_hash_alg)
+    if binder_len != hash_len -> return Ok(SSL_SRV13_BINDER_DOES_NOT_MATCH)
+    // The transcript runs through the identities, which the caller added.
+    transcript: ssltls.ssl_get_handshake_transcript(ssl, psk_hash_alg) ?? return Err(err)
+    psk := keys13.ssl_tls13_export_handshake_psk(ssl) ?? return Err(err)
+    computed := if keys13.ssl_tls13_create_psk_binder(psk_hash_alg, psk, psk_type, transcript) == {
+        .Ok(b) -> b
+        .Err(_) -> {
+            ssldefs.ssl_wipe(psk)
+            return Err(.HandshakeFailure)
+        }
+    }
+    ssldefs.ssl_wipe(psk)
+    if ctime.memcmp(computed, 0, ssl.in_buf, binder, hash_len) == 0 -> return Ok(SSL_SRV13_BINDER_MATCH)
+    ssldefs.ssl_wipe(computed)
+    Ok(SSL_SRV13_BINDER_DOES_NOT_MATCH)
+}
+
+// The resumed ticket's age offset, flags and resumption key, kept in the
+// session being negotiated (ssl_tls13_session_copy_ticket).
+ssl_srv13_session_copy_ticket: fn(dst: &ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.SSLError! {
+    dst.ticket_age_add = src.ticket_age_add
+    dst.ticket_flags = src.ticket_flags
+    if src.resumption_key.len() == 0 {
+        dst.resumption_key = [U8]{}
+        return Err(.InternalError)
+    }
+    dst.resumption_key = src.resumption_key.copy()
+}
+
+// The pre_shared_key extension in_buf[pre_shared_key_ext..<
+// pre_shared_key_ext_end], the ClientHello's last
+// (ssl_tls13_parse_pre_shared_key_ext, RFC 8446 4.2.11): the first identity
+// we know whose key exchange modes and ciphersuite we accept and whose
+// binder is right, UnknownIdentity when there is none. The caller added the
+// ClientHello up to the extension to the transcript; this adds the rest.
+ssl_srv13_parse_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, pre_shared_key_ext: Int, pre_shared_key_ext_end: Int, ciphersuites: Int, ciphersuites_end: Int) -> SSLTLS13PskAttributes ssldefs.SSLError! {
+    psk := SSLTLS13PskAttributes{}
+    // identities_len, then an identity of at least one byte with its length
+    // and obfuscated_ticket_age.
+    identities: pre_shared_key_ext
+    ssltls.ssl_chk_buf_read(ssl, identities, pre_shared_key_ext_end, 7 + 2) ?? return Err(err)
+    identities_len: ssldefs.ssl_get_u16(ssl.in_buf, identities)
+    p_identity_len := identities + 2
+    ssltls.ssl_chk_buf_read(ssl, p_identity_len, pre_shared_key_ext_end, identities_len) ?? return Err(err)
+    identities_end: p_identity_len + identities_len
+    // binders_len, then a binder of at least 32 bytes with its length.
+    binders: identities_end
+    ssltls.ssl_chk_buf_read(ssl, binders, pre_shared_key_ext_end, 33 + 2) ?? return Err(err)
+    binders_len: ssldefs.ssl_get_u16(ssl.in_buf, binders)
+    p_binder_len := binders + 2
+    ssltls.ssl_chk_buf_read(ssl, p_binder_len, pre_shared_key_ext_end, binders_len) ?? return Err(err)
+    binders_end: p_binder_len + binders_len
+    // The binders are made over the ClientHello through the identities.
+    ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, pre_shared_key_ext, identities_end - pre_shared_key_ext)
+    sn: ssl.session_negotiate
+    psk_type := ssldefs.SSL_TLS1_3_PSK_EXTERNAL
+    matched_identity := -1
+    identity_id := -1
+    loop p_identity_len < identities_end && p_binder_len < binders_end {
+        session := ssldefs.SSLSession{}
+        ssltls.ssl_chk_buf_read(ssl, p_identity_len, identities_end, 2 + 1 + 4) ?? return Err(err)
+        identity_len: ssldefs.ssl_get_u16(ssl.in_buf, p_identity_len)
+        identity: p_identity_len + 2
+        ssltls.ssl_chk_buf_read(ssl, identity, identities_end, identity_len + 4) ?? return Err(err)
+        obfuscated_ticket_age: ssldefs.ssl_get_u32(ssl.in_buf, identity + identity_len)
+        p_identity_len += identity_len + 6
+        ssltls.ssl_chk_buf_read(ssl, p_binder_len, binders_end, 1 + 32) ?? return Err(err)
+        binder_len: ssldefs.ssl_u8(ssl.in_buf, p_binder_len)
+        binder: p_binder_len + 1
+        ssltls.ssl_chk_buf_read(ssl, binder, binders_end, binder_len) ?? return Err(err)
+        p_binder_len += binder_len + 1
+        identity_id += 1
+        if matched_identity != -1 -> next
+        ret: ssl_srv13_offered_psks_check_identity_match(ssl, identity, identity_len, obfuscated_ticket_age, psk_type, session) ?? return Err(err)
+        if ret != SSL_SRV13_PSK_IDENTITY_MATCH -> next
+        psk_ciphersuite_id := 0
+        psk_hash_alg := hashes.Md?{None}
+        allowed_key_exchange_modes := 0
+        if psk_type == ssldefs.SSL_TLS1_3_PSK_EXTERNAL {
+            psk_hash_alg = Val(hashes.Md.SHA256)
+            allowed_key_exchange_modes = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL
+        } else if psk_type == ssldefs.SSL_TLS1_3_PSK_RESUMPTION {
+            psk_ciphersuite_id = session.ciphersuite
+            // The ticket's flags say the key exchange modes it allows.
+            ssl.spool[sn].ticket_flags = session.ticket_flags
+            allowed_key_exchange_modes = session.ticket_flags.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL)
+        } else {
+            return Err(.InternalError)
+        }
+        psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE
+        if allowed_key_exchange_modes.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL) != 0 && ssl_srv13_key_exchange_is_psk_ephemeral_available(ssl) {
+            psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
+        } else if allowed_key_exchange_modes.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK) != 0 && ssl_srv13_key_exchange_is_psk_available(ssl) {
+            psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK
+        }
+        if psk.key_exchange_mode == ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE -> next
+        psk.ciphersuite_info = ssl_srv13_select_ciphersuite(ssl, ciphersuites, ciphersuites_end, psk_ciphersuite_id, psk_hash_alg)
+        if psk.ciphersuite_info == None {
+            ssl_srv13_session_free(session)
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR, .HandshakeFailure)
+            return Err(.HandshakeFailure)
+        }
+        cs: psk.ciphersuite_info ?? return Err(.InternalError)
+        if ssl_srv13_offered_psks_check_binder_match(ssl, binder, binder_len, psk_type, cs.mac) == {
+            .Ok(r) -> {
+                if r != SSL_SRV13_BINDER_MATCH {
+                    ssl_srv13_session_free(session)
+                    sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR, .HandshakeFailure)
+                    return Err(.HandshakeFailure)
+                }
+            }
+            .Err(e) -> {
+                ssl_srv13_session_free(session)
+                sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR, .HandshakeFailure)
+                return Err(e)
+            }
+        }
+        matched_identity = identity_id
+        if psk_type == ssldefs.SSL_TLS1_3_PSK_RESUMPTION {
+            if ssl_srv13_session_copy_ticket(ssl.spool[sn], session) == {
+                .Ok(_) -> ssl_srv13_session_free(session)
+                .Err(e) -> {
+                    ssl_srv13_session_free(session)
+                    return Err(e)
+                }
+            }
+        }
+    }
+    if p_identity_len != identities_end || p_binder_len != binders_end {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
+        return Err(.DecodeError)
+    }
+    // The binders complete the ClientHello's transcript.
+    ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, identities_end, binders_end - identities_end)
+    if matched_identity == -1 -> return Err(.UnknownIdentity)
+    ssl.handshake.selected_identity = matched_identity
+    psk.psk_type = psk_type
+    Ok(psk)
+}
+
+// The ServerHello's pre_shared_key extension at out_buf[buf..<end]: the
+// identity we chose (ssl_tls13_write_server_pre_shared_key_ext). Its
+// length.
+ssl_srv13_write_server_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    if ssl.handshake.psk == None -> return Err(.InternalError)
+    ssltls.ssl_chk_buf(buf, end, 6) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf, ssldefs.TLS_EXT_PRE_SHARED_KEY)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 2, 2)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 4, ssl.handshake.selected_identity)
+    ssltls.ssl_tls13_set_hs_sent_ext_mask(ssl, ssldefs.TLS_EXT_PRE_SHARED_KEY)
+    Ok(6)
+}
+
+// ---------------------------------------------------------------------------
+// The ClientHello's other extensions.
+
+// The supported_versions extension in_buf[buf..<end]
+// (ssl_tls13_parse_supported_versions_ext, RFC 8446 4.2.1): the first
+// version offered that we speak, TLS 1.3 or a TLS 1.2 we have enabled.
+ssl_srv13_parse_supported_versions_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    p := buf
+    ssltls.ssl_chk_buf_read(ssl, p, end, 1) ?? return Err(err)
+    versions_len: ssldefs.ssl_u8(ssl.in_buf, p)
+    p += 1
+    ssltls.ssl_chk_buf_read(ssl, p, end, versions_len) ?? return Err(err)
+    versions_end: p + versions_len
+    loop p < versions_end {
+        ssltls.ssl_chk_buf_read(ssl, p, versions_end, 2) ?? return Err(err)
+        tls_version: sslmsg.ssl_read_version(ssl.in_buf, p, ssl.conf.transport)
+        p += 2
+        if tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return Ok(tls_version)
+        if tls_version == ssldefs.SSL_VERSION_TLS1_2 && ssltls.ssl_conf_is_tls12_enabled(ssl.conf) -> return Ok(tls_version)
+    }
+    sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_PROTOCOL_VERSION, .BadProtocolVersion)
+    Err(.BadProtocolVersion)
+}
+
+// The supported_groups extension in_buf[buf..<end]
+// (ssl_tls13_parse_supported_groups_ext, RFC 8446 4.2.7): the first group
+// we offer and support is the one a HelloRetryRequest asks for.
+ssl_srv13_parse_supported_groups_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
+    p := buf
+    ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
+    named_group_list_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
+    p += 2
+    ssltls.ssl_chk_buf_read(ssl, p, end, named_group_list_len) ?? return Err(err)
+    named_group_list_end: p + named_group_list_len
+    ssl.handshake.hrr_selected_group = 0
+    loop p < named_group_list_end {
+        ssltls.ssl_chk_buf_read(ssl, p, named_group_list_end, 2) ?? return Err(err)
+        named_group: ssldefs.ssl_get_u16(ssl.in_buf, p)
+        p += 2
+        if !ssltls.ssl_named_group_is_offered(ssl, named_group) || !ssltls.ssl_named_group_is_supported(named_group) || ssl.handshake.hrr_selected_group != 0 -> next
+        ssl.handshake.hrr_selected_group = named_group
+    }
+}
+
+// The key_share extension in_buf[buf..<end] (ssl_tls13_parse_key_shares_ext,
+// RFC 8446 4.2.8): the first share over a group we offer and support is
+// read. False when there is none (SSL_TLS1_3_PARSE_KEY_SHARES_EXT_NO_MATCH).
+ssl_srv13_parse_key_shares_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Bool ssldefs.SSLError! {
+    p := buf
+    ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
+    client_shares_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
+    p += 2
+    ssltls.ssl_chk_buf_read(ssl, p, end, client_shares_len) ?? return Err(err)
+    ssl.handshake.offered_group_id = 0
+    client_shares_end: p + client_shares_len
+    loop p < client_shares_end {
+        // A KeyShareEntry: its group, then its key_exchange and length.
+        ssltls.ssl_chk_buf_read(ssl, p, client_shares_end, 4) ?? return Err(err)
+        group: ssldefs.ssl_get_u16(ssl.in_buf, p)
+        key_exchange_len: ssldefs.ssl_get_u16(ssl.in_buf, p + 2)
+        p += 4
+        key_exchange: p
+        ssltls.ssl_chk_buf_read(ssl, p, client_shares_end, key_exchange_len) ?? return Err(err)
+        p += key_exchange_len
+        if !ssltls.ssl_named_group_is_offered(ssl, group) || !ssltls.ssl_named_group_is_supported(group) || ssl.handshake.offered_group_id != 0 -> next
+        if ssltls.ssl_tls13_named_group_is_ecdhe(group) || ssltls.ssl_tls13_named_group_is_ffdh(group) {
+            gen13.ssl_tls13_read_public_xxdhe_share(ssl, key_exchange - 2, key_exchange_len + 2) ?? return Err(err)
+        } else {
+            next
+        }
+        ssl.handshake.offered_group_id = group
+    }
+    Ok(ssl.handshake.offered_group_id != 0)
+}
+
+// Whether the ClientHello had every extension of a mask
+// (ssl_tls13_client_hello_has_exts).
+ssl_srv13_client_hello_has_exts: fn(ssl: ssldefs.SSLContext, exts_mask: Int) -> Bool Never! {
+    ssl.handshake.received_extensions.bit_and(exts_mask) == exts_mask
+}
+
+// The extensions an ephemeral key exchange needs
+// (ssl_tls13_client_hello_has_exts_for_ephemeral_key_exchange).
+ssl_srv13_client_hello_has_exts_for_ephemeral_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SIG_ALG))
+    ssl_srv13_client_hello_has_exts(ssl, mask)
+}
+
+// The extensions a PSK key exchange needs
+// (ssl_tls13_client_hello_has_exts_for_psk_key_exchange).
+ssl_srv13_client_hello_has_exts_for_psk_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES))
+    ssl_srv13_client_hello_has_exts(ssl, mask)
+}
+
+// The extensions a PSK key exchange with an ephemeral key needs
+// (ssl_tls13_client_hello_has_exts_for_psk_ephemeral_key_exchange).
+ssl_srv13_client_hello_has_exts_for_psk_ephemeral_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES))
+    ssl_srv13_client_hello_has_exts(ssl, mask)
+}
+
+// Whether a PSK key exchange is open: we and the client allow it and the
+// client sent its extensions (ssl_tls13_key_exchange_is_psk_available).
+ssl_srv13_key_exchange_is_psk_available: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssltls.ssl_conf_tls13_is_psk_enabled(ssl) && ssltls.ssl_tls13_is_psk_supported(ssl) && ssl_srv13_client_hello_has_exts_for_psk_key_exchange(ssl)
+}
+
+// Whether a PSK key exchange with an ephemeral key is open
+// (ssl_tls13_key_exchange_is_psk_ephemeral_available).
+ssl_srv13_key_exchange_is_psk_ephemeral_available: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssltls.ssl_conf_tls13_is_psk_ephemeral_enabled(ssl) && ssltls.ssl_tls13_is_psk_ephemeral_supported(ssl) && ssl_srv13_client_hello_has_exts_for_psk_ephemeral_key_exchange(ssl)
+}
+
+// Whether an ephemeral key exchange is open
+// (ssl_tls13_key_exchange_is_ephemeral_available).
+ssl_srv13_key_exchange_is_ephemeral_available: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssltls.ssl_conf_tls13_is_ephemeral_enabled(ssl) && ssl_srv13_client_hello_has_exts_for_ephemeral_key_exchange(ssl)
+}
+
+// Whether a certificate can serve the signature algorithm: its key may
+// sign, it may authenticate a server, and its key suits the algorithm.
+ssl_srv13_key_cert_suits: fn(kc: ssldefs.SSLKeyCert, sig_alg: Int) -> Bool Never! {
+    if kc.cert.len() == 0 -> return false
+    if x509crt.x509_crt_check_key_usage(kc.cert[0], x509.X509_KU_DIGITAL_SIGNATURE) == {
+        .Err(_) -> return false
+        else -> {}
+    }
+    if x509crt.x509_crt_check_extended_key_usage(kc.cert[0], oids.OID_SERVER_AUTH) == {
+        .Err(_) -> return false
+        else -> {}
+    }
+    gen13.ssl_tls13_check_sig_alg_cert_key_match(sig_alg, kc.cert[0].pk)
+}
+
+// Choose our certificate (ssl_tls13_pick_key_cert): for the client's
+// signature algorithms in its order, the first certificate, of those the
+// SNI or certificate callback gave or else the configured ones, that can
+// sign with it. False when none can.
+ssl_srv13_pick_key_cert: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
+    from_sni: ssltls.ssl_key_cert_from_sni(ssl)
+    count: if from_sni -> ssl.handshake.sni_key_cert.len() else -> ssl.conf.key_cert.len()
+    if count == 0 -> return false
+    sig_algs: ssl.handshake.received_sig_algs.copy()
+    loop sig_alg in sig_algs {
+        if !ssltls.ssl_sig_alg_is_offered(ssl, sig_alg) -> next
+        if !ssltls.ssl_tls13_sig_alg_for_cert_verify_is_supported(sig_alg) -> next
+        loop i in 0..<count {
+            suits: if from_sni -> ssl_srv13_key_cert_suits(ssl.handshake.sni_key_cert[i], sig_alg) else -> ssl_srv13_key_cert_suits(ssl.conf.key_cert[i], sig_alg)
+            if suits {
+                ssl.handshake.key_cert = i
+                return true
+            }
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// The ClientHello (RFC 8446 4.1.2).
+
+// Parse the ClientHello in_buf[buf..<end] (ssl_tls13_parse_client_hello):
+// CLIENT_HELLO_OK, CLIENT_HELLO_HRR_REQUIRED when the client sent no share
+// over a group we take, or CLIENT_HELLO_TLS1_2 when it offers no TLS 1.3,
+// which leaves the message to the TLS 1.2 server.
+ssl_srv13_parse_client_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    p := buf
+    // legacy_version, random and legacy_session_id's length.
+    ssltls.ssl_chk_buf_read(ssl, p, end, 2 + 32 + 1 + 2 + 1 + 2) ?? return Err(err)
+    if sslmsg.ssl_read_version(ssl.in_buf, p, ssl.conf.transport) != ssldefs.SSL_VERSION_TLS1_2 {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_PROTOCOL_VERSION, .BadProtocolVersion)
+        return Err(.BadProtocolVersion)
+    }
+    p += 2
+    random: p
+    p += ssldefs.CLIENT_HELLO_RANDOM_LEN
+    legacy_session_id_len: ssldefs.ssl_u8(ssl.in_buf, p)
+    p += 1
+    legacy_session_id: p
+    ssltls.ssl_chk_buf_read(ssl, p, end, legacy_session_id_len + 2) ?? return Err(err)
+    p += legacy_session_id_len
+    cipher_suites_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
+    p += 2
+    if cipher_suites_len.bit_and(1) != 0 {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
+        return Err(.DecodeError)
+    }
+    // The ciphersuites and legacy_compression_methods' length.
+    ssltls.ssl_chk_buf_read(ssl, p, end, cipher_suites_len + 1) ?? return Err(err)
+    cipher_suites: p
+    p += cipher_suites_len
+    cipher_suites_end: p
+    // legacy_compression_methods and the extensions' length.
+    compression_methods_len: ssldefs.ssl_u8(ssl.in_buf, p)
+    ssltls.ssl_chk_buf_read(ssl, p + 1, end, compression_methods_len + 2) ?? return Err(err)
+    // Without supported_versions this is TLS 1.2's ClientHello, or older.
+    versions_ext := gen13.SSLExtData{start: 0, end: 0}
+    if gen13.ssl_tls13_is_supported_versions_ext_present_in_exts(ssl, p + 1 + compression_methods_len, end) == {
+        .Ok(found) -> {
+            if found == {
+                .Val(d) -> versions_ext = d
+                None -> return Ok(SSL_SRV13_CLIENT_HELLO_TLS1_2)
+            }
+        }
+        .Err(e) -> return Err(e)
+    }
+    tls_version: ssl_srv13_parse_supported_versions_ext(ssl, versions_ext.start, versions_ext.end) ?? return Err(err)
+    if tls_version == ssldefs.SSL_VERSION_TLS1_2 -> return Ok(SSL_SRV13_CLIENT_HELLO_TLS1_2)
+    sn: ssl.session_negotiate
+    ssl.tls_version = ssldefs.SSL_VERSION_TLS1_3
+    ssl.spool[sn].tls_version = ssldefs.SSL_VERSION_TLS1_3
+    ssl.spool[sn].endpoint = ssl.conf.endpoint
+    ssldefs.ssl_copy_into(ssl.handshake.randbytes, 0, ssl.in_buf, random, ssldefs.CLIENT_HELLO_RANDOM_LEN)
+    if legacy_session_id_len > SSL_SRV13_SESSION_ID_MAX_LEN -> return Err(.DecodeError)
+    ssl.spool[sn].id = ssldefs.ssl_bytes_of(ssl.in_buf, legacy_session_id, legacy_session_id_len)
+    // The ciphersuite of an ephemeral key exchange; a PSK's replaces it.
+    ciphersuite_info := ssl_srv13_select_ciphersuite(ssl, cipher_suites, cipher_suites_end, 0, None)
+    if ciphersuite_info == None {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure)
+        return Err(.HandshakeFailure)
+    }
+    chosen: ciphersuite_info ?? return Err(.InternalError)
+    ssl.handshake.ciphersuite_info = Val(chosen)
+    ssl.spool[sn].ciphersuite = chosen.id
+    // legacy_compression_methods must be the null one alone.
+    if ssldefs.ssl_u8(ssl.in_buf, p) != 1 || ssldefs.ssl_u8(ssl.in_buf, p + 1) != ssldefs.SSL_COMPRESS_NULL {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+        return Err(.IllegalParameter)
+    }
+    p += 2
+    extensions_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
+    p += 2
+    ssltls.ssl_chk_buf_read(ssl, p, end, extensions_len) ?? return Err(err)
+    extensions_end: p + extensions_len
+    ssl.handshake.received_extensions = 0
+    no_usable_share_for_key_agreement := false
+    pre_shared_key_ext := 0
+    pre_shared_key_ext_end := 0
+    psk_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY)
+    loop p < extensions_end {
+        // pre_shared_key must be the last extension (RFC 8446 4.2.11).
+        if ssl.handshake.received_extensions.bit_and(psk_mask) != 0 {
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+            return Err(.IllegalParameter)
+        }
+        ssltls.ssl_chk_buf_read(ssl, p, extensions_end, 4) ?? return Err(err)
+        extension_type: ssldefs.ssl_get_u16(ssl.in_buf, p)
+        extension_data_len: ssldefs.ssl_get_u16(ssl.in_buf, p + 2)
+        p += 4
+        ssltls.ssl_chk_buf_read(ssl, p, extensions_end, extension_data_len) ?? return Err(err)
+        extension_data_end: p + extension_data_len
+        gen13.ssl_tls13_check_received_extension(ssl, ssldefs.SSL_HS_CLIENT_HELLO, extension_type, ssldefs.SSL_TLS1_3_ALLOWED_EXTS_OF_CH) ?? return Err(err)
+        if extension_type == ssldefs.TLS_EXT_SERVERNAME {
+            ssltls.ssl_parse_server_name_ext(ssl, p, extension_data_end) ?? return Err(err)
+        } else if extension_type == ssldefs.TLS_EXT_SUPPORTED_GROUPS {
+            // The group a HelloRetryRequest would ask for.
+            ssl_srv13_parse_supported_groups_ext(ssl, p, extension_data_end) ?? return Err(err)
+        } else if extension_type == ssldefs.TLS_EXT_KEY_SHARE {
+            // With no share over a group we take, a HelloRetryRequest asks
+            // for one.
+            matched: ssl_srv13_parse_key_shares_ext(ssl, p, extension_data_end) ?? return Err(err)
+            if !matched -> no_usable_share_for_key_agreement = true
+        } else if extension_type == ssldefs.TLS_EXT_SUPPORTED_VERSIONS {
+            // Parsed above.
+        } else if extension_type == ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES {
+            ssl_srv13_parse_key_exchange_modes_ext(ssl, p, extension_data_end) ?? return Err(err)
+        } else if extension_type == ssldefs.TLS_EXT_PRE_SHARED_KEY {
+            // psk_key_exchange_modes must come with it (RFC 8446 4.2.9).
+            if ssl.handshake.received_extensions.bit_and(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES)) == 0 {
+                sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+                return Err(.IllegalParameter)
+            }
+            // Parsed once the transcript runs up to it.
+            pre_shared_key_ext = p
+            pre_shared_key_ext_end = extension_data_end
+        } else if extension_type == ssldefs.TLS_EXT_ALPN {
+            ssltls.ssl_parse_alpn_ext(ssl, p, extension_data_end) ?? return Err(err)
+        } else if extension_type == ssldefs.TLS_EXT_SIG_ALG {
+            ssltls.ssl_parse_sig_alg_ext(ssl, p, extension_data_end) ?? return Err(err)
+        }
+        // Other extensions are ignored.
+        p += extension_data_len
+    }
+    // The handshake header comes first in the transcript.
+    ssltls.ssl_add_hs_hdr_to_checksum(ssl.handshake, ssldefs.SSL_HS_CLIENT_HELLO, p - buf)
+    got_psk := false
+    psk := SSLTLS13PskAttributes{}
+    if ssl.handshake.received_extensions.bit_and(psk_mask) != 0 {
+        // The ClientHello up to pre_shared_key; parsing it adds the rest.
+        ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, buf, pre_shared_key_ext - buf)
+        if ssl_srv13_parse_pre_shared_key_ext(ssl, pre_shared_key_ext, pre_shared_key_ext_end, cipher_suites, cipher_suites_end) == {
+            .Ok(found) -> {
+                psk = found
+                got_psk = true
+            }
+            .Err(e) -> {
+                // An identity we do not know is no error: the key exchange
+                // goes without a PSK.
+                if e != .UnknownIdentity -> return Err(e)
+            }
+        }
+    } else {
+        ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, buf, p - buf)
+    }
+    // The key exchange mode: a PSK with an ephemeral key, else an ephemeral
+    // key, else a PSK alone.
+    if got_psk && psk.key_exchange_mode == ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL {
+        ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
+    } else if ssl_srv13_key_exchange_is_ephemeral_available(ssl) {
+        ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL
+    } else if got_psk && psk.key_exchange_mode == ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK {
+        ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK
+    } else {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_MISSING_EXTENSION, .IllegalParameter)
+        return Err(.IllegalParameter)
+    }
+    hrr_required := false
+    if ssl.handshake.key_exchange_mode != ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK -> hrr_required = no_usable_share_for_key_agreement
+    if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) {
+        psk_suite: psk.ciphersuite_info ?? return Err(.InternalError)
+        ssl.handshake.ciphersuite_info = Val(psk_suite)
+        ssl.spool[sn].ciphersuite = psk_suite.id
+        // A resumption, unless a HelloRetryRequest comes first.
+        if psk.psk_type == ssldefs.SSL_TLS1_3_PSK_RESUMPTION && !hrr_required -> ssl.handshake.resume = 1
+    }
+    final_suite: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
+    ssltls.ssl_optimize_checksum(ssl, final_suite)
+    Ok(if hrr_required -> SSL_SRV13_CLIENT_HELLO_HRR_REQUIRED else -> SSL_SRV13_CLIENT_HELLO_OK)
+}
+
+// After the ClientHello (ssl_tls13_postprocess_client_hello): the
+// certificate callback, which sees the SNI name and signature algorithms,
+// and the early secret.
+ssl_srv13_postprocess_client_hello: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+    if ssl.conf.f_cert_cb == {
+        .Val(cb) -> {
+            select: cb.call
+            info: ssldefs.SSLClientHelloInfo{sni: ssl.handshake.sni_name.copy(), sig_algs: ssl.handshake.received_sig_algs.copy()}
+            ov := select(info) ?? return Err(err)
+            ssltls.ssl_apply_hs_override(ssl, ov)
+        }
+        None -> {}
+    }
+    ssl.handshake.sni_name = None
+    keys13.ssl_tls13_key_schedule_stage_early(ssl) ?? return Err(err)
+}
+
+// The MBEDTLS_SSL_CLIENT_HELLO step (ssl_tls13_process_client_hello): a
+// TLS 1.2 ClientHello is kept for the TLS 1.2 server, if we speak TLS 1.2
+// and sent no HelloRetryRequest.
+ssl_srv13_process_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    body: gen13.ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_CLIENT_HELLO, rng) ?? return Err(err)
+    parse_client_hello_ret: ssl_srv13_parse_client_hello(ssl, body.buf, body.buf + body.len) ?? return Err(err)
+    if parse_client_hello_ret == SSL_SRV13_CLIENT_HELLO_TLS1_2 {
+        // After a HelloRetryRequest the version is settled.
+        if ssl.handshake.hello_retry_request_flag != 0 {
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
+            return Err(.IllegalParameter)
+        }
+        if !ssltls.ssl_conf_is_tls12_enabled(ssl.conf) {
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_PROTOCOL_VERSION, .BadProtocolVersion)
+            return Err(.BadProtocolVersion)
+        }
+        ssl.keep_current_message = 1
+        ssl.tls_version = ssldefs.SSL_VERSION_TLS1_2
+        return
+    }
+    ssl_srv13_postprocess_client_hello(ssl) ?? return Err(err)
+    if parse_client_hello_ret == SSL_SRV13_CLIENT_HELLO_OK {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_HELLO)
+    } else {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HELLO_RETRY_REQUEST)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The ServerHello and HelloRetryRequest (RFC 8446 4.1.3, 4.1.4).
+
+// Our random and the session's start time (ssl_tls13_prepare_server_hello).
+ssl_srv13_prepare_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    server_randbytes := ssldefs.ssl_zeros(ssldefs.SERVER_HELLO_RANDOM_LEN)
+    if !rng.fill(server_randbytes) -> return Err(.RandomFailed)
+    ssldefs.ssl_copy_into(ssl.handshake.randbytes, ssldefs.CLIENT_HELLO_RANDOM_LEN, server_randbytes, 0, ssldefs.SERVER_HELLO_RANDOM_LEN)
+    ssl.spool[ssl.session_negotiate].start = ssldefs.ssl_time()
+}
+
+// The ServerHello's supported_versions extension at out_buf[buf..<end]:
+// the version we chose (ssl_tls13_write_server_hello_supported_versions_ext,
+// RFC 8446 4.2.1). Its length.
+ssl_srv13_write_server_hello_supported_versions_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    ssltls.ssl_chk_buf(buf, end, 6) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf, ssldefs.TLS_EXT_SUPPORTED_VERSIONS)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 2, 2)
+    sslmsg.ssl_write_version(ssl.out_buf, buf + 4, ssl.conf.transport, ssl.tls_version)
+    ssltls.ssl_tls13_set_hs_sent_ext_mask(ssl, ssldefs.TLS_EXT_SUPPORTED_VERSIONS)
+    Ok(6)
+}
+
+// Our key share over the group at out_buf[buf..<end]
+// (ssl_tls13_generate_and_write_key_share). Its length.
+ssl_srv13_generate_and_write_key_share: fn<R: RNG>(ssl: &ssldefs.SSLContext, named_group: Int, buf: Int, end: Int, rng: &R) -> Int ssldefs.SSLError! {
+    if ssltls.ssl_tls13_named_group_is_ecdhe(named_group) || ssltls.ssl_tls13_named_group_is_ffdh(named_group) {
+        return gen13.ssl_tls13_generate_and_write_xxdh_key_exchange(ssl, named_group, buf, end, rng)
+    }
+    Err(.InternalError)
+}
+
+// The ServerHello's key_share extension at out_buf[buf..<end]: our share
+// over the client's group (ssl_tls13_write_key_share_ext, RFC 8446 4.2.8).
+// Its length.
+ssl_srv13_write_key_share_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, rng: &R) -> Int ssldefs.SSLError! {
+    group: ssl.handshake.offered_group_id
+    server_share: buf + 4
+    // The extension's type and length, then the share's group and length.
+    ssltls.ssl_chk_buf(buf, end, 8) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf, ssldefs.TLS_EXT_KEY_SHARE)
+    ssldefs.ssl_put_u16(ssl.out_buf, server_share, group)
+    key_exchange_length: ssl_srv13_generate_and_write_key_share(ssl, group, server_share + 4, end, rng) ?? return Err(err)
+    p: server_share + 4 + key_exchange_length
+    ssldefs.ssl_put_u16(ssl.out_buf, server_share + 2, key_exchange_length)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 2, p - server_share)
+    ssltls.ssl_tls13_set_hs_sent_ext_mask(ssl, ssldefs.TLS_EXT_KEY_SHARE)
+    Ok(p - buf)
+}
+
+// The HelloRetryRequest's key_share extension at out_buf[buf..<end]: the
+// group we ask a share over (ssl_tls13_write_hrr_key_share_ext, RFC 8446
+// 4.2.8). Its length, 0 when no ephemeral key is wanted or the client's
+// share was good.
+ssl_srv13_write_hrr_key_share_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    if !ssltls.ssl_tls13_key_exchange_mode_with_ephemeral(ssl) -> return Ok(0)
+    if ssl.handshake.offered_group_id != 0 -> return Ok(0)
+    // No group of the client's that we take.
+    if ssl.handshake.hrr_selected_group == 0 -> return Err(.HandshakeFailure)
+    ssltls.ssl_chk_buf(buf, end, 6) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf, ssldefs.TLS_EXT_KEY_SHARE)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 2, 2)
+    ssldefs.ssl_put_u16(ssl.out_buf, buf + 4, ssl.handshake.hrr_selected_group)
+    ssltls.ssl_tls13_set_hs_sent_ext_mask(ssl, ssldefs.TLS_EXT_KEY_SHARE)
+    Ok(6)
+}
+
+// The ServerHello's or HelloRetryRequest's body at out_buf[buf..<end]
+// (ssl_tls13_write_server_hello_body). Its length.
+ssl_srv13_write_server_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, is_hrr: Bool, rng: &R) -> Int ssldefs.SSLError! {
+    p := buf
+    sn: ssl.session_negotiate
+    ssl.handshake.sent_extensions = 0
+    // legacy_version, TLS 1.2's.
+    ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, p, 0x0303)
+    p += 2
+    // The random, which is a fixed one in a HelloRetryRequest.
+    ssltls.ssl_chk_buf(p, end, ssldefs.SERVER_HELLO_RANDOM_LEN) ?? return Err(err)
+    if is_hrr {
+        ssldefs.ssl_copy_into(ssl.out_buf, p, gen13.SSL_TLS1_3_HELLO_RETRY_REQUEST_MAGIC, 0, ssldefs.SERVER_HELLO_RANDOM_LEN)
+    } else {
+        ssldefs.ssl_copy_into(ssl.out_buf, p, ssl.handshake.randbytes, ssldefs.CLIENT_HELLO_RANDOM_LEN, ssldefs.SERVER_HELLO_RANDOM_LEN)
+    }
+    p += ssldefs.SERVER_HELLO_RANDOM_LEN
+    // legacy_session_id_echo.
+    id_len: ssl.spool[sn].id.len()
+    ssltls.ssl_chk_buf(p, end, 1 + id_len) ?? return Err(err)
+    ssl.out_buf[p] = ssldefs.ssl_byte(id_len)
+    p += 1
+    ssldefs.ssl_copy_into(ssl.out_buf, p, ssl.spool[sn].id, 0, id_len)
+    p += id_len
+    // cipher_suite.
+    ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, p, ssl.spool[sn].ciphersuite)
+    p += 2
+    // legacy_compression_method.
+    ssltls.ssl_chk_buf(p, end, 1) ?? return Err(err)
+    ssl.out_buf[p] = ssldefs.ssl_byte(ssldefs.SSL_COMPRESS_NULL)
+    p += 1
+    // The extensions' length comes once they are written.
+    ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
+    p_extensions_len: p
+    p += 2
+    p += ssl_srv13_write_server_hello_supported_versions_ext(ssl, p, end) ?? return Err(err)
+    if ssltls.ssl_tls13_key_exchange_mode_with_ephemeral(ssl) {
+        if is_hrr {
+            p += ssl_srv13_write_hrr_key_share_ext(ssl, p, end) ?? return Err(err)
+        } else {
+            p += ssl_srv13_write_key_share_ext(ssl, p, end, rng) ?? return Err(err)
+        }
+    }
+    if !is_hrr && ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) {
+        p += ssl_srv13_write_server_pre_shared_key_ext(ssl, p, end) ?? return Err(err)
+    }
+    ssldefs.ssl_put_u16(ssl.out_buf, p_extensions_len, p - p_extensions_len - 2)
+    Ok(p - buf)
+}
+
+// The MBEDTLS_SSL_SERVER_HELLO step (ssl_tls13_write_server_hello): the
+// ServerHello, then the handshake keys. Middlebox compatibility mode sends
+// a ChangeCipherSpec next.
+ssl_srv13_write_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    ssl_srv13_prepare_server_hello(ssl, rng) ?? return Err(err)
+    buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_SERVER_HELLO)
+    msg_len: ssl_srv13_write_server_hello_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4, false, rng) ?? return Err(err)
+    ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_SERVER_HELLO, ssl.out_buf, buf, msg_len)
+    sslmsg.ssl_finish_handshake_msg(ssl, msg_len, rng) ?? return Err(err)
+    keys13.ssl_tls13_compute_handshake_transform(ssl, rng) ?? return Err(err)
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_CCS_AFTER_SERVER_HELLO)
+}
+
+// Before a HelloRetryRequest (ssl_tls13_prepare_hello_retry_request): only
+// one may be sent, the transcript restarts from the ClientHello's hash and
+// the message layer is reset for the second ClientHello.
+ssl_srv13_prepare_hello_retry_request: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+    if ssl.handshake.hello_retry_request_flag != 0 {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure)
+        return Err(.HandshakeFailure)
+    }
+    gen13.ssl_reset_transcript_for_hrr(ssl) ?? return Err(err)
+    ssltls.ssl_session_reset_msg_layer(ssl, false)
+}
+
+// The MBEDTLS_SSL_HELLO_RETRY_REQUEST step
+// (ssl_tls13_write_hello_retry_request, RFC 8446 4.1.4). Middlebox
+// compatibility mode sends a ChangeCipherSpec next.
+ssl_srv13_write_hello_retry_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    ssl_srv13_prepare_hello_retry_request(ssl) ?? return Err(err)
+    buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_SERVER_HELLO)
+    msg_len: ssl_srv13_write_server_hello_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4, true, rng) ?? return Err(err)
+    ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_SERVER_HELLO, ssl.out_buf, buf, msg_len)
+    sslmsg.ssl_finish_handshake_msg(ssl, msg_len, rng) ?? return Err(err)
+    ssl.handshake.hello_retry_request_flag = 1
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_CCS_AFTER_HELLO_RETRY_REQUEST)
+}
+
+// ---------------------------------------------------------------------------
+// EncryptedExtensions, CertificateRequest, Certificate, CertificateVerify
+// and Finished (RFC 8446 4.3, 4.4).
+
+// The EncryptedExtensions' body at out_buf[buf..<end]: the chosen ALPN
+// protocol (ssl_tls13_write_encrypted_extensions_body). Its length.
+ssl_srv13_write_encrypted_extensions_body: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    p := buf
+    ssl.handshake.sent_extensions = 0
+    ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
+    p_extensions_len: p
+    p += 2
+    p += ssltls.ssl_write_alpn_ext(ssl, p, end) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, p_extensions_len, p - p_extensions_len - 2)
+    Ok(p - buf)
+}
+
+// The MBEDTLS_SSL_ENCRYPTED_EXTENSIONS step
+// (ssl_tls13_write_encrypted_extensions), the first message under the
+// handshake keys. A PSK key exchange has no certificates, so the server's
+// Finished comes next.
+ssl_srv13_write_encrypted_extensions: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    sslmsg.ssl_set_outbound_transform(ssl, ssl.handshake.transform_handshake)
+    buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_ENCRYPTED_EXTENSIONS)
+    msg_len: ssl_srv13_write_encrypted_extensions_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4) ?? return Err(err)
+    ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_ENCRYPTED_EXTENSIONS, ssl.out_buf, buf, msg_len)
+    sslmsg.ssl_finish_handshake_msg(ssl, msg_len, rng) ?? return Err(err)
+    if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_FINISHED)
+        ssl.spool[ssl.session_negotiate].verify_result = 0
+    } else {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CERTIFICATE_REQUEST)
+    }
+}
+
+// Whether to ask for the client's certificate
+// (ssl_tls13_certificate_request_coordinate): not when the SNI's or the
+// configured authmode is VERIFY_NONE, which marks verification skipped.
+ssl_srv13_certificate_request_coordinate: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
+    authmode: if ssl.handshake.sni_authmode != ssldefs.SSL_VERIFY_UNSET -> ssl.handshake.sni_authmode else -> ssl.conf.authmode
+    if authmode == ssldefs.SSL_VERIFY_NONE {
+        ssl.spool[ssl.session_negotiate].verify_result = x509.X509_BADCERT_SKIP_VERIFY
+        return false
+    }
+    ssl.handshake.certificate_request_sent = 1
+    true
+}
+
+// The CertificateRequest's body at out_buf[buf..<end]: an empty context and
+// the signature algorithms we take (ssl_tls13_write_certificate_request_body).
+// Its length.
+ssl_srv13_write_certificate_request_body: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+    p := buf
+    // The context's length, 0, and the extensions' length.
+    ssltls.ssl_chk_buf(p, end, 1 + 2) ?? return Err(err)
+    ssl.out_buf[p] = U8{0}
+    p += 1
+    p_extensions_len: p
+    p += 2
+    ssl.handshake.sent_extensions = 0
+    p += ssltls.ssl_write_sig_alg_ext(ssl, p, end) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, p_extensions_len, p - p_extensions_len - 2)
+    Ok(p - buf)
+}
+
+// The MBEDTLS_SSL_CERTIFICATE_REQUEST step
+// (ssl_tls13_write_certificate_request).
+ssl_srv13_write_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    if ssl_srv13_certificate_request_coordinate(ssl) {
+        buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE_REQUEST)
+        msg_len: ssl_srv13_write_certificate_request_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4) ?? return Err(err)
+        ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_CERTIFICATE_REQUEST, ssl.out_buf, buf, msg_len)
+        sslmsg.ssl_finish_handshake_msg(ssl, msg_len, rng) ?? return Err(err)
+    }
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_CERTIFICATE)
+}
+
+// The MBEDTLS_SSL_SERVER_CERTIFICATE step (ssl_tls13_write_server_certificate):
+// the certificate that can sign with an algorithm the client takes.
+ssl_srv13_write_server_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    if !ssl_srv13_pick_key_cert(ssl) || ssltls.ssl_own_key_cert(ssl) < 0 {
+        sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure)
+        return Err(.HandshakeFailure)
+    }
+    gen13.ssl_tls13_write_certificate(ssl, rng) ?? return Err(err)
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CERTIFICATE_VERIFY)
+}
+
+// The MBEDTLS_SSL_SERVER_FINISHED step (ssl_tls13_write_server_finished):
+// our Finished, then the application keys, which our next messages go
+// under; the client's next flight is read under the handshake keys.
+ssl_srv13_write_server_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    gen13.ssl_tls13_write_finished_message(ssl, rng) ?? return Err(err)
+    if keys13.ssl_tls13_compute_application_transform(ssl) == {
+        .Err(e) -> {
+            sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure)
+            return Err(e)
+        }
+        else -> {}
+    }
+    sslmsg.ssl_set_inbound_transform(ssl, ssl.handshake.transform_handshake)
+    // ssl_tls13_prepare_for_second_flight.
+    if ssl.handshake.certificate_request_sent != 0 {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CERTIFICATE)
+    } else {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_FINISHED)
+    }
+}
+
+// The MBEDTLS_SSL_CLIENT_FINISHED step (ssl_tls13_process_client_finished):
+// the client's Finished, then the resumption master secret over the
+// transcript through it.
+ssl_srv13_process_client_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    gen13.ssl_tls13_process_finished_message(ssl, rng) ?? return Err(err)
+    keys13.ssl_tls13_compute_resumption_master_secret(ssl) ?? return Err(err)
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_WRAPUP)
+}
+
+// The MBEDTLS_SSL_HANDSHAKE_WRAPUP step (ssl_tls13_handshake_wrapup):
+// tickets follow when a PSK key exchange is open to the client.
+ssl_srv13_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
+    gen13.ssl_tls13_handshake_wrapup(ssl)
+    if ssltls.ssl_tls13_is_some_psk_supported(ssl) {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET)
+    } else {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_OVER)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NewSessionTicket (RFC 8446 4.6.1).
+
+// Whether to send a ticket (ssl_tls13_write_new_session_ticket_coordinate):
+// a ticket writer is set and tickets remain to send.
+ssl_srv13_write_new_session_ticket_coordinate: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    if ssl.conf.f_ticket_write == None -> return false
+    if ssl.conf.new_session_tickets_count == 0 -> return false
+    ssl.handshake.new_session_tickets_count != 0
+}
+
+// Ready the session for a ticket (ssl_tls13_prepare_new_session_ticket):
+// the key exchange modes it allows, a fresh age offset, and the resumption
+// key HKDF-Expand-Label(resumption_master_secret, "resumption",
+// ticket_nonce, Hash.length). The ticket's fresh nonce.
+ssl_srv13_prepare_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) -> [U8] ssldefs.SSLError! {
+    s: ssl.session
+    ssltls.ssl_tls13_session_clear_ticket_flags(ssl.spool[s], ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK)
+    ssltls.ssl_tls13_session_set_ticket_flags(ssl.spool[s], ssl.handshake.tls13_kex_modes)
+    age_add := ssldefs.ssl_zeros(4)
+    if !rng.fill(age_add) -> return Err(.RandomFailed)
+    ssl.spool[s].ticket_age_add = ssldefs.ssl_get_u32(age_add, 0)
+    ticket_nonce := ssldefs.ssl_zeros(ssldefs.SSL_TLS1_3_TICKET_NONCE_LENGTH)
+    if !rng.fill(ticket_nonce) -> return Err(.RandomFailed)
+    cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
+    hash_length: hashes.md_size(cs.mac)
+    if hash_length > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN -> return Err(.InternalError)
+    ssl.spool[s].ciphersuite = cs.id
+    secret: ssldefs.ssl_bytes_of(ssl.spool[s].app_secrets.resumption_master_secret, 0, hash_length)
+    ssl.spool[s].resumption_key = keys13.ssl_tls13_hkdf_expand_label(cs.mac, secret, "resumption".bytes(), ticket_nonce, hash_length) ?? return Err(err)
+    Ok(ticket_nonce)
+}
+
+// The NewSessionTicket's body at out_buf[buf..<end]
+// (ssl_tls13_write_new_session_ticket_body): ticket_lifetime,
+// ticket_age_add, ticket_nonce and the ticket the writer made of the
+// session, with no extensions. Its length.
+ssl_srv13_write_new_session_ticket_body: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, ticket_nonce: [U8]) -> Int ssldefs.SSLError! {
+    p := buf
+    s: ssl.session
+    ticket_nonce_size: ticket_nonce.len()
+    // ticket_lifetime, ticket_age_add, ticket_nonce and the ticket's length.
+    ssltls.ssl_chk_buf(p, end, 4 + 4 + 1 + ticket_nonce_size + 2) ?? return Err(err)
+    ssl.spool[s].ticket_creation_time = ssldefs.ssl_ms_time()
+    write := if ssl.conf.f_ticket_write == {
+        .Val(cb) -> cb.call
+        None -> return Err(.InternalError)
+    }
+    written := write(ssl.spool[s]) ?? return Err(err)
+    // C's writer gets the rest of the message, which the ticket must fit.
+    ticket_len: written.ticket.len()
+    ticket_at: p + 9 + ticket_nonce_size + 2
+    ssltls.ssl_chk_buf(ticket_at, end, ticket_len) ?? return Err(err)
+    if written.lifetime > ssldefs.SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME -> return Err(.BadInputData)
+    ssldefs.ssl_put_u32(ssl.out_buf, p, written.lifetime)
+    ssldefs.ssl_put_u32(ssl.out_buf, p + 4, ssl.spool[s].ticket_age_add)
+    ssl.out_buf[p + 8] = ssldefs.ssl_byte(ticket_nonce_size)
+    ssldefs.ssl_copy_into(ssl.out_buf, p + 9, ticket_nonce, 0, ticket_nonce_size)
+    p += 9 + ticket_nonce_size
+    ssldefs.ssl_put_u16(ssl.out_buf, p, ticket_len)
+    p += 2
+    ssldefs.ssl_copy_into(ssl.out_buf, p, written.ticket, 0, ticket_len)
+    p += ticket_len
+    // No extensions.
+    ssl.handshake.sent_extensions = 0
+    ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
+    ssldefs.ssl_put_u16(ssl.out_buf, p, 0)
+    p += 2
+    Ok(p - buf)
+}
+
+// The MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET step
+// (ssl_tls13_write_new_session_ticket). A resumed session gets one ticket.
+// The ticket is no part of the transcript.
+ssl_srv13_write_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    if !ssl_srv13_write_new_session_ticket_coordinate(ssl) {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_OVER)
+        return
+    }
+    ticket_nonce: ssl_srv13_prepare_new_session_ticket(ssl, rng) ?? return Err(err)
+    buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_NEW_SESSION_TICKET)
+    msg_len: ssl_srv13_write_new_session_ticket_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4, ticket_nonce) ?? return Err(err)
+    sslmsg.ssl_finish_handshake_msg(ssl, msg_len, rng) ?? return Err(err)
+    if ssl.handshake.resume == 1 {
+        ssl.handshake.new_session_tickets_count = 0
+    } else {
+        ssl.handshake.new_session_tickets_count -= 1
+    }
+    sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET_FLUSH)
+}
+
+// ---------------------------------------------------------------------------
+// The state machine.
+
+/// Perform one step of the TLS 1.3 server handshake
+/// (mbedtls_ssl_tls13_handshake_server_step).
+ssl_tls13_handshake_server_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+    if ssl.state == ssldefs.SSL_HANDSHAKE_OVER || !ssl.has_handshake -> return Err(.BadInputData)
+    state: ssl.state
+    if state == ssldefs.SSL_HELLO_REQUEST {
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_HELLO)
+        return
+    }
+    if state == ssldefs.SSL_CLIENT_HELLO -> return ssl_srv13_process_client_hello(ssl, rng)
+    if state == ssldefs.SSL_HELLO_RETRY_REQUEST -> return ssl_srv13_write_hello_retry_request(ssl, rng)
+    if state == ssldefs.SSL_SERVER_HELLO -> return ssl_srv13_write_server_hello(ssl, rng)
+    if state == ssldefs.SSL_ENCRYPTED_EXTENSIONS -> return ssl_srv13_write_encrypted_extensions(ssl, rng)
+    if state == ssldefs.SSL_CERTIFICATE_REQUEST -> return ssl_srv13_write_certificate_request(ssl, rng)
+    if state == ssldefs.SSL_SERVER_CERTIFICATE -> return ssl_srv13_write_server_certificate(ssl, rng)
+    if state == ssldefs.SSL_CERTIFICATE_VERIFY {
+        // ssl_tls13_write_certificate_verify.
+        gen13.ssl_tls13_write_certificate_verify(ssl, rng) ?? return Err(err)
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_SERVER_FINISHED)
+        return
+    }
+    // The dummy ChangeCipherSpec records of middlebox compatibility
+    // (RFC 8446 D.4).
+    if state == ssldefs.SSL_SERVER_CCS_AFTER_HELLO_RETRY_REQUEST {
+        gen13.ssl_tls13_write_change_cipher_spec(ssl, rng) ?? return Err(err)
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_HELLO)
+        return
+    }
+    if state == ssldefs.SSL_SERVER_CCS_AFTER_SERVER_HELLO {
+        gen13.ssl_tls13_write_change_cipher_spec(ssl, rng) ?? return Err(err)
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_ENCRYPTED_EXTENSIONS)
+        return
+    }
+    if state == ssldefs.SSL_SERVER_FINISHED -> return ssl_srv13_write_server_finished(ssl, rng)
+    if state == ssldefs.SSL_CLIENT_FINISHED -> return ssl_srv13_process_client_finished(ssl, rng)
+    if state == ssldefs.SSL_HANDSHAKE_WRAPUP {
+        ssl_srv13_handshake_wrapup(ssl)
+        return
+    }
+    if state == ssldefs.SSL_CLIENT_CERTIFICATE {
+        // The client's Certificate, then its CertificateVerify if it sent one.
+        gen13.ssl_tls13_process_certificate(ssl, rng) ?? return Err(err)
+        if ssltls.ssl_has_peer_cert(ssl) {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CERTIFICATE_VERIFY)
+        } else {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_FINISHED)
+        }
+        return
+    }
+    if state == ssldefs.SSL_CLIENT_CERTIFICATE_VERIFY {
+        gen13.ssl_tls13_process_certificate_verify(ssl, rng) ?? return Err(err)
+        sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_FINISHED)
+        return
+    }
+    if state == ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET -> return ssl_srv13_write_new_session_ticket(ssl, rng)
+    if state == ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET_FLUSH {
+        // The ticket is flushed before the next one, or the handshake's end.
+        if ssl.handshake.new_session_tickets_count == 0 {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_OVER)
+        } else {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET)
+        }
+        return
+    }
+    Err(.FeatureUnavailable)
+}

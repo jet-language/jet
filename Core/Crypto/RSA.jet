@@ -1,0 +1,1304 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/rsa.c, library/rsa_alt_helpers.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: RSA (PKCS#1 v1.5 and v2.1, RFC 8017).
+//
+// A port of mbedtls 3.6.7's rsa.c and rsa_alt_helpers.c with the CRT on and
+// both paddings: key import, completion and checks, key generation, the
+// public and private primitives, RSAES-PKCS1-v1_5, RSAES-OAEP,
+// RSASSA-PKCS1-v1_5 and RSASSA-PSS, and the PKCS#1 key encodings. The private
+// operation blinds its input and both CRT exponents and checks its result
+// against the public operation before it unblinds; the v1.5 and OAEP
+// decoders run in constant time up to their final verdict.
+use {
+    core
+    cipher: __core_crypto_cipher
+    bn: __core_crypto_bignum
+    __core_crypto_bignum.[RNG]
+    hashes: __core_crypto_md
+    drbg: __core_crypto_drbg
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    ctime: __core_crypto_ctime
+}
+
+/// The smallest modulus rsa_gen_key makes (MBEDTLS_RSA_GEN_KEY_MIN_BITS).
+GEN_KEY_MIN_BITS: 1024
+
+/// The largest modulus in bytes the primitives take (MBEDTLS_MPI_MAX_SIZE).
+MPI_MAX_SIZE: 1024
+
+/// The salt length that lets PSS pick the largest one that fits
+/// (MBEDTLS_RSA_SALT_LEN_ANY).
+SALT_LEN_ANY: -1
+
+/// The block type of a v1.5 signature (MBEDTLS_RSA_SIGN).
+RSA_SIGN: 1
+
+/// The block type of a v1.5 encryption (MBEDTLS_RSA_CRYPT).
+RSA_CRYPT: 2
+
+/// The bytes of the random multiple of p - 1 or q - 1 added to each CRT
+/// exponent (RSA_EXPONENT_BLINDING).
+EXPONENT_BLINDING: 28
+
+/// Why an RSA operation failed (MBEDTLS_ERR_RSA_*). A payload is the
+/// bignum error mbedtls adds to the RSA code.
+#Error
+RSAError: enum {
+    /// Bad input parameters (BAD_INPUT_DATA, -0x4080).
+    BadInput(bn.MpiError?)
+    /// The input has a bad padding (INVALID_PADDING, -0x4100).
+    InvalidPadding
+    /// Key generation failed (KEY_GEN_FAILED, -0x4180).
+    KeyGenFailed(bn.MpiError?)
+    /// The key failed a check (KEY_CHECK_FAILED, -0x4200).
+    KeyCheckFailed(bn.MpiError?)
+    /// The public operation failed (PUBLIC_FAILED, -0x4280).
+    PublicFailed(bn.MpiError?)
+    /// The private operation failed (PRIVATE_FAILED, -0x4300).
+    PrivateFailed(bn.MpiError?)
+    /// The signature or the private result does not verify
+    /// (VERIFY_FAILED, -0x4380).
+    VerifyFailed
+    /// The output does not fit the given length (OUTPUT_TOO_LARGE, -0x4400).
+    OutputTooLarge
+    /// The random generator failed (RNG_FAILED, -0x4480).
+    RNGFailed
+    /// A bignum error on its own (MBEDTLS_ERR_MPI_*).
+    Mpi(bn.MpiError)
+    /// A DER error of a key encoding (MBEDTLS_ERR_ASN1_*).
+    Asn1(asn1.ASN1Error)
+}
+
+impl bn.MpiError -> RSAError { RSAError.Mpi(self) }
+
+/// The encoding scheme (MBEDTLS_RSA_PKCS_V15, MBEDTLS_RSA_PKCS_V21).
+RSAPadding: enum {
+    PKCSV15
+    PKCSV21
+}
+
+/// One core parameter of a key, for import and export.
+RSAPart: enum {
+    N
+    P
+    Q
+    D
+    E
+}
+
+/// An RSA key (mbedtls_rsa_context): modulus n of `len` bytes, exponents e
+/// and d, primes p and q, the CRT values dp = d mod (p - 1),
+/// dq = d mod (q - 1) and qp = q^-1 mod p, the cached R^2 of each modulus,
+/// and the blinding pair vi = vf^-e mod n, vf.
+RSAContext: struct {
+    len: Int
+    n: bn.Mpi
+    e: bn.Mpi
+    d: bn.Mpi
+    p: bn.Mpi
+    q: bn.Mpi
+    dp: bn.Mpi
+    dq: bn.Mpi
+    qp: bn.Mpi
+    rn: bn.Mpi
+    rp: bn.Mpi
+    rq: bn.Mpi
+    vi: bn.Mpi
+    vf: bn.Mpi
+    padding: RSAPadding
+    hash_id: hashes.Md?
+}
+
+/// An empty key with v1.5 padding and no hash (mbedtls_rsa_init).
+rsa_new: fn() -> RSAContext Never! {
+    RSAContext{
+        len: 0, n: bn.mpi(), e: bn.mpi(), d: bn.mpi(), p: bn.mpi(), q: bn.mpi(),
+        dp: bn.mpi(), dq: bn.mpi(), qp: bn.mpi(), rn: bn.mpi(), rp: bn.mpi(), rq: bn.mpi(),
+        vi: bn.mpi(), vf: bn.mpi(), padding: .PKCSV15, hash_id: None,
+    }
+}
+
+/// Choose the padding and, for v2.1, the hash of OAEP and the MGF1 of PSS
+/// (mbedtls_rsa_set_padding). Every Md is built in, so this cannot fail.
+rsa_set_padding: fn(ctx: &RSAContext, padding: RSAPadding, hash_id: hashes.Md?) Never! {
+    ctx.padding = padding
+    ctx.hash_id = hash_id
+}
+
+/// The bit length of the modulus (mbedtls_rsa_get_bitlen).
+rsa_get_bitlen: fn(ctx: RSAContext) -> Int Never! { bn.bitlen(ctx.n) }
+
+/// A copy of every field (mbedtls_rsa_copy).
+rsa_copy: fn(src: RSAContext) -> RSAContext Never! {
+    RSAContext{
+        len: src.len, n: bn.copy_mpi(src.n), e: bn.copy_mpi(src.e), d: bn.copy_mpi(src.d),
+        p: bn.copy_mpi(src.p), q: bn.copy_mpi(src.q), dp: bn.copy_mpi(src.dp), dq: bn.copy_mpi(src.dq),
+        qp: bn.copy_mpi(src.qp), rn: bn.copy_mpi(src.rn), rp: bn.copy_mpi(src.rp), rq: bn.copy_mpi(src.rq),
+        vi: bn.copy_mpi(src.vi), vf: bn.copy_mpi(src.vf), padding: src.padding, hash_id: src.hash_id,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Import, completion and export.
+
+/// Set one core parameter; setting n sets len (mbedtls_rsa_import with one
+/// non-NULL argument).
+rsa_import: fn(ctx: &RSAContext, part: RSAPart, value: bn.Mpi) RSAError! {
+    if part == {
+        .N -> bn.set_mpi(ctx.n, value) ?? return Err(.BadInput(Val(err)))
+        .P -> bn.set_mpi(ctx.p, value) ?? return Err(.BadInput(Val(err)))
+        .Q -> bn.set_mpi(ctx.q, value) ?? return Err(.BadInput(Val(err)))
+        .D -> bn.set_mpi(ctx.d, value) ?? return Err(.BadInput(Val(err)))
+        .E -> bn.set_mpi(ctx.e, value) ?? return Err(.BadInput(Val(err)))
+    }
+    if part == .N -> ctx.len = bn.size(ctx.n)
+}
+
+/// Set one core parameter from its unsigned big-endian bytes
+/// (mbedtls_rsa_import_raw with one non-NULL argument).
+rsa_import_raw: fn(ctx: &RSAContext, part: RSAPart, bytes: [U8]) RSAError! {
+    value: bn.read_binary(bytes) ?? return Err(.BadInput(Val(err)))
+    rsa_import(ctx, part, value)
+}
+
+/// Whether n, p, q, d and e are all set, so the key is private.
+has_private_parts: fn(ctx: RSAContext) -> Bool Never! {
+    bn.cmp_int(ctx.n, 0) != 0 && bn.cmp_int(ctx.p, 0) != 0 && bn.cmp_int(ctx.q, 0) != 0
+        && bn.cmp_int(ctx.d, 0) != 0 && bn.cmp_int(ctx.e, 0) != 0
+}
+
+/// Whether the primitives can run on ctx: n is odd, positive and len bytes
+/// long, e is positive and, for the private operation, p and q are odd and
+/// positive and dp, dq and qp positive (rsa_check_context). It says nothing
+/// of whether the values agree. The private parts are secret, so their
+/// checks fold into one word with no test of their limbs and only the
+/// verdict leaves; mbedtls compares each in turn.
+rsa_check_context: fn(ctx: RSAContext, is_priv: Bool{false}) -> Bool Never! {
+    if ctx.len != bn.size(ctx.n) || ctx.len > MPI_MAX_SIZE -> return false
+    if bn.cmp_int(ctx.n, 0) <= 0 || bn.get_bit(ctx.n, 0) == 0 -> return false
+    if bn.cmp_int(ctx.e, 0) <= 0 -> return false
+    if !is_priv -> return true
+    ok := positive_ct(ctx.p).bit_and(bn.limb_bit(ctx.p, 0))
+    ok = ok.bit_and(positive_ct(ctx.q)).bit_and(bn.limb_bit(ctx.q, 0))
+    ok = ok.bit_and(positive_ct(ctx.dp)).bit_and(positive_ct(ctx.dq)).bit_and(positive_ct(ctx.qp))
+    ok == U64{1}
+}
+
+/// 1 when x > 0, with no test of its limbs; the sign is public.
+positive_ct: fn(x: bn.Mpi) -> U64 Never! {
+    if x.s < 0 -> return U64{0}
+    bn.core_check_zero_ct(x.p, x.p.len())
+}
+
+/// Deduce the missing parameters of a key given as (n, e), (p, q, d, e),
+/// (n, d, e) or (p, q, e), and the CRT values of a private key not given
+/// them (mbedtls_rsa_complete).
+rsa_complete: fn(ctx: &RSAContext) RSAError! {
+    have_n: bn.cmp_int(ctx.n, 0) != 0
+    have_p: bn.cmp_int(ctx.p, 0) != 0
+    have_q: bn.cmp_int(ctx.q, 0) != 0
+    have_d: bn.cmp_int(ctx.d, 0) != 0
+    have_e: bn.cmp_int(ctx.e, 0) != 0
+    have_dp: bn.cmp_int(ctx.dp, 0) != 0
+    have_dq: bn.cmp_int(ctx.dq, 0) != 0
+    have_qp: bn.cmp_int(ctx.qp, 0) != 0
+    n_missing: have_p && have_q && have_d && have_e
+    pq_missing: have_n && !have_p && !have_q && have_d && have_e
+    d_missing: have_p && have_q && !have_d && have_e
+    is_pub: have_n && !have_p && !have_q && !have_d && have_e
+    is_priv: n_missing || pq_missing || d_missing
+    if !is_priv && !is_pub -> return Err(.BadInput(None))
+    // Step 1: n from p and q.
+    if !have_n && have_p && have_q {
+        n: bn.mul_mpi(ctx.p, ctx.q) ?? return Err(.BadInput(Val(err)))
+        bn.set_mpi(ctx.n, n) ?? return Err(.BadInput(Val(err)))
+        ctx.len = bn.size(ctx.n)
+    }
+    // Step 2: the remaining core parameters.
+    if {
+        pq_missing -> {
+            // mbedtls_rsa_deduce_primes writes into P and Q and wants them unset.
+            if ctx.p.p.len() != 0 || ctx.q.p.len() != 0 -> return Err(.BadInput(Val(.BadInput)))
+            primes: rsa_deduce_primes(ctx.n, ctx.e, ctx.d) ?? return Err(.BadInput(Val(err)))
+            bn.set_mpi(ctx.p, primes.p) ?? return Err(.BadInput(Val(err)))
+            bn.set_mpi(ctx.q, primes.q) ?? return Err(.BadInput(Val(err)))
+        }
+        d_missing -> {
+            d: rsa_deduce_private_exponent(ctx.p, ctx.q, ctx.e) ?? return Err(.BadInput(Val(err)))
+            bn.set_mpi(ctx.d, d) ?? return Err(.BadInput(Val(err)))
+        }
+        else -> {}
+    }
+    // Step 3: the CRT values.
+    if is_priv && !(have_dp && have_dq && have_qp) {
+        crt: rsa_deduce_crt(ctx.p, ctx.q, ctx.d) ?? return Err(.BadInput(Val(err)))
+        bn.set_mpi(ctx.dp, crt.dp) ?? return Err(.BadInput(Val(err)))
+        bn.set_mpi(ctx.dq, crt.dq) ?? return Err(.BadInput(Val(err)))
+        bn.set_mpi(ctx.qp, crt.qp) ?? return Err(.BadInput(Val(err)))
+    }
+    if !rsa_check_context(ctx, is_priv: is_priv) -> return Err(.BadInput(None))
+}
+
+/// A copy of one core parameter; p, q and d only of a private key
+/// (mbedtls_rsa_export with one non-NULL argument).
+rsa_export: fn(ctx: RSAContext, part: RSAPart) -> bn.Mpi RSAError! {
+    if part == {
+        .N -> return Ok(bn.copy_mpi(ctx.n))
+        .E -> return Ok(bn.copy_mpi(ctx.e))
+        else -> {}
+    }
+    if !has_private_parts(ctx) -> return Err(.BadInput(None))
+    if part == {
+        .P -> Ok(bn.copy_mpi(ctx.p))
+        .Q -> Ok(bn.copy_mpi(ctx.q))
+        else -> Ok(bn.copy_mpi(ctx.d))
+    }
+}
+
+/// One core parameter as `len` big-endian bytes; p, q and d only of a
+/// private key (mbedtls_rsa_export_raw with one non-NULL argument).
+rsa_export_raw: fn(ctx: RSAContext, part: RSAPart, len: Int) -> [U8] RSAError! {
+    value: rsa_export(ctx, part)
+    out: bn.write_binary(value, len)
+    Ok(out)
+}
+
+/// The CRT values (dp, dq, qp) of a private key (mbedtls_rsa_export_crt).
+rsa_export_crt: fn(ctx: RSAContext) -> (dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) RSAError! {
+    if !has_private_parts(ctx) -> return Err(.BadInput(None))
+    Ok((dp: bn.copy_mpi(ctx.dp), dq: bn.copy_mpi(ctx.dq), qp: bn.copy_mpi(ctx.qp)))
+}
+
+// ---------------------------------------------------------------------------
+// Deductions and checks (rsa_alt_helpers.c).
+
+/// The primes dividing the first byte of every attempt in
+/// mbedtls_rsa_deduce_primes.
+DEDUCE_PRIMES: [Int]{
+    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
+    101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193,
+    197, 199, 211, 223, 227, 229, 233, 239, 241, 251,
+}
+
+/// The primes p, q of n = p q from the exponents d and e, by Miller's
+/// reduction (mbedtls_rsa_deduce_primes; HAC 8.2.2). Only d e matters, so
+/// d and e may come in either order. BadInput when no small base splits n.
+rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> (p: bn.Mpi, q: bn.Mpi) bn.MpiError! {
+    if bn.cmp_int(n, 0) <= 0 || bn.cmp_int(d, 1) <= 0 || bn.cmp_mpi(d, n) >= 0 || bn.cmp_int(e, 1) <= 0 || bn.cmp_mpi(e, n) >= 0 -> return Err(.BadInput)
+    // d e - 1 = 2^order t with t odd.
+    de: bn.mul_mpi(d, e)
+    t := bn.sub_int(de, 1)
+    order: bn.lsb(t)
+    if order == 0 -> return Err(.BadInput)
+    bn.shift_r(t, order)
+    // n = 1 mod 8 makes 2 a square mod both primes: it never splits n.
+    attempt := 0
+    if n.p[0].bit_and(U64{7}) == (U64{1}) -> attempt = 1
+    rr := bn.mpi()
+    loop attempt < DEDUCE_PRIMES.len() {
+        base: bn.from_int(DEDUCE_PRIMES[attempt])
+        attempt += 1
+        coprime: bn.gcd_modinv_odd(base, n, false)
+        if bn.cmp_int(coprime.g, 1) != 0 -> next
+        k := bn.exp_mod(base, t, n, rr)
+        iter := 1
+        loop iter <= order {
+            if bn.cmp_int(k, 1) == 0 -> break
+            k1: bn.add_int(k, 1)
+            split: bn.gcd_modinv_odd(k1, n, false)
+            if bn.cmp_int(split.g, 1) == 1 && bn.cmp_mpi(split.g, n) == -1 {
+                qr: bn.div_mpi(n, split.g)
+                return Ok((p: bn.copy_mpi(split.g), q: bn.copy_mpi(qr.q)))
+            }
+            sq: bn.mul_mpi(k, k)
+            reduced: bn.mod_mpi(sq, n)
+            bn.set_mpi(k, reduced)
+            iter += 1
+        }
+        // k^(2^order t) = k^(d e - 1) is not 1: d and e do not match n.
+        if bn.cmp_int(k, 1) != 0 -> break
+    }
+    Err(.BadInput)
+}
+
+/// d = e^-1 mod lcm(p - 1, q - 1) (mbedtls_rsa_deduce_private_exponent).
+/// NotAcceptable for an even e or one with no inverse.
+rsa_deduce_private_exponent: fn(p: bn.Mpi, q: bn.Mpi, e: bn.Mpi) -> bn.Mpi bn.MpiError! {
+    if bn.cmp_int(p, 1) <= 0 || bn.cmp_int(q, 1) <= 0 || bn.cmp_int(e, 0) == 0 -> return Err(.BadInput)
+    if bn.get_bit(e, 0) != 1 -> return Err(.NotAcceptable)
+    k: bn.sub_int(p, 1)
+    l: bn.sub_int(q, 1)
+    g: bn.gcd(k, l)
+    kl: bn.mul_mpi(k, l)
+    lcm: bn.div_mpi(kl, g)
+    d: bn.inv_mod_even_in_range(e, lcm.q)
+    Ok(d)
+}
+
+/// The CRT values dp = d mod (p - 1), dq = d mod (q - 1) and
+/// qp = q^-1 mod p (mbedtls_rsa_deduce_crt).
+rsa_deduce_crt: fn(p: bn.Mpi, q: bn.Mpi, d: bn.Mpi) -> (dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) bn.MpiError! {
+    p1: bn.sub_int(p, 1)
+    dp: bn.mod_mpi(d, p1)
+    q1: bn.sub_int(q, 1)
+    dq: bn.mod_mpi(d, q1)
+    qp: bn.inv_mod_odd(q, p)
+    Ok((dp: dp, dq: dq, qp: qp))
+}
+
+/// A bignum failure inside a key check carries KEY_CHECK_FAILED.
+key_check_failed: fn(e: RSAError) -> RSAError Never! {
+    if e == .Mpi(m) -> return RSAError.KeyCheckFailed(Val(m))
+    e.copy()
+}
+
+/// Check that the given parameters agree: n = p q, 1 < d, e < n, and
+/// d e = 1 mod p - 1 and mod q - 1 (mbedtls_rsa_validate_params without a
+/// generator; rsa_validate_params_rng also tests p and q for primality).
+rsa_validate_params: fn(n: bn.Mpi?, p: bn.Mpi?, q: bn.Mpi?, d: bn.Mpi?, e: bn.Mpi?) RSAError! {
+    validate_params_core(n, p, q, d, e) ?? return Err(key_check_failed(err))
+}
+
+validate_params_core: fn(n: bn.Mpi?, p: bn.Mpi?, q: bn.Mpi?, d: bn.Mpi?, e: bn.Mpi?) RSAError! {
+    if p == .Val(pv) && q == .Val(qv) && n == .Val(nv) {
+        k: bn.mul_mpi(pv, qv)
+        if bn.cmp_int(nv, 1) <= 0 || bn.cmp_mpi(k, nv) != 0 -> return Err(.KeyCheckFailed(None))
+    }
+    if n == .Val(nv) && d == .Val(dv) && e == .Val(ev) {
+        if bn.cmp_int(dv, 1) <= 0 || bn.cmp_int(ev, 1) <= 0 || bn.cmp_mpi(dv, nv) >= 0 || bn.cmp_mpi(ev, nv) >= 0 -> return Err(.KeyCheckFailed(None))
+    }
+    if p == .Val(pv) && q == .Val(qv) && d == .Val(dv) && e == .Val(ev) {
+        if bn.cmp_int(pv, 1) <= 0 || bn.cmp_int(qv, 1) <= 0 -> return Err(.KeyCheckFailed(None))
+        de: bn.mul_mpi(dv, ev)
+        de1: bn.sub_int(de, 1)
+        p1: bn.sub_int(pv, 1)
+        rp: bn.mod_mpi(de1, p1)
+        if bn.cmp_int(rp, 0) != 0 -> return Err(.KeyCheckFailed(None))
+        q1: bn.sub_int(qv, 1)
+        rq: bn.mod_mpi(de1, q1)
+        if bn.cmp_int(rq, 0) != 0 -> return Err(.KeyCheckFailed(None))
+    }
+}
+
+/// rsa_validate_params after 50 Miller-Rabin rounds on each given prime
+/// (mbedtls_rsa_validate_params with a generator).
+rsa_validate_params_rng: fn<R: RNG>(n: bn.Mpi?, p: bn.Mpi?, q: bn.Mpi?, d: bn.Mpi?, e: bn.Mpi?, rng: &R) RSAError! {
+    if p == .Val(pv) -> bn.is_prime_ext(pv, 50, rng) ?? return Err(.KeyCheckFailed(None))
+    if q == .Val(qv) -> bn.is_prime_ext(qv, 50, rng) ?? return Err(.KeyCheckFailed(None))
+    rsa_validate_params(n, p, q, d, e)
+}
+
+/// Check the CRT values against p, q and d (mbedtls_rsa_validate_crt).
+rsa_validate_crt: fn(p: bn.Mpi, q: bn.Mpi, d: bn.Mpi, dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) RSAError! {
+    validate_crt_core(p, q, d, dp, dq, qp) ?? return Err(key_check_failed(err))
+}
+
+validate_crt_core: fn(p: bn.Mpi, q: bn.Mpi, d: bn.Mpi, dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) RSAError! {
+    p1: bn.sub_int(p, 1)
+    dpd: bn.sub_mpi(dp, d)
+    rp: bn.mod_mpi(dpd, p1)
+    if bn.cmp_int(rp, 0) != 0 -> return Err(.KeyCheckFailed(None))
+    q1: bn.sub_int(q, 1)
+    dqd: bn.sub_mpi(dq, d)
+    rq: bn.mod_mpi(dqd, q1)
+    if bn.cmp_int(rq, 0) != 0 -> return Err(.KeyCheckFailed(None))
+    qpq: bn.mul_mpi(qp, q)
+    qpq1: bn.sub_int(qpq, 1)
+    rqp: bn.mod_mpi(qpq1, p)
+    if bn.cmp_int(rqp, 0) != 0 -> return Err(.KeyCheckFailed(None))
+}
+
+/// Check a public key: usable, n of 128 bits or more, e odd, above 2 and
+/// below n (mbedtls_rsa_check_pubkey).
+rsa_check_pubkey: fn(ctx: RSAContext) RSAError! {
+    if !rsa_check_context(ctx) -> return Err(.KeyCheckFailed(None))
+    if bn.bitlen(ctx.n) < 128 -> return Err(.KeyCheckFailed(None))
+    if bn.get_bit(ctx.e, 0) == 0 || bn.bitlen(ctx.e) < 2 || bn.cmp_mpi(ctx.e, ctx.n) >= 0 -> return Err(.KeyCheckFailed(None))
+}
+
+/// Check every field of a private key (mbedtls_rsa_check_privkey).
+rsa_check_privkey: fn(ctx: RSAContext) RSAError! {
+    rsa_check_pubkey(ctx) ?? return Err(.KeyCheckFailed(None))
+    if !rsa_check_context(ctx, is_priv: true) -> return Err(.KeyCheckFailed(None))
+    rsa_validate_params(Val(ctx.n), Val(ctx.p), Val(ctx.q), Val(ctx.d), Val(ctx.e)) ?? return Err(.KeyCheckFailed(None))
+    rsa_validate_crt(ctx.p, ctx.q, ctx.d, ctx.dp, ctx.dq, ctx.qp) ?? return Err(.KeyCheckFailed(None))
+}
+
+/// Check that prv is a valid private key and pub its public half
+/// (mbedtls_rsa_check_pub_priv).
+rsa_check_pub_priv: fn(pub_key: RSAContext, prv: RSAContext) RSAError! {
+    rsa_check_pubkey(pub_key) ?? return Err(.KeyCheckFailed(None))
+    rsa_check_privkey(prv) ?? return Err(.KeyCheckFailed(None))
+    if bn.cmp_mpi(pub_key.n, prv.n) != 0 || bn.cmp_mpi(pub_key.e, prv.e) != 0 -> return Err(.KeyCheckFailed(None))
+}
+
+// ---------------------------------------------------------------------------
+// Key generation.
+
+/// A bignum failure inside key generation carries KEY_GEN_FAILED.
+key_gen_failed: fn(e: RSAError) -> RSAError Never! {
+    if e == .Mpi(m) -> return RSAError.KeyGenFailed(Val(m))
+    e.copy()
+}
+
+/// A new key of nbits bits with public exponent `exponent`: primes q < p
+/// that differ in their top 100 bits, and d = e^-1 mod lcm(p - 1, q - 1)
+/// of more than nbits / 2 bits (mbedtls_rsa_gen_key; FIPS 186-4 B.3.1,
+/// B.3.3).
+rsa_gen_key: fn<R: RNG>(rng: &R, nbits: Int, exponent: Int) -> RSAContext RSAError! {
+    if exponent < 3 || nbits %% 2 != 0 -> return Err(.BadInput(None))
+    if nbits < GEN_KEY_MIN_BITS -> return Err(.BadInput(None))
+    ctx := gen_key_core(rng, nbits, exponent) ?? return Err(key_gen_failed(err))
+    Ok(ctx)
+}
+
+gen_key_core: fn<R: RNG>(rng: &R, nbits: Int, exponent: Int) -> RSAContext RSAError! {
+    // At 1024 bits or fewer the strength is at most 80 bits, so 2^-80 is
+    // error rate enough.
+    low_err: nbits > 1024
+    ctx := rsa_new()
+    bn.lset(ctx.e, exponent)
+    min_diff_bits: if nbits >= 200 -> (nbits >> 1) - 99 else -> 0
+    loop {
+        p := bn.gen_prime(nbits >> 1, rng, low_err: low_err)
+        q := bn.gen_prime(nbits >> 1, rng, low_err: low_err)
+        h: bn.sub_mpi(p, q)
+        if bn.bitlen(h) <= min_diff_bits -> next
+        // Not required by any standard, but some users rely on p > q.
+        if h.s < 0 -> bn.swap(p, q)
+        d := bn.mpi()
+        if rsa_deduce_private_exponent(p, q, ctx.e) == {
+            .Ok(found) -> bn.set_mpi(d, found)
+            .Err(.NotAcceptable) -> next
+            .Err(other) -> return Err(.Mpi(other))
+        }
+        if bn.bitlen(d) <= (nbits + 1) /% 2 -> next
+        bn.set_mpi(ctx.p, p)
+        bn.set_mpi(ctx.q, q)
+        bn.set_mpi(ctx.d, d)
+        break
+    }
+    n: bn.mul_mpi(ctx.p, ctx.q)
+    bn.set_mpi(ctx.n, n)
+    ctx.len = bn.size(ctx.n)
+    crt: rsa_deduce_crt(ctx.p, ctx.q, ctx.d)
+    bn.set_mpi(ctx.dp, crt.dp)
+    bn.set_mpi(ctx.dq, crt.dq)
+    bn.set_mpi(ctx.qp, crt.qp)
+    rsa_check_privkey(ctx)
+    Ok(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// The primitives.
+
+/// input^e mod n over the first len bytes of input, as len bytes
+/// (mbedtls_rsa_public). Input shorter than len is no integer below n:
+/// PublicFailed(BadInput), as for one that is not below n.
+rsa_public: fn(ctx: &RSAContext, input: [U8]) -> [U8] RSAError! {
+    if !rsa_check_context(ctx) -> return Err(.BadInput(None))
+    if input.len() < ctx.len -> return Err(.PublicFailed(Val(.BadInput)))
+    out := public_core(ctx, input) ?? return Err(.PublicFailed(Val(err)))
+    Ok(out)
+}
+
+/// The range check reads t's limbs in constant time (below_modulus): the
+/// signature check of rsa_pkcs1_sign runs this on the signature just made.
+public_core: fn(ctx: &RSAContext, input: [U8]) -> [U8] bn.MpiError! {
+    t: bn.read_binary(cipher.bytes_of(input, 0, ctx.len))
+    nl: ctx.n.p.len()
+    if t.p.len() > nl || !below_modulus(bn.limbs_of(t, nl), ctx.n.p, nl) -> return Err(.BadInput)
+    r: bn.exp_mod_unsafe(t, ctx.e, ctx.n, ctx.rn)
+    out: bn.write_binary(r, ctx.len)
+    Ok(out)
+}
+
+/// The t with t = tp mod p and t = tq mod q: ((tp - tq) qp mod p) q + tq
+/// (rsa_apply_crt), for tp < p and tq < q, in n's limb count. The halves are
+/// secret, so the arithmetic is fixed-width: tq comes below p by a
+/// Montgomery reduction, its product with qp mod p is two Montgomery
+/// products, and the lift is a plain product and sum. mbedtls uses the
+/// variable-time mbedtls_mpi_sub_mpi, mul_mpi and mod_mpi here.
+apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: &RSAContext) -> bn.Mpi bn.MpiError! {
+    pl: ctx.p.p.len()
+    ql: ctx.q.p.len()
+    bn.mont_r2(ctx.rp, ctx.p)
+    mm: bn.core_montmul_init(ctx.p.p)
+    t := cipher.words(2 * pl + 1)
+    tq_p := cipher.words(pl)
+    bn.core_mod_wide(tq_p, tq.p, tq.p.len(), ctx.p.p, pl, mm, ctx.rp.p, t)
+    tp_w := bn.limbs_of(tp, pl)
+    diff := cipher.words(pl)
+    bn.core_sub_mod(diff, tp_w, tq_p, ctx.p.p, pl)
+    qp_w := bn.limbs_of(ctx.qp, pl)
+    h := cipher.words(pl)
+    bn.core_mul_mod(h, diff, qp_w, ctx.p.p, pl, mm, ctx.rp.p, t)
+    // h q + tq <= (p - 1) q + q - 1 < n.
+    wl: pl + ql
+    wide := cipher.words(wl)
+    bn.core_mul(wide, h, pl, ctx.q.p, ql)
+    tq_w := bn.limbs_of(tq, wl)
+    sum := cipher.words(wl)
+    _: bn.core_add(sum, wide, tq_w, wl)
+    nl: ctx.n.p.len()
+    out := bn.zeros(nl)
+    loop i in 0..<(if wl < nl -> wl else -> nl) -> out.p[i] = sum[i]
+    cipher.wipe_words(t)
+    cipher.wipe_words(tq_p)
+    cipher.wipe_words(tp_w)
+    cipher.wipe_words(diff)
+    cipher.wipe_words(qp_w)
+    cipher.wipe_words(h)
+    cipher.wipe_words(wide)
+    cipher.wipe_words(tq_w)
+    cipher.wipe_words(sum)
+    Ok(out)
+}
+
+/// Whether a gcd is 1, read in constant time. For a prime p it is 1 for
+/// every draw but a multiple of p, so the verdict is public: a failure is
+/// RNGFailed.
+gcd_is_one: fn(g: bn.Mpi) -> Bool Never! {
+    if g.s < 0 || g.p.len() == 0 -> return false
+    rest := U64{0}
+    loop i in 1..<g.p.len() -> rest = rest.bit_or(g.p[i])
+    g.p[0].bit_xor(U64{1}).bit_or(rest) == U64{0}
+}
+
+/// A random a invertible mod n and b = a^-1 mod n (rsa_gen_rand_with_inverse):
+/// a is drawn in [1, n) and its inverses mod p and mod q are joined by the
+/// CRT. mbedtls draws a mod p and a mod q apart, which reads the bit lengths
+/// of p and q; one draw below the public n needs neither, and a draw that is
+/// a multiple of p or q (odds near 2^-(bitlen(p) - 1)) fails as RNGFailed.
+gen_rand_with_inverse: fn<R: RNG>(ctx: &RSAContext, rng: &R) -> (a: bn.Mpi, b: bn.Mpi) RSAError! {
+    a: bn.random(1, ctx.n, rng)
+    ap: bn.mod_ct(a, ctx.p, ctx.rp)
+    gp: bn.gcd_modinv_odd(ap, ctx.p, true)
+    // Only a p that is not prime or a multiple of p has no inverse.
+    if !gcd_is_one(gp.g) -> return Err(.RNGFailed)
+    aq: bn.mod_ct(a, ctx.q, ctx.rq)
+    gq: bn.gcd_modinv_odd(aq, ctx.q, true)
+    if !gcd_is_one(gq.g) -> return Err(.RNGFailed)
+    b: apply_crt(gp.i, gq.i, ctx)
+    Ok((a: a, b: b))
+}
+
+/// Make the blinding pair, or refresh it by squaring both halves mod n by
+/// Montgomery products (rsa_prepare_blinding; Kocher, CRYPTO '96, section
+/// 10).
+prepare_blinding: fn<R: RNG>(ctx: &RSAContext, rng: &R) RSAError! {
+    if ctx.vf.p.len() != 0 {
+        bn.mont_r2(ctx.rn, ctx.n)
+        nl: ctx.n.p.len()
+        mm: bn.core_montmul_init(ctx.n.p)
+        t := cipher.words(2 * nl + 1)
+        vi := bn.limbs_of(ctx.vi, nl)
+        vf := bn.limbs_of(ctx.vf, nl)
+        sq := cipher.words(nl)
+        bn.core_mul_mod(sq, vi, vi, ctx.n.p, nl, mm, ctx.rn.p, t)
+        cipher.wipe_words(ctx.vi.p)
+        ctx.vi = bn.Mpi{s: 1, p: sq.copy()}
+        bn.core_mul_mod(sq, vf, vf, ctx.n.p, nl, mm, ctx.rn.p, t)
+        cipher.wipe_words(ctx.vf.p)
+        ctx.vf = bn.Mpi{s: 1, p: sq.copy()}
+        cipher.wipe_words(t)
+        cipher.wipe_words(vi)
+        cipher.wipe_words(vf)
+        cipher.wipe_words(sq)
+        return
+    }
+    pair: gen_rand_with_inverse(ctx, rng)
+    cipher.wipe_words(ctx.vf.p)
+    ctx.vf = bn.copy_mpi_ct(pair.a)
+    // vi = vf^-e mod n; pair.b already is vf^-1.
+    vi: bn.exp_mod(pair.b, ctx.e, ctx.n, ctx.rn)
+    cipher.wipe_words(ctx.vi.p)
+    ctx.vi = vi
+}
+
+/// t = t vf mod n through one Montgomery product with t in Montgomery form
+/// (rsa_unblind).
+unblind: fn(t: &bn.Mpi, ctx: &RSAContext) bn.MpiError! {
+    nlimbs: ctx.n.p.len()
+    mm: bn.core_montmul_init(ctx.n.p)
+    rr: bn.core_get_mont_r2_unsafe(ctx.n)
+    work := cipher.words(2 * nlimbs + 1)
+    bn.grow(t, nlimbs)
+    bn.grow(ctx.vf, nlimbs)
+    a := t.p.copy()
+    bn.core_to_mont_rep(t.p, a, ctx.n.p, nlimbs, mm, rr.p, work)
+    cipher.wipe_words(a)
+    b := t.p.copy()
+    bn.core_montmul(t.p, b, ctx.vf.p, nlimbs, ctx.n.p, nlimbs, mm, work)
+    cipher.wipe_words(b)
+    cipher.wipe_words(work)
+}
+
+/// A bignum failure inside the private operation carries PRIVATE_FAILED;
+/// RSA errors pass unchanged.
+private_failed: fn(e: RSAError) -> RSAError Never! {
+    if e == .Mpi(m) -> return RSAError.PrivateFailed(Val(m))
+    e.copy()
+}
+
+/// input^d mod n over the first len bytes of input, as len bytes, through
+/// the CRT with blinded input and exponents; VerifyFailed when the result
+/// does not map back to the input (mbedtls_rsa_private). Input shorter than
+/// len is no integer below n: PrivateFailed(BadInput).
+rsa_private: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError! {
+    if !rsa_check_context(ctx, is_priv: true) -> return Err(.BadInput(None))
+    if input.len() < ctx.len -> return Err(.PrivateFailed(Val(.BadInput)))
+    out := private_core(ctx, rng, input) ?? return Err(private_failed(err))
+    Ok(out)
+}
+
+private_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError! {
+    nl: ctx.n.p.len()
+    t0 := cipher.words(nl)
+    bn.core_read_be(t0, nl, cipher.bytes_of(input, 0, ctx.len))
+    if !below_modulus(t0, ctx.n.p, nl) -> return Err(.Mpi(.BadInput))
+    // Blinding: t = t0 vi mod n.
+    prepare_blinding(ctx, rng)
+    bn.mont_r2(ctx.rn, ctx.n)
+    mm: bn.core_montmul_init(ctx.n.p)
+    work := cipher.words(2 * nl + 1)
+    vi := bn.limbs_of(ctx.vi, nl)
+    t := bn.zeros(nl)
+    bn.core_mul_mod(t.p, t0, vi, ctx.n.p, nl, mm, ctx.rn.p, work)
+    cipher.wipe_words(vi)
+    cipher.wipe_words(work)
+    // Exponent blinding: dp + (p - 1) r and dq + (q - 1) r'.
+    dp_blind: blind_exponent(ctx.p, ctx.dp, rng)
+    dq_blind: blind_exponent(ctx.q, ctx.dq, rng)
+    // The CRT: tp = t^dp mod p, tq = t^dq mod q.
+    tp: bn.exp_mod(t, dp_blind, ctx.p, ctx.rp)
+    tq: bn.exp_mod(t, dq_blind, ctx.q, ctx.rq)
+    s := apply_crt(tp, tq, ctx)
+    // Check the result against a fault in the computation.
+    check: bn.exp_mod(s, ctx.e, ctx.n, ctx.rn)
+    if !fault_check_passes(check, t, nl) -> return Err(.VerifyFailed)
+    unblind(s, ctx)
+    out: bn.write_binary(s, ctx.len)
+    Ok(out)
+}
+
+/// Whether an RSA input is below n, read in constant time. The input is
+/// public, since s^e mod n gives it back from the output, but it is read the
+/// same way as the rest (mbedtls_mpi_cmp_mpi in mbedtls): the private
+/// operation's input, and the signature that rsa_pkcs1_sign checks.
+below_modulus: fn(t: [U64], n: [U64], limbs: Int) -> Bool Never! { bn.core_lt_ct(t, n, limbs) == U64{1} }
+
+/// d + (p - 1) r for a fresh EXPONENT_BLINDING-byte r, over fixed limb
+/// counts: the exponent blinding of mbedtls_rsa_private, where
+/// mbedtls_mpi_sub_int, mul_mpi and add_mpi run in variable time.
+blind_exponent: fn<R: RNG>(p: bn.Mpi, d: bn.Mpi, rng: &R) -> bn.Mpi RSAError! {
+    pl: p.p.len()
+    r: bn.fill_random(EXPONENT_BLINDING, rng)
+    rl: r.p.len()
+    p1 := cipher.words(pl)
+    _: bn.core_sub_int(p1, p.p, U64{1}, pl)
+    wl: pl + rl
+    prod := cipher.words(wl)
+    bn.core_mul(prod, p1, pl, r.p, rl)
+    dw := bn.limbs_of(d, wl)
+    out := bn.zeros(wl)
+    _: bn.core_add(out.p, prod, dw, wl)
+    cipher.wipe_words(p1)
+    cipher.wipe_words(prod)
+    cipher.wipe_words(dw)
+    Ok(out)
+}
+
+/// Whether the fault check's s^e mod n gave back the blinded input t, in
+/// one pass over all limbs. A mismatch means a fault in the computation and
+/// fails the operation, so the verdict is public.
+fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
+    a := bn.limbs_of(check, limbs)
+    b := bn.limbs_of(t, limbs)
+    diff := U64{0}
+    loop i in 0..<limbs -> diff = diff.bit_or(a[i].bit_xor(b[i]))
+    cipher.wipe_words(a)
+    cipher.wipe_words(b)
+    diff == U64{0}
+}
+
+// ---------------------------------------------------------------------------
+// PKCS#1 v2.1 helpers.
+
+#Arithmetic(.Wrapping)
+next_byte: fn(b: U8) -> U8 Never! { b + U8{1} }
+
+/// dst[off..<off + len] ^= MGF1(src) over md (mgf_mask). The counter
+/// increments its last byte only, as mbedtls's does.
+mgf_mask: fn(dst: &[U8], off: Int, len: Int, src: [U8], md: hashes.Md) Never! {
+    hlen: hashes.md_size(md)
+    counter := cipher.zero_bytes(4)
+    at := off
+    left := len
+    loop left > 0 {
+        use_len: if left < hlen -> left else -> hlen
+        h := hashes.hash_start(md)
+        hashes.hash_update(h, src)
+        hashes.hash_update(h, counter)
+        mask := hashes.hash_finish(h)
+        loop i in 0..<use_len -> dst[at + i] = dst[at + i].bit_xor(mask[i])
+        core.crypto.wipe(mask)
+        counter[3] = next_byte(counter[3])
+        at += use_len
+        left -= use_len
+    }
+}
+
+/// Hash(0x00 * 8 || hash || salt) (hash_mprime; RFC 8017 9.1.1 steps 5, 6).
+hash_mprime: fn(hash: [U8], salt: [U8], md: hashes.Md) -> [U8] Never! {
+    h := hashes.hash_start(md)
+    hashes.hash_update(h, cipher.zero_bytes(8))
+    hashes.hash_update(h, hash)
+    hashes.hash_update(h, salt)
+    out: hashes.hash_finish(h)
+    out
+}
+
+/// Copy src into dst at `at`.
+put_bytes: fn(dst: &[U8], at: Int, src: [U8]) Never! {
+    loop i in 0..<src.len() -> dst[at + i] = src[i]
+}
+
+// ---------------------------------------------------------------------------
+// Encryption.
+
+/// RSAES-OAEP-ENCRYPT with the context's hash for both the label hash and
+/// MGF1 (mbedtls_rsa_rsaes_oaep_encrypt).
+rsa_rsaes_oaep_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, label: [U8], input: [U8]) -> [U8] RSAError! {
+    md: ctx.hash_id ?? return Err(.BadInput(None))
+    hlen: hashes.md_size(md)
+    olen: ctx.len
+    ilen: input.len()
+    if olen < ilen + 2 * hlen + 2 -> return Err(.BadInput(None))
+    out := cipher.zero_bytes(olen)
+    seed := cipher.zero_bytes(hlen)
+    if !rng.fill(seed) -> return Err(.RNGFailed)
+    put_bytes(out, 1, seed)
+    core.crypto.wipe(seed)
+    // DB = lHash || PS || 0x01 || M.
+    lhash: hashes.hash(md, label)
+    put_bytes(out, 1 + hlen, lhash)
+    out[olen - ilen - 1] = U8{1}
+    put_bytes(out, olen - ilen, input)
+    // maskedDB, then maskedSeed.
+    seed_part := cipher.bytes_of(out, 1, hlen)
+    mgf_mask(out, hlen + 1, olen - hlen - 1, seed_part, md)
+    core.crypto.wipe(seed_part)
+    db_part := cipher.bytes_of(out, hlen + 1, olen - hlen - 1)
+    mgf_mask(out, 1, hlen, db_part, md)
+    core.crypto.wipe(db_part)
+    sealed: rsa_public(ctx, out)
+    core.crypto.wipe(out)
+    Ok(sealed)
+}
+
+/// RSAES-PKCS1-v1_5-ENCRYPT: 0x00 0x02, nonzero random padding, 0x00, M
+/// (mbedtls_rsa_rsaes_pkcs1_v15_encrypt). RNGFailed after 100 zero draws
+/// for one padding byte.
+rsa_rsaes_pkcs1_v15_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError! {
+    olen: ctx.len
+    ilen: input.len()
+    if olen < ilen + 11 -> return Err(.BadInput(None))
+    nb_pad: olen - 3 - ilen
+    out := cipher.zero_bytes(olen)
+    out[1] = U8{RSA_CRYPT}
+    one := cipher.zero_bytes(1)
+    loop i in 0..<nb_pad {
+        rng_dl := 100
+        loop {
+            if !rng.fill(one) -> return Err(.RNGFailed)
+            rng_dl -= 1
+            if one[0] != (U8{0}) || rng_dl == 0 -> break
+        }
+        if one[0] == (U8{0}) -> return Err(.RNGFailed)
+        out[2 + i] = one[0]
+    }
+    put_bytes(out, olen - ilen, input)
+    sealed: rsa_public(ctx, out)
+    core.crypto.wipe(out)
+    Ok(sealed)
+}
+
+/// Encrypt with the context's padding (mbedtls_rsa_pkcs1_encrypt); OAEP
+/// with an empty label.
+rsa_pkcs1_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAError! {
+    if ctx.padding == .PKCSV15 -> return rsa_rsaes_pkcs1_v15_encrypt(ctx, rng, input)
+    rsa_rsaes_oaep_encrypt(ctx, rng, [U8]{}, input)
+}
+
+// ---------------------------------------------------------------------------
+// Decryption.
+
+/// RSAES-OAEP-DECRYPT (mbedtls_rsa_rsaes_oaep_decrypt). The padding checks
+/// run in constant time and fold into one InvalidPadding.
+rsa_rsaes_oaep_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, label: [U8], input: [U8], output_max_len: Int) -> [U8] RSAError! {
+    if ctx.padding != .PKCSV21 -> return Err(.BadInput(None))
+    ilen: ctx.len
+    if ilen < 16 || ilen > MPI_MAX_SIZE -> return Err(.BadInput(None))
+    md: ctx.hash_id ?? return Err(.BadInput(None))
+    hlen: hashes.md_size(md)
+    if 2 * hlen + 2 > ilen -> return Err(.BadInput(None))
+    buf := rsa_private(ctx, rng, input) ?? return Err(err)
+    // seed, then DB.
+    db_part := cipher.bytes_of(buf, hlen + 1, ilen - hlen - 1)
+    mgf_mask(buf, 1, hlen, db_part, md)
+    core.crypto.wipe(db_part)
+    seed_part := cipher.bytes_of(buf, 1, hlen)
+    mgf_mask(buf, hlen + 1, ilen - hlen - 1, seed_part, md)
+    core.crypto.wipe(seed_part)
+    lhash := hashes.hash(md, label)
+    // The first byte is 0, the label hash matches, zeros then 0x01.
+    bad := ctime.cond_of(U64.from_u8(buf[0]))
+    p := 1 + hlen
+    bad = ctime.bool_or(bad, ctime.cond_of_int(ctime.memcmp(lhash, 0, buf, p, hlen)))
+    p += hlen
+    pad_len := 0
+    in_padding := ctime.ct_true()
+    loop i in 0..<(ilen - 2 * hlen - 2) {
+        in_padding = ctime.bool_and(in_padding, ctime.uint_eq(U64.from_u8(buf[p + i]), U64{0}))
+        pad_len += ctime.size_if_else_0(in_padding, 1)
+    }
+    p += pad_len
+    bad = ctime.bool_or(bad, ctime.uint_ne(U64.from_u8(buf[p]), U64{1}))
+    p += 1
+    core.crypto.wipe(lhash)
+    // Only whether the padding was right leaks, as PKCS#1 v2.2 asks.
+    if ctime.cond_is_true(bad) {
+        core.crypto.wipe(buf)
+        return Err(.InvalidPadding)
+    }
+    if ilen - p > output_max_len {
+        core.crypto.wipe(buf)
+        return Err(.OutputTooLarge)
+    }
+    out: cipher.bytes_of(buf, p, ilen - p)
+    core.crypto.wipe(buf)
+    Ok(out)
+}
+
+/// The decoded block of rsaes_pkcs1_v15_unpadding: `out` holds
+/// plaintext_max_size bytes whose first olen are the message; on bad
+/// padding or a message longer than the output they are zero and olen is
+/// plaintext_max_size.
+V15Unpadded: struct {
+    out: [U8]
+    olen: Int
+    bad: ctime.CtCond
+    too_large: ctime.CtCond
+}
+
+/// EME-PKCS1-v1_5 decoding in constant time and constant memory trace
+/// (mbedtls_ct_rsaes_pkcs1_v15_unpadding). Neither the padding's validity
+/// nor the message length shows in the time or the accesses; input is
+/// overwritten. plaintext_max_size is min(output_max_len, ilen - 11).
+rsaes_pkcs1_v15_unpadding: fn(input: &[U8], output_max_len: Int) -> V15Unpadded Never! {
+    ilen: input.len()
+    plaintext_max_size: if output_max_len > ilen - 11 -> ilen - 11 else -> output_max_len
+    // 0x00 || 0x02 || PS || 0x00 with at least 8 nonzero bytes of PS.
+    bad := ctime.cond_of(U64.from_u8(input[0]))
+    bad = ctime.bool_or(bad, ctime.uint_ne(U64.from_u8(input[1]), U64{RSA_CRYPT}))
+    // Read the whole buffer; pad_count counts the bytes before the first 0.
+    pad_done := ctime.ct_false()
+    pad_count := 0
+    loop i in 2..<ilen {
+        found: ctime.uint_eq(U64.from_u8(input[i]), U64{0})
+        pad_done = ctime.bool_or(pad_done, found)
+        pad_count += ctime.size_if_else_0(ctime.bool_not(pad_done), 1)
+    }
+    bad = ctime.bool_or(bad, ctime.bool_not(pad_done))
+    bad = ctime.bool_or(bad, ctime.size_gt(8, pad_count))
+    // A bad padding claims the largest message that fits, so the size
+    // does not tell.
+    plaintext_size := Int.from_u64(ctime.select(bad, U64{plaintext_max_size}, message_size(ilen, pad_count)))
+    too_large: ctime.size_gt(plaintext_size, plaintext_max_size)
+    // Zero what is about to be copied out when it must not be; copy the
+    // same bytes from the same place either way.
+    ctime.zeroize_if(ctime.bool_or(bad, too_large), input, 11, ilen - 11)
+    plaintext_size = ctime.size_if(too_large, plaintext_max_size, plaintext_size)
+    // Move the message to start plaintext_max_size bytes from the end with
+    // an access pattern independent of its size.
+    ctime.memmove_left(input, ilen - plaintext_max_size, plaintext_max_size, plaintext_max_size - plaintext_size)
+    out: cipher.bytes_of(input, ilen - plaintext_max_size, plaintext_max_size)
+    V15Unpadded{out: out, olen: plaintext_size, bad: bad, too_large: too_large}
+}
+
+/// ilen - pad_count - 3 modulo 2^64: garbage only when the padding is bad,
+/// where it is never selected.
+#Arithmetic(.Wrapping)
+message_size: fn(ilen: Int, pad_count: Int) -> U64 Never! { U64{ilen} - U64{pad_count} - U64{3} }
+
+/// RSAES-PKCS1-v1_5-DECRYPT (mbedtls_rsa_rsaes_pkcs1_v15_decrypt).
+rsa_rsaes_pkcs1_v15_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8], output_max_len: Int) -> [U8] RSAError! {
+    ilen: ctx.len
+    if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
+    if ilen < 16 || ilen > MPI_MAX_SIZE -> return Err(.BadInput(None))
+    buf := rsa_private(ctx, rng, input) ?? return Err(err)
+    decoded := rsaes_pkcs1_v15_unpadding(buf, output_max_len)
+    core.crypto.wipe(buf)
+    bad: ctime.cond_is_true(decoded.bad)
+    too_large: ctime.cond_is_true(decoded.too_large)
+    if bad || too_large {
+        core.crypto.wipe(decoded.out)
+        if bad -> return Err(.InvalidPadding)
+        return Err(.OutputTooLarge)
+    }
+    out: cipher.bytes_of(decoded.out, 0, decoded.olen)
+    core.crypto.wipe(decoded.out)
+    Ok(out)
+}
+
+/// Decrypt with the context's padding (mbedtls_rsa_pkcs1_decrypt); OAEP
+/// with an empty label.
+rsa_pkcs1_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8], output_max_len: Int) -> [U8] RSAError! {
+    if ctx.padding == .PKCSV15 -> return rsa_rsaes_pkcs1_v15_decrypt(ctx, rng, input, output_max_len)
+    rsa_rsaes_oaep_decrypt(ctx, rng, [U8]{}, input, output_max_len)
+}
+
+/// The decryption result and problem of mbedtls_rsa_decrypt_decompose_ret.
+DecomposedRet: struct {
+    ret: Int
+    problem: Int
+}
+
+/// Split a combined error code in constant time: invalid_padding_in and
+/// output_too_large_in move into `problem` as their `_out` codes and leave
+/// `ret` 0; any other code stays in `ret` (mbedtls_rsa_decrypt_decompose_ret).
+/// Codes are mbedtls's, zero or negative.
+rsa_decrypt_decompose_ret: fn(invalid_padding_in: Int, invalid_padding_out: Int, output_too_large_in: Int, output_too_large_out: Int, combined_ret: Int) -> DecomposedRet Never! {
+    problem := 0
+    ret := combined_ret
+    invalid_padding: ctime.uint_eq(U64{0 - ret}, U64{0 - invalid_padding_in})
+    problem = ctime.error_if(invalid_padding, invalid_padding_out, problem)
+    ret = ctime.error_if(invalid_padding, 0, ret)
+    output_too_large: ctime.uint_eq(U64{0 - ret}, U64{0 - output_too_large_in})
+    problem = ctime.error_if(output_too_large, output_too_large_out, problem)
+    ret = ctime.error_if(output_too_large, 0, ret)
+    DecomposedRet{ret: ret, problem: problem}
+}
+
+// ---------------------------------------------------------------------------
+// Signatures.
+
+/// The digest length check of a signature: a given md fixes the hash length.
+hash_matches: fn(md: hashes.Md?, hash: [U8]) -> Bool Never! {
+    if md == .Val(m) -> return hash.len() == hashes.md_size(m)
+    true
+}
+
+/// RSASSA-PSS-SIGN without the padding-mode check, salt length `saltlen`
+/// or SALT_LEN_ANY (rsa_rsassa_pss_sign_no_mode_check). MGF1 and the M'
+/// hash use the context's hash, else md.
+pss_sign_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8], saltlen: Int) -> [U8] RSAError! {
+    olen: ctx.len
+    if !hash_matches(md, hash) -> return Err(.BadInput(None))
+    hash_id: ctx.hash_id ?? md ?? return Err(.BadInput(None))
+    hlen: hashes.md_size(hash_id)
+    if saltlen != SALT_LEN_ANY && (saltlen < 0 || saltlen + hlen + 2 > olen) -> return Err(.BadInput(None))
+    // SALT_LEN_ANY takes the hash length if it fits (FIPS 186-4 5.5 (e)),
+    // else the most that does, but at least hlen - 2.
+    if saltlen == SALT_LEN_ANY && olen < hlen + (hlen - 2) + 2 -> return Err(.BadInput(None))
+    slen: if {
+        saltlen != SALT_LEN_ANY -> saltlen
+        olen >= hlen + hlen + 2 -> hlen
+        else -> olen - hlen - 2
+    }
+    sig := cipher.zero_bytes(olen)
+    // EMSA-PSS encodes into bitlen(n) - 1 bits.
+    msb: bn.bitlen(ctx.n) - 1
+    p := olen - hlen - slen - 2
+    sig[p] = U8{0x01}
+    p += 1
+    salt := cipher.zero_bytes(slen)
+    if !rng.fill(salt) -> return Err(.RNGFailed)
+    put_bytes(sig, p, salt)
+    p += slen
+    h := hash_mprime(hash, salt, hash_id)
+    put_bytes(sig, p, h)
+    // With msb a multiple of 8 the encoding starts one byte in.
+    offset: if msb %% 8 == 0 -> 1 else -> 0
+    mgf_mask(sig, offset, olen - hlen - 1 - offset, h, hash_id)
+    sig[0] = sig[0].bit_and(U8{0xFF >> (olen * 8 - msb)})
+    p += hlen
+    sig[p] = U8{0xBC}
+    signed: rsa_private(ctx, rng, sig)
+    core.crypto.wipe(sig)
+    core.crypto.wipe(salt)
+    Ok(signed)
+}
+
+/// RSASSA-PSS-SIGN with the largest salt that fits, whatever the padding
+/// mode (mbedtls_rsa_rsassa_pss_sign_no_mode_check).
+rsa_rsassa_pss_sign_no_mode_check: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8]) -> [U8] RSAError! {
+    pss_sign_core(ctx, rng, md, hash, SALT_LEN_ANY)
+}
+
+/// RSASSA-PSS-SIGN with salt length `saltlen` or SALT_LEN_ANY on a v2.1
+/// context (mbedtls_rsa_rsassa_pss_sign_ext).
+rsa_rsassa_pss_sign_ext: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8], saltlen: Int) -> [U8] RSAError! {
+    if ctx.padding != .PKCSV21 -> return Err(.BadInput(None))
+    if ctx.hash_id == None && md == None -> return Err(.BadInput(None))
+    pss_sign_core(ctx, rng, md, hash, saltlen)
+}
+
+/// RSASSA-PSS-SIGN with the largest salt that fits (mbedtls_rsa_rsassa_pss_sign).
+rsa_rsassa_pss_sign: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8]) -> [U8] RSAError! {
+    rsa_rsassa_pss_sign_ext(ctx, rng, md, hash, SALT_LEN_ANY)
+}
+
+/// EMSA-PKCS1-v1_5 of `hash` into dst_len bytes: 0x00 0x01, 0xFF padding of
+/// at least 8 bytes, 0x00, and the DigestInfo of md, or the raw hash
+/// without md (rsa_rsassa_pkcs1_v15_encode). Every DER length is one byte,
+/// against Bleichenbacher's forgery on lax verifiers.
+rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RSAError! {
+    hashlen: hash.len()
+    nb_pad := dst_len
+    oid := [U8]{}
+    if md == {
+        .Val(m) -> {
+            oid = oids.oid_by_md(m)
+            if hashlen != hashes.md_size(m) -> return Err(.BadInput(None))
+            if 8 + hashlen + oid.len() >= 0x80 -> return Err(.BadInput(None))
+            if nb_pad < 10 + hashlen + oid.len() -> return Err(.BadInput(None))
+            nb_pad -= 10 + hashlen + oid.len()
+        }
+        else -> {
+            if nb_pad < hashlen -> return Err(.BadInput(None))
+            nb_pad -= hashlen
+        }
+    }
+    // The header and the delimiter take 3 bytes, the padding at least 8.
+    if nb_pad < 3 + 8 -> return Err(.BadInput(None))
+    nb_pad -= 3
+    dst := [U8]{}
+    dst.push(U8{0})
+    dst.push(U8{RSA_SIGN})
+    loop _ in 0..<nb_pad -> dst.push(U8{0xFF})
+    dst.push(U8{0})
+    if md != None {
+        // SEQUENCE { SEQUENCE { OID, NULL }, OCTET STRING hash }.
+        seq: asn1.ASN1_SEQUENCE.bit_or(asn1.ASN1_CONSTRUCTED)
+        dst.push(U8{seq})
+        dst.push(U8{0x08 + oid.len() + hashlen})
+        dst.push(U8{seq})
+        dst.push(U8{0x04 + oid.len()})
+        dst.push(U8{asn1.ASN1_OID})
+        dst.push(U8{oid.len()})
+        loop b in oid -> dst.push(b)
+        dst.push(U8{asn1.ASN1_NULL})
+        dst.push(U8{0})
+        dst.push(U8{asn1.ASN1_OCTET_STRING})
+        dst.push(U8{hashlen})
+    }
+    loop b in hash -> dst.push(b)
+    Ok(dst)
+}
+
+/// RSASSA-PKCS1-v1_5-SIGN, checked with the public operation against
+/// Lenstra's CRT fault attack (mbedtls_rsa_rsassa_pkcs1_v15_sign).
+rsa_rsassa_pkcs1_v15_sign: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8]) -> [U8] RSAError! {
+    if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
+    encoded := rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
+    sig_try := rsa_private(ctx, rng, encoded) ?? return Err(err)
+    verif := rsa_public(ctx, sig_try) ?? return Err(err)
+    differ: ctime.memcmp(verif, 0, encoded, 0, ctx.len)
+    core.crypto.wipe(verif)
+    core.crypto.wipe(encoded)
+    if differ != 0 {
+        core.crypto.wipe(sig_try)
+        return Err(.PrivateFailed(None))
+    }
+    Ok(sig_try)
+}
+
+/// Sign with the context's padding (mbedtls_rsa_pkcs1_sign).
+rsa_pkcs1_sign: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8]) -> [U8] RSAError! {
+    if ctx.padding == .PKCSV15 -> return rsa_rsassa_pkcs1_v15_sign(ctx, rng, md, hash)
+    rsa_rsassa_pss_sign(ctx, rng, md, hash)
+}
+
+/// RSASSA-PSS-VERIFY with MGF1 over mgf1_hash_id and salt length
+/// expected_salt_len or SALT_LEN_ANY (mbedtls_rsa_rsassa_pss_verify_ext).
+rsa_rsassa_pss_verify_ext: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], mgf1_hash_id: hashes.Md?, expected_salt_len: Int, sig: [U8]) RSAError! {
+    siglen := ctx.len
+    if siglen < 16 || siglen > MPI_MAX_SIZE -> return Err(.BadInput(None))
+    buf := rsa_public(ctx, sig) ?? return Err(err)
+    if buf[siglen - 1] != (U8{0xBC}) -> return Err(.InvalidPadding)
+    if !hash_matches(md, hash) -> return Err(.BadInput(None))
+    mgf: mgf1_hash_id ?? return Err(.BadInput(None))
+    hlen: hashes.md_size(mgf)
+    // EMSA-PSS decodes from bitlen(n) - 1 bits: the bits above are zero.
+    msb: bn.bitlen(ctx.n) - 1
+    if Int.from_u8(buf[0]) >> (8 - siglen * 8 + msb) != 0 -> return Err(.BadInput(None))
+    p := 0
+    if msb %% 8 == 0 {
+        p = 1
+        siglen -= 1
+    }
+    if siglen < hlen + 2 -> return Err(.BadInput(None))
+    hash_start: p + siglen - hlen - 1
+    h_part := cipher.bytes_of(buf, hash_start, hlen)
+    mgf_mask(buf, p, siglen - hlen - 1, h_part, mgf)
+    buf[0] = buf[0].bit_and(U8{0xFF >> (siglen * 8 - msb)})
+    loop p < hash_start - 1 && buf[p] == (U8{0}) -> p += 1
+    if buf[p] != (U8{0x01}) -> return Err(.InvalidPadding)
+    p += 1
+    observed_salt_len: hash_start - p
+    if expected_salt_len != SALT_LEN_ANY && observed_salt_len != expected_salt_len -> return Err(.InvalidPadding)
+    result: hash_mprime(hash, cipher.bytes_of(buf, p, observed_salt_len), mgf)
+    if result != h_part -> return Err(.VerifyFailed)
+}
+
+/// RSASSA-PSS-VERIFY with MGF1 over the context's hash, else md, and any
+/// salt length (mbedtls_rsa_rsassa_pss_verify).
+rsa_rsassa_pss_verify: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RSAError! {
+    mgf1_hash_id: if ctx.hash_id == None -> md else -> ctx.hash_id
+    rsa_rsassa_pss_verify_ext(ctx, md, hash, mgf1_hash_id, SALT_LEN_ANY, sig)
+}
+
+/// RSASSA-PKCS1-v1_5-VERIFY: the public operation must give exactly the
+/// encoding of hash (mbedtls_rsa_rsassa_pkcs1_v15_verify).
+rsa_rsassa_pkcs1_v15_verify: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RSAError! {
+    expected := rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
+    encoded := rsa_public(ctx, sig) ?? return Err(err)
+    differ: ctime.memcmp(encoded, 0, expected, 0, ctx.len)
+    core.crypto.wipe(encoded)
+    core.crypto.wipe(expected)
+    if differ != 0 -> return Err(.VerifyFailed)
+}
+
+/// Verify with the context's padding (mbedtls_rsa_pkcs1_verify).
+rsa_pkcs1_verify: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RSAError! {
+    if ctx.padding == .PKCSV15 -> return rsa_rsassa_pkcs1_v15_verify(ctx, md, hash, sig)
+    rsa_rsassa_pss_verify(ctx, md, hash, sig)
+}
+
+// ---------------------------------------------------------------------------
+// PKCS#1 key encodings.
+
+/// An INTEGER that must not be zero, the value rsa_complete reads as
+/// absent (asn1_get_nonzero_mpi).
+get_nonzero_mpi: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi RSAError! {
+    x := asn1.get_mpi(data, p, end) ?? return Err(.Asn1(err))
+    if bn.cmp_int(x, 0) == 0 -> return Err(.BadInput(None))
+    Ok(x)
+}
+
+/// A key from its DER RSAPrivateKey (PKCS#1, RFC 8017 A.1.2), completed
+/// and checked as a public key (mbedtls_rsa_parse_key). The CRT values are
+/// taken as given, which keeps the secret-dependent deduction off the load
+/// path (eprint 2020/055).
+rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
+    ctx := rsa_new()
+    p := 0
+    end: key.len()
+    len: asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    if end != p + len -> return Err(.BadInput(None))
+    version: asn1.get_int(key, p, end) ?? return Err(.Asn1(err))
+    if version != 0 -> return Err(.BadInput(None))
+    n: get_nonzero_mpi(key, p, end)
+    rsa_import(ctx, .N, n)
+    e: get_nonzero_mpi(key, p, end)
+    rsa_import(ctx, .E, e)
+    d: get_nonzero_mpi(key, p, end)
+    rsa_import(ctx, .D, d)
+    pp: get_nonzero_mpi(key, p, end)
+    rsa_import(ctx, .P, pp)
+    q: get_nonzero_mpi(key, p, end)
+    rsa_import(ctx, .Q, q)
+    dp: get_nonzero_mpi(key, p, end)
+    bn.set_mpi(ctx.dp, dp)
+    dq: get_nonzero_mpi(key, p, end)
+    bn.set_mpi(ctx.dq, dq)
+    qp: get_nonzero_mpi(key, p, end)
+    bn.set_mpi(ctx.qp, qp)
+    rsa_complete(ctx)
+    rsa_check_pubkey(ctx)
+    if p != end -> return Err(.Asn1(.LengthMismatch))
+    Ok(ctx)
+}
+
+/// A key from its DER RSAPublicKey (PKCS#1, RFC 8017 A.1.1)
+/// (mbedtls_rsa_parse_pubkey). A bad or unusable modulus or exponent is
+/// BadInput.
+rsa_parse_pubkey: fn(key: [U8]) -> RSAContext RSAError! {
+    ctx := rsa_new()
+    p := 0
+    end: key.len()
+    len := asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    if end != p + len -> return Err(.BadInput(None))
+    len = asn1.get_tag(key, p, end, asn1.ASN1_INTEGER) ?? return Err(.Asn1(err))
+    rsa_import_raw(ctx, .N, cipher.bytes_of(key, p, len)) ?? return Err(.BadInput(None))
+    p += len
+    len = asn1.get_tag(key, p, end, asn1.ASN1_INTEGER) ?? return Err(.Asn1(err))
+    rsa_import_raw(ctx, .E, cipher.bytes_of(key, p, len)) ?? return Err(.BadInput(None))
+    p += len
+    rsa_complete(ctx) ?? return Err(.BadInput(None))
+    rsa_check_pubkey(ctx) ?? return Err(.BadInput(None))
+    if p != end -> return Err(.Asn1(.LengthMismatch))
+    Ok(ctx)
+}
+
+/// One INTEGER written backwards before p.
+write_int_mpi: fn(buf: &[U8], p: &Int, start: Int, x: bn.Mpi) -> Int RSAError! {
+    n := asn1.write_mpi(buf, p, start, x) ?? return Err(.Asn1(err))
+    Ok(n)
+}
+
+/// The DER RSAPrivateKey of a private key, written backwards so it ends at
+/// p (mbedtls_rsa_write_key); its length.
+rsa_write_key: fn(ctx: RSAContext, buf: &[U8], p: &Int, start: Int) -> Int RSAError! {
+    if !has_private_parts(ctx) -> return Err(.BadInput(None))
+    len := write_int_mpi(buf, p, start, ctx.qp)
+    len += write_int_mpi(buf, p, start, ctx.dq)
+    len += write_int_mpi(buf, p, start, ctx.dp)
+    len += write_int_mpi(buf, p, start, ctx.q)
+    len += write_int_mpi(buf, p, start, ctx.p)
+    len += write_int_mpi(buf, p, start, ctx.d)
+    len += write_int_mpi(buf, p, start, ctx.e)
+    len += write_int_mpi(buf, p, start, ctx.n)
+    len += asn1.write_int(buf, p, start, 0) ?? return Err(.Asn1(err))
+    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    Ok(total)
+}
+
+/// The DER RSAPublicKey, written backwards so it ends at p
+/// (mbedtls_rsa_write_pubkey); its length.
+rsa_write_pubkey: fn(ctx: RSAContext, buf: &[U8], p: &Int, start: Int) -> Int RSAError! {
+    len := write_int_mpi(buf, p, start, ctx.e)
+    len += write_int_mpi(buf, p, start, ctx.n)
+    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    Ok(total)
+}
+
+#Test("The mbedtls rsa.c self-test: the RSA-1024 key validates, PKCS#1 v1.5 round-trips and its SHA-1 signature verifies") {
+    ctx := rsa_new()
+    n: bn.read_string(16, "9292758453063D803DD603D5E777D7888ED1D5BF35786190FA2F23EBC0848AEADDA92CA6C3D80B32C4D109BE0F36D6AE7130B9CED7ACDF54CFC7555AC14EEBAB93A89813FBF3C4F8066D2D800F7C38A81AE31942917403FF4946B0A83D3D3E05EE57C6F5F5606FB5D4BC6CD34EE0801A5E94BB77B07507233A0BC7BAC8F90F79") ?? panic("N")
+    p: bn.read_string(16, "C36D0EB7FCD285223CFB5AABA5BDA3D82C01CAD19EA484A87EA4377637E75500FCB2005C5C7DD6EC4AC023CDA285D796C3D9E75E1EFC42488BB4F1D13AC30A57") ?? panic("P")
+    q: bn.read_string(16, "C000DF51A7C77AE8D7C7370C1FF55B69E211C2B9E5DB1ED0BF61D0D9899620F4910E4168387E3C30AA1E00C339A795088452DD96A9A5EA5D9DCA68DA636032AF") ?? panic("Q")
+    d: bn.read_string(16, "24BF6185468786FDD303083D25E64EFC66CA472BC44D253102F8B4A9D3BFA75091386C0077937FE33FA3252D28855837AE1B484A8A9A45F7EE8C0C634F99E8CDDF79C5CE07EE72C7F123142198164234CABB724CF78B8173B9F880FC86322407AF1FEDFDDE2BEB674CA15F3E81A1521E071513A1E85B5DFA031F21ECAE91A34D") ?? panic("D")
+    e: bn.read_string(16, "10001") ?? panic("E")
+    rsa_import(ctx, .N, n) ?? panic("import N")
+    rsa_import(ctx, .P, p) ?? panic("import P")
+    rsa_import(ctx, .Q, q) ?? panic("import Q")
+    rsa_import(ctx, .D, d) ?? panic("import D")
+    rsa_import(ctx, .E, e) ?? panic("import E")
+    rsa_complete(ctx) ?? panic("complete")
+    rsa_check_pubkey(ctx) ?? panic("check pubkey")
+    rsa_check_privkey(ctx) ?? panic("check privkey")
+    rng := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, "rsa self-test".bytes())
+    plain: [U8]{0xAA, 0xBB, 0xCC, 0x03, 0x02, 0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x11, 0x22, 0x33, 0x0A, 0x0B, 0x0C, 0xCC, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD}
+    sealed: rsa_pkcs1_encrypt(ctx, rng, plain) ?? panic("encrypt")
+    assert(sealed.len() == 128)
+    opened: rsa_pkcs1_decrypt(ctx, rng, sealed, plain.len()) ?? panic("decrypt")
+    assert(opened == plain)
+    sha1sum: hashes.hash(.SHA1, plain)
+    sig: rsa_pkcs1_sign(ctx, rng, Val(hashes.Md.SHA1), sha1sum) ?? panic("sign")
+    rsa_pkcs1_verify(ctx, Val(hashes.Md.SHA1), sha1sum, sig) ?? panic("verify")
+}

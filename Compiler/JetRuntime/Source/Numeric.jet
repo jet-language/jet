@@ -4,9 +4,11 @@
 // text, raw line; the seed Rust CAbiRoutes17253 adapter uses its own JetCString
 // text header.
 numeric_widen_stop: fn(target_f32: Bool, file: I64, line: I64) {
-    trap_header(I64{1})
     // Exact text of the lowering's inline widening stop (BuildTypes.jet).
-    trap_write_static(if target_f32 -> rt_static_text("whole number has no exact F32; approx(x) rounds it to the nearest F32") else -> rt_static_text("whole number has no exact Float; approx(x) rounds it to the nearest Float"))
+    reason: if target_f32 -> rt_static_text("whole number has no exact F32; approx(x) rounds it to the nearest F32") else -> rt_static_text("whole number has no exact Float; approx(x) rounds it to the nearest Float")
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    trap_header(I64{1})
+    trap_write_static(reason)
     trap_msg_message_end()
     trap_context(sync_load(file), sync_load(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})

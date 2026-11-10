@@ -35,6 +35,10 @@ matches the work:
 - Submissions and `DOCS ONLY` are receipts, not runtime or milestone proof.
   The exact focused criterion proof, linked-card token, composed sweep, and
   fresh-context review are defined only in `references/closeout.md`.
+- The orchestrator may name one Lander, which runs the rolling train of
+  `references/intake.md` and commits on `dev` in its place, and one Closer,
+  which works the cards with the fewest open criteria and hands back proof.
+  Tower writes, owner gates and dispatch stay with the orchestrator.
 
 ## Standing work order: implement, then batch-verify
 

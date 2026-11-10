@@ -5,15 +5,15 @@ SCRIPT_TEST_SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 SCRIPT_TEST_SHA1: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 provider_script_test_authority: fn(kind: ScriptRegistryKind) -> RegistryAuthority Never! {
-    RegistryAuthority{provider: kind.label(), registry: kind.repository(), allow: kind.fetch_authorities(), deny: [String]{}}
+    RegistryAuthority{provider: kind.label(), registry: kind.repository, allow: kind.fetch_authorities, deny: [String]{}}
 }
 
 provider_script_test_cpan_search: fn(raw: String) -> [RegistryPackage] RegistryError! {
-    provider_cpan_parse_search((ScriptRegistryKind.Cpan).repository(), "Jet-App", raw)
+    provider_cpan_parse_search(provider_script_registry(ProviderFamily.Cpan).repository, "Jet-App", raw)
 }
 
 provider_script_test_packagist: fn(name: String, raw: String) -> [RegistryPackage] RegistryError! {
-    provider_packagist_parse_metadata((ScriptRegistryKind.Packagist).repository(), name, raw)
+    provider_packagist_parse_metadata(provider_script_registry(ProviderFamily.Packagist).repository, name, raw)
 }
 
 // The selected version of every package in a resolved closure.
@@ -115,21 +115,24 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 
 #Test("script registries parse native metadata and constraints") {
     assert_eq(crypto.sha1("abc".bytes()), "a9993e364706816aba3e25717850c26c9cd0d89d")
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "2.4.1", "^2.0"))
-    assert(!provider_script_version_satisfies(ScriptRegistryKind.Packagist, "3.0.0", "^2.0"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.RubyGems, "1.8.9", "~> 1.8"))
-    assert(!provider_script_version_satisfies(ScriptRegistryKind.RubyGems, "2.0", "~> 1.8"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Cpan, "1.5", ">=1.0 <2.0"))
-    assert(!provider_script_version_satisfies(ScriptRegistryKind.Cpan, "2.5", ">=1.0 <2.0"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "1.8.4", "1.*"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "2.0.7", "1.0 - 2.0"))
-    assert(!provider_script_version_satisfies(ScriptRegistryKind.Packagist, "2.1.0", "1.0 - 2.0"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "3.2.1", "1.* | ^3.1"))
-    assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "1.2.9", "~1.2"))
+    packagist: provider_script_registry(ProviderFamily.Packagist)
+    rubygems: provider_script_registry(ProviderFamily.RubyGems)
+    cpan: provider_script_registry(ProviderFamily.Cpan)
+    assert(provider_script_version_satisfies(packagist, "2.4.1", "^2.0"))
+    assert(!provider_script_version_satisfies(packagist, "3.0.0", "^2.0"))
+    assert(provider_script_version_satisfies(rubygems, "1.8.9", "~> 1.8"))
+    assert(!provider_script_version_satisfies(rubygems, "2.0", "~> 1.8"))
+    assert(provider_script_version_satisfies(cpan, "1.5", ">=1.0 <2.0"))
+    assert(!provider_script_version_satisfies(cpan, "2.5", ">=1.0 <2.0"))
+    assert(provider_script_version_satisfies(packagist, "1.8.4", "1.*"))
+    assert(provider_script_version_satisfies(packagist, "2.0.7", "1.0 - 2.0"))
+    assert(!provider_script_version_satisfies(packagist, "2.1.0", "1.0 - 2.0"))
+    assert(provider_script_version_satisfies(packagist, "3.2.1", "1.* | ^3.1"))
+    assert(provider_script_version_satisfies(packagist, "1.2.9", "~1.2"))
     assert_eq(provider_script_cpan_requirement("2.27300"), ">= 2.27300")
 
     ruby: "2.0.0 jetdep:>= 1.0&< 2.0|checksum:{SCRIPT_TEST_SHA256}\n"
-    gems: provider_rubygems_parse_info((ScriptRegistryKind.RubyGems).repository(), "jetapp", ruby) ?? panic("compact index parses")
+    gems: provider_rubygems_parse_info(rubygems.repository, "jetapp", ruby) ?? panic("compact index parses")
     assert_eq(gems[0].dependencies[0].requirement, ">= 1.0,< 2.0")
     cpan_release: `{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[{"module":"Jet-Dep","phase":"runtime","relationship":"requires","version":">= 1.0"}]}`
     search_head: `{"hits":{"hits":[{"_source":`
@@ -159,7 +162,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 }
 
 #Test("script registry solver backtracks across a diamond and cpan enumerates older releases") {
-    ruby_repository: (ScriptRegistryKind.RubyGems).repository()
+    ruby_repository: provider_script_registry(ProviderFamily.RubyGems).repository
     ruby_info: [String: String]{
         "root": "1.0 a:>= 1&< 3,b:= 1|checksum:{SCRIPT_TEST_SHA256}\n",
         "a": "2.0 c:>= 2|checksum:{SCRIPT_TEST_SHA256}\n1.0 c:< 2|checksum:{SCRIPT_TEST_SHA256}\n",
@@ -171,7 +174,8 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
         parsed: provider_rubygems_parse_info(ruby_repository, entry.key, entry.value) ?? panic("compact index parses")
         ruby_candidates[entry.key] = provider_script_sorted_candidates(parsed)
     }
-    closure: provider_script_resolve_closure(ScriptRegistryKind.RubyGems, provider_script_test_authority(ScriptRegistryKind.RubyGems), "", "root", "1.0", ruby_candidates) ?? panic("the diamond resolves")
+    rubygems: provider_script_registry(ProviderFamily.RubyGems)
+    closure: provider_script_resolve_closure(rubygems, provider_script_test_authority(rubygems), "", "root", "1.0", ruby_candidates) ?? panic("the diamond resolves")
     selected: provider_script_test_selected(closure)
     assert_eq(selected.get("a"), Val("1.0"))
     assert_eq(selected.get("c"), Val("1.0"))
@@ -187,7 +191,8 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
         parsed: provider_script_test_packagist(entry.key, entry.value.replace("SHA1", SCRIPT_TEST_SHA1)) ?? panic("Packagist metadata parses")
         composer_candidates[entry.key] = provider_script_sorted_candidates(parsed)
     }
-    composer: provider_script_resolve_closure(ScriptRegistryKind.Packagist, provider_script_test_authority(ScriptRegistryKind.Packagist), "", "vendor/root", "1.0.0", composer_candidates) ?? panic("the Composer closure resolves")
+    packagist: provider_script_registry(ProviderFamily.Packagist)
+    composer: provider_script_resolve_closure(packagist, provider_script_test_authority(packagist), "", "vendor/root", "1.0.0", composer_candidates) ?? panic("the Composer closure resolves")
     composer_selected: provider_script_test_selected(composer)
     assert_eq(composer_selected.get("vendor/a"), Val("1.5.0"))
     assert_eq(composer_selected.get("vendor/b"), Val("2.0.7"))
@@ -199,7 +204,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
     assert_eq(versions, [String]{"2.0", "1.0"})
     older := false
     loop package in cpan {
-        if provider_script_version_satisfies(ScriptRegistryKind.Cpan, package.version, "=1.0") -> older = true
+        if provider_script_version_satisfies(provider_script_registry(ProviderFamily.Cpan), package.version, "=1.0") -> older = true
     }
     assert(older)
 }
@@ -216,7 +221,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
     ctx: ProviderCtx{fixtures: None, store_dir: store, offline: true, project_dir: Val(project), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
     table: SourceTable.empty()
     spec: RefSpec.classify_in("demo@ruby#version=1.0", table) ?? panic("ref classifies")
-    authority: provider_script_registry_cache_authority(ScriptRegistryKind.RubyGems, ctx) ?? panic("cache authority loads")
+    authority: provider_script_registry_cache_authority(provider_script_registry(ProviderFamily.RubyGems), ctx) ?? panic("cache authority loads")
     pkg_lock_record_registry_realization(project, "ruby", "demo", "1.0", spec.raw, "/hangar/demo", provider_script_test_repeat("a", 64), authority.registry(), authority.provenance(), [String]{}, LockEnvelope{})
     assert(provider_validate_cache_authority(spec, table, ctx) == .Ok(_))
     locked_policy: (provider_cache_expectation(verification, spec, table, ctx) ?? panic("locked expectation")).identity.policy_fingerprint

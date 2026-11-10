@@ -38,7 +38,7 @@ sema_comptime_input_path_error: fn(builtin: String, problem: String, call: Call)
     example: if builtin == "find" -> "{builtin}(\"content/**/*.jet\")" else -> "{builtin}(\"data/file\")"
     if problem == "literal" -> return sema_error("E0957", span, "`{builtin}` {noun} must be a string literal", "a computed {noun} can't be audited at build time, so the compiler can't tell which file it reads", "pass the {noun} inline, e.g. `{example}`")
     if problem == "absolute" -> return sema_error("E0957", span, "`{builtin}` {noun} must be relative", "an absolute {noun} reaches outside the project", "use a {noun} relative to this file's own directory")
-    sema_error("E0957", span, "`{builtin}` {noun} escapes the project with `..`", "`..` could read files outside your project; comptime inputs must stay inside it", "drop the `..` and use a {noun} under this file's directory")
+    sema_error("E0957", span, "`{builtin}` {noun} can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused even when it names a file inside the package", "drop the `..` and use a {noun} under this file's directory")
 }
 
 sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {

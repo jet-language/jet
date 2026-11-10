@@ -1,0 +1,47 @@
+// A repeated JSON object key is found at every object width. `parse` finds
+// the repeat by scanning the members up to JSON_SEEN_SCAN (16) of them and
+// in a map of their positions past it (Core/Encoding/Json.jet parse_object),
+// so the objects here have 1 to 40 members with the repeat before, at and
+// after member 16. `parse` names the key with its path, line and column;
+// `parse_allow_duplicates` keeps the later value at the first name's
+// position. Objects with no repeat keep every member in order.
+use {
+    json: core.encoding.json
+}
+
+object: fn(width: Int, repeat: Int, of: Int) -> String {
+    members := [String]{}
+    loop index in 0..<width {
+        if index == repeat -> members.push("\"k{of}\":\"again\"")
+        members.push("\"k{index}\":{index}")
+    }
+    if repeat == width -> members.push("\"k{of}\":\"again\"")
+    "{{\"outer\":[{{{members.join(",")}}}]}}"
+}
+
+show: fn(width: Int, repeat: Int, of: Int) {
+    text: object(width, repeat, of)
+    tree: json.parse(text) ?? {
+        line: err.line ?? 0
+        column: err.column ?? 0
+        print("{width}/{repeat}/{of} parse: `{err.path}` line {line} column {column}: {err.reason}")
+        later: json.parse_allow_duplicates(text) ?? panic("allowed parse")
+        print("{width}/{repeat}/{of} allow: {json.to_string(later) ?? panic("render")}")
+        return
+    }
+    print("{width}/{repeat}/{of} parse: {json.to_string(tree) ?? panic("render")}")
+}
+
+run: fn() {
+    show(1, -1, 0)
+    show(3, 3, 1)
+    show(15, 15, 0)
+    show(16, 16, 15)
+    show(16, 16, 0)
+    show(17, 17, 16)
+    show(17, 17, 3)
+    show(40, -1, 0)
+    show(40, 40, 39)
+    show(40, 20, 39)
+    show(40, 25, 2)
+}

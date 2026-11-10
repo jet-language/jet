@@ -1306,6 +1306,11 @@ coll_chain_render: fn(chain: I64) -> I64 {
 // Legacy numeric LoopRange uses the exact-Int boundary. The private native
 // cursor keeps [current, end, step, exclusive, done].
 coll_loop_range_stop: fn(exhausted: Bool) {
+    reason: jet_rt_string_builder_new()
+    rt_text_push_word(reason, I64{8028827855593824626}, I64{8})
+    jet_rt_string_builder_push(reason, if exhausted -> rt_static_text("op value requested after exhaustion") else -> rt_static_text("op stride must not be zero"))
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    jet_rt_string_drop(reason)
     trap_header(I64{0})
     trap_write_word(I64{8028827855593824626}, I64{8})
     if exhausted {

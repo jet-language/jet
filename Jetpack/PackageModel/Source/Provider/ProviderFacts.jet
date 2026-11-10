@@ -570,8 +570,6 @@ pkg_provider_split_reference_authority: fn(reference: String) -> (target: String
 // The external ecosystems whose references must name their provider and an
 // exact identity.
 pkg_provider_is_external: fn(provider: String) -> Bool Never! {
-    if provider == {
-        "jet-registry" | "npm" | "pypi" | "cargo" | "swiftpm" | "maven" | "nuget" | "conan" | "vcpkg" | "github" | "homebrew" | "binary" | "cran" | "luarocks" | "ruby" | "perl" | "php" -> true
-        else -> false
-    }
+    row: pkg_provider_row(provider) ?? return false
+    row.external
 }

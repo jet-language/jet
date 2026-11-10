@@ -141,13 +141,7 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
         if key.trim() == "" -> return Err(HermeticBuildError.EmptyEnvName(name))
         if spec.env.get(key) == None -> return Err(HermeticBuildError.UndeclaredEnvName{action: name, key})
     }
-    if spec.cache == {
-        .Cached -> if spec.outputs.len() == 0 -> return Err(HermeticBuildError.CachedActionWithoutOutputs(name))
-        .UncachedPhony -> {
-            if spec.outputs.len() != 0 -> return Err(HermeticBuildError.PhonyActionWithOutputs(name))
-            if spec.caps.len() == 0 -> return Err(HermeticBuildError.PhonyActionWithoutCaps(name))
-        }
-    }
+    if build_effects_reusable(spec.caps) && spec.outputs.len() == 0 -> return Err(HermeticBuildError.ReusableActionWithoutOutputs(name))
     seen := [String]{}
     loop output in spec.outputs {
         if seen.contains(output) -> return Err(HermeticBuildError.DuplicateActionOutput{action: name, output})

@@ -10,6 +10,10 @@ ELF64_HEADER_SIZE: 64
 X64ExecutableResult: struct {
     bytes: [U8]
     errors: [String]
+    // Of a link that stopped at its undefined symbols (StaticLink.jet
+    // link_executable_image): each global live code references and nothing
+    // defines, once, in scan order; each has its row in `errors`.
+    undefined: [String]{[String]{}}
 }
 
 // Little-endian words, byte by byte without a loop: each `U8{x & 255}` is a

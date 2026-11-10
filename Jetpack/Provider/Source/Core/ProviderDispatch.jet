@@ -101,15 +101,11 @@ provider_for: fn(kind: ProviderKind) -> ProviderAdapter Never! {
         .Core -> ProviderAdapter.Core
         .Cran -> ProviderAdapter.Cran
         .LuaRocks -> ProviderAdapter.LuaRocks
-        .RubyGems -> ProviderAdapter.ScriptRegistry(ScriptRegistryKind.RubyGems)
-        .Cpan -> ProviderAdapter.ScriptRegistry(ScriptRegistryKind.Cpan)
-        .Packagist -> ProviderAdapter.ScriptRegistry(ScriptRegistryKind.Packagist)
+        .RubyGems -> ProviderAdapter.ScriptRegistry(provider_script_registry(ProviderFamily.RubyGems))
+        .Cpan -> ProviderAdapter.ScriptRegistry(provider_script_registry(ProviderFamily.Cpan))
+        .Packagist -> ProviderAdapter.ScriptRegistry(provider_script_registry(ProviderFamily.Packagist))
         .JetPackage -> ProviderAdapter.Native
-        .JetRegistry -> ProviderAdapter.Unsupported("jet-registry")
-        .Npm -> ProviderAdapter.Unsupported("npm")
-        .Cargo -> ProviderAdapter.Unsupported("cargo")
-        .PyPI -> ProviderAdapter.Unsupported("pypi")
-        .SwiftPM -> ProviderAdapter.Unsupported("swiftpm")
+        else -> ProviderAdapter.Unsupported(kind.label())
     }
 }
 
@@ -134,31 +130,13 @@ provider_approval_facts: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx)
     provider_for_ref(spec, table, ctx).approval_facts(spec, table, ctx)
 }
 
-// The concrete source kind of a direct ecosystem root, if the ref names one.
-provider_direct_kind: fn(source: RefSource) -> ProviderKind? Never! {
-    if source == {
-        .Cran -> Val(ProviderKind.Cran)
-        .LuaRocks -> Val(ProviderKind.LuaRocks)
-        .RubyGems -> Val(ProviderKind.RubyGems)
-        .Cpan -> Val(ProviderKind.Cpan)
-        .Packagist -> Val(ProviderKind.Packagist)
-        .JetRegistry -> Val(ProviderKind.JetRegistry)
-        .Npm -> Val(ProviderKind.Npm)
-        .Cargo -> Val(ProviderKind.Cargo)
-        .PyPI -> Val(ProviderKind.PyPI)
-        .SwiftPM -> Val(ProviderKind.SwiftPM)
-        .Releases -> Val(ProviderKind.JetPackage)
-        else -> None
-    }
-}
-
 // Resolve a ref's concrete provider kind, running the U9 realize-time probe
 // when the source table left the kind to inference (a typed `…@github`
 // source). Offline never hits the network: it reuses a cached checkout if
 // present, else falls back to `nix`. Built-in sources, bare paths, and
 // `…@nixpkgs` named sources are concrete in the table and never probe.
 provider_resolve_kind: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
-    if provider_direct_kind(spec.source) == {
+    if spec.source.direct_kind() == {
         .Val(kind) -> return kind
         .None -> {}
     }

@@ -21,9 +21,10 @@ use {
 
 // ── T1: channel classification (E1249) ──
 
-// A `jet:` pin is a channel ref `MAJOR.MINOR`,
-// `MAJOR.MINOR.PATCH`, or a lowercase named channel. Ranges, empty values,
-// and a bare major are E1249.
+// A `jet:` pin is a channel ref in Jet's version spelling: `aMAJOR.MINOR`
+// (`a0.0`, the series) or `aMAJOR.MINOR.PATCH` (`a0.0.43`, exact), the
+// leading letter the release stage (`a` alpha); or a lowercase named channel.
+// Ranges, empty values, a bare major and an unstaged `0.4` are E1249.
 trust_pin_classify_channel: fn(raw: String) -> String TrustError! {
     channel: trust_pin_channel_text(raw)
     if trust_pin_is_version_channel(channel) || trust_pin_is_named_channel(channel) -> return Ok(channel)
@@ -38,10 +39,14 @@ trust_pin_channel_text: fn(raw: String) -> String Never! {
 trust_pin_is_version_channel: fn(channel: String) -> Bool Never! {
     parts: trust_text_split(channel, TRUST_DOT)
     if parts.len() != 2 && parts.len() != 3 -> return false
-    loop part in parts {
-        if part == "" -> return false
-        loop byte in part.bytes() {
-            code: Int.from_u8(byte)
+    loop (index, part) in parts {
+        raw: part.bytes()
+        // The major carries the stage letter.
+        start: if index == 0 -> 1 else -> 0
+        if raw.len() <= start -> return false
+        if index == 0 && (Int.from_u8(raw[0]) < 97 || Int.from_u8(raw[0]) > 122) -> return false
+        loop offset in start..<raw.len() {
+            code: Int.from_u8(raw[offset])
             if code < 48 || code > 57 -> return false
         }
     }
@@ -68,7 +73,7 @@ trust_pin_is_named_channel: fn(channel: String) -> Bool Never! {
     true
 }
 
-// The channel of a running version: its `MAJOR.MINOR` (`jet init` pins it).
+// The channel of a running version: its `aMAJOR.MINOR` (`jet init` pins it).
 trust_pin_channel_of: fn(version: String) -> String Never! {
     parts: trust_text_split(version, TRUST_DOT)
     if parts.len() >= 2 -> return "{parts[0]}.{parts[1]}"
@@ -77,15 +82,15 @@ trust_pin_channel_of: fn(version: String) -> String Never! {
 
 // ── T2: channel resolution + lock record ──
 
-// A version channel resolves offline (`0.4` -> `0.4.0`, `0.4.2` -> itself).
+// A version channel resolves offline (`a0.4` -> `a0.4.0`, `a0.4.2` -> itself).
 // A named channel needs a realizable object, so it is E1251 here.
 trust_pin_resolve_channel: fn(channel: String) -[Env]> String TrustError! {
     if !trust_pin_is_version_channel(channel) -> return Err(TrustError.Pin(trust_pin_e1251(channel, channel, trust_pin_current_platform())))
     Ok(trust_pin_version_of_channel(channel))
 }
 
-// The exact version of a version channel: `MAJOR.MINOR` names the series
-// head `MAJOR.MINOR.0`.
+// The exact version of a version channel: `aMAJOR.MINOR` names the series
+// head `aMAJOR.MINOR.0`.
 trust_pin_version_of_channel: fn(channel: String) -> String Never! {
     parts: trust_text_split(channel, TRUST_DOT)
     if parts.len() == 2 -> return "{parts[0]}.{parts[1]}.0"
@@ -196,7 +201,7 @@ trust_pin_move: fn(root: String, channel_arg: String?, running_version: String) 
 }
 
 // `jet init`: write a `package.jet` pinned to the running toolchain's
-// channel. Never clobbers a manifest.
+// channel, quoted (`jet: "a0.0"`). Never clobbers a manifest.
 trust_pin_write_init: fn(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
     path: files.join(dir, PACKAGE_FILE)
     if files.exists(path) {
@@ -209,14 +214,14 @@ trust_pin_write_init: fn(dir: String, name: String, running_version: String) -[F
 
 // The canonical `package.jet` body `jet init` writes.
 trust_pin_init_manifest: fn(name: String, channel: String) -> String Never! {
-    "name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: {{}}\n"
+    "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{channel}\"\n\ndeps: {{}}\n"
 }
 
 // ── Diagnostics (E1249 / E1250 / E1251 / E1224) ──
 
 // E1249: a `jet:` value is not a valid version/channel ref.
 trust_pin_e1249: fn(value: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1249", None, "`{value.trim()}` is not a valid toolchain pin", "the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.", "write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.")
+    diagnostic_from_registry("E1249", None, "`{value.trim()}` is not a valid toolchain pin", "the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.", "write a channel: `jet: \"a0.0\"` (track the a0.0 series), `jet: \"a0.0.43\"` (exact), or a named channel like `jet: main`.")
 }
 
 // E1250: an unlocked channel pin under `--offline`/CI.

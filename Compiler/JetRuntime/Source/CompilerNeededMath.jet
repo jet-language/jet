@@ -1,40 +1,14 @@
 // Native compiler math routes, parity: Jet-only (Rust frozen). Every route
-// is Jet, ported from musl 1.2.5 with its algorithms: Libm.jet computes
-// floor, ceil, trunc, round, fmod, fma and sqrt, LibmTrig.jet sin, cos, tan,
-// asin, acos, atan and atan2, LibmExpLog.jet exp, exp2, expm1, log, log2,
-// log10 and log1p, LibmPow.jet pow, cbrt and hypot, and LibmHyperbolic.jet
-// sinh, cosh, tanh, asinh, acosh and atanh. Nothing here imports C. Never
-// approximate a function or unfuse mul_add.
+// is Jet: Libm.jet computes floor, ceil, trunc, round, fmod, fma and sqrt,
+// each exactly rounded with musl 1.2.5's algorithms. Core/Math/Math.jet owns
+// every other function (correctly rounded on every tier). Nothing here
+// imports C. Never unfuse mul_add.
 
-#Export(c) jet_std_math_acos: fn(x: Float) -> Float { libm_acos(x) }
-#Export(c) jet_std_math_acosh: fn(x: Float) -> Float { libm_acosh(x) }
-#Export(c) jet_std_math_asin: fn(x: Float) -> Float { libm_asin(x) }
-#Export(c) jet_std_math_asinh: fn(x: Float) -> Float { libm_asinh(x) }
-#Export(c) jet_std_math_atan: fn(x: Float) -> Float { libm_atan(x) }
-#Export(c) jet_std_math_atan2: fn(y: Float, x: Float) -> Float { libm_atan2(y, x) }
-#Export(c) jet_std_math_atanh: fn(x: Float) -> Float { libm_atanh(x) }
-#Export(c) jet_std_math_cbrt: fn(x: Float) -> Float { libm_cbrt(x) }
 #Export(c) jet_std_math_ceil: fn(x: Float) -> Float { libm_ceil(x) }
-#Export(c) jet_std_math_cos: fn(x: Float) -> Float { libm_cos(x) }
-#Export(c) jet_std_math_cosh: fn(x: Float) -> Float { libm_cosh(x) }
-#Export(c) jet_std_math_exp: fn(x: Float) -> Float { libm_exp(x) }
-#Export(c) jet_std_math_exp_m1: fn(x: Float) -> Float { libm_expm1(x) }
-#Export(c) jet_std_math_exp2: fn(x: Float) -> Float { libm_exp2(x) }
 #Export(c) jet_std_math_floor: fn(x: Float) -> Float { libm_floor(x) }
 #Export(c) jet_std_math_fma: fn(a: Float, b: Float, c: Float) -> Float { libm_fma(a, b, c) }
 #Export(c) jet_std_math_fmod: fn(x: Float, y: Float) -> Float { libm_fmod(x, y) }
-#Export(c) jet_std_math_hypot: fn(x: Float, y: Float) -> Float { libm_hypot(x, y) }
-#Export(c) jet_std_math_ln: fn(x: Float) -> Float { libm_log(x) }
-#Export(c) jet_std_math_ln_1p: fn(x: Float) -> Float { libm_log1p(x) }
-#Export(c) jet_std_math_log10: fn(x: Float) -> Float { libm_log10(x) }
-#Export(c) jet_std_math_log2: fn(x: Float) -> Float { libm_log2(x) }
-// Float `**` (jet_pow: f64::powf); native programs call this export.
-#Export(c) jet_std_math_pow: fn(x: Float, y: Float) -> Float { libm_pow(x, y) }
-#Export(c) jet_std_math_sin: fn(x: Float) -> Float { libm_sin(x) }
-#Export(c) jet_std_math_sinh: fn(x: Float) -> Float { libm_sinh(x) }
 #Export(c) jet_std_math_sqrt: fn(x: Float) -> Float { libm_sqrt(x) }
-#Export(c) jet_std_math_tan: fn(x: Float) -> Float { libm_tan(x) }
-#Export(c) jet_std_math_tanh: fn(x: Float) -> Float { libm_tanh(x) }
 #Export(c) jet_std_math_trunc: fn(x: Float) -> Float { libm_trunc(x) }
 
 // abs is a sign-bit clear, including -0 and signaling NaN payloads.
@@ -103,11 +77,4 @@
         fraction = fraction.bit_and(I64{8388607})
     }
     rt_f64_from_bits(sign.bit_or((exponent + I64{896}) << I64{52}).bit_or(fraction << I64{29}))
-}
-// Rust f64::sin_cos evaluates the separate sin/cos calls, in that tuple order.
-#Export(c) jet_std_math_sin_cos: fn(x: Float, sine: I64, cosine: I64) {
-    s: libm_sin(x)
-    c: libm_cos(x)
-    rt_text_store(sine, rt_f64_bits(s))
-    rt_text_store(cosine, rt_f64_bits(c))
 }

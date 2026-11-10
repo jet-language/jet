@@ -83,14 +83,19 @@ use {
 }
 
 #Test("version normalizer uses only the supplied banner and refuses unreadable versions") {
-    assert_eq(kit_steps_version("Jet 1.2.3\nrelease status: prerelease\n"), Val("1.2.3"))
+    assert_eq(kit_steps_version("jet a0.0.43-dev+29517f5447\nRelease status: Prerelease\n"), Val("a0.0.43"))
+    assert_eq(kit_steps_version_display("jet a0.0.43-dev+29517f5447\nRelease status: Prerelease\n"), Val("a0.0.43-dev+29517f5447"))
+    assert_eq(kit_steps_version("jet a0.0.43 (29517f5447, 2026-11-09, alpha)\n"), Val("a0.0.43"))
+    assert_eq(kit_steps_version_display("jet a0.0.43 (29517f5447, 2026-11-09, alpha)\n"), Val("a0.0.43 (29517f5447, 2026-11-09, alpha)"))
     assert_eq(kit_steps_version("unrecognized banner\n"), None)
-    assert_eq(kit_steps_version("Jet\n"), None)
+    assert_eq(kit_steps_version("jet\n"), None)
+    assert_eq(kit_steps_version("Jet 1.2.3\n"), None)
     root: cases_test_root("version-normalization")
-    kit_exec_write(files.join(root, "tests/cases/group/version.out"), "VERSION 9.8.7\n")
-    cases_test_source(root, "version", "normalize: version\nstep: jet -c 'echo \"1.2.3 9.8.7\"'\nstdout: = version.out\n")
+    kit_exec_write(files.join(root, "tests/cases/group/version.out"), "jet VERSION\nWelcome to Jet! (VERSION) 9.8.7\n")
+    cases_test_source(root, "version", "normalize: version\nstep: jet -c 'echo \"jet a0.0.43-dev+29517f5447\"; echo \"Welcome to Jet! (a0.0.43) 9.8.7\"'\nstdout: = version.out\n")
     context := cases_test_context(root, files.join(root, "scratch"))
-    context.env.version = "1.2.3"
+    context.env.version = "a0.0.43"
+    context.env.version_display = "a0.0.43-dev+29517f5447"
     assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "PASS")
     context.env.version = ""
     context.env.version_error = "unparseable jet --version banner"

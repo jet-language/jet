@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/constant_time.c, library/constant_time_impl.h); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: constant-time selection, comparison and copying.
+//
+// A port of mbedtls 3.6.7's constant_time.c and the portable branches of
+// constant_time_impl.h. A condition is a CtCond whose mask has every bit set
+// (true) or none (false); every operation here runs the same instructions and
+// touches the same memory whatever the secret values, so the choice is made
+// with masks, never with a branch. The word primitives under it are Bignum's
+// (ct_bool, ct_lt, ct_mask, ct_select). Lengths and offsets are Int; the ones
+// a caller passes as secrets (an unpadding's payload offset, a MAC's position)
+// go through U64 masks like every other secret.
+use {
+    core
+    bn: __core_crypto_bignum
+}
+
+/// A secret condition: all ones when true, zero when false
+/// (mbedtls_ct_condition_t).
+CtCond: struct {
+    mask: U64
+}
+
+/// The true condition.
+ct_true: fn() -> CtCond Never! { CtCond{mask: U64{0}.bit_not()} }
+
+/// The false condition.
+ct_false: fn() -> CtCond Never! { CtCond{mask: U64{0}} }
+
+/// True when x is not zero (mbedtls_ct_bool).
+cond_of: fn(x: U64) -> CtCond Never! { CtCond{mask: bn.ct_mask(bn.ct_bool(x))} }
+
+/// True when x is not zero, for a non-negative Int.
+cond_of_int: fn(x: Int) -> CtCond Never! { cond_of(U64{x}) }
+
+/// The public truth of a condition: for the end of a computation, once its
+/// outcome may be revealed.
+cond_is_true: fn(c: CtCond) -> Bool Never! { c.mask != U64{0} }
+
+/// x != y.
+uint_ne: fn(x: U64, y: U64) -> CtCond Never! { cond_of(x.bit_xor(y)) }
+
+/// x == y.
+uint_eq: fn(x: U64, y: U64) -> CtCond Never! { bool_not(uint_ne(x, y)) }
+
+/// x < y.
+uint_lt: fn(x: U64, y: U64) -> CtCond Never! { CtCond{mask: bn.ct_mask(bn.ct_lt(x, y))} }
+
+/// x > y.
+uint_gt: fn(x: U64, y: U64) -> CtCond Never! { uint_lt(y, x) }
+
+/// x >= y.
+uint_ge: fn(x: U64, y: U64) -> CtCond Never! { bool_not(uint_lt(x, y)) }
+
+/// x <= y.
+uint_le: fn(x: U64, y: U64) -> CtCond Never! { bool_not(uint_gt(x, y)) }
+
+/// x == y for non-negative Int sizes.
+size_eq: fn(x: Int, y: Int) -> CtCond Never! { uint_eq(U64{x}, U64{y}) }
+
+/// x != y for non-negative Int sizes.
+size_ne: fn(x: Int, y: Int) -> CtCond Never! { uint_ne(U64{x}, U64{y}) }
+
+/// x < y for non-negative Int sizes.
+size_lt: fn(x: Int, y: Int) -> CtCond Never! { uint_lt(U64{x}, U64{y}) }
+
+/// x > y for non-negative Int sizes.
+size_gt: fn(x: Int, y: Int) -> CtCond Never! { uint_gt(U64{x}, U64{y}) }
+
+/// x >= y for non-negative Int sizes.
+size_ge: fn(x: Int, y: Int) -> CtCond Never! { uint_ge(U64{x}, U64{y}) }
+
+/// x <= y for non-negative Int sizes.
+size_le: fn(x: Int, y: Int) -> CtCond Never! { uint_le(U64{x}, U64{y}) }
+
+/// x xor y.
+bool_ne: fn(x: CtCond, y: CtCond) -> CtCond Never! { CtCond{mask: x.mask.bit_xor(y.mask)} }
+
+/// x and y.
+bool_and: fn(x: CtCond, y: CtCond) -> CtCond Never! { CtCond{mask: x.mask.bit_and(y.mask)} }
+
+/// x or y.
+bool_or: fn(x: CtCond, y: CtCond) -> CtCond Never! { CtCond{mask: x.mask.bit_or(y.mask)} }
+
+/// Not x.
+bool_not: fn(x: CtCond) -> CtCond Never! { CtCond{mask: x.mask.bit_not()} }
+
+/// if1 when c is true, else if0 (mbedtls_ct_if and its size, uint and
+/// mpi_uint forms).
+select: fn(c: CtCond, if1: U64, if0: U64) -> U64 Never! { if1.bit_and(c.mask).bit_or(if0.bit_and(c.mask.bit_not())) }
+
+/// if1 when c is true, else zero.
+if_else_0: fn(c: CtCond, if1: U64) -> U64 Never! { if1.bit_and(c.mask) }
+
+/// if1 when c is true, else if0, for non-negative Int sizes.
+size_if: fn(c: CtCond, if1: Int, if0: Int) -> Int Never! { Int.from_u64(select(c, U64{if1}, U64{if0})) }
+
+/// if1 when c is true, else zero, for a non-negative Int size.
+size_if_else_0: fn(c: CtCond, if1: Int) -> Int Never! { Int.from_u64(if_else_0(c, U64{if1})) }
+
+/// if1 when c is true, else if0, for conditions.
+bool_if: fn(c: CtCond, if1: CtCond, if0: CtCond) -> CtCond Never! { CtCond{mask: select(c, if1.mask, if0.mask)} }
+
+/// if1 when c is true, else false.
+bool_if_else_0: fn(c: CtCond, if1: CtCond) -> CtCond Never! { CtCond{mask: if_else_0(c, if1.mask)} }
+
+/// if1 when c is true, else if0, for a byte.
+byte_if: fn(c: CtCond, if1: U8, if0: U8) -> U8 Never! {
+    m: wrapping(U8{c.mask})
+    if1.bit_and(m).bit_or(if0.bit_and(m.bit_not()))
+}
+
+/// t when low <= c <= high, else zero (mbedtls_ct_uchar_in_range_if).
+#Arithmetic(.Wrapping)
+uchar_in_range_if: fn(low: U8, high: U8, c: U8, t: U8) -> U8 Never! {
+    co: U32{c}
+    // All ones in the byte above bit 7 when the subtraction borrows.
+    low_mask: (co - U32{low}) >> 8
+    high_mask: (U32{high} - co) >> 8
+    wrapping(U8{low_mask.bit_or(high_mask).bit_not()}).bit_and(t)
+}
+
+/// if1 when c is true, else if0, for mbedtls-style error codes in
+/// -32767..0 (mbedtls_ct_error_if).
+error_if: fn(c: CtCond, if1: Int, if0: Int) -> Int Never! { 0 - Int.from_u64(select(c, U64{0 - if1}, U64{0 - if0})) }
+
+/// if1 when c is true, else zero, for an mbedtls-style error code.
+error_if_else_0: fn(c: CtCond, if1: Int) -> Int Never! { 0 - Int.from_u64(if_else_0(c, U64{0 - if1})) }
+
+/// Zero buf[off..<off+len] when c is true; leave it when false.
+zeroize_if: fn(c: CtCond, buf: &[U8], off: Int, len: Int) Never! {
+    keep: wrapping(U8{c.mask.bit_not()})
+    loop i in off..<(off + len) -> buf[i] = buf[i].bit_and(keep)
+}
+
+/// Shift buf[start..<start+total] left by the secret `offset` (at most total)
+/// and zero the vacated tail, touching every byte the same way whatever the
+/// offset: total passes, each a whole-window one-byte shift that the first
+/// total - offset passes discard.
+memmove_left: fn(buf: &[U8], start: Int, total: Int, offset: Int) Never! {
+    if total == 0 -> return
+    last: start + total - 1
+    loop i in 0..<total {
+        no_op: size_gt(total - offset, i)
+        loop n in start..<last {
+            current: buf[n]
+            following: buf[n + 1]
+            buf[n] = byte_if(no_op, current, following)
+        }
+        buf[last] = byte_if(no_op, buf[last], U8{0})
+    }
+}
+
+/// dest[doff..<doff+len] = src[soff..<soff+len] when c is true; unchanged
+/// otherwise (mbedtls_ct_memcpy_if with a NULL src2).
+memcpy_if: fn(c: CtCond, dest: &[U8], doff: Int, src: [U8], soff: Int, len: Int) Never! {
+    m: wrapping(U8{c.mask})
+    nm: m.bit_not()
+    loop i in 0..<len -> dest[doff + i] = src[soff + i].bit_and(m).bit_or(dest[doff + i].bit_and(nm))
+}
+
+/// dest[doff..<doff+len] = c ? src1[off1..] : src2[off2..], len bytes
+/// (mbedtls_ct_memcpy_if with both sources).
+memcpy_if_else: fn(c: CtCond, dest: &[U8], doff: Int, src1: [U8], off1: Int, src2: [U8], off2: Int, len: Int) Never! {
+    m: wrapping(U8{c.mask})
+    nm: m.bit_not()
+    loop i in 0..<len -> dest[doff + i] = src1[off1 + i].bit_and(m).bit_or(src2[off2 + i].bit_and(nm))
+}
+
+/// dest[doff..<doff+len] = src[soff+offset..], for a secret offset (a word,
+/// compared under masks only) in offset_min..offset_max: every candidate
+/// offset is read (mbedtls_ct_memcpy_offset).
+memcpy_offset: fn(dest: &[U8], doff: Int, src: [U8], soff: Int, offset: U64, offset_min: Int, offset_max: Int, len: Int) Never! {
+    loop v in offset_min..offset_max -> memcpy_if(uint_eq(U64{v}, offset), dest, doff, src, soff + v, len)
+}
+
+/// Zero when a[aoff..<aoff+n] equals b[boff..<boff+n], else a value that is
+/// not zero; every byte is read (mbedtls_ct_memcmp).
+memcmp: fn(a: [U8], aoff: Int, b: [U8], boff: Int, n: Int) -> Int Never! {
+    diff := U8{0}
+    loop i in 0..<n -> diff = diff.bit_or(a[aoff + i].bit_xor(b[boff + i]))
+    Int.from_u8(diff)
+}
+
+/// mbedtls_ct_memcmp over a[0..<n] and b[0..<n], ignoring the first
+/// skip_head and last skip_tail bytes, with every byte read.
+memcmp_partial: fn(a: [U8], b: [U8], n: Int, skip_head: Int, skip_tail: Int) -> Int Never! {
+    valid_end: n - skip_tail
+    diff := U64{0}
+    loop i in 0..<n {
+        d: U64{a[i].bit_xor(b[i])}
+        valid: bool_and(size_ge(i, skip_head), size_lt(i, valid_end))
+        diff = diff.bit_or(if_else_0(valid, d))
+    }
+    Int.from_u64(diff)
+}
+
+/// Entry x of a table packed 1 << per_log entries to a word (entry i in
+/// bits (64 >> per_log) * (i %% per) of word i >> per_log), for a secret x
+/// below the table's entry count: every word is read and the entry picked
+/// with masks, so no address or branch depends on x. The S-box lookups of
+/// the table-driven ciphers (DES, ARIA, Camellia) run through it; per_log is
+/// 3 for byte entries and 1 for 32-bit ones.
+#Arithmetic(.Wrapping)
+table_entry: fn(packed: [U64], per_log: Int, x: U64) -> U64 Never! {
+    per: 1 << per_log
+    width: 64 >> per_log
+    hi: x >> per_log
+    word := U64{0}
+    // All ones when the index matches: the xor is small, so subtracting one
+    // borrows into bit 63 only from zero.
+    loop i in 0..<packed.len() -> word = word.bit_or(packed[i].bit_and(U64{0} - ((U64{i}.bit_xor(hi) - U64{1}) >> 63)))
+    lo: x.bit_and(U64{per - 1})
+    entry_bits: (U64{1} << width) - U64{1}
+    out := U64{0}
+    loop k in 0..<per {
+        hit: U64{0} - ((U64{k}.bit_xor(lo) - U64{1}) >> 63)
+        out = out.bit_or((word >> (width * k)).bit_and(entry_bits).bit_and(hit))
+    }
+    out
+}
+
+#Test("Conditions, comparisons and selections agree with their plain forms at the word edges") {
+    big: U64{0}.bit_not()
+    assert(cond_of(U64{0}).mask == U64{0})
+    assert(cond_of(U64{4}).mask == big)
+    assert(cond_of(big).mask == big)
+    assert(cond_is_true(uint_lt(U64{1}, big)))
+    assert(!cond_is_true(uint_lt(big, U64{1})))
+    assert(cond_is_true(uint_ge(U64{6}, U64{6})))
+    assert(cond_is_true(uint_gt(U64{256}, U64{138})))
+    assert(select(ct_true(), U64{7}, U64{9}) == U64{7})
+    assert(select(ct_false(), U64{7}, U64{9}) == U64{9})
+    assert(error_if(ct_true(), -0x4100, -0x4400) == -0x4100)
+    assert(error_if_else_0(ct_false(), -0x4100) == 0)
+}
+
+#Test("The helper uchar_in_range_if gives t inside the range and zero outside it") {
+    assert(uchar_in_range_if(U8{65}, U8{90}, U8{70}, U8{100}) == U8{100})
+    assert(uchar_in_range_if(U8{65}, U8{90}, U8{91}, U8{100}) == U8{0})
+    assert(uchar_in_range_if(U8{65}, U8{90}, U8{64}, U8{100}) == U8{0})
+    assert(uchar_in_range_if(U8{0}, U8{255}, U8{255}, U8{255}) == U8{255})
+}
+
+#Test("The memory operations move, copy, zero and compare as their plain forms do") {
+    buf := [U8]{1, 2, 3, 4, 5}
+    memmove_left(buf, 0, 5, 2)
+    assert(buf == [U8]{3, 4, 5, 0, 0})
+    dst := [U8]{0, 0}
+    memcpy_offset(dst, 0, [U8]{9, 8, 7, 6}, 0, U64{1}, 0, 2, 2)
+    assert(dst == [U8]{8, 7})
+    zeroize_if(ct_true(), dst, 0, 2)
+    assert(dst == [U8]{0, 0})
+    assert(memcmp([U8]{1, 2, 3}, 0, [U8]{1, 2, 3}, 0, 3) == 0)
+    assert(memcmp([U8]{1, 2, 3}, 0, [U8]{1, 2, 4}, 0, 3) != 0)
+    assert(memcmp_partial([U8]{1, 2, 3}, [U8]{9, 2, 3}, 3, 1, 0) == 0)
+    // A packed lookup reads each entry, bytes and 32-bit words alike.
+    bytes: [U64]{0x0706050403020100, 0xFFFEFDFCFBFAF9F8}
+    loop i in 0..<16 {
+        want: if i < 8 -> i else -> 240 + i
+        assert(table_entry(bytes, 3, U64{i}) == U64{want})
+    }
+    words: [U64]{0x89ABCDEF01234567, 0x00000000FFFFFFFF}
+    assert(table_entry(words, 1, U64{0}) == U64{0x01234567})
+    assert(table_entry(words, 1, U64{1}) == U64{0x89ABCDEF})
+    assert(table_entry(words, 1, U64{2}) == U64{0xFFFFFFFF})
+    assert(table_entry(words, 1, U64{3}) == U64{0})
+}

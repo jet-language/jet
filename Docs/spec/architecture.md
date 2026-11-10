@@ -12,8 +12,8 @@ Jet source
   -> IR builder -> slot IR, optimized in place
   -> x86-64 selection and object emission (Compiler/JetIR, Compiler/JetBackend), one runtime
        O0: machine code in memory (`jet run`, `jet dev`, comptime)
-       O1: executable file (`jet build` default)
-       O2: executable file (`--release`)
+       O1: executable file (`--optimize=basic`, `-O1`)
+       O2: executable file (`jet build` default, `--release`)
 ```
 
 This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).
@@ -152,7 +152,7 @@ runtime's own calls and function addresses, one per line. A lifecycle hook
 that can reach one runs whenever the program keeps one of its guard
 storages, so the exports that can reach such a storage are listed too; the
 receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
-(`jet-native-runtime/v3`) and every pack reader verifies it. `jet build`
+(`jet-native-runtime/v4`) and every pack reader verifies it. `jet build`
 selects a program's inline RC updates without the lock prefix only when
 that receipt was read, neither the program nor its `main` calls an export it
 names, every foreign C call is a vetted libc leaf, and the program has no
@@ -179,10 +179,13 @@ system linker participates. The runtime exports C's `memcpy`, `memmove`,
 `__jet_start` (`Image/StaticLink.jet` `link_owned_startup`), which runs the
 init arrays, `main` and the fini arrays. A program link that adds C archives
 (foreign C, below) starts through musl's `__libc_start_main` instead, and
-that startup hands musl's thread functions to the runtime
-(`jet_rt_thread_libc`), so every runtime thread of such a program is a musl
-thread (`pthread_create`) that the linked C can run on; a program without C
-starts its threads as raw clones. The step installs `jet-runtime/` beside
+that startup hands the runtime three thread functions built over musl's
+(`jet_rt_thread_libc`: `__jet_thread_create`, which the link synthesizes
+over `pthread_create`, then `pthread_join` and `pthread_detach`), so every
+runtime thread of such a program is a musl thread that the linked C can run
+on; a program without C starts its threads as raw clones. Only that
+synthesized startup names musl's thread functions: the runtime object asks
+libc for none. The step installs `jet-runtime/` beside
 the compiler: `native.key`, `jet_runtime.pack.o` and `jet_runtime.image`, the pack linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
@@ -192,16 +195,14 @@ runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
 run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
-(`Image/Loader.jet`). The step also builds Core's vendored sqlite3 and
-mbedtls archives (`foreign/<lib>/`) beside the pack; it packages no C
-platform archives, which a program with C takes from jet's C toolchain pack
-(foreign C, below). The key hashes the source inventory, checked ABI,
-lifecycle, backend inputs and the vendored archives. The accompanying
-`provenance.json` records each input digest, the pack and image digests and
-zero Rust or LLVM-generated Jet objects, with the vendored archives listed
-separately.
+(`Image/Loader.jet`). The step runs no C compiler or archiver, and the pack
+packages no C platform archives, which a program with C takes from jet's C
+toolchain pack (foreign C, below). The key (`jet-native-runtime/v4`) hashes
+the source inventory, checked ABI, thread receipt, lifecycle and backend
+inputs. The accompanying `provenance.json` records each input digest, the
+pack and image digests and zero Rust or LLVM-generated Jet objects.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
-lifecycle, vendored C recipe and compiler executable. Neither the consumer program
+lifecycle and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced
 pack without checking or compiling the runtime again; changed producer inputs
 rebuild it. Reuse requires held regular-file reads, matching object/pack/image/ABI
@@ -399,9 +400,15 @@ An O2 pass may build an SSA form of one function, use it and discard it
 module against the IR's contract. It shares no code with the builder or the
 passes. Per function it checks the arena, each instruction's operands against
 its opcode's row in `IR_LINT_OPS` (roles, slot kinds, typing), every `Call`
-against the callee's parameter and result rows, every `CallRuntime` against
-its route's carriers, the structured-control nesting, and `Return` against
-the result. Per module it checks each type row's kind and layout against its
+against the callee's parameter and result rows, every `CallIndirect` through
+a function value's code word (a row of `#code` over the function type)
+against that signature, every `CallRuntime` against its route's carriers,
+each `Drop`/`Close` against its slot and drop routine, each
+`Load`/`Store`/`Offset`/`CopyBytes`/`StackAddress` against the bounds of an
+Aggregate base and the 32-bit displacement, each `ConstText` and
+`ConstBigInt` against its data or name row, the structured-control nesting,
+and `Return` against the result; only `Nop` and `Unreachable` have nothing
+to type. Per module it checks each type row's kind and layout against its
 checked `Type`. `ir_lint_core_routes` checks each Core call registry row
 with a runtime route against that route's arity. The route lint,
 `ir_lint_route_gaps`, lists in one run every gap a runtime leaves: each Core
@@ -417,9 +424,12 @@ the stop edge. A runtime route's Word carrier takes an `Int` or a word. A
 `ConstText` may yield the raw static-text address the runtime library's
 `rt_static_text` reads as a Word.
 
-It runs after the IR build (`ir.build`) on every native build, and again
-before x86-64 selection (`ir.opt`) when the optimizer ran; the functions
-split across the compiler threads. With `IROptOptions.verify` (tests, CI,
+It runs once per build, over the module x86-64 selection reads: after the IR
+build (`ir.build`) at O0, after the optimizer (`ir.opt`) at O1 and O2. `jet
+emit --ir` lints the module it prints (`ir.build`), and each comptime batch
+and the comptime entry program are linted before they compile (`eval.batch`,
+`eval.entry`; a finding fails the batch). The functions split across the
+compiler threads. With `IROptOptions.verify` (tests, CI,
 `JET_OPT_VERIFY=1`) it also runs after each optimizer pass
 (`ir.opt.<pass>`) and verifies each SSA form (`ssa.form`). A finding is a
 compiler bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE
@@ -432,7 +442,7 @@ checks, and each finding is one of its issue rows.
 |---|---|
 | IR builder (`JetIR/Source/Build*.jet`) | the checked program and its sema facts |
 | IR Lint (`JetIR/Source/Lint.jet`) | IR |
-| O1/O2 passes (`JetIR/Source/Opt*.jet`) | IR |
+| O1/O2 passes, and at O0 their inline Int facts alone (`JetIR/Source/Opt*.jet`) | IR |
 | x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
 | Comptime (`JetEval/Source/IR`): O0 machine code from the same selector | IR |
 | Phase trace: `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`, `ir.object` | IR |
@@ -1522,19 +1532,13 @@ check the archive digest. System V scalar calls preserve
 their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 
-SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
-`Core/Vendor/Sqlite3`, with its license and the seed's bundled feature flags,
-never a system SQLite. The upstream `sqlite3.c` SHA-256 is
-`7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
-Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is built: the `runtime` step of `jet build Compiler`
-builds each library under the native C policy and installs
-`jet-runtime/foreign/<lib>/lib<lib>.a`
-(with its LICENSE and VERSION) beside the pack. The archive digests are part of
-the runtime key and the vendored sources, flags and C compiler identity part of
-the pack recipe. A Core `c.<lib>` import links that archive, so neither jet's
-self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
-C a package declares itself is compiled at link time. User foreign
+SQLite is Jet source: `core.db` runs on the Jet port of SQLite 3.45.0 in
+`Core/Db/Engine`, written against the amalgamation `libsqlite3-sys` 0.28.0
+bundles and that crate's Linux build options, never a system SQLite.
+`core.net.tls` binds no C either: its TLS engine and cryptography are Jet
+(`Core/Net/SSL`, `Core/Crypto`). Core links no C of its own, so neither jet's
+self-compile nor a Core program needs a C compiler, and `jet build Compiler`
+compiles no C; only C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
@@ -1550,10 +1554,21 @@ adds the host C compiler's `libgcc_eh.a`. With `CC`/`AR` named, or no engine,
 the closure links the musl `libc.a` a find_folder search chooses on
 LIBRARY_PATH and the host compiler's `libgcc_eh.a` and `libgcc.a`. The runtime
 pack packages none of them. Such a program links the Jet-only
-runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack: the
-pack holds its own private, initialized libc, and a second copy beside it would
-run uninitialized. A program with no foreign closure receives no additional link
-inputs and keeps the pack. Platform archives are never runtime-pack exports.
+runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack:
+the pack carries the startup of a program with no libc (`__jet_start`), while
+the linker starts this one through musl's `__libc_start_main`, which
+initializes the libc it links. A program links only the C its live code calls: when only
+checked foreign declarations name C (a C provider of an imported module, such
+as `core.net.tls` and Mbed TLS), the linker's own collection
+over the program object and the pack (`x64_link_live_undefined` in
+`Compiler/JetBackend/Source/Image/StaticLink.jet`) names the symbols live code
+references and nothing defines, and only the providers of those declarations
+are realized (`jet_driver_foreign_link_live`). A program with no live foreign
+reference receives no additional link inputs, needs no C tools and keeps the
+pack, starting at `__jet_start`; a C symbol no input defines is the program's
+E2105 error naming the symbol and the foreign function that names it
+(`jet_cli_native_unprovided` in `Compiler/JetCli/Source/Cli/Host.jet`), not an
+internal compiler error. Platform archives are never runtime-pack exports.
 
 The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
 existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller
@@ -1567,8 +1582,8 @@ C String parameters instead use per-call NUL-terminated copies; their String
 results are copied before those temporaries are released.
 `Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
 embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
-`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI and the
-bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
+`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI against
+exact tier-parity output.
 
 `jet inspect bind cpp` is owned by
 [`Cpp.jet`](../../Jetpack/Integrations/Source/Foreign/Binders/Cpp.jet): clang
@@ -2257,7 +2272,7 @@ original Rust runner, and no case compiles beside another. When outer
 tracing is enabled, run-wide scratch also remains until the final trace audit;
 ordinary runs remove it after reporting.
 UI `@jetpack_e1250` copies its program as `main.jet` into a private scratch
-package with `name: "e1250_fixture"`, `version: "1"` and `jet: 0.9`; it runs
+package with `name: "e1250_fixture"`, `version: "1"` and `jet: "a0.9"`; it runs
 public `jet build main.jet --offline`, requires a nonzero refusal, and compares
 combined stdout/stderr. `@web_target` uses public
 `jet build FILE --target=web`, not an internal compiler hook. Target availability

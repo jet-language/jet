@@ -1,0 +1,15 @@
+// An undescribed C call has the effect `FFI.C`; this row leaves it out.
+package: {
+    name: "omitted"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+use c: c.c
+#Import c.c: module {
+    getpid: fn() -> I32 = "getpid"
+}
+
+run: fn() {
+    pid: c.getpid()
+    print("pid>0={pid > I32{0}}")
+}

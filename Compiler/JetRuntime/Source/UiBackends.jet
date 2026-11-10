@@ -1,39 +1,8 @@
-// The null and TUI renderer backends, their Rect/Size/InputEvent records,
-// buttons and the click slots.
-//
-// A backend handle is one refcounted State160 its clones share (Rust's
-// Arc<Mutex<State>>): refs0 kind8 (0 null, 1 TUI), layout frame
-// present16 x24 y32 w40 h48 (f64 bits), paint commands56 (owned texts),
-// focus nodes80 (owned UINodes), focused104 (-1 None), TUI grid data112
-// (one scalar word per cell) cols120 rows128, render count136, last node144
-// and unicode152.
-// Word vectors are len0 cap8 data16 (Events.jet event_words_*).
-UI_BACKEND_BYTES: I64{160}
-UI_BACKEND_REFS: I64{0}
-UI_BACKEND_KIND: I64{8}
-UI_BACKEND_FRAME_PRESENT: I64{16}
-UI_BACKEND_FRAME: I64{24}
-UI_BACKEND_COMMANDS: I64{56}
-UI_BACKEND_FOCUS: I64{80}
-UI_BACKEND_FOCUSED: I64{104}
-UI_BACKEND_GRID: I64{112}
-UI_BACKEND_COLS: I64{120}
-UI_BACKEND_ROWS: I64{128}
-UI_BACKEND_RENDERS: I64{136}
-UI_BACKEND_LAST_NODE: I64{144}
-UI_BACKEND_UNICODE: I64{152}
-UI_BACKEND_NULL: I64{0}
-UI_BACKEND_TUI: I64{1}
-UI_KIND_TEXT: I64{1}
-UI_KIND_BOX: I64{2}
-UI_KIND_BUTTON: I64{3}
-UI_KIND_TEXT_INPUT: I64{4}
-UI_ROLE_BUTTON: I64{0}
-UI_ROLE_TEXT_INPUT: I64{1}
+// The Rect/Size/InputEvent records core.ui's backends cross the runtime
+// with, a web build's scene, and the click slots of buttons. The backends
+// themselves are Jet (Core/Ui/Ui.jet).
 UI_RECT_BYTES: I64{32}
 UI_SIZE_BYTES: I64{16}
-UI_EVENT_RESULT_HANDLED: I64{0}
-UI_EVENT_RESULT_IGNORED: I64{1}
 
 // ---- Rect / Size / InputEvent records -------------------------------------
 
@@ -77,366 +46,11 @@ ui_rect_new: fn(x: Float, y: Float, width: Float, height: Float) -> I64 {
     result
 }
 
-// ---- Float helpers ----------------------------------------------------------
+// ---- web scene --------------------------------------------------------------
 
-// f64::max: a NaN side yields the other.
-ui_float_max: fn(a: Float, b: Float) -> Float {
-    if (a != a) -> return b
-    if (b != b) -> return a
-    if (a > b) -> a else -> b
-}
-// f64::clamp, which panics unless min <= max.
-ui_float_clamp: fn(value: Float, min: Float, max: Float) -> Float {
-    if !(min <= max) {
-        message: jet_rt_string_builder_new()
-        ui_text_push_static(message, rt_static_text("min > max, or either was NaN. min = "))
-        ui_text_push_owned(message, display_float(min, true))
-        ui_text_push_static(message, rt_static_text(", max = "))
-        ui_text_push_owned(message, display_float(max, true))
-        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
-    }
-    if (value < min) -> return min
-    if (value > max) -> return max
-    value
-}
-// `value as usize` for a value already floored at >= 0 (NaN saturates to 0).
-ui_float_index: fn(value: Float) -> I64 {
-    if !(value >= Float{1.0}) -> return I64{0}
-    if (value >= Float{9223372036854775807.0}) -> return I64{9223372036854775807}
-    runtime_duration_float_word(libm_trunc(value))
-}
-
-// ---- Text helpers -----------------------------------------------------------
-
-ui_text_push_static: fn(target: I64, text: I64) { rt_text_append(target, rt_text_data(text), rt_text_len(text)) }
-ui_text_push_owned: fn(target: I64, text: I64) {
-    rt_text_append(target, rt_text_data(text), rt_text_len(text))
-    jet_rt_string_drop(text)
-}
-ui_text_push_float: fn(target: I64, value: Float) { ui_text_push_owned(target, display_float(value, false)) }
-// Rect.jet_show: {x:…,y:…,w:…,h:…}.
-ui_text_push_rect: fn(target: I64, frame: I64) {
-    ui_text_push_static(target, rt_static_text("{{x:"))
-    ui_text_push_float(target, ui_float_at(frame))
-    ui_text_push_static(target, rt_static_text(",y:"))
-    ui_text_push_float(target, ui_float_at(wrapping(frame + I64{8})))
-    ui_text_push_static(target, rt_static_text(",w:"))
-    ui_text_push_float(target, ui_float_at(wrapping(frame + I64{16})))
-    ui_text_push_static(target, rt_static_text(",h:"))
-    ui_text_push_float(target, ui_float_at(wrapping(frame + I64{24})))
-    ui_text_push_static(target, rt_static_text("}}"))
-}
-// strip_ansi: an ESC starts an escape that ends after an ASCII letter or '@'.
-ui_tui_strip_ansi: fn(text: I64) -> I64 {
-    output: jet_rt_string_builder_new()
-    data: rt_text_data(text)
-    length: rt_text_len(text)
-    at := I64{0}
-    escape := false
-    loop at < length {
-        width: rt_text_width(wrapping(data + at))
-        character: rt_text_decode(wrapping(data + at))
-        if escape {
-            if ((character >= I64{65} && character <= I64{90}) || (character >= I64{97} && character <= I64{122}) || character == I64{64}) -> escape = false
-        } else if (character == I64{27}) {
-            escape = true
-        } else {
-            rt_text_append(output, data + at, width)
-        }
-        at += width
-    }
-    jet_rt_string_builder_finish(output)
-}
-// Ascii (Core/Tui ascii_scalar): box drawing and arrows map to ASCII, any other
-// non-ASCII scalar to '?'.
-ui_tui_ascii_scalar: fn(n: I64) -> I64 {
-    if (n == I64{0x2500} || n == I64{0x2501} || n == I64{0x2550}) -> return I64{45}
-    if (n == I64{0x2502} || n == I64{0x2503} || n == I64{0x2551}) -> return I64{124}
-    if (n == I64{0x250C} || n == I64{0x250F} || n == I64{0x2554} || n == I64{0x2510} || n == I64{0x2513} || n == I64{0x2557} || n == I64{0x2514} || n == I64{0x2517} || n == I64{0x255A} || n == I64{0x2518} || n == I64{0x251B} || n == I64{0x255D} || n == I64{0x251C} || n == I64{0x2524} || n == I64{0x252C} || n == I64{0x2534} || n == I64{0x253C} || n == I64{0x254B} || n == I64{0x256C}) -> return I64{43}
-    if (n == I64{0x2192} || n == I64{0x21D2} || n == I64{0x279C}) -> return I64{62}
-    if (n == I64{0x2190} || n == I64{0x21D0}) -> return I64{60}
-    if (n == I64{0x2191} || n == I64{0x21D1}) -> return I64{94}
-    if (n == I64{0x2193} || n == I64{0x21D3}) -> return I64{118}
-    if (n < I64{128}) -> return n
-    I64{63}
-}
-// char_width (Core/Tui scalar_display_width).
-ui_tui_char_width: fn(n: I64) -> I64 {
-    if (n < I64{32} || (n >= I64{0x7F} && n <= I64{0x9F}) || (n >= I64{0x0300} && n <= I64{0x036F}) || (n >= I64{0x0483} && n <= I64{0x0489}) || (n >= I64{0x0591} && n <= I64{0x05BD}) || (n >= I64{0x0610} && n <= I64{0x061A}) || (n >= I64{0x064B} && n <= I64{0x065F}) || (n >= I64{0x1AB0} && n <= I64{0x1AFF}) || (n >= I64{0x1DC0} && n <= I64{0x1DFF}) || (n >= I64{0x20D0} && n <= I64{0x20FF}) || (n >= I64{0xFE20} && n <= I64{0xFE2F})) -> return I64{0}
-    if ((n >= I64{0x1100} && n <= I64{0x115F}) || (n >= I64{0x2329} && n <= I64{0x232A}) || (n >= I64{0x2E80} && n <= I64{0x303E}) || (n >= I64{0x3040} && n <= I64{0xA4CF}) || (n >= I64{0xAC00} && n <= I64{0xD7A3}) || (n >= I64{0xF900} && n <= I64{0xFAFF}) || (n >= I64{0xFE10} && n <= I64{0xFE19}) || (n >= I64{0xFE30} && n <= I64{0xFE6F}) || (n >= I64{0xFF00} && n <= I64{0xFF60}) || (n >= I64{0xFFE0} && n <= I64{0xFFE6}) || (n >= I64{0x1F300} && n <= I64{0x1FAFF})) -> return I64{2}
-    I64{1}
-}
-// display_width: the char widths of the ANSI-stripped text.
-ui_tui_display_width: fn(text: I64) -> I64 {
-    stripped: ui_tui_strip_ansi(text)
-    data: rt_text_data(stripped)
-    length: rt_text_len(stripped)
-    at := I64{0}
-    total := I64{0}
-    loop at < length {
-        total += ui_tui_char_width(rt_text_decode(wrapping(data + at)))
-        at += rt_text_width(wrapping(data + at))
-    }
-    jet_rt_string_drop(stripped)
-    total
-}
-// str::eq_ignore_ascii_case(code, "tab").
-ui_key_is_tab: fn(code: I64) -> Bool {
-    if (rt_text_len(code) != I64{3}) -> return false
-    data: rt_text_data(code)
-    rt_text_byte(data).bit_or(I64{32}) == I64{116} && rt_text_byte(wrapping(data + I64{1})).bit_or(I64{32}) == I64{97} && rt_text_byte(wrapping(data + I64{2})).bit_or(I64{32}) == I64{98}
-}
-// jet_tui_env_flag: present and not "0".
-ui_env_flag: fn(name: I64) -> Bool {
-    value: host_environment_value(name)
-    if (value == I64{0}) -> return false
-    !(rt_text_byte(value) == I64{48} && rt_text_byte(wrapping(value + I64{1})) == I64{0})
-}
-// jet_tui_capabilities().unicode: neither JET_TUI_ASCII nor TERM=dumb (any
-// ASCII case; env::var's invalid UTF-8 reads as unset).
-ui_tui_unicode: fn() -> Bool {
-    if ui_env_flag(rt_static_text("JET_TUI_ASCII")) -> return false
-    term: rt_env_get(rt_static_text("TERM"))
-    if (term == I64{0}) -> return true
-    dumb := rt_text_len(term) == I64{4}
-    if dumb {
-        data: rt_text_data(term)
-        dumb = rt_text_byte(data).bit_or(I64{32}) == I64{100} && rt_text_byte(wrapping(data + I64{1})).bit_or(I64{32}) == I64{117} && rt_text_byte(wrapping(data + I64{2})).bit_or(I64{32}) == I64{109} && rt_text_byte(wrapping(data + I64{3})).bit_or(I64{32}) == I64{98}
-    }
-    jet_rt_string_drop(term)
-    !dumb
-}
-
-// ---- Node readers -----------------------------------------------------------
-
-ui_node_kind: fn(node: I64) -> I64 { ui_carrier_word(wrapping(node + UI_NODE_KIND)) }
-ui_node_role: fn(node: I64) -> I64 { ui_carrier_word(wrapping(node + UI_NODE_ROLE)) }
-ui_node_width: fn(node: I64) -> Float { ui_float_at(wrapping(node + UI_NODE_WIDTH)) }
-ui_node_height: fn(node: I64) -> Float { ui_float_at(wrapping(node + UI_NODE_HEIGHT)) }
-ui_node_child_count: fn(node: I64) -> I64 { ui_carrier_word(wrapping(ui_carrier_word(wrapping(node + UI_NODE_CHILDREN)) + DATA_SEQUENCE_LENGTH)) }
-ui_node_child: fn(node: I64, index: I64) -> I64 { ui_carrier_word(wrapping(ui_carrier_word(wrapping(ui_carrier_word(wrapping(node + UI_NODE_CHILDREN)) + DATA_SEQUENCE_DATA)) + index * UI_NODE_CHILD_BYTES)) }
-ui_node_interactive: fn(node: I64) -> Bool {
-    role: ui_node_role(node)
-    role == UI_ROLE_BUTTON || role == UI_ROLE_TEXT_INPUT
-}
-
-// ---- Backend state ----------------------------------------------------------
-
-ui_backend_new: fn(kind: I64) -> I64 {
-    state: jet_rt_alloc(UI_BACKEND_BYTES, I64{8})
-    offset := I64{0}
-    loop offset < UI_BACKEND_BYTES {
-        ui_carrier_store(wrapping(state + offset), I64{0})
-        offset += I64{8}
-    }
-    ui_carrier_store(wrapping(state + UI_BACKEND_REFS), I64{1})
-    ui_carrier_store(wrapping(state + UI_BACKEND_KIND), kind)
-    ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), I64{-1})
-    if (kind == UI_BACKEND_TUI) -> ui_carrier_store(wrapping(state + UI_BACKEND_UNICODE), if ui_tui_unicode() -> I64{1} else -> I64{0})
-    state
-}
-ui_backend_retain: fn(state: I64) -> I64 {
-    ui_carrier_store(wrapping(state + UI_BACKEND_REFS), ui_carrier_word(wrapping(state + UI_BACKEND_REFS)) + I64{1})
-    state
-}
-ui_words_clear: fn(base: I64, drop_kind: I64) {
-    length: ui_carrier_word(base)
-    index := I64{0}
-    loop index < length {
-        word: event_words_get(base, index)
-        if (drop_kind == I64{0}) {
-            jet_rt_string_drop(word)
-        } else {
-            jet_rt_handle_drop_jet_ui_node(word)
-        }
-        index += I64{1}
-    }
-    ui_carrier_store(base, I64{0})
-}
-// `count` empty word vectors side by side, freed by the caller.
-ui_words_scratch: fn(count: I64) -> I64 {
-    bytes: count * I64{24}
-    base: jet_rt_alloc(bytes, I64{8})
-    offset := I64{0}
-    loop offset < bytes {
-        ui_carrier_store(wrapping(base + offset), I64{0})
-        offset += I64{8}
-    }
-    base
-}
-// Moves the vector at `from` over the emptied vector at `to`.
-ui_words_move: fn(from: I64, to: I64) {
-    ui_carrier_store(to, ui_carrier_word(from))
-    ui_carrier_store(wrapping(to + I64{8}), ui_carrier_word(wrapping(from + I64{8})))
-    ui_carrier_store(wrapping(to + I64{16}), ui_carrier_word(wrapping(from + I64{16})))
-    event_words_take(from)
-}
-ui_words_free: fn(base: I64, drop_kind: I64) {
-    ui_words_clear(base, drop_kind)
-    event_words_free(ui_carrier_word(wrapping(base + I64{16})), ui_carrier_word(wrapping(base + I64{8})))
-    event_words_take(base)
-}
-ui_backend_release: fn(state: I64) {
-    if (state == I64{0}) -> return
-    refs: ui_carrier_word(wrapping(state + UI_BACKEND_REFS)) - I64{1}
-    ui_carrier_store(wrapping(state + UI_BACKEND_REFS), refs)
-    if (refs != I64{0}) -> return
-    ui_words_free(wrapping(state + UI_BACKEND_COMMANDS), I64{0})
-    ui_words_free(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-    ui_tui_grid_free(state)
-    last: ui_carrier_word(wrapping(state + UI_BACKEND_LAST_NODE))
-    if (last != I64{0}) -> jet_rt_handle_drop_jet_ui_node(last)
-    jet_rt_free(state, UI_BACKEND_BYTES, I64{8})
-}
-#Export(c) jet_ui_null: fn() -> I64 { ui_backend_new(UI_BACKEND_NULL) }
-#Export(c) jet_ui_tui: fn() -> I64 { ui_backend_new(UI_BACKEND_TUI) }
-#Export(c) jet_rt_handle_clone_jet_null_backend: fn(state: I64) -> I64 { ui_backend_retain(state) }
-#Export(c) jet_rt_handle_drop_jet_null_backend: fn(state: I64) { ui_backend_release(state) }
-#Export(c) jet_rt_handle_clone_jet_tui_backend: fn(state: I64) -> I64 { ui_backend_retain(state) }
-#Export(c) jet_rt_handle_drop_jet_tui_backend: fn(state: I64) { ui_backend_release(state) }
-
-// The paint frame: the layout frame, else the node's own size at the origin.
-ui_backend_paint_frame: fn(state: I64, node: I64) -> I64 {
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_FRAME_PRESENT)) != I64{0}) {
-        frame: wrapping(state + UI_BACKEND_FRAME)
-        return ui_rect_new(ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
-    }
-    ui_rect_new(Float{0.0}, Float{0.0}, ui_node_width(node), ui_node_height(node))
-}
-ui_backend_set_frame: fn(state: I64, x: Float, y: Float, width: Float, height: Float) {
-    ui_carrier_store(wrapping(state + UI_BACKEND_FRAME_PRESENT), I64{1})
-    ui_float_store(wrapping(state + UI_BACKEND_FRAME), x)
-    ui_float_store(wrapping(wrapping(state + UI_BACKEND_FRAME) + I64{8}), y)
-    ui_float_store(wrapping(wrapping(state + UI_BACKEND_FRAME) + I64{16}), width)
-    ui_float_store(wrapping(wrapping(state + UI_BACKEND_FRAME) + I64{24}), height)
-}
-
-// ---- measure / layout -------------------------------------------------------
-
-// jet_ui_measure_tree: a Box is its widest child by its children's summed
-// heights, any other node its own size, clamped to the constraint.
-ui_measure: fn(node: I64, constraint: I64) -> I64 {
-    width := ui_node_width(node)
-    height := ui_node_height(node)
-    if (ui_node_kind(node) == UI_KIND_BOX) {
-        width = Float{0.0}
-        height = Float{0.0}
-        count: ui_node_child_count(node)
-        index := I64{0}
-        loop index < count {
-            child: ui_node_child(node, index)
-            width = ui_float_max(width, ui_node_width(child))
-            height = height + ui_node_height(child)
-            index += I64{1}
-        }
-    }
-    clamped_width: ui_float_clamp(width, ui_float_at(wrapping(constraint + MATH_SIZE_MIN_WIDTH)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_WIDTH)))
-    clamped_height: ui_float_clamp(height, ui_float_at(wrapping(constraint + MATH_SIZE_MIN_HEIGHT)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_HEIGHT)))
-    jet_rt_record_new_jet_size(clamped_width, clamped_height)
-}
-ui_layout: fn(state: I64, frame: I64) {
-    ui_backend_set_frame(state, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) == UI_BACKEND_TUI) -> ui_tui_grid_reset(state, ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
-}
-
-// ---- paint ------------------------------------------------------------------
-
-// jet_ui_visit_tree: a Box stacks its children down its frame's width; every
-// other node is a leaf painted into its frame.
-ui_visit: fn(state: I64, node: I64, x: Float, y: Float, width: Float, height: Float) {
-    if (ui_node_kind(node) == UI_KIND_BOX) {
-        at := y
-        count: ui_node_child_count(node)
-        index := I64{0}
-        loop index < count {
-            child: ui_node_child(node, index)
-            child_height: ui_node_height(child)
-            ui_visit(state, child, x, at, width, child_height)
-            at = at + child_height
-            index += I64{1}
-        }
-        return
-    }
-    frame: ui_rect_new(x, y, width, height)
-    if {
-        (ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) == UI_BACKEND_TUI) -> ui_tui_write_label(state, frame, ui_carrier_word(wrapping(node + UI_NODE_LABEL)))
-        else -> ui_paint_leaf_commands(state, node, frame)
-    }
-    geometry_drop(frame, UI_RECT_BYTES)
-}
-// jet_ui_paint_tree's leaf: a fill (its color, else #000000) unless it is a
-// Text, then its text.
-ui_paint_leaf_commands: fn(state: I64, node: I64, frame: I64) {
-    if (ui_node_kind(node) != UI_KIND_TEXT) {
-        fill: jet_rt_string_builder_new()
-        ui_text_push_static(fill, rt_static_text("fill("))
-        ui_text_push_rect(fill, frame)
-        ui_text_push_static(fill, rt_static_text(", "))
-        color: ui_carrier_word(wrapping(node + UI_NODE_COLOR))
-        ui_text_push_static(fill, if (color == I64{0}) -> rt_static_text("#000000") else -> color)
-        ui_text_push_static(fill, rt_static_text(")"))
-        event_words_push(wrapping(state + UI_BACKEND_COMMANDS), jet_rt_string_builder_finish(fill))
-    }
-    text: jet_rt_string_builder_new()
-    ui_text_push_static(text, rt_static_text("text("))
-    ui_text_push_rect(text, frame)
-    ui_text_push_static(text, rt_static_text(", "))
-    ui_text_push_static(text, ui_carrier_word(wrapping(node + UI_NODE_LABEL)))
-    ui_text_push_static(text, rt_static_text(")"))
-    event_words_push(wrapping(state + UI_BACKEND_COMMANDS), jet_rt_string_builder_finish(text))
-}
-// jet_ui_collect_focus: every interactive node, pre-order.
-ui_collect_focus: fn(node: I64, out: I64) {
-    if ui_node_interactive(node) -> event_words_push(out, jet_rt_handle_clone_jet_ui_node(node))
-    count: ui_node_child_count(node)
-    index := I64{0}
-    loop index < count {
-        ui_collect_focus(ui_node_child(node, index), out)
-        index += I64{1}
-    }
-}
-// The focus a paint found replaces the backend's and focuses its first node.
-ui_paint_focus: fn(state: I64, node: I64) {
-    base: ui_words_scratch(I64{1})
-    ui_collect_focus(node, base)
-    if (ui_carrier_word(base) != I64{0}) {
-        ui_words_free(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-        ui_words_move(base, wrapping(state + UI_BACKEND_FOCUS))
-        ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), I64{0})
-    }
-    jet_rt_free(base, I64{24}, I64{8})
-}
-ui_paint: fn(state: I64, node: I64) {
-    kind: ui_carrier_word(wrapping(state + UI_BACKEND_KIND))
-    frame: ui_backend_paint_frame(state, node)
-    if (kind == UI_BACKEND_TUI) {
-        ui_carrier_store(wrapping(state + UI_BACKEND_RENDERS), ui_carrier_word(wrapping(state + UI_BACKEND_RENDERS)) + I64{1})
-        last: ui_carrier_word(wrapping(state + UI_BACKEND_LAST_NODE))
-        if (last != I64{0}) -> jet_rt_handle_drop_jet_ui_node(last)
-        ui_carrier_store(wrapping(state + UI_BACKEND_LAST_NODE), jet_rt_handle_clone_jet_ui_node(node))
-        if (ui_carrier_word(wrapping(state + UI_BACKEND_ROWS)) == I64{0}) -> ui_tui_grid_reset(state, ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
-        ui_tui_grid_blank(state)
-    }
-    ui_visit(state, node, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
-    if (ui_web_attached != I64{0}) -> ui_web_record_scene(node, frame)
-    geometry_drop(frame, UI_RECT_BYTES)
-    ui_paint_focus(state, node)
-}
-
-// ---- web scene ----------------------------------------------------------------
-
-// The host of a web build (JetWeb Host.jet) attaches when its page has a
-// document. From then on each paint records its scene, which the host turns
-// into the elements of `#jet-app`; a click on an element with a click slot
-// comes back through jet_ui_web_click. A native run never attaches, so its
-// paints record nothing.
-//
-// The scene is one record per leaf in paint order; a Box adds none and
-// stacks its children as ui_visit does. A record is its fields separated by
-// tabs: kind, click slot (0 for none), x, y, width, height, color (empty for
-// none), the label's byte length, then the label's bytes and a newline.
-// Only an attached build writes these words, and a web page's module runs
-// on one thread.
+// A web build's page attaches before its module runs; from then on each
+// paint hands over its scene (core.ui's scene records), which the host takes
+// once per paint.
 ui_web_attached := I64{0}
 ui_web_scene := I64{0}
 ui_web_scene_fresh := I64{0}
@@ -447,49 +61,15 @@ ui_web_scene_fresh := I64{0}
     }
 }
 
-ui_web_push_number: fn(scene: I64, value: I64) {
-    rt_text_push_number(scene, value)
-    rt_text_push_scalar(scene, I64{9})
-}
-ui_web_push_float: fn(scene: I64, value: Float) {
-    ui_text_push_float(scene, value)
-    rt_text_push_scalar(scene, I64{9})
-}
-ui_web_record: fn(scene: I64, node: I64, x: Float, y: Float, width: Float, height: Float) {
-    if (ui_node_kind(node) == UI_KIND_BOX) {
-        at := y
-        count: ui_node_child_count(node)
-        index := I64{0}
-        loop index < count {
-            child: ui_node_child(node, index)
-            child_height: ui_node_height(child)
-            ui_web_record(scene, child, x, at, width, child_height)
-            at = at + child_height
-            index += I64{1}
-        }
-        return
-    }
-    ui_web_push_number(scene, ui_node_kind(node))
-    clickable: ui_carrier_word(wrapping(node + UI_NODE_ABSENT_MASK)).bit_and(UI_NODE_SLOT_CLICK) == I64{0}
-    ui_web_push_number(scene, if clickable -> ui_carrier_word(wrapping(node + UI_NODE_CLICK_FN)) else -> I64{0})
-    ui_web_push_float(scene, x)
-    ui_web_push_float(scene, y)
-    ui_web_push_float(scene, width)
-    ui_web_push_float(scene, height)
-    color: ui_carrier_word(wrapping(node + UI_NODE_COLOR))
-    if (color != I64{0}) -> ui_text_push_static(scene, color)
-    rt_text_push_scalar(scene, I64{9})
-    label: ui_carrier_word(wrapping(node + UI_NODE_LABEL))
-    ui_web_push_number(scene, rt_text_len(label))
-    ui_text_push_static(scene, label)
-    rt_text_push_scalar(scene, I64{10})
-}
-ui_web_record_scene: fn(node: I64, frame: I64) {
-    scene: jet_rt_string_builder_new()
-    ui_web_record(scene, node, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
+// core.ui.__web_attached: whether a web page attached.
+#Export(c) jet_ui_web_attached: fn() -> Bool { ui_web_attached != I64{0} }
+
+// core.ui.__web_scene: keeps a copy of the borrowed scene as the latest.
+#Export(c) jet_ui_web_scene: fn(text: I64) {
+    scene: jet_rt_string_clone(text)
     if (ui_web_scene != I64{0}) -> jet_rt_string_drop(ui_web_scene)
     #Unsafe("only an attached web build records, on its one thread") {
-        ui_web_scene = jet_rt_string_builder_finish(scene)
+        ui_web_scene = scene
         ui_web_scene_fresh = I64{1}
     }
 }
@@ -512,203 +92,22 @@ ui_web_record_scene: fn(node: I64, frame: I64) {
     rt_text_len(ui_web_scene)
 }
 
-// ---- TUI grid ---------------------------------------------------------------
+// ---- click slots ------------------------------------------------------------
 
-ui_tui_grid_free: fn(state: I64) {
-    cells: ui_carrier_word(wrapping(state + UI_BACKEND_COLS)) * ui_carrier_word(wrapping(state + UI_BACKEND_ROWS))
-    if (cells != I64{0}) -> jet_rt_free(ui_carrier_word(wrapping(state + UI_BACKEND_GRID)), cells * I64{8}, I64{8})
-    ui_carrier_store(wrapping(state + UI_BACKEND_GRID), I64{0})
-    ui_carrier_store(wrapping(state + UI_BACKEND_COLS), I64{0})
-    ui_carrier_store(wrapping(state + UI_BACKEND_ROWS), I64{0})
-}
-// tui_grid_dims + tui_blank_grid: floor(max(side, 1)) cells of ' '.
-ui_tui_grid_reset: fn(state: I64, width: Float, height: Float) {
-    ui_tui_grid_free(state)
-    cols: ui_float_index(ui_float_max(width, Float{1.0}))
-    rows: ui_float_index(ui_float_max(height, Float{1.0}))
-    ui_carrier_store(wrapping(state + UI_BACKEND_GRID), if (cols * rows == I64{0}) -> I64{0} else -> jet_rt_alloc(cols * rows * I64{8}, I64{8}))
-    ui_carrier_store(wrapping(state + UI_BACKEND_COLS), cols)
-    ui_carrier_store(wrapping(state + UI_BACKEND_ROWS), rows)
-    ui_tui_grid_blank(state)
-}
-ui_tui_grid_blank: fn(state: I64) {
-    grid: ui_carrier_word(wrapping(state + UI_BACKEND_GRID))
-    cells: ui_carrier_word(wrapping(state + UI_BACKEND_COLS)) * ui_carrier_word(wrapping(state + UI_BACKEND_ROWS))
-    at := I64{0}
-    loop at < cells {
-        ui_carrier_store(wrapping(grid + at * I64{8}), I64{32})
-        at += I64{1}
-    }
-}
-// tui_write_label: the ANSI-stripped label (ASCII-projected without unicode)
-// from the frame's clamped origin along its row; zero-width scalars are
-// skipped and a wide one blanks the cell after it.
-ui_tui_write_label: fn(state: I64, frame: I64, label: I64) {
-    cols: ui_carrier_word(wrapping(state + UI_BACKEND_COLS))
-    rows: ui_carrier_word(wrapping(state + UI_BACKEND_ROWS))
-    grid: ui_carrier_word(wrapping(state + UI_BACKEND_GRID))
-    start_col: ui_float_index(ui_float_max(ui_float_at(frame), Float{0.0}))
-    start_row: ui_float_index(ui_float_max(ui_float_at(wrapping(frame + I64{8})), Float{0.0}))
-    unicode: ui_carrier_word(wrapping(state + UI_BACKEND_UNICODE)) != I64{0}
-    text: ui_tui_strip_ansi(label)
-    data: rt_text_data(text)
-    length: rt_text_len(text)
-    col := start_col
-    at := I64{0}
-    loop at < length {
-        scalar: rt_text_decode(wrapping(data + at))
-        at += rt_text_width(wrapping(data + at))
-        character: if unicode -> scalar else -> ui_tui_ascii_scalar(scalar)
-        width: ui_tui_char_width(character)
-        if (width == I64{0}) -> next
-        if (col < cols && start_row < rows) {
-            row: wrapping(grid + start_row * cols * I64{8})
-            ui_carrier_store(wrapping(row + col * I64{8}), character)
-            if (width == I64{2} && col + I64{1} < cols) -> ui_carrier_store(wrapping(row + (col + I64{1}) * I64{8}), I64{32})
-        }
-        col = if (col > I64{9223372036854775807} - width) -> I64{9223372036854775807} else -> col + width
-        if (col >= cols) -> break
-    }
-    jet_rt_string_drop(text)
-}
-
-// ---- events -----------------------------------------------------------------
-
-ui_event_result: fn(variant: I64) -> I64 {
-    result: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
-    ui_carrier_store(wrapping(result + ENCODING_ENUM_TAG), variant)
-    result
-}
-// on_event: Tab advances a non-empty focus ring; an empty key and a
-// non-positive resize are Ignored; a TUI resize relays its grid out.
-ui_on_event: fn(state: I64, event: I64) -> I64 {
-    kind: ui_carrier_word(wrapping(event + UI_EVENT_KIND))
-    if (kind == I64{0}) {
-        code: ui_carrier_word(wrapping(event + UI_EVENT_FIRST))
-        count: ui_carrier_word(wrapping(state + UI_BACKEND_FOCUS))
-        if (ui_key_is_tab(code) && count != I64{0}) {
-            focused: ui_carrier_word(wrapping(state + UI_BACKEND_FOCUSED))
-            ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), if (focused < I64{0}) -> I64{0} else -> (focused + I64{1}) % count)
-            return ui_event_result(UI_EVENT_RESULT_HANDLED)
-        }
-        if (rt_text_len(code) == I64{0}) -> return ui_event_result(UI_EVENT_RESULT_IGNORED)
-        return ui_event_result(UI_EVENT_RESULT_HANDLED)
-    }
-    width: ui_float_at(wrapping(event + UI_EVENT_FIRST))
-    height: ui_float_at(wrapping(event + UI_EVENT_SECOND))
-    if (width <= Float{0.0} || height <= Float{0.0}) -> return ui_event_result(UI_EVENT_RESULT_IGNORED)
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) == UI_BACKEND_TUI) {
-        ui_backend_set_frame(state, Float{0.0}, Float{0.0}, width, height)
-        ui_tui_grid_reset(state, width, height)
-    }
-    ui_event_result(UI_EVENT_RESULT_HANDLED)
-}
-// set_focus_group: the nodes (borrowed, each cloned) become the focus ring,
-// focused at its first node.
-ui_set_focus_group: fn(state: I64, data: I64, length: I64) {
-    ui_words_clear(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-    index := I64{0}
-    loop index < length {
-        node: ui_carrier_word(wrapping(data + index * I64{8}))
-        event_words_push(wrapping(state + UI_BACKEND_FOCUS), jet_rt_handle_clone_jet_ui_node(node))
-        index += I64{1}
-    }
-    ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), if (length == I64{0}) -> I64{-1} else -> I64{0})
-}
-ui_focused_label: fn(state: I64) -> I64 {
-    focused: ui_carrier_word(wrapping(state + UI_BACKEND_FOCUSED))
-    if (focused < I64{0} || focused >= ui_carrier_word(wrapping(state + UI_BACKEND_FOCUS))) -> return jet_rt_string_builder_new()
-    jet_rt_string_clone(ui_carrier_word(wrapping(event_words_get(wrapping(state + UI_BACKEND_FOCUS), focused) + UI_NODE_LABEL)))
-}
-// mount_node: measure, lay out at the origin and paint; the null backend
-// first clears its commands.
-ui_mount: fn(state: I64, node: I64, min_width: Float, min_height: Float, max_width: Float, max_height: Float) {
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) != UI_BACKEND_TUI) -> ui_words_clear(wrapping(state + UI_BACKEND_COMMANDS), I64{0})
-    constraint: jet_rt_record_new_jet_size_constraint(min_width, min_height, max_width, max_height)
-    size: ui_measure(node, constraint)
-    geometry_drop(constraint, MATH_SIZE_BYTES)
-    frame: ui_rect_new(Float{0.0}, Float{0.0}, ui_float_at(size), ui_float_at(wrapping(size + I64{8})))
-    geometry_drop(size, UI_SIZE_BYTES)
-    ui_layout(state, frame)
-    geometry_drop(frame, UI_RECT_BYTES)
-    ui_paint(state, node)
-}
-ui_mount_constraint: fn(state: I64, node: I64, constraint: I64) {
-    ui_mount(state, node, ui_float_at(wrapping(constraint + MATH_SIZE_MIN_WIDTH)), ui_float_at(wrapping(constraint + MATH_SIZE_MIN_HEIGHT)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_WIDTH)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_HEIGHT)))
-}
-// DEFAULT_MOUNT_COLS × DEFAULT_MOUNT_ROWS.
-ui_mount_default: fn(state: I64, node: I64) {
-    ui_mount(state, node, Float{0.0}, Float{0.0}, Float{80.0}, Float{24.0})
-}
-// A List<String> result: fresh clones of the vector's texts.
-ui_text_words_output: fn(base: I64, out_data: I64) -> I64 {
-    length: ui_carrier_word(base)
-    result: coll_i64_output(length, out_data)
-    index := I64{0}
-    loop index < length {
-        ui_carrier_store(wrapping(result + index * I64{8}), jet_rt_string_clone(event_words_get(base, index)))
-        index += I64{1}
-    }
-    length
-}
-
-// ---- backend methods (route exports; every input is borrowed) ---------------
-
-#Export(c) jet_ui_null_measure_node: fn(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
-#Export(c) jet_ui_null_layout_node: fn(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
-#Export(c) jet_ui_null_paint_node: fn(state: I64, node: I64) { ui_paint(state, node) }
-#Export(c) jet_ui_null_mount_node: fn(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
-#Export(c) jet_ui_null_mount_node_default: fn(state: I64, node: I64) { ui_mount_default(state, node) }
-#Export(c) jet_ui_null_dispatch_event: fn(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
-#Export(c) jet_ui_null_set_focus_group: fn(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
-#Export(c) jet_ui_null_focused_label: fn(state: I64) -> I64 { ui_focused_label(state) }
-#Export(c) jet_ui_null_paint_commands: fn(state: I64, out_data: I64) -> I64 { ui_text_words_output(wrapping(state + UI_BACKEND_COMMANDS), out_data) }
-#Export(c) jet_ui_tui_measure_node: fn(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
-#Export(c) jet_ui_tui_layout_node: fn(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
-#Export(c) jet_ui_tui_paint_node: fn(state: I64, node: I64) { ui_paint(state, node) }
-#Export(c) jet_ui_tui_mount_node: fn(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
-#Export(c) jet_ui_tui_mount_node_default: fn(state: I64, node: I64) { ui_mount_default(state, node) }
-#Export(c) jet_ui_tui_dispatch_event: fn(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
-#Export(c) jet_ui_tui_set_focus_group: fn(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
-#Export(c) jet_ui_tui_focused_label: fn(state: I64) -> I64 { ui_focused_label(state) }
-#Export(c) jet_ui_tui_render_count: fn(state: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(wrapping(state + UI_BACKEND_RENDERS))) }
-// frame_lines: each grid row, right-trimmed of Unicode white space.
-#Export(c) jet_ui_tui_frame_lines: fn(state: I64, out_data: I64) -> I64 {
-    cols: ui_carrier_word(wrapping(state + UI_BACKEND_COLS))
-    rows: ui_carrier_word(wrapping(state + UI_BACKEND_ROWS))
-    grid: ui_carrier_word(wrapping(state + UI_BACKEND_GRID))
-    result: coll_i64_output(rows, out_data)
-    row := I64{0}
-    loop row < rows {
-        cells: wrapping(grid + row * cols * I64{8})
-        end := cols
-        zero: I64{0}
-        loop end > zero && unicode_is_white_space(ui_carrier_word(wrapping(cells + (end - I64{1}) * I64{8}))) {
-            end -= I64{1}
-        }
-        line: jet_rt_string_builder_new()
-        col := I64{0}
-        loop col < end {
-            rt_text_push_scalar(line, ui_carrier_word(wrapping(cells + col * I64{8})))
-            col += I64{1}
-        }
-        ui_carrier_store(wrapping(result + row * I64{8}), jet_rt_string_builder_finish(line))
-        row += I64{1}
-    }
-    rows
-}
-
-// ---- buttons and click slots ------------------------------------------------
-
-// jet_ui_register_click: ids from 1; each slot keeps its handler (env,
-// invoke, release) for the process, as the reference's registry does. A
-// button may be built on any task, so registration runs under the host lock.
+// ids from 1; each slot keeps its handler (env, invoke, release) for the
+// process, as the reference's registry does. A button may be built on any
+// task, so registration runs under the host lock. The slots are one word
+// vector (len0 cap8 data16, Events.jet event_words_*).
 ui_click_slots := I64{0}
 ui_register_click: fn(env: I64, invoke: I64, release: I64) -> I64 {
     host_lock()
     if (ui_click_slots == I64{0}) {
+        base: jet_rt_alloc(I64{24}, I64{8})
+        ui_carrier_store(base, I64{0})
+        ui_carrier_store(wrapping(base + I64{8}), I64{0})
+        ui_carrier_store(wrapping(base + I64{16}), I64{0})
         #Unsafe("written under the host lock") {
-            ui_click_slots = ui_words_scratch(I64{1})
+            ui_click_slots = base
         }
     }
     base: ui_click_slots
@@ -719,6 +118,11 @@ ui_register_click: fn(env: I64, invoke: I64, release: I64) -> I64 {
     host_unlock()
     id
 }
+// `ui.button(…) { on_click }`: the click slot keeping the handler closure,
+// which it takes over, as the Int core.ui's `__button_click` stores.
+#Export(c) jet_ui_click_slot: fn(env: I64, invoke: I64, release: I64) -> I64 {
+    jet_int_owned_from_i64(ui_register_click(env, invoke, release))
+}
 // A web host's click on a scene element: runs the handler click slot `id`
 // keeps, as the reactive runtime runs an effect body (invoke(env, out) with
 // no result slot). An unknown id does nothing.
@@ -727,41 +131,4 @@ ui_register_click: fn(env: I64, invoke: I64, release: I64) -> I64 {
     if (base == I64{0} || id < I64{1} || id * I64{3} > ui_carrier_word(base)) -> return
     first: (id - I64{1}) * I64{3}
     _ := coll_call2(event_words_get(base, first + I64{1}), event_words_get(base, first), I64{0})
-}
-ui_button_node: fn(label: I64) -> I64 {
-    node: jet_rt_alloc(UI_NODE_BYTES, I64{8})
-    offset := I64{0}
-    loop offset < UI_NODE_BYTES {
-        ui_carrier_store(wrapping(node + offset), I64{0})
-        offset += I64{8}
-    }
-    ui_carrier_store(wrapping(node + UI_NODE_LABEL), jet_rt_string_clone(label))
-    ui_float_store(wrapping(node + UI_NODE_WIDTH), Float{ui_tui_display_width(label)} + Float{4.0})
-    ui_float_store(wrapping(node + UI_NODE_HEIGHT), Float{1.0})
-    ui_carrier_store(wrapping(node + UI_NODE_ROLE), UI_ROLE_BUTTON)
-    ui_carrier_store(wrapping(node + UI_NODE_KIND), UI_KIND_BUTTON)
-    ui_carrier_store(wrapping(node + UI_NODE_CHILDREN), data_sequence_new(I64{0}, UI_NODE_CHILD_BYTES))
-    ui_carrier_store(wrapping(node + UI_NODE_ABSENT_MASK), UI_NODE_OPTION_MASK)
-    node
-}
-#Export(c) jet_ui_button: fn(label: I64) -> I64 { ui_button_node(label) }
-// jet_ui_button_on_click: the label, the optional shortcut (a borrowed
-// UIShortcut record, null when absent), the optional accessible label (a
-// borrowed Option box, null when absent) and the handler closure, which the
-// click slot takes over.
-#Export(c) jet_ui_button_on_click: fn(label: I64, shortcut: I64, accessible_label: I64, env: I64, invoke: I64, release: I64) -> I64 {
-    node: ui_button_node(label)
-    if (shortcut != I64{0}) -> ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), jet_rt_handle_clone_jet_ui_shortcut(shortcut))
-    if (accessible_label != I64{0}) {
-        accessibility: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
-        ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_NAME), jet_rt_string_clone(ui_carrier_word(accessible_label)))
-        ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_DESCRIPTION), I64{0})
-        ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_LENGTH), I64{0})
-        ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_CAPACITY), I64{0})
-        ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_DATA), I64{0})
-        ui_carrier_store(wrapping(node + UI_NODE_ACCESSIBILITY), accessibility)
-    }
-    ui_carrier_store(wrapping(node + UI_NODE_CLICK_FN), ui_register_click(env, invoke, release))
-    ui_carrier_store(wrapping(node + UI_NODE_ABSENT_MASK), UI_NODE_OPTION_MASK.bit_and(I64{-1} - UI_NODE_SLOT_CLICK))
-    node
 }

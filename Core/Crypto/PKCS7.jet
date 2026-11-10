@@ -1,0 +1,359 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/pkcs7.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: PKCS #7 signed data.
+//
+// A port of mbedtls 3.6.7's pkcs7.c: the SignedData content type of
+// RFC 2315 section 9.1 as mbedtls reads it (one digest algorithm, no
+// encapsulated content, at most one certificate, no CRLs, signers without
+// authenticated or unauthenticated attributes), and the check of a
+// signature over data or over its digest against a certificate.
+//
+// A message keeps its own copy of the DER (`raw`); every ASN1Buf in it is
+// an offset into `raw`.
+use {
+    core
+    cipher: __core_crypto_cipher
+    hashes: __core_crypto_md
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    pk: __core_crypto_pk
+    x509: __core_crypto_x509
+    x509crt: __core_crypto_x509crt
+}
+
+/// Why a PKCS #7 message could not be read or its signature checked
+/// (MBEDTLS_ERR_PKCS7_*). A variant with an ASN1Error? adds the ASN.1
+/// failure underneath, as MBEDTLS_ERROR_ADD does.
+#Error
+PKCS7Error: enum {
+    /// The message is not a SEQUENCE that fills the input, or has trailing
+    /// data (INVALID_FORMAT).
+    InvalidFormat(asn1.ASN1Error?)
+    /// The message uses something mbedtls does not read: another content
+    /// type, more than one digest algorithm or certificate, or encapsulated
+    /// content (FEATURE_UNAVAILABLE).
+    FeatureUnavailable
+    /// A version is missing or not 1 (INVALID_VERSION).
+    InvalidVersion
+    /// The ContentInfo is malformed or not of type data
+    /// (INVALID_CONTENT_INFO).
+    InvalidContentInfo(asn1.ASN1Error?)
+    /// A digest algorithm is malformed or unknown, or the profile refuses
+    /// it (INVALID_ALG).
+    InvalidAlg(asn1.ASN1Error?)
+    /// The certificate does not parse, or there are no signers to check
+    /// (INVALID_CERT).
+    InvalidCert(asn1.ASN1Error?)
+    /// A SignerInfo is malformed (INVALID_SIGNER_INFO).
+    InvalidSignerInfo(asn1.ASN1Error?)
+    /// The content type is not one of RFC 2315, or the content does not
+    /// fill the message (BAD_INPUT_DATA).
+    BadInput
+    /// The digest given has the wrong length (VERIFY_FAIL).
+    VerifyFail
+    /// The certificate has expired or is not yet valid (CERT_DATE_INVALID).
+    CertDateInvalid
+    /// The content type could not be read (an MBEDTLS_ERR_ASN1_* code).
+    Asn1(asn1.ASN1Error)
+    /// The digest algorithm has no known digest (an MBEDTLS_ERR_OID_* code).
+    OID(oids.OIDError)
+    /// No signer's signature verifies; the last signer's failure (an
+    /// MBEDTLS_ERR_PK_* or a code it passes on).
+    PK(pk.PKError)
+}
+
+/// One SignerInfo (mbedtls_pkcs7_signer_info).
+/// - `issuer_raw`, `issuer`, `serial`: the IssuerAndSerialNumber.
+/// - `alg_identifier`: the digestAlgorithm, the SignedData's own.
+/// - `sig_alg_identifier`: the digestEncryptionAlgorithm.
+/// - `sig`: the encryptedDigest.
+PKCS7SignerInfo: struct {
+    version: Int
+    serial: asn1.ASN1Buf
+    issuer: [asn1.NamedData]
+    issuer_raw: asn1.ASN1Buf
+    alg_identifier: asn1.ASN1Buf
+    sig_alg_identifier: asn1.ASN1Buf
+    sig: asn1.ASN1Buf
+}
+
+/// A SignedData (mbedtls_pkcs7_signed_data): its one digest algorithm,
+/// the certificates it carries (none or one), and its signers. mbedtls
+/// reads no CRLs, so `no_of_crls` is always 0.
+PKCS7SignedData: struct {
+    version: Int
+    digest_alg_identifiers: asn1.ASN1Buf
+    no_of_certs: Int
+    certs: [x509crt.X509Crt]
+    no_of_crls: Int
+    signers: [PKCS7SignerInfo]
+}
+
+/// A parsed message (mbedtls_pkcs7): its DER, which every buffer indexes,
+/// and the SignedData.
+PKCS7: struct {
+    raw: [U8]
+    signed_data: PKCS7SignedData
+}
+
+/// The only SignedData and SignerInfo version mbedtls reads
+/// (MBEDTLS_PKCS7_SUPPORTED_VERSION).
+PKCS7_SUPPORTED_VERSION: 1
+
+// The SEQUENCE and SET tags, constructed, and the [0] EXPLICIT tag.
+PKCS7_SEQUENCE: 0x30
+PKCS7_SET: 0x31
+PKCS7_CONTEXT_0: 0xA0
+
+// Whether the OID content data[at..<at + len] is `oid`.
+pkcs7_oid_is: fn(oid: [U8], data: [U8], at: Int, len: Int) -> Bool Never! {
+    asn1.oid_is(oid, data, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: at, len: len})
+}
+
+// pkcs7_get_next_content_len: the [0] EXPLICIT content, which must end at
+// `end`.
+pkcs7_get_next_content_len: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
+    len: asn1.get_tag(data, p, end, PKCS7_CONTEXT_0) ?? return Err(.InvalidContentInfo(Val(err)))
+    if end - p != len -> return Err(.InvalidContentInfo(Val(.LengthMismatch)))
+    Ok(len)
+}
+
+// pkcs7_get_version: an INTEGER that must be 1. A version that does not
+// read leaves mbedtls's zeroed field, which is not 1 either, so both give
+// the bare code.
+pkcs7_get_version: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
+    ver: asn1.get_int(data, p, end) ?? return Err(.InvalidVersion)
+    if ver != PKCS7_SUPPORTED_VERSION -> return Err(.InvalidVersion)
+    Ok(ver)
+}
+
+// pkcs7_get_content_info_type: the contentType OID of a ContentInfo, and
+// where the ContentInfo ends.
+pkcs7_get_content_info_type: fn(data: [U8], p: &Int, end: Int) -> (seq_end: Int, content_type: asn1.ASN1Buf) PKCS7Error! {
+    len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidContentInfo(Val(err)))
+    seq_end: p + len
+    len = asn1.get_tag(data, p, seq_end, asn1.ASN1_OID) ?? return Err(.InvalidContentInfo(Val(err)))
+    content_type: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+    p += len
+    Ok((seq_end: seq_end, content_type: content_type))
+}
+
+// pkcs7_get_digest_algorithm: an AlgorithmIdentifier with NULL or no
+// parameters.
+pkcs7_get_digest_algorithm: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
+    alg: asn1.get_alg_null(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
+    Ok(alg)
+}
+
+// pkcs7_get_digest_algorithm_set: the DigestAlgorithmIdentifiers SET,
+// which mbedtls reads with exactly one algorithm.
+pkcs7_get_digest_algorithm_set: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
+    len: asn1.get_tag(data, p, end, PKCS7_SET) ?? return Err(.InvalidAlg(Val(err)))
+    set_end: p + len
+    alg: asn1.get_alg_null(data, p, set_end) ?? return Err(.InvalidAlg(Val(err)))
+    if p != set_end -> return Err(.FeatureUnavailable)
+    Ok(alg)
+}
+
+// pkcs7_get_certificates: the optional [0] IMPLICIT certificates, which
+// mbedtls reads with one certificate at most; how many were added.
+pkcs7_get_certificates: fn(data: [U8], p: &Int, end: Int, certs: &[x509crt.X509Crt]) -> Int PKCS7Error! {
+    len1: if asn1.get_tag(data, p, end, PKCS7_CONTEXT_0) == {
+        .Ok(n) -> n
+        .Err(e) -> {
+            if e == .UnexpectedTag -> return Ok(0)
+            return Err(.InvalidFormat(Val(e)))
+        }
+    }
+    start: p
+    end_set: p + len1
+    len2: asn1.get_tag(data, p, end_set, PKCS7_SEQUENCE) ?? return Err(.InvalidCert(Val(err)))
+    end_cert: p + len2
+    // A chain cannot be told apart from several signers' certificates, so
+    // mbedtls takes a single one.
+    if end_cert != end_set -> return Err(.FeatureUnavailable)
+    x509crt.x509_crt_parse_der(certs, cipher.bytes_of(data, start, len1)) ?? return Err(.InvalidCert(None))
+    p = end_cert
+    Ok(1)
+}
+
+// pkcs7_get_signer_info: one SignerInfo, whose digestAlgorithm must be the
+// SignedData's `alg`, with no authenticated or unauthenticated attributes.
+// Every failure is INVALID_SIGNER_INFO, with the ASN.1 failure only when a
+// SEQUENCE header itself does not read, as in mbedtls.
+pkcs7_get_signer_info: fn(data: [U8], p: &Int, end: Int, alg: asn1.ASN1Buf) -> PKCS7SignerInfo PKCS7Error! {
+    len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
+    end_signer: p + len
+    version: pkcs7_get_version(data, p, end_signer) ?? return Err(.InvalidSignerInfo(None))
+    len = asn1.get_tag(data, p, end_signer, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
+    end_issuer_and_sn: p + len
+    issuer_start: p
+    len = asn1.get_tag(data, p, end_issuer_and_sn, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
+    name_end: p + len
+    issuer: x509.x509_get_name(data, p, name_end) ?? return Err(.InvalidSignerInfo(None))
+    issuer_raw: asn1.ASN1Buf{tag_id: 0, p: issuer_start, len: p - issuer_start}
+    serial: x509.x509_get_serial(data, p, end_issuer_and_sn) ?? return Err(.InvalidSignerInfo(None))
+    if p != end_issuer_and_sn -> return Err(.InvalidSignerInfo(None))
+    alg_identifier: pkcs7_get_digest_algorithm(data, p, end_signer) ?? return Err(.InvalidSignerInfo(None))
+    if alg_identifier.tag_id != alg.tag_id || alg_identifier.len != alg.len -> return Err(.InvalidSignerInfo(None))
+    loop i in 0..<alg.len {
+        if data[alg_identifier.p + i] != data[alg.p + i] -> return Err(.InvalidSignerInfo(None))
+    }
+    sig_alg_identifier: pkcs7_get_digest_algorithm(data, p, end_signer) ?? return Err(.InvalidSignerInfo(None))
+    sig_len: asn1.get_tag(data, p, end_signer, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidSignerInfo(None))
+    sig: asn1.ASN1Buf{tag_id: asn1.ASN1_OCTET_STRING, p: p, len: sig_len}
+    p += sig_len
+    if p != end_signer -> return Err(.InvalidSignerInfo(None))
+    Ok(PKCS7SignerInfo{
+        version: version
+        serial: serial
+        issuer: issuer
+        issuer_raw: issuer_raw
+        alg_identifier: alg_identifier
+        sig_alg_identifier: sig_alg_identifier
+        sig: sig
+    })
+}
+
+// pkcs7_get_signers_info_set: the SignerInfos SET, which may be empty.
+pkcs7_get_signers_info_set: fn(data: [U8], p: &Int, end: Int, digest_alg: asn1.ASN1Buf) -> [PKCS7SignerInfo] PKCS7Error! {
+    signers := [PKCS7SignerInfo]{}
+    len: asn1.get_tag(data, p, end, PKCS7_SET) ?? return Err(.InvalidSignerInfo(Val(err)))
+    if len == 0 -> return Ok(signers)
+    end_set: p + len
+    first: pkcs7_get_signer_info(data, p, end_set, digest_alg)
+    signers.push(first)
+    loop p != end_set {
+        signer: pkcs7_get_signer_info(data, p, end_set, digest_alg)
+        signers.push(signer)
+    }
+    Ok(signers)
+}
+
+// pkcs7_get_signed_data: the SignedData in data[from..<from + len], which
+// it must fill.
+pkcs7_get_signed_data: fn(data: [U8], from: Int, buflen: Int) -> PKCS7SignedData PKCS7Error! {
+    p := from
+    end: from + buflen
+    len: asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    if p + len != end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    version: pkcs7_get_version(data, p, end)
+    digest_alg: pkcs7_get_digest_algorithm_set(data, p, end)
+    if oids.md_alg(data, digest_alg) == .Err(_) -> return Err(.InvalidAlg(None))
+    info: pkcs7_get_content_info_type(data, p, end)
+    if !asn1.oid_is(oids.OID_PKCS7_DATA, data, info.content_type) -> return Err(.InvalidContentInfo(None))
+    if p != info.seq_end {
+        content_len: asn1.get_tag(data, p, info.seq_end, PKCS7_CONTEXT_0) ?? return Err(.InvalidContentInfo(Val(err)))
+        p += content_len
+        if p != info.seq_end -> return Err(.InvalidContentInfo(None))
+        // Encapsulated content is valid but not read.
+        return Err(.FeatureUnavailable)
+    }
+    certs := [x509crt.X509Crt]{}
+    no_of_certs: pkcs7_get_certificates(data, p, end, certs)
+    // A CRLs field is not read: the signers below fail on its tag.
+    signers: pkcs7_get_signers_info_set(data, p, end, digest_alg)
+    if p != end -> return Err(.InvalidFormat(None))
+    Ok(PKCS7SignedData{
+        version: version
+        digest_alg_identifiers: digest_alg
+        no_of_certs: no_of_certs
+        certs: certs
+        no_of_crls: 0
+        signers: signers
+    })
+}
+
+/// Parses a DER PKCS #7 message: a ContentInfo of type signedData, or a bare
+/// SignedData (mbedtls_pkcs7_parse_der, which returns
+/// MBEDTLS_PKCS7_SIGNED_DATA on success). Another RFC 2315 content type is
+/// FeatureUnavailable; an unknown one BadInput.
+pkcs7_parse_der: fn(buf: [U8]) -> PKCS7 PKCS7Error! {
+    raw: buf.copy()
+    p := 0
+    end: raw.len()
+    len := asn1.get_tag(raw, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    if end - p != len -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    // Without a content type OID the whole input is read as the SignedData.
+    from := 0
+    body_len := end
+    if asn1.get_tag(raw, p, end, asn1.ASN1_OID) == {
+        .Err(e) -> {
+            if e != .UnexpectedTag -> return Err(.Asn1(e))
+        }
+        .Ok(oid_len) -> {
+            if !pkcs7_oid_is(oids.OID_PKCS7_SIGNED_DATA, raw, p, oid_len) {
+                known: pkcs7_oid_is(oids.OID_PKCS7_DATA, raw, p, oid_len)
+                    || pkcs7_oid_is(oids.OID_PKCS7_ENCRYPTED_DATA, raw, p, oid_len)
+                    || pkcs7_oid_is(oids.OID_PKCS7_ENVELOPED_DATA, raw, p, oid_len)
+                    || pkcs7_oid_is(oids.OID_PKCS7_SIGNED_AND_ENVELOPED_DATA, raw, p, oid_len)
+                    || pkcs7_oid_is(oids.OID_PKCS7_DIGESTED_DATA, raw, p, oid_len)
+                if known -> return Err(.FeatureUnavailable)
+                return Err(.BadInput)
+            }
+            p += oid_len
+            len = pkcs7_get_next_content_len(raw, p, end)
+            if p + len != end -> return Err(.BadInput)
+            from = p
+            body_len = len
+        }
+    }
+    signed_data: pkcs7_get_signed_data(raw, from, body_len)
+    Ok(PKCS7{raw: raw, signed_data: signed_data})
+}
+
+// pkcs7_data_or_hash_verify: whether one signer's signature over the
+// digest verifies with `cert`'s key. `given` is the data, or its digest
+// when `is_hash`. Without MBEDTLS_PKCS7_ALLOW_WEAK_SIGNATURES the digest and
+// the certificate's signature key type must pass the default profile.
+pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], is_hash: Bool) PKCS7Error! -[Time]> {
+    signers: msg.signed_data.signers
+    if signers.len() == 0 -> return Err(.InvalidCert(None))
+    if x509.x509_time_is_past(cert.valid_to) || x509.x509_time_is_future(cert.valid_from) -> return Err(.CertDateInvalid)
+    md: oids.md_alg(msg.raw, msg.signed_data.digest_alg_identifiers) ?? return Err(.OID(err))
+    profile: x509crt.x509_crt_profile_default()
+    if !x509crt.x509_profile_check_md_alg(profile, Val(md)) -> return Err(.InvalidAlg(None))
+    if !x509crt.x509_profile_check_pk_alg(profile, cert.sig_pk) -> return Err(.InvalidAlg(None))
+    digest := [U8]{}
+    if is_hash {
+        if given.len() != hashes.md_size(md) -> return Err(.VerifyFail)
+        digest = given.copy()
+    } else {
+        digest = hashes.hash(md, given)
+    }
+    // Any signer whose signature verifies will do; mbedtls does not match
+    // the signer to the certificate first.
+    last := pk.PKError.BadInput
+    loop signer in signers {
+        sig: cipher.bytes_of(msg.raw, signer.sig.p, signer.sig.len)
+        if pk.pk_verify(cert.pk, Val(md), digest, sig) == {
+            .Ok(_) -> return
+            .Err(e) -> last = e
+        }
+    }
+    Err(.PK(last))
+}
+
+/// Checks that a signer of `msg` signed `data` with `cert`'s key
+/// (mbedtls_pkcs7_signed_data_verify): the certificate must be valid now,
+/// and the digest and key type allowed by the default profile.
+pkcs7_signed_data_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, data: [U8]) PKCS7Error! -[Time]> {
+    pkcs7_data_or_hash_verify(msg, cert, data, false)
+}
+
+/// Checks that a signer of `msg` signed the digest `hash` with `cert`'s key
+/// (mbedtls_pkcs7_signed_hash_verify); `hash` must have the length of the
+/// message's digest algorithm.
+pkcs7_signed_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, hash: [U8]) PKCS7Error! -[Time]> {
+    pkcs7_data_or_hash_verify(msg, cert, hash, true)
+}
+
+#Test("An empty input and the content types other than signedData are refused with mbedtls's codes") {
+    assert(pkcs7_parse_der([U8]{}) == .Err(.InvalidFormat(Val(.OutOfData))))
+    // ContentInfo { envelopedData, [0] {} }, then the same with an OID
+    // outside RFC 2315 (1.2.840.113549.1.7.7).
+    enveloped: [U8]{0x30, 0x0D, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x03, 0xA0, 0x00}
+    assert(pkcs7_parse_der(enveloped) == .Err(.FeatureUnavailable))
+    unknown: [U8]{0x30, 0x0D, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x07, 0xA0, 0x00}
+    assert(pkcs7_parse_der(unknown) == .Err(.BadInput))
+}

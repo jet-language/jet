@@ -1,0 +1,136 @@
+// The Mbed TLS translation license guard (#6694): Core/Crypto and
+// Core/Net/SSL hold Jet translations of Mbed TLS 3.6.7, which stay under
+// Apache-2.0. Each translated file starts with the two-line header below,
+// and its folder holds the upstream LICENSE-mbedtls and the NOTICE-mbedtls
+// that names the translated release. The list of translated files is
+// closed: a Core file whose opening comment names mbedtls must be on it,
+// and a file that carries the header must be too.
+use tl_files: core.files
+
+TL_SPDX: "// SPDX-License-Identifier: Apache-2.0"
+TL_ORIGIN: "// Translated from Mbed TLS 3.6.7 ("
+TL_COPYRIGHT: "); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file."
+// The first line of the upstream LICENSE file.
+TL_LICENSE_HEAD: "Mbed TLS files are provided under a dual [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)"
+
+TL_TRANSLATED: [String]{
+    "Core/Crypto/ASN1.jet", "Core/Crypto/Aead.jet", "Core/Crypto/Bignum.jet", "Core/Crypto/Block.jet",
+    "Core/Crypto/Cipher.jet", "Core/Crypto/CipherLayer.jet", "Core/Crypto/ConstTime.jet", "Core/Crypto/DES.jet",
+    "Core/Crypto/DHM.jet", "Core/Crypto/DRBG.jet", "Core/Crypto/ECDH.jet", "Core/Crypto/ECDSA.jet",
+    "Core/Crypto/ECJPAKE.jet", "Core/Crypto/ECP.jet", "Core/Crypto/ECPCurves.jet", "Core/Crypto/LMS.jet",
+    "Core/Crypto/MD.jet", "Core/Crypto/OID.jet", "Core/Crypto/PEM.jet", "Core/Crypto/PK.jet",
+    "Core/Crypto/PKCS12.jet", "Core/Crypto/PKCS5.jet", "Core/Crypto/PKCS7.jet", "Core/Crypto/PKParse.jet",
+    "Core/Crypto/PKWrite.jet", "Core/Crypto/RSA.jet", "Core/Crypto/X509.jet", "Core/Crypto/X509CRL.jet",
+    "Core/Crypto/X509CRT.jet", "Core/Crypto/X509CSR.jet", "Core/Crypto/X509Write.jet",
+    "Core/Net/SSL/Cache.jet", "Core/Net/SSL/Ciphersuites.jet", "Core/Net/SSL/Client.jet", "Core/Net/SSL/Client12.jet",
+    "Core/Net/SSL/Client13.jet", "Core/Net/SSL/Cookie.jet", "Core/Net/SSL/Defs.jet", "Core/Net/SSL/Gen13.jet",
+    "Core/Net/SSL/Keys13.jet", "Core/Net/SSL/Msg.jet", "Core/Net/SSL/Ser.jet", "Core/Net/SSL/Server12.jet",
+    "Core/Net/SSL/Server13.jet", "Core/Net/SSL/TLS.jet", "Core/Net/SSL/Ticket.jet",
+}
+
+// Folders the walk does not enter: build output.
+TL_SKIPPED: [String]{".jet", "target", "node_modules"}
+
+// The findings for one file: `listed` says whether TL_TRANSLATED names it.
+tl_file_findings: fn(path: String, source: String, listed: Bool) -> [String] Never! {
+    findings := [String]{}
+    lines: source.lines()
+    first: if lines.len() > 0 -> lines[0] else -> ""
+    second: if lines.len() > 1 -> lines[1] else -> ""
+    headed: first == TL_SPDX
+    if listed {
+        if !headed -> findings.push("{path}: line 1 must be `{TL_SPDX}`")
+        if !second.starts_with(TL_ORIGIN) || !second.ends_with(TL_COPYRIGHT) {
+            findings.push("{path}: line 2 must be `{TL_ORIGIN}<the C files>{TL_COPYRIGHT}`")
+        }
+        return findings
+    }
+    if headed {
+        findings.push("{path}: carries the Mbed TLS translation header but has no TL_TRANSLATED row")
+        return findings
+    }
+    // The opening comment: the lines before the first non-comment line.
+    loop line in lines {
+        if !line.starts_with("//") -> break
+        if line.lower().contains("mbedtls") || line.lower().contains("mbed tls") {
+            findings.push("{path}: its opening comment names Mbed TLS; a translation carries the Apache-2.0 header and a TL_TRANSLATED row")
+            break
+        }
+    }
+    findings
+}
+
+// The findings for a folder holding translations.
+tl_folder_findings: fn(folder: String) -> [String] {
+    findings := [String]{}
+    license_path: "{folder}/LICENSE-mbedtls"
+    if tl_files.read(license_path) == {
+        .Ok(text) -> { if !text.starts_with(TL_LICENSE_HEAD) -> findings.push("{license_path}: not the upstream Mbed TLS LICENSE") }
+        .Err(_) -> { findings.push("{license_path}: missing; the translations beside it need the upstream LICENSE") }
+    }
+    notice_path: "{folder}/NOTICE-mbedtls"
+    if tl_files.read(notice_path) == {
+        .Ok(text) -> { if !text.contains("Mbed TLS 3.6.7") -> findings.push("{notice_path}: does not name Mbed TLS 3.6.7") }
+        .Err(_) -> { findings.push("{notice_path}: missing; the translations beside it need the NOTICE") }
+    }
+    findings
+}
+
+tl_folder: fn(path: String) -> String Never! {
+    cut := path.len() - 1
+    loop cut > 0 && path.slice(cut, cut + 1) != "/" -> cut -= 1
+    path.slice(0, cut)
+}
+
+tl_walk: fn(path: String, out: &[String]) {
+    if !tl_files.is_dir(path) {
+        if path.ends_with(".jet") -> out.push(path.copy())
+        return
+    }
+    loop child in (tl_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        skipped := false
+        loop name in TL_SKIPPED {
+            if child.name == name -> skipped = true
+        }
+        if !skipped -> tl_walk(child.path, out)
+    }
+}
+
+#Test("Mbed TLS translations keep their Apache-2.0 header and license files") {
+    guards_enter_root()
+    sources := [String]{}
+    tl_walk("Core", sources)
+    assert(sources.len() > 100, "the walk found only {sources.len()} Core sources")
+    listed := [String:Bool]{}
+    loop path in TL_TRANSLATED -> listed[path] = true
+    findings := [String]{}
+    found := [String:Bool]{}
+    loop path in sources {
+        source: tl_files.read(path) ?? panic("read {path}: {err}")
+        is_listed: listed.get(path) != None
+        if is_listed -> found[path] = true
+        loop finding in tl_file_findings(path, source, is_listed) -> findings.push(finding)
+    }
+    folders := [String:Bool]{}
+    loop path in TL_TRANSLATED {
+        if found.get(path) == None -> findings.push("{path}: no such file; delete its TL_TRANSLATED row")
+        folders[tl_folder(path)] = true
+    }
+    loop folder in folders.keys() {
+        loop finding in tl_folder_findings(folder) -> findings.push(finding)
+    }
+    findings.sort()
+    assert_eq(findings.join("\n"), "")
+}
+
+#Test("the translation guard refuses a missing or changed header") {
+    good: "{TL_SPDX}\n{TL_ORIGIN}library/aes.c{TL_COPYRIGHT}\nuse core\n"
+    assert_eq(tl_file_findings("Core/Crypto/Block.jet", good, true).len(), 0)
+    bare: "// Private Core source part: AES (a port of mbedtls 3.6.7's aes.c).\nuse core\n"
+    assert_eq(tl_file_findings("Core/Crypto/Block.jet", bare, true).len(), 2)
+    assert_eq(tl_file_findings("Core/Crypto/New.jet", bare, false).len(), 1)
+    assert_eq(tl_file_findings("Core/Crypto/New.jet", good, false).len(), 1)
+    later: "use core\n// Calls the Jet port of Mbed TLS.\n"
+    assert_eq(tl_file_findings("Core/Net/Tls.jet", later, false).len(), 0)
+    assert_eq(tl_folder("Core/Net/SSL/Msg.jet"), "Core/Net/SSL")
+}

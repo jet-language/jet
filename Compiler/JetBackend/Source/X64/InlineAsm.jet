@@ -9,7 +9,7 @@ X64AsmResult: struct {
 }
 
 X64AsmState: struct {
-    code: [U8]
+    code: X64Code
     names: [String]
     written: [Bool]
     depth: Int
@@ -239,8 +239,8 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         }
     } else if mnemonic == "syscall" || mnemonic == "pause" {
         if rest != "" -> return Val("instruction takes no operands")
-        x64_byte(s.code, if mnemonic == "syscall" -> 0x0f else -> 0xf3)
-        x64_byte(s.code, if mnemonic == "syscall" -> 0x05 else -> 0x90)
+        x64_byte(s.code.bytes, if mnemonic == "syscall" -> 0x0f else -> 0xf3)
+        x64_byte(s.code.bytes, if mnemonic == "syscall" -> 0x05 else -> 0x90)
         if mnemonic == "syscall" {
             s.written[0] = true
             s.written[1] = true
@@ -251,8 +251,8 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         // receive it. ebx is callee-saved, so a saved rbx must exist.
         if rest != "" -> return Val("instruction takes no operands")
         if s.rbx_saved < 0 -> return Val("cpuid writes rbx; save it first with push rbx")
-        x64_byte(s.code, 0x0f)
-        x64_byte(s.code, 0xa2)
+        x64_byte(s.code.bytes, 0x0f)
+        x64_byte(s.code.bytes, 0xa2)
         s.written[0] = true
         s.written[1] = true
         s.written[2] = true
@@ -260,24 +260,24 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
     } else if mnemonic == "xgetbv" {
         // ecx selects the extended control register; edx:eax receive it.
         if rest != "" -> return Val("instruction takes no operands")
-        x64_byte(s.code, 0x0f)
-        x64_byte(s.code, 0x01)
-        x64_byte(s.code, 0xd0)
+        x64_byte(s.code.bytes, 0x0f)
+        x64_byte(s.code.bytes, 0x01)
+        x64_byte(s.code.bytes, 0xd0)
         s.written[0] = true
         s.written[2] = true
     } else if mnemonic == "cld" || mnemonic == "std" {
         // The direction flag of a string move; System V requires it clear at
         // every call and return, so a template that sets it clears it again.
         if rest != "" -> return Val("instruction takes no operands")
-        x64_byte(s.code, if mnemonic == "cld" -> 0xfc else -> 0xfd)
+        x64_byte(s.code.bytes, if mnemonic == "cld" -> 0xfc else -> 0xfd)
     } else if mnemonic == "rep" {
         // String moves and the word store: rcx counts and rdi writes, both
         // advance; a move also reads and advances rsi, a store repeats rax.
         // The template's #Unsafe contract owns every range.
         if rest != "movsb" && rest != "movsq" && rest != "stosq" -> return Val("unsupported rep instruction")
-        x64_byte(s.code, 0xf3)
-        if rest != "movsb" -> x64_byte(s.code, 0x48)
-        x64_byte(s.code, if rest == "movsb" -> 0xa4 else if rest == "movsq" -> 0xa5 else -> 0xab)
+        x64_byte(s.code.bytes, 0xf3)
+        if rest != "movsb" -> x64_byte(s.code.bytes, 0x48)
+        x64_byte(s.code.bytes, if rest == "movsb" -> 0xa4 else if rest == "movsq" -> 0xa5 else -> 0xab)
         s.written[1] = true
         if rest != "stosq" -> s.written[6] = true
         s.written[7] = true
@@ -302,7 +302,7 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
             if mnemonic == "mov" && first == "rax" && second == "qword ptr gs:[0]" {
                 // The sole admitted segment operand: TCB self pointer at GS:0.
                 gs_bytes: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
-                loop byte in gs_bytes -> s.code.push(byte)
+                loop byte in gs_bytes -> s.code.bytes.push(byte)
             } else if mnemonic == "mov" && src >= 0 -> x64_mov_rr(s.code, dst, src) else if x64_asm_memory(s, second, if mnemonic == "mov" -> "qword" else -> "byte") == .Val(mem) {
                 if mnemonic == "mov" -> x64_load(s.code, dst, mem.base, mem.disp) else {
                     x64_load_u8(s.code, dst, mem.base, mem.disp)
@@ -344,16 +344,16 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         if reg < 0 || (mnemonic == "cmpxchg" && mem.disp != 0) {
             return Val("unsupported atomic operand")
         }
-        if mnemonic != "xchg" -> x64_byte(s.code, 0xf0)
-        x64_rex(s.code, true, reg, mem.base)
+        if mnemonic != "xchg" -> x64_byte(s.code.bytes, 0xf0)
+        x64_rex(s.code.bytes, true, reg, mem.base)
         if mnemonic == "cmpxchg" {
-            x64_byte(s.code, 0x0f)
-            x64_byte(s.code, 0xb1)
+            x64_byte(s.code.bytes, 0x0f)
+            x64_byte(s.code.bytes, 0xb1)
         } else if mnemonic == "xadd" {
-            x64_byte(s.code, 0x0f)
-            x64_byte(s.code, 0xc1)
+            x64_byte(s.code.bytes, 0x0f)
+            x64_byte(s.code.bytes, 0xc1)
         } else {
-            x64_byte(s.code, 0x87)
+            x64_byte(s.code.bytes, 0x87)
         }
         x64_modrm_mem(s.code, reg, mem.base, mem.disp)
         written = if mnemonic == "cmpxchg" -> X64_RAX else -> reg
@@ -383,7 +383,7 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         if form.immediate {
             imm: Int.parse(operands[2].trim()) ?? return Val("expected a byte immediate")
             if imm < 0 || imm > 255 -> return Val("expected a byte immediate")
-            x64_byte(s.code, imm)
+            x64_byte(s.code.bytes, imm)
         }
     } else if x64_asm_sse_shift(mnemonic) >= 0 {
         // 66 0F 73 /ext ib: the xmm register is ModRM.rm.
@@ -393,7 +393,7 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         imm: Int.parse(operands[1].trim()) ?? return Val("expected a byte immediate")
         if imm < 0 || imm > 255 -> return Val("expected a byte immediate")
         x64_sse(s.code, 0x66, false, 0x73, x64_asm_sse_shift(mnemonic), dst)
-        x64_byte(s.code, imm)
+        x64_byte(s.code.bytes, imm)
     } else { return Val("unsupported mnemonic `{mnemonic}`") }
     if written >= 0 -> s.written[written] = true
     loop comment in parts.slice(1, parts.len()) {
@@ -471,7 +471,7 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
         }
         if rail.len() > 0 -> return X64AsmResult{code: rail, regs: regs, result: -1, error: None}
     }
-    s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false}
+    s := X64AsmState{code: x64_code(), names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false}
     loop _ in 0..<16 -> s.written.push(false)
     i := 0
     loop i < lines.len() {
@@ -490,7 +490,7 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
                 }
             }
             child_bytes: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
-            loop byte in child_bytes -> s.code.push(byte)
+            loop byte in child_bytes -> s.code.bytes.push(byte)
             i += child.len()
             next
         }
@@ -505,5 +505,5 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
     if returns != (s.result >= 0) {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: return anchor disagrees with the function signature")}
     }
-    X64AsmResult{code: s.code, regs: regs, result: s.result, error: None}
+    X64AsmResult{code: s.code.bytes, regs: regs, result: s.result, error: None}
 }

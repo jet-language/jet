@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/x509_crl.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: X.509 certificate revocation lists.
+//
+// A port of mbedtls 3.6.7's x509_crl.c: CertificateList and TBSCertList
+// (RFC 5280 section 5.1) with their entries, PEM bundles, and
+// mbedtls_x509_crl_info. mbedtls reads no CRL or entry extension: it
+// checks that they are well formed and refuses a critical CRL extension.
+//
+// A CRL keeps its own copy of the DER (`raw`); every ASN1Buf in it is an
+// offset into `raw`. A chain is a list, in the order the CRLs were read.
+use {
+    core
+    cipher: __core_crypto_cipher
+    hashes: __core_crypto_md
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    pk: __core_crypto_pk
+    pem: __core_crypto_pem
+    x509: __core_crypto_x509
+}
+
+/// One revoked certificate (mbedtls_x509_crl_entry): the entry's DER, the
+/// serial number, the revocation date and the crlEntryExtensions, which
+/// are absent (p -1) when the entry has none.
+X509CrlEntry: struct {
+    raw: asn1.ASN1Buf
+    serial: asn1.ASN1Buf
+    revocation_date: x509.X509Time
+    entry_ext: asn1.ASN1Buf
+}
+
+/// One parsed CRL (mbedtls_x509_crl).
+/// - `raw`: the CRL's DER, which every buffer below indexes.
+/// - `version`: 1 or 2.
+/// - `next_update`: all zero when the CRL has none.
+/// - `sig_md`, `sig_pk`, `sig_opts`: the signature algorithm, with the
+///   RSASSA-PSS options when it is RSASSA-PSS.
+X509Crl: struct {
+    raw: [U8]
+    tbs: asn1.ASN1Buf
+    version: Int
+    sig_oid: asn1.ASN1Buf
+    issuer_raw: asn1.ASN1Buf
+    issuer: [asn1.NamedData]
+    this_update: x509.X509Time
+    next_update: x509.X509Time
+    entries: [X509CrlEntry]
+    crl_ext: asn1.ASN1Buf
+    sig: asn1.ASN1Buf
+    sig_md: hashes.Md?
+    sig_pk: oids.PKType?
+    sig_opts: pk.PSSOptions?
+}
+
+// The SEQUENCE tag, constructed.
+X509CRL_SEQUENCE: 0x30
+
+// The PEM armor of a CRL.
+X509CRL_PEM_BEGIN: "-----BEGIN X509 CRL-----"
+X509CRL_PEM_END: "-----END X509 CRL-----"
+
+// The all-zero time of an absent nextUpdate.
+x509_crl_no_time: fn() -> x509.X509Time Never! { x509.X509Time{year: 0, mon: 0, day: 0, hour: 0, min: 0, sec: 0} }
+
+/// An empty CRL (mbedtls_x509_crl_init).
+x509_crl_new: fn() -> X509Crl Never! {
+    X509Crl{
+        raw: [U8]{}
+        tbs: asn1.asn1_none()
+        version: 0
+        sig_oid: asn1.asn1_none()
+        issuer_raw: asn1.asn1_none()
+        issuer: [asn1.NamedData]{}
+        this_update: x509_crl_no_time()
+        next_update: x509_crl_no_time()
+        entries: [X509CrlEntry]{}
+        crl_ext: asn1.asn1_none()
+        sig: asn1.asn1_none()
+        sig_md: None
+        sig_pk: None
+        sig_opts: None
+    }
+}
+
+// x509_crl_get_version: an INTEGER, v1 (0) when absent.
+x509_crl_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
+    if asn1.get_int(data, p, end) == {
+        .Ok(ver) -> Ok(ver)
+        .Err(e) -> {
+            if e == .UnexpectedTag -> return Ok(0)
+            Err(.InvalidVersion(Val(e)))
+        }
+    }
+}
+
+// x509_get_crl_ext: the [0] crlExtensions, each well formed and none
+// critical; their content is not read.
+x509_crl_get_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
+    if p == end -> return Ok(asn1.asn1_none())
+    ext: x509.x509_get_ext(data, p, end, 0)
+    exts_end: ext.p + ext.len
+    loop p < exts_end {
+        len := asn1.get_tag(data, p, exts_end, X509CRL_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        end_ext_data: p + len
+        len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+        p += len
+        is_critical := false
+        if asn1.get_bool(data, p, end_ext_data) == {
+            .Ok(b) -> is_critical = b
+            .Err(e) -> {
+                if e != .UnexpectedTag -> return Err(.InvalidExtensions(Val(e)))
+            }
+        }
+        len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidExtensions(Val(err)))
+        p += len
+        if p != end_ext_data -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+        if is_critical -> return Err(.InvalidExtensions(Val(.UnexpectedTag)))
+    }
+    if p != exts_end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    Ok(ext)
+}
+
+// x509_get_crl_entry_ext: an entry's optional crlEntryExtensions, each
+// Extension only checked to be a SEQUENCE.
+x509_crl_get_entry_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
+    if end <= p -> return Ok(asn1.asn1_none())
+    ext := asn1.ASN1Buf{tag_id: Int.from_u8(data[p]), p: p, len: 0}
+    if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
+        .Ok(len) -> ext.len = len
+        .Err(e) -> {
+            if e == .UnexpectedTag -> return Ok(asn1.ASN1Buf{tag_id: ext.tag_id, p: -1, len: 0})
+            return Err(.InvalidExtensions(Val(e)))
+        }
+    }
+    exts_end: p + ext.len
+    loop p < exts_end {
+        len: asn1.get_tag(data, p, exts_end, X509CRL_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        p += len
+    }
+    if p != exts_end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    Ok(ext)
+}
+
+// x509_get_entries: the optional revokedCertificates. A malformed SEQUENCE
+// fails with the bare ASN.1 code, as mbedtls returns it.
+x509_crl_get_entries: fn(data: [U8], p: &Int, end: Int) -> [X509CrlEntry] x509.X509Error! {
+    entries := [X509CrlEntry]{}
+    if p == end -> return Ok(entries)
+    entry_len: if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
+        .Ok(len) -> len
+        .Err(e) -> {
+            if e == .UnexpectedTag -> return Ok(entries)
+            return Err(.Asn1(e))
+        }
+    }
+    list_end: p + entry_len
+    loop p < list_end {
+        tag_id: Int.from_u8(data[p])
+        len2: asn1.get_tag(data, p, list_end, X509CRL_SEQUENCE) ?? return Err(.Asn1(err))
+        raw: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len2}
+        end2: p + len2
+        serial: x509.x509_get_serial(data, p, end2)
+        date: x509.x509_get_time(data, p, end2)
+        entry_ext: x509_crl_get_entry_ext(data, p, end2)
+        entries.push(X509CrlEntry{raw: raw, serial: serial, revocation_date: date, entry_ext: entry_ext})
+    }
+    Ok(entries)
+}
+
+// mbedtls_x509_crl_parse_der's body: one CRL filling all of buf.
+x509_crl_parse_der_core: fn(buf: [U8]) -> X509Crl x509.X509Error! {
+    if buf.len() == 0 -> return Err(.InvalidFormat(None))
+    crl := x509_crl_new()
+    data: buf.copy()
+    p := 0
+    raw_end: data.len()
+    len := asn1.get_tag(data, p, raw_end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(None))
+    if len != raw_end - p -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    crl.tbs.p = p
+    len = asn1.get_tag(data, p, raw_end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    end: p + len
+    crl.tbs.len = end - crl.tbs.p
+    crl.version = x509_crl_get_version(data, p, end)
+    alg1: x509.x509_get_alg(data, p, end)
+    crl.sig_oid = alg1.alg
+    if crl.version < 0 || crl.version > 1 -> return Err(.UnknownVersion)
+    crl.version += 1
+    sig_alg: x509.x509_get_sig_alg(data, crl.sig_oid, alg1.params) ?? return Err(.UnknownSigAlg(None))
+    crl.sig_md = sig_alg.md
+    crl.sig_pk = Val(sig_alg.pk)
+    crl.sig_opts = sig_alg.pss
+    // issuer
+    crl.issuer_raw.p = p
+    len = asn1.get_tag(data, p, end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    crl.issuer = x509.x509_get_name(data, p, p + len)
+    crl.issuer_raw.len = p - crl.issuer_raw.p
+    // thisUpdate, and nextUpdate when one follows
+    crl.this_update = x509.x509_get_time(data, p, end)
+    if x509.x509_get_time(data, p, end) == {
+        .Ok(t) -> crl.next_update = t
+        .Err(e) -> {
+            absent: if e == {
+                .InvalidDate(inner) -> inner == .Val(.UnexpectedTag) || inner == .Val(.OutOfData)
+                else -> false
+            }
+            if !absent -> return Err(e)
+        }
+    }
+    crl.entries = x509_crl_get_entries(data, p, end)
+    if crl.version == 2 -> crl.crl_ext = x509_crl_get_ext(data, p, end)
+    if p != end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    // signatureAlgorithm, which must repeat the TBSCertList's, and
+    // signatureValue.
+    alg2: x509.x509_get_alg(data, p, raw_end)
+    same_oid: crl.sig_oid.len == alg2.alg.len && cipher.bytes_of(data, crl.sig_oid.p, crl.sig_oid.len) == cipher.bytes_of(data, alg2.alg.p, alg2.alg.len)
+    same_params: alg1.params.len == alg2.params.len && (alg1.params.len == 0 || cipher.bytes_of(data, alg1.params.p, alg1.params.len) == cipher.bytes_of(data, alg2.params.p, alg2.params.len))
+    if !same_oid || !same_params -> return Err(.SigMismatch)
+    crl.sig = x509.x509_get_sig(data, p, raw_end)
+    if p != raw_end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    crl.raw = data
+    Ok(crl)
+}
+
+/// Parse one DER CRL filling buf and append it to chain
+/// (mbedtls_x509_crl_parse_der); on failure the chain is unchanged.
+x509_crl_parse_der: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
+    crl: x509_crl_parse_der_core(buf)
+    chain.push(crl)
+}
+
+/// One DER CRL, or one or more PEM ones, appended to chain
+/// (mbedtls_x509_crl_parse). The input is PEM when the first block of its
+/// text up to the first NUL byte reads; then each further block must read
+/// and parse until no text is left, the CRLs before a failure staying in
+/// the chain.
+x509_crl_parse: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
+    is_pem := false
+    rest := buf.copy()
+    loop {
+        if pem.pem_read_buffer(X509CRL_PEM_BEGIN, X509CRL_PEM_END, rest, None) == {
+            .Ok(block) -> {
+                is_pem = true
+                rest = cipher.bytes_of(rest, block.used, rest.len() - block.used)
+                x509_crl_parse_der(chain, block.der)
+            }
+            .Err(e) -> {
+                if is_pem -> return Err(.PEM(e))
+            }
+        }
+        if !is_pem || pem.text_len(rest) == 0 -> break
+    }
+    if is_pem -> return
+    x509_crl_parse_der(chain, buf)
+}
+
+/// The text mbedtls prints for a CRL, each line after `prefix`
+/// (mbedtls_x509_crl_info).
+x509_crl_info: fn(prefix: String, crl: X509Crl) -> [U8] x509.X509Error! {
+    data: crl.raw
+    out := [U8]{}
+    out.extend("{prefix}CRL version   : {crl.version}".bytes())
+    out.extend("\n{prefix}issuer name   : ".bytes())
+    out.extend(x509.x509_dn_gets(crl.issuer))
+    out.extend("\n{prefix}this update   : {x509.x509_time_text(crl.this_update)}".bytes())
+    out.extend("\n{prefix}next update   : {x509.x509_time_text(crl.next_update)}".bytes())
+    out.extend("\n{prefix}Revoked certificates:".bytes())
+    loop entry in crl.entries {
+        out.extend("\n{prefix}serial number: ".bytes())
+        out.extend(x509.x509_serial_gets(data, entry.serial))
+        out.extend(" revocation date: {x509.x509_time_text(entry.revocation_date)}".bytes())
+    }
+    out.extend("\n{prefix}signed using  : ".bytes())
+    if crl.sig_pk == {
+        .Val(kind) -> out.extend(x509.x509_sig_alg_gets(data, crl.sig_oid, x509.X509SigAlg{md: crl.sig_md, pk: kind, pss: crl.sig_opts}))
+        .None -> out.extend("???".bytes())
+    }
+    out.extend("\n".bytes())
+    Ok(out)
+}

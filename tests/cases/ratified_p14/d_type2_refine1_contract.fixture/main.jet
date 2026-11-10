@@ -1,0 +1,21 @@
+// D-TYPE2-REFINE1: `distinct Int(1..6)` is the one refinement spelling. The
+// index prover reads the range directly: every `Die` value is a valid index
+// into a seven-slot list, so that read carries no runtime check.
+Die: distinct Int(1..6)
+
+pick: fn(faces: [String#7], roll: Die) -[!Panic]> String { faces[roll].copy() }
+
+// A plain `Int` index proves nothing, so its runtime check stays.
+pick_any: fn(faces: [String#7], index: Int) -> String { faces[index].copy() }
+
+// A runtime value becomes a `Die` only through the fallible conversion.
+checked: fn(raw: Int) -> Die { Die.from_int(raw) }
+
+run: fn() {
+    faces: [String#7]{"none", "one", "two", "three", "four", "five", "six"}
+    print(pick(faces, Die.from_int(1)))
+    print(pick(faces, Die.from_int(6)))
+    print(pick(faces, checked(5) ?? Die.from_int(2)))
+    print(pick(faces, checked(7) ?? Die.from_int(2)))
+    print(pick_any(faces, 0))
+}

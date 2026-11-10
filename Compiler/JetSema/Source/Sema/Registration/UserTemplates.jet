@@ -16,6 +16,7 @@ use jet_foundation.[
     DeriveBodyItem,
     DeriveDef,
     Diagnostic,
+    EffectRowEntry,
     Func,
     ImplConstValue,
     ImplDef,
@@ -23,8 +24,10 @@ use jet_foundation.[
     LValue,
     Marker,
     MarkerCallArg,
+    MarkerDecl,
     NamedCtValue,
     NamedType,
+    RuleSite,
     Span,
     Stmt,
     StructDef,
@@ -364,11 +367,18 @@ sema_user_derive_expand_module: fn(graph: &SemaRegistrationGraph, module_index: 
 // change or shadow a written (or earlier generated) member.
 
 // A marker application's rule body, with the `Diagnostic` impls of the rule's
-// declaring module that its `reject(value)` may raise.
+// declaring module that its `reject(value)` may raise, whether its row lets
+// it write declarations, and the marker's own value (`self`): one field per
+// marker parameter that the use site gives a known-time value.
 SemaUserRule: struct {
     body: [DeriveBodyItem]
     reports: [SemaDeriveReport]
+    generates: Bool
+    receiver: CtValue
 }
+
+// The effect a template needs to write declarations.
+META_GENERATE: "Meta.Generate"
 
 sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaUserRule? {
     resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
@@ -390,7 +400,89 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, m
             }
         }
     }
-    Val(SemaUserRule{body: body, reports: reports})
+    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker)})
+}
+
+// One use site's argument as a known-time value.
+sema_user_rule_argument: fn(argument: MarkerCallArg) -> CtValue? Never! {
+    if argument == .Expr(expression) -> return sema_derive_static_value(SemaDeriveExpansion{scope: [NamedCtValue]{}, failure: None}, expression)
+    None
+}
+
+// The marker's value at one use site: a labeled argument binds the
+// parameter of its name, the rest bind the parameters in order, a variadic
+// last parameter takes the remaining ones as a list, and an unbound parameter
+// takes its written default. A parameter with no known-time value is left out.
+sema_user_rule_receiver: fn(declaration: MarkerDecl, marker: Marker) -> CtValue Never! {
+    positional := [Int]{}
+    loop index in 0..<marker.args.len() {
+        if index < marker.arg_labels.len() && marker.arg_labels[index] != None -> next
+        positional.push(index)
+    }
+    fields := [NamedCtValue]{}
+    next_positional := 0
+    loop param in declaration.params {
+        if param.name.starts_with("$") -> next
+        if param.variadic {
+            values := [CtValue]{}
+            loop at in next_positional..<positional.len() {
+                value: sema_user_rule_argument(marker.args[positional[at]]) ?? next
+                values.push(value)
+            }
+            next_positional = positional.len()
+            fields.push(NamedCtValue{name: param.name, value: CtValue.List{values: values}})
+            next
+        }
+        bound := CtValue?{None}
+        labeled := false
+        loop index in 0..<marker.args.len() {
+            if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(label) && label.name == param.name {
+                labeled = true
+                bound = sema_user_rule_argument(marker.args[index])
+                break
+            }
+        }
+        if !labeled {
+            if next_positional < positional.len() {
+                bound = sema_user_rule_argument(marker.args[positional[next_positional]])
+                next_positional += 1
+            } else if param.value == .Val(default) {
+                bound = sema_derive_static_value(SemaDeriveExpansion{scope: [NamedCtValue]{}, failure: None}, default)
+            }
+        }
+        if bound == .Val(value) -> fields.push(NamedCtValue{name: param.name, value: value})
+    }
+    CtValue.Struct{type_name: declaration.name, fields: fields}
+}
+
+// `Marker.expand`'s row is `Meta.Generate`; a template that writes its own
+// row may write code only when that row names it.
+sema_user_rule_row_generates: fn(row: [EffectRowEntry]?) -> Bool Never! {
+    entries: row ?? return true
+    loop entry in entries {
+        if entry.name == META_GENERATE -> return true
+    }
+    false
+}
+
+// Each entry of a written template row is `Meta.Generate` or a denial: the
+// template runs inside the compiler, which reading needs no effect for.
+sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop declaration in sema_marker_module_declarations(items, "", false) {
+        entries: declaration.row ?? next
+        loop entry in entries {
+            if entry.name == META_GENERATE || entry.name.starts_with("!") -> next
+            diagnostics.push(sema_error("E0774", entry.span, "`{entry.name}` in `{declaration.name}`'s template row is outside `Marker.expand`'s row", "a marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect", "remove `{entry.name}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads"))
+        }
+    }
+}
+
+// A template whose row lacks `Meta.Generate` may reject or warn, not write
+// declarations.
+sema_user_rule_row_admits: fn(rule: SemaUserRule, marker: String, span: Span, expanded: [Item], diagnostics: &[Diagnostic]) -> Bool {
+    if rule.generates || expanded.len() == 0 -> return true
+    diagnostics.push(sema_error("E0775", span, "`{marker}`'s template writes declarations, but its row has no `Meta.Generate`", "a template whose row is `-[]>` only reads the program, so it may reject or warn but not add code", "write `-[Meta.Generate]>` on `{marker}`'s `expand`, or remove the declarations its template writes"))
+    false
 }
 
 // A struct's or enum's `impl Diagnostic { … }` written inside its body is the
@@ -479,7 +571,8 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
                 info: type_info ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+                if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
             }
         }
@@ -491,24 +584,72 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 if marker.negated -> next
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 info: sema_user_template_function_info(function) ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+                if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 loop expanded_item in expanded -> generated.push(expanded_item)
             }
         }
+    }
+    // Impl-site rules (a top-level `impl`, one written inside a struct's or an
+    // enum's body, and an error conversion `impl From -> To`) see the
+    // implementing type's TypeInfo.
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> sema_user_rule_collect_impl(graph, module_index, implementation.type_name, implementation.markers, generated, diagnostics)
+            .Struct(definition) -> {
+                loop block in definition.trait_impls -> sema_user_rule_collect_impl(graph, module_index, definition.name, block.markers, generated, diagnostics)
+            }
+            .Enum(definition) -> {
+                loop block in definition.trait_impls -> sema_user_rule_collect_impl(graph, module_index, definition.name, block.markers, generated, diagnostics)
+            }
+            else -> {}
+        }
+    }
+    // Registration has already replaced each error conversion with its
+    // checked routine and kept the conversion's markers as Impl-site facts
+    // on its source type's span (FailureLaw.jet), the only Impl-site facts.
+    source: graph.modules[module_index].source
+    source_bytes: source.bytes()
+    loop fact in graph.modules[module_index].program.rule_facts {
+        if fact.site != (Val(RuleSite.Impl)) || fact.marker.negated -> next
+        span: fact.target ?? next
+        if span.start < 0 || span.end < span.start || span.end > source_bytes.len() -> next
+        from_ty: String.from_bytes(source_bytes[span.start..<span.end]) ?? next
+        sema_user_rule_collect_impl(graph, module_index, from_ty, [Marker]{fact.marker.copy()}, generated, diagnostics)
     }
     // A `.Block` rule receives the text inside Jet's closed braces as its
     // `target` value. The rule body can check that text and emit ordinary Jet
     // items through the same typed path as a type or function rule (declared
     // text blocks).
-    source: graph.modules[module_index].source
     block_spans: graph.modules[module_index].program.block_spans
     blocks := [SemaUserTextBlock]{}
     loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, blocks)
     loop block in blocks {
         marker: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, rule.reports, Val(block.site), diagnostics) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, Val(rule.receiver), rule.reports, Val(block.site), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, block.name, block.site, expanded, diagnostics) -> next
         loop expanded_item in expanded -> generated.push(expanded_item)
+    }
+}
+
+// One impl's markers: each rule body runs over the implementing type's
+// TypeInfo, or over a handle naming the type when the type has no
+// registered declaration here (`impl String -> Err`).
+sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int, type_name: String, markers: [Marker], generated: &[Item], diagnostics: &[Diagnostic]) {
+    items: graph.modules[module_index].program.items
+    type_info := CtValue?{None}
+    loop marker in markers {
+        if marker.negated -> next
+        rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+        if type_info == None {
+            type_info = sema_user_template_type_info(graph, module_index, type_name)
+            if type_info == None -> type_info = Val(CtValue.Struct{type_name: "TypeInfo", fields: [NamedCtValue]{NamedCtValue{name: "name", value: CtValue.Str{value: type_name}}}})
+        }
+        info: type_info ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
+        sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
     }
 }
 
@@ -634,6 +775,7 @@ sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span
 sema_user_rule_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
+    sema_user_rule_row_check(graph.modules[module_index].program.items, diagnostics)
     sema_user_rule_collect_module(graph, module_index, generated, diagnostics)
     sema_user_template_register(graph, module_index, generated, diagnostics)
 }

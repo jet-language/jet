@@ -806,7 +806,7 @@ explain_pop: fn(p: &Parse) Never! { p.f.addr_explain = explain_parent(p) }
 open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
     if p.db.dbs[1].bt >= 0 || a.ctx.explain != 0 -> return false
     slot: conn.btree_slot_new(p.db)
-    owner: conn.bt_db_of(p.db, 1)
+    owner: conn.bt_db_of(p.db)
     vfs_flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_DELETEONCLOSE).bit_or(os.OPEN_TEMP_DB)
     rc: btree.btree_open(p.db.btrees[slot], None, owner, 0, vfs_flags, false, false, false, false)
     if rc != base.OK {

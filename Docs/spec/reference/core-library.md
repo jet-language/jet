@@ -264,9 +264,10 @@ A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
 `Compiler/Prelude/Core.jet`. Every other declaration in its source belongs to
 Core alone, including internal helpers and constants and handle types such as
-`core.db`'s `SqliteDB` or `core.crypto`'s `JetcFd`, whose fields are live
-native handles. Code outside Core can't name them: `use core.db.[SqliteDB]`
-and a `db.SqliteDB{…}` literal through an alias are both **E0609**. A call to
+`core.db`'s `CachedStatement` or `core.crypto`'s `JetcFd`, whose fields are
+live engine or native handles. Code outside Core can't name them:
+`use core.db.[CachedStatement]` and a `db.CachedStatement{…}` literal through
+an alias are both **E0609**. A call to
 an unexported function through an alias is E1004, so safe code can't build a
 handle from a made-up word.
 
@@ -474,7 +475,7 @@ records the shipped surface without adding aliases:
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)`, `PriorityQueue.by(key)`, `PriorityQueue.by_desc(key)`, `PriorityQueue.from_by(xs, key)`, `PriorityQueue.from_by_desc(xs, key)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. `new` and `from` pop the largest item first by its own order. The `by` forms order by a pure key function (`(s: Score) -> s.points`, an `Int`, `Float`, `String` or other natively ordered key): `by` pops the smallest key first and `by_desc` the largest; items with equal keys pop in the order they went in, and `to_sorted_list` lists them in pop order. A key function with effects is rejected (E0747). |
 | `Cache<K,V>` | `Cache<K,V>.new(capacity)` | Bounded least-recently-used `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, and size/clear operations. The constructor names its key and value types (`Cache<String, Int>.new(2)`): no argument carries them, and a later line never settles them (D-INFER-LEVEL1). `add` and `get` make a key the most recent; `add` returns a held key's old value, and a new key into a full cache evicts the least recent entry. `add_new` on a held key and `has_key` leave the order alone. `keys` lists the most recent first. A negative capacity is 0, which keeps nothing. |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | Counting `add`, `remove`, `has`, `count`, list conversion, and size/clear operations. |
-| `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, copying, and size/clear operations. |
+| `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, `Bits.copy()` (an independent set: changing the copy leaves the original as it was), and size/clear operations. |
 | `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | Byte-buffer reads/writes, cursor movement, text conversion, splitting/joining, comparison, copying, flushing, and closing. |
 
 `partition` is stable, and the list sort family preserves source order for equal
@@ -742,7 +743,7 @@ runs each of these cases.
 | `[T]` | `split_write(Int)` | exclusive, in place | Disjoint | Ok(two empty write views) at zero | current |
 | `[T]` | `get_disjoint_write([Int])` | exclusive, in place | Disjoint | Ok(empty view list) for no indexes | current |
 | `[T]` | `edit_disjoint([Int], (ViewMut<item>, ViewMut<item>) -> T)` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
-| `[T]` | `replace(Int, item)` | borrows | Build | empty list | current |
+| `[T]` | `replace(item, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
 | `[T]` | `binary_search_by((item) -> T)` | borrows | Search | None | current |
 | `[T]` | `random()` | borrows | Lookup | None | current |
@@ -1257,8 +1258,12 @@ rejected without a body allocation.
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
 | `exchange(method, url, body, header_lines)` | `HTTPResponse !HTTPError` | Validate and perform a request described by a method and header lines. |
-| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after the length check; a text read decodes it then. |
+| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after every length check; a text read decodes it then. |
+| `with_body(request, body)` / `request_with(method, url, headers, body)` / `response_ok(body)` | request/response | Carry the body as given: a `Body.Bytes` body stays bytes. |
 | `query()` / `query_get` / `query_all` / `query_set` | query values | Build and inspect repeated query pairs. |
+| `query_decode(text)` / `form_decode(text)` | `Query` | Split a query or an `application/x-www-form-urlencoded` form the WHATWG way: one leading `?` is stripped, empty segments are skipped, a field without `=` has an empty value, and duplicate names stay in order (`query_get` returns the first). `+` is a space and `%HH` one byte, decoded once; a broken escape such as `%QZ` stays as written, and bytes that are not UTF-8 become U+FFFD, one per maximal invalid subpart. Input above 1 MiB gives an empty `Query`. |
+| `query_decode_strict(text)` / `form_decode_strict(text)` | `Query !FormDecodeError` | The same split, refusing instead of replacing: `Escape` for a broken escape, `UTF8` for bytes that are not UTF-8, `TooLarge` above 1 MiB. Code whose decoded value picks a file, path, account or other identity uses these, since `%FF` and `%FE` both decode to U+FFFD when tolerant. |
+| `form_component_decode(text)` / `form_component_decode_strict(text)` | `String` / `String !FormDecodeError` | Decode one field name or value by the same rules. |
 | `cookie(name, value)` / `cookie_encode` / `cookies_parse` | cookie values | Construct, render, and parse bounded cookie fields. |
 | `basic_auth(user, password)` / `bearer_auth(token)` | `String` | Render authorization header values. |
 
@@ -1422,8 +1427,8 @@ fragments, missing hosts, and other schemes before the provider handshake.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `connect(url)` | `WsConn !WsError` | Validate and dial a cleartext WebSocket URL. |
-| `upgrade(request)` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
+| `connect(url) -[Net, Time.Wait]>` | `WsConn !WsError` | Validate and dial a cleartext WebSocket URL. |
+| `upgrade(request) -[Net, Time.Wait]>` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `!WsError` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage !WsError` | Receive a text, binary, or close message. |
 | `conn.close(code, reason)` | `!WsError` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
@@ -2176,6 +2181,9 @@ handling its failure; only the end of an access is checked when it runs.
 | `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `!IOError -[Env]>` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
 | `SharedMemory.descriptor()` | `Fd !IOError -[Env]>` | A new descriptor for the memory, to pass to another process. |
 | `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
+| `open_pipe()` | `[Fd] !IOError -[Env]>` | A new pipe: its read end, then its write end. Both block, so either can go to another process (a Wayland paste hands the write end to the copying client). |
+| `Fd.read(max: Int(1..16777216), timeout_ns)` | `[U8] !IOError -[Env]>` | At most `max` bytes from a pipe or socket once it has some, waiting at most `timeout_ns` nanoseconds (negative: no limit). Empty means the writer closed its end; a wait that runs out is `.TimedOut`. |
+| `Fd.write(bytes, timeout_ns)` | `Int !IOError -[Env]>` | Writes the first of `bytes`, at most 4096 (`PIPE_BUF`, which a pipe that polls writable takes whole), once there is room, waiting at most `timeout_ns`; gives the count written. A wait that runs out is `.TimedOut`, a closed reader `.Closed`. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -2479,8 +2487,8 @@ return it before any child starts. A slot outside 3 to 2147483646 is
 `IOError.InvalidInput` (`keep_open needs a descriptor slot from 3 to
 2147483646; 0 to 2 are the standard streams`), as is a slot the spec already
 keeps; a descriptor the host cannot duplicate is `IOError.Other` with the
-host's error. A `FileLock` is `IOError.Unsupported` (`keep_open does not keep
-a FileLock yet`).
+host's error. A kept `FileLock`'s duplicate shares its lock: the lock stays
+held while the child, or any process it starts, keeps the descriptor open.
 `Examples/Systems/Process/ProcessKeepOpen.jet` is the golden.
 #### Authority and output boundaries
 
@@ -2621,9 +2629,10 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
 `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
 `atanh`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`,
-`cbrt`, `hypot`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
-`acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`, `exp10_m1`, `log2_1p`,
-`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`), and F32 `pow`,
+`cbrt`, `hypot`, `rsqrt`, `erf`, `erfc`, `gamma`, `lgamma`, `sin_pi`,
+`cos_pi`, `tan_pi`, `asin_pi`, `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`,
+`exp10_m1`, `log2_1p`, `log10_1p`, `pow_r`, `pow_n`, `root_n`,
+`compound_n`), and F32 `pow`,
 returns the correctly rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
@@ -2645,7 +2654,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
 | `math.asin_pi(x)`, `acos_pi(x)`, `atan_pi(x)`, `atan2_pi(y, x)` | `Float` | `asin`, `acos`, `atan` and `atan2` divided by `pi`, correctly rounded, so every tier returns the same bits: `asin_pi` in [-1/2, 1/2] and `acos_pi` in [0, 1] with NaN for `abs(x) > 1`, `atan_pi` in [-1/2, 1/2] with ±1/2 at the infinities, and `atan2_pi` the angle of the point `(x, y)` in half-turns, in [-1, 1] with the sign of `y` and the C23 values at zeros and infinities (C23 `asinpi`, `acospi`, `atanpi`, `atan2pi`). |
 | `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)` | `Float` | `e^x`, `2^x`, `10^x` and `e^x - 1`, correctly rounded, so every tier returns the same bits: `+inf` on overflow, 0 (-1 for `exp_m1`) at `-inf`, `exp2` and `exp10` exact wherever the power is a Float, and `exp_m1` keeps the sign of a zero (C23 `exp`, `exp2`, `exp10`, `expm1`). |
-| `math.erf(x)`, `math.erfc(x)` | `Float` | Error functions. |
+| `math.erf(x)`, `math.erfc(x)` | `Float` | The error function and `1 - erf(x)`, correctly rounded, so every tier returns the same bits and `erfc` keeps full precision where `erf` is near 1: `erf` is odd, keeps the sign of a zero and is ±1 beyond about ±5.92, and `erfc` is 2 below about -5.86 and `+0` from about 27.23 (C23 `erf`, `erfc`). |
 | `math.exp2_m1(x)`, `exp10_m1(x)` | `Float` | `2^x - 1` and `10^x - 1`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: -1 at `-inf`, `+inf` on overflow, and a zero keeps its sign (C23 `exp2m1`, `exp10m1`). |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)` | `Float` | `log(x)`, `log(1 + x)`, `log10(x)` and `log2(x)`, correctly rounded, so every tier returns the same bits: NaN below 0 (below -1 for `ln_1p`), `-inf` at ±0 (at -1), `+inf` at `+inf`, `log2` and `log10` exact at every power of 2 or 10 that is a Float, and `ln_1p` keeps the sign of a zero (C23 `log`, `log1p`, `log10`, `log2`). |
 | `math.logb(x)`, `log(x, base)` | `Float` | The binary exponent as a Float, and the logarithm in any base, `ln(x) / ln(base)`. |
@@ -2656,10 +2665,10 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.root_n(x, n)`, `compound_n(x, n)` | `Float` | The `n`th root of `x` and `(1 + x)^n` for every whole `n: Int`, both correctly rounded, so every tier returns the same bits (C23 `rootn`, `compoundn`). `root_n` gives NaN for `n = 0` and for `x < 0` with `n` even, and a negative root for `x < 0` with `n` odd; `compound_n` gives 1 for `n = 0` (even at a NaN), NaN for `x < -1`, and never rounds `1 + x` first. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
-| `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
+| `math.gamma(x)` / `math.lgamma(x)` | `Float` | The gamma function and `ln(abs(gamma(x)))`, correctly rounded, so every tier returns the same bits: `gamma` is ±inf at ±0, NaN at every negative whole `x` and at `-inf`, and `+inf` from about 171.62; `lgamma` is `+inf` at zero, at every negative whole `x` and at ±inf (C23 `tgamma`, `lgamma`). |
 | `math.degrees(x)` / `math.radians(x)` | `Float` | Convert between degrees and radians. |
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
-| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once, the same bits on every tier. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
+| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once (IEEE 754 `fusedMultiplyAdd`), the same bits on every tier. A nonzero exact result that rounds to zero keeps its sign, so `fma(2^-1074, -0.5, 0.0)` is `-0.0`, where musl's C fma gives `+0.0`. Native x86-64 code runs one `vfmadd213sd` when the CPU has FMA3 (probed at a module's first fma) and the soft fma otherwise, with the same bits either way. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
@@ -2750,9 +2759,10 @@ Float Display text.
 
 Fixed-size vectors and matrices use `Float` components. `Vec2`, `Vec3`, and
 `Vec4` provide constructors, `splat`, `from_array`, `to_array`, checked lane
-indexing, vector addition and subtraction, and element-wise multiplication.
-`Vec3` also supports scalar multiplication and division, and the `dot`,
-`cross`, `length`, and `normalize` operations. `Mat3` and `Mat4` constructors
+indexing, vector addition and subtraction, element-wise multiplication,
+multiplication and division by a `Float` on either side, and the `dot`,
+`length`, `length_sq`, `distance`, `distance_sq`, and `normalize` operations;
+`Vec3` also has `cross`. `Mat3` and `Mat4` constructors
 use column-major storage; they provide `from_array`, `to_array`, addition,
 subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
 Reductions use a scalar left-to-right fold, so the reduction order is part of
@@ -3837,8 +3847,9 @@ with the source helpers, while application examples use public formatting.
 
 Calls run [`Core/Text/Fmt.jet`](../../../Core/Text/Fmt.jet); interpolation
 selectors and compile-time calls run the shared Prelude kernel with the same
-steps, so every tier prints the same text. Fixed-precision rounding scales by
-`10^frac` and rounds half away from zero; non-finite values print as ordinary
+steps, so every tier prints the same text. Fixed-precision rounding rounds the
+exact binary value at `frac` decimals, half away from zero (`decimal(2.675, 2)`
+is `2.67`: the stored binary value is just below 2.675); non-finite values print as ordinary
 `Float` text. `duration` does not emit unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
@@ -3976,7 +3987,7 @@ crossing the provider boundary.
 
 The list adapters `para_map`, `para_filter`, `para_partition` and `para_fold`
 run their callback on the task scheduler's pool on every tier: `jet run`
-and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
+and `jet dev` (O0), `jet build --optimize=basic` (O1) and `jet build` (O2) all call the one
 runtime kernel, `jet_rt_native_para_walk` in
 [`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). Each
 worker runs on a task fiber, so the pool's carrier threads (by default one
@@ -4169,11 +4180,13 @@ standard-library vocabulary.
 `core.ui` represents a UI as a typed node tree plus geometry and accessibility
 metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
-rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet).
+rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet);
+nodes and backends are plain Jet values, with no `#Unsafe`.
 
-`box` stores its children in the returned tree. Its runtime boundary therefore
-accepts an owned child list; compiler borrow-elision must not treat that native
-call as lending the caller's list.
+A `UINode` shows its `label`, `width` and `height` (in cells) and the
+optional `accessibility`, `ime` and `shortcut` metadata; its kind, role,
+children, color and click handler are its own. `box` stores its children in
+the returned tree.
 
 The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 `UI.Pointer`; capability checks and runtime support use the same spelling.
@@ -4195,13 +4208,30 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
-| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
+| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend; copies of a backend share it. |
+| `mount(backend, tree: UINode)`, `mount(backend, tree: UINode, constraint: SizeConstraint)` | — | Call the backend's `mount`. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
 | `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
 | `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
 | `node_color(label: String, width: Float, height: Float, color: String) -> UINode` | node | Construct a colored node. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
+
+Both backends have the same methods. `measure(tree, constraint) -> Size` is a
+box's widest child by its children's summed heights, any other node its own
+size, clamped to the constraint. `layout(tree, frame: Rect)` places the next
+paints. `paint(tree)` draws the tree and makes its buttons and text inputs the
+focus ring. `mount(tree, constraint?)` measures within the constraint (80 × 24
+cells when absent), lays out at the origin and paints. `on_event(event:
+InputEvent) -> EventResult` answers `Handled` or `Ignored`; Tab moves the
+focus to the next node of the ring. `set_focus_group(nodes: [UINode])` sets
+the ring and `focused_label() -> String` names its focused node ("" for
+none). `NullBackend.commands() -> [String]` lists what the paints since the
+latest mount drew: `fill(rect, color)` for each leaf but a text, then
+`text(rect, label)`. `TUIBackend` writes each leaf's label into a grid of
+terminal cells: `frame_lines() -> [String]` gives its rows without trailing
+white space and `render_count() -> Int` counts its paints. In a web build the
+page shows each paint.
 
 `UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
 scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
@@ -4289,9 +4319,12 @@ frames are the whole window.
 | `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
 | `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
 | `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
+| `Window.clipboard_text() -[Env, Net, Time]> String UIError!` / `.set_clipboard_text(text: String) -[Net, Time]> UIError!` | clipboard | Paste and copy through the seat's `wl_data_device`. A paste reads the holder's text in its first type of `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `TEXT`, `STRING` through a pipe, waiting up to 2 s (`.Protocol` past that or for text that is not UTF-8, `.Size` past 16 MiB), and is `""` when the clipboard is empty or holds no text; the window's own copy comes back without a round trip. A copy offers the text as all five types at the latest input's serial (the compositor takes it only from the focused window) and answers each paste until another program copies. `.Unsupported` without `wl_data_device_manager`; a headless window keeps a clipboard of its own. The web host's clipboard stays `core.ui.host`'s `read_text` / `write_text`. |
+| `Window.set_text_input(area: UIRect?) -[Net, Time]> UIError!` | text input | The program's text field, for the compositor's input method (`zwp_text_input_v3`) to compose into: `area` is the caret's rectangle in pixels, where the input method shows its candidates, and `None` says there is no text field, which disables the text input and ends any composition. Without `zwp_text_input_v3`, and in a headless window, typing comes from the keyboard alone. |
+| `Window.maximized() -> Bool` / `.fullscreen() -> Bool` / `.set_maximized(maximized: Bool)` / `.set_fullscreen(fullscreen: Bool)` / `.minimize()` | states | The window's states as the display server last configured them, and requests to change them (`xdg_toplevel`'s set/unset maximized and fullscreen, on the output the display server picks, and set_minimized). The display server decides; a new size arrives as `.Resize`, and a minimized window comes back only when the user brings it back. A headless window takes each state at once and keeps its size. Each window has its own connection to the display server, so a program shows several windows by driving each window's `frames()` in its own task. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
 | `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
-| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. |
 | `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
 | `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
@@ -4350,10 +4383,18 @@ existing public capability row.
 
 #### Drawing
 
-A `Frame` also draws: its `clear_background` and `draw_*` calls paint an RGBA
-canvas of the frame's size in Jet, the same on every backend and tier, blended
-src-over and clipped to the canvas, and the frame presents that canvas when the
-next frame begins unless the program called `present` itself. Shapes that take
+A `Frame` also draws: its `clear_background` and `draw_*` calls paint a canvas
+of the frame's size in Jet, the same on every backend and tier, clipped to the
+canvas, and the frame presents that canvas when the next frame begins unless
+the program called `present` itself. The canvas, like every `Image`, holds
+premultiplied RGBA8 pixels, and every draw follows core.ui's one blend rule,
+source-over on the sRGB bytes as they are: a color comes in straight and
+premultiplies, red, green and blue each `(c * a + 127) / 255`, and each byte
+of the canvas, alpha included, becomes `s + (d * (255 - a) + 127) / 255` for
+the premultiplied source byte `s` (alpha 20 white over `#0B0B0D` gives
+`#1E1E20`). A clear stores its color instead. Pixels read back straight: each
+color channel `(c * 255 + a / 2) / a`, at most 255, and a clear pixel all
+zeros. Shapes that take
 a `Point` or `Rect` fill the pixels whose centers lie inside, with coordinates
 snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is
 inside, one on a right or bottom edge is not. The collision checks and the
@@ -4383,8 +4424,8 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `Frame.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
 | `Frame.draw_poly(center, sides, radius, rotation, color)` | — | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
 | `Frame.draw_poly_lines(center, sides, radius, rotation, color)` | — | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
-| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
-| `measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
+| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in anti-aliased Atkinson Hyperlegible Next at `size` pixels to the em, kerned, with glyphs at quarter-pixel positions. The first line's top is at `y` and its baseline the face's ascent below that, rounded; `\n` starts a new line one line height (ascent, descent and line gap, rounded) lower. Each pixel blends the color src-over with its alpha scaled by the glyph's coverage. A size below 1 draws nothing. |
+| `measure_text(text, size)` | `Int` | The width in pixels of `draw_text`'s widest line: its kerned advance, rounded. Lines break at `\n`; empty text, empty lines and a size below 1 measure 0. Needs no effect. |
 | `Frame.draw_sprite(atlas, source, x, y)` | — | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
 | `check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
 | `check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
@@ -4394,16 +4435,16 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `check_collision_lines(start1, end1, start2, end2)` | `Point?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
 | `get_collision_rec(rec1, rec2)` | `Rect` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
 | `gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `Image` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
-| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, read back straight, or a zero color outside the image. |
+| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color` premultiplied, alpha included. |
 | `image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. Less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
 | `image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. One with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
 | `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
 | `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
-| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
-| `Image` | type | An RGBA8 image held in memory: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, as `Frame.present` takes them). A width of 0 means no image. |
+| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | On each pixel's straight color, stored premultiplied again: scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to each pixel's straight red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel that holds `color` premultiplied, in all four bytes, with `replace`; a clear pixel holds every color of alpha 0. |
+| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte), premultiplied as it loads. A missing or malformed PNG leaves the atlas without a texture. |
+| `Image` | type | An RGBA8 image held in memory, premultiplied: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, straight, as `Frame.present` takes them). A width of 0 means no image. |
 | `TextureAtlas` / `.name() -> String` / `.loaded() -> Bool` | type | Named regions of one decoded PNG texture; the atlas text's `atlas:` line or its file's stem, and whether the texture decoded. |
 | `Window.load_image_from_screen() -> Image` | image | A copy of the canvas the frames draw on, as last drawn. |
 | `Frame.is_key_down(key)` / `.is_key_up(key)` / `.is_key_pressed(key)` / `.is_key_released(key)` | `Bool` | Whether `key` is held during the frame, or went down or up since the previous one. |
@@ -4451,7 +4492,7 @@ Every fault in a font file is a typed `FontError{reason}`.
 | `Face.layout(text: String, size_px: Float) -> TextRun` / `.wrap(text, size_px, max_width) -> [TextLine]` | layout | Place a line of glyphs with kerning, and break text into lines after spaces and hyphens. |
 | `Face.raster(id: Int, size_px: Float, x_frac: Float) -> GlyphMask` | mask | A glyph's anti-aliased coverage, unhinted, at a sub-pixel position. |
 | `cache() -> GlyphCache` / `cache_within(budget: Int)` / `GlyphCache.glyph(face, id, size_px, x_frac)` | cache | Masks kept per face, glyph, size and quarter pixel, within about `budget` bytes (CACHE_BYTES_MAX, 4 MiB, by default). |
-| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask source-over, in linear light, onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row). Only pixels inside `clip` and the canvas change. |
+| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row) by core.ui's one blend rule, source-over on the sRGB bytes: the source covers `sa = (A * coverage + 127) / 255` of a pixel, and each byte `d` becomes `s + (d * (255 - sa) + 127) / 255`, with `s = (C * sa + 127) / 255` for a color byte and `sa` for alpha. Only pixels inside `clip` and the canvas change. |
 | `draw_text(&pixels, width, height, stride_bytes, &cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
 
 ### `core.reactive` — explicit signals and dependency tracking
@@ -4973,7 +5014,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 
 | Signature | Result | Description |
 |---|---|---|
-| `gethostname() -[Env]> String` | text | Read the local host name. |
+| `gethostname() -[Env, FS.Read]> String` | text | Read the local host name: `$HOSTNAME`, else `/etc/hostname`. |
 | `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
 | `socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] !NetError` | addresses | Every address the host names, in resolver order. |
@@ -4989,7 +5030,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
 | `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
@@ -5112,8 +5153,9 @@ Two address classes are distinct:
 ### `core.net.tls` — TLS stream wrapper
 
 `core.net.tls` upgrades a connected TCP stream to a verified TLS 1.2/1.3
-stream. It is Jet source over the vendored Mbed TLS 3.6 engine; configuration
-carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
+stream. It is Jet source over the Jet TLS engine (Core/Net/SSL, translated from
+Mbed TLS 3.6.7); configuration carriers are validated before network use. See
+[`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -5126,7 +5168,7 @@ carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Cor
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. Like `tcp_read_text`, `read_text` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read`. |
 | `write(stream: &TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
 | `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |

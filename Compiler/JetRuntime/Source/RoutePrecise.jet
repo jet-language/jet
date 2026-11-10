@@ -25,6 +25,7 @@ precise_pair: fn(top: I64, bottom: I64) -> I64 {
 // the CAbi guard: the payload bytes, a newline and the host-fault status 101
 // (as rt_seq_capacity_overflow_stop), not a Jet stop report.
 precise_fault: fn(message: I64) -> I64 {
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_write(rt_text_data(message), rt_text_len(message))

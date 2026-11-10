@@ -3,7 +3,7 @@
 // leaves out every unported form.
 use {
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JetCLICommandSpec, JetCLIFlagSpec]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_pkg_model.[JET_VERSION]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
 }
 
@@ -41,7 +41,7 @@ jet_cli_completion_zsh_escape: fn(text: String) -> String Never! {
 
 jet_cli_man_page: fn() -> String Never! {
     bin: JET_CLI_BINARY
-    out := ".TH {bin.to_upper()} 1 \"\" \"{bin} {COMPILER_VERSION}\" \"Jet Manual\"\n.SH Name\n{bin} \\- the Jet compiler and project tool\n.SH Synopsis\n.B {bin}\n.RI [ command ] \" \" [ args ...]\n.SH Description\n{bin} builds, checks, runs, and tests Jet programs, and manages Jet projects and their dependencies. Output is plain when piped and colored on a terminal.\n.SH Commands\n"
+    out := ".TH {bin.to_upper()} 1 \"\" \"{bin} {JET_VERSION}\" \"Jet Manual\"\n.SH Name\n{bin} \\- the Jet compiler and project tool\n.SH Synopsis\n.B {bin}\n.RI [ command ] \" \" [ args ...]\n.SH Description\n{bin} builds, checks, runs, and tests Jet programs, and manages Jet projects and their dependencies. Output is plain when piped and colored on a terminal.\n.SH Commands\n"
     loop command in JET_CLI_COMMANDS {
         if !jet_cli_command_listed(command.name) -> next
         out = "{out}.TP\n.B {command.name}\n{command.summary.replace("\\", "\\\\")}\n"

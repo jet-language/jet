@@ -1,10 +1,20 @@
 // Driver-owned target selection and dossier construction ported and
 // Driver::target_machine_for_facts.
 
-// Canonical validation carriers restored from 45acf6f8f.
+// The one target capability vocabulary. A capability's name is its Target
+// build fact row (Prelude/Facts.jet), and the provider dossier writes one fact
+// per capability in this order.
 TargetCapability: enum {
-    Allocator Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
-    TimeSleep Entropy Scheduler IORead IOWrite PanicReport Startup
+    Allocator Memory Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
+    TimeSleep Entropy Scheduler IORead IOWrite Panic PanicReport Startup
+}
+TARGET_CAPABILITY_ALL: comptime {
+    [TargetCapability]{
+        TargetCapability.Allocator, TargetCapability.Memory, TargetCapability.Atomic64, TargetCapability.MMIO,
+        TargetCapability.Hardware, TargetCapability.TimeWall, TargetCapability.TimeMonotonic, TargetCapability.TimeZoneData,
+        TargetCapability.TimeSleep, TargetCapability.Entropy, TargetCapability.Scheduler, TargetCapability.IORead,
+        TargetCapability.IOWrite, TargetCapability.Panic, TargetCapability.PanicReport, TargetCapability.Startup
+    }
 }
 TargetUnsafeGate: struct { reason: String }
 MMIOAccess: struct {
@@ -493,31 +503,32 @@ jet_target_atomic_word_supported: fn(triple: String) -> Bool Never! {
 }
 
 jet_target_provider_facts_json: fn(machine: TargetMachine) -> String Never! {
-    atomic_supported: jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
-    atomic_triple: jet_target_json_quote(machine.triple)
-    io_read: jet_target_byte_sink_component_json(machine.byte_sink, "read")
-    io_write: jet_target_byte_sink_component_json(machine.byte_sink, "write")
-    io_report: jet_target_byte_sink_component_json(machine.byte_sink, "report")
-    panic: jet_target_panic_json(machine.panic)
-    startup: jet_target_startup_json(machine.startup)
-    abi: jet_target_abi_json(machine.startup_abi)
-    facts: [String]{
-        "{{\"capability\":\"Target.Allocator\",\"fact\":{jet_target_allocator_json(machine.allocator)}}}",
-        "{{\"capability\":\"Target.Atomic64\",\"fact\":{{\"triple\":{atomic_triple},\"supported\":{atomic_supported}}}}}",
-        "{{\"capability\":\"Target.MMIO\",\"fact\":{jet_target_mmio_json(machine.mmio)}}}",
-        "{{\"capability\":\"Target.Hardware\",\"fact\":{jet_target_hardware_json(machine.hardware)}}}",
-        "{{\"capability\":\"Time.Wall\",\"fact\":{jet_target_clock_json(machine.wall_clock)}}}",
-        "{{\"capability\":\"Time.Monotonic\",\"fact\":{jet_target_clock_json(machine.monotonic_clock)}}}",
-        "{{\"capability\":\"Time.ZoneData\",\"fact\":{jet_target_clock_json(machine.zone_data)}}}",
-        "{{\"capability\":\"Time.Sleep\",\"fact\":{jet_target_clock_json(machine.sleep)}}}",
-        "{{\"capability\":\"Rand.Entropy\",\"fact\":{jet_target_entropy_json(machine.entropy)}}}",
-        "{{\"capability\":\"Target.Scheduler\",\"fact\":{jet_target_scheduler_json(machine.scheduler)}}}",
-        "{{\"capability\":\"IO.Read\",\"fact\":{io_read}}}",
-        "{{\"capability\":\"IO.Write\",\"fact\":{io_write}}}",
-        "{{\"capability\":\"Panic.Report\",\"fact\":{{\"panic\":{panic},\"sink\":{io_report}}}}}",
-        "{{\"capability\":\"Target.Startup\",\"fact\":{{\"policy\":{startup},\"entry\":{jet_target_json_quote(machine.startup_entry)},\"vectors\":{jet_target_json_quote(machine.startup_vectors)},\"abi\":{abi},\"placement\":{jet_target_json_quote(machine.startup_placement)}}}}}",
+    facts := [String]{}
+    loop capability in TARGET_CAPABILITY_ALL {
+        facts.push("{{\"capability\":{jet_target_json_quote(jet_target_capability_name(capability))},\"fact\":{jet_target_capability_fact_json(machine, capability)}}}")
     }
     "[{facts.join(",")}]"
+}
+
+jet_target_capability_fact_json: fn(machine: TargetMachine, capability: TargetCapability) -> String Never! {
+    if capability == {
+        .Allocator -> jet_target_allocator_json(machine.allocator)
+        .Memory -> jet_target_memory_json(machine.memory)
+        .Atomic64 -> "{{\"triple\":{jet_target_json_quote(machine.triple)},\"supported\":{jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))}}}"
+        .MMIO -> jet_target_mmio_json(machine.mmio)
+        .Hardware -> jet_target_hardware_json(machine.hardware)
+        .TimeWall -> jet_target_clock_json(machine.wall_clock)
+        .TimeMonotonic -> jet_target_clock_json(machine.monotonic_clock)
+        .TimeZoneData -> jet_target_clock_json(machine.zone_data)
+        .TimeSleep -> jet_target_clock_json(machine.sleep)
+        .Entropy -> jet_target_entropy_json(machine.entropy)
+        .Scheduler -> jet_target_scheduler_json(machine.scheduler)
+        .IORead -> jet_target_byte_sink_component_json(machine.byte_sink, "read")
+        .IOWrite -> jet_target_byte_sink_component_json(machine.byte_sink, "write")
+        .Panic -> jet_target_panic_json(machine.panic)
+        .PanicReport -> "{{\"panic\":{jet_target_panic_json(machine.panic)},\"sink\":{jet_target_byte_sink_component_json(machine.byte_sink, "report")}}}"
+        .Startup -> "{{\"policy\":{jet_target_startup_json(machine.startup)},\"entry\":{jet_target_json_quote(machine.startup_entry)},\"vectors\":{jet_target_json_quote(machine.startup_vectors)},\"abi\":{jet_target_abi_json(machine.startup_abi)},\"placement\":{jet_target_json_quote(machine.startup_placement)}}}"
+    }
 }
 
 jet_target_environment_identity: fn(machine: TargetMachine) -> String Never! {
@@ -640,14 +651,19 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
     Val(build_parts[0])
 }
 
-// The OS `$build.os` folds on: the triple's OS, else the host's (`host_os` is
-// a key such as `macos`), else Linux. A web, Wasm or freestanding triple names
-// no OS, so it folds on the host's.
-jet_target_active_os_name: fn(target_triple: String, host_os: String) -> String Never! {
+// The OS `$build.os` folds on: Freestanding for a machine with no OS (a
+// bare-metal or no-OS Wasm machine), Web for the browser's Wasm triple, Wasm
+// for any other Wasm triple, else the triple's native OS, else the host's
+// (`host_os` is a key such as `macos`), else Linux.
+jet_target_active_os_name: fn(machine: TargetMachine, host_os: String) -> String Never! {
+    triple: machine.triple
     if {
-        target_triple.contains("windows") -> target_os_name(TTargetOS.Windows)
-        target_triple.contains("apple") || target_triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
-        target_triple.contains("linux") -> target_os_name(TTargetOS.Linux)
+        machine.no_os -> target_os_name(TTargetOS.Freestanding)
+        triple == "wasm32-unknown-unknown" -> target_os_name(TTargetOS.Web)
+        triple.starts_with("wasm") -> target_os_name(TTargetOS.Wasm)
+        triple.contains("windows") -> target_os_name(TTargetOS.Windows)
+        triple.contains("apple") || triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
+        triple.contains("linux") -> target_os_name(TTargetOS.Linux)
         else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
     }
 }
@@ -662,6 +678,7 @@ jet_target_machine_use_default: fn() -> TargetMachineUse Never! {
 jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
     if capability == {
         .Allocator -> "Target.Allocator"
+        .Memory -> "Target.Memory"
         .Atomic64 -> "Target.Atomic64"
         .MMIO -> "Target.MMIO"
         .Hardware -> "Target.Hardware"
@@ -673,6 +690,7 @@ jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
         .Scheduler -> "Target.Scheduler"
         .IORead -> "IO.Read"
         .IOWrite -> "IO.Write"
+        .Panic -> "Target.Panic"
         .PanicReport -> "Panic.Report"
         .Startup -> "Target.Startup"
     }
@@ -786,6 +804,13 @@ jet_target_memory_contains: fn(region: MemoryRegion, origin: Int, size: ByteSize
     access_end: origin + size.bytes
     access_end <= 18446744073709551615 && region.origin <= origin && access_end <= end
 }
+// Whether the machine declares a RAM region, the no-OS form of `Target.Memory`.
+jet_target_memory_declares_ram: fn(regions: [MemoryRegion]) -> Bool Never! {
+    loop region in regions {
+        if region.kind == .Ram -> return true
+    }
+    false
+}
 
 // Rust policy provider/provides methods.
 jet_target_clock_provider: fn(policy: ClockPolicy) -> ProviderContract? Never! {
@@ -819,6 +844,7 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
             .Provider(_) | .Fixed(_, _) -> true
             else -> false
         }
+        .Memory -> hosted || jet_target_memory_declares_ram(machine.memory)
         .Atomic64 -> jet_target_atomic_word_supported(machine.triple)
         .MMIO -> if machine.mmio == {
             .HostedDefault -> hosted
@@ -836,6 +862,11 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
             else -> false
         }
         .Scheduler -> (hosted && machine.scheduler == .HostedDefault) || jet_target_scheduler_provider(machine.scheduler) != None
+        .Panic -> if machine.panic == {
+            .HostedDefault -> hosted
+            .Abort | .Report(_) -> true
+            else -> false
+        }
         .IORead | .IOWrite | .PanicReport -> (hosted && machine.byte_sink == .HostedDefault) || jet_target_sink_provider(machine.byte_sink, capability) != None
         .Startup -> if machine.startup == {
             .HostedDefault -> hosted

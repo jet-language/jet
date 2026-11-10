@@ -12,7 +12,7 @@ variant_test_key: fn(variant: String, sysroot_digest: String, sdk_version: Strin
     toolchain: build.toolchain("cross-tc", tc_spec) ?? panic("declare toolchain")
     signer_spec := SigningIdentitySpec.new(signer, BuildProvenance.user_declared("keychain:{signer}", Val(LockRecord.new("signing:1", "sha256:sig"))))
     signing: build.signing_identity("signer", signer_spec) ?? panic("declare signing identity")
-    handle: build.action("compile", ActionSpec.cached([String]{"jetc", "--emit", "obj"}).with_outputs([String]{"build/out.o"}).with_cap(BuildEffect.Exec).with_toolchain(toolchain).with_signing_identity(signing).with_variant_identity(variant)) ?? panic("declare action")
+    handle: build.action("compile", ActionSpec.new([String]{"jetc", "--emit", "obj"}).with_outputs([String]{"build/out.o"}).with_cap(BuildEffect.Exec).with_toolchain(toolchain).with_signing_identity(signing).with_variant_identity(variant)) ?? panic("declare action")
     plan: build.plan() ?? panic("plan")
     action: plan.action(handle) ?? panic("action in plan")
     build_canonical_action_key(plan, action, [ActionInputSnapshot]{})

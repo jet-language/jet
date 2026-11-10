@@ -32,10 +32,14 @@
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
 // then as `jet check Core` (every Core body, called or not), with this
 // checkout as the toolchain root; a runtime unit as itself, which the
-// compiler admits as that Core row. A Core path with no row fails.
+// compiler admits as that Core row. Core/Effects/Effects.jet, Core's service
+// effects, and Core/Compiler/Meta.jet, the metaprogramming effects, are part
+// of the canonical effect source: each gets CoreSourceRows.jet's check, then
+// its own `jet check`. Any other Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
-// or a drifted compiler slice, the unsafe-region ratchet in --check mode
+// or a drifted compiler slice (its Jet tool runs under $JET too, not the seed),
+// the unsafe-region ratchet in --check mode
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, the vocabulary
 // rows in --check mode, which refuse a package Source/Vocabulary.jet that
@@ -100,7 +104,7 @@ run: fn() {
         process.exit(1)
     }
     jet: env_or("JET", process.which("jet") ?? "jet")
-    assembly: process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
+    assembly: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
@@ -117,6 +121,30 @@ assembly_refused: fn(output: String) -[Exec, IO]> Never {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
     process.exit(1)
+}
+
+// An environment setting of a child run.
+Setting: struct {
+    name: String
+    value: String
+}
+
+// The Jetpack assembly check's environment. Its Jet tool
+// (Tools/agent/CompilerPackages.jet `sources`) runs under JET_BIN, else the
+// current seed, against this checkout's Core; the seed's Core part table
+// predates every part Core gained since it (#6694 c18: Core/Crypto's
+// `__core_crypto_md` is no core module to it). So the tool runs under the jet
+// being checked, as Compiler/test.jet and Jetpack/Bootstrap/Check.jet run it.
+assembly_env: fn(jet: String) -> [Setting] {
+    [Setting]{Setting{name: "JETPACK_WORKER", value: "lanecheck"}, Setting{name: "JET_BIN", value: jet}}
+}
+
+assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
+    spec := process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo)
+    loop setting in assembly_env(jet) {
+        spec = spec.env(setting.name, setting.value)
+    }
+    spec
 }
 
 // The unsafe-region ratchet with $JET, else the `jet` on PATH; it never writes.
@@ -247,15 +275,9 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
     text := ""
     generated := 0
     if generator.len() > 0 {
-        command: generator.join(" ")
-        folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
-        receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
-        output: process.combined_output(receipt)
-        text = output
-        if receipt.code != 0 || receipt.signal != None {
-            generated = 1
-            text = "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"
-        }
+        ran: generator_check(repo, generator, relative)
+        text = ran.text
+        generated = ran.code
     }
     if !name.ends_with(".jet") || PRELUDE_GENERATOR_INPUTS.contains(name) -> return Val(Ran{code: generated, text: text})
     // A generator failure is reported beside the prelude check, not instead of it.
@@ -269,6 +291,30 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
         code = generated
     }
     Val(Ran{code: code, text: "{text}{checked.text}"})
+}
+
+// `generator` (a `--check` command) run for `relative`: code 1 and a closing
+// error line when a compiler copy of it differs.
+generator_check: fn(repo: String, generator: [String], relative: String) -[Env, Exec]> Ran Never! {
+    command: generator.join(" ")
+    folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
+    receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"}
+    output: process.combined_output(receipt)
+    if receipt.code != 0 || receipt.signal != None -> return Ran{code: 1, text: "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"}
+    Ran{code: 0, text: output}
+}
+
+// Core's service effects and the metaprogramming effects are no Core module:
+// the compiler embeds them in its canonical effect source, so their check is
+// CoreSourceRows.jet's, as for Prelude/Effects.jet, then the file's own
+// `jet check`.
+CORE_EFFECTS_SOURCE: "Core/Effects/Effects.jet"
+META_EFFECTS_SOURCE: "Core/Compiler/Meta.jet"
+
+core_effects_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    generated: generator_check(repo, [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}, relative)
+    checked: run_check(repo, jet, [String]{"check", target}, scratch)
+    Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
 }
 
 // --- compiler check ---------------------------------------------------------
@@ -331,6 +377,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
             print(PRELUDE_UNCHECKED)
             return 1
         }
+        relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> ran = core_effects_check(repo, jet, relative, target, scratch)
         relative.starts_with("Core/") && relative.ends_with(".jet") -> ran = core_check(repo, jet, relative, target, scratch)
         else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
     }
@@ -1037,4 +1084,12 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(memory_bytes("G"), -1)
     assert_eq(memory_bytes("0G"), -1)
     assert_eq(memory_bytes("20GB"), -1)
+}
+
+#Test("the Jetpack assembly check runs its Jet tool under the checked jet, not the seed") {
+    tool := ""
+    loop setting in assembly_env("/opt/jet/bin/jet") {
+        if setting.name == "JET_BIN" -> tool = setting.value
+    }
+    assert_eq(tool, "/opt/jet/bin/jet")
 }

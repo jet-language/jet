@@ -1,0 +1,88 @@
+// #6727: a trait value passed to a read parameter stays its caller's (a
+// temporary is lent for the call and ended after it); one passed to a move
+// parameter is the callee's, which ends it. Every payload's `Shared` context
+// is released once, so the count is back to the caller's own when each
+// scenario returns.
+package: {
+    name: "trait_values_free_at_their_last_owner_when_passed"
+    authority: { allow: [IO] }
+}
+
+Context: struct {
+    id: Int
+}
+
+Sink: trait {
+    finish: fn(&&self) -[]> Int
+    peek: fn(self) -[]> Int
+}
+
+Worker: struct {
+    context: Shared<Context>
+    n: Int
+}
+
+impl Worker.Sink {
+    finish: fn(&&self) -[]> Int {
+        self.n + 2
+    }
+    peek: fn(self) -[]> Int {
+        self.n + 1
+    }
+}
+
+Holder: struct {
+    sink: Sink
+}
+
+make: fn(s: Shared<Context>, n: Int) -> Sink {
+    Worker{context: s.copy(), n: n}
+}
+
+read_it: fn(k: Sink) -> Int {
+    k.peek()
+}
+
+read_twice: fn(k: Sink) -> Int {
+    read_it(k) + read_it(k)
+}
+
+own_it: fn(&&k: Sink) -> Int {
+    k.peek()
+}
+
+keep_it: fn(&&k: Sink) -> Holder {
+    Holder{sink: k}
+}
+
+read: fn(s: Shared<Context>) {
+    a: make(s, 1)
+    total: read_it(a) + read_twice(a) + read_it(make(s, 2)) + read_twice(make(s, 3))
+    print("read {total} {a.peek()} live {s.strong_count()}")
+}
+
+owned: fn(s: Shared<Context>) {
+    a: make(s, 1)
+    b: make(s, 2)
+    total: own_it(a) + own_it(make(s, 3))
+    h: keep_it(b)
+    print("owned {total} {h.sink.peek()} live {s.strong_count()}")
+}
+
+loops: fn(s: Shared<Context>) {
+    total := 0
+    loop i in 0..<5 {
+        total += read_it(make(s, i)) + own_it(make(s, i))
+    }
+    print("loops {total} live {s.strong_count()}")
+}
+
+run: fn() {
+    s := shared Context{id: 1}
+    read(s)
+    print("read dropped {s.strong_count()}")
+    owned(s)
+    print("owned dropped {s.strong_count()}")
+    loops(s)
+    print("loops dropped {s.strong_count()}")
+}

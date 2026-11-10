@@ -1,0 +1,10 @@
+// E3410: a compile-time value reads the process arguments, which exist only
+// when the program runs; the build refuses the call instead of baking one
+// build's arguments into every run.
+use process: core.process
+
+ARGUMENT_COUNT: comptime { process.args().len() }
+
+run: fn() {
+    print(ARGUMENT_COUNT)
+}

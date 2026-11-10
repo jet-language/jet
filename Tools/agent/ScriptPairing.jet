@@ -15,9 +15,13 @@
 // - a tool entry (`"mode": "tool"`) names a repository script as
 //   `tool.original` and its Jet twin as `tool.jet`, and holds the shared
 //   fixtures (`tool.fixtures`, a directory in the entry, when the tool reads
-//   any) and the parity check: `tool.cases`, each the `args` both programs
-//   run with and the `expected` output file in the entry that both must print
-//   byte for byte;
+//   any; a stand-in program there, such as a fake `jet`, is the pair's too)
+//   and the parity check: `tool.cases`, each the `args` both programs
+//   run with (and, when given, the `env` variables they run under and the
+//   `exit` code both must give, 0 otherwise) and the `expected` output file
+//   in the entry that both must print byte for byte
+//   (Tools/gauntlet/harness/run.mjs runs each program in a fresh copy of the
+//   fixtures; `--entry NAME` runs one entry);
 // - a comparison entry (any other mode) holds its peer programs itself: every
 //   file in its directory is paired when the entry lists `jet` among its
 //   languages and has its jet/ directory and its expected output (a service
@@ -275,6 +279,9 @@ tool_entry: fn(repo: String, name: String, tree: Dyn, found: &Entries) -[FS]> ()
         return
     }
     found.pairings.push(Pairing{path: original.copy(), pair: Pair{entry: name.copy(), twin: twin.copy()}})
+    // The fixtures are what the pair runs on: a stand-in program there (a
+    // fake `jet` or `git`) belongs to the pair, as a comparison entry's peers do.
+    if fixtures != "" -> found.pairings.push(Pairing{path: "{dir}/{fixtures.removesuffix("/")}/", pair: Pair{entry: name.copy(), twin: twin.copy()}})
 }
 
 // Why a comparison entry pairs nothing, or "" when it is complete.
@@ -480,6 +487,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "Tools/count/Count.jet", "run: fn() {{ print(3) }}\n")
     plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/count/count.py\", \"jet\": \"Tools/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"args\": [], \"expected\": \"expected/plain.out\"}}]}}}}\n")
     plant(dir, "{ENTRIES_ROOT}/count/fixtures/input.txt", "3\n")
+    plant(dir, "{ENTRIES_ROOT}/count/fixtures/fake-git.sh", "#!/bin/sh\necho 3\n")
     plant(dir, "{ENTRIES_ROOT}/count/expected/plain.out", "3\n")
     plant(dir, "{ENTRIES_ROOT}/sum/entry.json", "{{\"name\": \"sum\", \"mode\": \"batch\", \"languages\": [\"jet\", \"python\"]}}\n")
     plant(dir, "{ENTRIES_ROOT}/sum/python/main.py", "print(2)\n")
@@ -501,11 +509,12 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert(refused[2].starts_with("Tools/stray/report.mjs: a script in another language with no gauntlet pair; "))
     rows: census_rows(dir, checkout_files(dir) ?? panic(err.message), read_entries(dir))
     assert(rows.contains("Tools/count/count.py\tpaired\tcount Tools/count/Count.jet"))
+    assert(rows.contains("{ENTRIES_ROOT}/count/fixtures/fake-git.sh\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/sum/python/main.py\tpaired\tsum {ENTRIES_ROOT}/sum/jet"))
     assert(rows.contains("{WORKLOAD_ROOTS[0]}/w99-echo/peer.py\tpaired\t{WORKLOAD_ROOTS[0]}/w99-echo {WORKLOAD_ROOTS[0]}/w99-echo/run.jet"))
     assert(rows.contains("Compiler/Prelude/Web/Core/Clock.js\tbrowser\t"))
     assert(rows.contains("tests/cases/port_python/input.py\tsubject\t"))
-    assert_eq(census_counts(rows), "scripts 8: paired 3, unpaired 3, browser 1, subject 1")
+    assert_eq(census_counts(rows), "scripts 9: paired 4, unpaired 3, browser 1, subject 1")
     files.remove_all(dir) ?? ()
 }
 

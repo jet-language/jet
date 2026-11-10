@@ -1,0 +1,17 @@
+# #5976 c31: gethostname reads `$HOSTNAME` or /etc/hostname, socket_addr may
+# wait on the resolver, and a WebSocket connect or upgrade does network I/O and
+# waits on the handshake. A ceiling that leaves out any of these fails, and the
+# truthful ceilings check clean. Waiting is deny-only (D-AUTH-AMBIENT2): no
+# ceiling has to name `Time.Wait`, so a wait shows only against `!Time.Wait`.
+fixture: net_and_websocket_calls_name_every_effect_they_use.fixture
+step: jet check understated.jet
+exit: nonzero
+stderr: ~ "Error [jet.EffectBoundExceeded]: `host_env_only` uses the effect `FS.Read`" # gethostname reads a file
+stderr: ~ "Error [jet.ProhibitedEffectReached]: `addr_no_wait` reaches the `Time.Wait` effect" # socket_addr waits on the resolver
+stderr: ~ "Error [jet.ProhibitedEffectReached]: `dial_no_wait` reaches the `Time.Wait` effect" # ws.connect waits on the handshake
+stderr: ~ "Error [jet.ProhibitedEffectReached]: `upgrade_no_wait` reaches the `Time.Wait` effect" # ws.upgrade waits on the handshake
+stderr: ~ "Error [jet.EffectBoundExceeded]: `upgrade_wait_only` uses the effect `Net`" # ws.upgrade writes the handshake
+stderr: count "Error [" = 5 # only the understated ceilings fail
+step: jet check truthful.jet
+exit: 0
+stderr: !~ "Error [" # every truthful ceiling checks clean

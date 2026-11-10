@@ -9,22 +9,49 @@ use {
     ui: core.ui
 }
 
-// One frame drawn by Jet's software rasterizer on a headless window: a clear,
-// an opaque rectangle clipped at the top-left corner, two translucent
-// rectangles blended src-over and two lines of bitmap-font text. The program
-// saves the screen as a PAM image; the golden pins its SHA-256 on every tier.
+// Two frames drawn by Jet's software rasterizer on a headless window. The
+// first is a clear, an opaque rectangle clipped at the top-left corner and
+// two translucent rectangles blended src-over; the program saves it as a PAM
+// image, and the golden pins its SHA-256 on every tier. The second adds two
+// lines of anti-aliased text in Atkinson Hyperlegible Next and reports where
+// its ink fell: within the measured width from x, and within the two lines'
+// height from y.
 run: fn() {
-    window: ui.headless(width: 64, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 64x48 window")
+    window: ui.headless(width: 64, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}, [ui.UIEvent]{}}) ?? panic("a 64x48 window")
+    text: "Hi!\nJet"
+    width := 0
     loop frame in window.frames() {
-        if frame.index > 0 -> break
-        frame.clear_background(ui.color(10, 20, 30, 255))
-        frame.draw_rectangle(-4, -4, 24, 20, ui.color(200, 40, 40, 255))
-        frame.draw_rectangle(12, 8, 30, 24, ui.color(40, 200, 90, 128))
-        frame.draw_rectangle(30, 20, 40, 40, ui.color(255, 255, 255, 64))
-        frame.draw_text("Hi!\nJet", 4, 28, 10, ui.color(255, 220, 120, 255))
+        if frame.index > 1 -> break
+        if frame.index == 0 {
+            frame.clear_background(ui.color(10, 20, 30, 255))
+            frame.draw_rectangle(-4, -4, 24, 20, ui.color(200, 40, 40, 255))
+            frame.draw_rectangle(12, 8, 30, 24, ui.color(40, 200, 90, 128))
+            frame.draw_rectangle(30, 20, 40, 40, ui.color(255, 255, 255, 64))
+            next
+        }
+        save_pam(window.load_image_from_screen(), "Frame.pam")
+        width = ui.measure_text(text, 10)
+        frame.draw_text(text, 4, 4, 10, ui.color(255, 220, 120, 255))
     }
-    save_pam(window.load_image_from_screen(), "frame.pam")
+
     print("canvas=64x48 frame=presented")
+    shapes: files.read_bytes("Frame.pam") ?? panic("read Frame.pam: {err}")
+    with_text: window.load_image_from_screen().pixels()
+    header: shapes.len() - with_text.len()
+    left := 64
+    right := -1
+    top := 48
+    bottom := -1
+    loop at in 0..<with_text.len() {
+        if with_text[at] == shapes[header + at] -> next
+        x: (at /% 4) %% 64
+        y: (at /% 4) /% 64
+        left = if x < left -> x else -> left
+        right = if x > right -> x else -> right
+        top = if y < top -> y else -> top
+        bottom = if y > bottom -> y else -> bottom
+    }
+    print("text width={width} ink_inside={left >= 4 && right < 4 + width && top >= 4 && bottom < 4 + 26} second_line={bottom >= 4 + 13}")
 }
 
 // An image as a PAM file (P7, RGB_ALPHA).

@@ -1,0 +1,11 @@
+// A repeating source yields a finite prefix lazily: cycle(1_000_000_000)
+// followed by take(4) never builds the billion items. An empty repeating
+// source ends at once instead of spinning.
+run: fn() {
+    items: [Int]{1, 2, 3}
+    print("{items.lazy().cycle(7).to_list()}")
+    print("{items.lazy().cycle(1000000000).take(4).to_list()}")
+    empty: [Int]{}
+    print("{empty.lazy().cycle(5).to_list()} {empty.lazy().repeat(1000000000).to_list()}")
+    print("done")
+}

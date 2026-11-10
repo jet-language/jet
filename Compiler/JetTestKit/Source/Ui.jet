@@ -284,6 +284,7 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
     if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     loop tier in ctx.options.tiers {
         args := [String]{ctx.env.jet, if tier == "o0" -> "run" else -> "build", fixed}
+        if tier == "o1" -> args.push("--optimize=basic")
         if tier == "o2" -> args.push("--release")
         built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, [U8]{}, overlay)
         failure: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
@@ -406,7 +407,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     }
     work: if call.unlocked_toolchain -> source else -> files.join(source, entry.project)
     if call.unlocked_toolchain {
-        kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
+        kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: \"a0.9\"\n")
         kit_exec_copy_file(original, files.join(source, "main.jet"))
     }
     overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}

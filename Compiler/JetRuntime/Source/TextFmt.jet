@@ -1,8 +1,10 @@
-// Native core.text.fmt.decimal: jet_fmt_decimal / fixed_half_away. Round value
-// * 10^precision (the scale built by repeated `* 10.0`) half away from zero;
-// past the i64 range, round the exact binary expansion half away at the same
-// place. Never print a negative zero. The Word precision is the raw carrier
-// word the Rust adapter receives.
+// Native core.text.fmt.decimal: jet_fmt_decimal. Owner ruling 2026-10-05
+// (#4588): round the exact binary value at `precision` decimals, half away
+// from zero (2.675 -> "2.67", 0.125 -> "0.13"), and never print a negative
+// zero. One correctly rounded `value * 10^precision` names that rounding
+// unless it lies within an ulp of a half; then, and past 2^52 or 22 places,
+// the exact binary expansion decides (text_fmt_exact). The Word precision is
+// the raw carrier word the Rust adapter receives.
 TEXT_FMT_BIG_BYTES: I64{328}
 
 // Exact Big32x40 (FloatShortest.jet) division by a small divisor, in place;
@@ -141,22 +143,33 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
         return jet_rt_string_clone(if (raw < I64{0}) -> rt_static_text("-inf") else -> rt_static_text("inf"))
     }
     places: if (precision < I64{0}) -> I64{0} else -> precision
-    scale := Float{1.0}
-    at := I64{0}
-    loop at < places {
-        scale = scale * Float{10.0}
-        if ((rt_f64_bits(scale).bit_and(I64{9223372036854775807})) == I64{9218868437227405312}) -> break
-        at += I64{1}
+    // rounded: the magnitude bits of the rounded product, or -1 for the exact
+    // expansion. 10^places is exact up to 22 places, so the product is off by
+    // at most half an ulp, and `margin` (product * 2^-51) is at least an ulp.
+    rounded := I64{-1}
+    if (places <= I64{22}) {
+        scale := Float{1.0}
+        at := I64{0}
+        loop at < places {
+            scale = scale * Float{10.0}
+            at += I64{1}
+        }
+        product: rt_f64_from_bits(rt_f64_bits(value * scale).bit_and(I64{9223372036854775807}))
+        if (product < Float{4503599627370496.0}) {
+            floor: libm_floor(product)
+            fraction: product - floor
+            margin: product * Float{0.0000000000000004440892098500626}
+            if (fraction - Float{0.5} > margin) -> rounded = rt_f64_bits(floor + Float{1.0})
+            if (Float{0.5} - fraction > margin) -> rounded = rt_f64_bits(floor)
+        }
     }
-    rounded: rt_f64_bits(libm_round(value * scale)).bit_and(I64{9223372036854775807})
     body := I64{0}
-    // rounded < 2^63 (a NaN product also takes the exact expansion).
-    if (rounded < I64{4890909195324358656}) {
+    if (rounded >= I64{0}) {
         shift: (rounded >> I64{52}) - I64{1075}
         significand: (rounded.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
         whole: if {
             (rounded == I64{0}) -> I64{0}
-            // rounded < 2^63: shift is at most 10.
+            // rounded <= 2^52: shift is at most 0.
             (shift >= I64{0}) -> significand << shift.bit_and(I64{15})
             // significand < 2^53.
             (shift < I64{-52}) -> I64{0}

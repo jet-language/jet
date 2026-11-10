@@ -1,11 +1,14 @@
 // `jet explain effects [<file>[:<line>]] [--caps] [--json]`: every effect cap
 // in force at one site, nearest first, one line per rung (block, function,
-// type when the method's type writes a cap, module, package, run), then what
-// the site reaches with the first call that reaches each effect. A rung that
-// writes nothing prints `(none written)`.
+// trait when the method implements a capped trait, type, module for the
+// inline modules around it, the file head and the caps where the file's
+// module is declared, package, run), then what the site reaches with the
+// first call that reaches each effect. A type or module rung that writes
+// nothing prints `(none written)`.
 // The facts are the checked program's own, read through the walker `jet
 // inspect rights` uses (InspectRights.jet) and the semantic index's
-// witnesses; `--caps` lists every module cap under a file or directory.
+// witnesses; `--caps` lists every file-head, module, type and trait cap under
+// a file or directory.
 use {
     cli_files: core.files
     jet_driver.[
@@ -55,19 +58,23 @@ JetCLIEffectsScope: struct {
 }
 
 // The innermost function holding the site, its effect-graph key, and the
-// inline module caps around the site, outermost first.
+// inline module, type and trait caps around the site, outermost first; each
+// cap's `scope` names its rung.
 JetCLIEffectsSite: struct {
     key: String
     function: Func?
     caps: [ModuleCap]
 }
 
-// One module cap for `--caps`.
+// One written cap for `--caps`: `kind` is `file`, `module`, `type` or
+// `trait`, and `name` the module, type or trait it caps (empty for a file
+// head).
 JetCLIEffectsCapRow: struct {
     file: String
     line: Int
     cap: String
-    module_name: String
+    kind: String
+    name: String
 }
 
 // The site the command line names, resolved before anything is compiled. A
@@ -82,7 +89,7 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     colon: jet_cli_effects_line_colon(target)
     if colon >= 0 {
         written_line: target.slice((colon + 1)..<target.len())
-        if caps -> return jet_cli_fail("E2104", "`--caps` lists the module caps under a file or directory, not at one line", jet_cli_why("E2104"), "drop `:{written_line}`, or drop `--caps`", color, JET_DRIVER_EXIT_USAGE)
+        if caps -> return jet_cli_fail("E2104", "`--caps` lists the effect caps under a file or directory, not at one line", jet_cli_why("E2104"), "drop `:{written_line}`, or drop `--caps`", color, JET_DRIVER_EXIT_USAGE)
         site: jet_cli_explain_marker_site(target) ?? return jet_cli_fail("E2104", err.message, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
         line = Int.parse(written_line) ?? 0
         target = site.file
@@ -321,28 +328,31 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
 }
 
 // The innermost function holding `offset`, keyed as `jet inspect rights`
-// keys it (jet_cli_rights_collect), and the inline module and type caps
-// around it.
+// keys it (jet_cli_rights_collect), and the inline module, type and trait
+// caps around it.
 jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: &JetCLIEffectsSite) Never! {
     loop item in items {
         if item == {
             .Func(function) -> jet_cli_effects_take(found, "{alias}::{namespace}{function.name}", function, caps, offset)
             .Impl(definition) -> {
-                typed: jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name))
+                typed := jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name), "type")
+                if definition.trait_name == .Val(trait_name) -> typed = jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, trait_name), "trait")
                 loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.type_name}::{method.name}", method, typed, offset)
             }
             .Struct(definition) -> {
-                typed: jet_cli_effects_with_cap(caps, definition.cap)
+                typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
                 loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
+                    traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, traited, offset)
                 }
             }
             .Enum(definition) -> {
-                typed: jet_cli_effects_with_cap(caps, definition.cap)
+                typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
                 loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
+                    traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, traited, offset)
                 }
             }
             .CodeModule(nested) -> {
@@ -359,11 +369,20 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
     }
 }
 
-// `caps` with a type's cap innermost, when the type has one.
-jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?) -> [ModuleCap] Never! {
+// `caps` with a type or trait cap innermost, on the `scope` rung, when one
+// is written.
+jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?, scope: String) -> [ModuleCap] Never! {
     typed := caps.copy()
-    if cap == .Val(value) -> typed.push(value.copy())
+    if cap == .Val(value) -> typed.push(ModuleCap{owner: value.owner.copy(), scope: scope, entries: value.entries.copy(), span: value.span})
     typed
+}
+
+// The cap of the trait `name` declared beside an impl of it.
+jet_cli_effects_trait_cap: fn(items: [Item], name: String) -> ModuleCap? Never! {
+    loop item in items {
+        if item == .Trait(definition) && definition.name == name -> return definition.cap
+    }
+    None
 }
 
 // The cap of the struct or enum `name` declared beside an impl of it.
@@ -619,17 +638,24 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
         loop view in jet_cli_rights_sorted(views) -> jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
     }
+    // The trait and type rungs come before the module rungs; the file-head
+    // cap is a module rung, written at the head of the file.
+    type_rungs := [JetCLIEffectsRung]{}
     cap_rungs := [JetCLIEffectsRung]{}
     loop index in 0..<found.caps.len() {
         cap: found.caps[found.caps.len() - 1 - index]
-        cap_rungs.push(JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)})
+        rung: JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)}
+        if cap.scope == "module" -> cap_rungs.push(rung) else -> type_rungs.push(rung)
     }
+    if doc_module.file_cap == .Val(head) -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
     jet_cli_effects_file_caps(modules, selected, 0, cap_rungs)
-    module_written := false
-    loop rung in cap_rungs {
-        if rung.rung == "module" -> module_written = true
+    type_written := false
+    loop rung in type_rungs {
+        if rung.rung == "type" -> type_written = true
     }
-    if !module_written -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    if !type_written -> type_rungs.push(JetCLIEffectsRung{rung: "type", text: "(none written)", written: false, site: ""})
+    if cap_rungs.len() == 0 -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    loop rung in type_rungs -> rungs.push(rung)
     loop rung in cap_rungs -> rungs.push(rung)
     rungs.push(jet_cli_effects_package_rung(result.authority_policy))
     rungs.push(JetCLIEffectsRung{rung: "run", text: JET_CLI_EXPLAIN_EFFECTS_RUN, written: false, site: ""})
@@ -652,26 +678,44 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     JetDriverVerbOutput{stdout: "{header}\n{lines.join("\n")}\nreaches: {reach_line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind: String, name: String) -> JetCLIEffectsCapRow Never! {
+    JetCLIEffectsCapRow{file: doc_module.path.copy(), line: diagnostic_line_at(doc_module.source, cap.span.start), cap: jet_cli_effects_cap_text(cap.entries), kind: kind, name: name.copy()}
+}
+
 jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], rows: &[JetCLIEffectsCapRow]) Never! {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
-                if definition.cap == .Val(cap) -> rows.push(JetCLIEffectsCapRow{file: doc_module.path.copy(), line: diagnostic_line_at(doc_module.source, cap.span.start), cap: jet_cli_effects_cap_text(cap.entries), module_name: definition.name.copy()})
+                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "module", definition.name))
                 if definition.body == .Val(body) -> jet_cli_effects_collect_caps(doc_module, body, rows)
             }
-            .GenericModule(nested) -> jet_cli_effects_collect_caps(doc_module, nested.body, rows)
+            .GenericModule(nested) -> {
+                if nested.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "module", nested.name))
+                jet_cli_effects_collect_caps(doc_module, nested.body, rows)
+            }
+            .Struct(definition) -> {
+                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+            }
+            .Enum(definition) -> {
+                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+            }
+            .Trait(definition) -> {
+                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "trait", definition.name))
+            }
             else -> {}
         }
     }
 }
 
-// `--caps`: every module cap written in a checked module under `scope`
-// (a canonical file or directory path), sorted by path, then line.
+// `--caps`: every file-head, module, type and trait cap written in a checked
+// module under `scope` (a canonical file or directory path), sorted by path,
+// then line.
 jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, json: Bool) -[FS]> JetDriverVerbOutput Never! {
     rows := [JetCLIEffectsCapRow]{}
     loop doc_module in modules {
         path: cli_files.realpath(doc_module.physical_path) ?? doc_module.physical_path
         if path != scope && !path.starts_with("{scope}/") -> next
+        if doc_module.file_cap == .Val(head) -> rows.push(jet_cli_effects_cap_row(doc_module, head, "file", ""))
         jet_cli_effects_collect_caps(doc_module, doc_module.items, rows)
     }
     loop index in 1..<rows.len() {
@@ -691,7 +735,8 @@ jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, js
             jet_cli_status_field("file", jet_cli_status_text(row.file)),
             jet_cli_status_field("line", jet_cli_status_int(row.line)),
             jet_cli_status_field("cap", jet_cli_status_text(row.cap)),
-            jet_cli_status_field("module", jet_cli_status_text(row.module_name)),
+            jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+            jet_cli_status_field("name", jet_cli_status_text(row.name)),
         })
         fields: [JetCLIStatusField]{
             jet_cli_status_field("scope", jet_cli_status_text(scope)),
@@ -700,6 +745,6 @@ jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, js
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("explain.effects", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if rows.len() == 0 -> return JetDriverVerbOutput{stdout: "(none written)\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    lines: loop row in rows -> "{row.file}:{row.line}  {row.cap}  {row.module_name}"
+    lines: loop row in rows -> if row.name == "" -> "{row.file}:{row.line}  {row.cap}  {row.kind}" else -> "{row.file}:{row.line}  {row.cap}  {row.kind} {row.name}"
     JetDriverVerbOutput{stdout: "{lines.join("\n")}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

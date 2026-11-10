@@ -670,11 +670,9 @@
       {"name":"stream_error","signature":"(kind: DataErrorKind, reason: String, operation: String) -> DataError"}
     ],
     "core.db": [
-      {"name":"bind","signature":"(driver: __Driver, statement: U64, params: [DBValue]) -> DBError?"},
-      {"name":"c_string","signature":"(address: U64) -> String"},
-      {"name":"CachedStatement.close","signature":"(&&self)"},
+      {"name":"bind","signature":"(driver: &__Driver, statement: Int, params: [DBValue]) -> DBError?"},
       {"name":"cell_wire_width","signature":"(value: DBValue) -> Int"},
-      {"name":"control","signature":"(driver: __Driver, sql: String) -> Bool"},
+      {"name":"control","signature":"(driver: &__Driver, sql: String) -> Bool"},
       {"name":"DBConnection.commit","signature":"(self) -> Bool"},
       {"name":"DBConnection.display","signature":"(self) -> String"},
       {"name":"DBError.debug","signature":"(&&self) -> String"},
@@ -698,16 +696,13 @@
       {"name":"error","signature":"(driver: __Driver) -> core.db.DBError"},
       {"name":"pool_receipt_text","signature":"(receipt: DBPoolReceipt) -> String"},
       {"name":"prepare","signature":"(driver: &__Driver, sql: String) -> core.db.CachedStatement"},
-      {"name":"raw","signature":"(driver: __Driver) -> U64"},
       {"name":"release","signature":"(driver: &__Driver, statement: &&CachedStatement)"},
       {"name":"render_value","signature":"(value: DBValue) -> String"},
       {"name":"SQL.display","signature":"(self) -> String"},
       {"name":"SQL.params","signature":"(self) -> [DBValue]"},
       {"name":"SQL.raw","signature":"(text: String) -> core.db.SQL"},
       {"name":"SQL.template","signature":"(self) -> String"},
-      {"name":"SqliteDB.close","signature":"(&&self)"},
-      {"name":"SqliteStmt.close","signature":"(&&self)"},
-      {"name":"statement_raw","signature":"(statement: CachedStatement) -> U64"},
+      {"name":"step_statement","signature":"(driver: &__Driver, statement: Int) -> Int"},
       {"name":"tagged_width","signature":"(payload: Int) -> Int"}
     ],
     "core.db.sql": [
@@ -1202,7 +1197,6 @@
       {"name":"parse_content_length_value","signature":"(text: String) -> Int?"},
       {"name":"parse_decimal","signature":"(text: String) -> Int?"},
       {"name":"parse_status_line","signature":"(line: String) -> StatusLine?"},
-      {"name":"percent_decode","signature":"(text: String) -> String"},
       {"name":"percent_encode","signature":"(text: String) -> String"},
       {"name":"request_target_path","signature":"(url: String) -> String"},
       {"name":"response_forbids_body","signature":"(code: Int) -> Bool"},
@@ -1277,7 +1271,7 @@
       {"name":"queue_acknowledge_transaction","signature":"(queue: JobQueue, claim: JobQueueClaim, result: JobResult) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
       {"name":"queue_age","signature":"(value: Int?, now: Int) -> Int"},
       {"name":"queue_backoff","signature":"(retry_delay_ms: Int, max_retry_delay_ms: Int, attempts: Int) -> Int"},
-      {"name":"queue_begin","signature":"(driver: db.__Driver)"},
+      {"name":"queue_begin","signature":"(driver: &db.__Driver)"},
       {"name":"queue_cancel_on_driver","signature":"(driver: &db.__Driver, authority: String, name: String, id: String, reason: String, lease_token: String?) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
       {"name":"queue_cancel_transaction","signature":"(queue: JobQueue, id: String, reason: String, lease_token: String?) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
       {"name":"queue_claim_on_driver","signature":"(driver: &db.__Driver, authority: String, name: String, worker: String, limit: Int, max_attempts: Int, lease_ms: Int, now: Int) -> (claims: [JobQueueClaim], observations: [QueueTransition])"},
@@ -1297,7 +1291,7 @@
       {"name":"queue_fail_transaction","signature":"(queue: JobQueue, claim: JobQueueClaim, failure: JobError) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
       {"name":"queue_find","signature":"(driver: &db.__Driver, authority: String, name: String, id: String) -> core.jobs.StoredJob"},
       {"name":"queue_find_by_key","signature":"(driver: &db.__Driver, authority: String, name: String, key: String) -> StoredJob?"},
-      {"name":"queue_finish","signature":"<T>(driver: db.__Driver, value: &&T) -> T"},
+      {"name":"queue_finish","signature":"<T>(driver: &db.__Driver, value: &&T) -> T"},
       {"name":"queue_frame","signature":"(input: &[U8], field: [U8])"},
       {"name":"queue_heartbeat_on_driver","signature":"(driver: &db.__Driver, authority: String, name: String, lease_ms: Int, claim: JobQueueClaim) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
       {"name":"queue_heartbeat_transaction","signature":"(queue: JobQueue, claim: JobQueueClaim) -> (receipt: JobQueueReceipt, observation: QueueTransition?)"},
@@ -3108,7 +3102,6 @@
       {"name":"color_words","signature":"(color: TUIColor?) -> core.tui.ColorWords"},
       {"name":"nonnegative","signature":"(value: Float) -> Float"},
       {"name":"nonnegative_int","signature":"(value: Int) -> Int"},
-      {"name":"normalized_style_test_node","signature":"(words: StyleWords) -> UINode"},
       {"name":"normalized_weight","signature":"(weight: Float) -> Float"},
       {"name":"rgb_ansi16","signature":"(red: Int, green: Int, blue: Int) -> Int"},
       {"name":"rgb_cube","signature":"(value: Int) -> Int"},
@@ -3121,11 +3114,7 @@
     ],
     "core.ui": [
       {"name":"preview_registry","signature":"(&&entries: [UIPreview]) -> core.ui.UIPreviewRegistry"},
-      {"name":"transfer_node","signature":"(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, children: [UINode], color: String?) -> UINode"},
-      {"name":"UIPreviewRegistry.render","signature":"(self, name: String) -> UINode"}
-    ],
-    "core.vendor.sqlite3.fixture.run": [
-      {"name":"run","signature":"()"}
+      {"name":"UIPreviewRegistry.render","signature":"(self, name: String) -> core.ui.UINode"}
     ],
     "core.watcher": [
       {"name":"has_prefix","signature":"(text: String, prefix: String) -> Bool"},

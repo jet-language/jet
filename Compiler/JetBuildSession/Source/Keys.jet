@@ -196,9 +196,9 @@ build_session_dep_outputs: fn(state: BuildSessionState, action: Int) -> [String]
     paths
 }
 // Every field of the executor's canonical action key (Jetpack's
-// build_canonical_action_key): a step is a generic, cached, compiler-unowned
-// action with no environment, helpers, labels, variant, legacy wrapper or
-// plugin, in the cpu pool, so those fields are written as those constants.
+// build_canonical_action_key): a step is a generic, compiler-unowned action
+// with no environment, helpers, labels, variant, legacy wrapper or plugin, in
+// the cpu pool, so those fields are written as those constants.
 build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never! {
     action: state.actions[id]
     bytes := [U8]{}
@@ -224,8 +224,6 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     build_key_texts(bytes, build_session_dep_outputs(state, id))
     build_key_text(bytes, "caps")
     loop cap in action.caps -> build_key_text(bytes, cap)
-    build_key_text(bytes, "cache")
-    build_key_text(bytes, "cached")
     build_key_text(bytes, "compiler-version")
     build_key_text(bytes, state.compiler_version)
     build_key_text(bytes, "helper-versions")

@@ -1,0 +1,333 @@
+#!/usr/bin/env jet
+// Batch10.jet BATCH SUB...: one integration cycle that does not let one bad
+// submission hold back the rest.
+//   1. SUBs whose meta says `seed:` something other than none wait for that
+//      seed and are listed as HELD.
+//   2. integrate10.sh BATCH with the rest.
+//   3. If the census failed, a SUB is QUARANTINED when a census row names
+//      one of its touched files (Core/X/Y.jet, <corelib>/Core/X/Y.jet, or
+//      module path Core/X/Y), or an error's quoted source line (`NNN | text`
+//      under an `Error [` header in census/*.err) is a line its patch adds,
+//      with every later SUB of the same lead. integrate10.sh BATCH-r then
+//      runs once more with the others.
+//
+// The Jet twin of batch10.sh (gauntlet tool entry batch10): the batches live
+// in $JET_SCRATCH_ROOT/lanes/Main/integ, as Tools/agent/roots.sh sets it, and
+// integrate10.sh is the one in $JET_ORCHESTRATOR_DIR, this program's
+// directory unless set.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+}
+
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> fallback.copy() else -> value
+}
+
+// What the machine's jet/env file sets `name` to (the default of its
+// `${NAME:-default}` form), None when it sets nothing.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
+    defaulted: "${{{name}:-"
+    found := ""
+    seen := false
+    loop line in text.lines() {
+        parts: line.trim().removeprefix("export ").partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
+// file, else `fallback`.
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    found: env_or(name, "")
+    if found != "" -> return found
+    env_file_value(name) ?? fallback.copy()
+}
+
+scratch_root: fn() -[Env, FS]> String Never! {
+    root("JET_SCRATCH_ROOT", root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev"))
+}
+
+// `text` without its trailing newlines, as `$(...)` gives it.
+chomp: fn(text: String) -> String Never! {
+    out := text.copy()
+    loop out.ends_with("\n") -> out = out.removesuffix("\n")
+    out
+}
+
+is_word: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+is_blank: fn(byte: U8) -> Bool Never! { byte == U8{32} || byte == U8{9} }
+
+// `text` without the spaces and tabs at its start (`front`) or its end.
+trim_blanks: fn(text: String, front: Bool) -> String Never! {
+    raw: text.bytes()
+    start := 0
+    end := raw.len()
+    if front {
+        loop start < end && is_blank(raw[start]) -> start += 1
+    } else {
+        loop end > start && is_blank(raw[end - 1]) -> end -= 1
+    }
+    String.from_bytes(raw.slice(start, end)) ?? text.copy()
+}
+
+// What `awk -F': *' '$1=="seed"{print $2}' META` prints, as `$(...)` keeps it.
+seed_of: fn(meta: String) -> String Never! {
+    values := [String]{}
+    loop line in meta.lines() {
+        parts: line.partition(":")
+        if parts.head != "seed" -> next
+        rest := parts.tail.copy()
+        loop rest.starts_with(" ") -> rest = rest.removeprefix(" ")
+        values.push(rest.partition(":").head)
+    }
+    chomp(values.join("\n"))
+}
+
+// The text of every file in `dir` whose name ends with `suffix` (and starts
+// with `prefix`), joined as `cat` joins them.
+cat_matching: fn(dir: String, prefix: String, suffix: String) -[FS]> String Never! {
+    names := [String]{}
+    loop entry in (files.list_dir(dir) ?? return "") {
+        if !entry.name.starts_with(".") && entry.name.starts_with(prefix) && entry.name.ends_with(suffix) -> names.push(entry.name.copy())
+    }
+    names.sort()
+    out := ""
+    loop name in names -> out = "{out}{files.read("{dir}/{name}") ?? ""}"
+    out
+}
+
+// The names a generator quotes: the last dot-part, longer than 3, of each
+// `quoted` span.
+quoted_names: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    loop line in text.lines() {
+        raw: line.bytes()
+        at := 0
+        loop at < raw.len() {
+            if raw[at] != 96 {
+                at += 1
+                next
+            }
+            close := at + 1
+            loop close < raw.len() && raw[close] != 96 -> close += 1
+            if close >= raw.len() -> break
+            if close == at + 1 {
+                at += 1
+                next
+            }
+            quoted: String.from_bytes(raw.slice(at + 1, close)) ?? ""
+            last: quoted.rpartition(".").tail
+            if last.len() > 3 && !out.contains(last) -> out.push(last)
+            at = close + 1
+        }
+    }
+    out
+}
+
+// The lines a patch adds (`^\+[^+]`), without the `+`.
+added_lines: fn(patch: String) -> [String] Never! {
+    out := [String]{}
+    loop line in patch.lines() {
+        raw: line.bytes()
+        if raw.len() >= 2 && raw[0] == 43 && raw[1] != 43 -> out.push(line.removeprefix("+"))
+    }
+    out
+}
+
+// Whether `line` holds `name` as a whole word, as `grep -w` matches it.
+has_word: fn(line: String, name: String) -> Bool Never! {
+    parts: line.split(name).to_list()
+    loop index in 1..<parts.len() {
+        before: parts[index - 1].bytes()
+        after: parts[index].bytes()
+        if before.len() > 0 && is_word(before[before.len() - 1]) -> next
+        if after.len() > 0 && is_word(after[0]) -> next
+        return true
+    }
+    false
+}
+
+// The file a census row names: column 2 without `<corelib>/`, its final
+// `:line.col` and `.jet`.
+row_path: fn(field: String) -> String Never! {
+    parts: field.partition("<corelib>/")
+    out := "{parts.head}{parts.tail}"
+    if parts.sep == "" -> out = field.copy()
+    colon: out.rfind(":")
+    if colon >= 0 {
+        rest: out.bytes().slice(colon + 1, out.bytes().len())
+        numeric := true
+        loop byte in rest {
+            code: Int.from_u8(byte)
+            if code != 46 && (code < 48 || code > 57) -> numeric = false
+        }
+        if numeric -> out = String.from_bytes(out.bytes().slice(0, colon)) ?? out
+    }
+    out.removesuffix(".jet")
+}
+
+census_rows: fn(integ: String) -[FS]> [String] Never! {
+    text: "{cat_matching("{integ}/census", "", "keep-going.tsv")}{files.read("{integ}/census.out") ?? ""}"
+    out := [String]{}
+    loop line in text.lines() {
+        fields: line.split("\t").to_list()
+        if fields.len() < 2 -> next
+        path: row_path(fields[1])
+        if !out.contains(path) -> out.push(path)
+    }
+    out
+}
+
+// Whether `line` is a quoted source line `  NNN | text`; gives the text.
+quoted_source: fn(line: String) -> String? Never! {
+    raw: line.bytes()
+    at := 0
+    loop at < raw.len() && raw[at] == 32 -> at += 1
+    digits: at
+    loop at < raw.len() && Int.from_u8(raw[at]) >= 48 && Int.from_u8(raw[at]) <= 57 -> at += 1
+    if at == digits || at + 3 > raw.len() || raw[at] != 32 || raw[at + 1] != 124 || raw[at + 2] != 32 -> return None
+    at += 3
+    loop at < raw.len() && raw[at] == 32 -> at += 1
+    Val(String.from_bytes(raw.slice(at, raw.len())) ?? "")
+}
+
+// Source lines quoted under Error headers (not warnings), trimmed.
+error_lines: fn(integ: String) -[FS]> [String] Never! {
+    out := [String]{}
+    in_error := false
+    loop line in cat_matching("{integ}/census", "", ".err").lines() {
+        if line.starts_with("Error [") {
+            in_error = true
+            next
+        }
+        if line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
+        if !in_error -> next
+        text: trim_blanks(quoted_source(line) ?? next, false)
+        if text.len() > 8 && !out.contains(text) -> out.push(text)
+    }
+    out
+}
+
+lead_of: fn(name: String) -> String Never! {
+    if name.contains("-") -> name.slice(0, name.rfind("-")) else -> name.copy()
+}
+
+// Whether an earlier blamed SUB has the same lead.
+same_lead: fn(blamed: [String], name: String) -> Bool Never! {
+    lead: lead_of(name)
+    loop other in blamed {
+        if lead_of(other) == lead -> return true
+    }
+    false
+}
+
+no_apply: fn(integ: String, name: String) -[FS]> Bool Never! {
+    chomp(files.read("{integ}/{name}.status") ?? "") == "NOAPPLY"
+}
+
+size_of: fn(path: String) -[FS]> Int Never! {
+    if files.stat(path) == {
+        .Ok(info) -> info.size
+        .Err(_) -> -1
+    }
+}
+
+// Runs integrate10.sh with inherited stdio and gives its exit code.
+integrate: fn(orchestrator: String, batch: String, subs: [String]) -[Exec, IO, Time.Wait]> Int Never! {
+    argv := [String]{"{orchestrator}/integrate10.sh", batch.copy()}
+    argv.extend(subs.copy())
+    receipt: process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+        term.eprint("batch: {argv[0]}: {err}")
+        return 127
+    }
+    if receipt.signal != None -> 128 + (receipt.signal ?? 0) else -> receipt.code
+}
+
+fail: fn(message: String, code: Int) -[Exec, IO]> Never {
+    print(message)
+    process.exit(code)
+}
+
+run: fn() {
+    main: "{scratch_root()}/lanes/Main"
+    orchestrator: env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
+    // One batch at a time: two runs of the same BATCH would write into one integ dir.
+    _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
+    args: process.args()
+    if args.len() == 0 {
+        term.eprint("usage: jet Tools/agent/orchestrator/Batch10.jet BATCH SUB...")
+        process.exit(1)
+    }
+    batch: args[0]
+    run := [String]{}
+    loop given in args.slice(1, args.len()) {
+        sub: given.removesuffix("/")
+        seed: seed_of(files.read("{sub}/meta") ?? "")
+        if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
+    }
+    // rc 2: the export or the apply step stopped (integrate10 printed why); there is no census to attribute.
+    if integrate(orchestrator, batch, run) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
+    integ: "{main}/integ/{batch}"
+    if files.is_file("{integ}/REGENFAIL") {
+        // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
+        // __from_bits_f32), with every later SUB of the same lead.
+        names: quoted_names(cat_matching(integ, "regen.", ".out"))
+        keep := [String]{}
+        blamed := [String]{}
+        loop sub in run {
+            name: files.basename(sub)
+            if no_apply(integ, name) -> next
+            added: added_lines(files.read("{sub}/patch") ?? "")
+            hit: added.any(line -> names.any(quoted -> has_word(line, quoted))) || same_lead(blamed, name)
+            if hit -> blamed.push(name) else -> keep.push(sub.copy())
+        }
+        if blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
+        print("QUARANTINED (regen) {blamed.join(" ")}")
+        process.exit(integrate(orchestrator, "{batch}-r", keep))
+    }
+    loop line in (files.read("{integ}/REPORT.md") ?? "").lines() {
+        if line.starts_with("Census rc=0 ") -> process.exit(0)
+    }
+    rows: census_rows(integ)
+    errors: error_lines(integ)
+    keep := [String]{}
+    blamed := [String]{}
+    loop sub in run {
+        name: files.basename(sub)
+        if no_apply(integ, name) -> next
+        hit := false
+        if rows.len() > 0 {
+            loop path in (files.read("{integ}/{name}.files") ?? "").lines() {
+                if path != "" && (rows.contains(path.removesuffix(".jet")) || rows.contains(path)) {
+                    hit = true
+                    break
+                }
+            }
+        }
+        if !hit && errors.len() > 0 {
+            patch: if size_of("{integ}/{name}.rebased") > 0 -> "{integ}/{name}.rebased" else -> "{sub}/patch"
+            hit = added_lines(files.read(patch) ?? "").any(line -> errors.contains(trim_blanks(trim_blanks(line, true), false)))
+        }
+        // A quarantined SUB takes every later SUB of the same lead with it (they may stack on it).
+        if hit || same_lead(blamed, name) -> blamed.push(name) else -> keep.push(sub.copy())
+    }
+    if blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
+    print("QUARANTINED {blamed.join(" ")}")
+    if keep.len() == 0 -> process.exit(1)
+    process.exit(integrate(orchestrator, "{batch}-r", keep))
+}

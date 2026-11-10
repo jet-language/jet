@@ -783,27 +783,49 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler208: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler232: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
-// woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200.
+// woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
+// blocked208 monitorArmed216 monitor224.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
 // The FIFO holds submitted task states (linked through their reserved word
 // @88); ready holds fibers to resume (Fiber.jet). live counts tasks taken and
 // not finished, parked their parked fibers, fibers the fiber stacks mapped,
 // pooled (pool, linked through Fiber next@48) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
-// carriers is a word list (scheduler_words) of Carrier32 records {argument0
-// handle8 save16 tcb24}, changed only under the lock; every carrier stays joinable
-// so jet_rt_scheduler_shutdown can join it. The poolSize carriers start one
+// carriers is a word list (scheduler_words) of Carrier64 records {argument0
+// handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56}, changed only under
+// the lock; every carrier on it stays joinable so jet_rt_scheduler_shutdown
+// can join it. The poolSize carriers start one
 // at a time, on demand: a submit starts one only when no idle carrier is left
 // to wake (idle - woken), so a process that submits a few tasks starts a few
 // threads, not the whole pool. idle counts carriers waiting on workSeq;
 // woken counts the wakes sent them that no carrier has taken yet; started
 // counts the carriers started. watch is the deadline the one idle carrier
 // watching the fiber timers sleeps to (0: none watches).
+//
+// A carrier blocked in the kernel (a foreign call, a raw read of a FIFO or
+// pipe, any system call that waits) holds its OS thread: no fiber park frees
+// it. The monitor thread (jet_rt_scheduler_monitor) hands its work to another
+// carrier, as Go's sysmon retakes a P from a thread in a system call. While
+// work waits with no idle carrier, every SCHEDULER_MONITOR_TICK_NS it counts
+// the carriers still on the job it saw them on (runs, odd while a job runs)
+// whose threads used under half a tick of CPU since and are blocked in the
+// kernel outside the runtime now (scheduler_thread_blocked: asleep, and in no
+// futex wait); blocked is that count,
+// and up to poolSize + blocked carriers may run. A carrier that finds no work
+// while more than poolSize + blocked run retires, unless it would leave the
+// fiber timers unwatched. The call path is
+// unchanged, so a short foreign call costs what it did. monitorArmed is 1
+// while the monitor watches and 0 while it sleeps until a submit or a wake
+// finds no idle carrier; monitor is its thread handle (0: not started, -1:
+// starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
-SCHEDULER_ROOT_BYTES: I64{208}
+SCHEDULER_ROOT_BYTES: I64{232}
+SCHEDULER_CARRIER_BYTES: I64{64}
+SCHEDULER_MONITOR_TICK_NS: I64{10000000}
+SCHEDULER_STAT_BYTES: I64{512}
 
 // runtime-init: 3 when scheduler_root
 #Export(c) jet_rt_scheduler_init: fn() {
@@ -828,6 +850,9 @@ rt_scheduler_worker_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 rt_scheduler_timer_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+rt_scheduler_monitor_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
@@ -898,7 +923,7 @@ scheduler_carrier_list_join: fn(list: I64) -> I64 {
     loop at < length {
         record: sync_load(wrapping(data + at * I64{8}))
         _ := thread_join(sync_load(wrapping(record + I64{8})), I64{0})
-        jet_rt_free(record, I64{32}, I64{8})
+        jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
         at += I64{1}
     }
     scheduler_words_drop(list)
@@ -909,15 +934,24 @@ scheduler_carrier_list_join: fn(list: I64) -> I64 {
 // carrier (which locks the root before it reads its handle) and shutdown
 // both see a complete record.
 scheduler_start_worker: fn(root: I64) {
-    record: jet_rt_alloc(I64{32}, I64{8})
-    thread_zero(record, I64{32})
+    record: jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8})
+    thread_zero(record, SCHEDULER_CARRIER_BYTES)
     sync_store(record, root)
     sync_thread_lock(root)
     handle: thread_spawn(rt_scheduler_worker_address(), record)
     if (handle < I64{0}) {
+        // The carrier scheduler_submit or the monitor counted for this start
+        // never runs. With others running the pool settles at them: the queued
+        // job waits for one, and no later submit retries the start. A refused
+        // start past the pool size (one the monitor made for a blocked
+        // carrier) leaves the pool size alone.
+        started: wrapping(sync_load(wrapping(root + I64{152})) - I64{1})
+        sync_store(wrapping(root + I64{152}), started)
+        pool: sync_load(wrapping(root + I64{112}))
+        if (started > I64{0} && (pool < I64{0} || started < pool)) -> _ := sync_swap(wrapping(root + I64{112}), started)
         sync_thread_unlock(root)
-        jet_rt_free(record, I64{32}, I64{8})
-        scheduler_start_failed()
+        jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
+        if (started == I64{0}) -> scheduler_first_worker_refused(-handle)
         return
     }
     sync_store(wrapping(record + I64{8}), handle)
@@ -946,9 +980,9 @@ scheduler_get: fn() -> I64 {
 }
 
 // Queues a job (scheduler_run_job) for a carrier. The job wakes an idle
-// carrier, else starts one more while fewer than the pool size run. Unsigned
-// pool sizes above i64::MAX are attempted just as Rust does, failing at
-// thread_spawn.
+// carrier, else starts one more while there is room
+// (scheduler_carrier_room), else arms the monitor. Unsigned pool sizes above
+// i64::MAX are attempted just as Rust does, failing at thread_spawn.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
@@ -958,14 +992,262 @@ scheduler_submit: fn(task: I64) {
     sync_store(wrapping(root + I64{16}), task)
     jet_rt_observe_pool(I64{-1}, I64{1})
     start := false
+    monitor := I64{0}
     woke: scheduler_wake_idle(root)
-    if !woke && sync_load(wrapping(root + I64{152})) != sync_load(wrapping(root + I64{112})) {
-        sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) + I64{1}))
-        start = true
+    if !woke {
+        if scheduler_carrier_room(root) {
+            sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) + I64{1}))
+            start = true
+        } else {
+            monitor = scheduler_monitor_arm(root)
+        }
     }
     sync_thread_unlock(root)
     if woke -> scheduler_kick_idle(root)
     if start -> scheduler_start_worker(root)
+    if (monitor != I64{0}) -> scheduler_monitor_kick(root, monitor)
+}
+
+// Whether one more carrier may start: fewer than the pool size run, or, while
+// the monitor counts blocked carriers, fewer than the pool size plus them.
+// Carriers the monitor started past the pool give no room once their blocked
+// ones wake. The root lock is held.
+scheduler_carrier_room: fn(root: I64) -> Bool {
+    started: sync_load(wrapping(root + I64{152}))
+    pool: sync_load(wrapping(root + I64{112}))
+    if (pool < I64{0}) -> return started != pool
+    started < wrapping(pool + sync_load(wrapping(root + I64{208})))
+}
+
+// Whether more carriers run than the pool size plus the blocked ones, so an
+// idle one retires; never while the fiber timers wait with no carrier
+// watching them, since the retiring carrier would leave them unwatched
+// (scheduler_carrier_idle). The root lock is held.
+scheduler_carrier_excess: fn(root: I64) -> Bool {
+    pool: sync_load(wrapping(root + I64{112}))
+    if (pool <= I64{0}) -> return false
+    timers: sync_load(wrapping(root + I64{136}))
+    if (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0}) -> return false
+    sync_load(wrapping(root + I64{152})) > wrapping(pool + sync_load(wrapping(root + I64{208})))
+}
+
+// Arms the monitor for a submit or a wake that found neither an idle carrier
+// nor room for one: 0 when it already watches or cannot start, 1 to wake it,
+// 2 to start it (scheduler_monitor_kick, after the unlock). The root lock is
+// held.
+scheduler_monitor_arm: fn(root: I64) -> I64 {
+    monitor: sync_load(wrapping(root + I64{224}))
+    if (monitor < I64{0} || sync_load(wrapping(root + I64{216})) != I64{0}) -> return I64{0}
+    sync_store(wrapping(root + I64{216}), I64{1})
+    if (monitor != I64{0}) -> return I64{1}
+    sync_store(wrapping(root + I64{224}), I64{-1})
+    I64{2}
+}
+
+scheduler_monitor_kick: fn(root: I64, how: I64) {
+    if (how == I64{1}) {
+        sync_futex_wake(wrapping(root + I64{216}), I64{1})
+        return
+    }
+    handle: thread_spawn(rt_scheduler_monitor_address(), root)
+    sync_thread_lock(root)
+    if (handle < I64{0}) {
+        // Refused: the pool goes on as it would without the monitor.
+        sync_store(wrapping(root + I64{224}), I64{-2})
+        sync_store(wrapping(root + I64{216}), I64{0})
+    } else {
+        sync_store(wrapping(root + I64{224}), handle)
+    }
+    sync_thread_unlock(root)
+}
+
+// Whether the monitor has carriers to watch: work waits with no idle carrier
+// unclaimed, or carriers past the pool size run. The root lock is held.
+scheduler_monitor_needed: fn(root: I64) -> Bool {
+    pool: sync_load(wrapping(root + I64{112}))
+    if (pool <= I64{0}) -> return false
+    if (sync_load(wrapping(root + I64{152})) > pool) -> return true
+    queued: sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{168})) != I64{0}
+    queued && sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))
+}
+
+// Another thread's CPU time in ns: its CLOCK_THREAD_CPUTIME_ID, the clock
+// (~tid << 3) | 6 that pthread_getcpuclockid names, or -1 once it is gone.
+// Not sync_clock_read, which stops on a failed read.
+scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
+    clock: (wrapping(I64{-1} - tid) << I64{3}).bit_or(I64{6})
+    #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
+        scratch: wrapping(os_tls_base_i64() + I64{232})
+        if (os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return I64{-1}
+        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(wrapping(scratch + I64{8})))
+    }
+}
+
+// Reads /proc/self/task/<tid>/<name> (`name` a static text) into `buffer`,
+// the monitor's SCHEDULER_STAT_BYTES of scratch: the bytes read, or a
+// negative count when the file cannot be opened or read.
+scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
+    prefix: rt_static_text("/proc/self/task/")
+    at := rt_text_len(prefix)
+    rt_text_bytes_copy(buffer, rt_text_data(prefix), at)
+    digits := I64{1}
+    scale := I64{10}
+    loop tid >= scale {
+        digits += I64{1}
+        scale = scale * I64{10}
+    }
+    value := tid
+    place := digits
+    loop place > (I64{0}) {
+        place -= I64{1}
+        rt_text_put(wrapping(buffer + at + place), I64{48} + value % I64{10})
+        value = value /% I64{10}
+    }
+    at = wrapping(at + digits)
+    rt_text_put(wrapping(buffer + at), I64{47})
+    at = wrapping(at + I64{1})
+    rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), rt_text_len(name))
+    rt_text_put(wrapping(buffer + at + rt_text_len(name)), I64{0})
+    got := I64{-1}
+    #Unsafe("openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return") {
+        // openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC).
+        descriptor: os_syscall_i64(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
+        if (descriptor < I64{0}) -> return descriptor
+        got = os_syscall_i64(I64{0}, descriptor, buffer, SCHEDULER_STAT_BYTES, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{3}, descriptor, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    got
+}
+
+// Whether thread `tid` of this process is blocked in the kernel outside the
+// runtime: the state in its /proc/self/task/<tid>/stat is S (an
+// interruptible sleep), and its wchan names a wait that is no futex wait. A
+// preempted thread is R, so a busy carrier on a crowded CPU is not taken for
+// a blocked one. Waits on the address-space lock (many carriers mapping or
+// unmapping fiber stacks at once) are D, and the runtime's own waits (a
+// contended lock whose holder is preempted, a job run on its carrier for
+// want of a fiber stack) are futex waits: new carriers would free neither.
+// So a foreign call waiting on a pthread lock or in a D-state disk read is
+// not handed off. A wchan of "0" (the thread runs again, or the kernel hides
+// it), or one that cannot be read, a gone or an unreadable thread is not
+// blocked. `buffer` is the monitor's SCHEDULER_STAT_BYTES of scratch.
+scheduler_thread_blocked: fn(tid: I64, buffer: I64) -> Bool {
+    got: scheduler_task_file(tid, rt_static_text("stat"), buffer)
+    // The state follows the name's last `)` and a space: the name may hold
+    // any byte, the fields after it only numbers.
+    paren := wrapping(got - I64{1})
+    loop paren >= (I64{0}) && rt_text_byte(wrapping(buffer + paren)) != (I64{41}) -> paren -= I64{1}
+    if (paren < I64{0} || wrapping(paren + I64{2}) >= got) -> return false
+    if (rt_text_byte(wrapping(buffer + paren + I64{2})) != I64{83}) -> return false
+    wchan: scheduler_task_file(tid, rt_static_text("wchan"), buffer)
+    if (wchan <= I64{0} || (wchan == I64{1} && rt_text_byte(buffer) == I64{48})) -> return false
+    // The futex waits are named __futex_wait, futex_wait_queue and the like:
+    // "futex" anywhere in the name.
+    futex: rt_static_text("futex")
+    length: rt_text_len(futex)
+    start := I64{0}
+    loop wrapping(start + length) <= wchan {
+        at := I64{0}
+        loop at < length && rt_text_byte(wrapping(buffer + start + at)) == rt_text_byte(wrapping(rt_text_data(futex) + at)) -> at += I64{1}
+        if (at == length) -> return false
+        start += I64{1}
+    }
+    true
+}
+
+// Counts the blocked carriers: on the job they ran at the last look (runs
+// odd and unchanged), their threads under half a tick of CPU since and
+// blocked in the kernel now (scheduler_thread_blocked). Each record keeps this
+// look's runs and CPU time for the next. The root lock is held.
+scheduler_monitor_scan: fn(root: I64, buffer: I64) -> I64 {
+    list: sync_load(wrapping(root + I64{128}))
+    if (list == I64{0}) -> return I64{0}
+    length: sync_load(list)
+    data: sync_load(wrapping(list + I64{16}))
+    blocked := I64{0}
+    at := I64{0}
+    loop at < length {
+        record: sync_load(wrapping(data + at * I64{8}))
+        runs: sync_load(wrapping(record + I64{40}))
+        tid: sync_load(wrapping(record + I64{32}))
+        cpu := I64{-1}
+        if (runs.bit_and(I64{1}) == I64{1} && tid > I64{0}) {
+            cpu = scheduler_thread_cpu_ns(tid)
+            seen: sync_load(wrapping(record + I64{56}))
+            if (cpu >= I64{0} && seen >= I64{0} && runs == sync_load(wrapping(record + I64{48})) && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) -> blocked += I64{1}
+        }
+        sync_store(wrapping(record + I64{48}), runs)
+        sync_store(wrapping(record + I64{56}), cpu)
+        at += I64{1}
+    }
+    blocked
+}
+
+// How many carriers the monitor starts into the room the blocked ones leave:
+// one per queued job or ready fiber no idle carrier is left to take, counted
+// as started. The root lock is held.
+scheduler_monitor_starts: fn(root: I64) -> I64 {
+    pool: sync_load(wrapping(root + I64{112}))
+    started: sync_load(wrapping(root + I64{152}))
+    room: wrapping(pool + sync_load(wrapping(root + I64{208})) - started)
+    if (pool <= I64{0} || room <= I64{0}) -> return I64{0}
+    spare: sync_load(wrapping(root + I64{120})) - sync_load(wrapping(root + I64{160}))
+    limit: room + (if (spare > I64{0}) -> spare else -> I64{0})
+    queued := I64{0}
+    task := sync_load(wrapping(root + I64{8}))
+    loop task != (I64{0}) && queued < limit {
+        queued += I64{1}
+        task = sync_load(wrapping(task + I64{88}))
+    }
+    fiber := sync_load(wrapping(root + I64{168}))
+    loop fiber != (I64{0}) && queued < limit {
+        queued += I64{1}
+        fiber = sync_load(wrapping(fiber + I64{48}))
+    }
+    starts: queued - (if (spare > I64{0}) -> spare else -> I64{0})
+    if (starts <= I64{0}) -> return I64{0}
+    sync_store(wrapping(root + I64{152}), wrapping(started + starts))
+    starts
+}
+
+// The monitor thread (Scheduler232). Asleep until armed; then each tick,
+// while it has carriers to watch, it recounts the blocked ones, starts
+// carriers into the room they leave and wakes idle carriers past it, which
+// retire. It leaves on shutdown's stop.
+#Export(c) jet_rt_scheduler_monitor: fn(root: I64) -> I64 {
+    armed: wrapping(root + I64{216})
+    buffer: jet_rt_alloc(SCHEDULER_STAT_BYTES, I64{8})
+    loop {
+        sync_thread_lock(root)
+        if (sync_load(wrapping(root + I64{144})) != I64{0}) {
+            sync_thread_unlock(root)
+            jet_rt_free(buffer, SCHEDULER_STAT_BYTES, I64{8})
+            return I64{0}
+        }
+        if !scheduler_monitor_needed(root) {
+            sync_store(wrapping(root + I64{208}), I64{0})
+            sync_store(armed, I64{0})
+            sync_thread_unlock(root)
+            _ := sync_futex_wait(armed, I64{0}, I64{-1})
+            next
+        }
+        sync_store(armed, I64{1})
+        sync_store(wrapping(root + I64{208}), scheduler_monitor_scan(root, buffer))
+        starts: scheduler_monitor_starts(root)
+        wakes := I64{0}
+        if scheduler_carrier_excess(root) {
+            excess: sync_load(wrapping(root + I64{152})) - sync_load(wrapping(root + I64{112})) - sync_load(wrapping(root + I64{208}))
+            loop wakes < excess && scheduler_wake_idle(root) -> wakes += I64{1}
+        }
+        sync_thread_unlock(root)
+        if (wakes > I64{0}) -> sync_futex_wake(wrapping(root + I64{24}), wakes)
+        at := I64{0}
+        loop at < starts {
+            scheduler_start_worker(root)
+            at += I64{1}
+        }
+        _ := sync_futex_wait(armed, I64{1}, sync_deadline(SCHEDULER_MONITOR_TICK_NS))
+    }
 }
 
 // Claims one idle carrier no earlier wake has claimed and bumps workSeq, so
@@ -1034,10 +1316,14 @@ scheduler_carrier_idle: fn(root: I64) {
 }
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
-// and, idle, fires their timers. The record is its Carrier32.
+// and, idle, fires their timers. The record is its Carrier64; runs turns odd
+// while it runs a job and even again after, for the monitor.
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
+    #Unsafe("gettid takes no arguments and retains nothing") {
+        sync_store(wrapping(record + I64{32}), os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
+    }
     loop {
         fiber_timers_fire(root)
         sync_thread_lock(root)
@@ -1050,6 +1336,10 @@ scheduler_carrier_idle: fn(root: I64) {
         task := I64{0}
         if (fiber == I64{0}) -> task = scheduler_pop(root)
         if (fiber == I64{0} && task == I64{0}) {
+            if scheduler_carrier_excess(root) {
+                scheduler_carrier_retire(root, record)
+                return I64{0}
+            }
             scheduler_carrier_idle(root)
             sync_thread_unlock(root)
             next
@@ -1059,6 +1349,8 @@ scheduler_carrier_idle: fn(root: I64) {
         kick: timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0} && scheduler_wake_idle(root)
         sync_thread_unlock(root)
         if kick -> scheduler_kick_idle(root)
+        runs: wrapping(record + I64{40})
+        sync_store(runs, wrapping(sync_load(runs) + I64{1}))
         if (task != I64{0}) {
             jet_rt_observe_pool(I64{-1}, I64{-1})
             fiber = fiber_take(root)
@@ -1066,6 +1358,7 @@ scheduler_carrier_idle: fn(root: I64) {
                 // No stack could be mapped, or the fiber stacks' space is
                 // spent: the job runs on the carrier, whose waits then block it.
                 scheduler_run_job(task)
+                sync_store(runs, wrapping(sync_load(runs) + I64{1}))
                 sync_thread_lock(root)
                 sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
                 sync_thread_unlock(root)
@@ -1074,7 +1367,33 @@ scheduler_carrier_idle: fn(root: I64) {
             sync_store(wrapping(fiber + I64{56}), task)
         }
         fiber_run(root, record, fiber)
+        sync_store(runs, wrapping(sync_load(runs) + I64{1}))
     }
+}
+
+// An idle carrier past the pool size plus the blocked ones leaves: off the
+// carrier list (shutdown joins only listed carriers), detached, its record
+// freed. The root lock is held on entry and released.
+scheduler_carrier_retire: fn(root: I64, record: I64) {
+    list: sync_load(wrapping(root + I64{128}))
+    length: sync_load(list)
+    data: sync_load(wrapping(list + I64{16}))
+    at := I64{0}
+    loop at < length {
+        if (sync_load(wrapping(data + at * I64{8})) == record) {
+            last: wrapping(length - I64{1})
+            sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + last * I64{8})))
+            sync_store(list, last)
+            at = length
+        } else {
+            at += I64{1}
+        }
+    }
+    sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) - I64{1}))
+    handle: sync_load(wrapping(record + I64{8}))
+    sync_thread_unlock(root)
+    _ := thread_detach(handle)
+    jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
 }
 
 // A queued job: a task state, or a parallel walk's worker (Parallel.jet),
@@ -1273,12 +1592,13 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
 }
 
 // Quiesce for a userland exec (JetBackend Image/Loader.jet): stop and join
-// every scheduler thread this process started (the carriers, the timer
-// thread), so the caller is the process's only scheduler thread. 0 when none
-// was ever started; otherwise the joined thread count. -1, with nothing
-// stopped, while a task is queued or running or a timer is pending. The
-// caller guarantees no other thread submits work concurrently. The pool and
-// the timer restart lazily on the next use; pooled fibers stay for it.
+// every scheduler thread this process started (the carriers, the timer and
+// monitor threads), so the caller is the process's only scheduler thread. 0
+// when none was ever started; otherwise the joined thread count. -1, with
+// nothing stopped, while a task is queued or running or a timer is pending.
+// The caller guarantees no other thread submits work concurrently. The pool,
+// the timer and the monitor restart lazily on the next use; pooled fibers
+// stay for it.
 #Export(c) jet_rt_scheduler_shutdown: fn() -> I64 {
     root: scheduler_root
     if (root == I64{0}) -> return I64{0}
@@ -1297,14 +1617,30 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     carriers: sync_swap(wrapping(root + I64{128}), I64{0})
     _ := sync_add(wrapping(root + I64{24}), I64{1})
     sync_futex_wake(wrapping(root + I64{24}), I64{2147483647})
+    sync_store(wrapping(root + I64{216}), I64{2})
+    sync_futex_wake(wrapping(root + I64{216}), I64{1})
     sync_thread_unlock(root)
-    joined: timer + scheduler_carrier_list_join(carriers)
+    joined := timer + scheduler_carrier_list_join(carriers)
+    // scheduler_monitor_kick publishes the handle right after the spawn.
+    loop sync_load(wrapping(root + (I64{224}))) == (I64{-1}) {
+        #Unsafe("sched_yield retains no memory and yields this OS thread") {
+            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    monitor: sync_load(wrapping(root + I64{224}))
+    if (monitor > I64{0}) {
+        _ := thread_join(monitor, I64{0})
+        joined += I64{1}
+    }
     sync_thread_lock(root)
     sync_store(wrapping(root + I64{32}), I64{0})
     sync_store(wrapping(root + I64{120}), I64{0})
     sync_store(wrapping(root + I64{144}), I64{0})
     sync_store(wrapping(root + I64{152}), I64{0})
     sync_store(wrapping(root + I64{160}), I64{0})
+    sync_store(wrapping(root + I64{208}), I64{0})
+    sync_store(wrapping(root + I64{216}), I64{0})
+    sync_store(wrapping(root + I64{224}), I64{0})
     _ := sync_swap(wrapping(root + I64{112}), I64{0})
     sync_thread_unlock(root)
     jet_rt_observe_pool(I64{0}, I64{0})
@@ -1421,18 +1757,46 @@ scheduler_fatal: fn(message: I64) {
     // The Rust original uses E3001 with an empty owner, not <core.prelude>.
     bytes: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
+    trap_stop(I64{1}, bytes, length, I64{0}, I64{0})
     if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
 }
 
-// A runtime thread that could not start (thread_spawn EAGAIN: RLIMIT_AS,
-// pids limit, memory) stops the process with E3001, also inside a task or
-// root. Native code has no stop edge out of a runtime-internal failure: an
+// A runtime helper thread that could not start (thread_spawn EAGAIN:
+// RLIMIT_AS, pids limit, memory) stops the process with E3001, also inside a
+// task or root; a carrier never does (scheduler_start_worker). Native code
+// has no stop edge out of a runtime-internal failure: an
 // in-task stop would return into its caller, which would run on with the error
 // code as a thread handle or a stopped helper's 0 result.
 scheduler_start_failed: fn() {
     message: scheduler_msg_start_failed()
     trap_process_stop(I64{0}, sync_load(message), sync_load(wrapping(message + I64{8})))
+}
+
+// The pool's first carrier could not start (thread_spawn's -`errno`), so no
+// task can run. The host refused a thread, which is no fault of the
+// program: the report is no panic but one `error:` line naming the errno
+// and the limits that refuse threads, RLIMIT_AS and RLIMIT_NPROC (-1 reads
+// as unlimited), and the process exits 70. Served comptime code reports it
+// to the compiler as a stop.
+scheduler_first_worker_refused: fn(errno: I64) {
+    head: rt_static_text("error: the host refused the first scheduler worker thread (errno ")
+    trap_stop(I64{1}, rt_text_data(head), rt_text_len(head), I64{0}, I64{0})
+    trap_defect_prepare()
+    jet_rt_stdout_flush()
+    trap_write_static(head)
+    trap_number(errno)
+    trap_write_static(rt_static_text("); address-space limit RLIMIT_AS "))
+    scheduler_limit_write(thread_rlimit_soft(I64{9}))
+    trap_write_static(rt_static_text(", process limit RLIMIT_NPROC "))
+    scheduler_limit_write(thread_rlimit_soft(I64{6}))
+    trap_write_static(rt_static_text("\n"))
+    trap_defect_exit(I64{70})
+}
+
+// A soft rlimit as scheduler_first_worker_refused names it.
+scheduler_limit_write: fn(soft: I64) {
+    if (soft < I64{0}) -> trap_write_static(rt_static_text("unlimited")) else -> trap_number(soft)
 }
 
 scheduler_abort_double_panic: fn() {

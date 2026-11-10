@@ -157,6 +157,8 @@ JetDriverDocModule: struct {
     name_module_index: Int{-1}
     // The `.routes(from:)` convention roots the loader read for this module.
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
+    // The `#FX(…)` written at the head of the file, when one is.
+    file_cap: ModuleCap?{None}
 }
 
 // The order of a documented item's kind among items of one qualified name:
@@ -298,6 +300,9 @@ JetDriverCompileRequest: struct {
     // A shipped artifact (`jet build`): sema rejects every remaining `debug`
     // trace (E3405), as a release-profile compile does.
     artifact_build: Bool{false}
+    // The OS an OS-less build option selects (`os: web`), which `$build.os`
+    // folds on instead of the host triple's; empty for a native build.
+    build_os: String{""}
     capture_build_program: Bool{false}
     capture_build_nodes: Bool{false}
     build_output_names: [String]{[String]{}}

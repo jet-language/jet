@@ -18,15 +18,15 @@ use {
 sprites_root: fn() -> String {
     candidates: [String]{"Examples/Apps/Game/DrawSprites", "."}
     loop candidate in candidates {
-        if files.exists("{candidate}/assets/sprites.atlas") -> return candidate
+        if files.exists("{candidate}/Assets/Sprites.atlas") -> return candidate
     }
     "."
 }
 
 run: fn() {
     root: sprites_root()
-    sprites: ui.load_texture_atlas("{root}/assets/sprites.atlas")
-    glow: ui.load_texture_atlas("{root}/assets/glow.atlas")
+    sprites: ui.load_texture_atlas("{root}/Assets/Sprites.atlas")
+    glow: ui.load_texture_atlas("{root}/Assets/Glow.atlas")
     window: ui.headless(width: 96, height: 64, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 96x64 window")
     loop frame in window.frames() {
         if frame.index > 0 -> break
@@ -48,7 +48,7 @@ run: fn() {
         frame.draw_sprite(glow, "halo", 60, 16)
         frame.draw_sprite(sprites, "missing", 0, 0)
     }
-    save_pam(window.load_image_from_screen(), "frame.pam")
+    save_pam(window.load_image_from_screen(), "Frame.pam")
     print("sprites=96x64 frame=presented atlases={sprites.name()},{glow.name()}")
 }
 

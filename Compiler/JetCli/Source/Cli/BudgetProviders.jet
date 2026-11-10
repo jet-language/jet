@@ -12,7 +12,7 @@ use {
     jet_foundation.[CanonicalJSON, CanonicalJSONField, PerfRational, perf_rational_integer, perf_report_object_new]
     jet_sema.[BudgetSpec, sema_budget_provider_identity, sema_budget_provider_kind]
     jet_driver.[JetDriverBudgetFacts]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_pkg_model.[JET_VERSION]
 }
 
 // The samples a ServiceProbe row carries: one per down-up-ready trial.
@@ -59,7 +59,7 @@ jet_cli_budget_service: fn(root: String, name: String) -> JetCLIBudgetService Je
 // exactly 20 samples.
 jet_cli_budget_probe_service: fn(root: String, name: String) -> [Int] JetCLIBudgetFailure! {
     bin: jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) ?? return Err(jet_cli_budget_failure("the `{JET_CLI_JETPACK_BINARY}` engine is not installed"))
-    if jet_cli_query_engine_protocol(bin) != Val(COMPILER_VERSION) -> return Err(jet_cli_budget_failure("the `{JET_CLI_JETPACK_BINARY}` engine at `{bin}` does not speak jet {COMPILER_VERSION}'s protocol"))
+    if jet_cli_query_engine_protocol(bin) != Val(JET_VERSION) -> return Err(jet_cli_budget_failure("the `{JET_CLI_JETPACK_BINARY}` engine at `{bin}` does not speak jet {JET_VERSION}'s protocol"))
     receipt: cli_process.cmd([String]{bin, "__service-probe", name, "--no-color"}).cwd(root).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdout(.Capture).stderr(.Capture).run() ?? return Err(jet_cli_budget_failure("cannot run `{bin}`: {jet_cli_io_error_text(err)}"))
     if !receipt.success -> return Err(jet_cli_budget_failure("measurement failed: {receipt.errors.trim()}"))
     rows := [String]{}

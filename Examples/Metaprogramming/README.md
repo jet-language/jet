@@ -37,6 +37,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [Find](Comptime/Find.jet) — `find(glob)` expands a build-time glob, sorts the relative file paths, and records each matched file hash for reproducible builds.
 - [FoldConstants](Comptime/FoldConstants.jet) — `:` asks for build-time evaluation as an optimization; `comptime` forces it.
 - [FrozenMap](Comptime/FrozenMap.jet) — A Map constant is frozen at build time like a List constant: its entries sit in static data in key order, and every read borrows them instead of building…
+- [Phase](Comptime/Phase.jet) — `$phase` reads the evaluation-site `Phase`: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
 - [PrepBlock](Comptime/PrepBlock.jet) — `comptime { … }` is the explicit shared-preparation block.
 - [PrepFn](Comptime/PrepFn.jet) — `comptime fn` marks a literal hook, a method that runs while building to turn a written number into a value.
 - [PrepLoop](Comptime/PrepLoop.jet) — `comptime loop` repeats declarations while building.
@@ -49,6 +50,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 ## Derives
 
 - [AutoDerivePolicy](Derives/AutoDerivePolicy/) — Auto-derive policy: Package policy sets the default.
+- [FieldTypes](Derives/FieldTypes.jet) — A reflected record names its type `type`: a derive reads `field.type`, and so does `T.reflect()`.
 - [MarkerDerives](Derives/MarkerDerives.jet)
 - [SerdeDerive](Derives/SerdeDerive.jet)
 - [UserDerive](Derives/UserDerive.jet) — user-authored derive, plus `T.reflect()` Demonstrates: derive bodies are checked Jet items with typed holes.
@@ -68,8 +70,11 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.
+- [GeneratingMarker](Reflection/GeneratingMarker.jet) — A marker that writes code types its template `-[Meta.Generate]>`, the row of `Marker.expand`.
 - [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct without `#Layout` reports the bytes the compiler chose for it.
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.
+- [ReadOnlyLint](Reflection/ReadOnlyLint.jet) — A read-only lint is a marker whose `expand` row is `-[]>`: it reads the marked type and may warn, but writes no code.
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.
+- [ReflectNested](Reflection/ReflectNested.jet) — `reflect.of(x)` reflects a nested value all the way down: a struct field's `Value` lists that struct's own fields.
 - [ReflectValue](Reflection/ReflectValue.jet) — `reflect.of(x)` — the runtime reflection floor.
 - [UserRuleBody](Reflection/UserRuleBody.jet) — A source rule with a body adds an ordinary method.

@@ -1,0 +1,15 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run a declared step") {
+        shell: b.probe("shell", "find_program", "sh")
+        // Reads secret.txt, which it never declares.
+        sneak: b.run("sneak", b.found(shell), ["Exec", "FS"])
+        sneak.arg("-c")
+        sneak.arg("read -r word < secret.txt && printf '%s' \"$word\" > sneak.txt")
+        sneak.reads("in.txt")
+        sneak.writes("sneak.txt")
+        app: b.add_executable("app", ["sneak.jet"], [sneak])
+        b.default(app)
+    }
+}
+
+run: fn() {}

@@ -1,0 +1,33 @@
+# A program whose C closure its live code decides (only a checked foreign
+# declaration names C, here musl's getpid) links its own program object with
+# the Jet-only runtime object, once, at every optimization level. The live
+# symbol query (StaticLink.jet x64_link_live_undefined) hands back exactly
+# the inputs it was given; when it also handed back the startup object the
+# link synthesizes, JetCli Host.jet jet_cli_native_executable took the
+# runtime pack for the program object and every runtime export was a
+# duplicate symbol against jet_runtime_jet.o.
+requires: os-name:linux
+fixture: c_programs_link_their_own_object_at_every_level.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet build --optimize=none main.jet
+exit: 0
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
+step o0_run: built
+exit: 0
+stdout: = c_programs_link_their_own_object_at_every_level.out
+stderr: empty
+step o1: jet build --optimize=basic main.jet
+exit: 0
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
+step o1_run: built
+exit: 0
+stdout: = c_programs_link_their_own_object_at_every_level.out
+stderr: empty
+step o2: jet build --optimize=full main.jet
+exit: 0
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
+step o2_run: built
+exit: 0
+stdout: = c_programs_link_their_own_object_at_every_level.out
+stderr: empty

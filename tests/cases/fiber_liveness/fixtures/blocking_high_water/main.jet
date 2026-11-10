@@ -1,0 +1,46 @@
+// 100 tasks each block 100 times for 1 ms (10,000 blocking waits) on four
+// carriers. After every wait a task reads the process's live thread count
+// (/proc/self/status `Threads:`); the highest stays within the carriers + 8
+// helper threads + the main thread (#6403 c4), since a waiting task parks
+// its fiber instead of holding or adding a thread.
+package: {
+    name: "blocking_high_water"
+    authority: { allow: [FS, FS.Read, IO, Time, Time.Wait] }
+}
+
+use files: core.files
+use time: core.time
+
+TASKS: 100
+WAITS: 100
+CARRIERS: 4
+
+threads: fn() -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with("Threads:") -> return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+    }
+    -1
+}
+
+blocker: fn() -[FS, Time.Wait]> Int {
+    high := 0
+    loop _ in 0..<WAITS {
+        time.sleep(1ms)
+        now: threads()
+        if now > high -> high = now
+    }
+    high
+}
+
+run: fn() {
+    handles := [Task<Int>]{}
+    loop _ in 0..<TASKS -> handles.push(task blocker())
+    high := 0
+    loop handle in handles {
+        seen: handle.join() ?? -1
+        if seen > high -> high = seen
+    }
+    print("{TASKS * WAITS} blocking waits")
+    print("thread high-water within carriers + 9 {high > 0 && high <= CARRIERS + 9}")
+}

@@ -186,8 +186,9 @@ sema_ui_handle_optional_arg: fn(arg: CallArg, ty: Type, environment: SemaScopeEn
 }
 
 // `ui.button(display)` is the Core source function `button`; the trailing
-// callback form retains its click handler as closure emission. Neither has a
-// Core registry row.
+// callback form registers its click handler as a retained closure (a click
+// slot Int) and builds the node with the Core source `__button_click`.
+// Neither has a Core registry row.
 sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() == 1 && !args[0].flags.is_trailing_block && args[0].label == None {
         label: sema_ui_handle_typed_arg(args[0], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
@@ -216,7 +217,8 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environm
     accessible_label: sema_ui_handle_optional_arg(bound[2], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callback: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
-    value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback}}, span)
+    click := sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span)
+    value: sema_call_core_source("core.ui", "__button_click", [TExpr]{label, shortcut, accessible_label, click}, result_type, false, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(environment, program, scopes, context, "core.ui.button", span, result_type, "Browser", diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
@@ -271,43 +273,18 @@ sema_ui_handle_reactive_render: fn(args: [CallArg], type_args: [Type], span: Spa
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
-// `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`: one call
-// over measure/layout/paint, routed to the backend's mount; the two-argument
-// form uses the backend's default viewport.
+// `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`: the
+// backend's own `mount` method, whose constraint defaults to its viewport.
 sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 2 && args.len() != 3 {
         diagnostics.push(sema_wrong_core_arity("mount", 2, args.len(), span))
         _ := sema_ui_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    typed_args: sema_ui_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-    if typed_args.len() != args.len() -> return SemaDirectSpecialCheck{handled: true, value: None}
-    backend: typed_args[0]
-    backend_name: sema_expr_type_base_name(backend.ty) ?? type_name(backend.ty)
-    valid := true
-    if !sema_ui_backend_owner(backend_name) {
-        diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()` or `ui.tui_backend()`", "backend: ui.tui_backend()\nui.mount(backend, tree)"))
-        valid = false
-    }
-    tree_name: sema_expr_type_base_name(typed_args[1].ty) ?? type_name(typed_args[1].ty)
-    if tree_name != "UINode" {
-        diagnostics.push(sema_error("E0108", args[1].span, "`ui.mount` needs a `UINode` tree, but the second argument is {sema_type_show(typed_args[1].ty)}", "build the tree with `ui.text` / `ui.box` / `ui.node` / …", "ui.mount(backend, ui.box([ui.text(\"hi\")]))"))
-        valid = false
-    }
-    if args.len() == 3 {
-        constraint_name: sema_expr_type_base_name(typed_args[2].ty) ?? type_name(typed_args[2].ty)
-        if constraint_name != "SizeConstraint" && !core_identity_is(constraint_name, "core.ui", "SizeConstraint") {
-            diagnostics.push(sema_error("E0108", args[2].span, "`ui.mount` optional third argument is a `SizeConstraint`, but got {sema_type_show(typed_args[2].ty)}", "use `ui.constraint(min_w, min_h, max_w, max_h)`", "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"))
-            valid = false
-        }
-    }
-    if !valid -> return SemaDirectSpecialCheck{handled: true, value: None}
-    method: if args.len() == 2 -> "mount_default" else -> "mount"
-    rest := [TExpr]{}
-    loop index in 1..<typed_args.len() -> rest.push(typed_args[index])
-    value := sema_tree_node(sema_ui_handle_unit(), TExprKind.HandleMethod{receiver: backend, operation: THandleOp.UIBackendMethod{method: method}, args: rest}, span)
-    checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+    rest := [CallArg]{}
+    loop index in 1..<args.len() -> rest.push(args[index].copy())
+    call: Expr.MethodCall{receiver: args[0].expr.copy(), method: "mount", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: rest, id: AST_NODE_GENERATED}
+    SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }
 
 // `ui.mount`, `ui.button`, `ui.text_input` and `ui.reactive_render` have no
@@ -325,45 +302,12 @@ sema_call_try_ui_core_call: fn(module_name: String, member: String, alias: Strin
     }
 }
 
-sema_ui_backend_owner: fn(owner: String) -> Bool Never! {
-    owner == "NullBackend" || owner == "TUIBackend"
-}
-
-sema_ui_backend_known_method: fn(owner: String, method: String) -> Bool Never! {
-    if (owner == "NullBackend" || owner == "TUIBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
-    if owner == "NullBackend" && method == "commands" -> return true
-    if owner == "TUIBackend" && (method == "frame_lines" || method == "render_count") -> return true
-    false
-}
-
-sema_ui_backend_result: fn(owner: String, method: String, argc: Int) -> Type? {
-    if owner == "NullBackend" || owner == "TUIBackend" {
-        if method == "measure" && argc == 2 -> return Val(Type.Named{name: "Size"})
-        if method == "layout" && argc == 2 -> return Val(sema_ui_handle_unit())
-        if method == "paint" && argc == 1 -> return Val(sema_ui_handle_unit())
-        if method == "mount" && (argc == 1 || argc == 2) -> return Val(sema_ui_handle_unit())
-        if method == "on_event" && argc == 1 -> return Val(Type.Named{name: "EventResult"})
-        if method == "set_focus_group" && argc == 1 -> return Val(sema_ui_handle_unit())
-        if method == "focused_label" && argc == 0 -> return Val(Type.String)
-    }
-    if owner == "NullBackend" && method == "commands" && argc == 0 -> return Val(Type.List{element: Type.String})
-    if owner == "TUIBackend" && method == "frame_lines" && argc == 0 -> return Val(Type.List{element: Type.String})
-    if owner == "TUIBackend" && method == "render_count" && argc == 0 -> return Val(Type.Int)
-    None
-}
-
-sema_call_try_ui_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// A UI backend's `set_focus_group` (a Core source method) lints the focus
+// ring it is given.
+sema_call_ui_backend_lint: fn(receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if method != "set_focus_group" -> return
     owner: sema_expr_type_base_name(receiver_value.ty) ?? type_name(receiver_value.ty)
-    if sema_ui_backend_owner(owner) && sema_ui_backend_known_method(owner, method) {
-        result_type: sema_ui_backend_result(owner, method, args.len()) ?? {
-            return SemaMethodSpecialCheck{handled: false, value: None}
-        }
-        if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, program, scopes, diagnostics)
-        typed_args: sema_ui_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        route_method: if method == "mount" && args.len() == 1 -> "mount_default" else -> method
-        value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: route_method}, args: typed_args}, span)
-        checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+    if owner == "NullBackend" || owner == "TUIBackend" || core_identity_is(owner, "core.ui", "NullBackend") || core_identity_is(owner, "core.ui", "TUIBackend") {
+        sema_call_core_ui_focus_group_lint(args, span, environment, program, scopes, diagnostics)
     }
-    SemaMethodSpecialCheck{handled: false, value: None}
 }

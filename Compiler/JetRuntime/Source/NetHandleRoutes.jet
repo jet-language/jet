@@ -1,4 +1,4 @@
-// TCP handle policy over Stream56/Listener8 and FD72, never Rust Word
+// TCP handle policy over Stream64/Listener8 and FD72, never Rust Word
 // limits/counts are raw i64; Duration Word parameters borrow exact ns. List
 // bytes follow RT_HOST_U8_STRIDE. Logical close retains the descriptor.
 net_tcp_direction_open: fn(stream: I64, reading: Bool, operation: I64, error: I64) -> Bool {
@@ -74,71 +74,210 @@ net_tcp_read_result: fn(stream: I64, limit: I64, output: I64, length: I64, text:
         if !text -> net_put(length, I64{0}, I64{0})
         return I64{1}
     }
+    if (!text && net_carry_bytes(stream, cap, output, length)) -> return I64{1}
     scratch: jet_rt_alloc(I64{48}, I64{8})
     net_tcp_deadline(stream, true, wrapping(scratch + I64{32}))
     result := I64{0}
     if net_tcp_apply_deadlines(stream, operation, scratch, error) {
-        bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
-        loop {
-            count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), bytes, cap, scratch)
+        size: net_read_size(stream, cap, text)
+        block: net_read_buffer_take(stream, size)
+        bytes: wrapping(block + I64{8})
+        filled := if text -> net_carry_take(stream, bytes) else -> I64{0}
+        result = I64{-1}
+        if (filled > I64{0}) -> result = net_read_text_publish(stream, bytes, filled, false, explicit, rt_static_text("tcp read text"), output, error)
+        loop result < (I64{0}) {
+            want: if (filled < cap) -> cap - filled else -> size - filled
+            count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), wrapping(bytes + filled * RT_HOST_U8_STRIDE), want, scratch)
             if (count >= I64{0}) {
                 if text {
-                    result = net_read_decode_text(bytes, count, explicit, rt_static_text("tcp read text"), output, error)
+                    filled += count
+                    result = net_read_text_publish(stream, bytes, filled, count == I64{0}, explicit, rt_static_text("tcp read text"), output, error)
                 } else {
                     // The output ABI carries len but no capacity; publish exactly
                     // len slots so its ordinary list destructor has the right layout.
-                    owned: if (count == I64{0}) -> I64{1} else if (count == cap) -> bytes else -> jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
-                    if (count != cap && count != I64{0}) -> rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
-                    net_put(output, I64{0}, owned)
-                    net_put(length, I64{0}, count)
-                    if (count == cap) -> bytes = I64{0}
+                    net_read_publish_bytes(bytes, count, output, length)
                     result = I64{1}
                 }
-                break
+            } else {
+                code: net_word(scratch, I64{8})
+                if (code != I64{11}) {
+                    _ := net_route_errno(operation, I64{0}, code, error)
+                    result = I64{0}
+                } else if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) {
+                    result = I64{0}
+                }
+                // A read that fails after the start of a character keeps it.
+                if (result == I64{0} && filled > I64{0}) -> net_carry_keep(stream, bytes, I64{0}, filled)
             }
-            code: net_word(scratch, I64{8})
-            if (code != I64{11}) {
-                _ := net_route_errno(operation, I64{0}, code, error)
-                break
-            }
-            if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) -> break
         }
-        if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
+        net_read_buffer_give(stream, block)
     }
     jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
-// operation is "tcp read text" or "unix read text"; both name it in the message.
-net_read_decode_text: fn(bytes: I64, count: I64, explicit: Bool, operation: I64, output: I64, error: I64) -> I64 {
-    at := I64{0}
-    loop at < count {
-        width: rt_text_valid_width(wrapping(bytes + at * RT_HOST_U8_STRIDE), count - at, RT_HOST_U8_STRIDE)
-        if (width < I64{0}) {
-            message: jet_rt_string_builder_new()
-            jet_rt_string_builder_push(message, operation)
-            jet_rt_string_builder_push(message, if explicit -> rt_static_text(" failed: ") else -> rt_static_text(" failed: invalid UTF-8: "))
-            lead: host_u8_get(bytes, at)
-            expected: if (lead >= I64{194} && lead <= I64{223}) -> I64{2} else if (lead >= I64{224} && lead <= I64{239}) -> I64{3} else if (lead >= I64{240} && lead <= I64{244}) -> I64{4} else -> I64{1}
-            if (expected > I64{1} && at - width == count) {
-                jet_rt_string_builder_push(message, rt_static_text("incomplete utf-8 byte sequence from index "))
-                rt_text_push_number(message, at)
-            } else {
-                jet_rt_string_builder_push(message, rt_static_text("invalid utf-8 sequence of "))
-                rt_text_push_number(message, -width)
-                jet_rt_string_builder_push(message, rt_static_text(" bytes from index "))
-                rt_text_push_number(message, at)
-            }
-            return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_builder_finish(message), I64{0}, error)
-        }
-        at += width
+
+// A text read never drops bytes (#4648). One that stops inside a UTF-8
+// character, or at bytes that are not UTF-8, keeps them on the stream as its
+// carry: Stream64 word 8 is 0, or a block [count@0][bytes@8 at
+// RT_HOST_U8_STRIDE]. The next text read starts with the carry, so a
+// character split across segments or by the read limit reads whole, and
+// bytes that are not UTF-8 fail each text read without being consumed. A
+// byte read returns the carry first, without reading the socket. TCP and
+// Unix streams share the holder and these helpers.
+net_carry_count: fn(stream: I64) -> I64 {
+    mutex: wrapping(stream + I64{48})
+    sync_mutex_lock(mutex)
+    block: net_word(stream, I64{8})
+    count: if (block == I64{0}) -> I64{0} else -> net_word(block, I64{0})
+    sync_mutex_unlock(mutex)
+    count
+}
+// Moves the carry into `into`, which has room for it, and clears it.
+net_carry_take: fn(stream: I64, into: I64) -> I64 {
+    mutex: wrapping(stream + I64{48})
+    sync_mutex_lock(mutex)
+    block: net_word(stream, I64{8})
+    net_put(stream, I64{8}, I64{0})
+    sync_mutex_unlock(mutex)
+    if (block == I64{0}) -> return I64{0}
+    count: net_word(block, I64{0})
+    rt_text_bytes_copy(into, wrapping(block + I64{8}), count * RT_HOST_U8_STRIDE)
+    jet_rt_free(block, I64{8} + count * RT_HOST_U8_STRIDE, I64{8})
+    count
+}
+// Keeps `count` bytes of `bytes` from index `from` as the carry, which is empty.
+net_carry_keep: fn(stream: I64, bytes: I64, from: I64, count: I64) {
+    block: jet_rt_alloc(I64{8} + count * RT_HOST_U8_STRIDE, I64{8})
+    net_put(block, I64{0}, count)
+    rt_text_bytes_copy(wrapping(block + I64{8}), wrapping(bytes + from * RT_HOST_U8_STRIDE), count * RT_HOST_U8_STRIDE)
+    mutex: wrapping(stream + I64{48})
+    sync_mutex_lock(mutex)
+    net_put(stream, I64{8}, block)
+    sync_mutex_unlock(mutex)
+}
+net_carry_drop: fn(stream: I64) {
+    block: net_word(stream, I64{8})
+    if (block != I64{0}) -> jet_rt_free(block, I64{8} + net_word(block, I64{0}) * RT_HOST_U8_STRIDE, I64{8})
+}
+// The stream's read buffer (Stream64 word 56, #4666): 0, or a block
+// [capacity@0][bytes@8 at RT_HOST_U8_STRIDE] that every read on the stream
+// reuses, so a read allocates only the bytes it returns. A read takes the
+// block out under the metadata mutex and gives it back after, so two readers
+// of one holder never share it. A block wider than NET_READ_BUFFER_KEEP serves
+// its one read and is freed, so an idle stream holds at most that many bytes.
+NET_READ_BUFFER_KEEP: I64{262144}
+net_read_block_free: fn(block: I64) {
+    jet_rt_free(block, I64{8} + net_word(block, I64{0}) * RT_HOST_U8_STRIDE, I64{8})
+}
+// A block with room for `size` bytes: the stream's own when it is wide enough,
+// else a new one sized to the next power of two from 4 KiB.
+net_read_buffer_take: fn(stream: I64, size: I64) -> I64 {
+    mutex: wrapping(stream + I64{48})
+    sync_mutex_lock(mutex)
+    kept: net_word(stream, I64{56})
+    net_put(stream, I64{56}, I64{0})
+    sync_mutex_unlock(mutex)
+    if (kept != I64{0}) {
+        if (net_word(kept, I64{0}) >= size) -> return kept
+        net_read_block_free(kept)
     }
+    capacity := I64{4096}
+    loop capacity < size { capacity = capacity * I64{2} }
+    block: jet_rt_alloc(I64{8} + capacity * RT_HOST_U8_STRIDE, I64{8})
+    net_put(block, I64{0}, capacity)
+    block
+}
+net_read_buffer_give: fn(stream: I64, block: I64) {
+    if (net_word(block, I64{0}) > NET_READ_BUFFER_KEEP) {
+        net_read_block_free(block)
+        return
+    }
+    mutex: wrapping(stream + I64{48})
+    sync_mutex_lock(mutex)
+    kept: net_word(stream, I64{56})
+    if (kept == I64{0}) -> net_put(stream, I64{56}, block)
+    sync_mutex_unlock(mutex)
+    if (kept != I64{0}) -> net_read_block_free(block)
+}
+net_read_buffer_drop: fn(stream: I64) {
+    block: net_word(stream, I64{56})
+    if (block != I64{0}) -> net_read_block_free(block)
+}
+// A byte read's list: exactly `count` slots copied out of the read buffer.
+net_read_publish_bytes: fn(bytes: I64, count: I64, output: I64, length: I64) {
+    owned: if (count == I64{0}) -> I64{1} else -> jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
+    if (count != I64{0}) -> rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
+    net_put(output, I64{0}, owned)
+    net_put(length, I64{0}, count)
+}
+// A byte read's carry: at most `cap` of its bytes, the rest kept. False when
+// there is no carry and the read goes to the socket.
+net_carry_bytes: fn(stream: I64, cap: I64, output: I64, length: I64) -> Bool {
+    carried: net_carry_count(stream)
+    if (carried == I64{0}) -> return false
+    bytes: jet_rt_alloc(carried * RT_HOST_U8_STRIDE, I64{8})
+    _ := net_carry_take(stream, bytes)
+    count: if (carried < cap) -> carried else -> cap
+    owned := bytes
+    if (count < carried) {
+        net_carry_keep(stream, bytes, count, carried - count)
+        owned = jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
+        rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
+        jet_rt_free(bytes, carried * RT_HOST_U8_STRIDE, I64{8})
+    }
+    net_put(output, I64{0}, owned)
+    net_put(length, I64{0}, count)
+    true
+}
+// The read size: `cap` bytes for a byte read. A text read also holds its
+// carry, and at least one whole character, so a limit under a character's
+// width returns that character.
+net_read_size: fn(stream: I64, cap: I64, text: Bool) -> I64 {
+    if !text -> return cap
+    carried: net_carry_count(stream)
+    size := if (cap < carried) -> carried else -> cap
+    if (size < I64{4}) -> size = I64{4}
+    size
+}
+// Publishes the longest UTF-8 prefix of `count` bytes (the carry first) as
+// the read's text and keeps the rest as the carry. Returns 1; 0 on an
+// error, the bytes kept; or -1 when they are only the start of one
+// character and the stream has not `ended`, so the caller reads more.
+// operation is "tcp read text" or "unix read text"; both name it in the message.
+net_read_text_publish: fn(stream: I64, bytes: I64, count: I64, ended: Bool, explicit: Bool, operation: I64, output: I64, error: I64) -> I64 {
+    valid := I64{0}
+    width := I64{0}
+    loop valid < count {
+        width = rt_text_valid_width(wrapping(bytes + valid * RT_HOST_U8_STRIDE), count - valid, RT_HOST_U8_STRIDE)
+        if (width < I64{0}) -> break
+        valid += width
+    }
+    if (valid == I64{0} && count > I64{0}) {
+        lead: host_u8_get(bytes, I64{0})
+        expected: if (lead >= I64{194} && lead <= I64{223}) -> I64{2} else if (lead >= I64{224} && lead <= I64{239}) -> I64{3} else if (lead >= I64{240} && lead <= I64{244}) -> I64{4} else -> I64{1}
+        incomplete: expected > I64{1} && -width == count
+        if (incomplete && !ended) -> return I64{-1}
+        net_carry_keep(stream, bytes, I64{0}, count)
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, operation)
+        jet_rt_string_builder_push(message, if explicit -> rt_static_text(" failed: ") else -> rt_static_text(" failed: invalid UTF-8: "))
+        if incomplete {
+            jet_rt_string_builder_push(message, rt_static_text("incomplete utf-8 byte sequence from index 0"))
+        } else {
+            jet_rt_string_builder_push(message, rt_static_text("invalid utf-8 sequence of "))
+            rt_text_push_number(message, -width)
+            jet_rt_string_builder_push(message, rt_static_text(" bytes from index 0"))
+        }
+        return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_builder_finish(message), I64{0}, error)
+    }
+    if (valid < count) -> net_carry_keep(stream, bytes, valid, count - valid)
     builder: jet_rt_string_builder_new()
     if (RT_HOST_U8_STRIDE == I64{1}) {
-        rt_text_append(builder, bytes, count)
+        rt_text_append(builder, bytes, valid)
     } else {
-        at = I64{0}
-        loop at < count {
+        at := I64{0}
+        loop at < valid {
             rt_text_append(builder, bytes + at * RT_HOST_U8_STRIDE, I64{1})
             at += I64{1}
         }
@@ -234,7 +373,7 @@ net_tcp_write_text_result: fn(stream: I64, text: I64, explicit: Bool, millisecon
 #Export(c) jet_net_tcp_write_text: fn(stream: I64, text: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, false, I64{0}, error) }
 #Export(c) jet_net_tcp_write_text_deadline: fn(stream: I64, text: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, true, net_deadline_millis(deadline), error) }
 #Export(c) jet_net_tcp_write: fn(stream: I64, text: I64, error: I64) -> I64 { jet_net_tcp_write_text(stream, text, error) }
-// TCP and Unix streams share Stream56, so shutdown/ready/accept-deadline take
+// TCP and Unix streams share Stream64, so shutdown/ready/accept-deadline take
 // the reference operation name ("tcp shutdown"/"unix shutdown", ...).
 net_stream_shutdown: fn(stream: I64, how: I64, operation: I64, error: I64) -> I64 {
     if (how < I64{0} || how > I64{2}) {
@@ -310,9 +449,8 @@ net_tcp_address_text: fn(holder: I64, listener: Bool, peer: Bool, output: I64, e
 #Export(c) jet_net_tcp_local_addr: fn(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, false, output, error) }
 #Export(c) jet_net_tcp_peer_addr: fn(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, true, output, error) }
 // core.net.__tcp_fd: the borrowed stream's nonblocking OS socket descriptor
-// (FD72 word 8), or -1 once the stream is closed, for Core's TLS provider
-// (Core/Net/Tls.jet), which drives that same socket and waits through
-// TCPStream.ready. The TCPStream keeps owning the descriptor.
+// (FD72 word 8), or -1 once the stream is closed, for core.http's upgrade
+// cell (Core/Http/Server.jet). The TCPStream keeps owning the descriptor.
 #Export(c) jet_net_tcp_fd: fn(stream: I64) -> I64 {
     state: jet_socket_stream_fd_raw(stream)
     fd_lock(state)

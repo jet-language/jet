@@ -10,11 +10,13 @@ package: {
 }
 use {
     core: core
-    // core.db is plain Core source over the vendored SQLite amalgamation: the
-    // private driver below holds the only engine pointers, and connections,
+    // core.db is plain Core source over the Jet SQLite engine: the private
+    // driver below holds the only engine connection, and connections,
     // scopes, row policies, pools and migrations are ordinary Jet values.
-    c.[sqlite3]
-    sqlite_mem: core.mem
+    prep: __core_db_prepare
+    api: __core_db_vdbeapi
+    conn: __core_db_conn
+    base: __core_db_base
     math: core.math
     time: core.time
     encoding: core.encoding
@@ -26,7 +28,7 @@ use {
 }
 
 // core.db owns its SQL values, typed row selection and conversion. The private
-// SQLite adapter alone holds engine pointers; fallible row reads use DBError.
+// SQLite driver alone holds the engine connection; fallible row reads use DBError.
 
 #Equatable
 DBValue: enum {
@@ -692,14 +694,14 @@ open_memory: fn() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory 
 
 __db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> Bool Never! {
     guard := state.guard_edit()
-    if raw(guard.value.driver) == (U64{0}) -> return false
+    if __driver_closed(guard.value.driver) -> return false
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
     if began -> guard.value.written = [String]{}
     began
 }
 __db_commit: fn(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
-    if raw(guard.value.driver) == (U64{0}) -> return false
+    if __driver_closed(guard.value.driver) -> return false
     committed: __driver_commit(guard.value.driver)
     if committed -> guard.value.written = [String]{}
     committed
@@ -708,7 +710,7 @@ __db_commit: fn(state: Shared<__DBState>) -> Bool Never! {
 // over a table they touched re-runs on its next read.
 __db_rollback: fn(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
-    if raw(guard.value.driver) == (U64{0}) -> return false
+    if __driver_closed(guard.value.driver) -> return false
     rolled: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
     guard.value.written = [String]{}
@@ -733,7 +735,7 @@ impl DBConnection {
 impl DBConnection.Display {
     display: fn(self) -> String {
         guard: self.state.guard_edit()
-        status: if raw(guard.value.driver) == (U64{0}) -> "closed" else -> "open"
+        status: if __driver_closed(guard.value.driver) -> "closed" else -> "open"
         "DBConnection({guard.value.path}, {status})"
     }
 }
@@ -742,7 +744,7 @@ impl DBConnection.Display {
 __scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
-    if raw(guard.value.driver) == (U64{0}) -> return Err(__db_closed())
+    if __driver_closed(guard.value.driver) -> return Err(__db_closed())
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if __sql_table(scoped) == .Val(table) {
         if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
@@ -753,7 +755,7 @@ __scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError
 __scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBValue]] DBError! {
     scoped: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
-    if raw(guard.value.driver) == (U64{0}) -> return Err(__db_closed())
+    if __driver_closed(guard.value.driver) -> return Err(__db_closed())
     __driver_query(guard.value.driver, scoped.text, scoped.values)
 }
 
@@ -1420,99 +1422,28 @@ decode: fn<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: Str
     }
 }
 
-// Actual scalar SQLite C signatures. Each pointer is owned by the Close record
-// below or borrowed from a live String/packed buffer for this one engine call.
-#Import c.sqlite3: module {
-    open_v2: fn(path: String, database: &U64, flags: I32, vfs: U64) -> I32 = "sqlite3_open_v2"
-    close_v2: fn(database: U64) -> I32 = "sqlite3_close_v2"
-    threadsafe: fn() -> I32 = "sqlite3_threadsafe"
-    mutex_alloc: fn(kind: I32) -> U64 = "sqlite3_mutex_alloc"
-    mutex_free: fn(mutex: U64) = "sqlite3_mutex_free"
-    memory_used: fn() -> I64 = "sqlite3_memory_used"
-    extended_result_codes: fn(database: U64, enabled: I32) -> I32 = "sqlite3_extended_result_codes"
-    busy_timeout: fn(database: U64, milliseconds: I32) -> I32 = "sqlite3_busy_timeout"
-    errmsg: fn(database: U64) -> U64 = "sqlite3_errmsg"
-    error_offset: fn(database: U64) -> I32 = "sqlite3_error_offset"
-    prepare_v3: fn(database: U64, sql: U64, bytes: I32, flags: U32, statement: &U64, tail: &U64) -> I32 = "sqlite3_prepare_v3"
-    finalize: fn(statement: U64) -> I32 = "sqlite3_finalize"
-    reset: fn(statement: U64) -> I32 = "sqlite3_reset"
-    clear_bindings: fn(statement: U64) -> I32 = "sqlite3_clear_bindings"
-    step: fn(statement: U64) -> I32 = "sqlite3_step"
-    bind_parameter_count: fn(statement: U64) -> I32 = "sqlite3_bind_parameter_count"
-    bind_null: fn(statement: U64, index: I32) -> I32 = "sqlite3_bind_null"
-    bind_int64: fn(statement: U64, index: I32, value: I64) -> I32 = "sqlite3_bind_int64"
-    bind_double: fn(statement: U64, index: I32, value: Float) -> I32 = "sqlite3_bind_double"
-    bind_text: fn(statement: U64, index: I32, bytes: U64, length: I32, destructor: I64) -> I32 = "sqlite3_bind_text"
-    bind_blob: fn(statement: U64, index: I32, bytes: U64, length: I32, destructor: I64) -> I32 = "sqlite3_bind_blob"
-    bind_zeroblob: fn(statement: U64, index: I32, length: I32) -> I32 = "sqlite3_bind_zeroblob"
-    column_count: fn(statement: U64) -> I32 = "sqlite3_column_count"
-    column_name: fn(statement: U64, index: I32) -> U64 = "sqlite3_column_name"
-    column_type: fn(statement: U64, index: I32) -> I32 = "sqlite3_column_type"
-    column_int64: fn(statement: U64, index: I32) -> I64 = "sqlite3_column_int64"
-    column_double: fn(statement: U64, index: I32) -> Float = "sqlite3_column_double"
-    column_text: fn(statement: U64, index: I32) -> U64 = "sqlite3_column_text"
-    column_blob: fn(statement: U64, index: I32) -> U64 = "sqlite3_column_blob"
-    column_bytes: fn(statement: U64, index: I32) -> I32 = "sqlite3_column_bytes"
-    changes: fn(database: U64) -> I32 = "sqlite3_changes"
-    get_autocommit: fn(database: U64) -> I32 = "sqlite3_get_autocommit"
-    exec: fn(database: U64, sql: String, callback: U64, context: U64, error: U64) -> I32 = "sqlite3_exec"
-    strlen: fn(text: U64) -> U64 = "strlen"
-}
-
-// The raw SQLite pointers are `priv`: a literal outside core.db could
-// otherwise hand Close a forged pointer (`SqliteDB{raw: 1}` faulted at close).
-SqliteDB: struct { priv raw: U64 }
-SqliteStmt: struct { priv raw: U64 }
-impl SqliteDB.Close {
-    close: fn(&&self) {
-        #Unsafe("this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later") {
-            _: sqlite3.close_v2(self.raw)
-        }
-    }
-}
-impl SqliteStmt.Close {
-    close: fn(&&self) {
-        #Unsafe("this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status") {
-            _: sqlite3.finalize(self.raw)
-        }
-    }
-}
-CachedStatement: struct { handle: SqliteStmt, sql: String }
-impl CachedStatement.Close {
-    close: fn(&&self) {
-        close(self.handle.move())
-    }
-}
+// One cached prepared statement: its engine statement slot (-1 when SQLite
+// prepared no statement, as for empty SQL) and the trimmed SQL it caches.
+CachedStatement: struct { stmt: Int, sql: String }
 
 // rusqlite 0.31.0: cache16,
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
-__Driver: struct { database: SqliteDB, cache: [CachedStatement] }
+// The connection is the Jet engine's; `live` is false once it is shut down.
+// The fields are `priv`: only core.db opens, drives and closes a connection.
+__Driver: struct { priv database: conn.Conn, priv cache: [CachedStatement], priv live: Bool }
 impl __Driver.Close {
     close: fn(&&self) {
-        cache := self.cache.move()
-        loop cache.len() > 0 {
-            statement: cache.pop() ?? panic("SQLite cache lost a statement")
-            close(statement)
-        }
-        close(self.database.move())
+        if !self.live -> return
+        held := __Driver{database: self.database.move(), cache: self.cache.move(), live: true}
+        _: __driver_shutdown(held)
     }
 }
-raw: fn(driver: __Driver) -> U64 Never! { driver.database.raw }
-statement_raw: fn(statement: CachedStatement) -> U64 Never! { statement.handle.raw }
+__driver_closed: fn(driver: __Driver) -> Bool Never! { !driver.live }
 
-#Unsafe("SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call")
-c_string: fn(address: U64) -> String Never! {
-    length: Int.from_u64(sqlite3.strlen(address))
-    String.from_bytes(sqlite_mem.__bytes_unpack(address, length)) ?? ""
-}
-error: fn(driver: __Driver) -> DBError Never! {
-    #Unsafe("copy this exclusively borrowed connection's error before reset/close can invalidate or overwrite it") {
-        return DBError{message: c_string(sqlite3.errmsg(raw(driver)))}
-    }
-}
+error: fn(driver: __Driver) -> DBError Never! { DBError{message: prep.errmsg(driver.database)} }
 
 // Backend open reports None; public open preserves E3001, while the queue maps
-// None to its existing Unavailable error. Failed non-null handles close too.
+// None to its existing Unavailable error. Failed opens close their connection.
 __nul_text: fn() -> String Never! { String.from_bytes([U8]{0}) ?? panic("NUL is one ASCII byte") }
 __has_nul: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() { if byte == (U8{0}) -> return true }
@@ -1520,51 +1451,44 @@ __has_nul: fn(text: String) -> Bool Never! {
 }
 
 __driver_open: fn(path: String) -> __Driver? Never! {
+    // sqlite3_open_v2 takes a NUL-terminated filename, so a NUL never opens.
     if __has_nul(path) -> return None
-    pointer := U64{0}
-    #Unsafe("NUL-free filename goes through the canonical C String adapter; the output pointer slot belongs to this stack frame") {
-        // rusqlite, for this pinned 3.45 engine: reject an unsafe global
-        // single-thread configuration before opening.
-        if sqlite3.threadsafe() == (I32{0}) -> return None
-        mutex: sqlite3.mutex_alloc(I32{0})
-        single_threaded: mutex == (U64{8})
-        sqlite3.mutex_free(mutex)
-        if single_threaded -> return None
-        status: sqlite3.open_v2(path, pointer, I32{32838}, U64{0})
-        database: SqliteDB{raw: pointer}
-        if status != (I32{0}) -> return None
-        _: sqlite3.extended_result_codes(pointer, I32{1})
-        if sqlite3.busy_timeout(pointer, I32{5000}) != (I32{0}) -> return None
-        return Val(__Driver{database: database.move(), cache: [CachedStatement]{}})
+    opened := prep.open_v2(path, 32838)
+    database := opened.db.move()
+    if opened.rc != base.OK {
+        _: prep.close_v2(database)
+        return None
+    }
+    _: prep.extended_result_codes(database, true)
+    if prep.busy_timeout(database, 5000) != base.OK {
+        _: prep.close_v2(database)
+        return None
+    }
+    Val(__Driver{database: database.move(), cache: [CachedStatement]{}, live: true})
+}
+// Finalize every cached statement, oldest first.
+__driver_finalize_cache: fn(driver: &__Driver) Never! {
+    loop driver.cache.len() > 0 {
+        statement: driver.cache.remove(0, .Slot) ?? panic("SQLite cache lost a statement")
+        _: prep.finalize_stmt(driver.database, statement.stmt)
     }
 }
-// Shut a shared connection down in place: later operations see raw == 0 and
-// the driver's own Close then hands SQLite a NULL pointer, which is a no-op.
+// Shut a shared connection down in place: later operations see it closed and
+// the driver's own Close then does nothing.
 __driver_shutdown: fn(driver: &__Driver) -> Bool Never! {
-    if raw(driver) == (U64{0}) -> return false
-    loop driver.cache.len() > 0 {
-        statement: driver.cache.pop() ?? panic("SQLite cache lost a statement")
-        close(statement)
-    }
-    #Unsafe("close the exclusively borrowed connection's sole SQLite pointer once; zeroing it below makes the later Close a no-op") {
-        _: sqlite3.close_v2(raw(driver))
-    }
-    driver.database.raw = U64{0}
+    if !driver.live -> return false
+    __driver_finalize_cache(driver)
+    _: prep.close_v2(driver.database)
+    driver.live = false
     true
 }
-control: fn(driver: __Driver, sql: String) -> Bool Never! {
-    #Unsafe("exclusive live database, constant transaction SQL, canonical C String adapter, and no callback/error output allocation") {
-        return sqlite3.exec(raw(driver), sql, U64{0}, U64{0}, U64{0}) == (I32{0})
-    }
-}
-__driver_begin: fn(driver: __Driver) -> Bool Never! { control(driver, "BEGIN") }
-__driver_begin_immediate: fn(driver: __Driver) -> Bool Never! { control(driver, "BEGIN IMMEDIATE") }
-__driver_commit: fn(driver: __Driver) -> Bool Never! { control(driver, "COMMIT") }
-__driver_rollback: fn(driver: __Driver) -> Bool Never! { control(driver, "ROLLBACK") }
-__driver_reset: fn(driver: __Driver) -> Bool Never! {
-    #Unsafe("read the exclusively borrowed SQLite connection's autocommit flag") {
-        if sqlite3.get_autocommit(raw(driver)) != (I32{0}) -> return true
-    }
+control: fn(driver: &__Driver, sql: String) -> Bool Never! { prep.exec_sql(driver.database, sql.bytes()) == base.OK }
+__driver_begin: fn(driver: &__Driver) -> Bool Never! { control(driver, "BEGIN") }
+__driver_begin_immediate: fn(driver: &__Driver) -> Bool Never! { control(driver, "BEGIN IMMEDIATE") }
+__driver_commit: fn(driver: &__Driver) -> Bool Never! { control(driver, "COMMIT") }
+__driver_rollback: fn(driver: &__Driver) -> Bool Never! { control(driver, "ROLLBACK") }
+__driver_reset: fn(driver: &__Driver) -> Bool Never! {
+    if prep.get_autocommit(driver.database) -> return true
     __driver_rollback(driver)
 }
 
@@ -1584,115 +1508,88 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
             return Ok(cached)
         }
     }
-    pointer := U64{0}
-    tail := U64{0}
-    #Unsafe("key stays alive and unmodified while SQLite borrows its UTF-8 data+byte length; the output slots are stack-owned") {
-        length: sqlite_mem.__string_byte_len(key)
-        if length >= 2147483647 -> return Err(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
-        status := I32{0}
-        // SQLite reads a null SQL pointer as an error; empty text borrows one
-        // packed byte for the duration of this call instead.
-        if {
-            length == 0 -> {
-                empty: sqlite_mem.__bytes_pack([U8]{0})
-                status = sqlite3.prepare_v3(raw(driver), empty, I32{0}, U32{1}, pointer, tail)
-                sqlite_mem.__bytes_free(empty, 1)
-            }
-            else -> {
-                status = sqlite3.prepare_v3(raw(driver), sqlite_mem.__string_data(key), I32{length}, U32{1}, pointer, tail)
-            }
+    text: key.bytes()
+    if text.len() >= 2147483647 -> return Err(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+    prepared: prep.prepare_v3(driver.database, text, 1)
+    if prepared.rc != base.OK {
+        failure := error(driver)
+        primary: prepared.rc.bit_and(255)
+        // rusqlite: only Unknown primary errors (outside 2..26) acquire
+        // modern_sqlite's SQL/offset diagnostic suffix.
+        if primary < 2 || primary > 26 {
+            offset: prep.error_offset(driver.database)
+            if offset >= 0 -> failure.message = "{failure.message} in {key} at offset {offset}"
         }
-        handle: SqliteStmt{raw: pointer}
-        if status != (I32{0}) {
-            failure := error(driver)
-            primary: status.bit_and(I32{255})
-            // rusqlite: only Unknown primary errors (outside 2..26) acquire
-            // modern_sqlite's SQL/offset diagnostic suffix.
-            if primary < (I32{2}) || primary > (I32{26}) {
-                offset: sqlite3.error_offset(raw(driver))
-                if offset >= (I32{0}) -> failure.message = "{failure.message} in {key} at offset {offset}"
-            }
-            return Err(failure)
-        }
-        return Ok(CachedStatement{handle: handle.move(), sql: key})
+        // SQLite hands back no statement on error; finalize(-1) does nothing.
+        _: prep.finalize_stmt(driver.database, prepared.stmt)
+        return Err(failure)
     }
+    Ok(CachedStatement{stmt: prepared.stmt, sql: key})
 }
 release: fn(driver: &__Driver, statement: &&CachedStatement) Never! {
-    if statement_raw(statement) == (U64{0}) -> return
-    #Unsafe("reset this exclusively owned statement and clear the TRANSIENT bindings before returning it to its owning cache") {
-        _: sqlite3.reset(statement_raw(statement))
-        _: sqlite3.clear_bindings(statement_raw(statement))
-    }
+    if statement.stmt < 0 -> return
+    // Reset this statement and clear its bindings before it returns to the cache.
+    _: prep.reset_stmt(driver.database, statement.stmt)
+    api.clear_bindings(driver.database, statement.stmt)
     if driver.cache.len() == 16 {
         oldest: driver.cache.remove(0, .Slot) ?? panic("SQLite cache lost its oldest statement")
-        close(oldest)
+        _: prep.finalize_stmt(driver.database, oldest.stmt)
     }
     driver.cache.push(statement)
 }
-bind: fn(driver: __Driver, statement: U64, params: [DBValue]) -> DBError? Never! {
-    #Unsafe("exclusive statement loan; scalar values are copied, borrowed String lives unmodified until SQLITE_TRANSIENT finishes, and packed blobs are freed only after SQLite copies them") {
-        needed: Int.from_i32(sqlite3.bind_parameter_count(statement))
-        if params.len() != needed -> return Val(DBError{message: "Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"})
-        loop at in 0..<params.len() {
-            index: I32{at + 1}
-            status := I32{0}
-            if params[at] == {
-                .Null -> status = sqlite3.bind_null(statement, index)
-                .Int(number) -> status = sqlite3.bind_int64(statement, index, I64{number})
-                .Float(number) -> status = sqlite3.bind_double(statement, index, number)
-                .Bool(value) -> status = sqlite3.bind_int64(statement, index, if value -> I64{1} else -> I64{0})
-                .Text(text) -> {
-                    length: sqlite_mem.__string_byte_len(text)
-                    if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
-                    // SQLite interprets a null pointer as NULL even with
-                    // length zero. Empty TEXT binds one packed byte; TRANSIENT
-                    // copies it before the buffer is freed.
-                    if {
-                        length == 0 -> {
-                            empty: sqlite_mem.__bytes_pack([U8]{0})
-                            status = sqlite3.bind_text(statement, index, empty, I32{0}, I64{-1})
-                            sqlite_mem.__bytes_free(empty, 1)
-                        }
-                        else -> {
-                            status = sqlite3.bind_text(statement, index, sqlite_mem.__string_data(text), I32{length}, I64{-1})
-                        }
-                    }
-                }
-                .Blob(bytes) -> {
-                    length: bytes.len()
-                    if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
-                    if length == 0 -> status = sqlite3.bind_zeroblob(statement, index, I32{0})
-                    else {
-                        address: sqlite_mem.__bytes_pack(bytes)
-                        status = sqlite3.bind_blob(statement, index, address, I32{length}, I64{-1})
-                        sqlite_mem.__bytes_free(address, length)
-                    }
-                }
+// sqlite3_step(NULL) is SQLITE_MISUSE; empty SQL prepares no statement.
+step_statement: fn(driver: &__Driver, statement: Int) -> Int Never! {
+    if statement < 0 -> return base.MISUSE
+    prep.step(driver.database, statement)
+}
+bind: fn(driver: &__Driver, statement: Int, params: [DBValue]) -> DBError? Never! {
+    needed: if statement < 0 -> 0 else -> api.bind_parameter_count(driver.database, statement)
+    if params.len() != needed -> return Val(DBError{message: "Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"})
+    loop at in 0..<params.len() {
+        index: at + 1
+        status := base.OK
+        if params[at] == {
+            .Null -> status = api.bind_null(driver.database, statement, index)
+            .Int(number) -> status = api.bind_int64(driver.database, statement, index, number)
+            .Float(number) -> status = api.bind_double(driver.database, statement, index, number)
+            .Bool(value) -> status = api.bind_int64(driver.database, statement, index, if value -> 1 else -> 0)
+            .Text(text) -> {
+                bytes: text.bytes()
+                length: bytes.len()
+                if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+                // Empty TEXT binds empty text, never NULL.
+                status = api.bind_text(driver.database, statement, index, Val(bytes), length)
             }
-            if status != (I32{0}) -> return Val(error(driver))
+            .Blob(bytes) -> {
+                length: bytes.len()
+                if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+                if length == 0 -> status = api.bind_zeroblob(driver.database, statement, index, 0)
+                else -> status = api.bind_blob(driver.database, statement, index, Val(bytes), length)
+            }
         }
+        if status != base.OK -> return Val(error(driver))
     }
     None
 }
 __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
-    if bind(driver, statement_raw(statement), params) == .Val(failure) {
+    if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
         return Err(failure)
     }
     count := 0
     failure := DBError?{None}
-    #Unsafe("step/reset the exclusive statement, matching rusqlite execute_with_bound_parameters, then copy any SQLite error before another operation") {
-        status: sqlite3.step(statement_raw(statement))
-        reset_status: sqlite3.reset(statement_raw(statement))
-        if {
-            status == (I32{101}) -> {
-                if reset_status == (I32{0}) -> count = Int.from_i32(sqlite3.changes(raw(driver)))
-                else -> failure = Val(error(driver))
-            }
-            status == (I32{100}) -> failure = Val(DBError{message: "Execute returned results - did you mean to call query?"})
+    // Step, then reset, matching rusqlite execute_with_bound_parameters; copy
+    // any SQLite error before another operation.
+    status: step_statement(driver, statement.stmt)
+    reset_status: if statement.stmt < 0 -> base.OK else -> prep.reset_stmt(driver.database, statement.stmt)
+    if {
+        status == base.DONE -> {
+            if reset_status == base.OK -> count = prep.changes(driver.database)
             else -> failure = Val(error(driver))
         }
+        status == base.ROW -> failure = Val(DBError{message: "Execute returned results - did you mean to call query?"})
+        else -> failure = Val(error(driver))
     }
     release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
@@ -1713,13 +1610,12 @@ decimal_width: fn(number: Int) -> Int Never! {
     width
 }
 tagged_width: fn(payload: Int) -> Int Never! { payload + decimal_width(payload) + 2 }
-#Unsafe("value is alive and unchanged while reading its UTF-8 byte count; no borrowed pointer escapes")
 cell_wire_width: fn(value: DBValue) -> Int Never! {
     payload: if value == {
         .Null -> 0
         .Int(number) -> decimal_width(number)
         .Float(number) -> __float_text(number).len()
-        .Text(text) -> sqlite_mem.__string_byte_len(text)
+        .Text(text) -> text.count_bytes()
         .Bool(_) -> 1
         .Blob(bytes) -> bytes.len() * 2
     }
@@ -1728,7 +1624,7 @@ cell_wire_width: fn(value: DBValue) -> Int Never! {
 
 __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[String: DBValue]] DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
-    if bind(driver, statement_raw(statement), params) == .Val(failure) {
+    if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
         return Err(failure)
     }
@@ -1737,53 +1633,44 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
     duplicate := false
     wire_rows := 0
     column_overflow := false
-    #Unsafe("copy every SQLite column into an owned value while its row remains live, before the next step/reset/finalize; byte unpack reads only column_bytes bytes") {
-        count: Int.from_i32(sqlite3.column_count(statement_raw(statement)))
-        names := [String]{}
-        row_prefix := decimal_width(count) + 1
-        loop index in 0..<count {
-            name: sqlite3.column_name(statement_raw(statement), I32{index})
-            if name == (U64{0}) -> panic("Null pointer from sqlite3_column_name: Out of memory?")
-            text: c_string(name)
-            row_prefix += tagged_width(sqlite_mem.__string_byte_len(text))
-            names.push(text)
+    // Copy every column into an owned value while its row is current.
+    count: if statement.stmt < 0 -> 0 else -> api.column_count(driver.database, statement.stmt)
+    names := [String]{}
+    row_prefix := decimal_width(count) + 1
+    loop index in 0..<count {
+        name: api.column_name(driver.database, statement.stmt, index) ?? panic("Null pointer from sqlite3_column_name: Out of memory?")
+        row_prefix += tagged_width(name.len())
+        names.push(String.from_bytes(name) ?? "")
+    }
+    loop {
+        status: step_statement(driver, statement.stmt)
+        if status == base.DONE -> break
+        if status != base.ROW {
+            failure = Val(error(driver))
+            break
         }
-        loop {
-            status: sqlite3.step(statement_raw(statement))
-            if status == (I32{101}) -> break
-            if status != (I32{100}) {
-                failure = Val(error(driver))
-                break
-            }
-            row := [String: DBValue]{}
-            loop at in 0..<count {
-                index: I32{at}
-                value := DBValue.Null
-                kind: sqlite3.column_type(statement_raw(statement), index)
-                if {
-                    kind == (I32{1}) -> value = DBValue.Int(Int.from_i64(sqlite3.column_int64(statement_raw(statement), index)))
-                    kind == (I32{2}) -> value = DBValue.Float(sqlite3.column_double(statement_raw(statement), index))
-                    kind == (I32{3}) -> {
-                        pointer: sqlite3.column_text(statement_raw(statement), index)
-                        length: Int.from_i32(sqlite3.column_bytes(statement_raw(statement), index))
-                        // The Rust original maps invalid UTF-8 to "".
-                        value = DBValue.Text(String.from_bytes(sqlite_mem.__bytes_unpack(pointer, length)) ?? "")
-                    }
-                    kind == (I32{4}) -> {
-                        pointer: sqlite3.column_blob(statement_raw(statement), index)
-                        length: Int.from_i32(sqlite3.column_bytes(statement_raw(statement), index))
-                        value = DBValue.Blob(sqlite_mem.__bytes_unpack(pointer, length))
-                    }
-                    else -> {}
+        row := [String: DBValue]{}
+        loop at in 0..<count {
+            value := DBValue.Null
+            kind: api.column_type(driver.database, statement.stmt, at)
+            if {
+                kind == base.SQL_INTEGER -> value = DBValue.Int(api.column_int64(driver.database, statement.stmt, at))
+                kind == base.SQL_FLOAT -> value = DBValue.Float(api.column_double(driver.database, statement.stmt, at))
+                kind == base.SQL_TEXT -> {
+                    text: api.column_text(driver.database, statement.stmt, at) ?? [U8]{}
+                    // The Rust original maps invalid UTF-8 to "".
+                    value = DBValue.Text(String.from_bytes(text) ?? "")
                 }
-                wire_rows += cell_wire_width(value)
-                if row.get(names[at]) == .Val(_) -> duplicate = true
-                row[names[at].copy()] = value.move()
+                kind == base.SQL_BLOB -> value = DBValue.Blob(api.column_blob(driver.database, statement.stmt, at))
+                else -> {}
             }
-            wire_rows += row_prefix
-            if count > 100000 -> column_overflow = true
-            rows.push(row)
+            wire_rows += cell_wire_width(value)
+            if row.get(names[at]) == .Val(_) -> duplicate = true
+            row[names[at].copy()] = value.move()
         }
+        wire_rows += row_prefix
+        if count > 100000 -> column_overflow = true
+        rows.push(row)
     }
     release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
@@ -1876,8 +1763,35 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     assert(__driver_shutdown(driver))
 }
 
-// Ordinary scope-end Close drains Driver -> CachedStatement -> SqliteStmt, then
-// closes SqliteDB when this probe returns; no explicit close here.
+#Test("SQLite driver builds an index over existing rows and keeps UNIQUE indexes unique") {
+    driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
+    _: __driver_execute(driver, "CREATE TABLE jobs (queue TEXT NOT NULL, state TEXT NOT NULL, due INTEGER NOT NULL, sequence INTEGER NOT NULL)", [DBValue]{}) ?? panic("SQLite create failed")
+    loop n in 0..<40 {
+        _: __driver_execute(driver, "INSERT INTO jobs VALUES (?, ?, ?, ?)", [DBValue]{.Text("q{n % 3}"), .Text(if n % 2 == 0 -> "ready" else -> "done"), .Int(100 - n), .Int(n)}) ?? panic("SQLite insert failed")
+    }
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS jobs_due ON jobs (queue, state, due, sequence)", [DBValue]{}) ?? panic("SQLite create index failed")
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS jobs_due ON jobs (queue, state, due, sequence)", [DBValue]{}) ?? panic("SQLite repeated create index failed")
+    _: __driver_execute(driver, "INSERT INTO jobs VALUES ('q1', 'ready', 1, 40)", [DBValue]{}) ?? panic("SQLite insert after index failed")
+    // INDEXED BY reads the rows from the index alone: the refill wrote every
+    // existing row and the later insert added its own.
+    due: __driver_query(driver, "SELECT sequence FROM jobs INDEXED BY jobs_due WHERE queue = 'q1' AND state = 'ready' ORDER BY due", [DBValue]{}) ?? panic("SQLite indexed select failed")
+    assert_eq(due.map(row -> row_int(row, "sequence") ?? -1), [Int]{40, 34, 28, 22, 16, 10, 4})
+    schema: __driver_query(driver, "SELECT sql FROM sqlite_master WHERE name = 'jobs_due'", [DBValue]{}) ?? panic("SQLite schema read failed")
+    assert_eq(row_text(schema[0], "sql") ?? "", "CREATE INDEX jobs_due ON jobs (queue, state, due, sequence)")
+    if __driver_execute(driver, "CREATE UNIQUE INDEX jobs_queue ON jobs (queue)", [DBValue]{}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.queue"))
+    }
+    _: __driver_execute(driver, "CREATE UNIQUE INDEX jobs_sequence ON jobs (sequence)", [DBValue]{}) ?? panic("SQLite unique index failed")
+    if __driver_execute(driver, "INSERT INTO jobs VALUES ('q0', 'ready', 5, 3)", [DBValue]{}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.sequence"))
+    }
+    assert(__driver_shutdown(driver))
+}
+
+// Ordinary scope-end Close finalizes the driver's cached statements and then
+// closes its connection when this probe returns; no explicit close here.
 __driver_cache_parity_probe: fn() Never! {
     driver := __driver_open(":memory:") ?? panic("SQLite open failed")
     loop number in 0..<20 {
@@ -1911,19 +1825,22 @@ __driver_cache_parity_probe: fn() Never! {
 #Test("SQLite driver retains cache/error parity and releases every cached handle") {
     warm := __driver_open(":memory:") ?? panic("SQLite warmup failed")
     assert(__driver_shutdown(warm))
-    baseline := I64{0}
-    #Unsafe("SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers") {
-        baseline = sqlite3.memory_used()
-    }
+    assert(!__driver_shutdown(warm))
+    assert(__driver_closed(warm))
     __driver_cache_parity_probe()
-    #Unsafe("all test handles have reached Close before reading SQLite's allocator counter") {
-        assert_eq(sqlite3.memory_used(), baseline)
+    // The cache keeps the 16 newest statements; finalizing them leaves the
+    // connection with no statement.
+    driver := __driver_open(":memory:") ?? panic("SQLite open failed")
+    loop number in 0..<20 {
+        _: __driver_query(driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
     }
+    assert_eq(driver.cache.len(), 16)
+    __driver_finalize_cache(driver)
+    assert_eq(driver.cache.len(), 0)
+    assert_eq(driver.database.vdbe_head, -1)
+    assert(__driver_shutdown(driver))
     if __driver_open("bad{__nul_text()}filename") == .Val(_) -> assert(false)
     if __driver_open("/") == .Val(_) -> assert(false)
-    #Unsafe("failed opens, including non-null error handles, have already reached Close") {
-        assert_eq(sqlite3.memory_used(), baseline)
-    }
 }
 
 #Test("typed SQL literals join their pieces with placeholders") {

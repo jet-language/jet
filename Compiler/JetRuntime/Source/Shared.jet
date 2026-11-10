@@ -104,6 +104,7 @@ shared_release: fn(shared: I64, editable: Bool) {
 
 shared_revision_stop: fn() {
     message: channel_text(I64{3})
+    trap_stop(I64{1}, sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}, I64{0})
     if !rt_task_panic_publish(sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}) {
         scheduler_fatal(message)
         return
@@ -141,6 +142,7 @@ shared_revision_begin: fn(shared: I64, revision: I64) -> Bool {
     shared_release(shared, true)
     jet_rt_native_shared_drop(shared)
     message: channel_text(I64{3})
+    trap_stop(I64{1}, sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}, I64{0})
     if !rt_task_panic_publish(sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}) {
         scheduler_fatal(message)
         return false
@@ -244,6 +246,7 @@ shared_guard_invalid: fn() {
     sync_store(wrapping(buffer + I64{16}), I64{8007510541417412206})
     sync_store(wrapping(buffer + I64{24}), I64{8314037903335497842})
     sync_store(wrapping(buffer + I64{32}), I64{25701})
+    trap_stop(I64{1}, buffer, I64{34}, I64{0}, I64{0})
     if !rt_task_panic_publish(buffer, I64{34}, I64{0}) -> scheduler_fatal(text)
     jet_rt_string_drop(text)
 }

@@ -1,9 +1,11 @@
 // game-frame: 1200 frames of a 2D game scene on a 320x200 RGBA8 software
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
-// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
-// rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
-// every presented frame is written there as a PAM image.
+// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. The
+// canvas is premultiplied, as core.ui's is: a color premultiplies on entry,
+// (c * a + 127) / 255, and every rectangle clips to the canvas and blends
+// src-over per channel, alpha included: s + (d * (255 - a) + 127) / 255.
+// With JET_FRAME_CAPTURE set, every presented frame is written there as a
+// PAM image; the canvas is opaque, so its bytes are the straight ones.
 use std::io::Write;
 
 const W: i64 = 320;
@@ -38,8 +40,8 @@ fn rgba(r: i64, g: i64, b: i64, a: i64) -> u32 {
     ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32
 }
 
-fn blend(source: u32, target: u8, alpha: u32) -> u8 {
-    ((source * alpha + target as u32 * (255 - alpha) + 127) / 255) as u8
+fn mul(a: u32, b: u32) -> u32 {
+    (a * b + 127) / 255
 }
 
 fn fill(canvas: &mut [u8], x: i64, y: i64, width: i64, height: i64, color: u32, replace: bool) {
@@ -54,7 +56,8 @@ fn fill(canvas: &mut [u8], x: i64, y: i64, width: i64, height: i64, color: u32, 
     if x1 <= x0 || y1 <= y0 {
         return;
     }
-    let (red, green, blue) = (color >> 24, (color >> 16) & 255, (color >> 8) & 255);
+    let (red, green, blue) = (mul(color >> 24, alpha), mul((color >> 16) & 255, alpha), mul((color >> 8) & 255, alpha));
+    let rest = 255 - alpha;
     let opaque = replace || alpha == 255;
     for row in y0..y1 {
         let start = ((row * W + x0) * 4) as usize;
@@ -66,10 +69,10 @@ fn fill(canvas: &mut [u8], x: i64, y: i64, width: i64, height: i64, color: u32, 
                 pixel[2] = blue as u8;
                 pixel[3] = alpha as u8;
             } else {
-                pixel[0] = blend(red, pixel[0], alpha);
-                pixel[1] = blend(green, pixel[1], alpha);
-                pixel[2] = blend(blue, pixel[2], alpha);
-                pixel[3] = blend(alpha, pixel[3], alpha);
+                pixel[0] = (red + mul(pixel[0] as u32, rest)) as u8;
+                pixel[1] = (green + mul(pixel[1] as u32, rest)) as u8;
+                pixel[2] = (blue + mul(pixel[2] as u32, rest)) as u8;
+                pixel[3] = (alpha + mul(pixel[3] as u32, rest)) as u8;
             }
         }
     }

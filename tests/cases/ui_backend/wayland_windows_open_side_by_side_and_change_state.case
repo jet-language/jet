@@ -1,0 +1,22 @@
+# #6701: two `ui.open` windows at once, each driven by its own task over
+# its own connection to a fake compositor on $WAYLAND_DISPLAY. One asks to
+# be maximized, is made fullscreen (on the output the compositor picks),
+# leaves fullscreen and asks to be minimized: each answer is a configure
+# whose size arrives as `.Resize`, with `maximized()` and `fullscreen()`
+# following its states. The other presents until the compositor closes
+# it, at the size the compositor configured.
+requires: os-name:linux
+fixture: wayland_windows_open_side_by_side_and_change_state.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: WAYLAND_DISPLAY={work}/wl.sock
+step run: jet run main.jet
+exit: 0
+stdout: = "states: opened maximized false fullscreen false\nstates: 400x300 maximized true fullscreen false\nstates: 640x480 maximized false fullscreen true\nstates: 200x100 maximized false fullscreen false\nstates: closed maximized false fullscreen false\nplain: closed after 3 presents at 200x100 maximized false fullscreen false\nstates: maximize\nstates: fullscreen on output 0\nstates: leave fullscreen\nstates: minimize\nplain: closed by the compositor after 3 commits\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "states: opened maximized false fullscreen false\nstates: 400x300 maximized true fullscreen false\nstates: 640x480 maximized false fullscreen true\nstates: 200x100 maximized false fullscreen false\nstates: closed maximized false fullscreen false\nplain: closed after 3 presents at 200x100 maximized false fullscreen false\nstates: maximize\nstates: fullscreen on output 0\nstates: leave fullscreen\nstates: minimize\nplain: closed by the compositor after 3 commits\n"
+stderr: empty

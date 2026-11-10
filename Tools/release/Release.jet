@@ -11,8 +11,24 @@ use {
 
 // What a seed directory ships; jetpack is
 // absent from some, and a missing name is skipped as there. RELEASE names the
-// release, so jet can download its own C toolchain pack.
-SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE"}
+// release, so jet can download its own C toolchain pack. VERSION (`a0.0.N
+// <commit> <YYYY-MM-DD>`) is the stamp `jet --version` prints the release from
+// (Jetpack/PackageModel Manifest.jet pkg_jet_build).
+SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE", "VERSION"}
+
+// Where a tree declares its Jet version, and the declaration's prefix.
+JET_VERSION_SOURCE: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+JET_VERSION_PREFIX: "JET_VERSION: \""
+
+// The JET_VERSION the tree at `root` declares, "" when it declares none.
+tree_jet_version: fn(root: String) -[FS]> String Never! {
+    text: read_text(files.join(root, JET_VERSION_SOURCE)) ?? return ""
+    loop line in text.split("\n").to_list() {
+        if !line.starts_with(JET_VERSION_PREFIX) || !line.ends_with("\"") || line.len() <= JET_VERSION_PREFIX.len() + 1 -> next
+        return line.slice(JET_VERSION_PREFIX.len()..<line.len() - 1).copy()
+    }
+    ""
+}
 
 // The kinds of problem that block a release. Each blocked run records its
 // problems under these names in the audit trail.
@@ -54,6 +70,8 @@ Release: struct {
     // An admitted release keeps the name `admit` gave it.
     name: String
     target: String
+    // The VERSION stamp's line (`a0.0.N <commit> <YYYY-MM-DD>`), "" without one.
+    version_stamp: String
     s2: String
     s3: String
     shipped: [Artifact]
@@ -185,7 +203,7 @@ first_line: fn(text: String) -> String Never! {
 // Reads `dir`. Missing or malformed inputs become problems, so one run
 // reports all of them.
 read_release: fn(dir: String) -[FS]> Release Never! {
-    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", commit: "", seed: "", name: "", target: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", admission: Dyn.Null, problems: [Problem]{}}
+    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", commit: "", seed: "", name: "", target: "", version_stamp: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", admission: Dyn.Null, problems: [Problem]{}}
     admitted: files.exists(files.join(dir, "RELEASE.json"))
     release.kind = if admitted -> "admitted" else -> "build"
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
@@ -195,6 +213,7 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     }
     if release.problems.len() > 0 -> return release
     release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")
+    release.version_stamp = first_line(read_text(files.join(dir, "VERSION")) ?? "")
     jet: files.read_bytes(files.join(dir, "jet")) ?? [U8]{}
     release.jet_sha256 = sha256_hex(jet)
     release.shipped = shipped_artifacts(dir)

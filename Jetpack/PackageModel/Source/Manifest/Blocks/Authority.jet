@@ -308,11 +308,23 @@ pkg_parse_effect_list: fn(field: String, value: String) -> [String] PackageParse
     loop name in names {
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
         if name.contains("(") {
-            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
-            if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
+            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
+            if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
         }
     }
     Ok(names)
+}
+
+// The reason for an `FFI` right written with an argument, such as
+// `FFI.C("nativeffi")` (#6281 c144): that is the foreign-call effect naming
+// a library, not a memory denial, and an authority list names the right
+// alone. None for every other root.
+pkg_authority_ffi_argument: fn(name: String, place: String) -> String? {
+    if authority_root(name) != "FFI" -> return None
+    open: name.find("(")
+    if open < 0 -> return None
+    right: String.from_bytes_lossy(name.bytes()[0..<open])
+    Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
 }
 
 pkg_parse_authority_needs: fn(value: String) -> [String] PackageParseError! {
@@ -320,7 +332,7 @@ pkg_parse_authority_needs: fn(value: String) -> [String] PackageParseError! {
     loop name in needs {
         if syntax_is_ui_capability(name) -> next
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect or UI capability"))
-        if name.contains("(") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+        if name.contains("(") -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`authority.needs`") ?? "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
     }
     loop right in needs {
         root: authority_root(right)

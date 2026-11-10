@@ -26,6 +26,8 @@ use {
         SemaCheckedMemoryFacts,
         sema_comptime_reflection_layout_engine,
         sema_checked_layout_projections,
+        SemaModuleMetaSource,
+        SemaModulePackage,
         SemaLookupCounters,
         SemaRegistrationForeignHandleFacts,
         SemaRegistrationGraph,
@@ -144,6 +146,7 @@ use {
         jet_target_machine_wasm_no_os,
         jet_target_package_version_from_compiler_identity,
         target_os_key,
+        target_os_name,
         target_os_parse,
         source_file_id,
         symbol_id,
@@ -494,6 +497,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
             target_layout: Val(target_layout),
             layout_facts: sema_checked_layout_projections(graph.programs[index].items, layout_engine, graph_module.module_identity),
             app_route_roots: graph.programs[index].app_route_roots,
+            file_cap: graph.programs[index].file_cap,
         })
     }
     if checked_projection && (seen.len() != loaded_units.len() || capture.entry_module == None) -> return [JetDriverDocModule]{}
@@ -685,7 +689,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     SemaBuildFacts{
         package_name: package_name,
         package_version: package_version,
-        os: jet_target_active_os_name(target_machine.triple, host_os),
+        os: if target_os_parse(request.build_os) == .Val(selected) -> target_os_name(selected) else -> jet_target_active_os_name(target_machine, host_os),
         profile: request.profile,
         stamp_git: stamp_git,
         stamp_dirty: stamp_dirty,
@@ -1679,6 +1683,7 @@ jet_driver_comptime_flush: fn(
         item_config := jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file), Val(compiler_queries))
         item_config.impure = source.impure
         item_config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
+        item_config.effect_call = comptime_request.effect_call
         eval_result: jet_eval_native_run(native, item, [TComptimeValue]{}, item_config, comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
         jet_driver_record_eval_result(trace, eval_result)
@@ -3310,10 +3315,12 @@ jet_driver_checked_declarations: fn(checked: &JetDriverLoweringInputs) -> JetDri
 // `release_programs`: each parsed program moves into its input and the loaded
 // module keeps an empty one (an ordinary compile reads programs only through
 // the registration graph from here on); otherwise the input is a copy.
+// `packages` give each module's Module record its package.
 jet_driver_registration_module_inputs: fn(
     modules: &[JetDriverLoadedModule],
     source_units: [JetDriverSourceUnit],
     source_files: [SourceFile],
+    packages: [JetDriverPackageInfo],
     providers: [SemaForeignProviderInput],
     diagnostics: &[Diagnostic],
     core_sources: [JetDriverCoreSource],
@@ -3355,9 +3362,22 @@ jet_driver_registration_module_inputs: fn(
             namespace_private: modules[loaded_index].namespace_private,
             namespace_refs: modules[loaded_index].namespace_refs,
             source: jet_driver_source_text_at(source_files, source_positions, unit.path),
+            meta: jet_driver_module_meta_source(unit, packages),
         })
     }
     Val(inputs)
+}
+
+// A module's file from its package root and its package's manifest facts,
+// which its Module record names.
+jet_driver_module_meta_source: fn(unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) -> SemaModuleMetaSource Never! {
+    meta := SemaModuleMetaSource{file: unit.relative_path.copy()}
+    loop package in packages {
+        if package.root_index != unit.root_index -> next
+        meta.package = SemaModulePackage{name: package.name.copy(), version: package.version ?? "0.0.0", edition: if package.edition == "" -> None else -> Val(package.edition.copy()), log: if package.log_filter == "" -> None else -> Val(package.log_filter.copy())}
+        break
+    }
+    meta
 }
 
 // Compiler-internal finalizer over the original completed check. Service
@@ -3669,7 +3689,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // Doc and the retained checked projection read the loaded programs again;
     // every other compile hands them to registration.
     release_programs: !(checked_projection || request.mode == JetDriverCompileMode.Doc)
-    registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
+    registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
     canonical_effect_module_identity := canonical_effect_module.module_identity
     registration_inputs.push(canonical_effect_module)
     registration_module_count := registration_inputs.len()

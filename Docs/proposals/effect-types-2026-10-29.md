@@ -359,21 +359,29 @@ Code that should differ per target branches on a fact
 Every place user code runs inside the compiler is a public function type in
 `core.compiler`, and its row is the contract:
 
-|Extension point|Type (in `core.compiler`)|Row|
+|Extension point|Entry (in `core.compiler`)|Row|
 |---|---|---|
-|Compile-time value|`comptime { … }`|`#FX()`: pure by default|
+|Compile-time value|`comptime { … }`|`#FX`: pure by default|
 |Pinned build input|`embed_file`, `find`, pinned `fetch`|`Build.Input`, recorded in `.jet/lock`|
 |Impure preparation|`#Impure("reason") { … }` plus `--gate impure=allow`|ambient effects, audited|
-|Marker expansion|`fn(Site) -[Compiler.Read]> Syntax`|reads the program, cannot touch the machine|
-|Derive|`fn(TypeInfo) -[Compiler.Read]> Syntax`|same|
-|Lint|`fn(Program) -[Compiler.Read]> [Diagnostic]`|same|
-|Code generation|`fn(Program) -[Compiler.Read, Compiler.Publish]>`|may add items, never replace them (D-META-PUBLISH2)|
+|Marker expansion|`Marker.expand(self, target: Target)`, a template body|`Meta.Generate`: reads the program, adds checked declarations, cannot touch the machine|
+|Derive|`Derive.expand(target: Target)`, a template body|`Meta.Generate`, the same|
+|Lint|`Marker.expand(self, target: Target) -[]>`|`-[]>`: reads the program and may reject or warn, writes no code|
+|Code generation|`fn(Program) -[Meta.Generate]>`|may add items, never replace them (D-META-PUBLISH2)|
 |Build action|`fn(ActionInput) -[...declared...]> ActionOutput`|declared, which makes caching safe|
-|Target provider (GPU and so on)|`fn(KernelIR) -[Compiler.Read]> Bytes`|pure translation|
+|Target provider (GPU and so on)|`fn(KernelIR) -[]> Bytes`|pure translation|
+
+`Target` is the `reflect()` value of the marked site, and a template body is
+the code the entry writes (D-DECL-TYPES1, D-CTCODEGEN1, D-DERIVE-PROVIDER1).
+`Meta: enum { Generate, Include, Rewrite, Types, Raw }` implements `Effect`
+with a bare `#FX` above it in `core.compiler` (D-META-LADDER1). Reading the
+program needs no Meta effect. A marker may write its row on `expand`:
+`-[Meta.Generate]>`, or `-[]>` for a lint; any other entry is E0774, and a
+`-[]>` template that writes a declaration is E0775.
 
 Today's three comptime tiers become these rows:
 
-- **Tier 0** is `#FX()`.
+- **Tier 0** is a bare `#FX`.
 - **Tier 1** is the new leaf `Build.Input`.
 - **Tier 2** is ambient effects granted by `#Impure` plus the build gate.
 
@@ -381,12 +389,18 @@ The checks and codes E3410–E3413 keep their meaning.
 
 ### 9.2 Compiler authority is effects
 
-The **today** "advanced compiler API" opt-in (`compiler.advanced.register`,
-`register_expansion`, `register_specialization`, `session`; D-META-CONTROL2
-and D-META-OPTIN2) becomes the effect leaves `Compiler.Register` and
-`Compiler.Session`. They are granted in the package `authority:` block like
-any other effect. That leaves one mechanism instead of two. `Compiler.Read`
-is part of the comptime floor; `Compiler.Publish` is granted per package.
+The old "advanced compiler API" opt-in (the `compiler.advanced.register`,
+`register_expansion`, `register_specialization` and `session` spellings from
+D-META-CONTROL2 and D-META-OPTIN2) is gone with no alias. Its authority is now
+the Meta effects plus one value (D-META-LADDER1):
+
+- `Meta.Generate`, `Meta.Include`, `Meta.Rewrite`, `Meta.Types` and `Meta.Raw`
+  are ordinary effects, allowed unless denied and denied with `-[!Meta.X]>`
+  like any other effect. That leaves one mechanism instead of two.
+- Reading the program needs no Meta effect.
+- `Compiler` is the value that only the root's own build source makes
+  (`b.compiler(app)`). A dependency can't make one; a function that receives
+  it acts with the root's authority, and passing it on delegates.
 
 ### 9.3 One compiler library for every tool
 
@@ -399,8 +413,8 @@ is part of the comptime floor; `Compiler.Publish` is granted per package.
 
 The CLI, the language server, the formatter, `fn build`, markers and outside
 tools all call them (pillar 5). Each tool's own row is then checkable. A
-language server plug-in typed `-[Compiler.Read]>` provably cannot write files
-or use the network.
+language server plug-in typed `-[]>` reads the program and provably cannot
+write files or use the network.
 
 ### 9.4 Build reuse falls out
 
@@ -510,8 +524,8 @@ the same marker and the same list syntax (pillar 4).
 - **C5:** the library effect spelling, `effect Query uses [Net]` versus
   `effect Query: [Net]`.
 - **C6:** whether `jet add` writes the inferred grant (proposed) or asks first.
-- **C7:** whether marker expansion gets `Compiler.Read` by default (proposed)
-  or by grant.
+- **C7:** settled by D-META-LADDER1: marker expansion runs under
+  `Meta.Generate` by default, and reading the program needs no effect.
 
 ## 16. Ballots that this proposal affects
 

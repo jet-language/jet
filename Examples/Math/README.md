@@ -48,6 +48,6 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [ComputeKernel](Compute/ComputeKernel.jet)
 - [ComputeLinalg](Compute/ComputeLinalg.jet)
 - [ComputeNDArray](Compute/ComputeNDArray.jet)
-- [ComputeSimd](Compute/ComputeSimd.jet)
+- [ComputeSIMD](Compute/ComputeSIMD.jet)
 - [ComputeTensor](Compute/ComputeTensor.jet)
 - [ComputeVulkanWebGPU](Compute/ComputeVulkanWebGPU.jet)

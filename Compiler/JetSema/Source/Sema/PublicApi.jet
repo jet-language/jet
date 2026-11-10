@@ -2,8 +2,9 @@
 // dependent can name, with the canonical signature `jet registry publish`
 // snapshots and diffs for the SemVer gate (E1218). Effects come from the
 // solved rows, so a body that starts to need a new capability is a contract
-// change even when its written signature is not. Rows sort by kind, name and
-// signature, so one API always renders as one snapshot.
+// change even when its written signature is not; a written `#FX(…)` cap is a
+// `cap` row of the type, trait or module it bounds. Rows sort by kind, name
+// and signature, so one API always renders as one snapshot.
 use jet_foundation.[
     access_sigil,
     dimension_identity,
@@ -11,6 +12,7 @@ use jet_foundation.[
     FnBody,
     Func,
     Item,
+    ModuleCap,
     Param,
     PublicAPIItem,
     StructDef,
@@ -131,7 +133,18 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                 }
             }
             .CodeModule(module_value) -> {
-                if module_value.is_pub && sema_public_api_named(module_value.name) && module_value.body == .Val(body) -> sema_public_api_scope(body, functions, "{prefix}{module_value.name}.", [String:Bool]{}, spellings, rows)
+                if !sema_public_api_named(module_value.name) -> next
+                path: "{prefix}{module_value.name}"
+                if module_value.body == .Val(body) {
+                    if module_value.is_pub {
+                        sema_public_api_cap(module_value.cap, path, rows)
+                        sema_public_api_scope(body, functions, "{path}.", [String:Bool]{}, spellings, rows)
+                    }
+                } else {
+                    // `#FX(…) name: module` over a file module: that file's
+                    // rows carry the module name as their prefix.
+                    sema_public_api_cap(module_value.cap, path, rows)
+                }
             }
             else -> {}
         }
@@ -325,6 +338,27 @@ sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: &[Publi
     loop block in blocks -> rows.push(PublicAPIItem{kind: "impl", name: "{owner}.{block.trait_name}", signature: "impl {owner}.{block.trait_name}"})
 }
 
+// A written `#FX(…)` cap is the ceiling dependents rely on, so it is a row of
+// the type, trait or module `name` it bounds: `cap Receipt #FX(IO, !FS)`.
+// Allowed effects sort first, then denials.
+sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: &[PublicAPIItem]) Never! {
+    if cap == .Val(written) {
+        allowed := [String]{}
+        denied := [String]{}
+        loop entry in written.entries {
+            if entry.name.starts_with("!") {
+                denied.push(entry.name.copy())
+            } else {
+                allowed.push(entry.name.copy())
+            }
+        }
+        allowed.sort()
+        denied.sort()
+        loop entry in denied -> allowed.push(entry.copy())
+        rows.push(PublicAPIItem{kind: "cap", name: name.copy(), signature: "cap {name} #FX({allowed.join(", ")})"})
+    }
+}
+
 // A struct is its row plus one `field` row per public field. The struct row
 // ends in `{ .. }` when it has private or soft-public fields: dependents
 // cannot rely on its literal, so a new field breaks no one. A defaulted field
@@ -354,6 +388,7 @@ sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: Str
     }
     sealed: if hidden -> " {{ .. }}" else -> ""
     rows.push(PublicAPIItem{kind: "struct", name: name.copy(), signature: "struct {name}{sema_public_api_type_params(definition.type_params, units)}{sealed}"})
+    sema_public_api_cap(definition.cap, name, rows)
     sema_public_api_methods(name, definition.methods, functions, units, rows)
     sema_public_api_impls(name, definition.trait_impls, rows)
 }
@@ -372,6 +407,7 @@ sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String,
         rows.push(PublicAPIItem{kind: "variant", name: "{name}.{variant.name}", signature: "variant {name}.{variant.name}{payload}"})
     }
     rows.push(PublicAPIItem{kind: "enum", name: name.copy(), signature: "enum {name}{sema_public_api_type_params(definition.type_params, units)}"})
+    sema_public_api_cap(definition.cap, name, rows)
     sema_public_api_methods(name, definition.methods, functions, units, rows)
     sema_public_api_impls(name, definition.trait_impls, rows)
 }
@@ -407,6 +443,7 @@ sema_public_api_trait: fn(definition: TraitDef, name: String, units: [String:Str
     }
     supertraits: if definition.supertraits.len() == 0 -> "" else -> ": {definition.supertraits.join(" + ")}"
     rows.push(PublicAPIItem{kind: "trait", name: name.copy(), signature: "trait {name}{supertraits}"})
+    sema_public_api_cap(definition.cap, name, rows)
 }
 
 sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> PublicAPIItem Never! {

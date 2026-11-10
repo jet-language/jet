@@ -1,0 +1,15 @@
+// The row lists FFI.C, the opt-in to an undescribed C call, and IO for `print`.
+package: {
+    name: "listed"
+    authority: { allow: [FFI.C, IO, Mem.Alloc] }
+}
+
+use c: c.c
+#Import c.c: module {
+    getpid: fn() -> I32 = "getpid"
+}
+
+run: fn() {
+    pid: c.getpid()
+    print("pid>0={pid > I32{0}}")
+}

@@ -222,50 +222,14 @@ ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: Bo
 }
 
 // `ui.button(label, shortcut:, accessible_label:) { on_click }`: the runtime
-// node keeps the handler in its click registry. The label is borrowed, the
-// accessible label crosses as its Option box (0 for None), and a present
-// shortcut as its UIShortcut record made for the call and dropped after it
-// (record.out; 0 for None).
-ir_ui_button_click: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, label: Int, shortcut: Int, accessible_label: Int, executable: BodyLambda, span: Span) -> Int Never! {
-    operands := [Int]{}
-    sources: [Int]{label, shortcut, accessible_label}
-    loop operand in sources {
-        // An absent Option crosses as 0 without lowering its type: the
-        // program may not declare UIShortcut at all.
-        absent: ir_body_node(p, b, operand).kind == .Absent
-        slot: if absent -> ir_word_const(m, b, 0) else -> ir_expr(m, p, b, operand)
-        if ir_failed(b) || slot < 0 -> return -1
-        operands.push(slot)
-    }
-    args := operands.copy()
-    record := -1
-    if ir_body_node(p, b, shortcut).kind != .Absent {
-        option_ty: ir_ty(p, b, shortcut)
-        payload_ty: if ir_untag(option_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "ui.button shortcut of {ir_type_name(option_ty)}") }
-        payload_row: ir_value_type(m, p, payload_ty) ?? return ir_type_fail(b, span, payload_ty)
-        pointer_row: ir_pointer_row(m)
-        record = ir_temp(m, b, pointer_row)
-        ir_emit(b.f, IROp.Const, record, 0, -1, -1, b.line)
-        present: ir_option_is_some(m, b, operands[1])
-        ir_open_if(b.f, present, b.line)
-        payload: ir_option_payload(m, b, operands[1], payload_row)
-        made: ir_record_out(m, p, b, payload_ty, payload, span)
-        if made < 0 -> return -1
-        ir_emit(b.f, IROp.Copy, record, made, -1, -1, b.line)
-        ir_end(b.f, b.line)
-        args[1] = record
-    }
+// click registry keeps the handler; its slot Int names the button's click.
+ir_ui_click_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
     body: ir_reactive_body(m, p, b, executable, span)
     if body.len() != 3 -> return -1
-    loop word in body { args.push(word) }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    node: ir_runtime(m, b, "jet_ui_button_on_click", args, row)
-    if record >= 0 {
-        _: ir_runtime(m, b, "jet_rt_handle_drop_jet_ui_shortcut", [Int]{record}, -1)
-    }
-    loop slot in operands { ir_release(m, b, slot) }
-    b.fresh[node] = true
-    node
+    slot: ir_runtime(m, b, "jet_ui_click_slot", body, row)
+    b.fresh[slot] = true
+    slot
 }
 
 // The Signal/Derived/Computed `get`/`set` and Effect `unsubscribe` /

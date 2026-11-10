@@ -1,4 +1,4 @@
-Welcome to Jet! (vVERSION)
+Welcome to Jet! (VERSION)
 
 Usage:
   jet add [args]                       Add and download a dependency
@@ -196,8 +196,9 @@ Flags:
   --all                        With fix: Apply safety classes beyond formatting and behavior-preserving; with help: Also list every form this `jet` has not built yet, with the Tower card that owns its port
   --markers                    With fix: Move every marker set above its declaration or into its body --markers <inside|above>
   --try-anyway                 With inspect gates: Evaluate past unsupported features (no guarantees)
-  --caps                       With explain effects: List every module cap written under a file or directory
+  --caps                       With explain effects: List every effect cap written under a file or directory
   --watch                      With dev: Re-run on dependency changes (--watch=off runs once)
+  --port                       With dev: Serve the web build on this preview listener port, as --port=N (0 lets the listener choose)
   --project                    With repl: Load package settings and imports from this directory
   --no-prepare                 With run: Refuse Jetpack project environment preparation
   -e                           With run: Run CODE as the body of the program's run function and show its last value, as jet -e CODE [<args>]; jet run - reads the program from standard input
@@ -225,7 +226,7 @@ Flags:
   -dumpmachine                 With cc/c++: Print the pinned target triple
   -print-sysroot               With cc/c++: Print the pinned virtual sysroot
   -dumpversion                 With cc/c++: Print the pinned compiler version
-  -v                           With cc/c++: Print pinned toolchain details or compile verbosely
+  -v                           With build/jobs/check/run/dev/test/explain: Short form of --verbose; with cc/c++: Print pinned toolchain details or compile verbosely
   --gate                       With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow
   --target                     With build/jobs/check/doctor/inspect/cc/c++: Select a target (triple, board.<name>, or named database target)
   --up                         With new: Checked forward SQL
@@ -278,6 +279,9 @@ Flags:
   --release                    With build/run/dev/jobs/test/inspect: Optimize for release
   --profile                    With build/run/dev/jobs/test/check: How hard to optimize: release, debug, or a named optimization bundle
   --optimize                   With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
+  -O0                          Short form of --optimize=none
+  -O1                          Short form of --optimize=basic
+  -O2                          Short form of --optimize=full
   --bounds                     With build/run/dev/test/inspect: What a failed bounds check does: fatal, report or off
   --debug-info                 With build/run/dev/test/inspect: Whether the image carries DWARF debug info: true, false or split
   --small                      With build/run/dev/test/inspect: Favor a smaller binary by keeping inlining to the O1 limits: true or false
@@ -289,7 +293,7 @@ Flags:
   --output-dir                 With build/run/dev/test/inspect: The directory jet build writes its executables to ("" is .jet/build)
   --libs                       With build/run/dev/test/inspect: More C libraries the native link resolves foreign symbols against
   --link-args                  With build/run/dev/test/inspect: More native link inputs: -L<dir>, -l<name> or a .a archive path
-  --os                         With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web or freestanding
+  --os                         With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web, wasm or freestanding
   --min-os                     With build/run/dev/test/inspect: The oldest OS version the image runs on ("" is none)
   --action-timeout             With build/run/dev/test/inspect: How long one build step may run, such as 10min
   --set                        With build/run/dev/jobs/test/check: Set one declared package setting as key=value

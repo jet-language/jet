@@ -1,0 +1,24 @@
+# `embed_file` inside compound prep expressions keeps its checked target (each
+# call reads its own file, relative to the source, on O0, O1 and O2) and its
+# asset provenance: after one embedded file changes, the next run under the
+# same store embeds the new text instead of reusing the cached build.
+fixture: embed_file_in_compound_prep_expression_keeps_target_and_input.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "4\n[abc]\n(abc|def)\n"
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "4\n[abc]\n(abc|def)\n"
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "4\n[abc]\n(abc|def)\n"
+stderr: empty
+copy: changed-notes.txt more/notes.txt
+step changed: jet run --optimize=none main.jet
+exit: 0
+stdout: = "4\n[abc]\n(abc|xyz!)\n"
+stderr: empty

@@ -221,11 +221,6 @@ BuildResourcePoolSpec: struct {
     slots: Int
 }
 
-ActionCache: enum {
-    Cached
-    UncachedPhony
-}
-
 // Distinct executable identities under one plan (E4-JP2 / #419).
 ActionKind: enum {
     Compile
@@ -295,9 +290,10 @@ ActionSpec: struct {
     // declared `env` map itself is the allowlist. Kept sorted and unique
     // (Rust `BTreeSet`).
     env_allowlist: [String]
-    // Sorted by canonical effect rank and unique (Rust `BTreeSet`).
+    // Sorted by canonical effect rank and unique (Rust `BTreeSet`). The
+    // action is reused exactly when none of them is ambient
+    // (build_effects_reusable).
     caps: [BuildEffect]
-    cache: ActionCache
     kind: ActionKind
     toolchain: ToolchainHandle?
     probes: [ProbeHandle]
@@ -311,20 +307,14 @@ ActionSpec: struct {
     // sandbox's default.
     timeout_ms: Int?
 
-    cached: fn(argv: [String]) -> ActionSpec Never! {
+    new: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
             inputs: [String]{}, outputs: [String]{}, kept: [KeptOutput]{}, folders: [ActionFolder]{}, programs: [ActionProgram]{}, argv: argv, env: [String: String]{},
-            env_allowlist: [String]{}, caps: [BuildEffect]{}, cache: ActionCache.Cached,
+            env_allowlist: [String]{}, caps: [BuildEffect]{},
             kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
             labels: [String: String]{}, helper_versions: [String: String]{},
             resource_pools: [BuildResourcePool]{}, variant_identity: None, timeout_ms: None,
         }
-    }
-
-    uncached_phony: fn(argv: [String]) -> ActionSpec Never! {
-        spec := ActionSpec.cached(argv)
-        spec.cache = ActionCache.UncachedPhony
-        spec
     }
 
     with_inputs: fn(self, paths: [String]) -> ActionSpec Never! {
@@ -457,7 +447,6 @@ HermeticBuildAction: struct {
     env: [String: String]
     env_allowlist: [String]
     caps: [BuildEffect]
-    cache: ActionCache
     kind: ActionKind
     toolchain: ToolchainHandle
     probes: [ProbeHandle]
@@ -467,6 +456,19 @@ HermeticBuildAction: struct {
     resource_pools: [BuildResourcePool]
     variant_identity: String?
     timeout_ms: Int?
+
+    reusable: fn(self) -> Bool Never! { build_effects_reusable(self.caps) }
+}
+
+// An action whose effects are all non-ambient (BuildEffect.ambient) has a
+// result fixed by its key, so a stored record of it is reused; one with an
+// ambient effect always runs. The native sandbox makes the non-ambient
+// readings hold: no action runs outside it.
+build_effects_reusable: fn(caps: [BuildEffect]) -> Bool Never! {
+    loop cap in caps {
+        if cap.ambient() -> return false
+    }
+    true
 }
 
 // Rust `BTreeSet<String>::insert`.
@@ -811,9 +813,8 @@ HermeticBuildError: enum {
     EmptyActionArgv(String)
     EmptyEnvName(String)
     UndeclaredEnvName(action: String, key: String)
-    CachedActionWithoutOutputs(String)
-    PhonyActionWithoutCaps(String)
-    PhonyActionWithOutputs(String)
+    // An action with no ambient effect, whose record would restore nothing.
+    ReusableActionWithoutOutputs(String)
     DuplicateActionOutput(action: String, output: String)
     // A kept output the action doesn't declare as one of its outputs.
     UndeclaredKeptOutput(action: String, output: String)
@@ -852,9 +853,7 @@ HermeticBuildError: enum {
             .EmptyActionArgv(name) -> "EmptyActionArgv({build_debug_quote(name)})"
             .EmptyEnvName(name) -> "EmptyEnvName({build_debug_quote(name)})"
             .UndeclaredEnvName(action, key) -> "UndeclaredEnvName {{ action: {build_debug_quote(action)}, key: {build_debug_quote(key)} }}"
-            .CachedActionWithoutOutputs(name) -> "CachedActionWithoutOutputs({build_debug_quote(name)})"
-            .PhonyActionWithoutCaps(name) -> "PhonyActionWithoutCaps({build_debug_quote(name)})"
-            .PhonyActionWithOutputs(name) -> "PhonyActionWithOutputs({build_debug_quote(name)})"
+            .ReusableActionWithoutOutputs(name) -> "ReusableActionWithoutOutputs({build_debug_quote(name)})"
             .DuplicateActionOutput(action, output) -> "DuplicateActionOutput {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)} }}"
             .UndeclaredKeptOutput(action, output) -> "UndeclaredKeptOutput {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)} }}"
             .OutputInFolder(action, output, folder) -> "OutputInFolder {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)}, folder: {build_debug_quote(folder)} }}"

@@ -1,0 +1,32 @@
+# A list field its loop fills through a `&` struct is made its own once,
+# before the loop, and the loop is one fill (a checked U8{value} of an Int
+# included), at O1 and O2. A copy of the field taken before keeps its old
+# bytes. A checked conversion `?? fallback` takes the fallback exactly for
+# the values outside its target, and a fallback that reads `err` reads the
+# conversion's text. Every tier prints the same values.
+fixture: a_struct_field_list_is_filled_and_blended_in_place.fixture
+env: NO_COLOR=1
+step: jet inspect decisions --optimize=basic main.jet
+exit: 0
+stdout: ~ "unique fill_bytes [U8]: made unique before the Loop" # optimize: basic hoists it (O1)
+stdout: ~ "fill reduction fill_bytes: vectorized" # the loop is one fill
+step: jet inspect decisions --release main.jet
+exit: 0
+stdout: ~ "unique fill_bytes [U8]: made unique before the Loop" # --release hoists it too (O2)
+stdout: ~ "unique fill_words [U32]: made unique before the Loop" # the U32 field too
+stdout: ~ "fill reduction fill_bytes: vectorized" # the checked conversion's fill
+stdout: ~ "fill reduction fill_words: vectorized" # the word fill
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_struct_field_list_is_filled_and_blended_in_place.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_struct_field_list_is_filled_and_blended_in_place.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_struct_field_list_is_filled_and_blended_in_place.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = a_struct_field_list_is_filled_and_blended_in_place.out

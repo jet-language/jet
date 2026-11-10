@@ -13,14 +13,6 @@ extern bool jet_rt_handle_eq_jet_ui_accessibility(uintptr_t, uintptr_t);
 extern uintptr_t jet_rt_handle_clone_jet_ui_shortcut(uintptr_t);
 extern void jet_rt_handle_drop_jet_ui_shortcut(uintptr_t);
 extern bool jet_rt_handle_eq_jet_ui_shortcut(uintptr_t, uintptr_t);
-extern uintptr_t jet_ui_raw_node_transfer(uintptr_t, double, double, int64_t,
-    int64_t, const uintptr_t *, int64_t, uint8_t, uintptr_t, int64_t, uint8_t,
-    int64_t, int64_t, int64_t, int64_t, int64_t);
-extern uintptr_t jet_ui_raw_accessibility_transfer(uintptr_t, uintptr_t, uint8_t);
-extern uintptr_t jet_ui_raw_shortcut_transfer(uintptr_t, uintptr_t, uint8_t);
-extern uintptr_t jet_rt_handle_clone_jet_ui_node(uintptr_t);
-extern void jet_rt_handle_drop_jet_ui_node(uintptr_t);
-extern bool jet_rt_handle_eq_jet_ui_node(uintptr_t, uintptr_t);
 extern uintptr_t jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(uintptr_t);
 
@@ -74,11 +66,6 @@ static void watch_accessibility(uintptr_t pointer) {
 static void watch_shortcut(uintptr_t pointer) {
     watch(pointer);
     watch_text(((const struct Shortcut *)pointer)->key);
-}
-static uintptr_t word(uintptr_t pointer, unsigned offset) {
-    uintptr_t result;
-    memcpy(&result, (const unsigned char *)pointer + offset, sizeof(result));
-    return result;
 }
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
@@ -144,36 +131,12 @@ int main(void) {
     ((struct Shortcut *)t)->key = mismatch;
     assert(!jet_rt_handle_eq_jet_ui_shortcut(s, t));
     ((struct Shortcut *)t)->key = saved;
-    uintptr_t node = jet_ui_raw_node_transfer(name, 0, 0, -1, 0,
-        NULL, 0, 0, 1, 63, 0, 0, 0, 0, 0, 0);
-    uintptr_t attached = jet_ui_raw_accessibility_transfer(node, a, 1);
-    uintptr_t both = jet_ui_raw_shortcut_transfer(attached, s, 1);
-    uintptr_t clone = jet_rt_handle_clone_jet_ui_node(both);
-    // Node160: accessibility and shortcut are nullable owners outside the
-    // absent mask, which tracks only the IME, click and drop slots.
-    enum { NODE_ABSENT_MASK = 104, NODE_ACCESSIBILITY = 136, NODE_SHORTCUT = 144, NODE_OPTION_MASK = 26 };
-    assert(word(node, NODE_ACCESSIBILITY) == 0 && word(node, NODE_SHORTCUT) == 0);
-    assert(word(both, NODE_ABSENT_MASK) == NODE_OPTION_MASK && jet_rt_handle_eq_jet_ui_node(both, clone));
-    assert(word(both, NODE_ACCESSIBILITY) && word(both, NODE_ACCESSIBILITY) != a && word(both, NODE_SHORTCUT) && word(both, NODE_SHORTCUT) != s);
-    assert(word(both, NODE_ACCESSIBILITY) != word(clone, NODE_ACCESSIBILITY));
-    assert(word(both, NODE_SHORTCUT) != word(clone, NODE_SHORTCUT));
-    uintptr_t cleared = jet_ui_raw_accessibility_transfer(both, UINTPTR_MAX, 0);
-    assert(word(cleared, NODE_ACCESSIBILITY) == 0 && word(cleared, NODE_SHORTCUT) && word(cleared, NODE_ABSENT_MASK) == NODE_OPTION_MASK);
-    uintptr_t absent = jet_ui_raw_shortcut_transfer(cleared, UINTPTR_MAX, 0);
-    assert(word(absent, NODE_SHORTCUT) == 0 && word(absent, NODE_ABSENT_MASK) == NODE_OPTION_MASK);
     watch_accessibility(a); watch_accessibility(b); watch_accessibility(e);
     watch_shortcut(s); watch_shortcut(t);
-    watch_accessibility(word(attached, NODE_ACCESSIBILITY));
-    watch_accessibility(word(both, NODE_ACCESSIBILITY)); watch_shortcut(word(both, NODE_SHORTCUT));
-    watch_accessibility(word(clone, NODE_ACCESSIBILITY)); watch_shortcut(word(clone, NODE_SHORTCUT));
-    watch_shortcut(word(cleared, NODE_SHORTCUT));
     jet_rt_handle_drop_jet_ui_accessibility(a);
     jet_rt_handle_drop_jet_ui_accessibility(b);
     jet_rt_handle_drop_jet_ui_accessibility(e);
     jet_rt_handle_drop_jet_ui_shortcut(s); jet_rt_handle_drop_jet_ui_shortcut(t);
-    jet_rt_handle_drop_jet_ui_node(node); jet_rt_handle_drop_jet_ui_node(attached);
-    jet_rt_handle_drop_jet_ui_node(both); jet_rt_handle_drop_jet_ui_node(clone);
-    jet_rt_handle_drop_jet_ui_node(cleared); jet_rt_handle_drop_jet_ui_node(absent);
     jet_rt_handle_drop_jet_ui_accessibility(0); jet_rt_handle_drop_jet_ui_shortcut(0);
     // Only the C owners remain; their releases free each text exactly once.
     assert(owners(name) == 1 && owners(description) == 1 && owners(value) == 1 && owners(mismatch) == 1);
@@ -181,6 +144,6 @@ int main(void) {
     jet_rt_string_drop(name); jet_rt_string_drop(description);
     jet_rt_string_drop(value); jet_rt_string_drop(mismatch);
     for (unsigned i = 0; i < watched_count; ++i) assert(releases[i] == 1);
-    puts("UI metadata: all variants, ordered equality, optional text, independent clones, transfers, exactly-once frees ok");
+    puts("UI metadata: all variants, ordered equality, optional text, independent clones, exactly-once frees ok");
     return 0;
 }

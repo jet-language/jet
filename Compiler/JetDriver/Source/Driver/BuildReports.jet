@@ -2,6 +2,7 @@
 // No cache observation or action execution is invented by these projections.
 use {
     jet_foundation.[foundation_json_quote]
+    jetpack_foundation.[BuildEffect]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[
         BuildSessionAction, BuildSessionPlan, BuildSessionState, build_key_debug_text,
@@ -28,9 +29,16 @@ jet_driver_build_debug_ids: fn(values: [Int], kind: String) -> String Never! {
 jet_driver_build_file_json: fn(file: BuildGraphFile) -> String Never! {
     "{{\"path\":{foundation_json_quote(file.path)},\"owner\":{jet_driver_build_id(file.owner)},\"consumers\":{jet_driver_build_ints(file.consumers)},\"targets\":{jet_driver_build_ints(file.targets)}}}"
 }
-// Every step is cached, so its provenance says so in the executor's words.
+// A step is reused unless one of its effects is ambient, in the executor's words.
+jet_driver_build_action_reuse: fn(action: BuildSessionAction) -> String Never! {
+    loop cap in action.caps {
+        written: BuildEffect.parse(cap) ?? next
+        if written.ambient() -> return "Ambient"
+    }
+    "Reusable"
+}
 jet_driver_build_action_provenance: fn(action: BuildSessionAction) -> [String] Never! {
-    [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "cache=Cached"}
+    [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "reuse={jet_driver_build_action_reuse(action)}"}
 }
 jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> JetDriverBuildExplanation Never! {
     permit: plan.storage.guard_read()
@@ -80,7 +88,7 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
         probe_rows: loop probe in real.probes -> foundation_json_quote(permit.value.probes[probe].name)
         hit: if action.cache_hit == .Val(value) -> { if value -> { "hit" } else -> { "miss" } } else -> { "unknown" }
         provenance: jet_driver_build_action_provenance(real)
-        actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(permit.value.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"cache\":\"Cached\",\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
+        actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(permit.value.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"reuse\":{foundation_json_quote(jet_driver_build_action_reuse(real))},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
     keys: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
     hits: loop action in graph.cache_hits -> "{{\"action\":{foundation_json_quote(action.name)},\"key\":{foundation_json_quote(action.key)}}}"

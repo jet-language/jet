@@ -1,0 +1,46 @@
+// 12 tasks each block their carrier opening a FIFO for reading, a system
+// call no fiber park frees, on four carriers; the one task that writes the
+// FIFOs is queued behind them. Without a carrier to take it the readers wait
+// for it forever; the monitor hands it one, and a trivial task spawned
+// meanwhile finishes in well under the writer's 1 s delay (#6403 c2).
+package: {
+    name: "blocked_fifo_read"
+    authority: { allow: [Exec, FS, IO, Time] }
+}
+
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+BLOCKERS: 12
+
+reader: fn(path: String) -[FS]> Int {
+    text: files.read(path) ?? panic("fifo read failed")
+    text.len()
+}
+
+writer: fn() -[Exec]> Int {
+    _done: process.run_spec(process.cmd(["sh", "-c", "sleep 1; for f in fifos/f*; do echo x > $f; done"])) ?? panic("writer failed")
+    1
+}
+
+quick: fn() -> Int { 1 }
+
+run: fn() {
+    _setup: process.run_spec(process.cmd(["sh", "-c", "rm -rf fifos && mkdir fifos && for i in $(seq 1 {BLOCKERS}); do mkfifo fifos/f$i; done"])) ?? panic("mkfifo failed")
+    handles := [Task<Int>]{}
+    loop index in 1..BLOCKERS -> handles.push(task reader("fifos/f{index}"))
+    feed: task writer()
+    time.sleep(100ms)
+    start: time.instant()
+    one: task quick()
+    _ := one.join() ?? -1
+    latency: time.instant() - start
+    read := 0
+    loop handle in handles { read += handle.join() ?? 0 }
+    _ := feed.join() ?? -1
+    print("{read} bytes read from {BLOCKERS} fifos")
+    print("quick task under 100 ms {(latency.in(.Milliseconds) ?? 1000) < 100}")
+}

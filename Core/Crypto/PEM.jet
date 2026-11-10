@@ -1,0 +1,489 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/pem.c, library/base64.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: PEM armor (RFC 7468, with the RFC 1421
+// encrypted-block headers OpenSSL writes) and its constant-time Base64.
+//
+// A port of mbedtls 3.6.7's pem.c and base64.c. Base64 digits map to and
+// from their values without table lookups or branches on the digit, since a
+// PEM body may hold a private key; the shape checks (line breaks, padding,
+// length) branch only on public layout. An encrypted block names its cipher
+// in a DEK-Info header: DES-CBC, DES-EDE3-CBC or AES-128/192/256-CBC, keyed by
+// OpenSSL's MD5 key derivation (PBKDF1-like, one pass per 16 key bytes) from
+// the password and the first eight IV bytes.
+use {
+    core
+    cipher: __core_crypto_cipher
+    hashes: __core_crypto_md
+    ctime: __core_crypto_ctime
+    des: __core_crypto_des
+}
+
+/// Why Base64 decoding failed (MBEDTLS_ERR_BASE64_*).
+#Error
+Base64Error: enum {
+    /// A byte that is no Base64 digit, a space inside a line, misplaced or
+    /// surplus `=` padding, or a digit count no encoding produces
+    /// (INVALID_CHARACTER, -0x002C).
+    InvalidCharacter
+}
+
+/// Why reading a PEM block failed (MBEDTLS_ERR_PEM_*).
+#Error
+PEMError: enum {
+    /// The header or the footer is missing, out of order, or the header
+    /// line does not end (NO_HEADER_FOOTER_PRESENT, -0x1080).
+    NoHeaderFooterPresent
+    /// The encapsulation headers or the body are malformed
+    /// (INVALID_DATA, -0x1100); with the Base64 error when the body is not
+    /// Base64.
+    InvalidData(Base64Error?)
+    /// The DEK-Info IV is not hex of the cipher's IV size
+    /// (INVALID_ENC_IV, -0x1200).
+    InvalidEncIV
+    /// The DEK-Info cipher is not one PEM supports
+    /// (UNKNOWN_ENC_ALG, -0x1280).
+    UnknownEncAlg
+    /// The block is encrypted and no password was given
+    /// (PASSWORD_REQUIRED, -0x1300).
+    PasswordRequired
+    /// The decrypted block's PKCS#7 padding is wrong: most likely a wrong
+    /// password (PASSWORD_MISMATCH, -0x1380).
+    PasswordMismatch
+    /// The body decodes to nothing (BAD_INPUT_DATA, -0x1480).
+    BadInputData
+    /// DES-CBC or DES-EDE3-CBC rejected the body
+    /// (MBEDTLS_ERR_DES_INVALID_INPUT_LENGTH when it is not whole blocks).
+    DES(des.DESError)
+    /// AES-CBC rejected the body: it is not whole 16-byte blocks
+    /// (MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH, -0x0022).
+    AESInvalidInputLength
+}
+
+impl des.DESError -> PEMError { PEMError.DES(self) }
+
+/// A decoded PEM block: its body and how many input bytes the block takes
+/// through the end of its footer line (mbedtls_pem_context and use_len).
+/// Closing wipes the body.
+PEMBlock: struct {
+    der: [U8]
+    used: Int
+}
+
+impl PEMBlock.Close {
+    close: fn(&&self) {
+        der := self.der.move()
+        core.crypto.wipe(der)
+    }
+}
+
+// The DEK-Info ciphers (the MBEDTLS_CIPHER_* types PEM accepts).
+PEMCipher: enum {
+    DESEDE3CBC
+    DESCBC
+    AES128CBC
+    AES192CBC
+    AES256CBC
+}
+
+SPACE: U8{32}
+CR: U8{13}
+LF: U8{10}
+EQUALS: U8{61}
+
+/// The Base64 digit of a 6-bit value (0..63), without a branch or a table
+/// lookup on it (mbedtls_ct_base64_enc_char).
+#Arithmetic(.Wrapping)
+base64_enc_char: fn(value: U8) -> U8 Never! {
+    digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
+    digit = digit.bit_or(ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26}))
+    digit = digit.bit_or(ctime.uchar_in_range_if(U8{52}, U8{61}, value, U8{48} + value - U8{52}))
+    digit = digit.bit_or(ctime.uchar_in_range_if(U8{62}, U8{62}, value, U8{43}))
+    digit.bit_or(ctime.uchar_in_range_if(U8{63}, U8{63}, value, U8{47}))
+}
+
+// One plus the value of Base64 digit c, or zero when c is no digit; no
+// branch or table lookup on c.
+#Arithmetic(.Wrapping)
+dec_bits: fn(c: U8) -> U8 Never! {
+    v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
+    v = v.bit_or(ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27}))
+    v = v.bit_or(ctime.uchar_in_range_if(U8{48}, U8{57}, c, c - U8{48} + U8{53}))
+    v = v.bit_or(ctime.uchar_in_range_if(U8{43}, U8{43}, c, U8{63}))
+    v.bit_or(ctime.uchar_in_range_if(U8{47}, U8{47}, c, U8{64}))
+}
+
+/// The value of Base64 digit c ('A'..'Z', 'a'..'z', '0'..'9', '+', '/'), or
+/// -1, in constant time (mbedtls_ct_base64_dec_value).
+base64_dec_value: fn(c: U8) -> Int Never! { Int.from_u8(dec_bits(c)) - 1 }
+
+LAYOUT_SPACE: U8{1}
+LAYOUT_CR: U8{2}
+LAYOUT_LF: U8{3}
+LAYOUT_EQUALS: U8{4}
+LAYOUT_INVALID: U8{5}
+
+// What byte c of Base64 text is, with no branch or table lookup on c: a
+// digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
+// the class, the text's layout; never on a digit's value.
+#Arithmetic(.Wrapping)
+layout_class: fn(c: U8) -> U8 Never! {
+    v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
+    v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))
+    v = v.bit_or(ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF))
+    v = v.bit_or(ctime.uchar_in_range_if(EQUALS, EQUALS, c, LAYOUT_EQUALS))
+    v.bit_or(ctime.uchar_in_range_if(U8{0}, U8{0}, dec_bits(c).bit_or(v), LAYOUT_INVALID))
+}
+
+/// The padded Base64 of src, no line breaks (mbedtls_base64_encode).
+base64_encode: fn(src: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    cipher.reserve(out, (src.len() + 2) /% 3 * 4)
+    whole: src.len() /% 3
+    loop b in 0..<whole {
+        c1: src[3 * b]
+        c2: src[3 * b + 1]
+        c3: src[3 * b + 2]
+        out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
+        out.push(base64_enc_char(((c1.bit_and(U8{3}) << 4) + (c2 >> 4)).bit_and(U8{0x3F})))
+        out.push(base64_enc_char(((c2.bit_and(U8{15}) << 2) + (c3 >> 6)).bit_and(U8{0x3F})))
+        out.push(base64_enc_char(c3.bit_and(U8{0x3F})))
+    }
+    i: 3 * whole
+    if i < src.len() {
+        c1: src[i]
+        two: i + 1 < src.len()
+        c2: if two -> src[i + 1] else -> U8{0}
+        out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
+        out.push(base64_enc_char(((c1.bit_and(U8{3}) << 4) + (c2 >> 4)).bit_and(U8{0x3F})))
+        if two -> out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_and(U8{0x3F}))) else -> out.push(EQUALS)
+        out.push(EQUALS)
+    }
+    out
+}
+
+/// The bytes of Base64 text src (mbedtls_base64_decode). Line breaks (LF or
+/// CRLF) may come anywhere and spaces may end a line; a space inside a line,
+/// a lone CR, or padding anywhere but the end is InvalidCharacter.
+base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
+    slen: src.len()
+    n := 0
+    equals := 0
+    i := 0
+    loop i < slen {
+        spaces := false
+        loop i < slen && layout_class(src[i]) == LAYOUT_SPACE {
+            i += 1
+            spaces = true
+        }
+        // Spaces at the end of the text are fine.
+        if i == slen -> break
+        class: layout_class(src[i])
+        if slen - i >= 2 && class == LAYOUT_CR && layout_class(src[i + 1]) == LAYOUT_LF {
+            i += 2
+            next
+        }
+        if class == LAYOUT_LF {
+            i += 1
+            next
+        }
+        if spaces || class == LAYOUT_INVALID || class == LAYOUT_CR -> return Err(.InvalidCharacter)
+        if class == LAYOUT_EQUALS {
+            equals += 1
+            if equals > 2 -> return Err(.InvalidCharacter)
+        } else {
+            if equals != 0 -> return Err(.InvalidCharacter)
+        }
+        n += 1
+        i += 1
+    }
+    // Digits come in 4k, 4k + 2 or 4k + 3; with the padding, in 4k.
+    if (n - equals) %% 4 == 1 || n %% 4 != 0 -> return Err(.InvalidCharacter)
+    out := [U8]{}
+    cipher.reserve(out, n /% 4 * 3 - equals)
+    x := U32{0}
+    digits := 0
+    loop c in src {
+        class: layout_class(c)
+        if class == LAYOUT_CR || class == LAYOUT_LF || class == LAYOUT_SPACE -> next
+        // The first pass put every `=` at the end.
+        if class == LAYOUT_EQUALS -> break
+        x = (x << 6).bit_or(wrapping(U32{dec_bits(c)} - U32{1}))
+        digits += 1
+        if digits == 4 {
+            digits = 0
+            out.push(wrapping(U8{x >> 16}))
+            out.push(wrapping(U8{x >> 8}))
+            out.push(wrapping(U8{x}))
+        }
+    }
+    if digits == 3 {
+        out.push(wrapping(U8{x >> 10}))
+        out.push(wrapping(U8{x >> 2}))
+    } else if digits == 2 {
+        out.push(wrapping(U8{x >> 4}))
+    }
+    Ok(out)
+}
+
+// The text of data: up to its first NUL byte, as C's string functions see it.
+text_len: fn(data: [U8]) -> Int Never! {
+    loop i in 0..<data.len() {
+        if data[i] == (U8{0}) -> return i
+    }
+    data.len()
+}
+
+// data[i] within the text, else the NUL that ends it.
+byte_at: fn(data: [U8], n: Int, i: Int) -> U8 Never! {
+    if i < n -> return data[i]
+    U8{0}
+}
+
+// Whether data[at..] starts with pat.
+starts_at: fn(data: [U8], at: Int, pat: [U8]) -> Bool Never! {
+    if at + pat.len() > data.len() -> return false
+    loop j in 0..<pat.len() {
+        if data[at + j] != pat[j] -> return false
+    }
+    true
+}
+
+// The first position of pat in the first n bytes of data (strstr).
+locate: fn(data: [U8], n: Int, pat: [U8]) -> Int? Never! {
+    if pat.len() > n -> return None
+    loop at in 0..(n - pat.len()) {
+        if starts_at(data, at, pat) -> return Val(at)
+    }
+    None
+}
+
+// `count` IV bytes from the 2 * count hex digits at data[at..] (pem_get_iv).
+get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
+    iv := cipher.zero_bytes(count)
+    loop i in 0..<(2 * count) {
+        c: data[at + i]
+        j: if {
+            c >= (U8{48}) && c <= (U8{57}) -> c - U8{48}
+            c >= (U8{65}) && c <= (U8{70}) -> c - U8{55}
+            c >= (U8{97}) && c <= (U8{102}) -> c - U8{87}
+            else -> return Err(.InvalidEncIV)
+        }
+        k: if i.bit_and(1) != 0 -> j else -> j << 4
+        iv[i >> 1] = iv[i >> 1].bit_or(k)
+    }
+    Ok(iv)
+}
+
+// OpenSSL's EVP_BytesToKey with MD5 and one iteration: key[0..16] =
+// MD5(pwd || iv[0..8]), key[16..] = MD5(key[0..16] || pwd || iv[0..8])
+// (pem_pbkdf1).
+pbkdf1: fn(keylen: Int, iv: [U8], pwd: [U8]) -> [U8] Never! {
+    ctx := hashes.hash_start(.MD5)
+    hashes.hash_update(ctx, pwd)
+    hashes.hash_update_range(ctx, iv, 0, 8)
+    first := hashes.hash_finish(ctx)
+    if keylen <= 16 {
+        key: cipher.bytes_of(first, 0, keylen)
+        core.crypto.wipe(first)
+        return key
+    }
+    key := first.copy()
+    more := hashes.hash_start(.MD5)
+    hashes.hash_update(more, first)
+    hashes.hash_update(more, pwd)
+    hashes.hash_update_range(more, iv, 0, 8)
+    second := hashes.hash_finish(more)
+    count: if keylen < 32 -> keylen - 16 else -> 16
+    loop i in 0..<count -> key.push(second[i])
+    core.crypto.wipe(first)
+    core.crypto.wipe(second)
+    key
+}
+
+// Decrypt a DEK-Info body in CBC mode under the password's key.
+decrypt: fn(alg: PEMCipher, iv: &[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! {
+    keylen: if alg == {
+        .DESCBC -> 8
+        .DESEDE3CBC -> 24
+        .AES128CBC -> 16
+        .AES192CBC -> 24
+        .AES256CBC -> 32
+    }
+    key := pbkdf1(keylen, iv, pwd)
+    if alg == .DESCBC {
+        k: des.des_setkey_dec(key)
+        core.crypto.wipe(key)
+        out: des.des_crypt_cbc(k, .Decrypt, iv, body)
+        return Ok(out)
+    }
+    if alg == .DESEDE3CBC {
+        k: des.des3_set3key_dec(key)
+        core.crypto.wipe(key)
+        out: des.des_crypt_cbc(k, .Decrypt, iv, body)
+        return Ok(out)
+    }
+    k: cipher.aes_key(key, true) ?? panic("PEM AES key size")
+    core.crypto.wipe(key)
+    out := [U8]{}
+    if !cipher.cbc(k, true, iv, body, 0, body.len(), out) -> return Err(.AESInvalidInputLength)
+    Ok(out)
+}
+
+// The length of a decrypted body without its PKCS#7 padding
+// (pem_check_pkcs_padding). A zero pad byte passes, as in mbedtls.
+unpadded_len: fn(input: [U8]) -> Int PEMError! {
+    if input.len() < 1 -> return Err(.InvalidData(None))
+    pad: Int.from_u8(input[input.len() - 1])
+    if pad > input.len() -> return Err(.PasswordMismatch)
+    keep: input.len() - pad
+    loop i in keep..<input.len() {
+        if Int.from_u8(input[i]) != pad -> return Err(.PasswordMismatch)
+    }
+    Ok(keep)
+}
+
+/// How many bytes of data the first header..footer block takes through the
+/// end of the footer line, or None when the block has no header or footer
+/// (the use_len of mbedtls_pem_read_buffer, which callers skip by when a
+/// block fails to read).
+pem_block_len: fn(header: String, footer: String, data: [U8]) -> Int? Never! {
+    n: text_len(data)
+    start: locate(data, n, header.bytes()) ?? return None
+    s2: locate(data, n, footer.bytes()) ?? return None
+    if s2 <= start -> return None
+    end := s2 + footer.bytes().len()
+    if byte_at(data, n, end) == SPACE -> end += 1
+    if byte_at(data, n, end) == CR -> end += 1
+    if byte_at(data, n, end) == LF -> end += 1
+    Val(end)
+}
+
+/// The first block of data between the header and footer lines
+/// (mbedtls_pem_read_buffer). The text ends at data's first NUL byte, if
+/// any. pwd decrypts a block with Proc-Type 4,ENCRYPTED and DEK-Info
+/// headers; None means no password.
+pem_read_buffer: fn(header: String, footer: String, data: [U8], pwd: [U8]?) -> PEMBlock PEMError! {
+    n: text_len(data)
+    hb: header.bytes()
+    start: locate(data, n, hb) ?? return Err(.NoHeaderFooterPresent)
+    s2: locate(data, n, footer.bytes()) ?? return Err(.NoHeaderFooterPresent)
+    if s2 <= start -> return Err(.NoHeaderFooterPresent)
+    s1 := start + hb.len()
+    if byte_at(data, n, s1) == SPACE -> s1 += 1
+    if byte_at(data, n, s1) == CR -> s1 += 1
+    if byte_at(data, n, s1) != LF -> return Err(.NoHeaderFooterPresent)
+    s1 += 1
+    used: pem_block_len(header, footer, data) ?? return Err(.NoHeaderFooterPresent)
+    encrypted: s2 - s1 >= 22 && starts_at(data, s1, "Proc-Type: 4,ENCRYPTED".bytes())
+    alg := PEMCipher.DESCBC
+    known := false
+    iv := [U8]{}
+    if encrypted {
+        s1 += 22
+        if byte_at(data, n, s1) == CR -> s1 += 1
+        if byte_at(data, n, s1) != LF -> return Err(.InvalidData(None))
+        s1 += 1
+        if s2 - s1 >= 23 && starts_at(data, s1, "DEK-Info: DES-EDE3-CBC,".bytes()) {
+            alg = .DESEDE3CBC
+            known = true
+            s1 += 23
+            if s2 - s1 < 16 -> return Err(.InvalidEncIV)
+            iv = get_iv(data, s1, 8) ?? return Err(err)
+            s1 += 16
+        } else if s2 - s1 >= 18 && starts_at(data, s1, "DEK-Info: DES-CBC,".bytes()) {
+            alg = .DESCBC
+            known = true
+            s1 += 18
+            if s2 - s1 < 16 -> return Err(.InvalidEncIV)
+            iv = get_iv(data, s1, 8) ?? return Err(err)
+            s1 += 16
+        }
+        // As in mbedtls, an AES DEK-Info right after a DES one replaces it.
+        if s2 - s1 >= 14 && starts_at(data, s1, "DEK-Info: AES-".bytes()) {
+            if s2 - s1 < 22 -> return Err(.UnknownEncAlg)
+            alg = aes_dek(data, s1) ?? return Err(.UnknownEncAlg)
+            known = true
+            s1 += 22
+            if s2 - s1 < 32 -> return Err(.InvalidEncIV)
+            iv = get_iv(data, s1, 16) ?? return Err(err)
+            s1 += 32
+        }
+        if !known -> return Err(.UnknownEncAlg)
+        if byte_at(data, n, s1) == CR -> s1 += 1
+        if byte_at(data, n, s1) != LF -> return Err(.InvalidData(None))
+        s1 += 1
+    }
+    if s1 >= s2 -> return Err(.InvalidData(None))
+    body := base64_decode(cipher.bytes_of(data, s1, s2 - s1)) ?? return Err(.InvalidData(Val(err)))
+    if body.len() == 0 -> return Err(.BadInputData)
+    if !encrypted -> return Ok(PEMBlock{der: body.move(), used: used})
+    der: open_block(alg, iv, body, pwd)
+    Ok(PEMBlock{der: der, used: used})
+}
+
+// The decrypted, unpadded body of an encrypted block; body is wiped on every
+// path.
+open_block: fn(alg: PEMCipher, iv: &[U8], body: &[U8], pwd: [U8]?) -> [U8] PEMError! {
+    secret: pwd ?? return refuse(body, .PasswordRequired)
+    plain := decrypt(alg, iv, body, secret) ?? return refuse(body, err)
+    core.crypto.wipe(body)
+    keep: unpadded_len(plain) ?? return refuse(plain, err)
+    der: cipher.bytes_of(plain, 0, keep)
+    core.crypto.wipe(plain)
+    Ok(der)
+}
+
+// Wipe buf and fail with e.
+refuse: fn(buf: &[U8], e: PEMError) -> [U8] PEMError! {
+    core.crypto.wipe(buf)
+    Err(e.copy())
+}
+
+// The AES cipher a "DEK-Info: AES-" header at data[at..] names.
+aes_dek: fn(data: [U8], at: Int) -> PEMCipher? Never! {
+    if starts_at(data, at, "DEK-Info: AES-128-CBC,".bytes()) -> return Val(.AES128CBC)
+    if starts_at(data, at, "DEK-Info: AES-192-CBC,".bytes()) -> return Val(.AES192CBC)
+    if starts_at(data, at, "DEK-Info: AES-256-CBC,".bytes()) -> return Val(.AES256CBC)
+    None
+}
+
+/// der as a PEM block: header, the Base64 in 64-column lines each ending in
+/// LF, then footer; header and footer carry their own line ends
+/// (mbedtls_pem_write_buffer, without the C string's NUL).
+pem_write_buffer: fn(header: String, footer: String, der: [U8]) -> [U8] Never! {
+    encoded: base64_encode(der)
+    hb: header.bytes()
+    fb: footer.bytes()
+    out := [U8]{}
+    cipher.reserve(out, hb.len() + encoded.len() + (encoded.len() + 63) /% 64 + fb.len())
+    loop b in hb -> out.push(b)
+    at := 0
+    loop at < encoded.len() {
+        end: if encoded.len() - at > 64 -> at + 64 else -> encoded.len()
+        loop i in at..<end -> out.push(encoded[i])
+        out.push(LF)
+        at = end
+    }
+    loop b in fb -> out.push(b)
+    out
+}
+
+#Test("Base64 and PEM round trips") {
+    assert(base64_encode("foobar".bytes()) == "Zm9vYmFy".bytes())
+    assert(base64_encode("fo".bytes()) == "Zm8=".bytes())
+    assert((base64_decode("Zm9vYg==".bytes()) ?? panic("decode")) == "foob".bytes())
+    assert((base64_decode("Zm9v\r\nYmFy".bytes()) ?? panic("decode")) == "foobar".bytes())
+    assert(base64_decode("Zm 9v".bytes()) == .Err(.InvalidCharacter))
+    assert(base64_decode("Zg=a".bytes()) == .Err(.InvalidCharacter))
+    loop v in 0..<64 {
+        c: base64_enc_char(U8{v})
+        assert(base64_dec_value(c) == v)
+    }
+    assert(base64_dec_value(U8{61}) == -1)
+    der: [U8]{0x30, 0x03, 0x02, 0x01, 0x05}
+    text: pem_write_buffer("-----BEGIN X-----\n", "-----END X-----\n", der)
+    block: pem_read_buffer("-----BEGIN X-----", "-----END X-----", text, None) ?? panic("read")
+    assert(block.der == der)
+    assert(block.used == text.len())
+    assert(pem_read_buffer("-----BEGIN Y-----", "-----END Y-----", text, None) == .Err(.NoHeaderFooterPresent))
+}

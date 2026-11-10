@@ -10,8 +10,8 @@
 //    can be satisfied (all archives form one group). COMDAT groups keep the
 //    first copy; weak and common definitions yield to strong ones.
 // 2. Synthesis: when musl's `__libc_start_main` is available the linker adds
-//    the startup object (`_start`, and a `main` thunk that hands musl's
-//    thread functions to the Jet runtime, so its threads are musl's
+//    the startup object (`_start`, and a `main` thunk that hands the Jet
+//    runtime three thread functions of musl's, so its threads are musl's
 //    (LINK_THREAD_LIBC), hands the unwind tables to `__jet_eh_startup` and
 //    runs `.init_array` with glibc's (argc, argv, envp) arguments, which the
 //    gnu-target Rust std expects); the Rust
@@ -37,8 +37,9 @@
 //    when its C closure has absolute 32-bit relocations (non-PIC code, which
 //    links only below 2 GiB), at LINK_RUN_LOW_BASE.
 // 5. Relocation, with the static-executable relaxations: TLS
-//    general/local-dynamic to local-exec, initial-exec to local-exec, and
-//    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
+//    general/local-dynamic (`__tls_get_addr` calls or TLS descriptors) to
+//    local-exec, initial-exec to local-exec, and GOT loads/calls to direct
+//    `lea`/`call`/`jmp` when the instruction allows.
 // 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
 //    of the directly linked objects (none without `debug_info`), a `.symtab`
 //    and section headers. A split link (x64_link_executable_split) writes
@@ -135,6 +136,8 @@ LINK_R_GOTOFF64: 25
 LINK_R_GOTPC32: 26
 LINK_R_SIZE32: 32
 LINK_R_SIZE64: 33
+LINK_R_GOTPC32_TLSDESC: 34
+LINK_R_TLSDESC_CALL: 35
 LINK_R_GOTPCRELX: 41
 LINK_R_REX_GOTPCRELX: 42
 
@@ -276,6 +279,10 @@ LinkContext: struct {
     fault_report_section: Int
     fault_report_caller: Int
     errors: [String]
+    // Every global live code strongly references and nothing defines, once
+    // each, in scan order (link_scan_reloc; x64_link_live_undefined, and a
+    // link stopped at them, X64ExecutableResult.undefined).
+    undefined: [String]
 }
 
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
@@ -292,7 +299,7 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
         got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{},
+        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{}, undefined: [String]{},
     }
 }
 
@@ -1051,8 +1058,8 @@ link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
 
 // The startup object for musl: `_start` hands `__jet_link_main` to
 // `__libc_start_main`, which initializes libc and calls it with (argc, argv,
-// envp). `__jet_link_main` hands musl's thread functions to the Jet runtime
-// (when the link has both: link_thread_libc), the unwind tables to
+// envp). `__jet_link_main` hands the Jet runtime musl's thread functions
+// (when the link has both: link_thread_libc, link_thread_create), the unwind tables to
 // `__jet_eh_startup` (when `register_frames`; link_eh_shims), runs every
 // `.init_array` entry with those three arguments (glibc's convention; musl's
 // own init loop sees an empty array), and tail-calls the program's `main`.
@@ -1070,14 +1077,16 @@ link_startup: fn(c: LinkContext, register_frames: Bool) -> LinkSynth Never! {
     link_synth_function(s, "__jet_link_main")
     // push rbx; push r12; push r13; push r14; sub rsp, 8; mov r12d, edi; mov r13, rsi; mov r14, rdx
     link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
-    if link_thread_libc(c) {
-        // lea rdi, rsi, rdx, rcx, r8, r9 in turn, [rip + each of
-        // LINK_THREAD_LIBC_NAMES]; call jet_rt_thread_libc
-        loads: [[Int]]{[Int]{0x48, 0x8d, 0x3d}, [Int]{0x48, 0x8d, 0x35}, [Int]{0x48, 0x8d, 0x15}, [Int]{0x48, 0x8d, 0x0d}, [Int]{0x4c, 0x8d, 0x05}, [Int]{0x4c, 0x8d, 0x0d}}
-        loop (k, name) in LINK_THREAD_LIBC_NAMES {
-            link_synth_code(s, loads[k])
-            link_synth_rel32(s, name, LINK_R_PC32)
-        }
+    threads: link_thread_libc(c)
+    if threads {
+        // lea rdi, [rip + __jet_thread_create]; lea rsi, [rip + pthread_join];
+        // lea rdx, [rip + pthread_detach]; call jet_rt_thread_libc
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x3d})
+        link_synth_rel32(s, LINK_THREAD_CREATE, LINK_R_PC32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x35})
+        link_synth_rel32(s, "pthread_join", LINK_R_PC32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x15})
+        link_synth_rel32(s, "pthread_detach", LINK_R_PC32)
         link_synth_code(s, [Int]{0xe8})
         link_synth_rel32(s, LINK_THREAD_LIBC, LINK_R_PLT32)
     }
@@ -1102,6 +1111,7 @@ link_startup: fn(c: LinkContext, register_frames: Bool) -> LinkSynth Never! {
     // done: mov edi, r12d; mov rsi, r13; mov rdx, r14; add rsp, 8; pop r14; pop r13; pop r12; pop rbx; jmp main
     link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0x48, 0x83, 0xc4, 0x08, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xe9})
     link_synth_rel32(s, "main", LINK_R_PLT32)
+    if threads -> link_thread_create(s)
     link_synth_define(s, "__dso_handle", 2, 0)
     loop _ in 0..<8 -> s.data.push(U8{0})
     // libgcc's `object: struct` for the registered tables (at most 8 words),
@@ -1152,16 +1162,47 @@ link_owned_startup: fn() -> LinkSynth Never! {
 
 LINK_OWNED_START: "__jet_start"
 
-// The Jet runtime's export that takes musl's thread functions (JetRuntime
-// Thread.jet jet_rt_thread_libc), and those functions in its parameter
-// order. A program that links C runs that C on the runtime's threads, which
-// must then be musl's own (pthread_create): a raw clone shares the main
-// thread's FS TLS (errno, pthread_self) and leaves musl's malloc and stdio
-// unlocked (libc.need_locks). The musl startup (link_startup) makes the
-// call whenever the link has both the runtime and musl's functions
-// (link_thread_libc); a program without libc starts raw clones.
+// The Jet runtime's export that takes a program's C thread functions
+// (JetRuntime Thread.jet jet_rt_thread_libc), and the musl functions they
+// are made of. A program that links C runs that C on the runtime's threads,
+// which must then be musl's own (pthread_create): a raw clone shares the
+// main thread's FS TLS (errno, pthread_self) and leaves musl's malloc and
+// stdio unlocked (libc.need_locks). The musl startup (link_startup) makes
+// the call whenever the link has both the runtime and musl's functions
+// (link_thread_libc), handing over link_thread_create's function,
+// pthread_join and pthread_detach; a program without libc starts raw
+// clones. Only this synthesized startup names musl's thread functions, so
+// the runtime object asks libc for none and a program that links no C
+// pulls none in.
 LINK_THREAD_LIBC: "jet_rt_thread_libc"
 LINK_THREAD_LIBC_NAMES: [String]{"pthread_create", "pthread_join", "pthread_detach", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_attr_destroy"}
+LINK_THREAD_CREATE: "__jet_thread_create"
+
+// `__jet_thread_create(word, entry, start, bytes)`: the runtime's create
+// function in a program that links C. It starts a musl thread running
+// entry(start) on a stack of `bytes` and stores its pthread_t at `word`,
+// returning 0 or pthread_attr_setstacksize's or pthread_create's errno
+// (musl's pthread_attr_init and pthread_attr_destroy always return 0). The
+// pthread_attr_t (56 bytes in musl on x86-64) lives in its frame.
+link_thread_create: fn(s: &LinkSynth) Never! {
+    link_synth_function(s, LINK_THREAD_CREATE)
+    // push rbx; push r12; push r13; push r14; sub rsp, 72; mov rbx, rdi;
+    // mov r12, rsi; mov r13, rdx; mov r14, rcx; mov rdi, rsp; call pthread_attr_init
+    link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x48, 0x48, 0x89, 0xfb, 0x49, 0x89, 0xf4, 0x49, 0x89, 0xd5, 0x49, 0x89, 0xce, 0x48, 0x89, 0xe7, 0xe8})
+    link_synth_rel32(s, "pthread_attr_init", LINK_R_PLT32)
+    // mov rdi, rsp; mov rsi, r14; call pthread_attr_setstacksize
+    link_synth_code(s, [Int]{0x48, 0x89, 0xe7, 0x4c, 0x89, 0xf6, 0xe8})
+    link_synth_rel32(s, "pthread_attr_setstacksize", LINK_R_PLT32)
+    // test eax, eax; jnz done; mov rdi, rbx; mov rsi, rsp; mov rdx, r12;
+    // mov rcx, r13; call pthread_create
+    link_synth_code(s, [Int]{0x85, 0xc0, 0x75, 0x11, 0x48, 0x89, 0xdf, 0x48, 0x89, 0xe6, 0x4c, 0x89, 0xe2, 0x4c, 0x89, 0xe9, 0xe8})
+    link_synth_rel32(s, "pthread_create", LINK_R_PLT32)
+    // done: mov ebx, eax; mov rdi, rsp; call pthread_attr_destroy
+    link_synth_code(s, [Int]{0x89, 0xc3, 0x48, 0x89, 0xe7, 0xe8})
+    link_synth_rel32(s, "pthread_attr_destroy", LINK_R_PLT32)
+    // mov eax, ebx; add rsp, 72; pop r14; pop r13; pop r12; pop rbx; ret
+    link_synth_code(s, [Int]{0x89, 0xd8, 0x48, 0x83, 0xc4, 0x48, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3})
+}
 
 // Whether the link has the runtime's LINK_THREAD_LIBC and every one of
 // musl's functions it takes: a fact of the inputs alone.
@@ -1352,7 +1393,7 @@ link_linker_names: fn() -> [String] Never! {
     [String]{
         "__jet_init_array_start", "__jet_init_array_end", "__init_array_start", "__init_array_end",
         "__fini_array_start", "__fini_array_end", "__preinit_array_start", "__preinit_array_end",
-        "__EH_FRAME_BEGIN__", "_GLOBAL_OFFSET_TABLE_", "__ehdr_start", "__executable_start",
+        "__EH_FRAME_BEGIN__", "_GLOBAL_OFFSET_TABLE_", "_TLS_MODULE_BASE_", "__ehdr_start", "__executable_start",
         "_etext", "etext", "_edata", "edata", "__bss_start", "_end", "end",
     }
 }
@@ -1570,6 +1611,7 @@ link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [Strin
     g: link_global_of(c, obj, symbol)
     if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
         reported.add(g, true).drop("checked absent above")
+        c.undefined.push(c.g_name[g].copy())
         site: link_section_label(c, s)
         message: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
         link_error(c, message)
@@ -1818,6 +1860,9 @@ link_define_names: fn(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
             "__preinit_array_end" -> l.preinit_end
             "__EH_FRAME_BEGIN__" -> c.eh_start
             "_GLOBAL_OFFSET_TABLE_" -> c.got_start
+            // A local-dynamic TLS descriptor's base: the thread pointer, so its
+            // local-exec offset is 0 and each `x@dtpoff` (link_apply) is x's.
+            "_TLS_MODULE_BASE_" -> c.tls_start + link_align(c.tls_end - c.tls_start, c.tls_align)
             "__ehdr_start" | "__executable_start" -> c.base
             "_etext" | "etext" -> l.text_end
             "_edata" | "edata" | "__bss_start" -> l.bss_start
@@ -1978,6 +2023,33 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
     }
     if kind == LINK_R_DTPOFF64 || kind == LINK_R_TPOFF64 {
         link_put64(out, pos, link_tpoff(c, target) + addend)
+        return false
+    }
+    if kind == LINK_R_GOTPC32_TLSDESC {
+        // lea reg, [rip + x@tlsdesc] -> mov reg, x@tpoff
+        if off < 3 {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
+            return false
+        }
+        rex: Int.from_u8(out[pos - 3])
+        modrm: Int.from_u8(out[pos - 1])
+        if (rex != 0x48 && rex != 0x4c) || Int.from_u8(out[pos - 2]) != 0x8d || (modrm.bit_and(0xc7)) != 0x05 {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
+            return false
+        }
+        out[pos - 3] = U8{if rex == 0x4c -> 0x49 else -> 0x48}
+        out[pos - 2] = U8{0xc7}
+        out[pos - 1] = U8{(0xc0).bit_or(((modrm >> 3).bit_and(7)))}
+        link_put32(out, pos, link_tpoff(c, target) + addend + 4)
+        return false
+    }
+    if kind == LINK_R_TLSDESC_CALL {
+        // call [rax] (x@tlscall) -> a two-byte nop: rax already holds x@tpoff.
+        if !link_byte_is(out, pos, [Int]{0xff, 0x10}) {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor call"))
+            return false
+        }
+        link_put_bytes(out, pos, [Int]{0x66, 0x90})
         return false
     }
     if kind == LINK_R_GOTTPOFF {
@@ -2952,6 +3024,38 @@ x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: Com
     linked.image.move()
 }
 
+// What x64_link_live_undefined found, with the inputs it was given.
+X64LiveUndefined: struct {
+    symbols: [String]
+    bufs: [[U8]]
+}
+
+// The symbols live code of the link inputs `bufs` references that no input
+// defines, as x64_link_executable's resolution and garbage collection count
+// them (a reference from collected code does not count), without laying out
+// an image. The inputs come back unchanged and alone: the objects the link
+// synthesizes after them (link_load_synth: the startup object, the linker
+// shims) are dropped, so bufs[i] is still the input names[i] names. A
+// program's C closure is realized only for the providers of these symbols
+// (JetCli Host.jet jet_cli_native_executable); inputs that don't load or
+// have no entry give none, and their link reports why.
+x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined Never! {
+    c := link_context(bufs, LINK_BASE)
+    link_load_inputs(c, names)
+    if c.errors.len() == 0 {
+        entry_g: link_resolve_program(c)
+        entry_section: link_entry_section(c, entry_g)
+        if entry_section >= 0 {
+            linker_names := [String:Bool]{}
+            loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
+            link_collect(c, [Int]{entry_section}, linker_names)
+        }
+    }
+    inputs := c.bufs.move()
+    loop inputs.len() > names.len() { _: inputs.pop() }
+    X64LiveUndefined{symbols: c.undefined.move(), bufs: inputs}
+}
+
 // A static executable whose debug information is in a side file.
 X64SplitExecutableResult: struct {
     // The executable: its loaded segments, a PT_NOTE naming its GNU build-id
@@ -2965,13 +3069,15 @@ X64SplitExecutableResult: struct {
     // The 20-byte id both files' notes hold.
     build_id: [U8]
     errors: [String]
+    // As X64ExecutableResult.undefined.
+    undefined: [String]
 }
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a
 // side debug file instead of the executable's tail.
 x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
     linked := link_executable_image(names, bufs, base, None, threads, true, true)
-    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move()}
+    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
 }
 
 // The single canonical executable engine. No request means no export census,
@@ -3019,7 +3125,11 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     linker_names := [String:Bool]{}
     loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
     link_collect(c, entries, linker_names)
-    if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
+    if c.errors.len() > 0 {
+        failed := link_resident_failure(c.errors.move())
+        failed.image.undefined = c.undefined.move()
+        return failed
+    }
     // A split link moves the unwind tables to the side debug file when
     // nothing reads them at run time. An image that keeps its debug tail
     // keeps `.eh_frame` loaded: there the move would add the whole table to

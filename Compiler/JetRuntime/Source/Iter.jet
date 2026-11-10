@@ -284,6 +284,8 @@ iter_pull_kernel: fn(node: I64, output: I64) -> Bool {
         return true
     }
     if (kind == I64{26}) { return iter_pull_filter_map(node, output) }
+    reason: trap_msg_unreachable_text()
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_defect_prepare()
     trap_msg_unreachable()
     trap_defect_exit(I64{101})
@@ -1324,20 +1326,29 @@ iter_try_callback: fn(source: I64, env: I64, invoke: I64, release: I64, carrier:
 }
 
 iter_argument_stop: fn(kind: I64) {
-    trap_header(I64{0})
-    if {
-        (kind == I64{0}) -> trap_msg_sequence_count()
-        (kind == I64{1}) -> trap_msg_sequence_step()
-        (kind == I64{2}) -> trap_msg_sequence_chunks()
-        (kind == I64{3}) -> trap_msg_sequence_windows()
-        (kind == I64{4}) -> trap_msg_cursor_step()
-        else -> trap_msg_cursor_exhausted()
+    reason: if {
+        (kind == I64{0}) -> trap_msg_sequence_count_text()
+        (kind == I64{1}) -> trap_msg_sequence_step_text()
+        (kind == I64{2}) -> trap_msg_sequence_chunks_text()
+        (kind == I64{3}) -> trap_msg_sequence_windows_text()
+        (kind == I64{4}) -> trap_msg_cursor_step_text()
+        else -> trap_msg_cursor_exhausted_text()
     }
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    trap_header(I64{0})
+    trap_write_static(reason)
     if (kind < I64{4}) { trap_msg_collections_end() } else { trap_msg_prelude_end() }
     trap_footer(I64{0})
 }
 
 iter_zip_stop: fn(context: I64) {
+    // The report's message, less its stop code, for served code.
+    reason: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(reason, rt_static_text("Zip inputs have different lengths under `"))
+    jet_rt_string_builder_push(reason, trap_word(context))
+    rt_text_push_word(reason, I64{96}, I64{1})
+    trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
+    jet_rt_string_drop(reason)
     trap_root_prepare()
     trap_msg_header_zip()
     trap_write_handle(trap_word(context))

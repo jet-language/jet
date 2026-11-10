@@ -1,0 +1,34 @@
+use files: core.files
+use process: core.process
+
+// A spec keeps a FileLock open in its child, where the descriptor names the
+// lock file, and the lock closes with the spec. An authority-bound spec
+// refuses any kept handle when it plans, and starts no child.
+why: fn(error: IOError) -> String {
+    if error == {
+        .Unsupported(context) -> "Unsupported: {context.cause ?? ""}"
+        .Other(context) -> "Other: {context.cause ?? ""}"
+        else -> "another error"
+    }
+}
+
+run: fn() -[IO, FS, Exec, Env]> {
+    root: files.cwd() ?? panic("cwd")
+    marker: files.join(root, "started")
+    lock_path: files.join(root, "held.lock")
+    lock: files.lock(lock_path) ?? panic("lock")
+    if process.cmd(["sh", "-c", "case $(readlink /proc/self/fd/9) in */held.lock) printf kept ;; *) printf missing ;; esac"]).keep_open(lock, at: 9).run() == {
+        .Ok(receipt) -> print("file lock: {receipt.output}")
+        .Err(error) -> print("file lock: {why(error)}")
+    }
+    // Taken again here: the spec's duplicate closed with the spec.
+    relocked: files.try_lock(lock_path) ?? panic("the kept lock outlived its spec")
+    print("lock free after the child: {files.basename(relocked.path)}")
+    directory: files.open_directory(root) ?? panic("open directory")
+    bound: process.cmd(["sh", "-c", "touch {marker}"]).cwd("/tmp").keep_open(directory, at: 9).under(Authority.from_rights(["Exec"]))
+    if bound.plan() == {
+        .Ok(_) -> print("authority-bound keep: planned")
+        .Err(error) -> print("authority-bound keep: {why(error)}")
+    }
+    print("child started: {files.exists(marker)}")
+}

@@ -512,12 +512,33 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             return sema_expr_expected_owned(core_value, expected, environment, program, diagnostics)
         }
     }
+    // A reflected record names its type `type`, never `ty`.
+    if owner_name != "" && member == "ty" && core_record_field(owner_name, "type") != None {
+        renamed: sema_error("E0302", span, "`{owner_name}` has no field `ty`", "a reflected record names its type `type`, as `field.type`", "write `.type`")
+        diagnostics.push(diagnostic_with_edit(renamed, TextEdit{span: Span{start: span.end - member.len(), end: span.end}, new_text: "type"}))
+        return None
+    }
     if sema_fact_read_unknown_member(member, span) == .Val(unknown) {
         diagnostics.push(unknown)
         return None
     }
     diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
+}
+
+// Whether `member` is a field of a module's Module record `record`, so
+// `pricing.category` reads the record and `pricing.missing` stays the module
+// member report.
+sema_expression_module_record_field: fn(record: TExpr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    owner_name := ""
+    if record.ty == .Named(name) -> owner_name = name
+    if owner_name == "" -> return false
+    owner_symbol: sema_expression_type_symbol(scopes, environment, program, owner_name) ?? return false
+    struct_def: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return false
+    loop field in struct_def.fields {
+        if field.name == member -> return true
+    }
+    false
 }
 
 // The `VJPRun<G>` members over gradient tuple `G`: `.value`
@@ -738,13 +759,24 @@ sema_expression_struct_static_member_error: fn(type_name: String, member: String
 
 // `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:
 // `modules[member_owner].consts.get(member)`): a ConstRef to the target
-// module's constant, typed by its staged value. A name the module does not
-// export is the call path's import-member report, not an untyped base.
+// module's constant, typed by its staged value. A member the module does not
+// declare is a field of its Module record (`pricing.category`) when it has
+// one; any other is the call path's import-member report, not an untyped base.
 sema_expression_module_constant: fn(alias: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     index: sema_scope_resolve_index(scopes, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return SemaMethodSpecialCheck{handled: false, value: None}
     if program.registration_graph == .Val(graph) {
+        // An inline module of the imported file (`lib.inner`) is its record.
+        if sema_expression_module_nested_record(graph, alias, member, environment, program) == .Val(nested) {
+            return sema_expression_module_constant_read(graph, nested, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
+        }
         resolved: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? {
+            if sema_registration_lookup_qualified(graph, environment.module_identity, alias, SEMA_MODULE_META) == .Val(record) {
+                read: sema_expression_module_constant_read(graph, record, alias, span, None, environment, program, context, diagnostics)
+                if read.value == .Val(value) && sema_expression_module_record_field(value, member, environment, program, scopes) {
+                    return SemaMethodSpecialCheck{handled: true, value: sema_expression_field_checked(value, member, span, expected, environment, program, scopes, context, diagnostics)}
+                }
+            }
             unknown: sema_expression_module_member_unknown(graph, environment.module_identity, alias, member, member_span) ?? return SemaMethodSpecialCheck{handled: false, value: None}
             diagnostics.push(unknown)
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -757,6 +789,18 @@ sema_expression_module_constant: fn(alias: String, member: String, member_span: 
         return sema_expression_module_constant_read(graph, resolved, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// The Module record of the inline module `member` that the file module
+// `alias` declares, hoisted under its member identity in that file.
+sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: String, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationResolvedSymbol? {
+    imported: sema_call_source_import_target(environment, program, alias) ?? return None
+    module_index: sema_registration_module_index(graph, imported.module_identity) ?? return None
+    loop surface in graph.modules[module_index].inline_bindings.modules {
+        if surface.name != member || surface.private_to != None || surface.constants.get(SEMA_MODULE_META) == None -> next
+        return sema_registration_lookup_name(graph, imported.module_identity, sema_inline_member_name(surface.path, SEMA_MODULE_META))
+    }
+    None
 }
 
 // E0605 for `alias.child` where `child` is a file module that the imported

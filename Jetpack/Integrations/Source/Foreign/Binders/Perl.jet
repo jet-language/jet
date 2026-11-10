@@ -6,7 +6,7 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
-        ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
+        ForeignBindError, ForeignBindResult, ForeignLanguage, pkg_ascii_lower,
         pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
         pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
         pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
@@ -90,7 +90,7 @@ PerlBoundFunction: struct {
 
 // Bind the named top-level subs of the Perl script at `path`.
 pkg_perl_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: WorkerLanguage.Perl
+    language: ForeignLanguage.Perl
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     perl: pkg_binder_resolved_tool_path("perl") ?? return Err(ForeignBindError.ToolMissing("perl"))

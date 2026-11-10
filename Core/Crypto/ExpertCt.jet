@@ -39,7 +39,7 @@ extract: fn(w: [I64], at: Int, count: Int) -> [U8] Never! {
     #Unsafe("Core fixed-limb extraction reserves its exact public output width before filling") {
         if !mem.__list_reserve_exact<U8>(out, count) -> panic("crypto output allocation failed")
     }
-    loop i in 0..<count -> out.push(U8{byte(w, at + i)})
+    loop i in 0..<count -> out.push(wrapping(U8{byte(w, at + i)}))
     out
 }
 equal: fn(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
@@ -325,8 +325,8 @@ hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8])
     #Unsafe("Core Ed25519 hashing reserves the exact combined public part lengths before filling") {
         if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) -> panic("crypto hash input allocation failed")
     }
-    loop i in 0..<an -> data.push(U8{byte(w, a + i)})
-    loop i in 0..<bn -> data.push(U8{byte(w, b + i)})
+    loop i in 0..<an -> data.push(wrapping(U8{byte(w, a + i)}))
+    loop i in 0..<bn -> data.push(wrapping(U8{byte(w, b + i)}))
     loop v in msg -> data.push(v)
     digest := crypto.sha512(data).bytes
     load(w, out, digest)

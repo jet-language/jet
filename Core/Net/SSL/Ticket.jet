@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_ticket.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
+// Private Core source part: the session ticket keys.
+//
+// A port of mbedtls 3.6.7's ssl_ticket.c under the default
+// mbedtls_config.h (no USE_PSA_CRYPTO, HAVE_TIME on): two AEAD keys, the
+// active one sealing new tickets and either one opening them, with each key
+// regenerated when its lifetime ends. A ticket is
+//
+//     struct {
+//         opaque key_name[4];
+//         opaque iv[12];
+//         opaque encrypted_state<0..2^16-1>;
+//         opaque tag[16];
+//     } ticket;
+//
+// with key_name, iv and the state's length as the additional data, so either
+// side reads what the other wrote.
+//
+// C's context borrows the f_rng and p_rng it is set up with; this one owns
+// its HMAC_DRBG. C's write fills the caller's buffer up to `end`; this one
+// returns the ticket and the server engine checks it fits. The context is
+// shared by every connection of a configuration: ssl_ticket_write_cb and
+// ssl_ticket_parse_cb give the configuration callbacks over a Shared handle,
+// which hold its lock for the call as C's THREADING_C mutex does.
+use {
+    core
+    layer: __core_crypto_cipher_layer
+    drbg: __core_crypto_drbg
+    ssldefs: __core_net_ssl_defs
+    sslser: __core_net_ssl_ser
+}
+
+// MAX_KEY_BYTES: the key bytes a cipher may take.
+SSL_TICKET_MAX_KEY_BYTES: 32
+// TICKET_KEY_NAME_BYTES (MBEDTLS_SSL_TICKET_KEY_NAME_BYTES).
+SSL_TICKET_KEY_NAME_BYTES: 4
+// TICKET_IV_BYTES.
+SSL_TICKET_IV_BYTES: 12
+// TICKET_CRYPT_LEN_BYTES.
+SSL_TICKET_CRYPT_LEN_BYTES: 2
+// TICKET_AUTH_TAG_BYTES.
+SSL_TICKET_AUTH_TAG_BYTES: 16
+// TICKET_ADD_DATA_LEN: key_name, iv and the state's length.
+SSL_TICKET_ADD_DATA_LEN: 18
+// TICKET_MIN_LEN: the additional data and the tag.
+SSL_TICKET_MIN_LEN: 34
+
+/// One ticket key (mbedtls_ssl_ticket_key): its name, the time it was made
+/// in seconds since the epoch, its lifetime in seconds (0 for no limit) and
+/// its AEAD context, None before setup.
+SSLTicketKey: struct {
+    name: [U8]
+    generation_time: Int
+    lifetime: Int
+    cipher: layer.CipherContext?
+}
+
+/// The ticket keys (mbedtls_ssl_ticket_context): the two keys, the index of
+/// the active one, the lifetime of the tickets it makes in seconds, and the
+/// random source of keys and IVs, None before setup.
+SSLTicketContext: struct {
+    keys: [SSLTicketKey]
+    active: Int
+    ticket_lifetime: Int
+    rng: drbg.HMACDrbg?
+}
+
+ssl_ticket_key_init: fn() -> SSLTicketKey Never! {
+    SSLTicketKey{name: ssldefs.ssl_zeros(SSL_TICKET_KEY_NAME_BYTES), generation_time: 0, lifetime: 0, cipher: None}
+}
+
+/// A context with no keys (mbedtls_ssl_ticket_init).
+ssl_ticket_init: fn() -> SSLTicketContext Never! {
+    keys := [SSLTicketKey]{}
+    keys.push(ssl_ticket_key_init())
+    keys.push(ssl_ticket_key_init())
+    SSLTicketContext{keys: keys, active: 0, ticket_lifetime: 0, rng: None}
+}
+
+// `n` bytes of the context's random source (C's ctx->f_rng); BadInputData
+// before setup, as C's write and parse give for a NULL f_rng.
+ssl_ticket_random: fn(ctx: &SSLTicketContext, n: Int) -> [U8] ssldefs.SSLError! {
+    out := ssldefs.ssl_zeros(n)
+    if &ctx.rng == {
+        .Val(r) -> {
+            if !r.fill(out) -> return Err(.RandomFailed)
+        }
+        None -> return Err(.BadInputData)
+    }
+    Ok(out)
+}
+
+// A fresh name and key for keys[index] (ssl_ticket_gen_key). The key's
+// lifetime is the tickets' lifetime when it is made.
+ssl_ticket_gen_key: fn(ctx: &SSLTicketContext, index: Int) ssldefs.SSLError! {
+    ctx.keys[index].generation_time = ssldefs.ssl_time()
+    ctx.keys[index].lifetime = ctx.ticket_lifetime
+    ctx.keys[index].name = ssl_ticket_random(ctx, SSL_TICKET_KEY_NAME_BYTES) ?? return Err(err)
+    buf := ssl_ticket_random(ctx, SSL_TICKET_MAX_KEY_BYTES) ?? return Err(err)
+    failure: ssl_ticket_key_set(ctx.keys[index], buf)
+    ssldefs.ssl_wipe(buf)
+    if failure == {
+        .Val(e) -> return Err(e)
+        None -> {}
+    }
+}
+
+// The key bits of the key's cipher, or -1 before setup.
+ssl_ticket_key_bits: fn(key: SSLTicketKey) -> Int Never! {
+    if key.cipher == {
+        .Val(c) -> c.info.key_bits
+        None -> -1
+    }
+}
+
+// Key the key's cipher with k[0..<key_bits / 8], which k must hold
+// (mbedtls_cipher_setkey). With GCM, CCM and ChaCha20-Poly1305 one context
+// seals and opens. The error, if any; BadInputData before setup.
+ssl_ticket_key_set: fn(key: &SSLTicketKey, k: [U8]) -> ssldefs.SSLError? Never! {
+    if &key.cipher == {
+        .Val(c) -> {
+            bytes := ssldefs.ssl_bytes_of(k, 0, c.info.key_bits /% 8)
+            failure := ssldefs.SSLError?{None}
+            if layer.cipher_setkey(c, bytes, .Encrypt) == {
+                .Ok(_) -> {}
+                .Err(e) -> failure = Val(ssldefs.SSLError.Cipher(e))
+            }
+            ssldefs.ssl_wipe(bytes)
+            failure
+        }
+        None -> Val(ssldefs.SSLError.BadInputData)
+    }
+}
+
+// Encrypt and authenticate `state` under the key: ciphertext then tag
+// (mbedtls_cipher_auth_encrypt_ext).
+ssl_ticket_key_seal: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], state: [U8]) -> [U8] ssldefs.SSLError! {
+    if &key.cipher == {
+        .Val(c) -> {
+            if layer.cipher_auth_encrypt_ext(c, iv, ad, state, SSL_TICKET_AUTH_TAG_BYTES) == {
+                .Ok(out) -> Ok(out)
+                .Err(e) -> Err(.Cipher(e))
+            }
+        }
+        None -> Err(.BadInputData)
+    }
+}
+
+// Check and decrypt ciphertext-then-tag under the key
+// (mbedtls_cipher_auth_decrypt_ext); InvalidMac when it does not
+// authenticate, as ssl_ticket.c maps MBEDTLS_ERR_CIPHER_AUTH_FAILED.
+ssl_ticket_key_open: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], sealed: [U8]) -> [U8] ssldefs.SSLError! {
+    if &key.cipher == {
+        .Val(c) -> {
+            if layer.cipher_auth_decrypt_ext(c, iv, ad, sealed, SSL_TICKET_AUTH_TAG_BYTES) == {
+                .Ok(out) -> Ok(out)
+                .Err(e) -> {
+                    if e == .AuthFailed -> return Err(.InvalidMac)
+                    Err(.Cipher(e))
+                }
+            }
+        }
+        None -> Err(.BadInputData)
+    }
+}
+
+// Make the other key active, with a fresh name and key, once the active
+// key's lifetime is over or its time is in the future
+// (ssl_ticket_update_keys). A key with lifetime 0 never expires.
+ssl_ticket_update_keys: fn(ctx: &SSLTicketContext) ssldefs.SSLError! {
+    lifetime: ctx.keys[ctx.active].lifetime
+    if lifetime == 0 -> return
+    current_time: ssldefs.ssl_time()
+    key_time: ctx.keys[ctx.active].generation_time
+    if current_time >= key_time && current_time - key_time < lifetime -> return
+    ctx.active = 1 - ctx.active
+    ssl_ticket_gen_key(ctx, ctx.active)
+}
+
+/// Install `name` and key `k` in the inactive slot and make it the active
+/// key, its tickets and itself living `lifetime` seconds
+/// (mbedtls_ssl_ticket_rotate). The name gives its first 4 bytes and the
+/// key its first key_bits / 8; shorter ones are Cipher(BadInputData).
+ssl_ticket_rotate: fn(ctx: &SSLTicketContext, name: [U8], k: [U8], lifetime: Int) ssldefs.SSLError! {
+    idx: 1 - ctx.active
+    // C's key context before setup has key length 0 and no cipher.
+    bitlen: ssl_ticket_key_bits(ctx.keys[idx])
+    if bitlen < 0 -> return Err(.Cipher(.BadInputData))
+    if name.len() < SSL_TICKET_KEY_NAME_BYTES || k.len() * 8 < bitlen -> return Err(.Cipher(.BadInputData))
+    if ssl_ticket_key_set(ctx.keys[idx], k) == {
+        .Val(e) -> return Err(e)
+        None -> {}
+    }
+    ctx.active = idx
+    ctx.ticket_lifetime = lifetime
+    ctx.keys[idx].name = ssldefs.ssl_bytes_of(name, 0, SSL_TICKET_KEY_NAME_BYTES)
+    ctx.keys[idx].generation_time = ssldefs.ssl_time()
+    ctx.keys[idx].lifetime = lifetime
+}
+
+/// Set the context up with its random source, an AEAD cipher (GCM, CCM or
+/// ChaCha20-Poly1305, of at most 256 key bits) and the lifetime of its
+/// tickets in seconds, and make both keys (mbedtls_ssl_ticket_setup).
+/// BadInputData for any other cipher.
+ssl_ticket_setup: fn(ctx: &SSLTicketContext, rng: &&drbg.HMACDrbg, info: layer.CipherInfo, lifetime: Int) ssldefs.SSLError! {
+    mode: info.mode
+    if mode != .GCM && mode != .CCM && mode != .ChaChaPoly -> return Err(.BadInputData)
+    if info.key_bits > 8 * SSL_TICKET_MAX_KEY_BYTES -> return Err(.BadInputData)
+    ctx.rng = Val(rng.move())
+    ctx.ticket_lifetime = lifetime
+    ctx.keys[0].cipher = Val(layer.cipher_setup(info))
+    ctx.keys[1].cipher = Val(layer.cipher_setup(info))
+    ssl_ticket_gen_key(ctx, 0) ?? return Err(err)
+    ssl_ticket_gen_key(ctx, 1)
+}
+
+/// Seal `session` into a ticket under the active key, rotating the keys
+/// first if it has expired; the ticket and its lifetime hint
+/// (mbedtls_ssl_ticket_write). A session that serializes past 65535 bytes
+/// gives an empty ticket, as C's write gives tlen 0 with no error.
+ssl_ticket_write: fn(ctx: &SSLTicketContext, session: ssldefs.SSLSession) -> ssldefs.SSLTicketWritten ssldefs.SSLError! {
+    if ctx.rng == None -> return Err(.BadInputData)
+    ssl_ticket_update_keys(ctx) ?? return Err(err)
+    a: ctx.active
+    lifetime: ctx.keys[a].lifetime
+    iv := ssl_ticket_random(ctx, SSL_TICKET_IV_BYTES) ?? return Err(err)
+    // Dump the session state.
+    state := sslser.ssl_session_save(session) ?? return Err(err)
+    clear_len: state.len()
+    if clear_len > 65535 {
+        ssldefs.ssl_wipe(state)
+        return Ok(ssldefs.SSLTicketWritten{ticket: [U8]{}, lifetime: lifetime})
+    }
+    ticket := [U8]{}
+    ssldefs.ssl_push_all(ticket, ctx.keys[a].name)
+    ssldefs.ssl_push_all(ticket, iv)
+    ssldefs.ssl_push_u16(ticket, clear_len)
+    // Encrypt and authenticate; the additional data is the key name, IV and
+    // length.
+    ad: ssldefs.ssl_bytes_of(ticket, 0, SSL_TICKET_ADD_DATA_LEN)
+    sealed := ssl_ticket_key_seal(ctx.keys[a], iv, ad, state) ?? {
+        ssldefs.ssl_wipe(state)
+        return Err(err)
+    }
+    ssldefs.ssl_wipe(state)
+    if sealed.len() != clear_len + SSL_TICKET_AUTH_TAG_BYTES -> return Err(.InternalError)
+    ssldefs.ssl_push_all(ticket, sealed)
+    Ok(ssldefs.SSLTicketWritten{ticket: ticket, lifetime: lifetime})
+}
+
+// The index of the key named by buf[0..<4], or -1 (ssl_ticket_select_key).
+ssl_ticket_select_key: fn(ctx: SSLTicketContext, buf: [U8]) -> Int Never! {
+    loop i in 0..<ctx.keys.len() {
+        if ssldefs.ssl_range_eq(buf, 0, ctx.keys[i].name, 0, SSL_TICKET_KEY_NAME_BYTES) -> return i
+    }
+    -1
+}
+
+/// Open a ticket into the session it seals (mbedtls_ssl_ticket_parse):
+/// BadInputData for a malformed one, SessionTicketExpired for one under a
+/// key no longer held or older than its key's lifetime, InvalidMac for one
+/// that does not authenticate.
+ssl_ticket_parse: fn(ctx: &SSLTicketContext, buf: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
+    if ctx.rng == None -> return Err(.BadInputData)
+    len: buf.len()
+    if len < SSL_TICKET_MIN_LEN -> return Err(.BadInputData)
+    ssl_ticket_update_keys(ctx) ?? return Err(err)
+    enc_len: ssldefs.ssl_get_u16(buf, SSL_TICKET_KEY_NAME_BYTES + SSL_TICKET_IV_BYTES)
+    if len != SSL_TICKET_MIN_LEN + enc_len -> return Err(.BadInputData)
+    // Most likely the key was rotated out, unless under attack: this is
+    // informative only.
+    k: ssl_ticket_select_key(ctx, buf)
+    if k < 0 -> return Err(.SessionTicketExpired)
+    iv: ssldefs.ssl_bytes_of(buf, SSL_TICKET_KEY_NAME_BYTES, SSL_TICKET_IV_BYTES)
+    ad: ssldefs.ssl_bytes_of(buf, 0, SSL_TICKET_ADD_DATA_LEN)
+    sealed: ssldefs.ssl_bytes_of(buf, SSL_TICKET_ADD_DATA_LEN, enc_len + SSL_TICKET_AUTH_TAG_BYTES)
+    plain := ssl_ticket_key_open(ctx.keys[k], iv, ad, sealed) ?? return Err(err)
+    if plain.len() != enc_len {
+        ssldefs.ssl_wipe(plain)
+        return Err(.InternalError)
+    }
+    // Load the session.
+    session := ssldefs.SSLSession{}
+    if sslser.ssl_session_load(session, plain) == {
+        .Ok(_) -> {}
+        .Err(e) -> {
+            ssldefs.ssl_wipe(plain)
+            return Err(e)
+        }
+    }
+    ssldefs.ssl_wipe(plain)
+    // The ticket's age against its key's lifetime, in milliseconds
+    // (mbedtls_ssl_session_get_ticket_creation_time takes only a server's
+    // session).
+    ticket_lifetime: ctx.keys[k].lifetime * 1000
+    if session.endpoint != ssldefs.SSL_IS_SERVER {
+        ssldefs.ssl_session_wipe(session)
+        return Err(.BadInputData)
+    }
+    ticket_age: ssldefs.ssl_ms_time() - session.ticket_creation_time
+    if ticket_age < 0 || ticket_age > ticket_lifetime {
+        ssldefs.ssl_session_wipe(session)
+        return Err(.SessionTicketExpired)
+    }
+    Ok(session)
+}
+
+/// Wipe the keys and drop the random source (mbedtls_ssl_ticket_free).
+ssl_ticket_free: fn(ctx: &SSLTicketContext) Never! {
+    loop i in 0..<ctx.keys.len() {
+        ssldefs.ssl_wipe(ctx.keys[i].name)
+        ctx.keys[i] = ssl_ticket_key_init()
+    }
+    ctx.active = 0
+    ctx.ticket_lifetime = 0
+    ctx.rng = None
+}
+
+ssl_ticket_write_locked: fn(ctx: Shared<SSLTicketContext>, session: ssldefs.SSLSession) -> ssldefs.SSLTicketWritten ssldefs.SSLError! {
+    guard := ctx.guard_edit()
+    ssl_ticket_write(guard.value, session)
+}
+
+ssl_ticket_parse_locked: fn(ctx: Shared<SSLTicketContext>, buf: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
+    guard := ctx.guard_edit()
+    ssl_ticket_parse(guard.value, buf)
+}
+
+/// The configuration's ticket writer over a shared context: C's
+/// mbedtls_ssl_ticket_write with the context as p_ticket.
+ssl_ticket_write_cb: fn(ctx: Shared<SSLTicketContext>) -> ssldefs.SSLTicketWrite Never! {
+    ssldefs.SSLTicketWrite{call: (session: ssldefs.SSLSession) -> ssl_ticket_write_locked(ctx, session)}
+}
+
+/// The configuration's ticket parser over a shared context: C's
+/// mbedtls_ssl_ticket_parse with the context as p_ticket.
+ssl_ticket_parse_cb: fn(ctx: Shared<SSLTicketContext>) -> ssldefs.SSLTicketParse Never! {
+    ssldefs.SSLTicketParse{call: (buf: [U8]) -> ssl_ticket_parse_locked(ctx, buf)}
+}

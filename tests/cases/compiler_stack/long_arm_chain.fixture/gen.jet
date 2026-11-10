@@ -1,0 +1,43 @@
+// Writes table.jet for the arm count its first argument names: one flat
+// value table (`if n == { 0 -> … }`) and one statement else-if chain of that
+// many arms, each arm `k -> (7 * k) % 13`. The parser reads either as a chain
+// of nested `if`s, one link per arm; the whole chain is one source nesting
+// level. run() sums both over 0..<count + 76, so the 76 inputs past the last
+// arm add the `else` value -1 each. It also writes nested.jet, 300 else-if
+// chains each written inside the first arm of the one before: real source
+// nesting, which passes the limit (E1403).
+use {
+    core.files
+    core.process.[args]
+}
+
+run: fn() {
+    given: args()
+    if given.len() != 1 -> panic("gen.jet takes one arm count: 256 or 1024")
+    count: if given[0] == {
+        "256" -> 256
+        "1024" -> 1024
+        else -> panic("gen.jet takes one arm count: 256 or 1024")
+    }
+    table := [String]{}
+    chain := [String]{}
+    loop k in 0..<count {
+        table.push("        {k} -> {(7 * k) % 13}\n")
+        chain.push("if n == {k} {{\n        out = {(7 * k) % 13}\n    }} else ")
+    }
+    arms: table.join("")
+    links: chain.join("")
+    limit: count + 76
+    source: "classify: fn(n: Int) -> Int {{\n    if n == {{\n{arms}        else -> -1\n    }}\n}}\n\nclassify_chain: fn(n: Int) -> Int {{\n    out := 0\n    {links}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    table := 0\n    chain := 0\n    loop i in 0..<{limit} {{\n        table += classify(i)\n        chain += classify_chain(i)\n    }}\n    print(\"{{table}}\")\n    print(\"{{chain}}\")\n}}\n"
+    files.write("table.jet", source) ?? panic("gen.jet: write table.jet: {err}")
+    opens := [String]{}
+    closes := [String]{}
+    loop _ in 0..<300 {
+        opens.push("if n == 0 {{\n")
+        closes.push("}} else if n == 1 {{\n        out = 2\n    }}\n")
+    }
+    inner: opens.join("")
+    outer: closes.join("")
+    nested: "deep: fn(n: Int) -> Int {{\n    out := 0\n    {inner}        out = 1\n{outer}    out\n}}\n\nrun: fn() {{\n    print(\"{{deep(0)}}\")\n}}\n"
+    files.write("nested.jet", nested) ?? panic("gen.jet: write nested.jet: {err}")
+}

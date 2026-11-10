@@ -6,9 +6,9 @@
 # same words and copies, the invalid byte included.
 fixture: a_list_its_loop_reads_and_clears_is_made_its_own_once.fixture
 env: NO_COLOR=1
-step: jet inspect decisions main.jet
+step: jet inspect decisions --optimize=basic main.jet
 exit: 0
-stdout: ~ "unique words [U8]: made unique before the Loop" # the default build hoists it (O1)
+stdout: ~ "unique words [U8]: made unique before the Loop" # optimize: basic hoists it (O1)
 stdout: ~ "unique kept [U8]: declined (the Loop hands on the list by its copy_bytes)" # the copies share the token's buffer
 step: jet inspect decisions --release main.jet
 exit: 0

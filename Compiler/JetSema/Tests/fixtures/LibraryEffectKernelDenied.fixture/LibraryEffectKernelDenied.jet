@@ -1,0 +1,9 @@
+// `store.load` works in `Disk`, which relies on files, so denying `FS`
+// blocks it (E0749).
+use store
+
+show: fn(path: String) -[!FS]> String {
+    store.load(path)
+}
+
+run: fn() { print(show("x")) }

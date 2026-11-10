@@ -32,6 +32,7 @@ use {
         Diagnostic,
         Dimension,
         DimensionAxis,
+        EFFECT_VOCABULARY_LEAVES,
         EffectRowEntry,
         EnumDef,
         EnumGroup,
@@ -583,6 +584,9 @@ SemaRegistrationModuleInput: struct {
     // The module's source text (Rust `Module::source`). A declared text block
     // hands the text inside its braces to its rule.
     source: String{""}
+    // Filled by the driver: the module's file from its package root and its
+    // package, which its Module record names (ModuleMeta.jet).
+    meta: SemaModuleMetaSource{SemaModuleMetaSource{}}
 }
 
 SemaForeignImportBinding: struct {
@@ -1112,13 +1116,14 @@ sema_registration_callback_boundary_param: fn(abi: SemaRegistrationCallableABI, 
     abi.is_c_abi && sema_registration_type_is_fn(effective_type)
 }
 
+// The effect an inline `#FFI(<lang>)` body runs under: the FFI leaf named by
+// the language, or the FFI root for a language with no leaf.
 sema_registration_inline_foreign_effect_root: fn(language: String) -> String Never! {
-    if language == {
-        "c" -> "FFI.C"
-        "asm" -> "FFI.Asm"
-        "cpp" -> "FFI.Cpp"
-        else -> "FFI.{language}"
+    wanted: "ffi.{language.lower()}"
+    loop leaf in EFFECT_VOCABULARY_LEAVES {
+        if leaf.lower() == wanted -> return leaf.copy()
     }
+    "FFI"
 }
 
 sema_registration_callable_abi_for_func: fn(func: Func) -> SemaRegistrationCallableABI Never! {
@@ -2466,6 +2471,9 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
             if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
+            if definition.trait_name == None && rows.nominals.get(definition.type_name) == .Val(nominal_index) && module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait {
+                diagnostics.push(sema_registration_impl_on_trait(definition))
+            }
             module_row.impls.push(row.copy())
             if row.target_module_identity != None {
                 nominal_index: rows.nominals.get(definition.type_name) ?? -1
@@ -2497,6 +2505,14 @@ sema_registration_unknown_impl_target: fn(definition: ImplDef) -> Diagnostic {
         }
     }
     sema_error("E0301", definition.type_span, "`impl {header}` needs a user-defined type", why, fix)
+}
+
+// `impl Shape { … }` outside a type body, where `Shape` is a trait, names no
+// type to implement it for: an in-body `impl Shape` is the enclosing type's,
+// and an outside one is written `impl Type.Shape`.
+sema_registration_impl_on_trait: fn(definition: ImplDef) -> Diagnostic {
+    name: definition.type_name
+    sema_error("E0301", definition.type_span, "`impl {name}` needs a user-defined type", "`{name}` is a trait, and an `impl` outside a type body only extends a declared struct, enum, or distinct type, so these methods would belong to no type", "write `impl Type.{name} {{ … }}` for the type that implements `{name}`, or move the block into that type's body")
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
@@ -2599,13 +2615,16 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
                 if !sema_registration_opmix_builtin_impl(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
                 next
             }
+            owner_nominal: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
+            if definition.trait_name == None && graph.modules[owner_index].nominals[owner_nominal].kind == SemaRegistrationNominalKind.Trait {
+                sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_impl_on_trait(definition))
+            }
             // The first registration already reported the methods' own
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
             row: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
             graph.modules[module_index].impls[impl_index] = row
-            nominal_index: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
-            loop method in row.methods -> graph.modules[owner_index].nominals[nominal_index].methods.push(method)
+            loop method in row.methods -> graph.modules[owner_index].nominals[owner_nominal].methods.push(method)
         }
     }
 }
@@ -2708,6 +2727,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     if module_row.package_identity == "" || module_row.module_identity == "" || module_row.module_name == "" || module_row.module_path == "" || module_row.source_file == "" {
         diagnostics.push(sema_error_optional("E0003", None, "a declaration registry row is missing source identity", "package, module, display path, and source identity remain separate semantic inputs", "provide the loader's canonical package, module, display-path, and source-file identities"))
     }
+    // A module's field lines become its Module record before casing would
+    // read them as constants. Core source carries no record.
+    if !module_row.module_identity.starts_with("<corelib>/") -> sema_module_meta_lower(module_row.program, module_row.declared_module, owned.meta, module_row.source, diagnostics)
     // Identifier casing is checked on the parsed source before
     // any declaration is registered or rewritten.
     sema_casing_program(module_row.program, diagnostics)
@@ -4297,6 +4319,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         if package_policies.get(prepared_inputs[index].package_identity) == None -> package_policies[prepared_inputs[index].package_identity] = sema_policy_package_declarations(prepared_inputs, prepared_inputs[index].package_identity, diagnostics)
         imported_templates.push(sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, prepared_inputs[index].module_identity))
     }
+    // A module carries its Module record only when a source reads it as a
+    // value or its body sets a field; the reads span every input.
+    sema_module_meta_mark_reads(prepared_inputs)
     // Only modules declaring a module alias or a generic module keep their
     // programs as written for the alias check after registration.
     written_inputs: sema_generic_modules_written(prepared_inputs)
@@ -4420,11 +4445,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     }
     // A lowered inline module's Core member import reads a file-level Core
     // alias that shares the scoped declaration's span (InlineModules.jet
-    // sema_inline_core_imports); the alias binds the loaded Core module it names.
+    // sema_inline_core_imports), and a module's Module record reads core.meta
+    // through its generated alias (ModuleMeta.jet); each alias binds the
+    // loaded Core module it names.
     loop hoisted_module in 0..<graph.modules.len() {
         hoisted := [ImportDecl]{}
         loop declaration in graph.modules[hoisted_module].program.imports {
-            if sema_inline_core_alias_import(declaration) -> hoisted.push(declaration)
+            if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) -> hoisted.push(declaration)
         }
         loop declaration in hoisted {
             if declaration.kind == .Module(name, _) {
@@ -4481,7 +4508,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         loop import_index in 0..<import_count {
             declaration := graph.modules[module_index].program.imports[import_index]
             found: edge_spans.get("{graph.modules[module_index].module_identity}|{declaration.span.start}|{declaration.span.end}") != None
-            if !found {
+            if !found && !sema_module_meta_import(declaration) {
                 sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }
         }

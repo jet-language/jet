@@ -1,0 +1,68 @@
+package: { name: "run", authority: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }
+use net: core.net
+
+// Every read on a stream reuses the stream's one read buffer (#5976 c42), and
+// each read returns a list of only the bytes it got. The buffer is sized by
+// the read limit, so the limits below change it up and down, past the widest
+// block a stream keeps (256 KiB): a list must never show bytes left in the
+// buffer by an earlier, longer read, and a list a caller still holds must not
+// change when later reads reuse the buffer.
+pattern: fn(seed: Int, count: Int) -> [U8] {
+    out := [U8]{}
+    loop i in 0..<count { out.push(U8{(seed + i * 7) %% 251}) }
+    out
+}
+
+// Exactly `want` bytes, read in reads of at most `limit`.
+drain: fn(&client: TCPStream, want: Int, limit: Int) -> [U8] {
+    got := [U8]{}
+    loop got.len() < want {
+        chunk: net.tcp_read_bytes(client, limit) ?? panic("read")
+        if chunk.len() == 0 -> panic("end of stream after {got.len()} of {want} bytes")
+        if chunk.len() > limit -> panic("a read of limit {limit} returned {chunk.len()} bytes")
+        loop b in chunk { got.push(b) }
+    }
+    got
+}
+
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: net.listener_local_socket_addr(listener) ?? panic("listener address")
+    client := net.tcp_connect_addr(address) ?? panic("connect")
+    server := net.tcp_accept(listener) ?? panic("accept")
+
+    // A long read first.
+    first: pattern(1, 3000)
+    net.tcp_write_all_bytes(server, first) ?? panic("write")
+    held: drain(client, 3000, 8192)
+    print("first 3000 bytes: {held == first}")
+
+    // A thousand short reads into the same buffer: each list is just the
+    // bytes sent, never the tail of the 3000-byte read before it.
+    short_ok := true
+    loop round in 0..<1000 {
+        size: 1 + round %% 13
+        sent: pattern(round, size)
+        net.tcp_write_all_bytes(server, sent) ?? panic("write")
+        if drain(client, size, 8192) != sent -> short_ok = false
+    }
+    print("1000 short reads return only their bytes: {short_ok}")
+    print("the first list is unchanged: {held == pattern(1, 3000)}")
+
+    // Limits that walk the buffer up past the 256 KiB it keeps and back down.
+    limits: [Int]{70000, 300000, 16, 1048576, 5}
+    loop limit in limits {
+        sent: pattern(limit, 40000)
+        net.tcp_write_all_bytes(server, sent) ?? panic("write")
+        print("40000 bytes at limit {limit}: {drain(client, 40000, limit) == sent}")
+    }
+
+    // A text read and then a byte read on the same buffer.
+    net.tcp_write_all_bytes(server, "hé".bytes()) ?? panic("write")
+    print("text: {net.tcp_read_text(client, 8192) ?? panic("read text")}")
+    net.tcp_write_all_bytes(server, [U8]{1, 2, 3}) ?? panic("write")
+    print("bytes: {net.tcp_read_bytes(client, 8192) ?? panic("read bytes")}")
+
+    server.close() ?? panic("close")
+    print("end: {(net.tcp_read_bytes(client, 8192) ?? panic("read end")).len()} bytes")
+}

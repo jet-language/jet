@@ -76,7 +76,7 @@ reviews may render it, but they must not create another verb list.
 | Job | List | Map | Set | Queue | PriorityQueue |
 | --- | --- | --- | --- | --- | --- |
 | remove and return | `pop()` | `pop(key)` | `pop(value)` | `pop_front()` / `pop_back()` | `pop()` |
-| swap at an index | `replace(index, value)` | — | — | — | — |
+| swap the first equal value | `replace(old, new)` | — | — | — | — |
 | store or upsert | — | `add(key, value)` | `add(value)` | — | — |
 | membership | — | `has_key(key)` | `has(value)` | — | — |
 | content search | — | `contains_value(value)` | — | `contains(value)` | — |

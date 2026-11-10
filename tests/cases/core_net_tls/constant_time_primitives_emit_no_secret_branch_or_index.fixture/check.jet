@@ -1,0 +1,1413 @@
+// #6694 c10: the emission check of the secret-dependent primitives.
+//
+// Usage: jet check.jet [--drop <directive>]... <spec> <log>...
+//
+// Each <log> is a JET_X64_EMIT_LOG report (Compiler/JetIR/Source/X64Select.jet
+// ir_x64_log_text): per logged function, the slot IR the x86-64 selector
+// consumed, each slot's checked type, and one row per conditional jump,
+// memory operand, division, string operation, call and inline-asm template
+// the encoder wrote, attributed to the IR instruction it lowers.
+//
+// <spec> names the secrets (`root <function> <variable>...`), the functions
+// judged (`check <source path part>`, or `check <function>` for one function
+// of a file that is not judged whole), the functions whose result is public
+// (`public <function>`: a tag compare's verdict, a text layout class), the
+// types public wherever they sit (`public-type <type>`: error kinds,
+// algorithm ids, curve parameters), the public members of a struct whose
+// other members are secret (`public-field <type> <member>`: an RSA key's
+// modulus, placed by the log's `field` lines), the structs whose exact Int
+// or Bool fields hold secrets (`secret-struct <type>`), the enums whose tag
+// is public though their payload is not (`public-tag <type>`: which cipher
+// a key schedule belongs to), the functions whose findings are expected
+// (`expected <function> <reason>`: a scan of decrypted plaintext, which
+// branches on the record's content, not on a key; its findings are listed
+// apart and must exist), and the unlogged
+// callees and runtime routines that may be handed secret memory (`callee
+// <function>`, `runtime <symbol>`; a cleared routine's result is public). A
+// function or type is `module::name`, generic arguments dropped.
+//
+// The taint is the IR's, after the optimizer, so it matches the emitted code
+// instruction for instruction. Each slot carries two bits: `value` (the word
+// it holds is secret) and `contents` (the memory it points to holds secrets).
+// The bits flow through every logged function and its calls until nothing
+// changes; a callee is walked once per pattern of secret arguments, so a
+// public call of a function stays public. A load from secret memory gives a
+// secret value, except the length and capacity words of a list header, the
+// tag of an Option or a Result or of a `public-tag` enum, and an exact Int
+// or Bool field of a struct (the library keeps its secrets in fixed-width
+// words and lists of them; its Int and Bool fields are lengths, counters and
+// API flags, but for the `secret-struct` ones), which are public; so the
+// address of such a field carries none of its struct's secrets, and a store
+// of a secret word into one is a finding of its own. A field is
+// placed by its struct's layout, read from the slot's type or, for a word
+// that addresses a list element (a list's data word, plus a multiple of the
+// element's size), from the element's type (find_elements), since an
+// optimized build types such an address as a plain word; a generic
+// struct's instance by its own layout (member_keys). The check fails, at
+// every level it is given, on:
+// - a conditional jump attributed to an instruction with a secret input; a
+//   jump to a stop (`jcc <cond> stop [s<slot>]`) when its condition reads a
+//   secret: the slot when the log names one, else the instruction's inputs;
+// - a memory operand outside the frame whose address is secret;
+// - a division with a secret operand, and a string operation whose count is;
+// - a secret word stored into a public Int or Bool field;
+// - a call through a secret register;
+// - an inline-asm template given a secret (a refusal: its bytes are opaque);
+// - a secret reaching a callee or runtime routine the log does not hold and
+//   the spec does not clear;
+// - a root the log does not hold.
+//
+// An optimized build folds calls away, so two more facts carry the bounds a
+// call drew: each instruction of an inlined `public` function's body names
+// the inline site it came from (the log's `inline` and `sites` lines;
+// Compiler/JetIR/Source/OptInline.jet), and its writes of the slots the
+// code outside the body reads are its verdict, public as the call's result is; and
+// a word holds no secret contents unless an address can reach it
+// (find_addresses), so a length summed with a data pointer stays a length.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+Check: struct {
+    // Per function.
+    fn_name: [String]
+    fn_base: [String]
+    fn_key: [String]
+    fn_file: [String]
+    fn_params: [Int]
+    fn_slot: [Int]
+    fn_op: [Int]
+    fn_row: [Int]
+    fn_rows: [Int]
+    // Per slot, function by function.
+    slot_kind: [String]
+    slot_name: [String]
+    slot_type: [String]
+    // Whether the slot's type is a spec `public-type`: it never holds a
+    // secret.
+    slot_public: [Bool]
+    // The slot's size in bytes, and whether it may hold an address (a word
+    // that does not is never a pointer to secret bytes; see find_addresses).
+    slot_size: [Int]
+    slot_addr: [Bool]
+    // The type of the list element a word slot addresses ("" none, "?" no
+    // one type), the variant's payload type an enum slot holds and where
+    // it starts (see find_elements), and the instructions writing each slot.
+    slot_elem: [String]
+    slot_payload: [String]
+    slot_payload_at: [Int]
+    slot_defs: [[Int]]
+    // Per instance: a function walked with one pattern of secret arguments
+    // (`inst_by`: `<function>/<pattern>`), its slots' state from
+    // `inst_base` on.
+    inst_fn: [Int]
+    inst_base: [Int]
+    inst_ret_value: [Bool]
+    inst_ret_contents: [Bool]
+    inst_by: [String:Int]
+    // Per instance slot: its function's slot, and its two bits.
+    state_static: [Int]
+    value: [Bool]
+    contents: [Bool]
+    // The instruction (and its instance) that first set each bit (-1: a
+    // root), for a finding's trail back to its secret.
+    why_value: [Int]
+    why_value_in: [Int]
+    why_contents: [Int]
+    why_contents_in: [Int]
+    // The instruction and instance the flow is at, and the slot it writes
+    // as a declassified verdict (-1: none; see declassify_inlined).
+    at_op: Int
+    at_inst: Int
+    at_declassified: Int
+    // Per instruction, function by function.
+    op_name: [String]
+    op_dst: [Int]
+    op_a: [Int]
+    op_b: [Int]
+    op_c: [Int]
+    op_args: [[Int]]
+    op_callee: [String]
+    op_text: [String]
+    // Whether the instruction writes the verdict of an inlined `public`
+    // function (declassify_inlined).
+    op_declassified: [Bool]
+    // Per instruction, the inline site it came from in its function (0: the
+    // function's own code); per function, the row of its first site in
+    // `site_key` and `site_outer`, the inlined function and the site it sits
+    // in (declassify_inlined).
+    op_site: [Int]{[Int]{}}
+    fn_site: [Int]{[Int]{}}
+    site_key: [String]{[String]{}}
+    site_outer: [Int]{[Int]{}}
+    // Per emission row, function by function.
+    row_at: [Int]
+    row_kind: [String]
+    row_text: [String]
+    by_base: [String:Int]
+    by_key: [String:Int]
+    // Struct members by `<struct base>/<member>`, from the log's `field`
+    // lines: offset and size in bytes, offset -2 when two instances of a
+    // generic struct place the member apart, and checked type (`box` for a
+    // boxed member); `members`: each struct's member keys.
+    field_offset: [String:Int]
+    field_size: [String:Int]
+    field_type: [String:String]
+    members: [String:[String]]
+}
+
+Spec: struct {
+    roots: [String:[String]]
+    public: [String:Bool]
+    callees: [String:Bool]
+    runtime: [String:Bool]
+    // Structs whose exact Int and Bool fields hold secrets.
+    secret_structs: [String:Bool]
+    // Types whose values are public wherever they sit (error kinds,
+    // algorithm ids, curve parameters).
+    public_types: [String:Bool]
+    // Struct members, by `<struct base>/<member>`, that hold public parts
+    // of a value whose other members are secret (a key's modulus).
+    public_fields: [String:Bool]
+    // Enums whose tag word is public while their payload is secret.
+    public_tags: [String:Bool]
+    // Functions whose findings are expected, with the reason.
+    expected: [String:String]
+    // Parts of the source paths whose functions the check judges.
+    checked: [String]
+}
+
+check_new: fn() -> Check Never! {
+    Check{fn_name: [String]{}, fn_base: [String]{}, fn_key: [String]{}, fn_file: [String]{}, fn_params: [Int]{}, fn_slot: [Int]{}, fn_op: [Int]{}, fn_row: [Int]{}, fn_rows: [Int]{}, slot_kind: [String]{}, slot_name: [String]{}, slot_type: [String]{}, slot_public: [Bool]{}, slot_size: [Int]{}, slot_addr: [Bool]{}, slot_elem: [String]{}, slot_payload: [String]{}, slot_payload_at: [Int]{}, slot_defs: [[Int]]{}, inst_fn: [Int]{}, inst_base: [Int]{}, inst_ret_value: [Bool]{}, inst_ret_contents: [Bool]{}, inst_by: [String:Int]{}, state_static: [Int]{}, value: [Bool]{}, contents: [Bool]{}, why_value: [Int]{}, why_value_in: [Int]{}, why_contents: [Int]{}, why_contents_in: [Int]{}, at_op: -1, at_inst: -1, at_declassified: -1, op_name: [String]{}, op_dst: [Int]{}, op_a: [Int]{}, op_b: [Int]{}, op_c: [Int]{}, op_args: [[Int]]{}, op_callee: [String]{}, op_text: [String]{}, op_declassified: [Bool]{}, row_at: [Int]{}, row_kind: [String]{}, row_text: [String]{}, by_base: [String:Int]{}, by_key: [String:Int]{}, field_offset: [String:Int]{}, field_size: [String:Int]{}, field_type: [String:String]{}, members: [String:[String]]{}}
+}
+
+/// The slots function `f` declares.
+slot_count: fn(c: Check, f: Int) -> Int Never! {
+    last: if f + 1 < c.fn_slot.len() -> c.fn_slot[f + 1] else -> c.slot_kind.len()
+    last - c.fn_slot[f]
+}
+
+/// The instance of function `f` walked with argument pattern `pattern`, made
+/// (with every bit clear) when new.
+instance: fn(c: &Check, f: Int, pattern: String) -> Int Never! {
+    key: "{f}/{pattern}"
+    found: c.inst_by.get(key) ?? -1
+    if found >= 0 -> return found
+    i: c.inst_fn.len()
+    c.inst_by[key] = i
+    c.inst_fn.push(f)
+    c.inst_base.push(c.value.len())
+    c.inst_ret_value.push(false)
+    c.inst_ret_contents.push(false)
+    loop local in 0..<slot_count(c, f) {
+        c.state_static.push(c.fn_slot[f] + local)
+        c.value.push(false)
+        c.contents.push(false)
+        c.why_value.push(-1)
+        c.why_value_in.push(-1)
+        c.why_contents.push(-1)
+        c.why_contents_in.push(-1)
+    }
+    i
+}
+
+/// `module::name` of a function key: the `function:<corelib>/` or
+/// `function:` prefix and any generic arguments dropped.
+key_base: fn(key: String) -> String Never! {
+    plain := key.removeprefix("function:").removeprefix("<corelib>/")
+    plain.partition("<").head
+}
+
+slot_ref: fn(token: String) -> Int Never! {
+    Int.parse(token.trim().removeprefix("s")) ?? -1
+}
+
+number: fn(token: String) -> Int Never! {
+    Int.parse(token.trim()) ?? -1
+}
+
+/// Reads one log into `c`; the problems it found.
+read_log: fn(c: &Check, text: String) -> [String] Never! {
+    problems := [String]{}
+    current := -1
+    file := ""
+    loop raw in text.split("\n") {
+        line: raw.removesuffix("\r")
+        if line.starts_with("x64 ") {
+            file = line.removeprefix("x64 ")
+            next
+        }
+        if line.starts_with("field ") {
+            // field <struct> <offset> <size> <member> <type>, the type last
+            // since it may hold spaces. A generic struct's member is also
+            // laid out under its instance's whole name, since instances
+            // differ in size and type (member_keys).
+            words: line.split(" ").to_list()
+            if words.len() >= 6 {
+                ty := words[5].copy()
+                loop w in 6..<words.len() -> ty = "{ty} {words[w]}"
+                offset: number(words[2])
+                owners := [String]{key_base(words[1])}
+                if words[1].contains("<") -> owners.push(words[1].copy())
+                loop owner in owners {
+                    key: "{owner}/{words[4]}"
+                    known: c.field_offset.get(key)
+                    if known == None {
+                        keys := c.members.get(owner) ?? [String]{}
+                        keys.push(key.copy())
+                        c.members[owner.copy()] = keys
+                    }
+                    c.field_offset[key.copy()] = if (known ?? offset) == offset -> offset else -> -2
+                    c.field_size[key.copy()] = number(words[3])
+                    c.field_type[key.copy()] = ty.copy()
+                }
+            }
+            next
+        }
+        if line == "end" {
+            current = -1
+            next
+        }
+        if line.starts_with("fn ") {
+            head: line.rpartition("] params=")
+            name: head.head.partition(" [").head.removeprefix("fn ")
+            key: head.head.partition(" [").tail
+            params: number(head.tail.partition(" ").head)
+            current = c.fn_name.len()
+            c.fn_name.push(name)
+            base: key_base(key)
+            c.by_key[key.copy()] = current
+            c.fn_key.push(key)
+            c.fn_file.push(file.copy())
+            c.fn_base.push(base.copy())
+            c.fn_params.push(params)
+            c.fn_slot.push(c.slot_kind.len())
+            c.fn_op.push(c.op_name.len())
+            c.fn_row.push(c.row_at.len())
+            c.fn_rows.push(0)
+            c.fn_site.push(c.site_key.len())
+            if c.by_base.get(base) == None -> c.by_base[base] = current
+            next
+        }
+        if current < 0 -> next
+        if line.starts_with("inline ") {
+            // inline <site> <outer site> <function key>, sites from 1 in order.
+            words: line.removeprefix("inline ").partition(" ")
+            rest: words.tail.partition(" ")
+            c.site_outer.push(number(rest.head))
+            c.site_key.push(rest.tail)
+            next
+        }
+        if line.starts_with("sites ") {
+            words: line.removeprefix("sites ").split(" ").to_list()
+            loop at in 0..<words.len() {
+                k: c.fn_op[current] + at
+                if k < c.op_site.len() -> c.op_site[k] = number(words[at])
+            }
+            next
+        }
+        if line.starts_with("type s") {
+            parts: line.removeprefix("type ").partition(" ")
+            slot: c.fn_slot[current] + slot_ref(parts.head)
+            if slot >= 0 && slot < c.slot_type.len() -> c.slot_type[slot] = parts.tail
+            next
+        }
+        if line.starts_with("emit ") {
+            parts: line.removeprefix("emit ").partition(" ")
+            at: number(parts.head)
+            kind: parts.tail.partition(" ").head
+            c.row_at.push(if at < 0 -> -1 else -> c.fn_op[current] + at)
+            c.row_kind.push(kind)
+            c.row_text.push(parts.tail)
+            c.fn_rows[current] = c.fn_rows[current] + 1
+            next
+        }
+        body: line.trim()
+        if body.starts_with("asm ") -> next
+        if body.starts_with("s") && line.starts_with("  s") {
+            // `sN param|local|temp name: Kind/size`
+            parts: body.partition(" ")
+            rest: parts.tail.partition(" ")
+            typed: rest.tail.rpartition(": ")
+            c.slot_kind.push(typed.tail.partition("/").head)
+            c.slot_size.push(number(typed.tail.partition("/").tail))
+            c.slot_name.push(typed.head)
+            c.slot_type.push("")
+            next
+        }
+        numbered: body.partition(": ")
+        if numbered.sep == "" || number(numbered.head) < 0 {
+            problems.push("unread line `{line}`")
+            next
+        }
+        read_op(c, numbered.tail, body)
+    }
+    problems
+}
+
+/// Whether checked type `ty` is a nominal struct or enum (not a list, an
+/// Option, a Result, a tuple or a machine word).
+is_struct: fn(ty: String) -> Bool Never! {
+    ty.contains("::") && !ty.starts_with("[") && !ty.starts_with("?") && !ty.starts_with("(") && !ty.contains(" ! ")
+}
+
+/// One instruction, `op [sD <-] operands [(args)] [; callee]`.
+read_op: fn(c: &Check, text: String, whole: String) Never! {
+    called: text.partition(" ; ")
+    main: called.head
+    args := [Int]{}
+    if main.contains("(") {
+        inside: main.partition("(").tail.rpartition(")").head
+        if inside.trim() != "" {
+            loop token in inside.split(",") -> args.push(slot_ref(token))
+        }
+    }
+    tokens: main.partition(" (").head.split(" ").to_list()
+    op: tokens[0]
+    at := 1
+    dst := -1
+    if tokens.len() > 2 && tokens[2] == "<-" {
+        dst = slot_ref(tokens[1])
+        at = 3
+    }
+    callee := called.tail.copy()
+    a := -1
+    b := -1
+    cc := -1
+    if op == "call_runtime" {
+        if at < tokens.len() -> callee = tokens[at].copy()
+    } else {
+        if at < tokens.len() -> a = number(tokens[at])
+        if at + 1 < tokens.len() -> b = number(tokens[at + 1])
+        if at + 2 < tokens.len() -> cc = number(tokens[at + 2])
+    }
+    c.op_name.push(op.copy())
+    c.op_dst.push(dst)
+    c.op_a.push(a)
+    c.op_b.push(b)
+    c.op_c.push(cc)
+    c.op_args.push(args)
+    c.op_callee.push(callee)
+    c.op_text.push(whole.copy())
+    c.op_declassified.push(false)
+    c.op_site.push(0)
+}
+
+/// The slots instruction `k` reads, as its function's slots.
+reads: fn(c: Check, k: Int) -> [Int] Never! {
+    op: c.op_name[k]
+    local := [Int]{}
+    if op == {
+        "copy" | "move" | "drop" | "close" | "neg" | "not" | "sqrt" | "convert" | "int_big" | "load" | "offset" | "if" | "br_if" -> local.push(c.op_a[k])
+        "add" | "sub" | "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "concat" -> {
+            local.push(c.op_a[k])
+            local.push(c.op_b[k])
+        }
+        "store" | "stream_store" -> {
+            local.push(c.op_a[k])
+            local.push(c.op_c[k])
+        }
+        // Its `c` is the byte count, an immediate.
+        "copy_bytes" -> {
+            local.push(c.op_a[k])
+            local.push(c.op_b[k])
+        }
+        "return" -> {
+            if c.op_a[k] >= 0 -> local.push(c.op_a[k])
+        }
+        "call" | "call_runtime" -> local.extend(c.op_args[k])
+        "call_indirect" -> {
+            local.push(c.op_a[k])
+            local.extend(c.op_args[k])
+        }
+        else -> {}
+    }
+    out := [Int]{}
+    loop slot in local {
+        if slot >= 0 -> out.push(slot)
+    }
+    out
+}
+
+/// The slots instruction `k` reads in instance `i`, as instance slot rows.
+inputs: fn(c: Check, i: Int, k: Int) -> [Int] Never! {
+    base: c.inst_base[i]
+    loop slot in reads(c, k) -> base + slot
+}
+
+/// Marks the verdicts of the inlined `public` functions. An optimized build
+/// inlines a small verdict function (OptInline.jet: each instruction of its
+/// body names its inline site), so no call bounds it; the body's writes of
+/// the slots the code outside it reads are its verdict, which is public as
+/// the call's result is. The rest of the body is judged as the caller's code.
+declassify_inlined: fn(c: &Check, spec: Spec) Never! {
+    loop f in 0..<c.fn_op.len() {
+        first: c.fn_op[f]
+        last: if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()
+        sites_at: c.fn_site[f]
+        sites_end: if f + 1 < c.fn_site.len() -> c.fn_site[f + 1] else -> c.site_key.len()
+        loop row in sites_at..<sites_end {
+            if spec.public.get(key_base(c.site_key[row])) == None -> next
+            site: row - sites_at + 1
+            read_outside := [Int:Bool]{}
+            loop j in first..<last {
+                if in_site(c, sites_at, c.op_site[j], site) -> next
+                loop slot in reads(c, j) -> read_outside[slot] = true
+            }
+            loop j in first..<last {
+                if in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] >= 0 && read_outside.get(c.op_dst[j]) != None -> c.op_declassified[j] = true
+            }
+        }
+    }
+}
+
+/// Whether inline site `at` of a function (whose first site row is
+/// `sites_at`) is site `site` or sits inside it.
+in_site: fn(c: Check, sites_at: Int, at: Int, site: Int) -> Bool Never! {
+    current := at
+    loop current > 0 {
+        if current == site -> return true
+        current = c.site_outer[sites_at + current - 1]
+    }
+    false
+}
+
+/// Instance `i`'s row of its function's slot `local`.
+slot_of: fn(c: Check, i: Int, local: Int) -> Int Never! {
+    if local < 0 -> return -1
+    c.inst_base[i] + local
+}
+
+/// The checked type of instance slot `slot`.
+type_of: fn(c: Check, slot: Int) -> String Never! {
+    c.slot_type[c.state_static[slot]]
+}
+
+is_list: fn(ty: String) -> Bool Never! {
+    ty.starts_with("[") && ty.ends_with("]") && !ty.split("::").to_list().join("").contains(":")
+}
+
+is_tagged: fn(ty: String) -> Bool Never! {
+    ty.starts_with("?") || ty.contains(" ! ")
+}
+
+scalar_kind: fn(kind: String) -> Bool Never! {
+    kind == "Int" || kind == "Word" || kind == "Bool" || kind == "Char" || kind == "Float" || kind == "Float32"
+}
+
+set_value: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
+    if slot < 0 || !on || c.value[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified -> return false
+    c.value[slot] = true
+    c.why_value[slot] = c.at_op
+    c.why_value_in[slot] = c.at_inst
+    true
+}
+
+/// Sets `slot`'s contents bit. An exact Int or a Bool never holds an address
+/// (an optimized build's addresses are machine words), nor does a word
+/// find_addresses finds no address reaches, so its contents bit stays
+/// clear: a length summed with an address is no address itself.
+set_contents: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
+    if slot < 0 || !on || c.contents[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified -> return false
+    ty: type_of(c, slot)
+    if ty == "Int" || ty == "Bool" || !c.slot_addr[c.state_static[slot]] -> return false
+    c.contents[slot] = true
+    c.why_contents[slot] = c.at_op
+    c.why_contents_in[slot] = c.at_inst
+    true
+}
+
+/// Finds the slots that may hold an address (`slot_addr`), over every
+/// function at once: a slot that is no plain word (an aggregate, a
+/// `Pointer`); a word an address operation, a runtime routine, an indirect
+/// call or an unread load writes; a copy, move, sum or difference of one; a
+/// load of a list's data word or of a member not typed as a number; the
+/// result of a call whose callee returns one (or is not in the log); a
+/// parameter some call hands one, or of a function no logged call reaches.
+/// A word narrower than eight bytes, a constant, a comparison and any other
+/// arithmetic hold none.
+find_addresses: fn(c: &Check, spec: Spec) Never! {
+    c.slot_addr = loop s in 0..<c.slot_kind.len() -> !scalar_kind(c.slot_kind[s]) || c.slot_type[s] == "Pointer"
+    count: c.fn_op.len()
+    called := loop _ in 0..<count -> false
+    loop k in 0..<c.op_name.len() {
+        if c.op_name[k] != "call" -> next
+        callee: c.by_key.get(c.op_callee[k]) ?? -1
+        if callee >= 0 && c.fn_params[callee] == c.op_args[k].len() -> called[callee] = true
+    }
+    returns := loop _ in 0..<count -> false
+    loop f in 0..<count {
+        if called[f] -> next
+        loop p in 0..<c.fn_params[f] -> mark_address(c, c.fn_slot[f] + p)
+    }
+    loop {
+        changed := false
+        loop f in 0..<count {
+            base: c.fn_slot[f]
+            last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+            loop k in c.fn_op[f]..<last {
+                op: c.op_name[k]
+                a: if op == "call_runtime" || c.op_a[k] < 0 -> -1 else -> base + c.op_a[k]
+                b: if c.op_b[k] < 0 -> -1 else -> base + c.op_b[k]
+                is := false
+                if op == {
+                    "copy" | "move" -> is = a >= 0 && c.slot_addr[a]
+                    "add" | "sub" -> is = (a >= 0 && c.slot_addr[a]) || (b >= 0 && c.slot_addr[b])
+                    "load" -> is = loads_address(c, spec, a, c.op_b[k])
+                    "call" -> {
+                        callee: c.by_key.get(c.op_callee[k]) ?? -1
+                        if callee >= 0 && c.fn_params[callee] == c.op_args[k].len() {
+                            is = returns[callee]
+                            loop (p, arg) in c.op_args[k] {
+                                if arg >= 0 && c.slot_addr[base + arg] && mark_address(c, c.fn_slot[callee] + p) -> changed = true
+                            }
+                        } else {
+                            is = true
+                        }
+                    }
+                    "return" -> {
+                        if a >= 0 && c.slot_addr[a] && !returns[f] {
+                            returns[f] = true
+                            changed = true
+                        }
+                    }
+                    "const" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "neg" | "not" | "sqrt" | "convert" | "int_big" -> is = false
+                    else -> is = true
+                }
+                if is && c.op_dst[k] >= 0 && mark_address(c, base + c.op_dst[k]) -> changed = true
+            }
+        }
+        if !changed -> break
+    }
+}
+
+/// Marks static slot `s` as one that may hold an address, unless it is
+/// narrower than one; whether that changed it.
+mark_address: fn(c: &Check, s: Int) -> Bool Never! {
+    if c.slot_addr[s] || c.slot_size[s] < 8 -> return false
+    c.slot_addr[s] = true
+    true
+}
+
+/// Whether a load `offset` bytes into static slot `a`'s value may read an
+/// address: not a list's capacity or length, a tag, or a member typed as a
+/// number.
+loads_address: fn(c: Check, spec: Spec, a: Int, offset: Int) -> Bool Never! {
+    if a < 0 -> return true
+    at: access(c, spec, a, offset)
+    if is_list(at.ty) -> return at.offset == 16
+    if is_tagged(at.ty) && at.offset == 0 -> return false
+    if at.offset == 0 && spec.public_tags.get(key_base(at.ty)) != None -> return false
+    !number_type(at.leaf)
+}
+
+/// Where an access `offset` bytes from static slot `a` lands (field_at): in
+/// the slot's own type; for a word addressing a list element
+/// (find_elements), in that element, at the offset modulo its size; and
+/// for an enum whose payload the function addresses as one variant's type
+/// (`slot_payload`), past the payload's start, in that type.
+access: fn(c: Check, spec: Spec, a: Int, offset: Int) -> FieldAt Never! {
+    if a < 0 -> return field_at(c, spec, "", offset)
+    ty: c.slot_type[a]
+    payload: c.slot_payload[a]
+    from: c.slot_payload_at[a]
+    if payload != "" && payload != "?" && offset >= from -> return field_at(c, spec, payload, offset - from)
+    elem: c.slot_elem[a]
+    if elem == "" || elem == "?" || aggregate_type(ty) -> return field_at(c, spec, ty, offset)
+    size: type_size(c, elem)
+    field_at(c, spec, elem, if size > 0 -> offset %% size else -> offset)
+}
+
+aggregate_type: fn(ty: String) -> Bool Never! {
+    is_struct(ty) || is_list(ty) || is_tagged(ty) || is_tuple(ty)
+}
+
+/// Finds the list element each word slot addresses (`slot_elem`), over
+/// every function at once: a load of a list's data word addresses its first
+/// element; a copy or move of an element address, and its sum with a
+/// multiple of the element's size (a constant, a product with one, or a sum
+/// of those), address an element too. A slot two rules give two types, or
+/// a sum with anything else, addresses no known element ("?"), and an
+/// access through it is placed by its own type. Also the variant each enum
+/// slot holds (`slot_payload`, at `slot_payload_at`): the type of the one
+/// payload address its function takes of it (an `offset` typed as a
+/// struct), "?" when it takes two.
+find_elements: fn(c: &Check, spec: Spec) Never! {
+    c.slot_elem = loop _ in 0..<c.slot_kind.len() -> ""
+    c.slot_defs = loop _ in 0..<c.slot_kind.len() -> [Int]{}
+    c.slot_payload = loop _ in 0..<c.slot_kind.len() -> ""
+    c.slot_payload_at = loop _ in 0..<c.slot_kind.len() -> 0
+    count: c.fn_op.len()
+    loop f in 0..<count {
+        base: c.fn_slot[f]
+        last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+        loop k in c.fn_op[f]..<last {
+            if c.op_dst[k] < 0 -> next
+            d: base + c.op_dst[k]
+            c.slot_defs[d].push(k)
+            if c.op_name[k] != "offset" || c.op_a[k] < 0 -> next
+            a: base + c.op_a[k]
+            enum_ty: c.slot_type[a]
+            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None || !is_struct(c.slot_type[d]) -> next
+            known: c.slot_payload[a]
+            if known == "" {
+                c.slot_payload[a] = c.slot_type[d].copy()
+                c.slot_payload_at[a] = c.op_b[k]
+            } else if known != c.slot_type[d] || c.slot_payload_at[a] != c.op_b[k] {
+                c.slot_payload[a] = "?"
+            }
+        }
+    }
+    loop {
+        changed := false
+        loop f in 0..<count {
+            base: c.fn_slot[f]
+            last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+            loop k in c.fn_op[f]..<last {
+                op: c.op_name[k]
+                if c.op_dst[k] < 0 || c.op_a[k] < 0 || op == "call_runtime" -> next
+                d: base + c.op_dst[k]
+                a: base + c.op_a[k]
+                elem := ""
+                if op == {
+                    "load" -> {
+                        at: access(c, spec, a, c.op_b[k])
+                        if is_list(at.ty) && at.offset == 16 -> elem = at.ty.removeprefix("[").removesuffix("]")
+                    }
+                    "copy" | "move" -> elem = c.slot_elem[a].copy()
+                    "add" | "sub" -> {
+                        b: if c.op_b[k] < 0 -> -1 else -> base + c.op_b[k]
+                        ea: c.slot_elem[a]
+                        eb: if b < 0 -> "" else -> c.slot_elem[b]
+                        if ea != "" && ea != "?" && eb == "" {
+                            elem = if scaled(c, base, c.op_b[k], type_size(c, ea), 0) -> ea.copy() else -> "?"
+                        } else if op == "add" && eb != "" && eb != "?" && ea == "" {
+                            elem = if scaled(c, base, c.op_a[k], type_size(c, eb), 0) -> eb.copy() else -> "?"
+                        } else if ea != "" || eb != "" {
+                            elem = "?"
+                        }
+                    }
+                    else -> {}
+                }
+                if elem == "" || c.slot_elem[d] == elem || c.slot_elem[d] == "?" -> next
+                c.slot_elem[d] = if c.slot_elem[d] == "" -> elem else -> "?"
+                changed = true
+            }
+        }
+        if !changed -> break
+    }
+}
+
+/// Whether every write of function slot `local` (its function's slots from
+/// `base`) gives a multiple of `size`: a constant one, a product with one, a
+/// sum of two, or a copy of one.
+scaled: fn(c: Check, base: Int, local: Int, size: Int, depth: Int) -> Bool Never! {
+    if local < 0 || size <= 0 || depth > 4 -> return false
+    defs: c.slot_defs[base + local]
+    if defs.len() == 0 -> return false
+    loop k in defs {
+        op: c.op_name[k]
+        ok := false
+        if op == {
+            "const" -> ok = c.op_a[k] %% size == 0
+            "mul" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) || scaled(c, base, c.op_b[k], size, depth + 1)
+            "add" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) && scaled(c, base, c.op_b[k], size, depth + 1)
+            "copy" | "move" -> ok = scaled(c, base, c.op_a[k], size, depth + 1)
+            else -> {}
+        }
+        if !ok -> return false
+    }
+    true
+}
+
+number_type: fn(ty: String) -> Bool Never! {
+    ty == "Int" || ty == "I64" || ty == "U64" || ty == "I32" || ty == "U32" || ty == "I16" || ty == "U16" || ty == "I8" || ty == "U8" || ty == "Bool" || ty == "Char" || ty == "Float" || ty == "Float32"
+}
+
+any_value: fn(c: Check, slots: [Int]) -> Bool Never! {
+    loop slot in slots {
+        if c.value[slot] -> return true
+    }
+    false
+}
+
+any_contents: fn(c: Check, slots: [Int]) -> Bool Never! {
+    loop slot in slots {
+        if c.contents[slot] -> return true
+    }
+    false
+}
+
+/// Whether instance slot `slot` holds a plain word (not an address or an
+/// aggregate).
+holds_word: fn(c: Check, slot: Int) -> Bool Never! {
+    slot >= 0 && scalar_kind(c.slot_kind[c.state_static[slot]]) && type_of(c, slot) != "Pointer"
+}
+
+/// Taints `slot` as an unknown result that saw a secret: its value when it
+/// holds a word, else what it points to.
+taint_result: fn(c: &Check, slot: Int, secret: Bool) -> Bool Never! {
+    if slot < 0 -> return false
+    if holds_word(c, slot) -> return set_value(c, slot, secret)
+    set_contents(c, slot, secret)
+}
+
+/// Whether access `at` lands on an exact Int or Bool member of a struct
+/// that is no `secret-struct`: a public word. Exact by the member's
+/// declared type or by the type of `slot`, the word read or stored (an
+/// optimized build may type the word I64; -1 for none).
+exact_member: fn(c: Check, spec: Spec, at: FieldAt, slot: Int) -> Bool Never! {
+    if !is_struct(at.ty) || spec.secret_structs.get(key_base(at.ty)) != None -> return false
+    if at.leaf == "Int" || at.leaf == "Bool" -> return true
+    slot >= 0 && (type_of(c, slot) == "Int" || type_of(c, slot) == "Bool")
+}
+
+/// Whether `offset` into the struct of type `ty` falls in a member the spec
+/// names public: what it reads or addresses carries no secret.
+public_field: fn(c: Check, spec: Spec, ty: String, offset: Int) -> Bool Never! {
+    if spec.public_fields.len() == 0 -> return false
+    base: key_base(ty)
+    loop (key, _) in spec.public_fields {
+        if key.partition("/").head != base -> next
+        start: c.field_offset.get(key) ?? -1
+        if start < 0 -> next
+        size: c.field_size.get(key) ?? 0
+        if offset >= start && offset < start + size -> return true
+    }
+    false
+}
+
+/// Where an access `offset` bytes into a value of type `ty` lands: the
+/// innermost list, Option, Result or struct that holds it and the offset in
+/// that, through the members the log's `field` lines place, the elements
+/// of a tuple (laid out in order, each at its alignment), and the payload
+/// of an Option or a Result (after its 8-byte tag word: a payload holding
+/// a struct or a list is 8-byte aligned; a Result's ok type is the one
+/// read), since an optimized build folds a nested member's offset into one
+/// access; whether a member on the way is a spec `public-field`; and the
+/// type of the member, element or payload the access lands in when the
+/// layout tells it (`leaf`, "" when not).
+FieldAt: struct {
+    ty: String
+    offset: Int
+    public: Bool
+    leaf: String
+}
+
+field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
+    at := ty.copy()
+    off := offset
+    leaf := ""
+    loop {
+        if public_field(c, spec, at, off) -> return FieldAt{ty: at, offset: off, public: true, leaf: ""}
+        inner := ""
+        start := -1
+        if is_tuple(at) {
+            from := 0
+            loop element in tuple_elements(at) {
+                size: type_size(c, element)
+                if size < 0 -> break
+                align: if size >= 8 -> 8 else -> size
+                from = (from + align - 1) /% align * align
+                if off >= from && off < from + size {
+                    inner = element.copy()
+                    start = from
+                    break
+                }
+                from += size
+            }
+        } else if is_tagged(at) {
+            payload: if at.starts_with("?") -> at.removeprefix("?") else -> at.partition(" ! ").head
+            // A word-wide payload sits after the tag word as a struct does.
+            if off >= 8 && (is_struct(payload) || is_list(payload) || type_size(c, payload) == 8) {
+                inner = payload.copy()
+                start = 8
+            }
+        } else if is_struct(at) {
+            keys: member_keys(c, at)
+            loop key in keys {
+                from: c.field_offset.get(key) ?? -1
+                if from < 0 || off < from || off >= from + (c.field_size.get(key) ?? 0) -> next
+                inner = (c.field_type.get(key) ?? "").copy()
+                start = from
+                break
+            }
+        }
+        leaf = inner.copy()
+        if start < 0 || !(is_struct(inner) || is_list(inner) || is_tagged(inner) || is_tuple(inner)) -> break
+        at = inner
+        off -= start
+    }
+    FieldAt{ty: at, offset: off, public: false, leaf: leaf}
+}
+
+is_tuple: fn(ty: String) -> Bool Never! {
+    ty.starts_with("(") && ty.ends_with(")")
+}
+
+/// How many times `mark` occurs in `text`.
+occurrences: fn(text: String, mark: String) -> Int Never! {
+    text.split(mark).to_list().len() - 1
+}
+
+/// The element types of tuple type `ty` (`(a: T, U)`), names dropped.
+tuple_elements: fn(ty: String) -> [String] Never! {
+    out := [String]{}
+    pending := ""
+    loop piece in ty.removeprefix("(").removesuffix(")").split(", ") {
+        pending = if pending == "" -> piece.copy() else -> "{pending}, {piece}"
+        open: occurrences(pending, "(") + occurrences(pending, "[") + occurrences(pending, "<")
+        closed: occurrences(pending, ")") + occurrences(pending, "]") + occurrences(pending, ">")
+        if open != closed -> next
+        named: pending.partition(": ")
+        out.push(if named.sep != "" && !named.head.contains("<") && !named.head.contains("[") && !named.head.contains("(") -> named.tail.copy() else -> pending.copy())
+        pending = ""
+    }
+    out
+}
+
+/// The member keys of struct type `ty`: its own instance's layout when the
+/// log lays that out (a generic struct's instances differ), else its
+/// base's.
+member_keys: fn(c: Check, ty: String) -> [String] Never! {
+    c.members.get(ty) ?? c.members.get(key_base(ty)) ?? [String]{}
+}
+
+/// The size in bytes of a value of checked type `ty` held in place, -1 when
+/// the log does not tell it (an Option, a Result, an unlisted struct).
+type_size: fn(c: Check, ty: String) -> Int Never! {
+    if is_list(ty) -> return 24
+    if ty == "Int" || ty == "I64" || ty == "U64" || ty == "Float" || ty == "String" -> return if ty == "String" -> 24 else -> 8
+    if ty == "I32" || ty == "U32" || ty == "Float32" || ty == "Char" -> return 4
+    if ty == "I16" || ty == "U16" -> return 2
+    if ty == "Bool" || ty == "I8" || ty == "U8" -> return 1
+    if is_tuple(ty) {
+        from := 0
+        loop element in tuple_elements(ty) {
+            size: type_size(c, element)
+            if size < 0 -> return -1
+            align: if size >= 8 -> 8 else -> size
+            from = (from + align - 1) /% align * align + size
+        }
+        return (from + 7) /% 8 * 8
+    }
+    if !is_struct(ty) || is_tagged(ty) -> return -1
+    keys: member_keys(c, ty)
+    if keys.len() == 0 -> return -1
+    end := 0
+    loop key in keys {
+        from: c.field_offset.get(key) ?? -1
+        if from < 0 -> return -1
+        reach: from + (c.field_size.get(key) ?? 0)
+        if reach > end -> end = reach
+    }
+    (end + 7) /% 8 * 8
+}
+
+/// One pass of the flow over instruction `k` of instance `i`; whether a bit
+/// changed.
+flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
+    c.at_op = k
+    c.at_inst = i
+    op: c.op_name[k]
+    d: slot_of(c, i, c.op_dst[k])
+    c.at_declassified = if c.op_declassified[k] -> d else -> -1
+    a: if op == "call_runtime" -> -1 else -> slot_of(c, i, c.op_a[k])
+    changed := false
+    if op == {
+        "copy" | "move" | "offset" -> {
+            if op == "offset" {
+                at: access(c, spec, c.state_static[a], c.op_b[k])
+                if at.public -> return false
+                // A reference past the struct's start to a public Int or
+                // Bool member (`&ctx.iv_off`) points at no secret; what is
+                // stored through it still reaches the struct.
+                if c.op_b[k] != 0 && type_of(c, d) == "Pointer" && exact_member(c, spec, at, -1) -> return set_contents(c, a, c.contents[d])
+            }
+            changed = set_value(c, d, c.value[a]) || changed
+            changed = set_contents(c, d, c.contents[a]) || changed
+            changed = set_contents(c, a, c.contents[d]) || changed
+        }
+        "add" | "sub" -> {
+            b: slot_of(c, i, c.op_b[k])
+            changed = set_value(c, d, c.value[a] || c.value[b]) || changed
+            changed = set_contents(c, d, c.contents[a] || c.contents[b]) || changed
+            changed = set_contents(c, a, c.contents[d]) || changed
+            changed = set_contents(c, b, c.contents[d]) || changed
+        }
+        "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" -> {
+            b: slot_of(c, i, c.op_b[k])
+            changed = set_value(c, d, c.value[a] || c.value[b]) || changed
+        }
+        "concat" -> {
+            b: slot_of(c, i, c.op_b[k])
+            changed = set_value(c, d, c.value[a] || c.value[b]) || changed
+            changed = set_contents(c, d, c.contents[a] || c.contents[b]) || changed
+        }
+        "neg" | "not" | "sqrt" | "convert" | "int_big" -> changed = set_value(c, d, c.value[a]) || changed
+        "load" -> {
+            at: access(c, spec, c.state_static[a], c.op_b[k])
+            if at.public -> return false
+            ty: at.ty
+            offset: at.offset
+            changed = set_value(c, d, c.value[a]) || changed
+            if is_list(ty) && (offset == 0 || offset == 8) -> return changed
+            if is_tagged(ty) && offset == 0 -> return changed
+            if offset == 0 && spec.public_tags.get(key_base(ty)) != None -> return changed
+            if exact_member(c, spec, at, d) -> return changed
+            if is_list(ty) && offset == 16 {
+                changed = set_contents(c, d, c.contents[a]) || changed
+                changed = set_contents(c, a, c.contents[d]) || changed
+                return changed
+            }
+            changed = taint_result(c, d, c.contents[a]) || changed
+            if !holds_word(c, d) -> changed = set_contents(c, a, c.contents[d]) || changed
+        }
+        "store" | "stream_store" -> {
+            v: slot_of(c, i, c.op_c[k])
+            // A word stored into a public member stays out of the struct's
+            // secrets; a secret one is a finding (findings_of).
+            if exact_member(c, spec, access(c, spec, c.state_static[a], c.op_b[k]), v) -> return false
+            changed = set_contents(c, a, c.value[v] || c.contents[v]) || changed
+        }
+        "copy_bytes" -> {
+            b: slot_of(c, i, c.op_b[k])
+            changed = set_contents(c, a, c.contents[b]) || changed
+        }
+        "return" -> {
+            if a >= 0 {
+                if c.value[a] && !c.inst_ret_value[i] {
+                    c.inst_ret_value[i] = true
+                    changed = true
+                }
+                if c.contents[a] && !c.inst_ret_contents[i] {
+                    c.inst_ret_contents[i] = true
+                    changed = true
+                }
+            }
+        }
+        "call" -> {
+            args: loop local in c.op_args[k] -> slot_of(c, i, local)
+            callee: c.by_key.get(c.op_callee[k]) ?? -1
+            if callee >= 0 && c.fn_params[callee] == args.len() {
+                // The callee walked with this pattern of secret arguments;
+                // none secret, it computes nothing secret.
+                pattern := ""
+                loop arg in args {
+                    v: if c.value[arg] -> "v" else -> "-"
+                    m: if c.contents[arg] -> "c" else -> "-"
+                    pattern = "{pattern}{v}{m}"
+                }
+                if !pattern.contains("v") && !pattern.contains("c") -> return changed
+                known: c.inst_fn.len()
+                j: instance(c, callee, pattern)
+                if j == known -> changed = true
+                loop (p, arg) in args {
+                    param: c.inst_base[j] + p
+                    changed = set_value(c, param, c.value[arg]) || changed
+                    changed = set_contents(c, param, c.contents[arg]) || changed
+                    changed = set_contents(c, arg, c.contents[param]) || changed
+                }
+                if spec.public.get(c.fn_base[callee]) == None {
+                    changed = set_value(c, d, c.inst_ret_value[j]) || changed
+                    changed = set_contents(c, d, c.inst_ret_contents[j]) || changed
+                }
+            } else {
+                secret: any_value(c, args) || any_contents(c, args)
+                // A callee cleared as a routine (`runtime`: an inline-asm
+                // fill the optimizer made of a store loop) returns nothing
+                // secret.
+                cleared: spec.runtime.get(key_base(c.op_callee[k])) != None
+                changed = taint_result(c, d, secret && !cleared) || changed
+                loop arg in args {
+                    if !holds_word(c, arg) -> changed = set_contents(c, arg, secret) || changed
+                }
+            }
+        }
+        "call_runtime" | "call_indirect" -> {
+            args: inputs(c, i, k)
+            secret: any_value(c, args) || any_contents(c, args)
+            // A cleared routine reads only a block's header word or moves
+            // its bytes whole: what it returns is public. One handed a
+            // secret word is a finding of its own.
+            cleared: op == "call_runtime" && spec.runtime.get(c.op_callee[k]) != None
+            changed = taint_result(c, d, secret && !cleared) || changed
+            loop arg in args {
+                if !holds_word(c, arg) -> changed = set_contents(c, arg, secret) || changed
+            }
+        }
+        else -> {}
+    }
+    changed
+}
+
+/// Whether register text `reg` names the frame (or no register at all).
+frame_register: fn(reg: String) -> Bool Never! {
+    reg == "rbp" || reg == "rsp" || reg == "-"
+}
+
+/// The way a secret reached `slots` (an instruction's inputs), newest first:
+/// the instruction that first set each bit, back to a root or at most eight
+/// steps, each step to a slot the trail has not been through (a loop's
+/// counter and its sum set each other's bits).
+trail: fn(c: Check, slots: [Int]) -> String Never! {
+    steps := [String]{}
+    slot := -1
+    value := true
+    loop s in slots {
+        if c.value[s] {
+            slot = s
+            break
+        }
+    }
+    if slot < 0 {
+        value = false
+        loop s in slots {
+            if c.contents[s] {
+                slot = s
+                break
+            }
+        }
+    }
+    through := [Int:Bool]{}
+    loop slot >= 0 && steps.len() < 8 {
+        through[slot] = true
+        k: if value -> c.why_value[slot] else -> c.why_contents[slot]
+        g: if value -> c.why_value_in[slot] else -> c.why_contents_in[slot]
+        if k < 0 {
+            steps.push("root `{c.slot_name[c.state_static[slot]]}`")
+            break
+        }
+        steps.push("{c.fn_base[c.inst_fn[g]]} `{c.op_text[k]}`")
+        ins: inputs(c, g, k)
+        slot = -1
+        loop s in ins {
+            if c.value[s] && through.get(s) == None {
+                slot = s
+                value = true
+                break
+            }
+        }
+        if slot < 0 {
+            loop s in ins {
+                if c.contents[s] && through.get(s) == None {
+                    slot = s
+                    value = false
+                    break
+                }
+            }
+        }
+    }
+    steps.join(" <- ")
+}
+
+/// `line` as instruction `k` of function `f` reports it: marked
+/// "expected `<function>`: " when `k` belongs to an `expected` function,
+/// `f` itself or one inlined into it (the inline site of `k`, or one
+/// around that).
+marked: fn(c: Check, spec: Spec, f: Int, k: Int, line: String) -> String Never! {
+    if spec.expected.get(c.fn_base[f]) != None -> return "expected `{c.fn_base[f]}`: {line}"
+    site := c.op_site[k]
+    loop site > 0 {
+        row: c.fn_site[f] + site - 1
+        base: key_base(c.site_key[row])
+        if spec.expected.get(base) != None -> return "expected `{base}`: {line}"
+        site = c.site_outer[row]
+    }
+    line.copy()
+}
+
+/// The findings of instance `i`, each one line (marked), but for those
+/// `seen` (lines of another instance of the same function) holds.
+findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] Never! {
+    out := [String]{}
+    f: c.inst_fn[i]
+    loop r in c.fn_row[f]..<(c.fn_row[f] + c.fn_rows[f]) {
+        k: c.row_at[r]
+        if k < 0 -> next
+        ins: inputs(c, i, k)
+        secret: any_value(c, ins)
+        kind: c.row_kind[r]
+        op: c.op_name[k]
+        problem := ""
+        if kind == {
+            "jcc" -> {
+                // `jcc <cond> stop [s<slot>]`: a branch whose taken side
+                // ends the program. It fails only when its condition reads a
+                // secret: whether it fires tells the secret's range. With a
+                // slot the condition reads that slot alone.
+                words: c.row_text[r].split(" ").to_list()
+                stop: words.len() >= 3 && words[2] == "stop"
+                tested: if words.len() == 4 -> slot_ref(words[3]) else -> -1
+                if tested >= 0 {
+                    if c.value[slot_of(c, i, tested)] -> problem = "stop on a secret"
+                } else if secret {
+                    problem = if stop -> "stop on a secret" else -> "branch on a secret"
+                }
+            }
+            "memory" -> {
+                regs: c.row_text[r].removeprefix("memory ").partition(" ")
+                if !(frame_register(regs.head) && frame_register(regs.tail)) {
+                    if op == "load" || op == "store" || op == "stream_store" {
+                        if c.value[slot_of(c, i, c.op_a[k])] -> problem = "memory access at a secret address"
+                    } else if op == "copy_bytes" {
+                        if c.value[slot_of(c, i, c.op_a[k])] || c.value[slot_of(c, i, c.op_b[k])] -> problem = "memory copy at a secret address"
+                    } else if secret {
+                        problem = "memory operand of an instruction with a secret input"
+                    }
+                }
+            }
+            "div" -> {
+                if secret -> problem = "division of a secret"
+            }
+            "string" -> {
+                // A copy's byte count is an immediate (IR.jet CopyBytes):
+                // its string instruction runs a fixed length.
+                if op != "copy_bytes" && secret -> problem = "string operation with a secret input"
+            }
+            "call" -> {
+                if op == "call_indirect" && c.value[slot_of(c, i, c.op_a[k])] -> problem = "call through a secret register"
+            }
+            "asm" -> {
+                // The template of a cleared routine (the optimizer's fill)
+                // may take secret memory, never a secret word.
+                cleared: op == "call" && spec.runtime.get(key_base(c.op_callee[k])) != None
+                if secret || (!cleared && any_contents(c, ins)) -> problem = "inline-asm template given a secret (refused: its bytes are not checked)"
+            }
+            else -> {}
+        }
+        if problem == "" -> next
+        line: "{c.fn_base[f]} at `{c.op_text[k]}`: {problem} ({c.row_text[r]})"
+        if seen.get(line) != None -> next
+        seen[line] = true
+        out.push(marked(c, spec, f, k, "{line}, from {trail(c, ins)}"))
+    }
+    // Secret words stored into public members, and secrets that leave the
+    // log.
+    loop k in c.fn_op[f]..<(if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()) {
+        op: c.op_name[k]
+        if op == "store" || op == "stream_store" {
+            a: slot_of(c, i, c.op_a[k])
+            v: slot_of(c, i, c.op_c[k])
+            if a < 0 || v < 0 || !c.value[v] -> next
+            at: access(c, spec, c.state_static[a], c.op_b[k])
+            if !exact_member(c, spec, at, v) -> next
+            stored: "{c.fn_base[f]} at `{c.op_text[k]}`: a secret word stored into a public member of `{key_base(at.ty)}`"
+            if seen.get(stored) != None -> next
+            seen[stored.copy()] = true
+            out.push(marked(c, spec, f, k, "{stored}, from {trail(c, [v])}"))
+            next
+        }
+        if op != "call" && op != "call_runtime" && op != "call_indirect" -> next
+        ins: inputs(c, i, k)
+        if !(any_value(c, ins) || any_contents(c, ins)) -> next
+        // A cleared callee or routine takes secret memory, never a secret word.
+        word: any_value(c, ins)
+        line := ""
+        if op == "call" {
+            base: key_base(c.op_callee[k])
+            if c.by_key.get(c.op_callee[k]) != None -> next
+            if (spec.callees.get(base) != None || spec.runtime.get(base) != None) && !word -> next
+            line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches `{base}`, which the log does not hold"
+        } else if op == "call_runtime" {
+            if spec.runtime.get(c.op_callee[k]) != None && !word -> next
+            line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches the runtime routine `{c.op_callee[k]}`"
+        } else {
+            line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches an indirect call"
+        }
+        if seen.get(line) != None -> next
+        seen[line.copy()] = true
+        out.push(marked(c, spec, f, k, "{line}, from {trail(c, ins)}"))
+    }
+    out
+}
+
+root_matches: fn(root: String, base: String) -> Bool Never! {
+    if root.ends_with("*") -> return base.starts_with(root.removesuffix("*"))
+    base == root
+}
+
+/// Whether the function `base` of source file `file` is judged: a `check`
+/// part names its file (a path part) or the function itself.
+judged: fn(spec: Spec, file: String, base: String) -> Bool Never! {
+    loop part in spec.checked {
+        if file.contains(part) || base == part -> return true
+    }
+    false
+}
+
+/// The spec in `text`, less the directive lines in `dropped` (each must be
+/// one of its lines).
+read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
+    spec := Spec{roots: [String:[String]]{}, public: [String:Bool]{}, callees: [String:Bool]{}, runtime: [String:Bool]{}, secret_structs: [String:Bool]{}, public_types: [String:Bool]{}, public_fields: [String:Bool]{}, public_tags: [String:Bool]{}, expected: [String:String]{}, checked: [String]{}}
+    seen := [String:Bool]{}
+    loop raw in text.split("\n") {
+        line: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        if dropped.get(line) != None {
+            seen[line.copy()] = true
+            next
+        }
+        words: line.split(" ").to_list()
+        if words.len() < 2 -> next
+        if words[0] == {
+            "root" -> {
+                names := spec.roots.get(words[1]) ?? [String]{}
+                loop i in 2..<words.len() -> names.push(words[i].copy())
+                spec.roots[words[1].copy()] = names
+            }
+            "public" -> spec.public[words[1].copy()] = true
+            "callee" -> spec.callees[words[1].copy()] = true
+            "runtime" -> spec.runtime[words[1].copy()] = true
+            "secret-struct" -> spec.secret_structs[words[1].copy()] = true
+            "public-type" -> spec.public_types[words[1].copy()] = true
+            "public-field" -> if words.len() == 3 -> spec.public_fields["{words[1]}/{words[2]}"] = true
+            "public-tag" -> spec.public_tags[words[1].copy()] = true
+            "expected" -> {
+                // The reason is required: an expected finding says why.
+                if words.len() < 3 {
+                    term.eprint("`{line}`: an expected function needs its reason")
+                    process.exit(2)
+                }
+                why := words[2].copy()
+                loop w in 3..<words.len() -> why = "{why} {words[w]}"
+                spec.expected[words[1].copy()] = why
+            }
+            "check" -> spec.checked.push(words[1].copy())
+            else -> {}
+        }
+    }
+    loop (line, _) in dropped {
+        if seen.get(line) == None {
+            term.eprint("--drop `{line}` is no line of the spec")
+            process.exit(2)
+        }
+    }
+    spec
+}
+
+run: fn() {
+    argv: process.args()
+    // `--drop <directive>` (repeatable) checks without that spec line: the
+    // case's proof that the check finds what the directive clears.
+    dropped := [String:Bool]{}
+    first := 0
+    loop first + 1 < argv.len() && argv[first] == "--drop" {
+        dropped[argv[first + 1].copy()] = true
+        first += 2
+    }
+    if argv.len() < first + 2 {
+        term.eprint("usage: jet check.jet [--drop <directive>]... <spec> <log>...")
+        process.exit(2)
+    }
+    spec_text: files.read(argv[first]) ?? {
+        term.eprint("{argv[first]}: cannot read: {err}")
+        process.exit(2)
+        return
+    }
+    spec: read_spec(spec_text, dropped)
+    failed := 0
+    // The expected functions some log finds something in.
+    hit := [String:Bool]{}
+    loop i in (first + 1)..<argv.len() {
+        path: argv[i]
+        text: files.read(path) ?? {
+            term.eprint("{path}: cannot read: {err}")
+            failed += 1
+            next
+        }
+        c := check_new()
+        problems: read_log(c, text)
+        loop ty in c.slot_type -> c.slot_public.push(spec.public_types.get(key_base(ty)) != None)
+        declassify_inlined(c, spec)
+        find_elements(c, spec)
+        find_addresses(c, spec)
+        loop problem in problems -> print("{path}: {problem}")
+        failed += problems.len()
+        // A public member the log does not lay out, or lays out apart in
+        // two instances, would exempt nothing or the wrong bytes.
+        loop (key, _) in spec.public_fields {
+            if (c.field_offset.get(key) ?? -1) < 0 {
+                print("{path}: public-field `{key}` is not laid out once in the log")
+                failed += 1
+            }
+        }
+        missing := 0
+        loop (root, names) in spec.roots {
+            // Every function of that base (one per generic instance); a
+            // root ending `*` takes every base it begins.
+            found := [String:Bool]{}
+            matched := 0
+            loop g in 0..<c.fn_base.len() {
+                if !root_matches(root, c.fn_base[g]) -> next
+                matched += 1
+                inst: instance(c, g, "root")
+                loop local in 0..<slot_count(c, g) {
+                    name: c.slot_name[c.fn_slot[g] + local]
+                    if !names.contains(name) -> next
+                    found[name.copy()] = true
+                    slot: c.inst_base[inst] + local
+                    if holds_word(c, slot) -> c.value[slot] = true else -> c.contents[slot] = true
+                }
+            }
+            if matched == 0 {
+                print("{path}: root `{root}` is not in the log")
+                missing += 1
+                next
+            }
+            loop name in names {
+                if found.get(name) == None {
+                    print("{path}: root `{root}` has no variable `{name}`")
+                    missing += 1
+                }
+            }
+        }
+        failed += missing
+        rounds := 0
+        loop {
+            rounds += 1
+            changed := false
+            // Instances made in a pass are walked in the same pass.
+            at := 0
+            loop at < c.inst_fn.len() {
+                f: c.inst_fn[at]
+                last: if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()
+                loop k in c.fn_op[f]..<last {
+                    if flow(c, spec, at, k) -> changed = true
+                }
+                at += 1
+            }
+            if !changed -> break
+        }
+        reached := [String:Bool]{}
+        findings := 0
+        expected := 0
+        seen := [String:Bool]{}
+        loop inst in 0..<c.inst_fn.len() {
+            f: c.inst_fn[inst]
+            if spec.checked.len() > 0 && !judged(spec, c.fn_file[f], c.fn_base[f]) -> next
+            reached[c.fn_key[f].copy()] = true
+            loop line in findings_of(c, spec, inst, seen) {
+                print("{path}: {line}")
+                if line.starts_with("expected `") {
+                    expected += 1
+                    hit[line.removeprefix("expected `").partition("`").head.copy()] = true
+                } else {
+                    findings += 1
+                }
+            }
+        }
+        failed += findings
+        print("{path}: {c.fn_name.len()} functions, {reached.len()} reached by secrets in {c.inst_fn.len()} instances, {findings} findings, {missing} missing roots, {expected} expected, {rounds} rounds")
+    }
+    // An expected function no log finds anything in is a stale directive.
+    loop (base, why) in spec.expected {
+        if hit.get(base) == None {
+            print("expected `{base}` ({why}) has no finding in any log")
+            failed += 1
+        }
+    }
+    if failed > 0 -> process.exit(1)
+}

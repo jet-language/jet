@@ -31,5 +31,5 @@ Run a lesson from the repository root, for example `jet run Examples/Modules/<Le
 
 ## Jetpack
 
-- [EnvironmentImage](Jetpack/EnvironmentImage/) — `env.jet` beside this manifest declares the dev environment and the shell image built from it; `config/app.toml` is the one project file the image copies in.
+- [EnvironmentImage](Jetpack/EnvironmentImage/) — `env.jet` beside this manifest declares the dev environment and the shell image built from it; `Config/App.toml` is the one project file the image copies in.
 - [Epoch5](Jetpack/Epoch5/)

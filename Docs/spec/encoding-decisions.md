@@ -1328,7 +1328,7 @@ independent RFC corpora. Checked examples cover whole-value breadth, base
 allowances, reader/writer lifecycle, and shared types; their goldens are under
 [`Examples/Data`](../../Examples/Data/).
 The matched Python fixture is
-[`encoding_json_stream.py`](../../Examples/Data/JSON/encoding_json_stream.py).
+[`EncodingJSONStream.py`](../../Examples/Data/JSON/EncodingJSONStream.py).
 It uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and
 `json.load` for the same canonical file round trip. The parity test must
 exercise the Jet fixture on AOT, resident JIT, and the forced interpreter;

@@ -647,8 +647,12 @@ checked handles and are revalidated before invoking the compiler.
 the Jet-native backend: the IR builder builds the functions `run: fn` reaches,
 x86-64 selection compiles them to a relocatable object, and the in-process
 linker binds it to the runtime pack shipped beside `jet` into a static x86-64
-executable. The default build is O1; `--release` (or `--profile release`) is
-O2. A program that backend cannot build yet is refused with E2104.
+executable. The default build is O2 (`optimize: full`); `--optimize=basic` is
+O1 and `--optimize=none` (or `--profile debug`) is O0. `-O0`, `-O1` and `-O2`
+are the short forms of `--optimize=none`, `basic` and `full`; two levels that
+disagree, such as `-O1 --optimize=full`, are refused with E2104, and a level
+the project pins is refused with E2113. A program that backend cannot build
+yet is refused with E2104.
 Other build flags and profiles are refused with E2104 until they are ported.
 
 `jet run <file>` (and the `jet <file>` shorthand) builds the same executable
@@ -676,8 +680,8 @@ they compile and link it in one command of the C toolchain Jet programs
 compile their own C with (`CC`/`AR` when set, else the C toolchain pack
 `jetpack` provides), into `.jet/build/<stem>` in the nearest directory at or
 above the file that holds `package.jet`, or the file's own directory. The
-compile is O0 for `jet run` and O1 for `jet build`; `--release` (or
-`--optimize=full`) is O2, and `--optimize=none|basic` picks O0 or O1. A
+compile is O0 for `jet run` and O2 for `jet build`; `--optimize=none|basic|full`
+(or `-O0`, `-O1`, `-O2`) picks O0, O1 or O2, and `--release` is O2. A
 run then runs the program on the caller's stdin, stdout and stderr with the
 same arguments a Jet program gets, and exits as it exits. The C toolchain
 links no C++ standard library. The compiler's report of a file it rejects
@@ -746,21 +750,13 @@ marks its program as just run unless it was marked in the last ten minutes,
 so recency counts to within ten minutes. A compile that read a comptime input
 file keeps nothing, and a `--verbose` or traced run always compiles.
 
-A plain `jet run` compiles at the stock `optimize: none`, so the first run
-starts quickly. When a rerun reuses that program and neither a profile nor a
-flag chose the level, it also starts one background build of the same
-sources at `full`: the same `jet run` command, detached (in a session of its
-own, not the program's child, with no terminal and its output discarded), at
-the lowest CPU priority and in the idle I/O class, printing nothing. The
-reused program still runs as a freshly compiled one does, in place of
-`jet run` with its process id, so a signal sent to that process reaches the
-program. That build keeps its
-program in the same slot, and later reruns run it. Every level means the same,
-so only speed changes. Only one build runs per slot: it holds the lock file
-`<slot>.full` beside the record while it runs. A build that
-fails leaves `<slot>.failed` naming the sources it failed on, and none is tried
-again for them. A build that is killed leaves the `none` program in use, and
-the next rerun starts it again.
+A plain `jet run` compiles at the stock `optimize: none`, so a run starts
+quickly; `jet run --optimize=full` (or `-O2`) runs an O2 program. The level is
+one of the build options that name a kept program's slot, so each level keeps
+its own program, a rerun reuses the one built at its level, and no run builds
+at a level it was not asked for. The reused program runs as a freshly
+compiled one does, in place of `jet run` with its process id, so a signal
+sent to that process reaches the program.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
@@ -784,7 +780,9 @@ intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `cli.authority`) and the native backend's (`native.sources`,
 `native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
 `native.foreign` (the wait for the program's C closure and the runtime's
-bytes, which its own thread realizes and reads while the object builds),
+bytes, which its own thread realizes and reads while the object builds; for
+a closure only checked foreign declarations name, also the link's live
+symbol collection and the realization of the providers it reaches),
 `native.link`; one `native.build` around
 them for a test harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use
@@ -1170,8 +1168,9 @@ package-export liveness verdicts in source/span/code/name order, with the same
 Core lifecycle markers publish the consumer's site, package-edition status,
 and replacement detail. Once checked modules exist, failed Doc compilations
 retain these facts as well as the earlier resolved import edges.
-The hosted Core/Structure catalog is `Compiler/JetCli/Source/Cli/StructureRegistry.jet`,
-edited directly.
+The structure rows it lists are the `Structure.*` rows of the registration fact
+table (`jet explain` shows each one); a test fails when a structure fact kind
+and those rows disagree.
 
 Offline syntax explanations read `SyntaxDictionaryData.jet`, a Jet-owned
 dictionary of keywords, markers, types, built-ins, operators, and sigils.
@@ -1241,20 +1240,23 @@ where its module is declared hold; a `#!` script is checked on its own. The
 first line names the site and its function; then comes one line per rung:
 the `#FX(…)` blocks and lambdas that hold the line (`block`, `function`), the
 enclosing function's `-[…]>` row, a `comptime` rung for the Mem-only rule,
-each module cap (`module`), the package `authority` rows (`package`), and
-`run` (everything else allowed; `--deny` wins). A rung that writes nothing
-prints `(none written)`; each written rung names the `file:line` that writes
-it. The last line, `reaches:`, lists each effect the site reaches with the
-first call that reaches it and where the site makes that call. No site means
-the entry `jet run` picks; a file alone means its `run` function and module.
-A line past the end is a usage error, and `:0` gets the `jet explain marker`
-refusal. `--caps` lists every module cap written under a file, a directory,
-or (with no target) the project root, as `file:line  #FX(…)  module`. A
-program that fails its check still gets its ladder on stdout, under the
-errors on stderr. `--json` prints one `jet.status/v1` line with action
-`explain.effects`: `site`, `rungs` (`rung`, `written`, `text`, `site`) and
-`reaches` (`effect`, `chain`, `site`), or `scope` and `caps` (`file`, `line`,
-`cap`, `module`).
+the cap of the trait a method implements (`trait`), the type rung (`type`),
+the module rungs (`module`: each inline module cap, the file-head cap, and
+the caps where the file's module is declared), the package `authority` rows
+(`package`), and `run` (everything else allowed; `--deny` wins). A type or
+module rung that writes nothing prints `(none written)`; each written rung names the
+`file:line` that writes it. The last line, `reaches:`, lists each effect the
+site reaches with the first call that reaches it and where the site makes
+that call. No site means the entry `jet run` picks; a file alone means its
+`run` function and module. A line past the end is a usage error, and `:0`
+gets the `jet explain marker` refusal. `--caps` lists every file-head,
+module, type and trait cap written under a file, a directory, or (with no
+target) the project root, as `file:line  #FX(…)  module pricing` (`file`,
+`type Receipt`, `trait Shape`). A program that fails its check still gets
+its ladder on stdout, under the errors on stderr. `--json` prints one
+`jet.status/v1` line with action `explain.effects`: `site`, `rungs` (`rung`,
+`written`, `text`, `site`) and `reaches` (`effect`, `chain`, `site`), or
+`scope` and `caps` (`file`, `line`, `cap`, `kind`, `name`).
 
 `jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
 and its expected output `Examples/<area>/<name>.out` beside it.
@@ -1325,8 +1327,9 @@ static key, so it cannot serve as a native artifact cache identity. A compile
 observation never stamps an unexecuted check or link action.
 
 Decision inspection builds the checked program into the slot IR from its
-`run: fn` and runs the IR optimizer at the level `jet build` uses: O1, or O2
-under `--release` or the `release`/`hardened` profiles. It reports what the
+`run: fn` and runs the IR optimizer at the level `jet build` uses: O2, or O1
+under `--optimize=basic` (`-O1`), or O0 under `--optimize=none` or the `debug`
+profile. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
 fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar
 replaced aggregates) and names each function the IR builder could not build.

@@ -314,10 +314,11 @@ fake_report: fn(&f: Fake) {
     shown: f.chrome_shown.copy()
     chrome_mapping: if f.chrome_viewport != 0 -> "on {shown.dest_w}x{shown.dest_h}" else -> "at buffer scale {shown.scale}"
     f.report.push("  chrome {chrome.width}x{chrome.height} {fake_format(chrome.format)} {chrome_mapping} at {f.shown_x},{f.shown_y}, input {shown.input}")
-    // The chrome's corner is the window's (-m, -m), title bar included.
+    // The chrome's corner is the window's (-m, -m), title bar included; the
+    // probe is 20 units down the 34-unit bar, clear of the title and buttons.
     m: 0 - f.shown_x
     s: f.scale120
-    bar: fake_pixel(f, chrome, fake_pixels(m + 120, s), fake_pixels(m + 40, s))
+    bar: fake_pixel(f, chrome, fake_pixels(m + 120, s), fake_pixels(m + 20, s))
     f.report.push("  title bar {bar}")
     if m > 0 {
         shadow: fake_pixel(f, chrome, fake_pixels(m /% 2, s), fake_pixels(m + 100, s))

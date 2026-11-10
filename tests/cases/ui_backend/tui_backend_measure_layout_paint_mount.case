@@ -1,0 +1,20 @@
+# #6701: the TUI backend is plain Jet. measure clamps the tree's size (a box
+# is its widest child by its summed heights: text "ab" is 2 wide, button "Go"
+# 2 + 4), layout sizes the grid to the frame, paint writes each label from
+# its frame's top-left cell, and mount re-measures within 80 x 24 and lays
+# out at the origin; each paint counts one render.
+# `jet run -A` acknowledges tui_backend's Browser effect, so the run's effect
+# notice stays off stderr.
+fixture: tui_backend_measure_layout_paint_mount.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "true true\ntrue\nab\nGo\nc\n2\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true true\ntrue\nab\nGo\nc\n2\n"
+stderr: empty

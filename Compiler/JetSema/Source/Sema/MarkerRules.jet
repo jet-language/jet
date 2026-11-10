@@ -1402,8 +1402,8 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
     kept
 }
 
-// The parser owns `#FX` on a module, a struct or an enum as its effect cap,
-// so it is no rule application there.
+// The parser owns `#FX` on a module, a struct, an enum or a trait as its
+// effect cap, so it is no rule application there.
 sema_marker_rules_without_cap: fn(markers: [Marker]) -> [Marker] Never! {
     kept := [Marker]{}
     loop marker in markers {
@@ -1439,7 +1439,7 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
             loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, applications)
         }
         .Trait(definition) -> {
-            sema_marker_rules_attach(definition.markers, definition.name_span, RuleSite.Trait, applications)
+            sema_marker_rules_attach(sema_marker_rules_without_cap(definition.markers), definition.name_span, RuleSite.Trait, applications)
             loop method in definition.methods -> sema_marker_rules_attach(method.markers, method.name_span, RuleSite.Method, applications)
         }
         .Module(declaration) -> sema_marker_rules_attach(declaration.markers, declaration.name_span, RuleSite.Module, applications)

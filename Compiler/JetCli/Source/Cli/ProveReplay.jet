@@ -22,8 +22,8 @@ use {
         canonical_json_bytes, canonical_json_value, import_alias, import_walk_bindings,
     ]
     jet_parser.[parse_source]
-    jet_sema.[sema_taint_core_effect, sema_taint_effect_name]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_sema.[sema_taint_core_effect]
+    jet_pkg_model.[JET_VERSION]
 }
 
 // The v1 bounds (proof-replay-decisions): 256 MiB per artifact, 100,000 frames, 1 MiB
@@ -211,7 +211,7 @@ JetCLIReplayJournal: struct {
 // `owner` is the Core module it resolves to ("" when none does).
 JetCLIReplaySite: struct {
     operation: String
-    authority: Effect?
+    authority: String?
     owner: String
 }
 
@@ -268,9 +268,9 @@ jet_cli_prove_replay_checks: fn(identity: JetCLIProveIdentity, members: [JetCLIP
 // clock.
 jet_cli_replay_capture_roots: fn(sites: [JetCLIReplaySite], sensitive: Bool) -> [String] Never! {
     roots := [String]{}
-    if sensitive && jet_cli_replay_reaches(sites, Effect.IO) -> roots.push("IO")
+    if sensitive && jet_cli_replay_reaches(sites, "IO") -> roots.push("IO")
     if sensitive && jet_cli_replay_reaches_http(sites) -> roots.push("Net")
-    if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> roots.push("Rand")
+    if sensitive && jet_cli_replay_reaches(sites, "Rand") -> roots.push("Rand")
     roots.push("Time")
     roots
 }
@@ -280,7 +280,7 @@ jet_cli_replay_capture_roots: fn(sites: [JetCLIReplaySite], sensitive: Bool) -> 
 // raw socket, or the build-time transport.
 jet_cli_replay_is_http_client: fn(site: JetCLIReplaySite) -> Bool Never! {
     authority: site.authority ?? return false
-    if authority != Effect.Net -> return false
+    if authority != "Net" -> return false
     dot: site.operation.rfind(".")
     member: if dot < 0 -> site.operation else -> site.operation.slice(dot + 1, site.operation.len())
     if site.owner == "core.http.client" -> return !member.starts_with("jet_http_build_") && !member.starts_with("__")
@@ -295,12 +295,12 @@ jet_cli_replay_reaches_http: fn(sites: [JetCLIReplaySite]) -> Bool Never! {
 }
 
 jet_cli_replay_is_terminal_io: fn(site: JetCLIReplaySite) -> Bool Never! {
-    if site.authority == .Val(authority) -> return authority == Effect.IO && (JET_CLI_REPLAY_IO_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
+    if site.authority == .Val(authority) -> return authority == "IO" && (JET_CLI_REPLAY_IO_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
     false
 }
 
 jet_cli_replay_is_stdin_read: fn(site: JetCLIReplaySite) -> Bool Never! {
-    if site.authority == .Val(authority) -> return authority == Effect.IO && (JET_CLI_REPLAY_STDIN_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
+    if site.authority == .Val(authority) -> return authority == "IO" && (JET_CLI_REPLAY_STDIN_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
     false
 }
 
@@ -312,7 +312,7 @@ jet_cli_replay_is_term_read: fn(site: JetCLIReplaySite) -> Bool Never! {
     JET_CLI_REPLAY_TERM_READS.contains(site.operation.slice(dot + 1, site.operation.len()))
 }
 
-jet_cli_replay_reaches: fn(sites: [JetCLIReplaySite], authority: Effect) -> Bool Never! {
+jet_cli_replay_reaches: fn(sites: [JetCLIReplaySite], authority: String) -> Bool Never! {
     loop site in sites {
         if site.authority == .Val(found) {
             if found == authority -> return true
@@ -409,7 +409,7 @@ jet_cli_replay_rand_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIP
     operations := [String]{}
     loop site in sites {
         if site.authority == .Val(authority) {
-            if authority == Effect.Rand -> operations.push(site.operation.copy())
+            if authority == "Rand" -> operations.push(site.operation.copy())
         }
     }
     jet_cli_replay_site_digest("jet.replay.v1/rand-site", identity, members, operations.join("\n"))
@@ -839,7 +839,7 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     }
     indexed: ".jet/replays/{name}"
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_unfinalized(err.message))
-    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
     row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_unfinalized(err.message))
     Ok(indexed)
@@ -916,7 +916,7 @@ jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> Str
     jet_cli_replay_publish(root, [String]{".jet", "replays"}, "{record.name}.jetproof-replay", bytes) ?? return Err(err)
     path: jet_cli_replay_record_path(record.name)
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_record_index_failed(err.message))
-    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
     row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     Ok(path)
@@ -1180,23 +1180,23 @@ jet_cli_replay_capture_preflight: fn(sites: [JetCLIReplaySite], sensitive: Bool)
     // A request's headers and body are stored only as salted digests, but its
     // host, path and query are stored as text. A target that reads Secret
     // values could put one there, so it is refused before anything runs.
-    if sensitive && jet_cli_replay_reaches_http(sites) && jet_cli_replay_reaches(sites, Effect.Secret) {
+    if sensitive && jet_cli_replay_reaches_http(sites) && jet_cli_replay_reaches(sites, "Secret") {
         return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "the target reads Secret values and makes HTTP requests, so a secret could reach a request's host, path or query, which the artifact stores as text", "capture a target that makes its HTTP requests without reading Secret values"))
     }
     loop site in sites {
         authority: site.authority ?? return Val(jet_cli_replay_unmodeled(site.operation, "the reachable call shape is opaque to the replay authority", "route the operation through a supported deterministic input, or remove it from the captured target"))
-        if authority == Effect.Time {
+        if authority == "Time" {
             if jet_cli_replay_is_time_now(site) -> next
             return Val(jet_cli_replay_unmodeled(site.operation, "the current replay adapter records only `core.time.now`; this Time operation would sleep or read an unrecorded clock", "capture a target that uses `core.time.now`, or route the operation through an injected deterministic input"))
         }
-        if authority == Effect.Rand || authority == Effect.IO || authority == Effect.Net {
-            if !sensitive -> return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "safe capture reached raw {sema_taint_effect_name(authority)} at {site.operation}; untainted values still require sensitive-data consent", "inject deterministic data, or explicitly use --capture-sensitive"))
-            if authority == Effect.Rand || jet_cli_replay_is_terminal_io(site) || jet_cli_replay_is_http_client(site) -> next
+        if authority == "Rand" || authority == "IO" || authority == "Net" {
+            if !sensitive -> return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "safe capture reached raw {authority} at {site.operation}; untainted values still require sensitive-data consent", "inject deterministic data, or explicitly use --capture-sensitive"))
+            if authority == "Rand" || jet_cli_replay_is_terminal_io(site) || jet_cli_replay_is_http_client(site) -> next
         }
-        if authority == Effect.Net {
+        if authority == "Net" {
             return Val(jet_cli_replay_unmodeled(site.operation, "replay capture records the requests of Core's HTTP client, not raw sockets, TLS streams, WebSockets or servers", "make the target's network calls through `core.http.client`, or change the capture target"))
         }
-        return Val(jet_cli_replay_unmodeled(site.operation, "replay capture has no authority adapter for the {sema_taint_effect_name(authority)} effect", "route the operation through a supported deterministic input, or change the capture target"))
+        return Val(jet_cli_replay_unmodeled(site.operation, "replay capture has no authority adapter for the {authority} effect", "route the operation through a supported deterministic input, or change the capture target"))
     }
     None
 }
@@ -1296,10 +1296,10 @@ jet_cli_replay_target_refusal: fn(sites: [JetCLIReplaySite], roots: [String]) ->
         if jet_cli_replay_is_time_now(site) -> next
         why := "replay reached an opaque authority boundary at {site.operation}"
         if site.authority == .Val(authority) {
-            if authority == Effect.Rand && roots.contains("Rand") -> next
+            if authority == "Rand" && roots.contains("Rand") -> next
             if roots.contains("IO") && jet_cli_replay_is_terminal_io(site) -> next
             if roots.contains("Net") && jet_cli_replay_is_http_client(site) -> next
-            why = if authority == Effect.Time -> "replay reached unsupported Time operation at {site.operation}; the artifact records only `core.time.now`" else -> "replay reached unrecorded {sema_taint_effect_name(authority)} authority at {site.operation}"
+            why = if authority == "Time" -> "replay reached unsupported Time operation at {site.operation}; the artifact records only `core.time.now`" else -> "replay reached unrecorded {authority} authority at {site.operation}"
         }
         return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", why, "recapture the target with every authority it reaches recorded, or remove the unrecorded boundary"))
     }
@@ -2181,7 +2181,7 @@ jet_cli_replay_kind_text: fn(kind: Int) -> String Never! {
 // --- the static authority walk ---------------------------------------------
 
 jet_cli_replay_is_time_now: fn(site: JetCLIReplaySite) -> Bool Never! {
-    if site.authority == .Val(authority) -> return authority == Effect.Time && (site.operation == "now" || site.operation.ends_with(".now"))
+    if site.authority == .Val(authority) -> return authority == "Time" && (site.operation == "now" || site.operation.ends_with(".now"))
     false
 }
 
@@ -2442,7 +2442,7 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
         }
         // The ambient `input` reads stdin (or the files its arguments name).
         .Ident(name, _, _) -> {
-            if name == "input" && !locals.contains(name) -> sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
+            if name == "input" && !locals.contains(name) -> sites.push(JetCLIReplaySite{operation: name, authority: Val("IO"), owner: ""})
         }
         .Call(call, _) -> {
             jet_cli_replay_call(call.name, aliases, locals, sites)
@@ -2610,7 +2610,7 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
     if dot < 0 {
         if locals.contains(name) -> return
         if JET_CLI_REPLAY_IO_BUILTINS.contains(name) {
-            sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
+            sites.push(JetCLIReplaySite{operation: name, authority: Val("IO"), owner: ""})
             return
         }
         if aliases.get(name) == None {

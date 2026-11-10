@@ -284,9 +284,10 @@ the source nominal identity while checking that crossing.
 
 `core.math` keeps IEEE classification, adjacent-value and exponent composition,
 rounding/conversion policy, remainder validation, distance accumulation, and
-special-function approximations in Jet. Its libm operations are Jet runtime
-code ported from musl 1.2.5, so its numeric host boundary is primitive bit
-casts alone. A classification or composite operation is
+special-function approximations in Jet. Its transcendental functions and
+Float power are correctly rounded Core source, and the runtime's exactly
+rounded operations are Jet code ported from musl 1.2.5, so its numeric host
+boundary is primitive bit casts alone. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
 The caller-owned RNG stream uses SplitMix64, distinct from the ambient
@@ -314,7 +315,7 @@ read cannot be folded into the default while compiling the program. Prelude
 `Perf.*` calls load the same source module as an explicit `core.perf` import.
 
 `core.ui` drawing runs entirely in Jet: the `color` constructor clamps each
-channel to `0..255`, and the rasterizer paints straight-alpha RGBA pixels in
+channel to `0..255`, and the rasterizer paints premultiplied RGBA pixels in
 Jet code that is the same on every tier, so no native or compile-time drawing
 route duplicates it.
 
@@ -550,7 +551,11 @@ and its waits block that thread. Under a finite address-space limit
 (`RLIMIT_AS`) no thread or fiber stack reserves more than a hundredth of it
 and the fiber stacks together at most a quarter, so the stacks leave the
 heap its room; a task past that quarter runs on its carrier as well. A
-task's CPU clock (`jet_rt_task_cpu_ns`)
+carrier the host refuses to start (no address space or process slot for
+its thread) leaves the pool at the carriers already running; when it is
+the first, no task can run, and the process stops with one `error:` line
+that names the errno, `RLIMIT_AS` and `RLIMIT_NPROC`, exit 70, not a
+panic. A task's CPU clock (`jet_rt_task_cpu_ns`)
 is its fiber's run time summed over the carriers that ran it, and its
 identity (`jet_rt_task_identity`) is its fiber's, so a trace keyed by task
 stays whole across parks; on a plain thread both are the thread's.
@@ -845,18 +850,17 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
-`core.net.tls` has no native carriers or handles. `Core/Net/Tls.jet` is plain
-Core source over the vendored Mbed TLS 3.6 closure (`c.[mbedtls]`,
-`Core/Vendor/Mbedtls`, version and sha256 in its `VERSION` file). The
-`jet_tls.c` shim only binds an Mbed TLS context to the borrowed nonblocking
-descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
-trust selection, hostname checks, version bounds, ALPN, readiness waits,
-deadlines, close_notify, the verified peer identity and every error message are
-Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
-The closure is built with Mbed TLS's threading layer on
-(`MBEDTLS_THREADING_C`, `MBEDTLS_THREADING_PTHREAD` over musl's mutexes), so
-handshakes on different task threads share PSA's key slots and global state
-safely.
+`core.net.tls` has no native carriers or handles and binds no C.
+`Core/Net/Tls.jet` is plain Core source over the Jet TLS engine (the
+`Core/Net/SSL` parts, translated from Mbed TLS 3.6.7 under Apache-2.0, over the
+`Core/Crypto` parts). The engine reads and writes records through in-memory
+buffers; `Core/Net/Tls.jet` moves those bytes over the connected `TCPStream`,
+which stays the socket's owner for the stream's lifetime. Trust selection,
+hostname checks, version bounds, ALPN, readiness waits, deadlines,
+close_notify, the verified peer identity and every error message are Jet. Each
+connection owns its engine state and its HMAC_DRBG (SHA-256) generator, seeded
+from the host entropy source, so handshakes on different task threads share no
+state.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
@@ -876,8 +880,8 @@ release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations
 low-byte normalization, independent clones and exact-sized shell deallocation.
 
 `core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
-connection, scope, pool and lease carriers are Jet structs over the vendored
-SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
+connection, scope, pool and lease carriers are Jet structs over the Jet
+SQLite engine (`Core/Db/Engine`), `RowPolicy` and `SQL` are source values, and
 typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
 
 `core.service` trees, endpoints, workflows, upgrade receipts, deliveries and

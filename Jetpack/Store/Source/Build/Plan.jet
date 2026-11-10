@@ -50,7 +50,7 @@ HermeticBuildPlan: struct {
             prefix: "action.{index}"
             facts["{prefix}.name"] = action.name
             facts["{prefix}.kind"] = action.kind.as_str()
-            facts["{prefix}.cache"] = if action.cache == ActionCache.Cached -> "Cached" else -> "UncachedPhony"
+            facts["{prefix}.reuse"] = if action.reusable() -> "Reusable" else -> "Ambient"
             facts["{prefix}.argv"] = action.argv.join(nul)
             facts["{prefix}.inputs"] = action.inputs.join(nul)
             facts["{prefix}.outputs"] = action.outputs.join(nul)
@@ -364,8 +364,9 @@ BuildExecutionMetrics: struct {
     actions_total: Int
     parallel_stages: Int
     max_parallel_actions: Int
-    cacheable_actions: Int
-    phony_actions: Int
+    // Actions reused when unchanged, and those with an ambient effect.
+    reusable_actions: Int
+    ambient_actions: Int
     failed_actions: Int
     cancelled_actions: Int
     cache_restored_actions: Int
@@ -532,14 +533,14 @@ build_execution_metrics: fn(actions: [HermeticBuildAction], stages: [BuildExecut
     loop stage in stages {
         if stage.actions.len() > widest -> widest = stage.actions.len()
     }
-    cacheable := 0
-    phony := 0
+    reusable := 0
+    ambient := 0
     loop action in actions {
-        if action.cache == ActionCache.Cached -> cacheable += 1 else -> phony += 1
+        if action.reusable() -> reusable += 1 else -> ambient += 1
     }
     BuildExecutionMetrics{
         actions_total: actions.len(), parallel_stages: stages.len(), max_parallel_actions: widest,
-        cacheable_actions: cacheable, phony_actions: phony, failed_actions: 0, cancelled_actions: 0,
+        reusable_actions: reusable, ambient_actions: ambient, failed_actions: 0, cancelled_actions: 0,
         cache_restored_actions: 0, pending_actions: 0,
     }
 }

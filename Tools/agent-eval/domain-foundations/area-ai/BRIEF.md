@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-An AI application as one Jet package: tensors with broadcasting and a matmul on the core substrate; a tiny two-layer network trained with autodiff on a toy dataset via a data loader that batches and shuffles; model state saved and restored; an embeddings index with cosine search over 10k vectors; a streaming call to an OpenAI-compatible HTTP endpoint (mock server locally) with a bounded tool-call loop; and a GPU path for the matmul if the machine has one (record the receipt either way). Start from Examples/Math/**, Examples/LowLevel/LinalgSimd.jet and simd_*.jet, Examples/Network/HTTP/HTTPClient.jet, Examples/Apps/Web/WebComputeWebGPU.jet, and `jet inspect facts` for core.compute.
+An AI application as one Jet package: tensors with broadcasting and a matmul on the core substrate; a tiny two-layer network trained with autodiff on a toy dataset via a data loader that batches and shuffles; model state saved and restored; an embeddings index with cosine search over 10k vectors; a streaming call to an OpenAI-compatible HTTP endpoint (mock server locally) with a bounded tool-call loop; and a GPU path for the matmul if the machine has one (record the receipt either way). Start from Examples/Math/**, Examples/LowLevel/LinalgSIMD.jet and simd_*.jet, Examples/Network/HTTP/HTTPClient.jet, Examples/Apps/Web/WebComputeWebGPU.jet, and `jet inspect facts` for core.compute.
 
 ## Answer these
 

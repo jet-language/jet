@@ -23,6 +23,11 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Diagnostic,
+    ast_binding,
+    ast_func,
+    ConstDef,
+    SemaNameCase,
+    sema_casing_has_case,
     core_module_export,
     classify_identifier,
     IdentifierClass,
@@ -341,6 +346,9 @@ SemaComptimeItemSource: struct {
     // A body site lexically inside an `#Impure` block: its Tier-2 effects
     // need the invocation gate (E3411), not the block (E3410).
     impure: Bool{false}
+    // A body site's run-time locals and parameters, which its staged check
+    // names as run-time values (E0640) when the code reads one.
+    runtime_locals: [String]{[String]{}}
 }
 
 SemaComptimeItemRequest: struct {
@@ -359,6 +367,9 @@ SemaComptimeItemRequest: struct {
     reachable_function_keys: [String]
     // The item expression's own call sites (a soft item's purity reads them).
     call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    // The item expression's first call with a host effect, as a refused
+    // comptime effect names it (sema_effect_comptime_call_name).
+    effect_call: String?{None}
 }
 
 SemaComptimeItemValue: struct {
@@ -928,6 +939,7 @@ sema_incremental_program_header: fn(program: Program) -> Program Never! {
         applied_rules: program.applied_rules, rule_facts: program.rule_facts,
         else_arms: program.else_arms, used_import_names: program.used_import_names,
         debug_sites: program.debug_sites, app_route_roots: program.app_route_roots,
+        entry_locals: program.entry_locals,
     }
 }
 
@@ -1822,7 +1834,14 @@ sema_function_check_passes: fn(func: Func, owner_id: SymbolID, function_kind: TF
         sema_scope_rollback(module_scopes, mark)
         rechecks: sema_function_accept_share_sites(share_known, share_found, environment, program)
         if !rechecks {
-            loop diagnostic in pass_diagnostics -> diagnostics.push(diagnostic)
+            instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
+            loop diagnostic in pass_diagnostics {
+                if instance == .Val(line) {
+                    diagnostics.push(sema_name_at_instance(diagnostic, line))
+                } else {
+                    diagnostics.push(diagnostic)
+                }
+            }
             loop fact in pass_call_facts -> call_facts.push(fact)
             loop request in pass_comptime_requests -> comptime_requests.push(request)
             loop reference in pass_name_references -> name_references.push(reference)
@@ -7963,7 +7982,9 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // records only under an owner) and its purity can be read.
         if source.soft || source.startup -> _ := sema_scope_enter(probe.table, state, "{source.key}#init")
         if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, probe.table, state)
+        probe.table.comptime_runtime_locals = source.runtime_locals.copy()
         checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, probe.table, state, tail_store, context, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, probe.table, state, tail_store, context, diagnostics)
+        probe.table.comptime_runtime_locals = [String]{}
         sema_scope_rollback(probe.table, mark)
         // A compile-time value never reads the clock or randomness, and
         // reaches the network only through a pinned `fetch`; a startup or
@@ -8005,6 +8026,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, context.call_facts),
             call_facts: if source.soft || source.startup -> context.call_facts else -> [SemaCallSiteFact]{},
+            effect_call: sema_effect_comptime_call_name(context.call_facts),
         }
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
     }
@@ -8039,7 +8061,10 @@ sema_comptime_dependency_cycle_diagnostic: fn(name: String, span: Span) -> Diagn
 
 // `type_caps` (sema_effect_type_caps) binds a struct's or enum's `#FX(…)` cap
 // to each of its methods, trait impls written apart from its body included.
-sema_comptime_effect_sources: fn(source_module: SemaRegistrationModule, type_caps: [String:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
+// Each trait impl method also takes the trait it implements, resolved in
+// `graph` where its `impl` block is written, which binds the trait's cap
+// and its trait-value calls to it.
+sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [String:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module)
     loop function in source_module.functions {
@@ -8048,32 +8073,65 @@ sema_comptime_effect_sources: fn(source_module: SemaRegistrationModule, type_cap
         sources.push(source)
     }
     loop nominal in source_module.nominals {
-        loop function in nominal.methods {
+        block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
+        loop (index, function) in nominal.methods {
             source := sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id.key), source_module.module_identity)
+            if index < block_traits.len() -> source.trait_key = block_traits[index]
             sources.push(source)
         }
     }
     loop implementation in source_module.impls {
+        trait_key := ""
+        if implementation.trait_name == .Val(trait_name) {
+            trait_symbol := implementation.trait_symbol
+            if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, source_module.module_identity, trait_name)
+            if trait_symbol == .Val(symbol) -> trait_key = sema_effect_trait_cap_key(symbol.id.key)
+        }
         loop function in implementation.methods {
             source := sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal_key, source_module.module_identity)
+            source.trait_key = trait_key
             sources.push(source)
         }
     }
     sources
 }
 
-// One checked module's effect inputs, read in place from its registration row.
-sema_effect_module_input: fn(source: SemaRegistrationModule, module_index: Int, type_caps: [String:SemaEffectTypeCap]) -> SemaEffectModuleInput Never! {
+// The trait key (sema_effect_trait_cap_key) of each of `nominal`'s methods,
+// by method row: "" for a method of its own, the block's trait for one an
+// `impl Trait` block in its body writes. The registration rows a nominal's
+// own methods first, then each block's methods in block order.
+sema_effect_body_block_traits: fn(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal) -> [String] Never! {
+    rows := [String]{}
+    if nominal.source == .SourceAST(item) {
+        own: if item == {
+            .Struct(definition) -> definition.methods.len()
+            .Enum(definition) -> definition.methods.len()
+            else -> return rows
+        }
+        loop _ in 0..<own -> rows.push("")
+        loop block in sema_registration_item_trait_blocks(item) {
+            trait_key: if sema_type_graph_trait_symbol(graph, module_identity, block.trait_name) == .Val(symbol) -> sema_effect_trait_cap_key(symbol.id.key) else -> ""
+            loop _ in block.methods -> rows.push(trait_key.copy())
+        }
+    }
+    rows
+}
+
+// One checked module's effect inputs, read in place from its registration
+// row `graph.modules[source_index]`.
+sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, module_index: Int, type_caps: [String:SemaEffectTypeCap], library: [SemaLibraryEffect]) -> SemaEffectModuleInput Never! {
+    source: graph.modules[source_index]
     SemaEffectModuleInput{
         module_index: module_index,
-        sources: sema_comptime_effect_sources(source, type_caps),
+        sources: sema_comptime_effect_sources(graph, source, type_caps),
         // copy: the effect inputs locate their diagnostics; the graph keeps its segments.
         source_segments: source.source_segments.copy(),
         trait_bounds: sema_effect_trait_bounds(source.program.items),
         trait_implementers: sema_effect_trait_implementers(source.program.items),
         owned_trait_hooks: sema_effect_owned_trait_hooks(source),
+        library_effects: sema_library_effect_view(library, source),
     }
 }
 
@@ -8998,11 +9056,13 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
     }
 }
 
-// Only an explicit `run: fn` may contain executable entry
-// code. An imported file with loose statements is E0620 and the entry file
-// E0621, spanning the first through the last statement. A file-scope
-// `name: value` binding is a module global which the
-// parser already registers as a declaration.
+// A file of top-level statements is a program: with no `run: fn` of its own,
+// the entry file's statements are, in order, the body of its `run: fn`
+// (sema_script_entry), so they reach this check only beside an explicit one.
+// That file is E0621, and an imported file with loose statements E0620, each
+// spanning the first through the last statement. A file-scope `name: value`
+// binding is a module global which the parser already registers as a
+// declaration.
 sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
     loop source_module_index in 0..<graph.modules.len() {
@@ -9011,13 +9071,73 @@ sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagn
         span: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
         start: diagnostics.len()
         if {
-            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].source_file}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `run: fn`, so an import never gains a hidden side effect.", "move the statements into the entry file's `run: fn`, or import a declaration-only file"))
-            else -> diagnostics.push(sema_error("E0621", span, "top-level executable statements require an explicit `run: fn`", "Jet does not invent a runtime function for ordinary files; only `run: fn` executes code", "move the statements into `run: fn`"))
+            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].source_file}` has executable top-level statements", "imported files provide declarations; executable code belongs in the entry file, so an import never gains a hidden side effect.", "move the statements into the entry file, or import a declaration-only file"))
+            else -> diagnostics.push(sema_error("E0621", span, "this file has top-level statements and a `run: fn`", "a file's top-level statements are its entry, and so is `run: fn`; a program has one entry", "move the statements into `run: fn`, or remove `run: fn` so the statements run"))
         }
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)
         found = true
     }
     found
+}
+
+// The entry file `program` of a load: a file whose top level holds
+// statements and declares no `run: fn` is a program whose `run: fn` runs
+// those statements in order (owner ruling 2026-11-09, #6281). Its
+// top-level bindings are part of that order: `total := 0` and `limit: 3`
+// are locals of the generated `run: fn` (Main ruling 2026-11-09, option A),
+// so its functions don't see them (sema_unknown_entry_local). An ALL_CAPS
+// constant, a `#Persist` or comptime binding and the Output defaults record
+// stay module declarations. A file with both keeps its statements for E0621
+// (sema_check_script_entries).
+sema_script_entry: fn(program: &Program) {
+    count: program.script_body.len()
+    if count == 0 -> return
+    loop item in program.items {
+        if item == .Func(function) && function.name == "run" && function.external_type == None -> return
+    }
+    statements := [Stmt]{}
+    compiler_transfer_rows<Stmt>(statements, program.script_body)
+    // Popped twice, the items come back in source order.
+    reversed := [Item]{}
+    loop program.items.len() > 0 -> reversed.push(program.items.pop() ?? panic("a nonempty item list failed to pop"))
+    locals := [Stmt]{}
+    loop reversed.len() > 0 {
+        item := reversed.pop() ?? panic("a nonempty item list failed to pop")
+        if item == .Const(definition) && sema_script_entry_local(definition) {
+            binding := ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
+            binding.ty = definition.ty.copy()
+            binding.meta = definition.meta.copy()
+            binding.markers = definition.markers.copy()
+            program.entry_locals.push(definition.name.copy())
+            locals.push(Stmt.Val{binding: binding})
+            next
+        }
+        program.items.push(item)
+    }
+    // `statements` and `locals` are each in source order: take the later of
+    // the two tails into `order`, which then pops in source order.
+    order := [Stmt]{}
+    loop statements.len() > 0 || locals.len() > 0 {
+        local_last: locals.len() > 0 && (statements.len() == 0 || sema_compiler_index_stmt_span(locals[locals.len() - 1]).start > sema_compiler_index_stmt_span(statements[statements.len() - 1]).start)
+        if local_last {
+            order.push(locals.pop() ?? panic("a nonempty local list failed to pop"))
+            next
+        }
+        order.push(statements.pop() ?? panic("a nonempty statement list failed to pop"))
+    }
+    start: sema_compiler_index_stmt_span(order[order.len() - 1]).start
+    end: sema_compiler_index_stmt_span(order[0]).end
+    entry := ast_func("run", Span{start: start, end: start}, Span{start: start, end: end})
+    loop order.len() > 0 -> entry.body.push(order.pop() ?? panic("a nonempty statement list failed to pop"))
+    program.items.push(Item.Func{value: entry})
+}
+
+// Whether the file-scope binding `definition` of an entry file of
+// top-level statements is a local of its entry (sema_script_entry).
+sema_script_entry_local: fn(definition: ConstDef) -> Bool Never! {
+    if definition.is_persist || definition.is_comptime -> return false
+    if definition.ty == (Val(Type.Named{name: "__OutputDefaults"})) -> return false
+    definition.mutable || sema_casing_has_case(definition.name, SemaNameCase.Snake)
 }
 
 // `host_hooks` are the driver's host callbacks; `threads` admits the
@@ -9235,18 +9355,22 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     loop graph_module in final_graph.modules -> denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
-    // and an erased generic-module template leaves its cap behind.
+    // and an erased generic-module template leaves its cap behind. A capped
+    // type's function-typed fields fit its cap where they are declared.
+    field_caps: sema_effect_type_caps(final_graph.modules)
     loop graph_module in final_graph.modules {
         cap_diagnostics := [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) -> sema_effect_cap_entry_names(head, cap_diagnostics)
         loop cap in graph_module.template_caps -> sema_effect_cap_entry_names(cap, cap_diagnostics)
         sema_effect_module_cap_names(graph_module.program.items, cap_diagnostics)
+        sema_effect_check_field_rows(graph_module, field_caps, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, cap_diagnostics)
     }
     file_caps: sema_effect_file_module_caps(final_graph.modules, final_graph.edges)
+    trait_caps: sema_effect_trait_caps(final_graph.modules)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, final_graph.decls, threads)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -9842,9 +9966,10 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             first: part * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             last: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             type_caps: sema_effect_type_caps(graph.modules)
+            library: sema_library_effects(graph)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-                input := sema_effect_module_input(graph.modules[source_index], module_index, type_caps)
+                input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
                 // Input positions count from the part's first input; the join shifts them.
                 sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls)
                 side.effect_inputs.push(input)

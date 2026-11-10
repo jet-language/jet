@@ -309,7 +309,7 @@ envmodel_build_source_table: fn(units: [EvalUnit]) -[FS]> SourceTable EnvModelEv
 // the `nix` compatibility provider from its resolved target. A bare path
 // stats the directory locally; `…@nixpkgs` is always `nix`; `…@github` is
 // left to a realize-time `package.jet` peek (`Infer`); the direct ecosystem
-// roots name their own providers.
+// roots name their own providers (`RefSource.direct_kind`).
 envmodel_infer_provider_kind: fn(reference: ProviderRef, base_dir: String) -[FS]> ProviderKind Never! {
     if reference.provider == {
         .Path -> {
@@ -318,15 +318,6 @@ envmodel_infer_provider_kind: fn(reference: ProviderRef, base_dir: String) -[FS]
             if envmodel_source_files.is_file(envmodel_source_files.join(directory, PACKAGE_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
         }
         .Github -> ProviderKind.Infer
-        .Cran -> ProviderKind.Cran
-        .LuaRocks -> ProviderKind.LuaRocks
-        .RubyGems -> ProviderKind.RubyGems
-        .Cpan -> ProviderKind.Cpan
-        .Packagist -> ProviderKind.Packagist
-        .Releases -> ProviderKind.JetPackage
-        .JetRegistry -> ProviderKind.JetRegistry
-        .Npm -> ProviderKind.Npm
-        .Cargo -> ProviderKind.Cargo
-        else -> ProviderKind.Nix
+        else -> reference.provider.direct_kind() ?? ProviderKind.Nix
     }
 }

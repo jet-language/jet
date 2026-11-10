@@ -1,0 +1,554 @@
+// UPDATE: a port of SQLite 3.45.0 update.c, the code generator for UPDATE
+// statements (sqlite3Update), with UPDATE ... FROM (updateFromSelect).
+// sqlite3ColumnDefault is Expr's; the constraint checks and record writes
+// are Insert's, the index entry deletes Delete's.
+//
+// This build of the engine has no triggers, foreign-key enforcement,
+// upsert, RETURNING or writable virtual tables, and no
+// SQLITE_ENABLE_UPDATE_DELETE_LIMIT or SQLITE_ENABLE_PREUPDATE_HOOK: the
+// trigger list is always empty and hasFK 0; a view or virtual table is
+// read-only, so the MaterializeView and updateVirtualTable paths are not
+// needed; an ON CONFLICT clause is rejected by INSERT before it gets here.
+// UPDATE ... ORDER BY and LIMIT are rejected by the parser; their
+// arguments are only deleted. VdbeComment and VdbeCoverage code nothing.
+use {
+    ast: __core_db_ast
+    tk: __core_db_tokenize
+    util: __core_db_util
+    conn: __core_db_conn
+    opc: __core_db_opcodes
+    cg: __core_db_codegen
+    cat: __core_db_catalog
+    rs: __core_db_resolve
+    ex: __core_db_expr
+    we: __core_db_whereexpr
+    wh: __core_db_where
+    sel: __core_db_select
+    dl: __core_db_delete
+    ins: __core_db_insert
+}
+
+// indexColumnIsBeingUpdated: whether column i_col of index ix uses a
+// column a_xref marks changed (>= 0), or the rowid when chng_rowid.
+index_column_is_being_updated: fn(db: conn.Conn, a: &ast.AST, ix: Int, i_col: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
+    c: db.indexes[ix].ai_column[i_col]
+    if c >= 0 -> return a_xref[c] >= 0
+    e: ast.list_expr(a, db.indexes[ix].col_expr, i_col)
+    ins.expr_references_updated_column(a, e, a_xref, chng_rowid)
+}
+
+// indexWhereClauseMightChange: whether index ix is partial and its WHERE
+// clause uses a changed column.
+index_where_clause_might_change: fn(db: conn.Conn, a: &ast.AST, ix: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
+    pw: db.indexes[ix].part_idx_where
+    if pw < 0 -> return false
+    ins.expr_references_updated_column(a, pw, a_xref, chng_rowid)
+}
+
+// exprRowColumn: a TK_ROW expression the resolver turns into column i_col
+// of the first FROM item.
+expr_row_column: fn(a: &ast.AST, i_col: Int) -> Int Never! {
+    e: ast.pexpr(a, tk.TK_ROW, -1, -1)
+    if e >= 0 -> a.exprs[e].icolumn = i_col + 1
+    e
+}
+
+// updateFromSelect: for UPDATE ... FROM, run
+//   SELECT <key columns>, changes FROM src WHERE where_expr
+// into ephemeral table i_eph: the rowid as its key for a rowid table, the
+// PRIMARY KEY (pk) columns as an index key for a WITHOUT ROWID table.
+// changes, src and where_expr are copied, not consumed.
+update_from_select: fn(p: &cg.Parse, a: &ast.AST, i_eph: Int, pk: Int, changes: Int, src: Int, where_expr: Int) Never! -[DB]> {
+    t: a.items[ast.src_item(a, src, 0)].tab
+    new_src: ast.src_list_dup(a, src, 0)
+    where2: ast.expr_dup(a, where_expr, 0)
+    if new_src >= 0 {
+        si: ast.src_item(a, new_src, 0)
+        a.items[si].cursor = -1
+        tab: a.items[si].tab
+        ast.tab_unref(a, tab)
+        a.items[si].tab = -1
+    }
+    list := -1
+    e_dest := cg.SRT_UPFROM
+    if pk >= 0 {
+        loop i in 0..<p.db.indexes[pk].n_key_col {
+            e: expr_row_column(a, p.db.indexes[pk].ai_column[i])
+            list = ast.expr_list_append(a, list, e)
+        }
+    } else {
+        e: ast.pexpr(a, tk.TK_ROW, -1, -1)
+        list = ast.expr_list_append(a, -1, e)
+    }
+    if ex.is_virtual(p.db, t) -> e_dest = cg.SRT_TABLE
+    loop i in 0..<ast.list_len(a, changes) {
+        ce: ast.list_expr(a, changes, i)
+        e: ast.expr_dup(a, ce, 0)
+        list = ast.expr_list_append(a, list, e)
+    }
+    s: ast.select_new(a, list, new_src, where2, -1, -1, -1, ast.SF_UF_SRC_CHECK.bit_or(ast.SF_INCLUDE_HIDDEN).bit_or(ast.SF_UPDATE_FROM), -1)
+    if s >= 0 -> a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_ORDER_BY_REQD)
+    dest := ex.select_dest_init(e_dest, i_eph)
+    dest.i_sd_parm2 = if pk >= 0 -> p.db.indexes[pk].n_key_col else -> -1
+    _: sel.select(p, a, s, dest)
+    ast.select_delete(a, s)
+}
+
+// No WhereInfo yet: the UPDATE ... FROM loop has none.
+no_where_info: fn() -> we.WhereInfo? Never! { None }
+
+// sqlite3Update: code UPDATE OR on_error src SET changes WHERE where_expr,
+// src being the table to change and any FROM tables, changes the SET list
+// (each item's ename is the column). upsert (an INSERT's ON CONFLICT DO
+// UPDATE, -1 for none) is not supported in this build. The statement owns
+// and deletes its arguments, upsert apart.
+update: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) Never! -[DB]> {
+    if cg.n_err(a) == 0 {
+        if upsert >= 0 {
+            ast.error(a, "ON CONFLICT DO UPDATE (upsert) is not supported in this build")
+        } else {
+            mark: p.ncs.len()
+            nc: rs.nc_push(p, rs.nc_new(src, ast.NC_UUPSERT))
+            update_body(p, a, src, changes, where_expr, on_error, nc)
+            rs.nc_release(p, mark)
+        }
+    }
+    ast.src_list_delete(a, src)
+    ast.expr_list_delete(a, changes)
+    ast.expr_delete(a, where_expr)
+    ast.expr_list_delete(a, order_by)
+    ast.expr_delete(a, limit)
+}
+
+// The body of sqlite3Update up to its update_cleanup label; nc is the
+// NameContext over src.
+update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, nc: Int) Never! -[DB]> {
+    t: dl.src_list_lookup(p, a, src)
+    if t < 0 -> return
+    i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
+
+    // With a FROM clause the SET expressions are resolved by the SELECT
+    // that updateFromSelect runs.
+    n_change_from: if ast.src_len(a, src) > 1 -> ast.list_len(a, changes) else -> 0
+
+    g := p.up
+    if g.view_get_column_names(p, a, t) != 0 -> return
+    if dl.is_read_only(p, a, t) -> return
+
+    // Cursors for the table and all its indices, the index cursors right
+    // after the table's, whether they are used or not.
+    i_base_cur: p.f.n_tab
+    i_data_cur := i_base_cur
+    p.f.n_tab += 1
+    i_idx_cur: i_data_cur + 1
+    has_rowid: ex.has_rowid(p.db, t)
+    pk: if has_rowid -> -1 else -> cat.primary_key_index(p.db, t)
+    n_idx := 0
+    ix := p.db.tables[t].index
+    loop ix >= 0 {
+        if ix == pk -> i_data_cur = p.f.n_tab
+        p.f.n_tab += 1
+        n_idx += 1
+        ix = p.db.indexes[ix].next
+    }
+    si0: ast.src_item(a, src, 0)
+    a.items[si0].cursor = i_data_cur
+
+    // a_xref[i] is the SET item for column i, -1 when it is not changed;
+    // to_open[0] is the table, to_open[1 + i] the i-th index.
+    n_col: p.db.tables[t].cols.len()
+    a_xref := [Int]{}
+    loop _ in 0..<n_col -> a_xref.push(-1)
+    to_open := [Bool]{}
+    loop _ in 0..<(n_idx + 1) -> to_open.push(true)
+    to_open.push(false)
+
+    cg.get_vdbe(p)
+
+    // Resolve the SET expressions and match each to its column, checking
+    // the authorization to change it.
+    chng_rowid := false
+    chng_pk := false
+    rowid_expr := -1
+    i_rowid_expr := -1
+    tab_name: p.db.tables[t].name.copy()
+    db_name: p.db.dbs[i_db].name.copy()
+    loop i in 0..<ast.list_len(a, changes) {
+        z_ename: a.lists[changes].items[i].ename ?? [U8]{}
+        h_col: util.str_ihash(z_ename)
+        ce: ast.list_expr(a, changes, i)
+        if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, ce) != 0 -> return
+        j := 0
+        found := false
+        loop j < n_col {
+            if p.db.tables[t].cols[j].h_name == h_col && util.str_icmp(p.db.tables[t].cols[j].name, z_ename) == 0 {
+                cf: p.db.tables[t].cols[j].col_flags
+                if j == p.db.tables[t].ipkey {
+                    chng_rowid = true
+                    rowid_expr = ce
+                    i_rowid_expr = i
+                } else if pk >= 0 && cf.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+                    chng_pk = true
+                } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+                    ast.error(a, "cannot UPDATE generated column \"{ast.text(p.db.tables[t].cols[j].name)}\"")
+                    return
+                }
+                a_xref[j] = i
+                found = true
+                break
+            }
+            j += 1
+        }
+        if !found {
+            if pk < 0 && rs.is_rowid(z_ename) {
+                j = -1
+                chng_rowid = true
+                rowid_expr = ce
+                i_rowid_expr = i
+            } else {
+                ast.error(a, "no such column: {ast.text(z_ename)}")
+                p.f.check_schema = true
+                return
+            }
+        }
+        col_name: if j < 0 -> "ROWID".bytes() else -> p.db.tables[t].cols[j].name.copy()
+        rc: cg.auth_check(p, a, conn.AUTH_UPDATE, Val(tab_name.copy()), Val(col_name), Val(db_name.copy()))
+        if rc == conn.AUTH_DENY -> return
+        if rc == conn.AUTH_IGNORE && j >= 0 -> a_xref[j] = -1
+    }
+    chng_key: chng_rowid || chng_pk
+
+    // A generated column changes when what it is computed from does.
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+        loop {
+            progress := false
+            loop i in 0..<n_col {
+                if a_xref[i] >= 0 -> next
+                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) == 0 -> next
+                ge: cat.column_expr(p.db, a, t, i)
+                if ins.expr_references_updated_column(a, ge, a_xref, chng_rowid) {
+                    a_xref[i] = 99999
+                    progress = true
+                }
+            }
+            if !progress -> break
+        }
+    }
+
+    // The SET expressions are not used inside the WHERE loop.
+    a.items[si0].col_used = if ex.is_virtual(p.db, t) -> rs.ALLBITS else -> 0
+
+    // A register range for each index whose entry may change (0 for the
+    // others), then the table record's.
+    b_replace := on_error == ast.OE_REPLACE
+    a_reg_idx := [Int]{}
+    n_all_idx := 0
+    ix = p.db.tables[t].index
+    loop ix >= 0 {
+        reg := 0
+        if chng_key || ix == pk || index_where_clause_might_change(p.db, a, ix, a_xref, chng_rowid) {
+            p.f.n_mem += 1
+            reg = p.f.n_mem
+            p.f.n_mem += p.db.indexes[ix].n_column
+        } else {
+            loop i in 0..<p.db.indexes[ix].n_key_col {
+                if index_column_is_being_updated(p.db, a, ix, i, a_xref, chng_rowid) {
+                    p.f.n_mem += 1
+                    reg = p.f.n_mem
+                    p.f.n_mem += p.db.indexes[ix].n_column
+                    if on_error == ast.OE_DEFAULT && p.db.indexes[ix].on_error == ast.OE_REPLACE -> b_replace = true
+                    break
+                }
+            }
+        }
+        if reg == 0 -> to_open[n_all_idx + 1] = false
+        a_reg_idx.push(reg)
+        n_all_idx += 1
+        ix = p.db.indexes[ix].next
+    }
+    p.f.n_mem += 1
+    a_reg_idx.push(p.f.n_mem)
+    if b_replace {
+        // REPLACE may delete rows: open every index.
+        loop i in 0..<(n_idx + 1) -> to_open[i] = true
+    }
+
+    if a.ctx.nested == 0 -> cg.v_count_changes(p)
+    cg.begin_write_operation(p, a, false, i_db)
+
+    // The registers: the RowSet of the two-pass update shares the table
+    // record's until that is reallocated; the old and new rowids; the old
+    // row when the PRIMARY KEY changes; the new row.
+    reg_row_set: a_reg_idx[n_all_idx]
+    p.f.n_mem += 1
+    reg_old_rowid: p.f.n_mem
+    reg_new_rowid := reg_old_rowid
+    reg_old := 0
+    if chng_pk {
+        reg_old = p.f.n_mem + 1
+        p.f.n_mem += n_col
+    }
+    if chng_key {
+        p.f.n_mem += 1
+        reg_new_rowid = p.f.n_mem
+    }
+    reg_new: p.f.n_mem + 1
+    p.f.n_mem += n_col
+
+    // Resolve the WHERE clause.
+    if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, where_expr) != 0 -> return
+
+    label_break: cg.v_make_label(p)
+    label_continue := label_break
+
+    // The count of rows updated.
+    reg_row_count := 0
+    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && p.f.trigger_tab < 0 && a.ctx.nested == 0 && !p.f.b_returning {
+        p.f.n_mem += 1
+        reg_row_count = p.f.n_mem
+        _: cg.op2(p, opc.OP_INTEGER, 0, reg_row_count)
+    }
+
+    // The ephemeral table of the rows to change: their rowids, or their
+    // PRIMARY KEYs (and with FROM, the SET values).
+    i_eph := 0
+    addr_open := 0
+    n_pk := 0
+    i_pk := 0
+    reg_key := 0
+    n_key := 0
+    if n_change_from == 0 && has_rowid {
+        _: cg.op3(p, opc.OP_NULL, 0, reg_row_set, reg_old_rowid)
+        i_eph = p.f.n_tab
+        p.f.n_tab += 1
+        addr_open = cg.op3(p, opc.OP_OPEN_EPHEMERAL, i_eph, 0, reg_row_set)
+    } else {
+        n_pk = if pk >= 0 -> p.db.indexes[pk].n_key_col else -> 0
+        i_pk = p.f.n_mem + 1
+        p.f.n_mem += n_pk
+        p.f.n_mem += n_change_from
+        p.f.n_mem += 1
+        reg_key = p.f.n_mem
+        n_eph_col: n_pk + n_change_from
+        i_eph = p.f.n_tab
+        p.f.n_tab += 1
+        if pk >= 0 -> _: cg.op3(p, opc.OP_NULL, 0, i_pk, i_pk + n_pk - 1)
+        addr_open = cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_eph, n_eph_col)
+        if pk >= 0 {
+            kio: cat.key_info_of_index(p, a, pk)
+            if kio == .Val(k0) {
+                k := k0.copy()
+                k.n_all_field = n_eph_col
+                cg.v_append_p4(p, conn.P4.KeyInfo(k))
+            }
+        }
+        if n_change_from > 0 -> update_from_select(p, a, i_eph, pk, changes, src, where_expr)
+    }
+
+    // Find the rows to change: one pass changes them inside the WHERE loop,
+    // else the loop collects them and a second loop changes them.
+    e_one_pass := we.ONEPASS_OFF
+    ai_cur := [Int]{-1, -1}
+    b_finish_seek := true
+    wr := no_where_info()
+    if n_change_from > 0 {
+        cg.multi_write(p)
+        n_key = n_pk
+        reg_key = i_pk
+    } else {
+        // No multi-row one pass for a nested UPDATE, a changing key, a
+        // possible REPLACE or a WHERE subquery.
+        wcf := cg.WHERE_ONEPASS_DESIRED
+        if a.ctx.nested == 0 && !chng_key && !b_replace && (where_expr < 0 || !ast.has(a, where_expr, ast.EP_SUBQUERY)) {
+            wcf = wcf.bit_or(cg.WHERE_ONEPASS_MULTIROW)
+        }
+        wr = wh.where_begin(p, a, src, where_expr, -1, -1, -1, wcf, i_idx_cur)
+        if wr == .Val(w0) {
+            one: wh.where_ok_one_pass(w0)
+            e_one_pass = one.e
+            ai_cur = one.cur
+            b_finish_seek = wh.where_uses_deferred_seek(w0)
+        } else {
+            return
+        }
+        if e_one_pass != we.ONEPASS_SINGLE {
+            cg.multi_write(p)
+            if e_one_pass == we.ONEPASS_MULTI {
+                // A multi-row one pass cannot scan an index it changes.
+                i_cur: ai_cur[1]
+                if i_cur >= 0 && i_cur != i_data_cur && to_open[i_cur - i_base_cur] -> e_one_pass = we.ONEPASS_OFF
+            }
+        }
+        if has_rowid {
+            // The rowid of the row: into the ephemeral table, or kept in
+            // reg_old_rowid for one pass.
+            _: cg.op2(p, opc.OP_ROWID, i_data_cur, reg_old_rowid)
+            if e_one_pass == we.ONEPASS_OFF {
+                p.f.n_mem += 1
+                a_reg_idx[n_all_idx] = p.f.n_mem
+                _: cg.op3(p, opc.OP_INSERT, i_eph, reg_row_set, reg_old_rowid)
+            } else if addr_open != 0 {
+                _: cg.v_change_to_noop(p, addr_open)
+            }
+        } else {
+            // The PRIMARY KEY of the row: as a record into the ephemeral
+            // table, or kept in its registers for one pass.
+            loop i in 0..<n_pk {
+                col: p.db.indexes[pk].ai_column[i]
+                ex.expr_code_get_column_of_table(p, a, t, i_data_cur, col, i_pk + i)
+            }
+            if e_one_pass != we.ONEPASS_OFF {
+                if addr_open != 0 -> _: cg.v_change_to_noop(p, addr_open)
+                n_key = n_pk
+                reg_key = i_pk
+            } else {
+                aff: wh.index_affinity_str(p.db, a, pk)
+                _: cg.op4(p, opc.OP_MAKE_RECORD, i_pk, n_pk, reg_key, conn.P4.Text(aff))
+                _: cg.op4_int(p, opc.OP_IDX_INSERT, i_eph, reg_key, i_pk, n_pk)
+            }
+        }
+    }
+
+    if n_change_from == 0 && e_one_pass != we.ONEPASS_MULTI {
+        if wr == .Val(w0) {
+            w := w0
+            wh.where_end(p, a, w)
+        }
+    }
+
+    // Open every index that needs updating, but not the cursors the one
+    // pass already has open.
+    if e_one_pass != we.ONEPASS_OFF {
+        if ai_cur[0] >= 0 -> to_open[ai_cur[0] - i_base_cur] = false
+        if ai_cur[1] >= 0 -> to_open[ai_cur[1] - i_base_cur] = false
+    }
+    addr_once := 0
+    n_scan_idx: if ai_cur[1] >= 0 -> 1 else -> 0
+    if e_one_pass == we.ONEPASS_MULTI && n_idx - n_scan_idx > 0 -> addr_once = cg.op0(p, opc.OP_ONCE)
+    _: dl.open_table_and_indices(p, a, t, opc.OP_OPEN_WRITE, 0, i_base_cur, Val(to_open))
+    if addr_once != 0 -> cg.v_jump_here_or_pop_inst(p, addr_once)
+
+    // The top of the update loop.
+    addr_top := 0
+    if e_one_pass != we.ONEPASS_OFF {
+        if ai_cur[0] != i_data_cur && ai_cur[1] != i_data_cur {
+            _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_break, reg_key, n_key)
+        }
+        if e_one_pass != we.ONEPASS_SINGLE -> label_continue = cg.v_make_label(p)
+        key_reg: if pk >= 0 -> reg_key else -> reg_old_rowid
+        _: cg.op2(p, opc.OP_IS_NULL, key_reg, label_break)
+    } else if pk >= 0 || n_change_from > 0 {
+        label_continue = cg.v_make_label(p)
+        _: cg.op2(p, opc.OP_REWIND, i_eph, label_break)
+        addr_top = cg.v_current_addr(p)
+        if n_change_from > 0 {
+            if pk >= 0 {
+                loop i in 0..<n_pk -> _: cg.op3(p, opc.OP_COLUMN, i_eph, i, i_pk + i)
+                _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_continue, i_pk, n_pk)
+            } else {
+                _: cg.op2(p, opc.OP_ROWID, i_eph, reg_old_rowid)
+                _: cg.op3(p, opc.OP_NOT_EXISTS, i_data_cur, label_continue, reg_old_rowid)
+            }
+        } else {
+            _: cg.op2(p, opc.OP_ROW_DATA, i_eph, reg_key)
+            _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_continue, reg_key, 0)
+        }
+    } else {
+        _: cg.op2(p, opc.OP_REWIND, i_eph, label_break)
+        label_continue = cg.v_make_label(p)
+        addr_top = cg.op2(p, opc.OP_ROWID, i_eph, reg_old_rowid)
+        _: cg.op3(p, opc.OP_NOT_EXISTS, i_data_cur, label_continue, reg_old_rowid)
+    }
+
+    // The new rowid, when it changes; else reg_new_rowid is reg_old_rowid.
+    if chng_rowid {
+        if n_change_from == 0 {
+            ex.expr_code(p, a, rowid_expr, reg_new_rowid)
+        } else {
+            _: cg.op3(p, opc.OP_COLUMN, i_eph, i_rowid_expr, reg_new_rowid)
+        }
+        _: cg.op1(p, opc.OP_MUST_BE_INT, reg_new_rowid)
+    }
+
+    // The old row's PRIMARY KEY columns, when it changes.
+    if chng_pk {
+        loop i in 0..<n_col {
+            k: cat.table_column_to_storage(p.db, t, i) + reg_old
+            if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+                ex.expr_code_get_column_of_table(p, a, t, i_data_cur, i, k)
+            } else {
+                _: cg.op2(p, opc.OP_NULL, 0, k)
+            }
+        }
+        if !chng_rowid && pk < 0 -> _: cg.op2(p, opc.OP_COPY, reg_old_rowid, reg_new_rowid)
+    }
+
+    // The new row, from reg_new in storage order: the SET values and the
+    // unchanged columns.
+    k := reg_new
+    loop i in 0..<n_col {
+        reg: k
+        k += 1
+        cf: p.db.tables[t].cols[i].col_flags
+        if i == p.db.tables[t].ipkey {
+            _: cg.op2(p, opc.OP_NULL, 0, reg)
+        } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+            if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> k -= 1
+        } else {
+            j: a_xref[i]
+            if j >= 0 {
+                if n_change_from > 0 {
+                    _: cg.op3(p, opc.OP_COLUMN, i_eph, n_pk + j, reg)
+                } else {
+                    ve: ast.list_expr(a, changes, j)
+                    ex.expr_code(p, a, ve, reg)
+                }
+            } else {
+                ex.expr_code_get_column_of_table(p, a, t, i_data_cur, i, reg)
+                b_finish_seek = false
+            }
+        }
+    }
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 -> ins.compute_generated_columns(p, a, reg_new, t)
+
+    // Check the constraints. A REPLACE or a changed key may have moved
+    // the data cursor: seek it again.
+    b_replace = ins.generate_constraint_checks(p, a, t, a_reg_idx, i_data_cur, i_idx_cur, reg_new_rowid, reg_old_rowid, chng_key, on_error, label_continue, Val(a_xref))
+    if b_replace || chng_key {
+        if pk >= 0 {
+            _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_continue, reg_key, n_key)
+        } else {
+            _: cg.op3(p, opc.OP_NOT_EXISTS, i_data_cur, label_continue, reg_old_rowid)
+        }
+    }
+
+    // Delete the old index entries, and the old record when the key
+    // changes, then write the new ones.
+    dl.generate_row_index_delete(p, a, t, i_data_cur, i_idx_cur, Val(a_reg_idx.copy()), -1)
+    if b_finish_seek -> _: cg.op1(p, opc.OP_FINISH_SEEK, i_data_cur)
+    if chng_key -> _: cg.op2(p, opc.OP_DELETE, i_data_cur, 0)
+    update_flags: conn.OPFLAG_ISUPDATE.bit_or(if e_one_pass == we.ONEPASS_MULTI -> conn.OPFLAG_SAVEPOSITION else -> 0)
+    ins.complete_insertion(p, a, t, i_data_cur, i_idx_cur, reg_new_rowid, a_reg_idx, update_flags, false, false)
+
+    if reg_row_count != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, reg_row_count, 1)
+
+    // The next row to change.
+    if e_one_pass == we.ONEPASS_MULTI {
+        cg.v_resolve_label(p, label_continue)
+        if wr == .Val(w0) {
+            w := w0
+            wh.where_end(p, a, w)
+        }
+    } else if e_one_pass != we.ONEPASS_SINGLE {
+        cg.v_resolve_label(p, label_continue)
+        _: cg.op2(p, opc.OP_NEXT, i_eph, addr_top)
+    }
+    cg.v_resolve_label(p, label_break)
+
+    // Store the largest rowids AUTOINCREMENT tables reached in
+    // sqlite_sequence.
+    if a.ctx.nested == 0 && p.f.trigger_tab < 0 -> dl.autoincrement_end(p, a)
+
+    // Return the number of rows updated.
+    if reg_row_count != 0 -> dl.code_change_count(p, reg_row_count, "rows updated")
+}

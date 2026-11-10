@@ -1,0 +1,21 @@
+# `math.fma` is one vfmadd213sd on an FMA3 CPU and the runtime's soft fma on
+# any other (JetIR X64Select.jet ir_x64_fma), and every tier prints the same
+# IEEE 754 bits, the signed zero musl gets wrong and the NaN rows included.
+fixture: fma_has_the_soft_bits_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fma_has_the_soft_bits_on_every_tier.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fma_has_the_soft_bits_on_every_tier.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fma_has_the_soft_bits_on_every_tier.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = fma_has_the_soft_bits_on_every_tier.out

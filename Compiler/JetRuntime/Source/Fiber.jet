@@ -138,8 +138,11 @@ fiber_ready: fn(fiber: I64) {
     sync_thread_lock(root)
     fiber_ready_push(root, fiber)
     woke: scheduler_wake_idle(root)
+    // No idle carrier to take it: the monitor watches for blocked ones.
+    monitor: if woke -> I64{0} else -> scheduler_monitor_arm(root)
     sync_thread_unlock(root)
     if woke -> scheduler_kick_idle(root)
+    if (monitor != I64{0}) -> scheduler_monitor_kick(root, monitor)
 }
 
 // The ready FIFO at root 168/176; callers hold the root lock.

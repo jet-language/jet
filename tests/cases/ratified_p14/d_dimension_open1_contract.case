@@ -1,0 +1,28 @@
+# D-DIMENSION-OPEN1 (#4284 c27): `#UnitFamily(Name, dimension, base: unit)`
+# declares an open nominal base dimension. The SI families (Length, Mass, Time
+# and the derived Speed and Force) are ordinary prelude declarations; a user
+# base dimension `Information` uses the same surface, and the user derived
+# families `Throughput` and `Effort` compose it with SI bases through the same
+# exponent-map algebra. Incompatible dimensions do not add.
+fixture: d_dimension_open1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_dimension_open1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_dimension_open1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_dimension_open1_contract.stdout.expected
+stderr: empty
+step mismatch: jet check mismatch/main.jet
+exit: 1
+stderr: ~ "`+` can't combine Information with Length" # distinct dimension identities reject
+stderr: ~ "--> main.jet:4:12" # located at the sum
+stderr: ~ "jet-lang.dev/e/E0359" # one registered code

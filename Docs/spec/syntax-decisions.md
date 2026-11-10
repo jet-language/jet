@@ -49,10 +49,6 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
-| `compiler.advanced.register` | explicit opt-in provider registration for declared targets |
-| `compiler.advanced.register_expansion` | explicit opt-in call-expansion provider registration |
-| `compiler.advanced.register_specialization` | explicit opt-in specialization provider registration |
-| `compiler.advanced.session` | authorized session within a registered provider |
 | `-[…]` | effect row on a callable |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
@@ -359,21 +355,32 @@ for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
 **D-ENTRY-SCRIPT1=C / D-ENTRY-ORDER1=C — explicit ordinary-file entry** *(amends
-the 2026-08-08 D-ENTRY-SCRIPT1=B ruling)*: ordinary files never synthesize a
-runtime function from loose top-level statements. `run: fn` is the only ordinary
-file execution body; `jet run`, `jet dev`, and `jet test` use that same entry
-law. At file scope, `name: value` and `name := value` are module globals
+the 2026-08-08 D-ENTRY-SCRIPT1=B ruling; amended by D-ENTRY-STATEMENTS1
+below)*: in a file with `run: fn`, that is the file's execution body; `jet run`,
+`jet dev`, and `jet test` use that same entry law. At file scope of such a file,
+`name: value` and `name := value` are module globals
 visible to every function in the file; the mutable form is writable and is
 initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
 instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23) amends the
 immutable form: its initializer is any expression, computed once in dependency
 order before `run: fn` and read as an ordinary copy on every tier (spec "Values,
-expressions, and calls"). Loose top-level statements are E0621, and an
-imported file with loose statements is E0620. Notebook and REPL adapters may
-construct an explicit `run: fn` for their submitted fragment. `dev: fn`,
-`build: fn`, and `#Test` declarations remain legal beside module globals.
-The maintained example corpus enforces this same explicit-entry law: an
-ordinary `run: fn` is not optional teaching ceremony.
+expressions, and calls"). Loose top-level statements beside `run: fn` are
+E0621, and an imported file with loose statements is E0620. Notebook and REPL
+adapters may construct an explicit `run: fn` for their submitted fragment.
+`dev: fn`, `build: fn`, and `#Test` declarations remain legal beside module
+globals.
+
+**D-ENTRY-STATEMENTS1 — a file of top-level statements just runs** *(owner
+ruling 2026-11-09, #6281 c128; amends D-ENTRY-SCRIPT1=C)*: an entry file whose
+top level holds statements and declares no `run: fn` is a program, and every
+top-level line is its entry, in source order. Its bindings are locals of that
+entry (Main ruling 2026-11-09, option A): `total := 0` is written by a later
+top-level loop and captured by a lambda in the body, and the file's functions
+don't see it (E0107, "pass it as a parameter"). ALL_CAPS constants, `#Persist`
+and comptime bindings stay module declarations. A file with `run: fn` keeps the
+module rules above; a file with both is E0621; a file with neither is a library
+(E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
+meaning on every tier.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -3623,12 +3630,12 @@ grammar).
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
 `.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
-the field list; each field carries `.name`/`.ty`/`.markers`/
+the field list; each field carries `.name`/`.type`/`.markers`/
 `.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
 is the leaf and `.path()` is the canonical path.
 
 The one registered reflection field row is the law for both views. Comptime
-keeps the row's `name`, `ty`, marker facts, visibility, and source span because
+keeps the row's `name`, `type`, marker facts, visibility, and source span because
 those facts guide generated source before execution. Runtime keeps the same
 field names and order and projects each stored field as a typed `Value`; it
 keeps `type_name`, `path`, and display text because those facts describe the
@@ -3653,8 +3660,8 @@ physical layout is not guaranteed. Completion visibly groups
 `derive Wire for T` is E2714); the header names the provider and target, and
 the body contains typed Jet members. `@` holes are filled at expansion and the
 resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
-never inject unchecked AST or re-lex emitted text). `@loop` over
-`T.@fields` contributes one checked member per field. Local-only orphan rule.
+never inject unchecked AST or re-lex emitted text). `comptime loop` over
+`T.$fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
 **D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
@@ -3715,6 +3722,9 @@ workspace/build control, and existing-program rewrites use an authorized
 `compiler.advanced` session. Changes are explicit, checked against affected
 callers, atomic, and reported by a complete transformation receipt. They do
 not expose mutable compiler AST nodes or manufacture inferred facts.
+*Superseded by D-META-LADDER1=A (ratified 2026-11-09, #6129):* compiler
+control is the one root-only `Compiler` value under the Meta effects; the
+`compiler.advanced.*` spellings are removed.
 
 **D-META-OPTIN2=A — Approved root-package metaprogramming opt-in** *(ratified
 2026-09-21)*: standard mode includes read-only facts and additive `Generated`
@@ -3722,6 +3732,9 @@ publication. Advanced providers require `metaprogramming: unrestricted` in the
 approved root package and explicit target registration from root preparation.
 Import alone grants no provider or session. This opt-in does not grant host
 permissions.
+*Superseded by D-META-LADDER1=A (ratified 2026-11-09, #6129):* the Meta
+effects follow the rule of every effect, and only the root package's build
+function receives the `Compiler` value (`b.compiler(app)`).
 
 **D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
 subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,
@@ -5386,19 +5399,22 @@ run: fn() {
         .Linux   -> { b: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b: WinBackend{ name: "win32" }    print(b.label()) }
+        else     -> print("no native backend")
     }
 }
 ```
 
-`$build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
-bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `comptime if` chain
+`$build.os` resolves to the build's OS: the `--target=<triple>` OS bucket, the
+host OS when omitted, `.Web` for a web build, `.Wasm` for a Wasm target and
+`.Freestanding` for a machine with no OS (owner ruling on #6206, which replaced
+the fall-back to the host for those targets). Sema desugars the dispatch into a `comptime if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
 inside the taken arm is legal and dead arms never trip
 `E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
-set must cover `.Linux`, `.MacOS`, and `.Windows`, or carry an `else` — missing
+set must cover every OS of the one OS list (`.Linux`, `.MacOS`, `.Windows`,
+`.Web`, `.Wasm`, `.Freestanding`), or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
 compiles or fails identically on every platform). A non-`$build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
@@ -5779,7 +5795,8 @@ opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sb
 package and asks sema for its public API rows (every public fn with its solved
 effect row, struct with its fields, enum with its variants, trait with its
 required and defaulted members, method, `impl`, distinct, type, const and unit
-family; another module's names carry the module prefix, and an inline
+family, and a `cap` row for each written `#FX(…)` cap of a public type, trait
+or module; another module's names carry the module prefix, and an inline
 module's members carry their module path). A soft-public `_name` is no row
 (D-SHAPE-INTERNAL1). A unit family is a row only when the package declares
 it; a signature that names a standard `core.units` type spells it with its
@@ -5789,11 +5806,13 @@ fills a bare positional ends in `[positional N]`. It uploads them as
 registry's snapshot for the highest published version below the new one,
 yanked or not; the local `.jet/cache/api/<name>.api` copy feeds the lock
 fingerprint only. A published version without a snapshot is E2607. Breaking:
-a removed or changed row; a widened effect row (a narrowed one is
-compatible); a field without a default added to a struct that has no private
-fields; a variant added to an enum; a required member added to a trait; a
-changed distinct range or unit scale. Compatible: every other addition,
-including a defaulted field and a defaulted trait method. A release may break
+a removed or changed row; a widened effect row or cap (a narrowed one is
+compatible: a cap narrows when it keeps every denial and allows nothing it did
+not, and a removed cap widens); a field without a default added to a struct
+that has no private fields; a variant added to an enum; a required member
+added to a trait; a changed distinct range or unit scale. Compatible: every
+other addition, including a new cap, a defaulted field and a defaulted trait
+method. A release may break
 exactly when it lies outside the caret range of the version it is compared
 with (the resolver's `^` rule: `1.4.2` → `2.0.0`, `0.2.3` → `0.3.0`, `0.0.3`
 → `0.0.4`); an additive change under a patch bump is accepted. A breaking
@@ -8244,14 +8263,11 @@ live development state across a hot reload. The owner's frame: game state in a
 game you are developing is pinned, you edit an enemy's logic, `jet dev` reloads
 the changed code, and you keep playtesting without resetting the world.
 
-That purpose settles the semantics. A pinned value is state a running program
-mutates — a score, a position, a world — so a `#Persist` binding is writable
-from a function. It is the one module binding that is, because surviving the
-reload is the entire reason it exists; every other module binding stays
-immutable from a function with the existing E0111 teaching text. This amends
-D-VERDICT-1231-2, which ratified the spelling `#Persist counter := 0` but left
-that spelling with no program that compiles: writing `counter += 1` from a
-function reported E0111, so the marker could not express the thing it was for.
+That purpose settles the semantics: `#Persist` keeps a binding's value across
+a hot reload, and that is all the marker means (owner ruling 2026-11-09). It is
+not the way to make module state writable from a function; E0111 teaches a
+`shared` holder for that. This amends D-VERDICT-1231-2, which ratified the
+spelling `#Persist counter := 0`.
 
 **2026-08-20 — D-SERVICE1=D reaffirmed** *(card #444; owner ruling in session)*:
 the typed `service.tree(…)` surface the decision describes is the law, and the

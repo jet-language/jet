@@ -1,0 +1,21 @@
+// A stop inside a lambda body is the enclosing function's stop, as the
+// lambda's calls are its calls: each function below reaches `Panic`.
+through_map: fn(items: [Int]) -[!Panic]> [Int] {
+    items.map((n: Int) -> if n < 0 -> panic("negative") else -> n)
+}
+
+through_local: fn(n: Int) -[!Panic]> Int {
+    check := (m: Int) -> {
+        assert(m >= 0)
+        m
+    }
+    check(n)
+}
+
+through_fallback: fn(items: [Int]) -[!Panic]> [Int] {
+    items.map((n: Int) -> items.get(n) ?? panic("missing"))
+}
+
+run: fn() {
+    print("{through_map([Int]{1})} {through_local(2)} {through_fallback([Int]{0})}")
+}

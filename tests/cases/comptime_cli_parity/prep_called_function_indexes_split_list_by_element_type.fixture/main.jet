@@ -1,0 +1,20 @@
+// A function that prep calls indexes `split(...).to_list()`: the element is a
+// String (its methods resolve and its value prints), never a Never base.
+first_word: fn(text: String) -> String {
+    parts: text.split(" ").to_list()
+    parts[0].copy()
+}
+
+last_word_length: fn(text: String) -> Int {
+    parts: text.split(" ").to_list()
+    parts[parts.len() - 1].len()
+}
+
+FIRST: comptime { first_word("hello prep world") }
+LAST_LENGTH: comptime { last_word_length("hello prep world") }
+
+run: fn() {
+    print(FIRST)
+    print(FIRST.to_upper())
+    print(LAST_LENGTH)
+}

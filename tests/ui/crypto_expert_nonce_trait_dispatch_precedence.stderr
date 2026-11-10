@@ -3,6 +3,6 @@ Error [jet.MissingDynamicEffectBound]: Dynamic call `Shape::area` has no effect 
     |
  12 |     return shape.area()
     |                  ^^^^
- Why: A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound
- Fix: Declare an effect row on `Shape::area`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function
+ Why: A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap
+ Fix: Declare an effect row on `Shape::area`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function
 More: jet-lang.dev/e/E0743

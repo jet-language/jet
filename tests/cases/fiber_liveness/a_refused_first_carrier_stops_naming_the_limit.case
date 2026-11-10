@@ -1,0 +1,29 @@
+# The host refuses the pool's first carrier (the program capped its address
+# space below room for a thread stack before its first task): no task can
+# run, so the process stops, with one `error:` line that names the errno and
+# the limits that refuse threads (RLIMIT_AS, RLIMIT_NPROC) and exit 70, and
+# no panic report (#6403 c7). The limit values vary with the program's
+# mappings, so the line is pinned up to them. Built programs at O0 and O2.
+fixture: fixtures/refused_first_carrier
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JET_SCHEDULER_THREADS=8
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 70
+stdout: = "capped\n"
+stderr: ~ "error: the host refused the first scheduler worker thread (errno 11); address-space limit RLIMIT_AS " # the stop names the errno and the address-space limit
+stderr: ~ ", process limit RLIMIT_NPROC " # and the process-count limit
+stderr: !~ "panic" # a refused thread is no program fault
+stderr: !~ "E3001" # nor the runtime's panic stop
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 70
+stdout: = "capped\n"
+stderr: ~ "error: the host refused the first scheduler worker thread (errno 11); address-space limit RLIMIT_AS " # the stop names the errno and the address-space limit
+stderr: ~ ", process limit RLIMIT_NPROC " # and the process-count limit
+stderr: !~ "panic" # a refused thread is no program fault
+stderr: !~ "E3001" # nor the runtime's panic stop

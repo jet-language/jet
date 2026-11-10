@@ -1,0 +1,24 @@
+// A Close duty written in the type body owns one cleanup, like `impl T.Close`:
+// a binding moves the value, and each value closes once, after its last use.
+Stream: struct {
+    fd: Int
+
+    impl Close {
+        close: fn(&&self) { print("closed {self.fd}") }
+    }
+}
+
+FileReader: struct {
+    stream: Stream
+}
+
+keep: fn(r: FileReader) -> Int { r.stream.fd }
+
+run: fn() {
+    a: Stream{fd: 1}
+    b: a
+    print("moved {b.fd}")
+    r: FileReader{stream: Stream{fd: 2}}
+    s: r
+    print("kept {keep(s)}")
+}

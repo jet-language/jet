@@ -12,29 +12,42 @@ use jet_foundation.[name_rows_value]
 // slot moved from it once, whose buffer is stored before the Loop in a
 // region around it (so the header holds a list wherever the Loop starts);
 // or a parameter's header the function never rebinds (a `&` list, which
-// holds the caller's list from the start).
+// holds the caller's list from the start). It may also be a field of such
+// storage or parameter (a `&` struct's list): the address `base + k` an
+// Offset makes once, of a base that is there before the Loop. An Offset
+// made in the Loop is pure, so it goes before the Loop with the call.
 // A Loop can make its buffer shared again when it reads the header other
-// than by a Load, another such call or a store keeping the buffer its own
-// (of the length or capacity, or of a buffer fresh from jet_rt_alloc, as
-// a growth does), or hands the buffer pointer loaded from it to a call
-// (but a route that only reads it: ir_opt_buffer_reader), a store or a
-// move.
+// than by a Load of a word, another such call or a store keeping the
+// buffer its own (of the length or capacity, or of a buffer fresh from
+// jet_rt_alloc, as a growth does), or hands the buffer pointer loaded from
+// it to a call (but a route that only reads it: ir_opt_buffer_reader), a
+// store or a move. For a field, any read of its base counts that reaches
+// the header's 24 bytes or hands the base on: Loads and Stores of other
+// fields, Offsets the same rules then follow, and `#unique<..>` calls on
+// other list fields keep it.
 // `jet inspect decisions` names each call in a Loop: `unique <function>
 // <list type>: made unique before the Loop`, or `declined (<why>)`.
 
 ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
     count: f.slot_type.len()
     facts: ir_opt_facts(f)
-    // The header each slot names (-1: none).
+    // The header or struct base each slot points into (-1: none), and how
+    // many bytes past that base (`disp`).
     root := [Int]{}
-    loop slot in 0..<count -> root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
+    disp := [Int]{}
+    loop slot in 0..<count {
+        root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
+        disp.push(0)
+    }
     loop at in 0..<f.op.len() {
         dst: f.dst[at]
         if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
-        if f.op[at] == .StackAddress {
+        op: f.op[at]
+        if op == .StackAddress {
             root[dst] = dst
-        } else if f.op[at] == .Move && f.a[at] >= 0 && root[f.a[at]] >= 0 {
+        } else if (op == .Move || (op == .Offset && f.b[at] >= 0)) && f.a[at] >= 0 && root[f.a[at]] >= 0 {
             root[dst] = root[f.a[at]]
+            disp[dst] = disp[f.a[at]] + (if op == .Offset -> f.b[at] else -> 0)
         }
     }
     // Each instruction's innermost Loop, each Loop's enclosing one and End.
@@ -63,24 +76,37 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
             }
         }
     }
-    // The calls, and where each goes (-1: stays).
+    // The calls, and where each goes (-1: stays); the Offset making a
+    // call's header address in the Loop, which goes along (-1: none), and
+    // per instruction whether it is such an Offset.
     target := [Int]{}
-    loop _ in 0..<f.op.len() -> target.push(-1)
+    lift := [Int]{}
+    lifted := [Bool]{}
+    loop _ in 0..<f.op.len() {
+        target.push(-1)
+        lift.push(-1)
+        lifted.push(false)
+    }
     moved := 0
     rows := [String]{}
     loop at in 0..<f.op.len() {
-        header: ir_opt_unique_header(f, keys, root, at)
+        header: ir_opt_unique_header(f, keys, root, disp, at)
         if header < 0 -> next
         slot: f.args[f.b[at]]
+        // Where the header's address is first there: its own write, or for
+        // an Offset's, that Offset's base.
+        def: facts.def_at[slot]
+        offset: def >= 0 && f.op[def] == .Offset
+        ready: if offset -> facts.def_at[f.a[def]] else -> def
         place := -1
         candidate := inner[at]
         why := ""
-        loop candidate >= 0 && facts.def_at[slot] < candidate {
-            if !ir_opt_header_ready(f, facts, root, header, candidate) {
+        loop candidate >= 0 && ready < candidate {
+            if !ir_opt_header_ready(f, facts, root, disp, header, candidate) {
                 why = "the list holds no buffer before the Loop"
                 break
             }
-            why = ir_opt_reshares(m, f, facts, keys, root, header, candidate, ends[candidate])
+            why = ir_opt_reshares(m, f, facts, keys, root, disp, header, candidate, ends[candidate])
             if why != "" -> break
             place = candidate
             candidate = outer[candidate]
@@ -92,24 +118,36 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
         }
         if place < 0 -> next
         target[at] = place
+        if offset && def > place {
+            lift[at] = def
+            lifted[def] = true
+        }
         moved += 1
     }
     loop row in rows -> notes.push(row)
     if moved == 0 -> return 0
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    // The lifted Offsets already put before their Loop.
+    put := [Int]{}
     loop at in 0..<f.op.len() {
         if f.op[at] == .Loop {
-            // The calls hoisted here, once per header.
+            // The calls hoisted here, once per header, each after the
+            // Offset making its address.
             done := [Int]{}
             loop k in 0..<f.op.len() {
                 if target[k] != at -> next
-                header: root[f.args[f.b[k]]]
+                made: lift[k]
+                if made >= 0 && !put.contains(made) {
+                    put.push(made)
+                    ir_opt_code_put(code, f.op[made], f.dst[made], f.a[made], f.b[made], f.c[made], f.code_line[made])
+                }
+                header: ir_opt_unique_header(f, keys, root, disp, k)
                 if done.contains(header) -> next
                 done.push(header)
                 ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
             }
         }
-        if target[at] >= 0 -> next
+        if target[at] >= 0 || lifted[at] -> next
         ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
     }
     f.op = code.op.move()
@@ -133,26 +171,33 @@ ir_opt_unique_list: fn(key: String) -> String Never! {
 }
 
 // The header instruction `at` makes unique when it calls a `#unique<..>`
-// helper on a frame header, else -1.
-ir_opt_unique_header: fn(f: IRFunction, keys: [String], root: [Int], at: Int) -> Int Never! {
+// helper on a frame header or a field of one, else -1: the header's base
+// slot plus the slot count times its bytes past that base.
+ir_opt_unique_header: fn(f: IRFunction, keys: [String], root: [Int], disp: [Int], at: Int) -> Int Never! {
     if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
     callee: f.a[at]
     if callee < 0 || callee >= keys.len() || !keys[callee].starts_with("#unique<") -> return -1
     slot: f.args[f.b[at]]
-    if slot < 0 || slot >= root.len() -> return -1
-    root[slot]
+    if slot < 0 || slot >= root.len() || root[slot] < 0 -> return -1
+    root[slot] + root.len() * disp[slot]
 }
 
 // Whether the buffer of `header` is stored before the Loop at `opener`, in
 // a region around it, by a Store of it or a CopyBytes of a whole list
-// header into it (`l := other`); a parameter's header holds one from the
-// start.
-ir_opt_header_ready: fn(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
-    if header < f.param_count -> return true
+// header into it (`l := other`, or of a struct holding it); a parameter's
+// header, or a field of a parameter, holds one from the start.
+ir_opt_header_ready: fn(f: IRFunction, facts: OptFacts, root: [Int], disp: [Int], header: Int, opener: Int) -> Bool Never! {
+    count: root.len()
+    base: header %% count
+    low: header /% count
+    if base < f.param_count -> return true
     loop at in 0..<opener {
-        stores: f.op[at] == .Store && f.b[at] == 16
-        copies: f.op[at] == .CopyBytes && f.c[at] >= 24
-        if (!stores && !copies) || f.a[at] < 0 || root[f.a[at]] != header -> next
+        op: f.op[at]
+        if (op != .Store && op != .CopyBytes) || f.a[at] < 0 || f.a[at] >= count || root[f.a[at]] != base -> next
+        start: disp[f.a[at]]
+        stores: op == .Store && start + f.b[at] == low + 16
+        copies: op == .CopyBytes && start <= low && start + f.c[at] >= low + 24
+        if !stores && !copies -> next
         if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true
     }
     false
@@ -161,13 +206,15 @@ ir_opt_header_ready: fn(f: IRFunction, facts: OptFacts, root: [Int], header: Int
 // Why the Loop at `opener` (End at `end`) can make the buffer of `header`
 // shared again, or "" when it cannot. What a dead end in it reads
 // (ir_opt_dead_end: a failure's cleanup) never reaches its next iteration.
-ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> String Never! {
+ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], disp: [Int], header: Int, opener: Int, end: Int) -> String Never! {
     count: f.slot_type.len()
+    base: header %% count
+    low: header /% count
     // The slots holding the buffer pointer loaded from the header.
     buffer := [Int]{}
     reads := [Int]{}
     loop k in (opener + 1)..<end {
-        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == header && f.b[k] == 16 && f.dst[k] >= 0 -> buffer.push(f.dst[k])
+        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == base && disp[f.a[k]] + f.b[k] == low + 16 && f.dst[k] >= 0 -> buffer.push(f.dst[k])
     }
     at := opener + 1
     loop at < end {
@@ -177,15 +224,12 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
             next
         }
         op: f.op[at]
-        unique: ir_opt_unique_header(f, keys, root, at) == header
         ir_x64_reads_into(f, at, reads)
         loop slot in reads {
             if slot < 0 || slot >= count -> next
-            if root[slot] == header {
-                if op == .Load && f.a[at] == slot -> next
-                if unique -> next
-                if op == .Store && f.a[at] == slot && f.c[at] != slot && ir_opt_header_store_keeps(m, f, facts, at) -> next
-                return "the Loop hands on the list by its {ir_op_name(op)}"
+            if root[slot] == base {
+                if !ir_opt_header_kept(m, f, facts, keys, root, disp, header, at, slot) -> return "the Loop hands on the list by its {ir_op_name(op)}"
+                next
             }
             if buffer.contains(slot) {
                 if ir_opt_buffer_reader(m, f, at) -> next
@@ -194,11 +238,47 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
                 if (op == .Store || op == .StreamStore) && f.c[at] == slot -> return "the Loop stores the buffer"
             }
         }
+        // An Offset of the base only names an address in it (its reads
+        // follow these rules).
         written: ir_x64_write(f, at)
-        if written >= 0 && written < count && root[written] == header -> return "the Loop rebinds the list"
+        if written >= 0 && written < count && root[written] == base && op != .Offset -> return "the Loop rebinds the list"
         at += 1
     }
     ""
+}
+
+// Whether instruction `at`'s read of `slot`, an address `disp[slot]` bytes
+// into the base of `header` (whose 24 bytes start `low` bytes in), keeps
+// the header's buffer its own: an Offset whose address the rules follow
+// too; a `#unique<..>` call on the header or on another header apart from
+// it; a Load or Store through `slot` of bytes apart from the header; a
+// Load of a header word; or a Store of one keeping the buffer
+// (ir_opt_header_store_keeps).
+ir_opt_header_kept: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], disp: [Int], header: Int, at: Int, slot: Int) -> Bool Never! {
+    count: root.len()
+    low: header /% count
+    high: low + 24
+    op: f.op[at]
+    if op == .Offset -> return f.dst[at] >= 0 && f.dst[at] < count && root[f.dst[at]] == root[slot]
+    other: ir_opt_unique_header(f, keys, root, disp, at)
+    if other >= 0 {
+        start: other /% count
+        return other == header || start + 24 <= low || start >= high
+    }
+    if op == .Load && f.a[at] == slot && f.dst[at] >= 0 {
+        start: disp[slot] + f.b[at]
+        loaded: m.types[f.slot_type[f.dst[at]]]
+        return start + loaded.size <= low || start >= high || (loaded.kind != .Aggregate && loaded.size <= 8)
+    }
+    if (op == .Store || op == .StreamStore) && f.a[at] == slot && f.c[at] != slot && f.c[at] >= 0 {
+        start: disp[slot] + f.b[at]
+        size: m.types[f.slot_type[f.c[at]]].size
+        if start + size <= low || start >= high -> return true
+        // One header word, no wider than it.
+        within: start >= low && size <= 8 && (start - low) %% 8 + size <= 8
+        return op == .Store && within && ir_opt_header_store_keeps(m, f, facts, at, start - low - (start - low) %% 8)
+    }
+    false
 }
 
 // Whether instruction `at` is a runtime route that only reads the buffer it
@@ -230,11 +310,12 @@ ir_opt_dead_end: fn(f: IRFunction, at: Int) -> Int Never! {
     end
 }
 
-// Whether the header Store at `at` keeps its buffer the header's own: a
-// length or capacity, or a buffer fresh from jet_rt_alloc (a growth).
-ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Bool Never! {
-    if f.b[at] == 0 || f.b[at] == 8 -> return true
-    if f.b[at] != 16 -> return false
+// Whether the header Store at `at` of the header word `word` bytes in
+// keeps its buffer the header's own: a length or capacity, or a buffer
+// fresh from jet_rt_alloc (a growth).
+ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, word: Int) -> Bool Never! {
+    if word == 0 || word == 8 -> return true
+    if word != 16 -> return false
     value: f.c[at]
     if value < f.param_count || facts.defs[value] != 1 -> return false
     ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
@@ -396,4 +477,76 @@ ir_opt_put_uniques: fn(f: &IRFunction, callees: [Int], params: [Int], helpers: [
     f.c = code.c.move()
     f.code_line = code.line.move()
     true
+}
+
+// fill(canvas): `loop i < canvas.words.len() -> canvas.words[i] = 1` the
+// way the builder makes it: the field's address (an Offset 32 bytes into
+// the `&` struct) made again in the Loop for its `#unique<..>` call (row 1
+// of `keys`) and its data load. `spoil` 1 also hands the struct to a call
+// (row 2) in the Loop, 2 stores a word over the field's buffer pointer
+// through the struct, 3 only stores another field.
+ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    canvas_row: ir_intern_type(m, "Canvas", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Canvas"}, 56, 8, IRClass.Memory, false, 0, ""))
+    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
+    f := ir_function_new("fill", "test:fill.jet::fill", "", "fill.jet", 1)
+    canvas: ir_slot(f, canvas_row, IRSlotKind.Param, ir_intern_name(m, "canvas"), 1)
+    outside: ir_slot(f, list_row, IRSlotKind.Temp, -1, 1)
+    _ := ir_emit(f, IROp.Offset, outside, canvas, 32, -1, 1)
+    n: ir_slot(f, word, IRSlotKind.Temp, -1, 1)
+    _ := ir_emit(f, IROp.Load, n, outside, 0, -1, 1)
+    i: ir_slot(f, word, IRSlotKind.Temp, -1, 1)
+    _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 1)
+    one: ir_slot(f, word, IRSlotKind.Temp, -1, 1)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 1)
+    _ := ir_open(f, IROp.Loop, 2)
+    done: ir_slot(f, flag, IRSlotKind.Temp, -1, 2)
+    _ := ir_emit(f, IROp.Ge, done, i, n, -1, 2)
+    _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 2)
+    field: ir_slot(f, list_row, IRSlotKind.Temp, -1, 2)
+    _ := ir_emit(f, IROp.Offset, field, canvas, 32, -1, 2)
+    unique_args: ir_args(f, [Int]{field})
+    _ := ir_emit(f, IROp.Call, -1, 1, unique_args, 1, 2)
+    data: ir_slot(f, word, IRSlotKind.Temp, -1, 2)
+    _ := ir_emit(f, IROp.Load, data, field, 16, -1, 2)
+    _ := ir_emit(f, IROp.Store, -1, data, 0, one, 2)
+    if spoil == {
+        1 -> {
+            keep_args: ir_args(f, [Int]{canvas})
+            _ := ir_emit(f, IROp.Call, -1, 2, keep_args, 1, 2)
+        }
+        2 -> _ := ir_emit(f, IROp.Store, -1, canvas, 48, one, 2)
+        3 -> _ := ir_emit(f, IROp.Store, -1, canvas, 0, one, 2)
+        else -> {}
+    }
+    _ := ir_emit(f, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 2)
+    ir_end(f, 2)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ir_opt_compact(f)
+    keys: [String]{"test:fill.jet::fill", "#unique<Aggregate:24:64:false:[I64]>", "test:fill.jet::keep"}
+    notes := [String]{}
+    moved: ir_opt_hoist_unique(m, f, keys, notes)
+    assert_eq(notes.len(), 1)
+    if moved == 0 -> return notes[0].copy()
+    // The Offset, then the call, go before the Loop; the Loop's data load
+    // reads the Offset's address there.
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Loop -> next
+        assert(f.op[at - 2] == .Offset && f.dst[at - 2] == field && f.op[at - 1] == .Call && f.args[f.b[at - 1]] == field)
+        loop k in (at + 1)..<f.a[at] -> assert(f.op[k] != .Offset && !(f.op[k] == .Call && f.a[k] == 1))
+    }
+    notes[0].copy()
+}
+
+#Test("A `&` struct's list field is made its own once, before the Loop") {
+    assert_eq(ir_opt_unique_field_test(0), "unique fill [I64]: made unique before the Loop")
+    assert_eq(ir_opt_unique_field_test(3), "unique fill [I64]: made unique before the Loop")
+}
+
+#Test("A Loop that hands on the struct or writes the field's header keeps its unique call") {
+    assert_eq(ir_opt_unique_field_test(1), "unique fill [I64]: declined (the Loop hands on the list by its call)")
+    assert_eq(ir_opt_unique_field_test(2), "unique fill [I64]: declined (the Loop hands on the list by its store)")
 }

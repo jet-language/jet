@@ -7,6 +7,8 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 ## Contracts
 
 - [InlineContracts](Contracts/InlineContracts.jet) — Checked `#Inline` contracts.
+- [PostBreach](Contracts/PostBreach.jet) — A broken `#Post` stops in its function, the same on every tier.
+- [PreBreach](Contracts/PreBreach.jet) — A broken `#Pre` stops at the call, the same on every tier.
 - [PrePost](Contracts/PrePost.jet) — `#Pre`/`#Post` function contracts.
 
 ## Effects
@@ -19,6 +21,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row lists Env, but the program also reads the clock.
 - [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: a file with no package block may use every effect nothing denies.
 - [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `&T` write, `&&T` move/take — and the call site mirrors it.
+- [DependencyUpgrade](Effects/DependencyUpgrade/) — A dependency upgrade that does more: the package writes no effect rows, `.jet/lock` records each dependency's row, and `jet build --locked` refuses an upgrade that reads files, naming the call path.
 - [Determinism](Effects/Determinism.jet)
 - [EffectAuthority](Effects/EffectAuthority.jet) — `#FX(…) { … }` restricts a block to a fixed authority set: only those listed may be used inside, directly or through any call it reaches.
 - [EffectDeclarations](Effects/EffectDeclarations.jet)
@@ -30,13 +33,16 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [EffectTraitBound](Effects/EffectTraitBound.jet) — A trait method may declare an effect upper bound.
 - [EffectTree](Effects/EffectTree.jet) — The ten effect names (`Net`, `FS`, `DB`, …) are tree ROOTS.
 - [FileScope](Effects/FileScope.jet)
+- [GenericRow](Effects/GenericRow.jet) — A generic type's row belongs to each instance: what `Traced` does through its type parameter is charged to the caller that writes `Traced<Parser>`.
+- [LibraryEffect](Effects/LibraryEffect.jet) — A library effect written as a type: `SQL` implements `Effect`, and the `#FX(…)` above it names the kernel effects a row that names `SQL` may do.
 - [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
-- [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module.
+- [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
 - [Pure](Effects/Pure.jet)
 - [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `&self` methods.
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
 - [Taint](Effects/Taint.jet) — External values carry origin facts until a typed decode or an explicit #Scrub gate clears them.
+- [TraitCap](Effects/TraitCap.jet) — A trait cap and a method bound together: `#FX(…)` above a trait bounds every implementation of its methods, and a row on one method narrows it further.
 - [TypeCap](Effects/TypeCap.jet) — A type cap: `#FX(…)` on a struct or enum bounds every method of the type, in its body or in an `impl` block apart from it.
 
 ## Errors

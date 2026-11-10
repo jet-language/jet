@@ -339,26 +339,33 @@ radix: fn(n: Int, base: Int) -> String Never! {
     String.from_bytes(digits) ?? "0"
 }
 
-// Owner ruling #4588, one rounding with the runtime kernel (TextFmt.jet
-// jet_fmt_decimal, the `:Fixed(n)` selector): round value * 10^precision, the
-// scale built by repeated `* 10.0`, half away from zero. Past the Int range
-// the value's exact binary expansion rounds half away at the same place. A
-// value that rounds to zero prints no sign.
+// Owner ruling 2026-10-05 (#4588), one rounding with the runtime kernel
+// (TextFmt.jet jet_fmt_decimal, the `:Fixed(n)` selector): round the exact
+// binary value at `precision` decimals, half away from zero (2.675 -> "2.67",
+// 0.125 -> "0.13"). One correctly rounded `n * 10^precision` names that
+// rounding unless it lies within an ulp of a half; then, and past 2^52 or 22
+// places, the exact binary expansion decides. A value that rounds to zero
+// prints no sign.
 float_fixed: fn(n: Float, frac: Int) -> String Never! {
     if !math.is_finite(n) -> return "{n}"
     precision: if frac < 0 -> 0 else -> frac
-    scale := Float{1.0}
-    places := 0
-    loop places < precision {
-        scale = scale * 10.0
-        if !math.is_finite(scale) -> break
-        places = places + 1
-    }
-    product: n * scale
-    if product > -9223372036854775808.0 && product < 9223372036854775808.0 {
-        whole: math.round(product)
-        sign: if whole < 0 -> "-" else -> ""
-        return "{sign}{scaled_decimal(if whole < 0 -> -whole else -> whole, precision)}"
+    if precision <= 22 {
+        // 10^precision is exact, so the product is off by at most half an
+        // ulp, and `margin` (product * 2^-51) is at least an ulp.
+        scale := Float{1.0}
+        loop _ in 0..<precision -> scale = scale * 10.0
+        product: if n < 0.0 -> -(n * scale) else -> n * scale
+        if product < 4503599627370496.0 {
+            floor: math.floor(product)
+            fraction: product - floor
+            margin: product * 0.0000000000000004440892098500626
+            half: Float{0.5}
+            if fraction - half > margin || half - fraction > margin {
+                whole: math.round(floor) + if fraction > half -> 1 else -> 0
+                sign: if n < 0.0 && whole != 0 -> "-" else -> ""
+                return "{sign}{scaled_decimal(whole, precision)}"
+            }
+        }
     }
     bits: math.to_bits(n)
     binary_exponent: (bits >> 52).bit_and(2047)

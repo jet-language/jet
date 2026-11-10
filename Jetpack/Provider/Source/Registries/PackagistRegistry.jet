@@ -61,7 +61,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
                         loop entry in require {
                             dependency_name: entry.key
                             if dependency_name == "php" || dependency_name.starts_with("ext-") || dependency_name.starts_with("lib-") -> next
-                            if !(ScriptRegistryKind.Packagist).valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
+                            if !provider_script_registry(ProviderFamily.Packagist).valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
                             requirement: provider_script_json_str(entry.value)
                             dependencies.push(RegistryDependency{name: dependency_name, requirement})
                         }
@@ -208,7 +208,7 @@ provider_packagist_install: fn(artifact: RegistryArtifact, out: String, scratch:
     action: "unpack Packagist dist with provisioned PHP ZipArchive"
     provider_registry_run(extract, action, "could not {action}")
     root: provider_registry_archive_root(unpack)
-    provider_script_reject_tree_features(ScriptRegistryKind.Packagist, root, [String]{"composer-plugin"})
+    provider_script_reject_tree_features(provider_script_registry(ProviderFamily.Packagist), root, [String]{"composer-plugin"})
     provider_script_copy_tree(root, files.join(files.join(out, "vendor"), artifact.package.name))
 }
 

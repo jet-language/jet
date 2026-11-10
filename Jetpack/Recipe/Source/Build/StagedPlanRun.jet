@@ -185,7 +185,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
     stage_text: "{action.stage}"
     bound_text: "{action.stage_bound}"
     plan_ctx := HermeticBuildContext.new()
-    planner_spec := ActionSpec.cached([String]{"jet-staged-plan", action.name, identity})
+    planner_spec := ActionSpec.new([String]{"jet-staged-plan", action.name, identity})
         .with_kind(.Generic)
         .with_outputs([String]{plan_output})
         .with_env("STAGED_PLAN_STAGE", stage_text)
@@ -234,7 +234,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
         outputs := emitted.outputs
         outputs.sort()
         outputs.push(marker.copy())
-        spec := ActionSpec.cached(argv)
+        spec := ActionSpec.new(argv)
             .with_kind(.Compile)
             .with_inputs(input_set)
             .with_outputs(outputs)

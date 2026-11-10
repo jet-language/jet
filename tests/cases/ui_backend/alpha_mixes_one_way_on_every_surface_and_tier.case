@@ -1,0 +1,35 @@
+# #6701, D-UI-BLEND1 (owner ruling A): core.ui mixes alpha one way on every
+# surface and tier, source-over on premultiplied sRGB bytes. Alpha 20 of
+# white premultiplies to (255 * 20 + 127) / 255 = 20 and keeps
+# (d * 235 + 127) / 255 of Jet black's bytes, #0B0B0D: 20 + 10 = 30 of 11
+# and 20 + 12 = 32 of 13, alpha 20 + 235 = 255. So #1E1E20, as a design tool
+# mixes it, from a canvas fill, from a sprite's PNG texel (straight
+# 255,255,255,20), under a fully covered text pixel and through
+# core.ui.font.blend, at O0, O1 and O2, built, and on the web.
+fixture: alpha_mixes_one_way_on_every_surface_and_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty
+step build: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty
+step: jet build --target web main.jet
+exit: 0
+step web: node .jet/build/app.js
+exit: 0 # run from the fixture, where the sprite's atlas is
+stdout: = alpha_mixes_one_way_on_every_surface_and_tier.out
+stderr: empty

@@ -1,0 +1,333 @@
+#!/usr/bin/env jet
+// The gauntlet run tier on every optimize level: sieve, wordfreq,
+// datasummary, csvtransform and concurrency-service run under `jet run` at
+// O0, O1 and O2, and each must print its expected output byte for byte.
+//
+//   jet Tools/gauntlet/TierParity.jet --out DIR [--jet PATH] [--plant ENTRY]
+//
+// Run it from the repository root. Each entry's jet/ package is copied to
+// DIR/ENTRY, with its input written there by the entry's fixtures/gen.py (an
+// input that already exists is kept). Each level runs twice, with the
+// programs kept in DIR/cache: the first run compiles the program and runs it,
+// the second runs the kept program and is timed as runtime_wall_seconds. A
+// batch entry's stdout must equal its expected.out; the service entry is
+// started on a free port and must answer its readiness probe and each probe
+// of entry.json exactly, then exit cleanly (its runtime_wall_seconds is the
+// whole session, start to exit). One row per entry and level is printed and
+// written to DIR/tiers.tsv; the exit is 1 on any difference or failed run.
+//
+// `--plant ENTRY` changes one byte of that entry's expected output and runs
+// only that entry: the check must report a difference on every level while
+// the program still prints the real expected output. It exits 0 when the
+// planted change is caught on all three levels, 1 otherwise.
+package: {
+    name: "tier-parity"
+    authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    fs: core.files
+    json: core.encoding.json
+    net: core.net
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+ENTRIES: [String]{"sieve", "wordfreq", "datasummary", "csvtransform", "concurrency-service"}
+LEVELS: 3
+RUN_TIMEOUT_MS: 300000
+// The service entry listens on PORT_BASE + 2 * level + run, a port of its own
+// for every run.
+PORT_BASE: 18180
+
+Probe: struct {
+    send: String
+    expect: String
+}
+
+Entry: struct {
+    name: String
+    // The entry's directory, with its jet/ package, fixtures and expected.out.
+    dir: String
+    service: Bool
+    args: [String]
+    // The entry's fixtures/gen.py and the input it writes; "" for none.
+    gen: String
+    input: String
+    // The readiness probe and the probes of a service entry.
+    ready: Probe
+    probes: [Probe]
+    // What the program prints: expected.out, or for a service the answers to
+    // its readiness probe and each probe, in order.
+    expected: String
+}
+
+Options: struct {
+    out: String
+    jet: String
+    plant: String
+}
+
+// One run of the program: what it printed (or answered), its wall time in
+// nanoseconds, and why it failed to run ("" when it ran and exited 0).
+Ran: struct {
+    output: String
+    ns: Int
+    error: String
+}
+
+fail: fn(message: String) -> Never {
+    print("tier-parity: {message}")
+    process.exit(2)
+}
+
+member: fn(d: Dyn, name: String) -> Dyn {
+    d.field(name) ?? fail("entry.json: no `{name}`")
+}
+
+text_of: fn(d: Dyn, name: String) -> String {
+    member(d, name).text() ?? fail("entry.json: `{name}` is not text")
+}
+
+items: fn(d: Dyn) -> [Dyn] {
+    if d == {
+        .Array(values) -> values
+        else -> fail("entry.json: expected an array")
+    }
+}
+
+probe_of: fn(d: Dyn) -> Probe {
+    Probe{send: text_of(d, "send"), expect: text_of(d, "expect")}
+}
+
+load: fn(root: String, name: String) -> Entry {
+    dir: "{root}/Tools/gauntlet/entries/{name}"
+    tree: json.parse(fs.read("{dir}/entry.json") ?? fail("can't read {dir}/entry.json")) ?? fail("{dir}/entry.json is not JSON")
+    spec: member(tree, "spec")
+    args := [String]{}
+    loop a in items(member(spec, "args")) -> args.push(a.text() ?? fail("{name}: an argument is not text"))
+    gen := ""
+    input := ""
+    if member(spec, "fixtureGen") == {
+        .Null -> {}
+        else -> {
+            g: member(spec, "fixtureGen")
+            gen = "{dir}/{text_of(g, "script")}"
+            input = text_of(g, "out")
+        }
+    }
+    service: text_of(tree, "mode") == "service"
+    if !service {
+        expected: fs.read("{dir}/{text_of(spec, "expected")}") ?? fail("{name}: can't read its expected output")
+        return Entry{name: name.copy(), dir: dir, service: false, args: args, gen: gen, input: input, ready: Probe{send: "", expect: ""}, probes: [Probe]{}, expected: expected}
+    }
+    s: member(tree, "service")
+    ready: probe_of(member(s, "ready"))
+    probes := [Probe]{}
+    loop p in items(member(s, "probe")) -> probes.push(probe_of(p))
+    answers := ready.expect.copy()
+    loop p in probes -> answers = "{answers}{p.expect}"
+    Entry{name: name.copy(), dir: dir, service: true, args: args, gen: gen, input: input, ready: ready, probes: probes, expected: answers}
+}
+
+// DIR/ENTRY: the entry's jet/ package and its input.
+prepare: fn(opts: Options, e: Entry) -> String {
+    work: "{opts.out}/{e.name}"
+    fs.create_dir_all(work) ?? fail("mkdir {work}: {err}")
+    loop file in ["package.jet", "run.jet"] {
+        fs.remove_all("{work}/{file}").drop("a copy left by an earlier run may be absent")
+        fs.copy("{e.dir}/jet/{file}", "{work}/{file}") ?? fail("{e.name}: can't copy jet/{file}: {err}")
+    }
+    if e.gen != "" && !fs.exists("{work}/{e.input}") {
+        made: process.cmd([String]{"python3", e.gen.copy(), "{work}/{e.input}"}).output_limit(1048576).run() ?? fail("{e.name}: python3 could not start for {e.gen}: {err}")
+        if !made.success -> fail("{e.name}: {e.gen} failed (exit {made.code}): {made.errors}")
+    }
+    work
+}
+
+jet_argv: fn(opts: Options, level: Int, args: [String]) -> [String] {
+    argv := [String]{opts.jet.copy(), "run", "-O{level}", "run.jet"}
+    if args.len() > 0 -> argv.push("--")
+    loop a in args -> argv.push(a.copy())
+    argv
+}
+
+run_batch: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
+    started: time.instant()
+    spec: process.cmd(jet_argv(opts, level, e.args)).cwd(work.copy()).env("XDG_CACHE_HOME", "{opts.out}/cache").timeout(time.duration_ms(RUN_TIMEOUT_MS)).output_limit(67108864)
+    receipt: spec.run() ?? return Ran{output: "", ns: 0, error: "{opts.jet} could not start: {err}"}
+    ns: started.elapsed().ns
+    if receipt.timed_out -> return Ran{output: receipt.output.copy(), ns: ns, error: "timed out after {RUN_TIMEOUT_MS / 1000} s"}
+    if !receipt.success -> return Ran{output: receipt.output.copy(), ns: ns, error: "exit {receipt.code}: {last_lines(receipt.errors, 6)}"}
+    Ran{output: receipt.output.copy(), ns: ns, error: ""}
+}
+
+// Sends one probe on its own connection and reads the answer to its end;
+// None when the service does not take the connection.
+ask: fn(address: String, send: String) -> String? {
+    stream := net.tcp_connect(address) ?? return None
+    stream.write_text(send) ?? return None
+    answer := ""
+    loop {
+        part: stream.read_text(1024) ?? return None
+        if part == "" -> break
+        answer = "{answer}{part}"
+    }
+    // The answer is read whole, so a failed close loses nothing.
+    stream.close() ?? return Val(answer)
+    Val(answer)
+}
+
+run_service: fn(opts: Options, e: Entry, work: String, level: Int, port: Int) -> Ran {
+    address: "127.0.0.1:{port}"
+    started: time.instant()
+    child: process.cmd(jet_argv(opts, level, [String]{"{port}"})).cwd(work.copy()).env("XDG_CACHE_HOME", "{opts.out}/cache").output_limit(1048576).spawn() ?? return Ran{output: "", ns: 0, error: "{opts.jet} could not start: {err}"}
+    answers := ""
+    ready := false
+    loop started.elapsed_millis() < RUN_TIMEOUT_MS {
+        if ask(address, e.ready.send) == .Val(answer) {
+            answers = answer
+            ready = true
+            break
+        }
+        time.sleep(10ms)
+    }
+    if !ready {
+        child.kill().drop("the service may have exited already")
+        return Ran{output: "", ns: started.elapsed().ns, error: "the service never answered `{e.ready.send.trim()}` on {address}"}
+    }
+    loop p in e.probes {
+        answer: ask(address, p.send) ?? {
+            child.kill().drop("the service may have exited already")
+            return Ran{output: answers, ns: started.elapsed().ns, error: "the service dropped the probe `{p.send.trim()}`"}
+        }
+        answers = "{answers}{answer}"
+    }
+    receipt: child.wait() ?? return Ran{output: answers, ns: started.elapsed().ns, error: "the service could not be waited for: {err}"}
+    ns: started.elapsed().ns
+    if !receipt.success -> return Ran{output: answers, ns: ns, error: "the service exited {receipt.code}: {last_lines(receipt.errors, 6)}"}
+    Ran{output: answers, ns: ns, error: ""}
+}
+
+run_once: fn(opts: Options, e: Entry, work: String, level: Int, attempt: Int) -> Ran {
+    if e.service -> return run_service(opts, e, work, level, PORT_BASE + 2 * level + attempt)
+    run_batch(opts, e, work, level)
+}
+
+last_lines: fn(text: String, count: Int) -> String {
+    lines: text.trim().split("\n").to_list()
+    from: if lines.len() > count -> lines.len() - count else -> 0
+    lines.slice(from, lines.len()).join(" | ")
+}
+
+// Seconds with millisecond places, from nanoseconds.
+seconds: fn(ns: Int) -> String {
+    ms: (ns + 500000) /% 1000000
+    frac: ms %% 1000
+    pad: if {
+        frac < 10 -> "00"
+        frac < 100 -> "0"
+        else -> ""
+    }
+    "{ms /% 1000}.{pad}{frac}"
+}
+
+// `text` with its first byte changed: the planted output change.
+planted: fn(text: String) -> String {
+    if text == "" -> return "planted"
+    head: if text.starts_with("X") -> "Y" else -> "X"
+    "{head}{text.slice(1, text.count_bytes())}"
+}
+
+// The first line where `got` leaves `want`, for the report.
+first_difference: fn(want: String, got: String) -> String {
+    a: want.split("\n").to_list()
+    b: got.split("\n").to_list()
+    n: if a.len() > b.len() -> a.len() else -> b.len()
+    loop i in 0..<n {
+        wanted: if i < a.len() -> a[i].copy() else -> "<end>"
+        printed: if i < b.len() -> b[i].copy() else -> "<end>"
+        if wanted != printed -> return "line {i + 1}: expected `{wanted}`, printed `{printed}`"
+    }
+    "the same lines"
+}
+
+// Why a level fails, "" when both runs ran cleanly and printed `expected`.
+verdict: fn(expected: String, first: Ran, warm: Ran) -> String {
+    if first.error != "" -> return "first run: {first.error}"
+    if warm.error != "" -> return "kept run: {warm.error}"
+    if first.output != expected -> return "first run, {first_difference(expected, first.output)}"
+    if warm.output != expected -> return "kept run, {first_difference(expected, warm.output)}"
+    ""
+}
+
+options: fn() -> Options {
+    argv: process.args()
+    opts := Options{out: "", jet: process.which("jet") ?? "", plant: ""}
+    i := 0
+    loop i < argv.len() {
+        value: if i + 1 < argv.len() -> argv[i + 1].copy() else -> fail("`{argv[i]}` needs a value")
+        if argv[i] == {
+            "--out" -> opts.out = value
+            "--jet" -> opts.jet = value
+            "--plant" -> opts.plant = value
+            else -> fail("unknown argument `{argv[i]}`; usage: TierParity.jet --out DIR [--jet PATH] [--plant ENTRY]")
+        }
+        i += 2
+    }
+    if opts.out == "" || opts.jet == "" -> fail("--out and a jet compiler (--jet or PATH) are required")
+    if opts.plant != "" && !ENTRIES.contains(opts.plant) -> fail("--plant names one of {ENTRIES.join(", ")}")
+    opts
+}
+
+run: fn() {
+    opts: options()
+    root: sys.current_dir() ?? fail("no working directory")
+    fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}: {err}")
+    fs.remove_all("{opts.out}/cache").drop("a cache left by an earlier run may be absent")
+    names: if opts.plant != "" -> [String]{opts.plant.copy()} else -> ENTRIES.copy()
+    rows := ["entry\tlevel\tstatus\tfirst_run_seconds\truntime_wall_seconds"]
+    failures := 0
+    caught := 0
+    loop name in names {
+        e: load(root, name)
+        work: prepare(opts, e)
+        expected: if opts.plant != "" -> planted(e.expected) else -> e.expected.copy()
+        loop level in 0..<LEVELS {
+            first: run_once(opts, e, work, level, 0)
+            warm: run_once(opts, e, work, level, 1)
+            why: verdict(expected, first, warm)
+            status: if {
+                why == "" -> "ok"
+                first.error != "" || warm.error != "" -> "error"
+                else -> "differs"
+            }
+            if status != "ok" -> failures += 1
+            if status == "differs" && first.output == e.expected && warm.output == e.expected -> caught += 1
+            rows.push("{name}\tO{level}\t{status}\t{seconds(first.ns)}\t{seconds(warm.ns)}")
+            shown: if why == "" -> "" else -> " ({why})"
+            print("{name.pad_end(20, " ")} O{level} {status.pad_end(7, " ")} first run {seconds(first.ns).pad_start(8, " ")} s  runtime_wall_seconds {seconds(warm.ns).pad_start(8, " ")}{shown}")
+        }
+    }
+    fs.write("{opts.out}/tiers.tsv", "{rows.join("\n")}\n") ?? fail("can't write {opts.out}/tiers.tsv: {err}")
+    if opts.plant != "" {
+        if caught == LEVELS {
+            print("tier-parity: the planted change in {opts.plant}'s expected output is caught on O0, O1 and O2")
+            return
+        }
+        print("tier-parity: the planted change in {opts.plant}'s expected output is caught on {caught} of {LEVELS} levels")
+        process.exit(1)
+    }
+    print("tier-parity: {names.len()} entries on O0, O1 and O2, {failures} failing; rows in {opts.out}/tiers.tsv")
+    if failures > 0 -> process.exit(1)
+}
+
+#Test("a planted change alters one byte, and the report names the line it differs on") {
+    assert_eq(planted("count 1\n"), "Xount 1\n")
+    assert_eq(planted("X\n"), "Y\n")
+    assert_eq(first_difference("a\nb\n", "a\nc\n"), "line 2: expected `b`, printed `c`")
+    assert_eq(first_difference("a\n", "a\nb\n"), "line 2: expected ``, printed `b`")
+    assert_eq(seconds(1234567890), "1.235")
+    assert_eq(seconds(5000000), "0.005")
+}

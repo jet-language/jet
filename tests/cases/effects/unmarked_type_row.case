@@ -1,0 +1,29 @@
+# A type with no `#FX(…)` keeps its inferred rows on every tier: a method that
+# prints carries `IO` to its callers, a pure method stays pure, and the
+# program prints the same at O0, O1 and O2.
+fixture: unmarked_type_row/input
+env: NO_COLOR=1
+step: jet check ok.jet
+exit: 0
+step: jet run --optimize=none ok.jet
+exit: 0
+stdout: = "count: 1\nnext: 2\n"
+step: jet run --optimize=basic ok.jet
+exit: 0
+stdout: = "count: 1\nnext: 2\n"
+step: jet run --optimize=full ok.jet
+exit: 0
+stdout: = "count: 1\nnext: 2\n"
+step: jet check pure.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`quiet` uses the effect `IO`, which its signature doesn't allow" # show's inferred row is IO
+step: jet run --optimize=none pure.jet
+exit: 1
+stderr: ~ "`quiet` uses the effect `IO`, which its signature doesn't allow" # O0 keeps the row
+step: jet run --optimize=basic pure.jet
+exit: 1
+stderr: ~ "`quiet` uses the effect `IO`, which its signature doesn't allow" # O1 keeps the row
+step: jet run --optimize=full pure.jet
+exit: 1
+stderr: ~ "`quiet` uses the effect `IO`, which its signature doesn't allow" # O2 keeps the row

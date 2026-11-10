@@ -1,0 +1,25 @@
+# `#Persist` attaches to every module binding form, with no const-only path
+# (#6281 c97): the mutable `:=`, the immutable `:` and a `: comptime { … }`
+# value each persist and read back on every tier. The retired Jet-const
+# `::` spelling is no binding form, so `#Persist NAME :: value` is refused.
+fixture: persist_attaches_to_every_binding_form.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "1 4 21\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "1 4 21\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "1 4 21\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "1 4 21\n"
+step: jet check const_form.jet
+exit: 1 # `::` is no binding form
+stderr: ~ "[jet.InvalidStatement]: Expected `:=` or `:` in a binding" # the parser names the binding forms
+stderr: ~ "const_form.jet:1:16" # at the retired `::`

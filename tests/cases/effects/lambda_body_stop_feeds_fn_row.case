@@ -1,0 +1,33 @@
+# A stop in a lambda body (`panic`, `assert`, `value ?? panic(message)`)
+# puts `Panic` in the enclosing function's row, as the lambda's calls do:
+# a `-[!Panic]>` function holding one is refused on every tier, and the
+# same lambdas under rows that allow stops check clean and print the same
+# at O0, O1 and O2.
+fixture: lambda_body_stop_feeds_fn_row.fixture
+env: NO_COLOR=1
+step: jet check denied.jet
+exit: 1
+stderr: count "Error [" = 3 # one per function
+stderr: ~ "`through_map` can stop, but Panic is denied here" # a panic in a mapped lambda
+stderr: ~ "`through_local` can stop, but Panic is denied here" # an assert in a stored lambda
+stderr: ~ "`through_fallback` can stop, but Panic is denied here" # `?? panic` in a lambda
+step: jet run --optimize=none denied.jet
+exit: 1
+stderr: ~ "`through_map` can stop, but Panic is denied here" # O0 refuses it
+step: jet run --optimize=basic denied.jet
+exit: 1
+stderr: ~ "`through_map` can stop, but Panic is denied here" # O1 refuses it
+step: jet run --optimize=full denied.jet
+exit: 1
+stderr: ~ "`through_map` can stop, but Panic is denied here" # O2 refuses it
+step: jet check allowed.jet
+exit: 0
+step: jet run --optimize=none allowed.jet
+exit: 0
+stdout: = "[2, 4] 3\n"
+step: jet run --optimize=basic allowed.jet
+exit: 0
+stdout: = "[2, 4] 3\n"
+step: jet run --optimize=full allowed.jet
+exit: 0
+stdout: = "[2, 4] 3\n"
