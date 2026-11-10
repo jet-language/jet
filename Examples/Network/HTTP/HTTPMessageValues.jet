@@ -11,18 +11,18 @@ use {
 
 method_named: fn(token: String) -> String {
     method: http.Method.custom(token) ?? return "refused"
-    "{method}"
+    method.display()
 }
 
 status_named: fn(code: Int) -> String {
     status: http.Status.new(code) ?? return "refused"
-    "{status}"
+    status.display()
 }
 
 field_named: fn(name: String, value: String) -> String {
     field_name: http.HeaderName.new(name) ?? return "refused name"
     field_value: http.HeaderValue.new(value) ?? return "refused value"
-    "{field_name}: {field_value}"
+    [field_name.display(), field_value.display()].join(": ")
 }
 
 run: fn() {
@@ -35,7 +35,7 @@ run: fn() {
 
     print(status_named(299))
     print(status_named(600))
-    print("{http.Version.http_1_0()} {http.Version.http_1_1()} {http.Version.http_2()}")
+    print([http.Version.http_1_0().display(), http.Version.http_1_1().display(), http.Version.http_2().display()].join(" "))
 
     print(field_named("X-Test", "ok"))
     print(field_named("X Test", "ok"))
