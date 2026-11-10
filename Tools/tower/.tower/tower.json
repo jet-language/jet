@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98971,
+    "rev": 98975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57078,15 +57078,6 @@
           "at": "2026-11-10T18:34:43.974Z"
         },
         {
-          "n": 41,
-          "text": "Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 and verify-rows, and the cost is the runtime's baseline, not the twins. The fix goes in the general mechanism (runtime start-up, reserved heap or arena sizing, and eagerly mapped tables), and is proven on a second small program. PortBars shows peak memory PASS on all nine.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T19:58:53.233Z"
-        },
-        {
           "n": 42,
           "text": "Reasoning: every PortBars entry has its review.json record from a reviewer of a different model family than the twin's author. The reasoning bar passes on all nine.",
           "status": "open",
@@ -57106,7 +57097,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T20:53:13.497Z",
+      "updated": "2026-11-10T21:03:28.160Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -70797,10 +70788,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-10T19:45:05.245Z",
+      "updated": "2026-11-10T21:03:31.553Z",
       "updatedBy": "Main",
       "goals": [
-        "G4",
         "G11"
       ],
       "criteriaLastN": 12
@@ -88896,59 +88886,6 @@
       "criteriaLastN": 16
     },
     {
-      "id": "c0qowqlz",
-      "num": 6572,
-      "title": "codegen: a consuming method fn m(&&self) does not drop self (a struct's [TCPListener] stays open)",
-      "body": "Reported by JetpackStore 2026-11-05. On a struct with a [TCPListener] field, calling a consuming method fn release(^self) Never! {} leaves the listener open: after ^r.release() the port can't be rebound. A free fn f(^r: S) {} or the struct leaving scope drops it correctly. Repro (jet run -A; expected every line 'rebind ok', got 'consume empty: rebind FAILED' and 'consume field: rebind FAILED'):\n\nuse net :: core.net\nstruct Res {\n    ports: [Int]\n    listeners: [TCPListener]\n    fn release_empty(^self) Never! {}\n    fn release_field(^self) Never! { held :: self.listeners }\n}\nfn make() -[Net]> Res NetError! {\n    held := [TCPListener]{}\n    listener :: net.tcp_listen(\"127.0.0.1:0\")\n    address :: net.listener_local_socket_addr(listener)\n    &held.push(^listener)\n    Ok(Res{ports: [Int]{net.socket_port(address)}, listeners: held})\n}\nfn release_free(^r: Res) Never! {}\nfn try_bind(label: String, port: Int) Never! -[Net, IO]> {\n    if net.tcp_listen(\"127.0.0.1:{port}\") == { .Ok(_) -> print(\"{label}: rebind ok\") .Err(e) -> print(\"{label}: rebind FAILED {e}\") }\n}\nfn run() Never! -[Net, IO]> {\n    b :: make() ?? panic(\"b\"); pb :: b.ports[0]; ^b.release_empty(); try_bind(\"consume empty\", pb)\n    c :: make() ?? panic(\"c\"); pc :: c.ports[0]; ^c.release_field(); try_bind(\"consume field\", pc)\n    d :: make() ?? panic(\"d\"); pd :: d.ports[0]; release_free(^d); try_bind(\"free fn\", pd)\n}\n\nWorkaround in Jetpack Services: free fn services_release_ports(^reservation); remove it when fixed.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "Consuming-method drop is correct on every tier; pinned by the case at f080cc6bde."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: under D-MOVE-SIGIL1=A and D-CALLSITE-MARK2=A the repro reads fn release(&&self) and the call is r.release(); the defect is unchanged."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A consuming method drops self: after calling it on a struct holding a [TCPListener], the port rebinds, proven by a case on O0, O1 and O2 (the JetpackStore repro prints only `rebind ok`).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "f080cc6bde: tests/cases/resource_close/consuming_method_drops_self_and_its_listener.case (the repro in current syntax: fn(&&self) consuming methods on a struct holding [TCPListener], plus a free fn) prints only 'rebind ok' on jet run (O0), jet build (O1) and jet build --release (O2); jet test Compiler --profile cases --filter consuming_method_drops_self PASS 1/1 on dev with seed a0_033.",
-          "at": "2026-11-07T21:02:23.771Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G10"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T21:32:45.696Z",
-      "updated": "2026-11-07T21:02:26.553Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-07T21:02:26.553Z"
-    },
-    {
       "id": "c0tc8fct",
       "num": 6573,
       "title": "JetDevserver Canvas debug: run_session_recorded and run_session_replay are called but defined nowhere",
@@ -93174,6 +93111,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:23:26.616Z"
+        },
+        {
+          "n": 3,
+          "text": "Owner instruction 2026-11-10 ~16:10: the target for scripts is the machine ceiling, the same as for every other program. Every ScriptBench cell and every orchestrator-tool (PortBars) workload has an asm-parity ceiling reference (Tools/perf/asm-parity) that does the same job with the best known technique, and Jet's `jet run` (warm, cold and after an edit, reported separately) and its built binary each come within about 1.00 of that ceiling in cycles, wall time, peak RSS and bytes. Beating the peers (c2) is the floor, not the goal, and a cell without a ceiling reference is uncovered and fails.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T21:03:23.935Z"
+        },
+        {
+          "n": 4,
+          "text": "(moved from #5072 c41 by the owner instruction of 2026-11-10 ~16:10) Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 and verify-rows, and the cost is the runtime's baseline, not the twins. The fix goes in the general mechanism (runtime start-up, reserved heap or arena sizing, and eagerly mapped tables), and is proven on a second small program. PortBars shows peak memory PASS on all nine. Part 1 (ScriptAPI-3, image layout locality and the build key; it rides t16) took the warm small-script peak from 15.5 MB to 7.1-7.5 MB, and batch10, integrate10 and streamb10 still lose (11.8 against 10.6 MB, 12.9 against 8.6, 10.6 against 8.6), while verify-rows ties.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T21:03:26.388Z"
         }
       ],
       "refs": [],
@@ -93184,9 +93139,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:23:24.506Z",
-      "updated": "2026-11-09T19:40:36.843Z",
+      "updated": "2026-11-10T21:03:26.388Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 4
     },
     {
       "id": "c01paimh",
@@ -200443,6 +200398,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T21:03:31.554Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a0gmpl",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-10T21:03:28.160Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0qe89cl",
+      "note": "#41: Owner instruction 2026-11-10 ~16:10: the script goal holds no speed or size work. Moved to #6639 (G11).; was [open]: Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 "
+    },
+    {
+      "at": "2026-11-10T21:03:26.388Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0g6fxb9",
+      "note": "#4 (moved from #5072 c41 by the owner instruction of 2026-11-10"
+    },
+    {
+      "at": "2026-11-10T21:03:23.935Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0g6fxb9",
+      "note": "#3 Owner instruction 2026-11-10 ~16:10: the target for scripts "
+    },
     {
       "at": "2026-11-10T20:53:13.497Z",
       "by": "Main",
