@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98725,
+    "rev": 98726,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75708,7 +75708,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T12:28:52.041Z",
+      "updated": "2026-11-10T12:28:54.729Z",
       "updatedBy": "Main",
       "criteriaLastN": 157
     },
@@ -190881,20 +190881,20 @@
       "cardId": "c0oev2ib",
       "group": "syntax",
       "title": "Keep <> in every pipe step, and let E0438's fix write it into the missing first slot",
-      "situation": "A pipe step is |> expression, and <> inside it is the value from the line above. D-PIPE1=A ratified that every step writes <> at least once. A step without it is E0438.\n\nYour review asked whether a step without <> should pass the value as the first argument, as Elixir does. You kept <> because it marks where piped data goes. A keeps the ratified rule; B is the review's proposal.",
+      "situation": "A pipe step is a line starting with |>, and <> inside it stands for the value from the line above. The ratified rule says every step writes <> at least once; a step without it is an error.\n\nThe review asked whether a step without <> should pass the value as the first argument, as Elixir does. The owner kept <>, because it marks where piped data goes. A keeps the rule and makes the error's fix write <> for you; B is the review's proposal.",
       "gist": "Should a pipe step keep writing <>, or should a call step without <> take the value as its first argument?",
       "lesson": "A pipe passes a value down a chain of steps. Jet marks where the value lands with <>, as in |> add(<>, 10). Some languages drop the mark and put the value first. This vote decides whether Jet's steps keep the mark.",
       "explainer": "Words used here. A pipe step is a line starting with |>. <> stands for the value from the step above. E0438 is the error for a step that never uses <>. A fix is the rewrite an error offers to apply for you.",
-      "story": "Ivo writes |> add(10) out of Elixir habit and gets E0438. Under A, jet fix turns it into add(<>, 10) in one step, and a later reader sees exactly where the value went.",
+      "story": "Ivo writes |> double() and |> add(10) out of Elixir habit and gets E0438 twice. Under A, jet fix turns the first into double(<>). For add, both slots take an Int, so his editor offers add(<>, 10) first, and a later reader sees exactly where the value went.",
       "inWild": "# Elixir: the value is the first argument of each call step.\n3\n|> double()\n|> add(10)",
-      "detail": "What this ballot decides. Whether a pipe step may leave out <>. Pipes themselves, the <> glyph and the ?? return fallback of D-PIPE1=A are unchanged.\n\nToday, on seed a0_042. Probe p02 writes 3 |> double(<>) |> add(<>, 10) and prints 16, and 3 |> add(10, <>) prints 13. Probe p01 writes |> double, |> double() and |> add(10), and each is E0438: this pipe step does not use <>.\n\nProbe p03 writes |> print(\"done\") in the middle of a pipe. That is also E0438, and here the error is doing its job: the step ignored the value, which is almost always a mistake.\n\nThe rule under A. Every step writes <>, as ratified. E0438's fix gets better. When the step is a call that is exactly one argument short and its first parameter takes the value's type, the fix inserts <> there. Otherwise the fix stays the general one.\n\nSo the typing cost of the mark becomes one jet fix, and the reader still sees where the value lands in every step.\n\nCensus on the seed. Pipes are rare. 13 lines in 4 Jet files start with a step. Outside the compiler's message strings, 18 steps sit in 7 files. 5 pass <> as the whole first argument and 5 call a method on it there, as Int.parse(<>.trim()). 4 put it in a condition, a lambda or a comparison, and 4 are error tests with no <>.\n\nSo 9 of the 14 working steps would need <> even under a first-argument rule, and those steps would mix two styles.\n\nBeginner path. Write <> where the value goes; if you forget, jet fix writes it. Expert path. The same rule everywhere: a step is any expression, and <> may appear more than once or deep inside.\n\nDownsides of A, and what the design does about them. A step written the Elixir way fails once. The improved fix rewrites it exactly, so the cost is one command, not a lookup.\n\nWhat remains. The common first-argument step carries two characters, <> and a comma, that Elixir leaves out. That is the price of the mark you chose to keep.\n\nOther options. B is the review's proposal, guarded: a call one argument short takes the value first, so a complete call like print(\"done\") still fails. C is Elixir's rule unguarded. D is F#'s bare function name. E fills the last argument, as OCaml and F# do.\n\nTheir best cases. B shortens 5 steps with no silent change to a complete call. C is the shortest. D reads cleanly for one-argument functions. E suits curried libraries.\n\nTheir costs. B leaves no mark, so a reader must know the callee's arity to see where the value goes. C turns a forgotten value into a silent wrong call. D adds a second step form. E puts the value where Jet's argument order rarely expects it.",
+      "detail": "What this ballot decides. Whether a pipe step may leave out <>. Pipes themselves, the <> glyph and the ?? return fallback of D-PIPE1=A are unchanged.\n\nToday, on the t6c compiler (dev 76955986d0), as on the seed. Probe p02 writes 3 |> double(<>) |> add(<>, 10) and prints 16, and 3 |> add(10, <>) prints 13. Probe p01 writes |> double, |> double() and |> add(10), and each is E0438, PipeStepWithoutValue. Its fix today is general: write <> where the value goes, or end the pipe before this step.\n\nProbe p03 writes |> print(\"done\") in the middle of a pipe. That is also E0438, and here the error is doing its job: the step ignored the value, which is almost always a mistake.\n\nThe rule under A. Every step writes <>, as ratified, and E0438's fix gets exact. A bare function name of one parameter becomes name(<>). A call exactly one argument short becomes a call with <> in the one slot whose parameter accepts the value's type. A name that is only a method of the value's type becomes <>.name(…).\n\nNo silent wrong placement. jet fix applies the fix only when exactly one placement fits. When several slots accept the type, as in add(10) with two Int parameters, the error lists each placement. The editor offers each, first slot first, and jet fix leaves the site for a person. Otherwise the fix stays the general one.\n\nSo the typing cost of the mark becomes one jet fix, and the reader still sees where the value lands in every step.\n\nCensus on dev, unchanged from the seed. Pipes are rare. 13 lines in 4 Jet files start with a step. Outside the compiler's message strings, 18 steps sit in 7 files. 5 pass <> as the whole first argument and 5 call a method on it there, as Int.parse(<>.trim()). 4 put it in a condition, a lambda or a comparison, and 4 are error tests with no <>.\n\nSo 9 of the 14 working steps would need <> even under a first-argument rule, and those steps would mix two styles.\n\nBeginner path. Write <> where the value goes; if you forget, jet fix writes it. Expert path. The same rule everywhere: a step is any expression, and <> may appear more than once or deep inside.\n\nDownsides of A, and what the design does about them. A step written the Elixir way fails once. The improved fix rewrites it exactly, so the cost is one command, not a lookup.\n\nWhat remains. The common first-argument step carries two characters, <> and a comma, that Elixir leaves out. That is the price of the mark you chose to keep.\n\nOther options. B is the review's proposal, guarded: a call one argument short takes the value first, so a complete call like print(\"done\") still fails. C is Elixir's rule unguarded. D is F#'s bare function name. E fills the last argument, as OCaml and F# do.\n\nTheir best cases. B shortens 5 steps with no silent change to a complete call. C is the shortest. D reads cleanly for one-argument functions. E suits curried libraries.\n\nTheir costs. B leaves no mark, so a reader must know the callee's arity to see where the value goes. C turns a forgotten value into a silent wrong call. D adds a second step form. E puts the value where Jet's argument order rarely expects it.",
       "options": [
         {
           "key": "A",
           "name": "Keep <>; a better fix",
-          "detail": "Every step writes <>, as ratified. E0438's fix inserts <> into the missing first slot of a call one argument short.",
-          "technical": "D-PIPE1=A unchanged. E0438 fix: when the step is a call with exactly one required argument missing and the first parameter accepts the piped type, insert <> first; otherwise the current fix.",
-          "code": "add: fn(a: Int, b: Int) -> Int { a + b }\ndouble: fn(a: Int) -> Int { a * 2 }\n\nrun: fn() {\n    total: 3\n        |> double(<>)\n        |> add(<>, 10)\n    print(total)\n}\n// Proposed (A): the ratified rule stays; probe p02 prints 16.\n// Writing |> add(10) stays E0438, and its fix now writes add(<>, 10) for you."
+          "detail": "Every step writes <>, as ratified. E0438's fix writes <> into the one slot that fits, and offers each slot when several do.",
+          "technical": "D-PIPE1=A unchanged. E0438 fix: a bare one-parameter name gets (<>); a call with exactly one required argument missing gets <> in the one slot that accepts the piped type; a method-only name gets <>.name(…). jet fix applies it only when one placement fits; with several, the editor offers each and jet fix leaves the site.",
+          "code": "add: fn(a: Int, b: Int) -> Int { a + b }\ndouble: fn(a: Int) -> Int { a * 2 }\n\nrun: fn() {\n    total: 3\n        |> double(<>)\n        |> add(<>, 10)\n    print(total)\n}\n// Proposed (A): the ratified rule stays; probe p02 prints 16.\n// Writing |> double() stays E0438, and jet fix writes double(<>) for you.\n// |> add(10) has two Int slots, so the editor offers add(<>, 10) first, then add(10, <>)."
         },
         {
           "key": "B",
@@ -190987,9 +190987,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
       },
-      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh cp run; the p files are the pipe probes, outputs in probes/cp/out. The census reads git grep for |> steps over Core, Compiler, Jetpack, Tools, Examples and tests. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/cp run; the p files are the pipe probes, outputs in probes/cp/out6. The census is git grep -cE for lines starting with |> over Jet files on dev. Then run Tools/agent/ballots/Validate.jet on this payload.",
       "surface": {
         "gist": "Should a pipe step keep writing <>, or should a call step without <> take the value as its first argument?",
         "lesson": "A pipe passes a value down a chain of steps. Jet marks where the value lands with <>, as in |> add(<>, 10). Some languages drop the mark and put the value first. This vote decides whether Jet's steps keep the mark.",
@@ -198070,6 +198070,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T12:28:54.729Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PIPE-FIRST1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T12:28:52.041Z",
       "by": "Main",
