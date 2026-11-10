@@ -10,10 +10,9 @@ response_text_default: fn(response: HTTPResponse) -> String Never! {
                 .UnsupportedEncoding -> return "err:UnsupportedEncoding"
                 .IO(operation) -> return "err:IO:{operation}"
                 .BodyConsumed -> return "err:BodyConsumed"
-                else -> return "err:other"
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .InvalidFraming | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return "err:other"
             }
         }
-        else -> return "err:unexpected"
     }
 }
 
@@ -24,10 +23,9 @@ response_text_explicit: fn(response: HTTPResponse) -> String Never! {
             if error == {
                 .BodyTooLarge(limit) -> return "err:BodyTooLarge:{limit}"
                 .BodyConsumed -> return "err:BodyConsumed"
-                else -> return "err:other"
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return "err:other"
             }
         }
-        else -> return "err:unexpected"
     }
 }
 
@@ -39,14 +37,12 @@ response_text_consumed: fn(response: HTTPResponse) -> String Never! {
                 .Err(error) -> {
                     if error == {
                         .BodyConsumed -> return "err:BodyConsumed"
-                        else -> return "err:other"
+                        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return "err:other"
                     }
                 }
-                else -> return "err:unexpected"
             }
         }
         .Err(_) -> return "err:first-read"
-        else -> return "err:first-read"
     }
 }
 
@@ -56,10 +52,9 @@ response_text_stream: fn(response: HTTPResponse) -> String Never! {
         .Err(error) -> {
             if error == {
                 .BodyConsumed -> return "err:BodyConsumed"
-                else -> return "err:other"
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> return "err:other"
             }
         }
-        else -> return "err:unexpected"
     }
 }
 
@@ -67,36 +62,29 @@ run: fn() {
     if http.get("http://{cap:addr}/default") == {
         .Ok(response) -> print("default={response_text_default(response)}")
         .Err(_) -> print("default=request-error")
-        else -> print("default=unexpected")
     }
     if http.get("http://{cap:addr}/explicit") == {
         .Ok(response) -> print("explicit={response_text_explicit(response)}")
         .Err(_) -> print("explicit=request-error")
-        else -> print("explicit=unexpected")
     }
     if http.get("http://{cap:addr}/consumed") == {
         .Ok(response) -> print("consumed={response_text_consumed(response)}")
         .Err(_) -> print("consumed=request-error")
-        else -> print("consumed=unexpected")
     }
     if http.get("http://{cap:addr}/stream") == {
         .Ok(response) -> print("stream={response_text_stream(response)}")
         .Err(_) -> print("stream=request-error")
-        else -> print("stream=unexpected")
     }
     if http.get("http://{cap:addr}/over") == {
         .Ok(over) -> print("over={response_text_default(over)}")
         .Err(_) -> print("over=request-error")
-        else -> print("over=unexpected")
     }
     if http.get("http://{cap:addr}/binary") == {
         .Ok(binary) -> print("binary={response_text_default(binary)}")
         .Err(_) -> print("binary=request-error")
-        else -> print("binary=unexpected")
     }
     if http.get("http://{cap:addr}/truncated") == {
         .Ok(truncated) -> print("truncated={response_text_default(truncated)}")
         .Err(_) -> print("truncated=request-error")
-        else -> print("truncated=unexpected")
     }
 }

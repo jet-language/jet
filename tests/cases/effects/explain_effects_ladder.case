@@ -16,20 +16,20 @@ stdout: ~ "  block     #FX(FS.Read, IO)  main.jet:5" # the `#FX` block holding l
 stdout: ~ "  function  -[FS, IO]>        main.jet:4\n  type      (none written)\n  module    (none written)\n" # the type rung sits between function and module; neither is written here
 stdout: ~ "  package   allow: [FS]       package.jet:3" # the package row as written
 stdout: ~ "  run       everything else allowed; --deny wins" # the run rung
-stdout: ~ "reaches: FS.Read via pricing::rates (main.jet:6)" # the block reaches the read through the call
+stdout: ~ "reaches: FS.Read(\"rates.txt\") via pricing::rates (main.jet:6)" # the block reaches the read through the call
 stdout: ~ ", IO (main.jet:6)" # and prints directly
 step module: jet explain effects pricing.jet:3
 exit: 0
 stdout: ~ "effects at pricing.jet:3, in `rates`, nearest first" # a module file of the package
 stdout: ~ "  function  (none written)  pricing.jet:3\n  type      (none written)\n" # no row is written on `rates`, and it is no method
 stdout: ~ "  module    #FX(!Net)       main.jet:1" # the cap written where pricing is declared
-stdout: ~ "reaches: FS.Read (pricing.jet:3)" # `rates` reads the file itself
+stdout: ~ "reaches: FS.Read(\"rates.txt\") (pricing.jet:3)" # `rates` reads the file itself
 step method: jet explain effects receipt.jet:15
 exit: 0
 stdout: ~ "effects at receipt.jet:15, in `render`, nearest first" # a trait method of a capped type
 stdout: ~ "  function  (none written)    receipt.jet:15\n  trait     #FX(FS.Read, IO)  receipt.jet:4\n  type      #FX(FS.Read)      receipt.jet:9\n" # no row on `render`, then the cap of the trait it implements, then its type's cap
 stdout: ~ "  module    #FX(!Exec)        receipt.jet:1\n  package" # the file-head cap is the module rung; `receipt: module` is declared with no cap
-stdout: ~ "reaches: FS.Read (receipt.jet:15)" # `render` reads the file itself
+stdout: ~ "reaches: FS.Read(\"receipt.txt\") (receipt.jet:15)" # `render` reads the file itself
 step caps: jet explain effects --caps
 exit: 0
 stdout: ~ "main.jet:1  #FX(!Net)  module pricing" # the module cap where pricing is declared
@@ -40,7 +40,7 @@ step json: jet explain effects --json main.jet:6
 exit: 0
 stdout: ~ "\"explain.effects\"" # one jet.status/v1 line
 stdout: ~ "\"rung\":\"block\"" # the rungs ride as objects
-stdout: ~ "\"effect\":\"FS.Read\"" # and so do the reaches
+stdout: ~ "\"effect\":\"FS.Read(" # and so do the reaches
 step past: jet explain effects main.jet:99
 exit: 2
 stderr: ~ "Line 99 is past the end of `main.jet`, which has 14 lines" # a line past the end is a usage error

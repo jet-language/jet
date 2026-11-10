@@ -24,9 +24,9 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .UnsupportedEncoding -> print("UnsupportedEncoding")
-                else -> panic("wrong br encoding error")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> panic("wrong br encoding error")
             }
         }
-        else -> panic("br accepted")
+        .Ok(_) -> panic("br accepted")
     }
 }

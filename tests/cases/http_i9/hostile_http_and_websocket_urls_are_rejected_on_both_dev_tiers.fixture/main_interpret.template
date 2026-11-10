@@ -11,7 +11,6 @@ run: fn() {
             if error == .InvalidURL -> print("http url rejected")
             else -> print("http url wrong")
         }
-        else -> print("http url unexpected")
     }
     method: http_client.request("GET\nInjected", "http://{cap:addr_interpret}/method")
     if method.send() == {
@@ -20,7 +19,6 @@ run: fn() {
             if error == .InvalidHeader -> print("method rejected")
             else -> print("method wrong")
         }
-        else -> print("method unexpected")
     }
     header_name: http_client.request("GET", "http://{cap:addr_interpret}/header-name")
         .header("x-bad\nname", "value")
@@ -30,7 +28,6 @@ run: fn() {
             if error == .InvalidHeader -> print("header name rejected")
             else -> print("header name wrong")
         }
-        else -> print("header name unexpected")
     }
     header_value: http_client.request("GET", "http://{cap:addr_interpret}/header-value")
         .header("x-safe", "bad\nvalue")
@@ -40,7 +37,6 @@ run: fn() {
             if error == .InvalidHeader -> print("header value rejected")
             else -> print("header value wrong")
         }
-        else -> print("header value unexpected")
     }
     content_length: http_client.request("POST", "http://{cap:addr_interpret}/content-length")
         .header("Content-Length", "0")
@@ -51,7 +47,6 @@ run: fn() {
             if error == .InvalidFraming -> print("content length rejected")
             else -> print("content length wrong")
         }
-        else -> print("content length unexpected")
     }
     transfer_encoding: http_client.request("POST", "http://{cap:addr_interpret}/transfer-encoding")
         .header("Transfer-Encoding", "chunked")
@@ -62,7 +57,6 @@ run: fn() {
             if error == .InvalidFraming -> print("transfer encoding rejected")
             else -> print("transfer encoding wrong")
         }
-        else -> print("transfer encoding unexpected")
     }
     duplicate_host: http_client.request("GET", "http://{cap:addr_interpret}/duplicate-host")
         .header("Host", "one")
@@ -73,7 +67,6 @@ run: fn() {
             if error == .InvalidFraming -> print("duplicate host rejected")
             else -> print("duplicate host wrong")
         }
-        else -> print("duplicate host unexpected")
     }
     connection_host: http_client.request("GET", "http://{cap:addr_interpret}/connection-host")
         .header("cOnNeCtIoN", "hOsT")
@@ -83,7 +76,6 @@ run: fn() {
             if error == .InvalidFraming -> print("connection host rejected")
             else -> print("connection host wrong")
         }
-        else -> print("connection host unexpected")
     }
     connection_length: http_client.request("POST", "http://{cap:addr_interpret}/connection-length")
         .header("Connection", "Content-Length")
@@ -94,7 +86,6 @@ run: fn() {
             if error == .InvalidFraming -> print("connection length rejected")
             else -> print("connection length wrong")
         }
-        else -> print("connection length unexpected")
     }
     connection_transfer: http_client.request("POST", "http://{cap:addr_interpret}/connection-transfer")
         .header("Connection", "tRaNsFeR-EnCoDiNg")
@@ -105,7 +96,6 @@ run: fn() {
             if error == .InvalidFraming -> print("connection transfer rejected")
             else -> print("connection transfer wrong")
         }
-        else -> print("connection transfer unexpected")
     }
     proxy_connection: http_client.request("GET", "http://{cap:addr_interpret}/proxy-connection")
         .header("pRoXy-CoNnEcTiOn", "keep-alive")
@@ -115,7 +105,6 @@ run: fn() {
             if error == .InvalidFraming -> print("proxy connection rejected")
             else -> print("proxy connection wrong")
         }
-        else -> print("proxy connection unexpected")
     }
     keep_alive: http_client.request("GET", "http://{cap:addr_interpret}/keep-alive")
         .header("Keep-Alive", "timeout=5")
@@ -125,7 +114,6 @@ run: fn() {
             if error == .InvalidFraming -> print("keep-alive rejected")
             else -> print("keep-alive wrong")
         }
-        else -> print("keep-alive unexpected")
     }
     te: http_client.request("GET", "http://{cap:addr_interpret}/te")
         .header("TE", "trailers")
@@ -135,7 +123,6 @@ run: fn() {
             if error == .InvalidFraming -> print("te rejected")
             else -> print("te wrong")
         }
-        else -> print("te unexpected")
     }
     trailer: http_client.request("GET", "http://{cap:addr_interpret}/trailer")
         .header("Trailer", "x-trailer")
@@ -145,7 +132,6 @@ run: fn() {
             if error == .InvalidFraming -> print("trailer rejected")
             else -> print("trailer wrong")
         }
-        else -> print("trailer unexpected")
     }
     upgrade: http_client.request("GET", "http://{cap:addr_interpret}/upgrade")
         .header("Upgrade", "websocket")
@@ -155,7 +141,6 @@ run: fn() {
             if error == .InvalidFraming -> print("upgrade rejected")
             else -> print("upgrade wrong")
         }
-        else -> print("upgrade unexpected")
     }
     proxy_authenticate: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authenticate")
         .header("Proxy-Authenticate", "Basic")
@@ -165,7 +150,6 @@ run: fn() {
             if error == .InvalidFraming -> print("proxy authenticate rejected")
             else -> print("proxy authenticate wrong")
         }
-        else -> print("proxy authenticate unexpected")
     }
     proxy_authorization: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authorization")
         .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
@@ -175,7 +159,6 @@ run: fn() {
             if error == .InvalidFraming -> print("proxy authorization rejected")
             else -> print("proxy authorization wrong")
         }
-        else -> print("proxy authorization unexpected")
     }
     if ws.connect("ws://{cap:addr_interpret}/path\nInjected: yes") == {
         .Ok(_) -> print("ws accepted")
@@ -183,6 +166,5 @@ run: fn() {
             if error == .InvalidURL -> print("ws rejected")
             else -> print("ws wrong error")
         }
-        else -> print("ws unexpected")
     }
 }

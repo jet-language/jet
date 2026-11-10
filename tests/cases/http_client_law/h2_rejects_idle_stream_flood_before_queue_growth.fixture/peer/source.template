@@ -88,7 +88,7 @@ observed_closed: fn(stream: &TCPStream) -> Bool {
             .Err(error) -> {
                 if error == {
                     .Timeout(_) -> { if time.instant() >= deadline -> return false }
-                    else -> return true
+                    .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> return true
                 }
             }
         }
