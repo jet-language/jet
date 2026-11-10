@@ -1,0 +1,25 @@
+# D-SPREAD1 (#4284 c5): `prefix.[a, b]` is `[prefix.a, prefix.b]` in ordinary
+# Jet code. In list position the members splice into the surrounding list. An
+# entry that is not a bare member name is E0961.
+fixture: d_spread1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_spread1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_spread1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_spread1_contract.stdout.expected
+stderr: empty
+step not_member: jet check not_member/main.jet
+exit: 1
+stderr: ~ "`.[ ]` lists member names, not calls or expressions" # only bare member names
+stderr: ~ "--> main.jet:8:20" # located at the non-member entry
+stderr: ~ "jet-lang.dev/e/E0961" # one registered code

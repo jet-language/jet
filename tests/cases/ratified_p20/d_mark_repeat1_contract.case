@@ -1,0 +1,31 @@
+# D-MARK-REPEAT1 (#4284 c3): one rule written twice on one target is E0999 with
+# a remove-the-repeat fix. `#Pre`, `#Post` and `#Allow` are repeatable rows:
+# several copies are accepted, and each `#Pre` keeps its own check and message.
+fixture: d_mark_repeat1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_mark_repeat1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_mark_repeat1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_mark_repeat1_contract.stdout.expected
+stderr: empty
+step twice: jet check twice/main.jet
+exit: 1
+stderr: ~ "`#Inline` is already applied to this function" # a non-repeatable rule written twice
+stderr: ~ "--> main.jet:1:11" # located at the repeat
+stderr: ~ "Fix: Remove the repeated marker" # remove-the-repeat fix
+stderr: ~ "jet-lang.dev/e/E0999" # one registered code
+step second_pre: jet run pre_fails/main.jet
+exit: 70 # the second `#Pre` fails on its own
+stdout: ~ "4" # the first call satisfies both checks
+stderr: ~ "#Pre contract failed: x is small" # the second clause's own message
+stderr: !~ "x is positive" # the first clause still holds
