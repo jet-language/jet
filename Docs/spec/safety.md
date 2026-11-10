@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1435,
+  "total": 1410,
   "counts": {
-    "Compiler": 748,
-    "Core": 190,
+    "Compiler": 749,
+    "Core": 164,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -3466,21 +3466,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 391,
+      "line": 397,
       "column": 9,
       "reason": "the caller holds an existing owner; atomic retain cannot race final-owner retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 412,
+      "line": 418,
       "column": 9,
       "reason": "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 417,
+      "line": 423,
       "column": 13,
       "reason": "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement"
     },
@@ -3795,7 +3795,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessRoutes.jet",
-      "line": 128,
+      "line": 125,
       "column": 5,
       "reason": "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC"
     },
@@ -4236,7 +4236,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1265,
+      "line": 1271,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -4383,84 +4383,84 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 51,
+      "line": 57,
       "column": 5,
       "reason": "futex wake borrows a live aligned word and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 66,
+      "line": 72,
       "column": 5,
       "reason": "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 142,
+      "line": 148,
       "column": 5,
       "reason": "base points into the kernel's vDSO image, mapped readable for the process lifetime"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 166,
+      "line": 172,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same resolved address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 170,
+      "line": 176,
       "column": 9,
       "reason": "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 175,
+      "line": 181,
       "column": 9,
       "reason": "clock_gettime writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 183,
+      "line": 189,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 192,
+      "line": 198,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 234,
+      "line": 240,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 271,
+      "line": 277,
       "column": 5,
       "reason": "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 288,
+      "line": 294,
       "column": 5,
       "reason": "an elided section: only this thread has written the lock word and the count since sync_sole_enter"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 300,
+      "line": 306,
       "column": 5,
       "reason": "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0"
     },
@@ -4698,84 +4698,91 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 486,
+      "line": 466,
+      "column": 5,
+      "reason": "one aligned word, set before the threads it sizes start; thread_spawn reads it once per thread"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Thread.jet",
+      "line": 504,
       "column": 5,
       "reason": "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 538,
+      "line": 556,
       "column": 5,
       "reason": "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 576,
+      "line": 594,
       "column": 5,
       "reason": "the startup hands these over once, before the init arrays and any other thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 586,
+      "line": 604,
       "column": 5,
       "reason": "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 618,
+      "line": 636,
       "column": 5,
       "reason": "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 654,
+      "line": 672,
       "column": 9,
       "reason": "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 815,
+      "line": 833,
       "column": 5,
       "reason": "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 849,
+      "line": 867,
       "column": 9,
       "reason": "kill(getpid(), SIGKILL) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 867,
+      "line": 885,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 890,
+      "line": 908,
       "column": 13,
       "reason": "tgkill names a live registered thread of this process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 928,
+      "line": 946,
       "column": 9,
       "reason": "a credential system call takes word arguments and retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 940,
+      "line": 958,
       "column": 13,
       "reason": "written under the registry mutex, before any handler can run"
     },
@@ -5468,91 +5475,91 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Cipher.jet",
-      "line": 77,
+      "line": 79,
       "column": 5,
       "reason": "Core cipher workspace reserves its complete operation-owned word capacity before filling"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Cipher.jet",
-      "line": 93,
+      "line": 95,
       "column": 5,
       "reason": "Core cipher output reserves its exact public output width before filling"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 286,
+      "line": 287,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 292,
+      "line": 293,
       "column": 5,
       "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 297,
+      "line": 298,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 302,
+      "line": 303,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 645,
+      "line": 646,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1186,
+      "line": 1187,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1213,
+      "line": 1214,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2170,
+      "line": 1522,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2268,
+      "line": 1620,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2277,
+      "line": 1629,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2283,
+      "line": 1635,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -5831,125 +5838,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1468,
-      "column": 9,
-      "reason": "this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1475,
-      "column": 9,
-      "reason": "this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1503,
-      "column": 1,
-      "reason": "SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1509,
-      "column": 5,
-      "reason": "copy this exclusively borrowed connection's error before reset/close can invalidate or overwrite it"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1525,
-      "column": 5,
-      "reason": "NUL-free filename goes through the canonical C String adapter; the output pointer slot belongs to this stack frame"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1549,
-      "column": 5,
-      "reason": "close the exclusively borrowed connection's sole SQLite pointer once; zeroing it below makes the later Close a no-op"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1556,
-      "column": 5,
-      "reason": "exclusive live database, constant transaction SQL, canonical C String adapter, and no callback/error output allocation"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1565,
-      "column": 5,
-      "reason": "read the exclusively borrowed SQLite connection's autocommit flag"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1589,
-      "column": 5,
-      "reason": "key stays alive and unmodified while SQLite borrows its UTF-8 data+byte length; the output slots are stack-owned"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1622,
-      "column": 5,
-      "reason": "reset this exclusively owned statement and clear the TRANSIENT bindings before returning it to its owning cache"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1633,
-      "column": 5,
-      "reason": "exclusive statement loan; scalar values are copied, borrowed String lives unmodified until SQLITE_TRANSIENT finishes, and packed blobs are freed only after SQLite copies them"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1685,
-      "column": 5,
-      "reason": "step/reset the exclusive statement, matching rusqlite execute_with_bound_parameters, then copy any SQLite error before another operation"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1716,
-      "column": 1,
-      "reason": "value is alive and unchanged while reading its UTF-8 byte count; no borrowed pointer escapes"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1740,
-      "column": 5,
-      "reason": "copy every SQLite column into an owned value while its row remains live, before the next step/reset/finalize; byte unpack reads only column_bytes bytes"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1915,
-      "column": 5,
-      "reason": "SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1919,
-      "column": 5,
-      "reason": "all test handles have reached Close before reading SQLite's allocator counter"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Db/Db.jet",
-      "line": 1924,
-      "column": 5,
-      "reason": "failed opens, including non-null error handles, have already reached Close"
-    },
-    {
-      "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
       "line": 100,
       "column": 5,
@@ -6035,14 +5923,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1226,
+      "line": 1245,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1231,
+      "line": 1250,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -6231,7 +6119,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 645,
+      "line": 644,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6356,199 +6244,143 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 70,
-      "column": 9,
-      "reason": "this consuming Close owns the sole jet_tls context; jet_tls_free accepts 0 and never closes the socket"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 549,
-      "column": 5,
-      "reason": "the output slot belongs to this frame; jet_tls_new stores 0 or a fresh context that __TLSContext owns"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 942,
-      "column": 9,
-      "reason": "the packed copy lives until the matching free below; Mbed TLS only reads it during jet_tls_write"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 948,
-      "column": 17,
-      "reason": "frees the packed chunk exactly once after its last jet_tls_write"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 954,
-      "column": 9,
-      "reason": "frees the packed chunk exactly once after its last jet_tls_write"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1483,
-      "column": 5,
-      "reason": "configures the live context before setup"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1487,
-      "column": 5,
-      "reason": "configures the live context before setup"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1492,
-      "column": 5,
-      "reason": "NUL-free PEM text is borrowed for this parse; Mbed TLS copies the certificates"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1498,
-      "column": 5,
-      "reason": "the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1504,
-      "column": 5,
-      "reason": "the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1510,
-      "column": 5,
-      "reason": "reads the live context's root list"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1516,
-      "column": 5,
-      "reason": "NUL-free PEM texts are borrowed for this parse; Mbed TLS copies the chain and the key"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1522,
-      "column": 5,
-      "reason": "the NUL-free protocol is copied by jet_tls_alpn_add"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1528,
-      "column": 5,
-      "reason": "binds the live context to the TCPStream's descriptor, which the stream state keeps open for the context's lifetime"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1534,
-      "column": 5,
-      "reason": "one nonblocking handshake step on the live context"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1540,
-      "column": 5,
-      "reason": "one nonblocking read into the live context's own buffer"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1546,
-      "column": 5,
-      "reason": "jet_tls_read just filled `length` bytes of the context's buffer; they are copied before the next engine call"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1554,
-      "column": 5,
-      "reason": "the caller's packed chunk holds `length` readable bytes for this call"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1560,
-      "column": 5,
-      "reason": "one nonblocking close_notify step on the live context"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1566,
-      "column": 5,
-      "reason": "reads the live context's verification flags"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1572,
-      "column": 5,
-      "reason": "reads the live context's negotiated version"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1578,
-      "column": 5,
-      "reason": "the suite name is a static NUL-terminated string; its length and unpack finish before the next engine call"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1589,
-      "column": 5,
-      "reason": "the live context keeps its verified peer chain while the DER is copied out; the output slots belong to this frame"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1599,
-      "column": 5,
-      "reason": "getenv returns a NUL-terminated string or NULL; it is copied before any environment change"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1606,
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3319,
       "column": 1,
-      "reason": "the caller guarantees a live NUL-terminated string at `address`"
+      "reason": "`key` and `iv` are a vector record's, used for that record only"
     },
     {
       "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1616,
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3321,
       "column": 5,
-      "reason": "reads the run's journal mode word; no argument is borrowed"
+      "reason": "a vector record's key and nonce, used for that record only"
     },
     {
       "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1623,
-      "column": 5,
-      "reason": "the packed copy lives until the matching free below; the runtime copies it into the journal during the call"
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3327,
+      "column": 1,
+      "reason": "`key` and `iv` are a vector record's, used for that record only"
     },
     {
       "package": "Core",
-      "file": "Core/Net/Tls.jet",
-      "line": 1634,
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3329,
       "column": 5,
-      "reason": "the packed request lives until the matching free below; the served address points into the run's loaded journal, copied out before return"
+      "reason": "a vector record's key and nonce, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3335,
+      "column": 1,
+      "reason": "`key` and `iv` are a vector record's, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3337,
+      "column": 5,
+      "reason": "a vector record's key and nonce, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3343,
+      "column": 1,
+      "reason": "`key` and `iv` are a vector record's, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3345,
+      "column": 5,
+      "reason": "a vector record's key and nonce, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3352,
+      "column": 5,
+      "reason": "each record's key and IV are used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3391,
+      "column": 13,
+      "reason": "the record's key and IV are used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3413,
+      "column": 13,
+      "reason": "the record's key and nonce are used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3423,
+      "column": 1,
+      "reason": "`private` is a vector record's key, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3425,
+      "column": 5,
+      "reason": "a vector record's private key, used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3432,
+      "column": 1,
+      "reason": "the arguments are a vector record's public key, message and signature"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3434,
+      "column": 5,
+      "reason": "verification of a vector record's public signature"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3447,
+      "column": 13,
+      "reason": "the record's private key is used for that record only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3463,
+      "column": 13,
+      "reason": "the record's public key, message and signature"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3738,
+      "column": 1,
+      "reason": "`seed` is a timing run's test key, used for that run only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3740,
+      "column": 5,
+      "reason": "a timing run's test key, used for that run only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3756,
+      "column": 5,
+      "reason": "timing runs on test keys and nonces, each used for its run only"
     },
     {
       "package": "Core",
@@ -6780,13 +6612,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 130,
       "column": 5,
       "reason": "Core TUI samples the same stdout terminal fact consumed by terminal style/progress"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Vendor/Sqlite3/Fixture/run.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once"
     },
     {
       "package": "Docs",
@@ -10275,14 +10100,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 748 |
-| Core | 190 |
+| Compiler | 749 |
+| Core | 164 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 432 |
-| **total** | **1435** |
+| **total** | **1410** |
 
 ### Regions
 
@@ -10751,9 +10576,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 28:5 | "write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 391:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 412:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 417:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 397:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 418:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 423:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 13:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 92:5 | "the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 22:5 | "runtime-init runs before any other thread exists" |
@@ -10798,7 +10623,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 449:13 | "the child mutex holds the capture builder's initialized bytes" |
-| Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 128:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
+| Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 125:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 19:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 27:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 51:9 | "written under the scheduler root mutex" |
@@ -10861,7 +10686,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 232:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 535:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 811:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1265:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1271:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -10882,18 +10707,18 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 22:5 | "atomic exchange on an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 28:5 | "atomic fetch-add on an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 34:5 | "atomic compare-exchange on an aligned live synchronization word" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 51:5 | "futex wake borrows a live aligned word and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 66:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 142:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 166:9 | "an idempotent install: every writer stores the same resolved address" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 170:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 175:9 | "clock_gettime writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 183:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 192:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 234:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 271:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 288:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 300:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 57:5 | "futex wake borrows a live aligned word and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 72:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 148:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 172:9 | "an idempotent install: every writer stores the same resolved address" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 176:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 181:9 | "clock_gettime writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 189:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 198:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 240:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 277:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 294:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 306:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
 | Compiler | Compiler/JetRuntime/Source/Task.jet | 530:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 22:5 | "runtime-init runs before any other thread exists" |
@@ -10927,18 +10752,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 401:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 409:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 424:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 486:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 538:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 576:5 | "the startup hands these over once, before the init arrays and any other thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 586:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 618:5 | "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 654:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 815:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 849:9 | "kill(getpid(), SIGKILL) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 867:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 890:13 | "tgkill names a live registered thread of this process" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 928:9 | "a credential system call takes word arguments and retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 940:13 | "written under the registry mutex, before any handler can run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 466:5 | "one aligned word, set before the threads it sizes start; thread_spawn reads it once per thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 504:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 556:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 594:5 | "the startup hands these over once, before the init arrays and any other thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 604:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 636:5 | "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 672:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 833:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 867:9 | "kill(getpid(), SIGKILL) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 885:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 908:13 | "tgkill names a live registered thread of this process" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 946:9 | "a credential system call takes word arguments and retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 958:13 | "written under the registry mutex, before any handler can run" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 3:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 6:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
@@ -11037,19 +10863,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Cipher.jet | 77:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
-| Core | Core/Crypto/Cipher.jet | 93:5 | "Core cipher output reserves its exact public output width before filling" |
-| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 297:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 302:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 645:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1186:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1213:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 2170:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 2268:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 2277:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 2283:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Cipher.jet | 79:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
+| Core | Core/Crypto/Cipher.jet | 95:5 | "Core cipher output reserves its exact public output width before filling" |
+| Core | Core/Crypto/Crypto.jet | 287:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 293:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
+| Core | Core/Crypto/Crypto.jet | 298:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 303:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 646:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1187:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1214:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1522:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1620:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1629:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1635:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -11089,23 +10915,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Data/Data.jet | 2419:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Data/Data.jet | 3348:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Data/Data.jet | 3682:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Db/Db.jet | 1468:9 | "this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later" |
-| Core | Core/Db/Db.jet | 1475:9 | "this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status" |
-| Core | Core/Db/Db.jet | 1503:1 | "SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call" |
-| Core | Core/Db/Db.jet | 1509:5 | "copy this exclusively borrowed connection's error before reset/close can invalidate or overwrite it" |
-| Core | Core/Db/Db.jet | 1525:5 | "NUL-free filename goes through the canonical C String adapter; the output pointer slot belongs to this stack frame" |
-| Core | Core/Db/Db.jet | 1549:5 | "close the exclusively borrowed connection's sole SQLite pointer once; zeroing it below makes the later Close a no-op" |
-| Core | Core/Db/Db.jet | 1556:5 | "exclusive live database, constant transaction SQL, canonical C String adapter, and no callback/error output allocation" |
-| Core | Core/Db/Db.jet | 1565:5 | "read the exclusively borrowed SQLite connection's autocommit flag" |
-| Core | Core/Db/Db.jet | 1589:5 | "key stays alive and unmodified while SQLite borrows its UTF-8 data+byte length; the output slots are stack-owned" |
-| Core | Core/Db/Db.jet | 1622:5 | "reset this exclusively owned statement and clear the TRANSIENT bindings before returning it to its owning cache" |
-| Core | Core/Db/Db.jet | 1633:5 | "exclusive statement loan; scalar values are copied, borrowed String lives unmodified until SQLITE_TRANSIENT finishes, and packed blobs are freed only after SQLite copies them" |
-| Core | Core/Db/Db.jet | 1685:5 | "step/reset the exclusive statement, matching rusqlite execute_with_bound_parameters, then copy any SQLite error before another operation" |
-| Core | Core/Db/Db.jet | 1716:1 | "value is alive and unchanged while reading its UTF-8 byte count; no borrowed pointer escapes" |
-| Core | Core/Db/Db.jet | 1740:5 | "copy every SQLite column into an owned value while its row remains live, before the next step/reset/finalize; byte unpack reads only column_bytes bytes" |
-| Core | Core/Db/Db.jet | 1915:5 | "SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers" |
-| Core | Core/Db/Db.jet | 1919:5 | "all test handles have reached Close before reading SQLite's allocator counter" |
-| Core | Core/Db/Db.jet | 1924:5 | "failed opens, including non-null error handles, have already reached Close" |
 | Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 221:9 | "the retained key copies exactly the already validated text bytes" |
@@ -11118,8 +10927,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Eetf.jet | 549:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 113:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
 | Core | Core/Encoding/Json.jet | 121:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1226:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1231:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1245:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1250:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 16:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |
@@ -11146,7 +10955,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Files.jet | 570:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
 | Core | Core/Files/Files.jet | 576:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 645:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 644:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11164,34 +10973,26 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/Net.jet | 219:5 | "read native socket port" |
 | Core | Core/Net/Net.jet | 231:5 | "read native IPv6 socket scope identifier" |
 | Core | Core/Net/Net.jet | 433:5 | "read the native UDP packet's socket-address carrier" |
-| Core | Core/Net/Tls.jet | 70:9 | "this consuming Close owns the sole jet_tls context; jet_tls_free accepts 0 and never closes the socket" |
-| Core | Core/Net/Tls.jet | 549:5 | "the output slot belongs to this frame; jet_tls_new stores 0 or a fresh context that __TLSContext owns" |
-| Core | Core/Net/Tls.jet | 942:9 | "the packed copy lives until the matching free below; Mbed TLS only reads it during jet_tls_write" |
-| Core | Core/Net/Tls.jet | 948:17 | "frees the packed chunk exactly once after its last jet_tls_write" |
-| Core | Core/Net/Tls.jet | 954:9 | "frees the packed chunk exactly once after its last jet_tls_write" |
-| Core | Core/Net/Tls.jet | 1483:5 | "configures the live context before setup" |
-| Core | Core/Net/Tls.jet | 1487:5 | "configures the live context before setup" |
-| Core | Core/Net/Tls.jet | 1492:5 | "NUL-free PEM text is borrowed for this parse; Mbed TLS copies the certificates" |
-| Core | Core/Net/Tls.jet | 1498:5 | "the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates" |
-| Core | Core/Net/Tls.jet | 1504:5 | "the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates" |
-| Core | Core/Net/Tls.jet | 1510:5 | "reads the live context's root list" |
-| Core | Core/Net/Tls.jet | 1516:5 | "NUL-free PEM texts are borrowed for this parse; Mbed TLS copies the chain and the key" |
-| Core | Core/Net/Tls.jet | 1522:5 | "the NUL-free protocol is copied by jet_tls_alpn_add" |
-| Core | Core/Net/Tls.jet | 1528:5 | "binds the live context to the TCPStream's descriptor, which the stream state keeps open for the context's lifetime" |
-| Core | Core/Net/Tls.jet | 1534:5 | "one nonblocking handshake step on the live context" |
-| Core | Core/Net/Tls.jet | 1540:5 | "one nonblocking read into the live context's own buffer" |
-| Core | Core/Net/Tls.jet | 1546:5 | "jet_tls_read just filled `length` bytes of the context's buffer; they are copied before the next engine call" |
-| Core | Core/Net/Tls.jet | 1554:5 | "the caller's packed chunk holds `length` readable bytes for this call" |
-| Core | Core/Net/Tls.jet | 1560:5 | "one nonblocking close_notify step on the live context" |
-| Core | Core/Net/Tls.jet | 1566:5 | "reads the live context's verification flags" |
-| Core | Core/Net/Tls.jet | 1572:5 | "reads the live context's negotiated version" |
-| Core | Core/Net/Tls.jet | 1578:5 | "the suite name is a static NUL-terminated string; its length and unpack finish before the next engine call" |
-| Core | Core/Net/Tls.jet | 1589:5 | "the live context keeps its verified peer chain while the DER is copied out; the output slots belong to this frame" |
-| Core | Core/Net/Tls.jet | 1599:5 | "getenv returns a NUL-terminated string or NULL; it is copied before any environment change" |
-| Core | Core/Net/Tls.jet | 1606:1 | "the caller guarantees a live NUL-terminated string at `address`" |
-| Core | Core/Net/Tls.jet | 1616:5 | "reads the run's journal mode word; no argument is borrowed" |
-| Core | Core/Net/Tls.jet | 1623:5 | "the packed copy lives until the matching free below; the runtime copies it into the journal during the call" |
-| Core | Core/Net/Tls.jet | 1634:5 | "the packed request lives until the matching free below; the served address points into the run's loaded journal, copied out before return" |
+| Core | Core/Net/SSL/TLS.jet | 3319:1 | "`key` and `iv` are a vector record's, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3321:5 | "a vector record's key and nonce, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3327:1 | "`key` and `iv` are a vector record's, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3329:5 | "a vector record's key and nonce, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3335:1 | "`key` and `iv` are a vector record's, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3337:5 | "a vector record's key and nonce, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3343:1 | "`key` and `iv` are a vector record's, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3345:5 | "a vector record's key and nonce, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3352:5 | "each record's key and IV are used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3391:13 | "the record's key and IV are used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3413:13 | "the record's key and nonce are used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3423:1 | "`private` is a vector record's key, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3425:5 | "a vector record's private key, used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3432:1 | "the arguments are a vector record's public key, message and signature" |
+| Core | Core/Net/SSL/TLS.jet | 3434:5 | "verification of a vector record's public signature" |
+| Core | Core/Net/SSL/TLS.jet | 3447:13 | "the record's private key is used for that record only" |
+| Core | Core/Net/SSL/TLS.jet | 3463:13 | "the record's public key, message and signature" |
+| Core | Core/Net/SSL/TLS.jet | 3738:1 | "`seed` is a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3740:5 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3756:5 | "timing runs on test keys and nonces, each used for its run only" |
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
@@ -11225,7 +11026,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
-| Core | Core/Vendor/Sqlite3/Fixture/run.jet | 19:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
@@ -11808,17 +11608,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Data/Data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
   {"file":"Core/Data/Data.jet","function":"data_schema_value_type","proof":"Not a core.data export (Compiler/Prelude/Core.jet:69). Its #Unsafe block (Data.jet:3674-3677) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to name their schema type; it reads no memory, builds or mutates no carrier and returns a static String, so no caller can break those carriers' invariants through it. Every other Dyn shape is matched through the public variants (:3678-3688)."},
   {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
-{"file":"Core/Db/Db.jet","function":"close","proof":"SqliteDB.close and SqliteStmt.close (Db.jet:1466-1478) consume their Close resource, so each runs at most once per value. Both raw fields are priv (:1464-1465), so no literal outside core.db can forge a pointer; inside core.db the only SqliteDB is built from open_v2's output slot (:1533-1534) and the only SqliteStmt from prepare_v3's (:1605). close_v2 and finalize accept NULL (a failed open's zero, or the zero __driver_shutdown leaves, :1552), and close_v2 defers the free while statements live, so a cached statement finalized later (__Driver.close, :1491-1497) never touches a freed connection."},
-{"file":"Core/Db/Db.jet","function":"error","proof":"Its parameter is the reserved __Driver type (a __ name is refused outside Core), so callers are core.db and core.jobs. Every driver comes from __driver_open, which returns only a successfully opened non-NULL handle (Db.jet:1522-1539); DBConnection paths check raw != 0 before any driver call (:695, :702, :711, :745, :756), and pool and queue drivers are never shut down (only :719 calls __driver_shutdown). sqlite3_errmsg returns a NUL-terminated buffer the connection owns; c_string copies it with strlen and unpack (:1504-1507) before any other engine call, and only the owned String escapes."},
-{"file":"Core/Db/Db.jet","function":"__driver_open","proof":"Takes only a String path; a path with a NUL byte returns None first (Db.jet:1523), so open_v2 receives the complete C string. The single-thread probe frees the mutex it allocates (:1529-1531). open_v2 writes its handle into a stack slot of this frame (:1524, :1533), which is wrapped in the Close-owning SqliteDB before the status check (:1534), so the early returns (:1535, :1537) close a failed handle. The only escaping value is a __Driver owning that live pointer with an empty cache (:1538); no raw address is returned."},
-{"file":"Core/Db/Db.jet","function":"__driver_shutdown","proof":"Its only caller lends the DBConnection's driver exclusively under the state guard (Db.jet:718-719). A zero raw returns false before any engine call (:1544). Cached statements are finalized through their consuming Close first (:1545-1548), close_v2 runs once on the live pointer (:1549-1551) and the field is zeroed immediately after (:1552), so the driver's later Close hands close_v2 NULL, a no-op, and every DBConnection operation sees raw == 0 and refuses (:695, :702, :711, :745, :756)."},
-{"file":"Core/Db/Db.jet","function":"control","proof":"Reachable only with the reserved __Driver type, whose handle every caller keeps live (see error: __driver_open :1522-1539, raw checks :695, :702, :711; queue drivers in Jobs.jet are never shut down). Its callers __driver_begin, __driver_begin_immediate, __driver_commit and __driver_rollback (:1560-1563) pass constant SQL, which the C String adapter lends NUL-terminated for the call, and exec receives NULL callback, context and error-output pointers (:1557), so SQLite allocates nothing for the caller to free. Only a Bool returns."},
-{"file":"Core/Db/Db.jet","function":"__driver_reset","proof":"Called on a pool driver being returned (Db.jet:1213); pool drivers come from __driver_open (:1198, :1270) and are never shut down, so raw is a live connection. get_autocommit only reads that connection's flag (:1566); otherwise the fixed ROLLBACK runs through control (:1568). Only a Bool returns and no pointer escapes."},
-{"file":"Core/Db/Db.jet","function":"prepare","proof":"Takes an exclusive &__Driver whose handle is live (see error). Cache hits return an owned CachedStatement removed from the cache (Db.jet:1574-1586). On a miss, key is an owned trimmed String that stays alive and unmodified while prepare_v3 borrows its data with an explicit byte length checked below 2147483647 (:1590-1591, :1602); empty text lends a packed one-byte buffer freed right after the call (:1596-1599). The handle and tail output slots belong to this frame (:1587-1588), the new handle is wrapped in the Close-owning SqliteStmt before the status check (:1605), and a failure copies the error text out through error (:1607). No raw address escapes."},
-{"file":"Core/Db/Db.jet","function":"release","proof":"Takes the statement by consuming move, so the caller cannot reuse it; a zero handle returns at once (Db.jet:1621). reset and clear_bindings run on that exclusively owned live statement (:1622-1625) before it re-enters the 16-entry cache, which evicts and closes its oldest entry through the consuming Close (:1626-1630). The driver loan only touches the cache list; no pointer escapes."},
-{"file":"Core/Db/Db.jet","function":"bind","proof":"Its callers __driver_execute (Db.jet:1679) and __driver_query (:1731) pass statement_raw of the CachedStatement prepare just returned, which they own until release, so the statement is live; the reserved __Driver type keeps other callers out. The parameter count must match first (:1634-1635). Scalars are copied by value (:1640-1643). Text binds the String's data with its byte length, checked below 2147483647 (:1645-1646), as SQLITE_TRANSIENT (-1), so SQLite copies it during the call while the String is alive and unmodified; empty text and blobs bind packed buffers freed only after that TRANSIENT call returns (:1651-1654, :1666-1668). Failures are copied out through error (:1672)."},
-{"file":"Core/Db/Db.jet","function":"__driver_execute","proof":"Takes an exclusive &__Driver; DBConnection callers check raw != 0 first (Db.jet:745) and queue drivers (Jobs.jet:144, :942-943) are never shut down. The statement is prepared and owned here until release (:1678, :1697), and a bind failure releases it before returning (:1679-1682), so step, reset and changes run on a live statement and connection (:1686-1690). Error text is copied out through error before release; only an Int count or an owned DBError escapes."},
-{"file":"Core/Db/Db.jet","function":"__driver_query","proof":"Takes an exclusive &__Driver; DBConnection callers check raw != 0 first (Db.jet:756) and queue drivers (Jobs.jet:948-949) are never shut down. The statement is prepared and owned here until release (:1730, :1788), and a bind failure releases it first (:1731-1734). Column names are NULL-checked and copied by c_string before the first step (:1745-1749); each cell is copied into an owned DBValue while its row is current, calling column_text or column_blob before column_bytes and unpacking exactly that many bytes (:1762-1776), before the next step or reset. Only owned rows or an owned DBError escape."},
 {"file":"Core/Net/Net.jet","function":"ip_addr","proof":"__ip_from_bytes expects exactly four or sixteen octets. net.jet:136 accepts only parse_ip_bytes success: parse_ipv4_bytes(:960-979) checks four decimal octets <=255, and the IPv6 parser(:982-1048) checks eight 16-bit words including compression before expanding to sixteen bytes. The exact owned list moves at :138; callers cannot substitute a differently sized list after validation."},
 {"file":"Core/Net/Net.jet","function":"ip_to_string_impl","proof":"net.jet:143-144 call __ip_bytes on a borrowed typed IPAddr; Top/NetHTTP.rs:1944-1948 discriminant-matches its native IPv4/IPv6 enum and copies exactly its initialized octets into an owned list. Formatting only reads that list. No caller-selected index, raw pointer or borrowed native storage escapes."},
 {"file":"Core/Net/Net.jet","function":"ip_is_ipv4","proof":"__ip_is_v4 at net.jet:149 only matches the valid native IPAddr discriminant (Top/NetHTTP.rs:1951-1952). Any typed address is admitted; no payload reinterpretation, mutation or memory borrow is returned, only Bool."},
@@ -11827,31 +11616,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
 {"file":"Core/Net/Net.jet","function":"socket_port","proof":"__socket_port at net.jet:202 borrows a typed SocketAddr and widens its initialized native u16 port to Int (Top/NetHTTP.rs:2042-2043). This scalar projection accepts every valid carrier and neither exposes a borrow nor changes socket ownership."},
 {"file":"Core/Net/Net.jet","function":"socket_scope","proof":"__socket_scope at net.jet:215 matches the valid socket enum, returning None for IPv4 or widening the IPv6 u32 scope (Top/NetHTTP.rs:2046-2050). Source substitutes zero for None. No reinterpretation or caller-controlled pointer is involved and only an owned scalar escapes."},
 {"file":"Core/Net/Net.jet","function":"udp_packet_addr","proof":"__udp_packet_addr at net.jet:413 borrows a typed UDPPacket and clones its stored SocketAddr (Top/NetHTTP.rs:2851-2852); the packet remains live during the projection. The return carrier owns its address rather than pointing into packet storage, so releasing the packet cannot invalidate the result."},
-{"file":"Core/Net/Tls.jet","function":"close","proof":"__TLSContext.close (Tls.jet:68-73) consumes the context, so jet_tls_free runs at most once per context. __TLSContext is a reserved __ type, so only Core can build one, and its sole constructor __context_new (:546-555) stores either 0 or the fresh handle jet_tls_new wrote. jet_tls_free returns on 0 (jet_tls.c:61-64) and never closes the socket, which the TCPStream owns."},
-{"file":"Core/Net/Tls.jet","function":"__context_new","proof":"Reserved __ name; callers pass the constant endpoint 0 or 1 (Tls.jet:167, :559, :678, :690). The output slot belongs to this frame (:547, :550); jet_tls_new zeroes it first and stores a context only on success, freeing its own partial context on failure (jet_tls.c:80-104). The handle is wrapped in the Close-owning __TLSContext before the status check (:552), so the failure return frees it and success returns that sole owner."},
-{"file":"Core/Net/Tls.jet","function":"__write_all","proof":"Reserved __ name; TLSStream.write_all calls it under the state guard (Tls.jet:183-188), and a closed stream is refused before any engine call (:936). Each chunk is a bounds-checked __slice of at most C_RECORD_BYTES (:939-940), packed into a fresh buffer of exactly `size` bytes (:943) that __write_packed lends to jet_tls_write with that length (:964-966), and freed exactly once after its last write on either the error or the success path (:948-950, :954-956)."},
-{"file":"Core/Net/Tls.jet","function":"__c_authmode","proof":"Reserved __ name, so its callers are Tls.jet's own: __client_context (:573) and the server accept path (:149) pass the raw of a context __context_new just created and still owns, before setup, with the constant modes 2 and 0. jet_tls_authmode only stores the mode in that live config (jet_tls.c:112-115). Nothing is returned."},
-{"file":"Core/Net/Tls.jet","function":"__c_versions","proof":"Reserved __ name; its only caller __client_context (Tls.jet:570) passes the raw of the context it created and owns, before setup, with __version_code values after checking min <= max (:567). I32{} stops with E3010 rather than wrap (core-library.md:4172-4173). jet_tls_versions only stores the bounds in that live config (jet_tls.c:118-121)."},
-{"file":"Core/Net/Tls.jet","function":"__c_ca_pem","proof":"Reserved __ name; callers (Tls.jet:604, :679) pass the raw of a context they own and PEM text checked NUL-free first (:603, :677). The C String adapter lends it NUL-terminated for the call; mbedtls_x509_crt_parse copies the certificates into the context's own chain (jet_tls.c:126-131). Only a status Int returns."},
-{"file":"Core/Net/Tls.jet","function":"__c_ca_file","proof":"Reserved __ name; callers (Tls.jet:609, :632, :640) pass the raw of a context they own and a path checked NUL-free first (:608, :632) or a constant system path (__system_root_files). The path is lent NUL-terminated for the call and mbedtls_x509_crt_parse_file copies the certificates into the context's chain (jet_tls.c:136-143). Only a status Int returns."},
-{"file":"Core/Net/Tls.jet","function":"__c_ca_dir","proof":"Reserved __ name; callers (Tls.jet:634, :642) pass the raw of a context they own and a directory checked NUL-free first (:634) or the constant /etc/ssl/certs. The path is lent NUL-terminated for the call and mbedtls_x509_crt_parse_path copies the certificates into the context's chain (jet_tls.c:146-153). Only a status Int returns."},
-{"file":"Core/Net/Tls.jet","function":"__c_ca_count","proof":"Reserved __ name; callers (Tls.jet:600, :613, :639, :642, :645) pass the raw of a context they created and own. jet_tls_ca_count only walks that context's own root list (jet_tls.c:156-160) and returns a count; nothing is borrowed or written."},
-{"file":"Core/Net/Tls.jet","function":"__c_own_pem","proof":"Reserved __ name; callers (Tls.jet:169, :564, :691) pass the raw of a context they own and certificate and key PEM checked NUL-free first (:168, :563, :689). Both texts are lent NUL-terminated for the call; Mbed TLS parses copies of the chain and key into the context (jet_tls.c:166-175). Only a status Int returns."},
-{"file":"Core/Net/Tls.jet","function":"__c_alpn_add","proof":"Reserved __ name; its only caller __add_alpn (Tls.jet:577-583) passes the raw of a context it owns after __alpn_problem bounds the list to 16 protocols and validates each (:361-364). jet_tls_alpn_add refuses a full table and mallocs its own copy of the protocol before registering it (jet_tls.c:184-197), so the borrowed String is not retained."},
-{"file":"Core/Net/Tls.jet","function":"__c_setup","proof":"Reserved __ name; callers (Tls.jet:134, :150) pass the raw of a configured context they own, the descriptor of the TCPStream that the stream state then keeps beside the context for its whole life (:153), and a server name validated by __valid_server_name (:558) or the empty string. mbedtls_ssl_set_hostname copies the name (jet_tls.c:208-213); I64{fd} is a checked conversion. Only a status Int returns."},
-{"file":"Core/Net/Tls.jet","function":"__c_handshake","proof":"Reserved __ name; its caller __handshake (Tls.jet:840) passes the raw of a context that was set up on a live TCPStream and is owned by the caller or the stream state. jet_tls_handshake performs one nonblocking step on that context (jet_tls.c:219-221) and returns a status Int; nothing is borrowed beyond the call."},
-{"file":"Core/Net/Tls.jet","function":"__c_read","proof":"Reserved __ name; callers (Tls.jet:898, :919) pass the raw of the stream state's live context after refusing a closed stream (:889) and with a positive limit (TLSStream.read refuses max_bytes <= 0, :176; C_RECORD_BYTES otherwise). jet_tls_read reads at most min(limit, 16384) bytes into the context's own 16384-byte buffer (jet_tls.c:225-228)."},
-{"file":"Core/Net/Tls.jet","function":"__c_buffer_bytes","proof":"Reserved __ name; callers (Tls.jet:899, :921) pass the same live context and the positive count the immediately preceding jet_tls_read returned, which is at most the 16384-byte buffer size (jet_tls.c:225-233). __bytes_unpack copies exactly that many bytes into an owned list before any other engine call, so no borrow of the buffer escapes."},
-{"file":"Core/Net/Tls.jet","function":"__c_write","proof":"Reserved __ name; its only caller __write_packed (Tls.jet:966) passes the stream state's live context and the packed chunk address and length __write_all allocated and keeps alive until after this call (:943, :948-956). jet_tls_write only reads those bytes during the call (jet_tls.c:242-244)."},
-{"file":"Core/Net/Tls.jet","function":"__c_close_notify","proof":"Reserved __ name; its caller (Tls.jet:980) passes the raw of the stream state's live context, which the state owns until its own Close. jet_tls_close_notify performs one nonblocking close_notify step (jet_tls.c:246-248) and returns a status Int."},
-{"file":"Core/Net/Tls.jet","function":"__c_verify_result","proof":"Reserved __ name; its caller __handshake_message (Tls.jet:853) passes the raw of the context whose handshake just ran and is still owned. jet_tls_verify_result only reads that context's verification flags (jet_tls.c:251-253)."},
-{"file":"Core/Net/Tls.jet","function":"__c_version","proof":"Reserved __ name; its caller __peer_identity (Tls.jet:1206) passes the raw of the context whose handshake completed and is still owned. jet_tls_version only reads the negotiated version number (jet_tls.c:255-257)."},
-{"file":"Core/Net/Tls.jet","function":"__c_string_ciphersuite","proof":"Reserved __ name; its caller __peer_identity (Tls.jet:1204) passes the raw of a live context after its handshake. jet_tls_ciphersuite returns Mbed TLS's static suite name or a static empty string, never NULL (jet_tls.c:259-262), so __c_text's strlen and unpack read a valid NUL-terminated string and copy it into an owned String."},
-{"file":"Core/Net/Tls.jet","function":"__c_peer_cert","proof":"Reserved __ name; its caller __peer_identity (Tls.jet:1184-1188) passes the raw of a context whose handshake completed and which it owns for the whole loop. The data and length output slots belong to this frame; jet_tls_peer_cert fills them only with a certificate's raw DER held by that context's session, or returns an error past the chain's end (jet_tls.c:278-289), and the DER is copied out by __bytes_unpack before the next engine call."},
-{"file":"Core/Net/Tls.jet","function":"__getenv","proof":"Reserved __ name; callers pass the constant names SSL_CERT_FILE and SSL_CERT_DIR (Tls.jet:628-629). getenv returns NULL, which is checked (:1601), or a NUL-terminated string in the environment; neither JetRuntime nor Core calls setenv, putenv or unsetenv, so the string stays valid while __c_text copies it into an owned String."},
-{"file":"Core/Net/Tls.jet","function":"__prove_net_mode","proof":"Reserved __ name, called by core.http's client (Http/Client.jet:1467). jet_prove_net_mode takes no argument and only reads the journal mode word (JetRuntime ProveJournal.jet:208-213), returning 0, 1 or 2."},
-{"file":"Core/Net/Tls.jet","function":"__prove_net_record","proof":"Reserved __ name, called by core.http's client with an owned tape (Http/Client.jet:1477). An empty tape returns first (Tls.jet:1622); otherwise the packed copy of exactly tape.len() bytes stays alive until the matching free (:1624-1626), and jet_prove_net_record copies those bytes into the journal under its lock during the call (JetRuntime ProveJournal.jet:217-223)."},
-{"file":"Core/Net/Tls.jet","function":"__prove_net_take","proof":"Reserved __ name, called by core.http's replay path (Http/Client.jet:1567). The packed request of exactly request.len() bytes lives until the matching free (Tls.jet:1635, :1641); jet_prove_net_take copies it into the journal and, on a hit, stores the address and length of a record in the run's loaded journal, which stays put for the run (JetRuntime ProveJournal.jet:225-253). The output slots belong to this frame, and the record is copied out by __bytes_unpack before return."},
 {"file":"Core/Http/Client.jet","function":"__build_socket","proof":"Reserved __ name; it copies the resolver octets into a fresh owned list (Client.jet:653-654) and moves it into core.net.__ip_from_bytes, whose runtime refuses any length but 4 or 16 before allocating (JetRuntime HostNetAddress.jet:31-32), so a malformed address cannot overrun the native carrier. U16{port} stops with E3010 when the port does not fit (core-library.md:4172-4173), and jet_http_build_get already rejects ports outside 0..65535 (:590). It returns an owned SocketAddr; no pointer or borrow escapes."},
 {"file":"Core/Jobs/Jobs.jet","function":"queue","proof":"The gates at jobs.jet:130-136 call __path_kind and __create_dir_all_raw with owned String paths computed by queue_default_path/files.dirname, after endpoint authority validation at :124-126. Metadata is a scalar kind query and recursive mkdir returns owned IOError; neither leaf accepts or returns memory addresses. The kind check at :131-132 rejects observed symlinks before the checked SQLite open. Path races do not create a borrowed descriptor or dangling pointer because these are independent pathname operations, not identity-handle transfers."},
 {"file":"Core/Jobs/Jobs.jet","function":"wait","proof":"The unsafe __sleep_ms leaf casts signed milliseconds to unsigned host Duration (Top/ServiceAuthority.rs:3792-3793). jobs.jet:386-387 reject negative/oversized timeout and :393 clamps the exact delay passed at :395 to 1..25, independently of wall-clock movement. No caller can reach the cast with a negative or oversized delay; the leaf only sleeps and exports no memory."},
@@ -11895,7 +11659,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/XmlEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) copies valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
   {"file":"Core/Encoding/Yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
   {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:1365 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
-  {"file":"Core/Vendor/Sqlite3/Fixture/run.jet","function":"run","proof":"The no-argument fixture supplies only fixed SQL and an in-memory database name. Exclusive U64 out-slots start at zero; successful sqlite3_open_v2 and sqlite3_prepare_v2 checks dominate all database/statement uses. SQLite owns the resulting handles; the fixture never forges an address, lends a callback, or exposes a handle to callers. It steps the statement before reading column zero, finalizes it once before closing the database once, and uses neither afterward. Borrowed String storage remains live for each synchronous call; any failed operation stops before further handle use."},
   {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."}
 ]
