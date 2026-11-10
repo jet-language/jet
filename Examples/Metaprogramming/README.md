@@ -21,6 +21,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [CompilerAPI](BuildTime/CompilerAPI/) — The read-only compiler value API runs in the build entry and feeds the normal generated-source path.
 - [CompilerAPIPackage](BuildTime/CompilerAPIPackage/)
 - [ProgrammableBuild](BuildTime/ProgrammableBuild/)
+- [TwoTargets](BuildTime/TwoTargets/) — One `build: fn` builds this source twice: `two_targets` for the machine running the build and `two_targets_page` for the web, through a toolchain for the web's triple.
 
 ## Comptime
 

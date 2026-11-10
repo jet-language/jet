@@ -30,6 +30,7 @@ use jet_foundation.[
     TFieldRef,
     TIntegerWidth,
     TPatternBindingFact,
+    TargetMachine,
     TextEdit,
     Type,
     UnitScaleProvenance,
@@ -38,6 +39,9 @@ use jet_foundation.[
     ViewSourcePath,
     core_record_field,
     diagnostic_with_edit,
+    jet_target_layout_cache_line,
+    jet_target_layout_cpu_features,
+    jet_target_layout_pointer_size,
     symbol_id,
     type_name,
     fact_read_detail_field,
@@ -633,7 +637,9 @@ sema_fact_build_rooted: fn(base: Expr) -> Bool Never! {
 
 // The registered build-fact paths (Rust `Registry::build_fact_read`) and the
 // typed value each one takes from the snapshot (Rust `BuildFactSnapshot::value`).
-sema_fact_build_value: fn(path: String, facts: SemaBuildFacts) -> SemaFactReadValue? {
+// `#build.target.*` reads the facts of the machine the build targets, the
+// ones `core.target` declares for each machine.
+sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMachine) -> SemaFactReadValue? {
     if {
         path == "#package.name" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_name}})
         path == "#package.version" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_version}})
@@ -644,6 +650,10 @@ sema_fact_build_value: fn(path: String, facts: SemaBuildFacts) -> SemaFactReadVa
         path == "#build.stamp.toolchain" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_toolchain}})
         path == "#build.stamp.at" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_at}})
         path == "#build.cpu.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}})
+        path == "#build.target.triple" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: machine.triple}})
+        path == "#build.target.layout.pointer_bits" || path == "#build.target.layout.word_bits" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_pointer_size(machine.triple) * 8}})
+        path == "#build.target.layout.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_cache_line(machine.triple)}})
+        path == "#build.target.cpu_features" -> Val(SemaFactReadValue{ty: Type.List{element: Type.String}, value: TComptimeValue.List{values: loop feature in jet_target_layout_cpu_features(machine.triple) -> TComptimeValue.String{value: feature}}})
         else -> None
     }
 }
@@ -777,7 +787,7 @@ sema_fact_build_read: fn(base: Expr, member: String, span: Span, expected: Type?
         return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, diagnostics)}
     }
     if program.registration_graph == .Val(graph) {
-    resolved: sema_fact_build_value(path, graph.build_facts) ?? return sema_fact_read_unhandled()
+    resolved: sema_fact_build_value(path, graph.build_facts, graph.target_machine) ?? return sema_fact_read_unhandled()
     prepared: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program, context) ?? return sema_fact_read_failed()
     return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, diagnostics)}
     }

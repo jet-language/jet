@@ -1,18 +1,25 @@
 // Trait constants: a trait declares `name: Type` (with an optional default,
 // `name: Type{value}`), each implementation supplies `name: value`, and a
 // body reads `Type.name` on a concrete type or `T.name` on a bounded type
-// parameter. A value is a literal, an enum case, a list of them or an
-// optional one, checked against the declared type here and stored on the
-// implementation's checked row, so a read needs no code to run.
-use jet_foundation.[Diagnostic, Expr, ImplConstValue, NodeKind, Span, TComptimeEnumArg, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, UnOp, expr_span, type_name]
+// parameter. A value is a literal, an enum case, a record of them, a list of
+// them or an optional one, checked against the declared type here and stored
+// on the implementation's checked row, so a read needs no code to run.
+use jet_foundation.[Diagnostic, Expr, ExprField, ImplConstValue, NodeKind, Span, StructDef, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, UnOp, expr_span, type_name]
 
 // What checking a trait constant's value found.
 SemaTraitConstantEval: enum {
     Value(value: TComptimeValue)
     // A value of some other type.
     WrongType
-    // Not a literal, an enum case or a list of them.
+    // Not a literal, an enum case, a record or a list of them.
     NotCompileTime
+}
+
+// The declaration of a record constant's type: the struct and the module it
+// is written in, which its field types resolve in.
+SemaTraitConstantRecord: struct {
+    definition: StructDef
+    module_identity: String
 }
 
 // One trait constant a read can name: the trait's short name, the declared
@@ -140,6 +147,7 @@ sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type,
         .List(element) -> return sema_trait_constant_eval_list(graph, expr, ty, element, module_identity, type_module)
         .Named(name) -> {
             if sema_trait_constant_enum_variants(graph, type_module, name) == .Val(variants) -> return sema_trait_constant_eval_enum(graph, expr, name, variants, module_identity)
+            if sema_trait_constant_record(graph, type_module, name) == .Val(record) -> return sema_trait_constant_eval_record(graph, expr, name, record, module_identity)
         }
         else -> {}
     }
@@ -154,7 +162,7 @@ sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type,
 sema_trait_constant_other: fn(expr: Expr) -> SemaTraitConstantEval Never! {
     if sema_trait_constant_literal(expr) != None -> return SemaTraitConstantEval.WrongType
     if expr == {
-        .ListLit(_, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Present(_, _, _) -> SemaTraitConstantEval.WrongType
+        .ListLit(_, _, _) | .TypedLit(_, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Present(_, _, _) -> SemaTraitConstantEval.WrongType
         else -> SemaTraitConstantEval.NotCompileTime
     }
 }
@@ -295,6 +303,80 @@ sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module:
         if variant.payload == .Unit -> names.push(variant.symbol.name.copy())
     }
     Val(names)
+}
+
+// The declaration of resolved struct type `name` (resolved in `type_module`);
+// None when it names no struct, or a generic one, whose field types a
+// constant's value alone does not fix.
+sema_trait_constant_record: fn(graph: SemaRegistrationGraph, type_module: String, name: String) -> SemaTraitConstantRecord? Never! {
+    resolved: sema_type_graph_lookup_symbol(graph, type_module, name) ?? return None
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    item: sema_registration_nominal_source_item(graph.modules[row.module_index].nominals[row.row].source) ?? return None
+    if item == .Struct(definition) {
+        if definition.type_params.len() > 0 -> return None
+        return Val(SemaTraitConstantRecord{definition: definition.copy(), module_identity: graph.modules[row.module_index].module_identity.copy()})
+    }
+    None
+}
+
+// A record constant: `Name{field: value, …}`, or `{field: value, …}` where
+// the type is known. Each stored field is a value of its declared type; a
+// field the value leaves out takes the default its declaration writes.
+sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, record: SemaTraitConstantRecord, module_identity: String) -> SemaTraitConstantEval Never! {
+    expected_type: Type.Named{name: name.copy()}
+    written := [ExprField]{}
+    if expr == {
+        .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
+            if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
+            if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+            written = fields.copy()
+        }
+        .TypedLit(head, body, _, _) -> {
+            if head == .Val(head_type) {
+                if sema_checked_qualify_type(graph, head_type, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+            }
+            if body == {
+                .Fields(fields) -> written = fields.copy()
+                .Empty -> {}
+                else -> return SemaTraitConstantEval.WrongType
+            }
+        }
+        else -> return sema_trait_constant_other(expr)
+    }
+    loop field in written {
+        known := false
+        loop declared in record.definition.fields {
+            if declared.name == field.name && declared.computed == None {
+                known = true
+                break
+            }
+        }
+        if !known -> return SemaTraitConstantEval.WrongType
+    }
+    values := [TComptimeField]{}
+    loop declared in record.definition.fields {
+        if declared.computed != None -> next
+        field_type: sema_checked_qualify_type(graph, declared.ty, record.module_identity)
+        given := Expr?{None}
+        loop field in written {
+            if field.name == declared.name {
+                given = Val(field.value.copy())
+                break
+            }
+        }
+        result := SemaTraitConstantEval.WrongType
+        if given == .Val(value) {
+            result = sema_trait_constant_eval(graph, value, field_type, module_identity, record.module_identity)
+        } else if declared.default == .Val(default_value) {
+            result = sema_trait_constant_eval(graph, default_value, field_type, record.module_identity, record.module_identity)
+        }
+        if result == .Value(value) {
+            values.push(TComptimeField{name: declared.name.copy(), value: value.copy()})
+        } else {
+            return result
+        }
+    }
+    SemaTraitConstantEval.Value{value: TComptimeValue.Struct{type_name: name.copy(), fields: values}}
 }
 
 // An enum constant: `.Case`, `Enum.Case` or `module.Enum.Case`, naming a

@@ -540,6 +540,15 @@ jet_target_environment_identity: fn(machine: TargetMachine) -> String Never! {
     }
 }
 
+// The effects code built for a hosted `machine` is denied, the row the
+// machine's `core.target` facts derive: a web build's host starts no
+// processes and makes no C foreign calls; a native or WASI host lacks none.
+// A machine with no OS is checked by its own policies instead.
+jet_target_machine_denied_effects: fn(machine: TargetMachine) -> [String] Never! {
+    if jet_target_environment_identity(machine) == "browser" -> return [String]{"Exec", "FFI.C"}
+    [String]{}
+}
+
 jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
     bytes := [U8]{}
     jet_target_append_frame(bytes, "environment", jet_target_environment_identity(machine))
@@ -652,19 +661,26 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
 }
 
 // The OS `#build.target.os` folds on: Freestanding for a machine with no OS (a
-// bare-metal or no-OS Wasm machine), Web for the browser's Wasm triple, Wasm
-// for any other Wasm triple, else the triple's native OS, else the host's
-// (`host_os` is a key such as `macos`), else Linux.
+// bare-metal or no-OS Wasm machine), else the OS its triple names
+// (jet_target_triple_os), else the host's (`host_os` is a key such as
+// `macos`), else Linux.
 jet_target_active_os_name: fn(machine: TargetMachine, host_os: String) -> String Never! {
-    triple: machine.triple
+    if machine.no_os -> return target_os_name(TTargetOS.Freestanding)
+    if jet_target_triple_os(machine.triple) == .Val(os) -> return target_os_name(os)
+    target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
+}
+
+// The OS a target triple names: Web for the browser's Wasm triple, Wasm for
+// any other Wasm triple, else the triple's native OS; None when it names
+// none.
+jet_target_triple_os: fn(triple: String) -> TTargetOS? Never! {
     if {
-        machine.no_os -> target_os_name(TTargetOS.Freestanding)
-        triple == "wasm32-unknown-unknown" -> target_os_name(TTargetOS.Web)
-        triple.starts_with("wasm") -> target_os_name(TTargetOS.Wasm)
-        triple.contains("windows") -> target_os_name(TTargetOS.Windows)
-        triple.contains("apple") || triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
-        triple.contains("linux") -> target_os_name(TTargetOS.Linux)
-        else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
+        triple == "wasm32-unknown-unknown" -> Val(TTargetOS.Web)
+        triple.starts_with("wasm") -> Val(TTargetOS.Wasm)
+        triple.contains("windows") -> Val(TTargetOS.Windows)
+        triple.contains("apple") || triple.contains("darwin") -> Val(TTargetOS.MacOS)
+        triple.contains("linux") -> Val(TTargetOS.Linux)
+        else -> None
     }
 }
 

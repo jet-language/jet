@@ -8,7 +8,7 @@ use {
         jet_target_environment_identity, jet_target_hardware_empty, jet_target_hardware_validate,
         jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_board_sensor_v1,
         jet_target_machine_diagnostics, jet_target_machine_error_debug, jet_target_machine_error_diagnostic,
-        jet_target_machine_errors_debug, jet_target_machine_hosted,
+        jet_target_machine_denied_effects, jet_target_machine_errors_debug, jet_target_machine_hosted,
         jet_target_machine_provides_capability, jet_target_machine_supports_execution_tier,
         jet_target_machine_use_default, jet_target_machine_use_from_core_apis, jet_target_machine_validate,
         jet_target_machine_wasm_browser, jet_target_machine_wasm_no_os, jet_target_machine_wasm_wasi,
@@ -190,6 +190,14 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(jet_target_provider_identity(browser) != jet_target_provider_identity(wasi))
     assert(jet_target_provider_identity(browser) != jet_target_provider_identity(no_os))
     assert(jet_target_provider_identity(wasi) != jet_target_provider_identity(no_os))
+}
+// The rows Core's `core.target` machines derive from their facts: a web
+// build's host starts no processes and makes no C foreign calls; a native
+// host and a WASI runtime lack nothing.
+#Test("hosted_machines_deny_the_effects_core_target_rows_name") {
+    assert_eq(jet_target_machine_denied_effects(jet_target_machine_wasm_browser("0.0.1")), [String]{"Exec", "FFI.C"})
+    assert(jet_target_machine_denied_effects(jet_target_machine_wasm_wasi("0.0.1")).is_empty())
+    assert(jet_target_machine_denied_effects(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")).is_empty())
 }
 // Rust-computed oracle: CLI-37/identity_oracle.py extracts unmodified Rust
 // TargetMachine::provider_identity, board constructors, facts; rustc

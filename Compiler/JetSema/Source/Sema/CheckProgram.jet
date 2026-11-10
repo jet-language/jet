@@ -9329,6 +9329,8 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     if !effects.complete -> complete = false
     // The web partition reads the solved effect rows and call edges.
     sema_web_partition_check(modules, final_graph, diagnostics)
+    // Code the entry reaches uses only the effects its target provides.
+    sema_target_denial_check(modules, final_graph, diagnostics)
     // `#Target(OS.…)` impls: the axis conflict and ungated signature uses.
     sema_os_target_check(final_graph, diagnostics)
     // Typestate flow reads each body's checked receiver types.

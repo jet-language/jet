@@ -762,6 +762,13 @@ jet_driver_selected_target_machine: fn(
         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
         return None
     }
+    // A build for an OS no host triple names (`os: web`) targets that OS's
+    // machine, so its artifact is checked against that machine's row.
+    if target_os_parse(request.build_os) == {
+        .Val(.Web) -> return Val(jet_target_machine_wasm_browser(compiler_version))
+        .Val(.Wasm) -> return Val(jet_target_machine_wasm_wasi(compiler_version))
+        else -> {}
+    }
     Val(jet_target_machine_for_facts(false, false, target_triple, compiler_version))
 }
 

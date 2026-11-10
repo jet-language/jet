@@ -13,7 +13,7 @@ use {
     core.build.[BuildGraph, BuildGraphAction]
     jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
-    jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
+    jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionOutcome, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProbeFact, BuildProvenance, ContentDigest,
@@ -395,10 +395,11 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     host_options = jet_cli_build_options_set(host_options, "os", "linux")
     host_options = jet_cli_build_options_set(host_options, "min_os", "")
     if node.kind == .Host -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
-    built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, options.copy(), threads, invocation, trace_sink)
+    target_options: jet_cli_build_toolchain_options(graph, row, options)
+    built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, target_options.copy(), threads, invocation, trace_sink)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     wants_host: needs.host.contains(target)
-    cross: build_options_value(options, "os") != "linux" || build_options_value(options, "min_os") != ""
+    cross: build_options_value(target_options, "os") != "linux" || build_options_value(target_options, "min_os") != ""
     if !needs.images.contains(target) && (!wants_host || cross) {
         if !wants_host -> return built
         return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
@@ -409,7 +410,7 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     cache := WorkspaceDeclarationCache.new()
     source_root := source_dir.copy()
     if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) -> source_root = package_root.copy()
-    written: build_options_value(options, "output_dir")
+    written: build_options_value(target_options, "output_dir")
     image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
     image: cli_files.join(image_dir, row.name)
     if needs.images.contains(target) {
@@ -426,6 +427,18 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     cli_files.copy2(image, tool) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image to its host copy `{tool}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     cli_files.set_mode(tool, 493) ?? return jet_cli_build_failed("couldn't make the host copy `{tool}` executable: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     built
+}
+
+// The options target `row` builds with: a target on its own toolchain
+// (`b.toolchain(name, triple)`) builds for the OS that toolchain's triple
+// names, so its artifact is checked against that machine's row; a target on
+// the host toolchain, or on a triple that names no OS, follows the build.
+jet_cli_build_toolchain_options: fn(graph: BuildPlanExecution, row: BuildSessionTarget, options: BuildOptions) -> BuildOptions Never! {
+    if row.toolchain < 0 || row.toolchain >= graph.toolchains.len() -> return options.copy()
+    toolchain: graph.toolchains[row.toolchain]
+    if toolchain.role != "target" -> return options.copy()
+    os: jet_target_triple_os(toolchain.target_triple) ?? return options.copy()
+    jet_cli_build_options_set(options, "os", target_os_key(os))
 }
 
 // `options` with the resolved value of row `name` replaced by `value`.

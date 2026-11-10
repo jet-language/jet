@@ -43,7 +43,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$` | site location `$here`, `$caller` |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
-| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) |
+| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features` |
 | `#package` | package site value: `#package.name`, `.version` |
 | `#line` | the `Int` source line where it is written |
 | `#file` | the `String` source file where it is written |

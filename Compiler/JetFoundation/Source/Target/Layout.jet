@@ -202,6 +202,20 @@ jet_target_layout_pointer_size: fn(triple: String) -> Int Never! {
     if triple.starts_with("wasm32-") || triple.starts_with("i686-") || triple.starts_with("arm-") || triple.starts_with("armv7-") || triple.starts_with("thumb") -> 4 else -> 8
 }
 
+// The bytes one cache line of `triple`'s CPU holds: Apple's arm64 cores fetch
+// 128-byte lines, every other supported CPU 64.
+jet_target_layout_cache_line: fn(triple: String) -> Int Never! {
+    if triple.starts_with("aarch64-apple-") -> 128 else -> 64
+}
+
+// The CPU features every CPU `triple` names has, so code built for it may use
+// them unprobed: SSE2 on x86-64, NEON on arm64, none elsewhere.
+jet_target_layout_cpu_features: fn(triple: String) -> [String] Never! {
+    if triple.starts_with("x86_64-") -> return [String]{"sse2"}
+    if triple.starts_with("aarch64-") -> return [String]{"neon"}
+    [String]{}
+}
+
 jet_target_layout_from_triple_and_version: fn(triple: String, package_version: String) -> JetTargetLayout Never! {
     pointer_size: jet_target_layout_pointer_size(triple)
     address_bound: if pointer_size <= 4 -> 0xffffffff else -> JET_LAYOUT_U64_MAX

@@ -10,6 +10,15 @@
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF: "Exec.Args"
+// Ending the program's own process, a leaf of `Exec`.
+AUTHORITY_EXEC_EXIT_LEAF: "Exec.Exit"
+
+// Whether `right` is an `Exec` leaf that acts on the program's own process,
+// reading its arguments or ending it, rather than starting other programs.
+authority_own_process_leaf: fn(right: String) -> Bool Never! {
+    right == AUTHORITY_EXEC_ARGS_LEAF || right == AUTHORITY_EXEC_EXIT_LEAF
+}
+
 // The beginner floor every program holds: print, allocate, and read
 // arguments. Never the `Exec` root.
 AUTHORITY_AMBIENT_BASIC_EFFECTS: comptime { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }

@@ -13,12 +13,12 @@ use {
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
-        AUTHORITY_EXEC_ARGS_LEAF,
         Diagnostic,
         authority_effect_action,
         authority_root,
         authority_grantable_roots,
         authority_is_deny_only,
+        authority_own_process_leaf,
         authority_parse_root,
         diagnostic_from_registry,
     ]
@@ -279,7 +279,7 @@ jet_cli_invocation_denials: fn(authority: JetCLIAuthority, denied: [String]) -> 
 // `Exec.Exit` starts other programs.
 jet_cli_effect_open_ended: fn(right: String) -> Bool Never! {
     root: authority_root(right)
-    root == "FFI" || (root == "Exec" && right != AUTHORITY_EXEC_ARGS_LEAF && right != "Exec.Exit")
+    root == "FFI" || (root == "Exec" && !authority_own_process_leaf(right))
 }
 
 // Plain words for what a program does with `right`.

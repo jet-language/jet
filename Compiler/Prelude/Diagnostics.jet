@@ -9063,6 +9063,21 @@ DuplicateCaseNumber: struct {
     }
 }
 
+TargetDeniedEffect: struct {
+    function: String
+    denied: String
+    target: String
+
+    impl Diagnostic {
+        code: "E1123"
+        meaning: "Code built for a target uses an effect the target denies"
+        detail: true
+        what: fn(self) -> String { "`{self.function}` uses `{self.denied}`, which target `{self.target}` denies." }
+        why: fn(self) -> String { "An artifact built for `{self.target}` gets only the services that machine provides, and it lacks the one `{self.denied}` needs." }
+        fix: fn(self) -> String { "Keep the `{self.denied}` work out of the code this entry reaches, or build the entry for a target that provides `{self.denied}`." }
+    }
+}
+
 RetiredKernelCrossing: struct {
     impl Diagnostic {
         code: "E1130"
