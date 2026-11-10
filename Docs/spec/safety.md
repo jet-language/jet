@@ -1751,70 +1751,70 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 87,
+      "line": 105,
       "column": 5,
       "reason": "native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 115,
+      "line": 133,
       "column": 5,
       "reason": "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 173,
+      "line": 191,
       "column": 5,
       "reason": "C's caller owns count writable bytes at target"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 196,
+      "line": 214,
       "column": 5,
       "reason": "C's caller owns count readable bytes at left and at right"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 229,
+      "line": 247,
       "column": 5,
       "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 235,
+      "line": 253,
       "column": 5,
       "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 241,
+      "line": 259,
       "column": 5,
       "reason": "checked unary closure adapter with borrowed environment, input and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 247,
+      "line": 265,
       "column": 5,
       "reason": "checked binary closure adapter with live environment, inputs and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 253,
+      "line": 271,
       "column": 5,
       "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 259,
+      "line": 277,
       "column": 5,
       "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
     },
@@ -3627,21 +3627,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 219,
+      "line": 220,
       "column": 13,
       "reason": "fds lends count initialized exact Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 376,
+      "line": 377,
       "column": 5,
       "reason": "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 467,
+      "line": 468,
       "column": 13,
       "reason": "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec"
     },
@@ -6070,21 +6070,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 594,
+      "line": 596,
       "column": 1,
       "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 600,
+      "line": 602,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 668,
+      "line": 670,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6392,21 +6392,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 156,
+      "line": 155,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 190,
+      "line": 189,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
     {
       "package": "Core",
       "file": "Core/Service/Service.jet",
-      "line": 1427,
+      "line": 1487,
       "column": 5,
       "reason": "read the final path component's OS metadata kind without opening an identity handle"
     },
@@ -7050,7 +7050,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/orchestrator/LaneCommit.jet",
-      "line": 333,
+      "line": 206,
       "column": 5,
       "reason": "signal 0 delivers nothing: it only asks whether a queued job's caller still runs"
     },
@@ -10366,16 +10366,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/CodecCSV.jet | 264:5 | "checked native Decode callback; the tree, value slot and out words stay live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 9:5 | "data lends index's initialized packed native U8 element" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 14:5 | "data owns index's writable packed native U8 element" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 87:5 | "native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 115:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 173:5 | "C's caller owns count writable bytes at target" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 196:5 | "C's caller owns count readable bytes at left and at right" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 229:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 235:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 241:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 247:5 | "checked binary closure adapter with live environment, inputs and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 253:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 259:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 105:5 | "native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 133:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 191:5 | "C's caller owns count writable bytes at target" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 214:5 | "C's caller owns count readable bytes at left and at right" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 247:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 253:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 259:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 265:5 | "checked binary closure adapter with live environment, inputs and output slots" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 271:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 277:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
 | Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 184:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 205:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
@@ -10634,9 +10634,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutText.jet | 62:5 | "runtime-init (jet_rt_layout_init) runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 228:9 | "the owned terminated host copy truncates at its validated scope suffix" |
 | Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 546:9 | "output lends the C ABI bool result byte, not an eight-byte word" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 219:13 | "fds lends count initialized exact Int words" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 376:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 467:13 | "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec" |
+| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 220:13 | "fds lends count initialized exact Int words" |
+| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 377:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
+| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 468:13 | "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 18:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 25:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 217:5 | "an idempotent flag: every writer stores the same 1" |
@@ -10983,9 +10983,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 594:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/Files/Files.jet | 600:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 668:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 596:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| Core | Core/Files/Files.jet | 602:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 670:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11029,9 +11029,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4334:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4339:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4368:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 156:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 190:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
-| Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
+| Core | Core/Process/Process.jet | 155:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 189:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 426:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 594:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
 | Core | Core/Sys/Sys.jet | 644:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
@@ -11123,7 +11123,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 335:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
-| Tools | Tools/agent/orchestrator/LaneCommit.jet | 333:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
+| Tools | Tools/agent/orchestrator/LaneCommit.jet | 206:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |

@@ -36,48 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub({tag})` function first.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0737</code>: <code>tests/ui/taint/fixed_timing_value_steering_is_e0737.stderr</code>.</p>
-<pre class="diag">Error [jet.FixedTimingSteer]: A `Key` value decides a branch that can&#39;t be masked (an arm returns, breaks, calls, can stop or writes memory)
-  --&gt; tests/ui/taint/fixed_timing_value_steering_is_e0737.jet:4:8
+<p>First UI snapshot mentioning <code>E0737</code>: <code>tests/ui/taint/fixed_timing_early_return_skipping_a_call_is_e0737.stderr</code>.</p>
+<pre class="diag">Error [jet.FixedTimingSteer]: A `Key` value decides an early return that can&#39;t be masked (the code it skips calls, can stop, writes memory or loops on its own)
+  --&gt; tests/ui/taint/fixed_timing_early_return_skipping_a_call_is_e0737.jet:5:12
     |
-  4 |     if k == (U64{0}) -&gt; return a
-    |        ^^^^^^^^^^^^^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
- Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737
-
-Error [jet.FixedTimingSteer]: A `Key` value decides a division (its time depends on its operands)
-  --&gt; tests/ui/taint/fixed_timing_value_steering_is_e0737.jet:5:8
-    |
-  5 |     q: k / U64{3}
-    |        ^^^^^^^^^^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
- Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737
-
-Error [jet.FixedTimingSteer]: A `Key` value decides whether `&amp;&amp;` or `||` evaluates its right side
-  --&gt; tests/ui/taint/fixed_timing_value_steering_is_e0737.jet:6:11
-    |
-  6 |     both: q != (U64{0}) &amp;&amp; b != (U64{0})
-    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
- Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737
-
-Error [jet.FixedTimingSteer]: A `Key` value decides a branch that can&#39;t be masked (an arm returns, breaks, calls, can stop or writes memory)
-  --&gt; tests/ui/taint/fixed_timing_value_steering_is_e0737.jet:7:8
-    |
-  7 |     if both -&gt; return b
-    |        ^^^^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
- Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737
-
-Error [jet.FixedTimingSteer]: A `Key` value decides a branch that can&#39;t be masked (an arm returns, breaks, calls, can stop or writes memory)
-  --&gt; tests/ui/taint/fixed_timing_value_steering_is_e0737.jet:8:16
-    |
-  8 |     picked: if k == (U64{1}) -&gt; a else -&gt; b - a
-    |                ^^^^^^^^^^^^^
+  5 |         if items[i] == k -&gt; return U64{1}
+    |            ^^^^^^^^^^^^^
  Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
  Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
 More: jet-lang.dev/e/E0737

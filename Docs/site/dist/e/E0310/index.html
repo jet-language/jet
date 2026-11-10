@@ -46,13 +46,13 @@
  Fix: Test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) { ... }`
 More: jet-lang.dev/e/E0310
 
-Error [jet.EffectBoundExceeded]: `active_effect` uses the effect `FS.Read`, which its signature doesn&#39;t allow
+Error [jet.EffectBoundExceeded]: `active_effect` uses the effect `FS.Read(&quot;missing&quot;)`, which its signature doesn&#39;t allow
   --&gt; tests/ui/effects/erased_scope_restores_refinement_and_effect_facts.jet:27:23
     |
  27 | active_effect: fn() -[IO]&gt; {
     |                       ^^
- Why: The signature declares `-[IO]&gt;`, so the body may only use those; `FS.Read` is outside that set
- Fix: Add `FS.Read` to the effect list, or stop using it in `active_effect`
+ Why: The signature declares `-[IO]&gt;`, so the body may only use those; `FS.Read(&quot;missing&quot;)` is outside that set
+ Fix: Add `FS.Read(&quot;missing&quot;)` to the effect list, or stop using it in `active_effect`
  Denial: invocation
  Call chain: active_effect
 More: jet-lang.dev/e/E0740
