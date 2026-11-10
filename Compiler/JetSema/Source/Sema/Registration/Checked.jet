@@ -23,6 +23,7 @@ use {
         Item,
         LayoutFacts,
         MARKER_MEMO,
+        MARKER_RENAME,
         Marker,
         NamedSpan,
         OperatorMarker,
@@ -197,7 +198,7 @@ sema_checked_marker_text: fn(marker: Marker) -> String? {
 // it. None when the type has no casing `#Rename`.
 sema_checked_rename_case: fn(markers: [Marker]) -> String? {
     loop marker in markers {
-        if marker.name != "Rename" || marker.negated -> next
+        if marker.name != MARKER_RENAME || marker.negated -> next
         return sema_checked_rename_case_word(marker)
     }
     None
