@@ -88,9 +88,8 @@ Exemption: struct {
 
 // The exemptions, in one place.
 EXEMPTIONS: [Exemption]{
-    // JavaScript that runs in a browser: the web Prelude, the canvas assets
-    // the web build ships, and the website.
-    Exemption{root: "Compiler/Prelude/Web/", class: .Browser, js_only: true},
+    // JavaScript that runs in a browser: the canvas assets the web build
+    // ships, and the website.
     Exemption{root: "Compiler/JetCanvas/", class: .Browser, js_only: true},
     Exemption{root: "Docs/site/", class: .Browser, js_only: true},
     // Test and example subjects.
@@ -499,9 +498,9 @@ run: fn() {
     assert(file_class("Tools/x/run.mjs", "") == .Script)
     assert(file_class("Tools/x/run.py", "") == .Script)
     assert(file_class("Tools/x/types.d.ts", "") == .Script)
-    assert(file_class("Compiler/Prelude/Web/Core/Time.js", "") == .Browser)
+    assert(file_class("Compiler/JetCanvas/Source/CanvasAssets/js/review.js", "") == .Browser)
     assert(file_class("Docs/site/assets/site.js", "") == .Browser)
-    assert(file_class("Compiler/Prelude/Web/build.sh", "") == .Script)
+    assert(file_class("Compiler/JetCanvas/build.sh", "") == .Script)
     assert(file_class("tests/cases/source_import/lib.py", "") == .Subject)
     assert(file_class("Examples/Interop/FFI/add.js", "") == .Subject)
     assert(file_class("tests/agent_workloads/adapters/run.bash", "") == .Script)
@@ -556,13 +555,13 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "{ENTRIES_ROOT}/sum/expected.out", "2\n")
     plant(dir, "{ENTRIES_ROOT}/half/entry.json", "{{\"name\": \"half\", \"mode\": \"batch\", \"languages\": [\"python\"]}}\n")
     plant(dir, "{ENTRIES_ROOT}/half/python/main.py", "print(1)\n")
-    plant(dir, "Compiler/Prelude/Web/Core/Clock.js", "export const now = () => 0;\n")
+    plant(dir, "Compiler/JetCanvas/Source/CanvasAssets/js/clock.js", "export const now = () => 0;\n")
     plant(dir, "tests/cases/port_python/input.py", "print(4)\n")
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/peer.py", "print(5)\n")
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/run.jet", "run: fn() {{ print(5) }}\n")
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/expected.out", "5\n")
     added: added_files(dir, "HEAD") ?? panic(err.message)
-    assert(added.contains("Tools/stray/report.mjs") && added.contains("Compiler/Prelude/Web/Core/Clock.js"))
+    assert(added.contains("Tools/stray/report.mjs") && added.contains("Compiler/JetCanvas/Source/CanvasAssets/js/clock.js"))
     refused: refusals(dir, added, read_entries(dir))
     assert_eq(refused.len(), 3)
     assert(refused[0].starts_with("{ENTRIES_ROOT}/half/python/main.py: a script in another language with no gauntlet pair (entry `half` is incomplete: it does not list `jet` among its languages); "))
@@ -573,7 +572,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert(rows.contains("{ENTRIES_ROOT}/count/fixtures/fake-git.sh\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/sum/python/main.py\tpaired\tsum {ENTRIES_ROOT}/sum/jet"))
     assert(rows.contains("{WORKLOAD_ROOTS[0]}/w99-echo/peer.py\tpaired\t{WORKLOAD_ROOTS[0]}/w99-echo {WORKLOAD_ROOTS[0]}/w99-echo/run.jet"))
-    assert(rows.contains("Compiler/Prelude/Web/Core/Clock.js\tbrowser\t"))
+    assert(rows.contains("Compiler/JetCanvas/Source/CanvasAssets/js/clock.js\tbrowser\t"))
     assert(rows.contains("tests/cases/port_python/input.py\tsubject\t"))
     assert_eq(census_counts(rows), "scripts 9: paired 4, unpaired 3, browser 1, subject 1")
     files.remove_all(dir) ?? ()

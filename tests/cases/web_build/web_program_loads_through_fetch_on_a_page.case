@@ -1,0 +1,14 @@
+# On a page (no file system) the generated web host fetches the manifest,
+# the runtime partition and the program partition, then runs the program:
+# the harness serves the build directory through `fetch`.
+requires: tool:node
+fixture: web_program_loads_through_fetch_on_a_page.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "hello from the page\nstatus 0; fetched web.manifest.json rt.wasm app.wasm\n"
+stderr: = ""

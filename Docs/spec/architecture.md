@@ -17,10 +17,10 @@ Jet source
 ```
 
 This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).
-Every native level (O0, O1, O2) reads the same Jet-owned IR and calls one
-runtime: the Prelude and Core, compiled once per Jet version and shipped with
-Jet. The web tier does not yet: its JavaScript host still provides some runtime
-functions itself (I9; #6615 c7). O0, O1 and O2 are all
+Every level reads the same Jet-owned IR and calls one runtime: the Prelude and
+Core, compiled once per Jet version and shipped with Jet. The web target runs
+that runtime selected to WebAssembly (`jet_runtime.wasm`); its JavaScript host
+only answers system calls and marshals values. O0, O1 and O2 are all
 the Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
 fallback until Jet O2 beats it on every required cell and covers every
 supported target (card #4013). The Cranelift JIT is retired (D-EXEC2).
@@ -1277,8 +1277,8 @@ vetted runtime internal must also uphold its boundary contract.
 ### Private traced collector substrate
 
 D-DEP-GC1=A has one dependency-free collector. Its Rust-tier implementation
-left with Rust; the native runtime does not carry it yet, and the Web target's
-routes are in [`Gc.js`](../../Compiler/Prelude/Web/Core/Gc.js). The collector
+left with Rust; neither the native runtime nor the web runtime carries it yet.
+The collector
 has no source-facing wrapper, constructor, or module; only sema-proven
 automatic promotions call its traced allocation entry.
 

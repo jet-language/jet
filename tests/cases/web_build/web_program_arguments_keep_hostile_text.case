@@ -1,0 +1,13 @@
+# The generated web host marshals the process arguments into the runtime's
+# own strings: a quote, non-ASCII text, an empty argument and markup arrive
+# byte for byte, as they do on the native tiers.
+requires: tool:node
+fixture: web_program_arguments_keep_hostile_text.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+step: node app.js 'a"b' 'ünï😀' '' '<b>&amp;'
+cwd: .jet/build
+exit: 0
+stdout: = "[a\"b]\n[ünï😀]\n[]\n[<b>&amp;]\n"
+stderr: = ""
