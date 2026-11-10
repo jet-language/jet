@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98503,
+    "rev": 98514,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34517,20 +34517,20 @@
         {
           "n": 29,
           "text": "D-REFLECT-FIELDTYPE1 A: every reflected record names its type `type`, never `ty`. That covers FieldInfo, MarkerArgInfo, LayoutField, CompilerParam, CompilerField and CompilerSymbolKind. - Rows to change: CoreRecordRows.jet:207,212,214,316,325,425; CompilerOwned.jet:163; Expressions/FactReads.jet:458; Comptime/Reflection.jet:322,657,811,1222; Registration/Derives.jet:1687,1730. - `field.ty` is E0302, and its fix names `field.type`, with a UI snapshot. - A golden reads `field.type` in a derive `expand` and through `T.reflect()` on O0, O1 and O2. - syntax-decisions.md:3488 (D-METAREFLECT1 `.ty`) and the `field.ty` mentions in D-META-HASH1 A and D-ENUM-CASEMETA1 A now read `field.type`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:30:48.865Z"
+          "evidence": "dd68e2aa03 (G8Lead2-22): every reflected record names its type `type`; `field.ty` is E0302 with a fix naming field.type (tests/ui/reflected_field_ty_is_e0302); the FieldTypes golden passes. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:16.809Z"
         },
         {
           "n": 30,
           "text": "(was #1516 c5) An ascending integer-literal range in an expression fence expands to its entries (D-FENCE-RANGE1=A, spelled <: :> by D-FENCE2=A): print(<:0..3:>) prints 0, 1, 2 and 3 on O0, O1 and O2. Proof: tests/cases/fenced_names/fenced_integer_range_matches_on_aot_jit_and_interpreter, which today runs only jet run and the default jet build; it gains O1 and O2 steps. (was #5201 c11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:16:25.588Z"
+          "evidence": "7c6a43f5ee: the fenced integer range case runs and passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:14.647Z"
         },
         {
           "n": 31,
@@ -34562,8 +34562,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-09T22:52:54.918Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-10T03:58:16.809Z",
+      "updatedBy": "Main",
       "goals": [
         "G6"
       ],
@@ -63359,11 +63359,11 @@
         {
           "n": 39,
           "text": "(was #2398 c3) A false statement-position if with no else emits no else body, never lowers `Expr.NoElse` to Unreachable, and falls through on all applicable execution tiers [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:17.894Z"
+          "evidence": "d6e24a4836: false_if_without_else_falls_through_on_every_tier passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:25.139Z"
         }
       ],
       "refs": [],
@@ -63374,7 +63374,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-10T02:13:20.025Z",
+      "updated": "2026-11-10T03:58:25.139Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -64100,20 +64100,20 @@
         {
           "n": 78,
           "text": "(was #3316 c1) A finite prefix can be taken from a repeating nonempty source without materializing an unbounded source [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:44.353Z"
+          "evidence": "a388e96b3e: repeating_sources_take_a_finite_prefix_and_empty_ones_stop passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:27.098Z"
         },
         {
           "n": 79,
           "text": "(was #3316 c2) An empty repeating source terminates without spinning [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:45.017Z"
+          "evidence": "a388e96b3e: the same case shows that empty repeating sources stop, at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:29.059Z"
         },
         {
           "n": 80,
@@ -64208,11 +64208,11 @@
         {
           "n": 90,
           "text": "(was #3545 c3) Fresh O0, O1 and O2 fixtures preserve exact set outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:39:52.625Z"
+          "evidence": "ad5a7828aa: 76 tier-named cases gain O1 and O2 steps, including both core_set_foundations cases. With the c057 compiler: 71 PASS, 7 pre-existing KF, 0 FAIL. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:30.894Z"
         },
         {
           "n": 91,
@@ -64394,7 +64394,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T03:52:07.883Z",
+      "updated": "2026-11-10T03:58:30.894Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -73112,11 +73112,11 @@
         {
           "n": 28,
           "text": "(from #6141 Effects on types: spec page, diagnostics registry and teachi) Docs/spec states the rung rule, spellings and inference once, linking to the registry and examples instead of listing behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:55:52.356Z"
+          "evidence": "bcd7bb5bf4 (G8Lead2-20): Docs/spec states the rung rule, its spellings and inference once, and links to the registry and the Effects examples. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:19.101Z"
         },
         {
           "n": 29,
@@ -73361,7 +73361,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-10T03:48:09.508Z",
+      "updated": "2026-11-10T03:58:19.102Z",
       "updatedBy": "Main",
       "criteriaLastN": 55
     },
@@ -76583,11 +76583,11 @@
         {
           "n": 125,
           "text": "(was #4291) [#4488] Never is accepted in success-value slots (y := v ?? fail(); a tail fail() in -> Int). Terminated joins invent no phi. (was #4275 c49)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:33:02.468Z"
+          "evidence": "5bb11ed44e: never_fills_success_value_slots_on_every_tier passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:23.321Z"
         },
         {
           "n": 126,
@@ -76814,7 +76814,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T03:52:04.130Z",
+      "updated": "2026-11-10T03:58:23.321Z",
       "updatedBy": "Main",
       "criteriaLastN": 149
     },
@@ -97767,8 +97767,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Census at dev c057ea659d (t2c landed): git grep -nE '#Import\\(c\\)|#FFI\\(c\\)|#Import c\\.[A-Za-z_]+' c057ea659d -- Compiler Core Jetpack Tools. Core has 0 hits, and so do JetRuntime sources and the runtime pack. The rest are all the C-interop feature itself: its parser, sema and registration (JetParser Items.jet, JetSema Guest.jet, Registration, Calls/Core.jet comments), its CLI link (ForeignLink.jet and Host.jet comments), its diagnostics rows, the Jetpack RustBridge foreign bridge, and its tests and fixtures (JetParser Tests, JetBackend and JetRuntime Fragments fixtures, RustBridge tests, RuntimeGenerators and CoreCoverage fixture strings, the tree-sitter corpus, and agent-eval FFI probes). Tools/tower/.tower is Tower history. SqliteLead-15r2 (d46993e917) and TlsLead-30r2 (ebea158575) removed the last Core C imports.",
-          "at": "2026-11-10T02:39:16.672Z"
+          "evidence": "194aa0de0b: the C-import census also counts attribute-list declarations, and guards c_imports passes on the landed tree. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:21.312Z"
         }
       ],
       "refs": [],
@@ -97783,7 +97783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-10T02:53:16.949Z",
+      "updated": "2026-11-10T03:58:21.312Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -98610,11 +98610,11 @@
         {
           "n": 3,
           "text": "Databases written by C SQLite open in Jet and the reverse, in the journal mode Core/Db uses, case-tested.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T17:21:02.066Z"
+          "evidence": "a5518357aa: DBFileFormat finds its fixtures from its own package root, and the golden passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:32.750Z"
         }
       ],
       "refs": [],
@@ -98629,7 +98629,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-10T02:36:08.026Z",
+      "updated": "2026-11-10T03:58:32.750Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -99046,11 +99046,11 @@
         {
           "n": 1,
           "text": "No reference to raylib remains in code, examples, tests, tools, registries, specs, guides, env/flake inputs or gauntlet entries (dated audits and research stay as evidence): core.game.raylib drawing (shapes, text, textures, sprites, collisions) becomes `ui` drawing on Frame values; every caller, golden, case, UI snapshot, runtime symbol (jet_raylib_*), web host file, generated registry row and Jetpack env/link fixture migrates in one cutover; goldens pass on O0, O1, O2 and web",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T19:53:43.183Z"
+          "evidence": "76bf5d7fa2 (G1Lead-3-rl1): the stale raylib references are gone. Main ran `git grep -il raylib 63944380ec` outside Docs/audits, Docs/research and Docs/proposals, and only decision history is left: the D-FLAGSHIP-RAYLIB1 and D-RAYLIB-DRIVER-LOAD1 lines of syntax-decisions.md, and one historical ballot body in Tools/agent-eval/domain-foundations/slate/ballots.mjs. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:34.693Z"
         },
         {
           "n": 2,
@@ -99137,7 +99137,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-10T02:36:21.403Z",
+      "updated": "2026-11-10T03:58:34.693Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -200527,6 +200527,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T03:58:34.693Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l39twq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-10T03:58:32.751Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ajhpeh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-10T03:58:30.894Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#90"
+    },
+    {
+      "at": "2026-11-10T03:58:29.059Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#79"
+    },
+    {
+      "at": "2026-11-10T03:58:27.098Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#78"
+    },
+    {
+      "at": "2026-11-10T03:58:25.139Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-10T03:58:23.321Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#125"
+    },
+    {
+      "at": "2026-11-10T03:58:21.312Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lscvc9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-10T03:58:19.102Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-10T03:58:16.810Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-10T03:58:14.647Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#30"
+    },
     {
       "at": "2026-11-10T03:52:07.883Z",
       "by": "Main",
