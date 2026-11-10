@@ -440,7 +440,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 // ---------------------------------------------------------------------------
 
 /// x[i] += x[j] + nothing, accumulating the carry into c (add64 of p192).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_limb: fn(x: &[U64], i: Int, v: U64, c: U64) -> U64 Never! {
     t: x[i] + v
     x[i] = t
@@ -448,7 +448,7 @@ add_limb: fn(x: &[U64], i: Int, v: U64, c: U64) -> U64 Never! {
 }
 
 /// x[i] += c; the carry out (carry64 of p192).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 carry_limb: fn(x: &[U64], i: Int, c: U64) -> U64 Never! {
     t: x[i] + c
     x[i] = t
@@ -456,7 +456,7 @@ carry_limb: fn(x: &[U64], i: Int, c: U64) -> U64 Never! {
 }
 
 /// x += v over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_word_in: fn(x: &[U64], limbs: Int, v: U64) -> U64 Never! {
     c := v
     loop i in 0..<limbs {
@@ -468,7 +468,7 @@ add_word_in: fn(x: &[U64], limbs: Int, v: U64) -> U64 Never! {
 }
 
 /// x += b over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -482,7 +482,7 @@ add_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x -= b over `limbs` limbs; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sub_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -495,7 +495,7 @@ sub_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// mbedtls_ecp_mod_p192_raw: 2^192 = 2^64 + 1 mod p.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p192: fn(x: &[U64]) Never! {
     c := U64{0}
     v := x[3]
@@ -548,7 +548,7 @@ carry32: fn(cur: I64) -> I64 Never! { cur >> 32 }
 /// the top chunk folds back in with the signs in `fix`. False when a carry
 /// is left over, which no input below p^2 produces. The accumulator is a
 /// fixed word (it stays within 2^40 of zero), so no step tests the value.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
     i := 0
     cur := ld32(x, 0)
@@ -609,7 +609,7 @@ P384_OPS: [Int]{
 P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 
 /// mbedtls_ecp_mod_p521_raw: 2^521 = 1 mod p. s is 9 limbs of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p521: fn(x: &[U64], s: &[U64]) Never! {
     loop i in 0..<9 -> s[i] = x[9 + i]
     carry: bn.core_mla(x, 0, 9, s, 9, U64{1} << 55)
@@ -621,7 +621,7 @@ raw_p521: fn(x: &[U64], s: &[U64]) Never! {
 }
 
 /// mbedtls_ecp_mod_p255_raw: 2^256 = 38 mod p. s is 4 limbs of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p255: fn(x: &[U64], s: &[U64]) Never! {
     loop i in 0..<4 -> s[i] = x[4 + i]
     carry := bn.core_mla(x, 0, 4, s, 4, U64{38})
@@ -635,7 +635,7 @@ raw_p255: fn(x: &[U64], s: &[U64]) Never! {
 
 /// mbedtls_ecp_mod_p448_raw: 2^448 = 2^224 + 1 mod p. m and q are 8 limbs
 /// of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p448: fn(x: &[U64], m: &[U64], q: &[U64]) Never! {
     loop i in 0..<7 -> m[i] = x[7 + i]
     m[7] = U64{0}
@@ -662,7 +662,7 @@ raw_p448: fn(x: &[U64], m: &[U64], q: &[U64]) Never! {
 
 /// ecp_mod_koblitz: 2^bits = r mod p for p = 2^bits - r. a1 holds
 /// bits / 64 + 1 limbs and m one more, both scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_koblitz: fn(x: &[U64], r: U64, bits: Int, a1: &[U64], m: &[U64]) Never! {
     shift: bits %% 64
     adjust: if shift != 0 -> 1 else -> 0
@@ -931,7 +931,7 @@ fe_sqr_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
 }
 
 /// d = a + b.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_add: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
     c: bn.core_add(d, a, b, f.n)
     borrow: sub_in(d, f.p, f.n)
@@ -939,7 +939,7 @@ fe_add: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
 }
 
 /// x = x + b.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_add_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
     c: add_in(x, b, f.n)
     borrow: sub_in(x, f.p, f.n)
@@ -947,7 +947,7 @@ fe_add_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
 }
 
 /// x = 2 x.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_dbl_in: fn(f: Field, x: &[U64]) Never! {
     c: x[f.n - 1] >> 63
     bn.core_shift_l(x, f.n, 1)
@@ -1429,7 +1429,7 @@ comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: U64, rx: &[U64],
 
 /// The comb digits of an odd m: d + 1 signed digits of `wnd` bits each,
 /// the sign in bit 7 (ecp_comb_recode_core).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 comb_recode_core: fn(d: Int, wnd: Int, m: bn.Mpi) -> [U64] Never! {
     x := cipher.words(d + 1)
     loop i in 0..<d {

@@ -2120,7 +2120,7 @@ ir_route_member: fn(op: TBinaryOp) -> String Never! {
 // Whether compound assignment `place op= value` checks overflow: as its
 // binary form does (sema_expr_check_binary), for + - * / ** << >>; only a
 // fixed-width integer reads it (plain arithmetic traps). An
-// `op=` under an `#Arithmetic` policy never reaches here: sema lowers it to
+// `op=` under a `#Policy(arithmetic:)` mode never reaches here: sema lowers it to
 // `place = OverflowOpt(...)` (Statements.jet sema_stmt_policy_compound).
 ir_assign_overflow: fn(op: TBinaryOp) -> Bool Never! {
     op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Pow || op == .Shl || op == .Shr

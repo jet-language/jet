@@ -1151,10 +1151,7 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &Sema
                 sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }
             .DeferClose(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-            .ScopeMember(name, _, args, _, nested, dsl, _, span) -> {
-                if name == "Arithmetic" && !dsl && args.len() == 1 && sema_function_arithmetic_mode(args[0]) == .Val(mode) {
-                    values.scopes.push(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})
-                }
+            .ScopeMember(_, _, args, _, nested, _, _, _) -> {
                 loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument, values)
                 sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }

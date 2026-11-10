@@ -1159,7 +1159,7 @@ semindex_binding: fn(binding: Binding, db: &SemDB, ctx: &SemWalk, modules: [JetD
     semindex_scalar("initializer", binding.init, db, ctx, modules)
 }
 
-// The lexical `#Arithmetic(mode)` operations of one function, from the
+// The lexical `#Policy(arithmetic: mode)` operations of one function, from the
 // shared sema scan the compiler semantic index and reflection also read.
 semindex_function_arithmetic: fn(function: Func, db: &SemDB, ctx: &SemWalk) {
     loop fact in sema_arithmetic_policy_facts(function) {
@@ -1179,7 +1179,7 @@ semindex_arithmetic_operation: fn(fact: ArithmeticPolicyFact) -> String? Never! 
     }
 }
 
-// The policy is the `#Arithmetic` variant name: LSP semantic tokens
+// The policy is the `#Policy(arithmetic:)` mode name: LSP semantic tokens
 // (JetLSP Navigation) and the `fixed-width add: .Wrapping` hover read it so.
 semindex_arithmetic_mode: fn(fact: ArithmeticPolicyFact) -> String Never! {
     if fact.mode == {

@@ -59,7 +59,7 @@ min_int: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
 /// The low 64 bits of the carry-less product of x and y. Each operand is
 /// split into four masks with three zero bits between set bits, so the
 /// integer products cannot carry into a kept bit.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 bmul64: fn(x: U64, y: U64) -> U64 Never! {
     m1: U64{0x1111111111111111}
     m2: U64{0x2222222222222222}
@@ -143,7 +143,7 @@ ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
 }
 
 /// `ghash` on the Jet carry-less multiply alone.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ghash_portable: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
     if count <= 0 -> return
     h0: k.hw[0]
@@ -682,7 +682,7 @@ put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
 /// state `s` into the 64 bytes of `ks`: the block function of RFC 8439
 /// section 2.3 when `feed` adds the input state back, the HChaCha20 core
 /// when it does not.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
     x0 := s[0]
     x1 := s[1]
@@ -872,7 +872,7 @@ chacha20_room: fn(c: ChaCha20, size: Int) -> Bool Never! {
 }
 
 /// The next keystream block into `stream`, then the counter steps.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_next: fn(c: &ChaCha20) Never! {
     chacha20_core(c.state, c.stream, true)
     c.state[12] = c.state[12] + U32{1}
@@ -966,7 +966,7 @@ impl Poly1305.Close {
 
 /// A context for the 32-byte one-time key r || s, with r clamped (RFC 8439
 /// section 2.5.1; mbedtls_poly1305_starts). None for any other length.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 poly1305_key: fn(key: [U8]) -> Poly1305? Never! {
     if key.len() != 32 -> return None
     r := cipher.words(9)
@@ -984,7 +984,7 @@ poly1305_key: fn(key: [U8]) -> Poly1305? Never! {
 /// h = (h + m_i + hibit 2^128) r mod 2^130 - 5 over `count` 16-byte blocks
 /// of `m` from `off`. `hibit` is 2^24 in limb 4 for a whole block, zero for
 /// the padded last one.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 poly1305_blocks: fn(r: [U64], h: &[U64], m: [U8], off: Int, count: Int, hibit: U64) Never! {
     mask: U64{0x3ffffff}
     five: U64{5}
@@ -1059,7 +1059,7 @@ poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
 
 /// The 16-byte tag (h + s) mod 2^128, with h fully reduced mod 2^130 - 5
 /// by a masked select (mbedtls_poly1305_finish).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
     if p.fill > 0 {
         p.buf[p.fill] = U8{1}

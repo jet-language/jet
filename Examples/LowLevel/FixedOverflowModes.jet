@@ -1,7 +1,7 @@
 // Every fixed-width overflow mode the IR carries, run in range so the
 // program prints instead of stopping: default trapping operators (expression
 // and compound forms), the per-operation wrapping/saturating/checked gates, and
-// the lexical `#Arithmetic` policy. Exact `Int` arithmetic never overflows.
+// the lexical `#Policy(arithmetic:)` mode. Exact `Int` arithmetic never overflows.
 run: fn() {
     a: I32{2000000000}
     b: I32{100000000}
@@ -31,10 +31,10 @@ run: fn() {
     print(saturating(hi + lo))
     print(checked(hi + lo) ?? U8{0})
     print(checked(hi * lo) ?? U8{0})
-    #Arithmetic(.Wrapping) {
+    #Policy(arithmetic: .Wrapping) {
         print(hi * lo)
     }
-    #Arithmetic(.Saturating) {
+    #Policy(arithmetic: .Saturating) {
         print(hi * lo)
     }
     print(9000000000 * 9000000000)

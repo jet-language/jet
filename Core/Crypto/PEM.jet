@@ -92,7 +92,7 @@ EQUALS: U8{61}
 
 /// The Base64 digit of a 6-bit value (0..63), without a branch or a table
 /// lookup on it (mbedtls_ct_base64_enc_char).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 base64_enc_char: fn(value: U8) -> U8 Never! {
     digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
     digit = digit.bit_or(ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26}))
@@ -103,7 +103,7 @@ base64_enc_char: fn(value: U8) -> U8 Never! {
 
 // One plus the value of Base64 digit c, or zero when c is no digit; no
 // branch or table lookup on c.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 dec_bits: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
     v = v.bit_or(ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27}))
@@ -125,7 +125,7 @@ LAYOUT_INVALID: U8{5}
 // What byte c of Base64 text is, with no branch or table lookup on c: a
 // digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
 // the class, the text's layout; never on a digit's value.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 layout_class: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
     v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))

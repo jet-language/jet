@@ -14,7 +14,6 @@ use {
         Expr,
         ForKind,
         LValue,
-        MARKER_ARITHMETIC,
         MARKER_FX,
         MARKER_OFF,
         MARKER_TRANSACT,
@@ -2105,15 +2104,12 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
             reason: parser_expr_literal_string(reason_expr) ?? ""
             Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: body.statements, span: span}
         }
-        // Rust: `#Arithmetic(mode) { … }` is the generic marker block (a
-        // non-text scope member the checker reads as a lexical policy); any
-        // other name is a declared checked text block. Both keep their
-        // arguments.
+        // Any other name is a declared checked text block; it keeps its
+        // arguments. (`#Policy(arithmetic: .Mode) { … }` is the `Policy` arm.)
         else -> {
             block_args: loop arg in args -> arg.expr
             args_span: if args.len() > 0 -> Val(marker_span) else -> None
-            text_block: marker.name != MARKER_ARITHMETIC
-            Stmt.ScopeMember{name: marker.name, name_span: marker.name_span, args: block_args, args_span: args_span, body: body.statements, dsl: text_block, dot_span: if text_block -> hash.span else -> marker_span, span: span}
+            Stmt.ScopeMember{name: marker.name, name_span: marker.name_span, args: block_args, args_span: args_span, body: body.statements, dsl: true, dot_span: hash.span, span: span}
         }
     }
 }

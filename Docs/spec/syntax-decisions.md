@@ -1143,14 +1143,24 @@ the Float function runs on the exactly widened arguments and its result rounds
 once to `F32`; `to_bits` returns the binary32 bits, and `is_finite`/`cmp`
 classify the `F32` value.
 
-**D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
-.Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary
+**D-WRAP-SCOPE1=A** *(owner outcome, card #2171; spelling superseded by
+D-POLICY-FILE1)*: `#Policy(arithmetic: .Checked | .Wrapping | .Saturating)` is
+the one lexical policy for fixed-width `+`, `-`, `*`, unary
 negation, and `pow`. It may attach to a function, method, or block; the
 innermost block wins, and a declaration policy does not cross a call boundary.
 `.Checked` is the explicit spelling of the default. Division, remainder,
 shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
 existing rules and do not inherit this policy. The operation keeps the exact
 source span of its active policy for tooling and diagnostics.
+
+**D-POLICY-FILE1** *(card #4299, carried by #4284 c15)*: arithmetic is a
+`#Policy` setting, `arithmetic: .Mode`, at function, method and block scope.
+Written on the line directly above a declaration, `#Policy(arithmetic: …)`
+belongs to that declaration. Followed by a blank line or the end of the file
+it is a module policy, which is E0355. A package `policy: { arithmetic: … }`
+is an invalid manifest (E1215). A bare `arithmetic` with no mode is E0355, and
+a mode outside the menu is E0930. The standalone `#Arithmetic(mode)` marker is
+retired and is an unknown marker (E0927).
 
 **D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
 2026-07-28)*: one numeric widening law applies to operators, arguments,

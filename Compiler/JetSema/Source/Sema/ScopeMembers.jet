@@ -323,9 +323,7 @@ sema_scope_members_is_expect_call: fn(expression: Expr) -> Bool Never! {
 sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnostics: &[Diagnostic]) {
     loop (index, statement) in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
-            // `#Arithmetic(...) { … }` is a lexical policy
-            // region, not a member of the enclosing test.
-            if dsl || name == "Arithmetic" -> next
+            if dsl -> next
             sema_scope_members_validate_member(marker, name, index == 0, dot_span, diagnostics)
             sema_scope_members_walk(member_body, true, diagnostics)
             next
@@ -364,7 +362,7 @@ sema_scope_members_validate_member: fn(marker: String, name: String, is_first: B
 sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: &[Diagnostic]) {
     loop statement in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
-            if !dsl && name != "Arithmetic" {
+            if !dsl {
                 diagnostic: if nested -> sema_error("E0618", dot_span, "scope members can't be nested", "each `.{name}`-style member is a top-level region of the block; nesting one inside another member or a control block has no meaning", "move `.{name} {{ … }}` out to the top level of the block") else -> sema_error("E0615", dot_span, "`.{name}` only works inside a marker block that declares it", "a leading-dot member statement resolves against the enclosing applied rule's vocabulary — here there is no such block", "move it inside a `#Test(\"…\") {{ … }}` block, or write an ordinary statement")
                 diagnostics.push(diagnostic)
             }

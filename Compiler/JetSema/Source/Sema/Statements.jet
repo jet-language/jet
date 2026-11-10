@@ -6648,21 +6648,6 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})
     }
-    // `#Arithmetic(mode) { … }`: one lexical fixed-width arithmetic mode over
-    // the block, as `#Policy(arithmetic: mode) { … }` is, read until every
-    // in-repo use is the policy. An argument that names no mode is the block
-    // application's E0930 (sema_marker_rules_check_statement_facts); the
-    // block is still checked.
-    if name == "Arithmetic" {
-        mode := ArithmeticMode?{None}
-        if args.len() == 1 -> mode = sema_function_arithmetic_mode(args[0])
-        outer_policy: context.arithmetic_policy
-        if mode == .Val(value) -> context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: value, scope_span: span, operation_span: span, operation: None})
-        nested := sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "arithmetic@{span.start}", loop_depth)
-        context.arithmetic_policy = outer_policy
-        if mode == None || !nested.complete -> return None
-        return Val(TStmt.Region{body: nested.value, span: span})
-    }
     kind := TScopeMemberKind?{None}
     if name == {
         "setup" -> {
@@ -7060,7 +7045,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: &&TExpr, op:
     sema_ownership_release_value_only_views(state, target, tail_store, context)
     if !sema_ownership_check_lvalue_write_as(state, target, !sema_stmt_place_writes_through_view(place), scopes, diagnostics) -> return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
     if !sema_stmt_move_direct(expr, state, scopes, "the assignment", diagnostics) -> return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 7")
-    // A compound update under an `#Arithmetic` policy reads the place as a
+    // A compound update under a `#Policy(arithmetic:)` mode reads the place as a
     // value (sema_stmt_policy_compound), before it becomes the write.
     read := TExpr?{None}
     if op != None -> read = Val(place.copy())
@@ -7097,7 +7082,7 @@ sema_stmt_field_write_mismatch: fn(target: LValue, required: Type, value: Expr, 
 }
 
 // A compound update `place op= value` of a fixed-width integer under the
-// function's `#Arithmetic` policy, for + - * **: `place = OverflowOpt(read,
+// function's `#Policy(arithmetic:)` mode, for + - * **: `place = OverflowOpt(read,
 // value)`, the policy's operation exactly as the binary form lowers it
 // (Expressions.jet sema_expr_check_binary, sema_expr_arithmetic_policy_value).
 // `read` is the place read as a value. None outside a policy, for any other

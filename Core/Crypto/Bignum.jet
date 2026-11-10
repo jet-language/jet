@@ -68,18 +68,18 @@ RNG: trait {
 // Constant-time primitives. Each condition is the low bit of a U64.
 
 /// 1 when x is not zero.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_bool: fn(x: U64) -> U64 Never! { x.bit_or(U64{0} - x) >> 63 }
 
 /// 1 when a < b: the borrow out of a - b (Hacker's Delight 2-13).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_lt: fn(a: U64, b: U64) -> U64 Never! {
     na: a.bit_not()
     na.bit_and(b).bit_or(na.bit_or(b).bit_and(a - b)) >> 63
 }
 
 /// All ones when the condition bit is 1, else zero.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_mask: fn(bit: U64) -> U64 Never! { U64{0} - bit }
 
 /// a when mask is all ones, b when it is zero.
@@ -87,7 +87,7 @@ ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b.bit_xor(mask.bit_and(
 
 /// The 128-bit product of a and b as its high and low halves, from four
 /// 32-bit partial products.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mul_wide: fn(a: U64, b: U64) -> (hi: U64, lo: U64) Never! {
     m: U64{0xffffffff}
     a0: a.bit_and(m)
@@ -281,7 +281,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a + b over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -295,7 +295,7 @@ core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x += a over `limbs` limbs when `cond` is 1, in constant time; the carry.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
     mask: ct_mask(cond)
     c := U64{0}
@@ -311,7 +311,7 @@ core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
 }
 
 /// x = a - b over `limbs` limbs; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -324,7 +324,7 @@ core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x = a - c over `limbs` limbs for one limb c; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
     borrow := c
     loop i in 0..<limbs {
@@ -338,7 +338,7 @@ core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
 
 /// d[off..<off + d_len] += s[0..<s_len] * b; the carry out. d_len must be at
 /// least s_len; a shorter d gives a wrong result, never a write past it.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_mla: fn(d: &[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
     n: if d_len < s_len -> d_len else -> s_len
     c := U64{0}
@@ -366,7 +366,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 }
 
 /// -n^-1 mod 2^64 for odd n[0], by Newton iteration (Tom St Denis).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_montmul_init: fn(n: [U64]) -> U64 Never! {
     x := n[0]
     x += (n[0] + U64{2}).bit_and(U64{4}) << 1
@@ -378,7 +378,7 @@ core_montmul_init: fn(n: [U64]) -> U64 Never! {
 /// an_limbs limbs, b has b_limbs <= an_limbs, and a * b < R * n. t is
 /// scratch of at least 2 * an_limbs + 1 limbs. The final subtraction always
 /// runs and its result is chosen by mask.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_montmul: fn(x: &[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
     zero_limbs(t, 2 * an_limbs + 1)
     loop i in 0..<an_limbs {
@@ -718,7 +718,7 @@ impl Mpi.Close {
 mpi: fn() -> Mpi Never! { Mpi{s: 1, p: [U64]{}} }
 
 /// |z| as a limb, the most negative Int64 included.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sint_abs: fn(z: Int) -> U64 Never! {
     if z >= 0 -> return U64{z}
     U64{-(z + 1)} + U64{1}
@@ -1119,7 +1119,7 @@ safe_cond_swap: fn(x: &Mpi, y: &Mpi, swap: Int) MpiError! {
 }
 
 /// |a| + |b| (HAC 14.7).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     x := copy_mpi(a)
     x.s = 1
@@ -1145,7 +1145,7 @@ add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 
 /// |a| - |b| in a's limb count, or NegativeValue when |a| < |b|
 /// (HAC 14.9, 14.10).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sub_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     n: used_limbs(b)
     if n > a.p.len() -> return Err(.NegativeValue)
@@ -1206,7 +1206,7 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a * b for one limb b, as a + a * (b - 1) through the multiply-add.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
     n: used_limbs(a)
     if b == (U64{0}) || n == 0 -> return Ok(from_int(0))
@@ -1219,7 +1219,7 @@ mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
 
 /// (u1 * 2^64 + u0) / d, saturating at 2^64 - 1 when u1 >= d or d is 0
 /// (Knuth TAOCP vol. 2 section 4.3.1 algorithm D on 32-bit halves).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 int_div_int: fn(high: U64, low: U64, divisor: U64) -> U64 Never! {
     if divisor == (U64{0}) || high >= divisor -> return U64{0}.bit_not()
     radix: U64{1} << 32
@@ -1339,7 +1339,7 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a mod b in [0, b) for an Int64 b > 0.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mod_int: fn(a: Mpi, b: Int) -> U64 MpiError! {
     if b == 0 -> return Err(.DivisionByZero)
     if b < 0 -> return Err(.NegativeValue)

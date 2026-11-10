@@ -270,7 +270,7 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
 
 // --- SHA-1 (FIPS 180-4 section 6.1.2) ------------------------------------
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sha1_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
     w := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
@@ -329,7 +329,7 @@ sha1_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
 // Rotations are spelled as shift pairs: the backend lowers a constant shift
 // to one instruction, and `rotate_right` with a constant to two variable
 // shifts.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sha256_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
     w := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
@@ -381,7 +381,7 @@ sha256_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
 
 // --- SHA-384 and SHA-512 (FIPS 180-4 section 6.4.2) ----------------------
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sha512_blocks: fn(s: &[U64], msg: [U8], off: Int, count: Int) Never! {
     w := [U64#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
@@ -446,7 +446,7 @@ keccak_absorb: fn(lanes: &[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
 }
 
 /// Keccak-f[1600]: 24 rounds of theta, rho, pi, chi and iota.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 keccak_f1600: fn(lanes: &[U64]) Never! {
     a := [U64#25]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     c := [U64#5]{0, 0, 0, 0, 0}
@@ -685,7 +685,7 @@ rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n).bit_or(x >> (32 - n)) }
 
 /// The `count` 64-byte blocks of `msg` from `off` folded into the MD5 state
 /// (RFC 1321 section 3.4).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 md5_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
     // T[i] = floor(2^32 * abs(sin(i + 1))).
     t := [U32#64]{
@@ -756,7 +756,7 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
 
 /// The `count` 64-byte blocks of `msg` from `off` folded into the
 /// RIPEMD-160 state: two parallel lines of 80 steps each.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ripemd160_blocks: fn(s: &[U32], msg: [U8], off: Int, count: Int) Never! {
     r := [Int#80]{
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,

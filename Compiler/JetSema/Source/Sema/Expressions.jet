@@ -150,7 +150,7 @@ sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
 }
 
 // (Rust `policy_call` and its lowering): under the
-// function's `#Arithmetic(mode)` a fixed-width `+`, `-`, `*`, `**` or signed
+// function's `#Policy(arithmetic: mode)` a fixed-width `+`, `-`, `*`, `**` or signed
 // negation lowers through that mode's overflow route; `Checked` is the
 // trapping policy route.
 sema_expr_arithmetic_policy_value: fn(policy: ArithmeticPolicyFact, operation: ArithmeticOperation, ty: Type, span: Span, line: Int, lhs: TExpr, rhs: TExpr) -> TExpr Never! {
@@ -4815,7 +4815,7 @@ sema_expr_lint_inline_autodiff: fn(callee: Expr, environment: SemaScopeEnvironme
 
 // L0519: `Meter.from_float(value.raw() * 2)` unwraps a linear unit, scales the
 // scalar and rewraps the same unit, which `value * 2` says directly. A point of
-// an affine family, or a rewrap inside `#Arithmetic`, keeps its explicit form.
+// an affine family, or a rewrap inside `#Policy(arithmetic:)`, keeps its explicit form.
 sema_expr_lint_unit_scalar_rewrap: fn(receiver: Expr, method: String, args: [CallArg], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if !method.starts_with("from_") || args.len() != 1 || args[0].label != None || args[0].spread || context.arithmetic_policy != None -> return
     unit_name: sema_shared_access_without_parens_name(receiver) ?? return

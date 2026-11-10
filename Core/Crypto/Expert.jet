@@ -109,7 +109,7 @@ priv chacha20_core: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -119,7 +119,7 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
@@ -152,7 +152,7 @@ priv u32_words: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
     state := chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -505,7 +505,7 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
 }
 
 // Masks are explicitly wrapping fixed-width subtraction.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     a := x[0]
     b := x[1]
@@ -688,7 +688,7 @@ mix_columns: fn(s: &[U8]) Never! {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 xtime: fn(a: U8) -> U8 Never! {
     (a << 1).bit_xor((U8{0x1b}.bit_and((U8{0} - (a >> 7)))))
 }
@@ -946,7 +946,7 @@ argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int
 
 /// BlaMka G: BLAKE2b G with each x + y replaced by
 /// x + y + 2 * lo32(x) * lo32(y), all modulo 2^64.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     lo: U64{0xffffffff}
     a := v[ia]
@@ -1210,7 +1210,7 @@ blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, en
 }
 
 /// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 blake2b_mix: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
     a := v[ia]
     b := v[ib]

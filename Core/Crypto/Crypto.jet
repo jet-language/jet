@@ -1275,7 +1275,7 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
 /// The base64 digit of `n`'s low six bits `v`: `A`-`Z`, `a`-`z`, `0`-`9`,
 /// `+`, `/`, computed as `A` plus the offsets of the ranges `v` is past, each
 /// a mask from the borrow of a wrapping subtraction.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 __b64_digit: fn(n: U32) -> U8 Never! {
     v: n.bit_and(U32{63})
     c := v + U32{65}
@@ -1354,7 +1354,7 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
 
 /// The lowercase hex digit of `n` (0 to 15): `0` plus `n`, and the 39 from
 /// `9` to `a` when `n` is past 9, a mask from the borrow of `9 - n`.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 __hex_digit: fn(n: U32) -> U8 Never! {
     wrapping(U8{n + U32{48} + ((U32{9} - n) >> 8).bit_and(U32{39})})
 }
@@ -1465,7 +1465,7 @@ priv chacha20_core: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -1475,7 +1475,7 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
@@ -1495,7 +1495,7 @@ qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     s[id] = d
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
     state := chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -1848,7 +1848,7 @@ __blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
     __blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 __blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flags: Int) -> [U32] {
     m := [U32]{}
     loop i in 0..<16 -> m.push(load_le32(block, i * 4))
@@ -1887,7 +1887,7 @@ __blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flag
 }
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 __blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
     s[a] = s[a] + s[b] + mx
     s[d] = (s[d].bit_xor(s[a])).rotate_right(16)

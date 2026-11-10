@@ -731,7 +731,7 @@ fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // PKCS#1 v2.1 helpers.
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 next_byte: fn(b: U8) -> U8 Never! { b + U8{1} }
 
 /// dst[off..<off + len] ^= MGF1(src) over md (mgf_mask). The counter
@@ -969,7 +969,7 @@ V15Unpadded: struct {
 /// overwritten. plaintext_max_size is min(output_max_len, ilen - 11). The
 /// counts that depend on the padding are U64 words, which wrap instead of
 /// branching on an overflow as an Int does.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 rsaes_pkcs1_v15_unpadding: fn(input: &[U8], output_max_len: Int) -> V15Unpadded Never! {
     ilen: input.len()
     plaintext_max_size: if output_max_len > ilen - 11 -> ilen - 11 else -> output_max_len
@@ -1002,6 +1002,7 @@ rsaes_pkcs1_v15_unpadding: fn(input: &[U8], output_max_len: Int) -> V15Unpadded 
     out: cipher.bytes_of(input, ilen - plaintext_max_size, plaintext_max_size)
     V15Unpadded{out: out, olen: plaintext_size, bad: bad, too_large: too_large}
 }
+
 
 /// RSAES-PKCS1-v1_5-DECRYPT (mbedtls_rsa_rsaes_pkcs1_v15_decrypt).
 rsa_rsaes_pkcs1_v15_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8], output_max_len: Int) -> [U8] RSAError! {
