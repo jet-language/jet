@@ -947,8 +947,8 @@ sema_stmt_unit_arm_form: fn(expr: Expr) -> Bool Never! {
 }
 
 sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    // E1403: each level of the chain is one source
-    // nesting level, as an `if` expression is in the Rust checker.
+    // E1403: an `if` is one source nesting level, and so is a whole
+    // else-if chain: each link is checked at its head's level.
     if !sema_enter_source_nesting(context, span, diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     // `if T == Int { … }` is the one-arm type test, checked
     // as a type-table arm: its body reads `T` as the named type.
@@ -988,7 +988,9 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
         .If(_, _, _, _, _, _, _) -> {
             else_is_elseif = true
             if else_body.len() == 0 {
+                sema_leave_source_nesting(context)
                 else_result = sema_stmt_check_unit_if(else_value, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+                context.source_nesting += 1
             }
         }
         else -> else_result = sema_stmt_check_unit_branch(else_body, else_value, [SemaConditionBinding]{}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "if.else@{span.start}", loop_depth)

@@ -2442,7 +2442,12 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         expected == None && sema_expression_uncontextual_err_arm(else_value, scopes) -> sema_expression_err_sibling(then_first)
         else -> expected
     }
+    // An else-if link continues this level's chain, so a chain of any length
+    // is one source nesting level; only the forms inside an arm nest deeper.
+    chain_link: else_body.len() == 0 && else_value == .If(_, _, _, _, _, _, _)
+    if chain_link -> sema_leave_source_nesting(context)
     else_value_checked: if defer_then_err -> sema_check_expression_carrier(else_value, else_expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(else_value, else_expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if chain_link -> context.source_nesting += 1
     else_checked: else_value_checked ?? {
         sema_scope_leave(scopes, state)
         sema_scope_rollback(scopes, else_mark)

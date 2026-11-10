@@ -1,0 +1,26 @@
+# #6281 c41 / #5971 c38: a flat 1,024-arm value table and a 1,024-link
+# statement else-if chain, both written by gen.jet, check and print the
+# same totals on O0, O1 and O2: a chain of any length is one source nesting
+# level, where each link once counted one (E1403 at 257).
+fixture: long_arm_chain.fixture
+env: NO_COLOR=1
+step: jet run --allow=FS gen.jet 1024
+exit: 0
+stdout: = ""
+step check: jet check table.jet
+exit: 0
+step o0: jet run --optimize=none table.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "6063\n6063\n"
+stderr: = ""
+step o1: jet run --optimize=basic table.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "6063\n6063\n"
+stderr: = ""
+step o2: jet run --optimize=full table.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "6063\n6063\n"
+stderr: = ""
