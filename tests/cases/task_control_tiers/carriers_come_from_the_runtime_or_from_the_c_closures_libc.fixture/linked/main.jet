@@ -1,0 +1,20 @@
+// #6689 c1, C-linking shape: two tasks meet inside C at once, so they hold
+// two carriers; each carrier and the main thread read a different
+// pthread_self, which only libc-started threads (musl pthread_create) have.
+use c: c.carrier
+
+#Import c.carrier: module {
+    meet: fn(parties: I64) -> I64 = "carrier_meet"
+    met: fn() -> I64 = "carrier_met"
+    self_id: fn() -> I64 = "carrier_self"
+}
+
+run: fn() {
+    main: c.self_id()
+    first: task c.meet(I64{2})
+    second: task c.meet(I64{2})
+    a: first.join() ?? panic("join first")
+    b: second.join() ?? panic("join second")
+    print("met {c.met()}")
+    print("libc carriers {a != I64{0} && b != I64{0} && a != b && a != main && b != main}")
+}

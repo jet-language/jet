@@ -1,0 +1,30 @@
+// #6689 c1, pure-Jet link shape: no C closure, so the runtime starts its
+// carriers itself (Thread.jet raw clone) and the image carries no pthread
+// symbol. Each task reports the kernel thread it ran on; the work spreads over
+// more than the main thread.
+use files: core.files
+
+ROUNDS: 64
+
+tid: fn() -[FS]> String {
+    stat: files.read("/proc/thread-self/stat") ?? panic("read thread stat")
+    stat.split(" ").to_list()[0]
+}
+
+spin: fn(seed: Int) -> Int {
+    value := seed
+    loop _ in 0..<200000 -> value = (value * 1103515245 + 12345) % 2147483648
+    value
+}
+
+run: fn() {
+    main: tid()
+    handles := [Task<(tid: String, value: Int)>]{}
+    loop i in 0..<ROUNDS -> handles.push(task { (tid: tid(), value: spin(i)) })
+    off_main := 0
+    loop handle in handles {
+        result: handle.join() ?? panic("join")
+        if result.tid != main -> off_main += 1
+    }
+    print("{ROUNDS} tasks joined, ran off the main thread {off_main > 0}")
+}
