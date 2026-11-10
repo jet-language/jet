@@ -19,10 +19,12 @@ use {
 // content's own surface, a small muted title in the regular face centered
 // where it fits, three thin muted glyphs that take a soft background under
 // the pointer (Jet red only for close), squircle corners, one 1-unit
-// outline a step lighter than the surface, and a soft shadow, on Jet
-// black; the keyboard focus ring is a light ink. The app's icon belongs to
-// the taskbar (xdg-toplevel-icon-v1), not the header. The buttons are laid
-// out in whole pixels at every scale (see `button_box` and `button_glyph`).
+// outline a step lighter than the surface, and a soft shadow. It is dark
+// on Jet black unless the desktop asks for light (org.freedesktop.appearance's
+// color-scheme through the settings portal); either way the keyboard focus
+// ring is the theme's ink. The app's icon belongs to the taskbar
+// (xdg-toplevel-icon-v1), not the header. The buttons are laid out in whole
+// pixels at every scale (see `button_box` and `button_glyph`).
 //
 // Coordinates: logical units have the window's top-left corner (the
 // header's) at 0, 0; pixels are logical units times the scale, given in
@@ -85,7 +87,7 @@ EDGE_BOTTOM: 2
 EDGE_LEFT: 4
 EDGE_RIGHT: 8
 
-// The frame's colors, 0xAARRGGBB with straight alpha.
+// The colors of one theme, 0xAARRGGBB with straight alpha.
 Palette: struct {
     header_active: Int
     header_inactive: Int
@@ -106,16 +108,28 @@ Palette: struct {
     focus: Int
 }
 
-// The header on Jet black, a muted gray title and glyphs, a quiet square a
-// step lighter under the pointer, Jet red only for the close button under
-// it, and a light focus ring.
-palette: fn() -> Palette {
+// The dark theme, the default: the header on Jet black, a muted gray title
+// and glyphs, a quiet square a step lighter under the pointer, Jet red only
+// for the close button under it, and a light focus ring.
+dark_palette: fn() -> Palette {
     Palette{
         header_active: 0xFF0B0B0D, header_inactive: 0xFF0B0B0D, text_active: 0xFF9A9AA4, text_inactive: 0xFF80808A,
         glyph_hover: 0xFFECECF0, outline: 0xFF1E1E22, button_idle: 0x00000000, button_hover: 0xFF1D1D21, button_press: 0xFF27272C,
         close_hover: 0xFFE8232A, close_press: 0xFFE8232A, focus: 0xFFECECF0,
     }
 }
+
+// The light theme, when the desktop prefers light: the same quiet layout
+// on a pale header, with a dark focus ring and Jet red only for close.
+light_palette: fn() -> Palette {
+    Palette{
+        header_active: 0xFFF4F4F6, header_inactive: 0xFFF4F4F6, text_active: 0xFF5A5A63, text_inactive: 0xFF66666F,
+        glyph_hover: 0xFF1C1C21, outline: 0xFFD6D6DC, button_idle: 0x00000000, button_hover: 0xFFE8E8EC, button_press: 0xFFDEDEE3,
+        close_hover: 0xFFE8232A, close_press: 0xFFE8232A, focus: 0xFF1C1C21,
+    }
+}
+
+palette: fn(look: FrameLook) -> Palette { if look.dark -> dark_palette() else -> light_palette() }
 
 SHADOW_ACTIVE: 0x59000000
 SHADOW_INACTIVE: 0x2E000000
@@ -144,7 +158,8 @@ FrameSpot: enum {
 // shadow (a maximized, tiled or fullscreen window); `maximized` picks the
 // restore glyph. `coarse` spreads the buttons for a finger: the latest
 // press on the frame was a touch. `focus` is the button with the keyboard
-// focus, ringed (`Nothing` while the content has it).
+// focus, ringed (`Nothing` while the content has it). `dark` picks the
+// dark theme, else the light one.
 FrameLook: struct {
     title: String
     active: Bool
@@ -154,14 +169,16 @@ FrameLook: struct {
     hover: FrameButton
     pressed: FrameButton
     focus: FrameButton
+    dark: Bool
 }
 
 // The shadow and outline of a small window, `box_width` by `box_height`
-// pixels with `margin` pixels around it, for one scale and activation.
-// Any larger window's ring is this one's corners with its straight middle
-// rows and columns repeated: see `kit_index`.
+// pixels with `margin` pixels around it, for one scale, activation and
+// theme. Any larger window's ring is this one's corners with its straight
+// middle rows and columns repeated: see `kit_index`.
 Kit: struct {
     active: Bool
+    dark: Bool
     scale120: Int
     margin: Int
     box_width: Int
@@ -313,7 +330,7 @@ title_left: fn(window: Float, start: Float, end: Float, advance: Float) -> Float
 // and kept: the four latest stay.
 kit: fn(&p: Painter, look: FrameLook, scale120: Int) -> Int {
     loop at in 0..<p.kits.len() {
-        if p.kits[at].active == look.active && p.kits[at].scale120 == scale120 -> return at
+        if p.kits[at].active == look.active && p.kits[at].dark == look.dark && p.kits[at].scale120 == scale120 -> return at
     }
     if p.kits.len() >= 4 {
         _: p.kits.remove(0, .Slot)
@@ -343,8 +360,8 @@ draw_kit: fn(look: FrameLook, scale120: Int) -> Kit {
     } else {
         paint(pixels, width, height, shadow_mask(width, height, x0, y0, x1, y1, r, 5.0 * s, 11.0 * s), SHADOW_INACTIVE)
     }
-    paint(pixels, width, height, ring_mask(x0, y0, x1, y1, r, fmax(1.0, s)), palette().outline)
-    Kit{active: look.active, scale120: scale120, margin: margin, box_width: box_width, box_height: box_height, width: width, height: height, pixels: pixels}
+    paint(pixels, width, height, ring_mask(x0, y0, x1, y1, r, fmax(1.0, s)), palette(look).outline)
+    Kit{active: look.active, dark: look.dark, scale120: scale120, margin: margin, box_width: box_width, box_height: box_height, width: width, height: height, pixels: pixels}
 }
 
 // Where pixel `at` of a window side `size` pixels long falls in the kit's
@@ -416,7 +433,7 @@ bottom_left_cover: fn(scale120: Int) -> [U8] {
 header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     s: Float{scale120} / 120.0
     height: px(HEADER, scale120)
-    colors: palette()
+    colors: palette(look)
     back: if look.active -> colors.header_active else -> colors.header_inactive
     side: if look.square -> 0 else -> min_int(corner_side(scale120), min_int(width /% 2, height))
     slot: kit(p, look, scale120)
@@ -879,9 +896,9 @@ linear: fn(channel: Int) -> Float {
     math.exp(math.ln((c + 0.055) / 1.055) * 2.4)
 }
 
-// A look for the tests: active, rounded, nothing hovered.
+// A look for the tests: active, rounded, dark, nothing hovered.
 plain_look: fn(title: String) -> FrameLook {
-    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing}
+    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, dark: true}
 }
 
 // The bounding box of the pixels in `area` of the `width`-pixel-wide
@@ -1114,8 +1131,8 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert(Int.from_u8(bar[3]) < 255, "the top-left corner is rounded")
     middle: (17 * 300 + 150) * 4
     assert_eq(bar[middle + 3], U8{255})
-    // No mark of Jet's: left of the title the header is bare Jet black,
-    // 0x0B0B0D as B, G, R, A.
+    // Dark by default, and no mark of Jet's: left of the title the header
+    // is bare Jet black, 0x0B0B0D as B, G, R, A.
     bare: (17 * 300 + 5) * 4
     assert_eq([U8]{bar[bare], bar[bare + 1], bar[bare + 2], bar[bare + 3]}, [U8]{U8{0x0D}, U8{0x0B}, U8{0x0B}, U8{255}})
     // The hovered close button is Jet red: its square runs from 274 to 292
@@ -1148,6 +1165,22 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
         at: (17 * 300 + col) * 4
         assert_eq([U8]{empty[at], empty[at + 1], empty[at + 2]}, [U8]{U8{0x0D}, U8{0x0B}, U8{0x0B}})
     }
+    // When the desktop prefers light, the header is 0xF4F4F6, a hovered
+    // maximize square is 0xE8E8EC, close still turns Jet red, and the
+    // shadow ring is the light theme's own kit.
+    light := plain_look("")
+    light.dark = false
+    pale: header(p, light, 300, 120)
+    assert_eq([U8]{pale[bare], pale[bare + 1], pale[bare + 2], pale[bare + 3]}, [U8]{U8{0xF6}, U8{0xF4}, U8{0xF4}, U8{255}})
+    light.hover = FrameButton.Maximize
+    pale_soft: header(p, light, 300, 120)
+    assert_eq([U8]{pale_soft[lit], pale_soft[lit + 1], pale_soft[lit + 2], pale_soft[lit + 3]}, [U8]{U8{0xEC}, U8{0xE8}, U8{0xE8}, U8{255}})
+    light.hover = FrameButton.Close
+    pale_close: header(p, light, 300, 120)
+    assert(Int.from_u8(pale_close[close + 2]) > 200 && Int.from_u8(pale_close[close + 1]) < 60, "the hovered close button is red in the light theme")
+    light_kit: kit(p, light, 120)
+    dark_kit: kit(p, plain_look(""), 120)
+    assert(light_kit != dark_kit && p.kits[light_kit].dark == false && p.kits[dark_kit].dark, "each theme has its own shadow ring")
 }
 
 #Test("titles are cut at graphemes, at a word end when one fits") {
@@ -1165,23 +1198,25 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq(cut, "{acute}{acute}…")
 }
 
-#Test("the frame's colors meet WCAG 2.2 contrast, focused or not") {
-    colors: palette()
-    // Titles are text: 4.5:1 on their header, unfocused windows included.
-    assert(contrast(colors.text_active, colors.header_active) >= 4.5, "the title is readable")
-    assert(contrast(colors.text_inactive, colors.header_inactive) >= 4.5, "an unfocused window's title is readable")
-    assert(contrast(colors.glyph_hover, over(colors.button_hover, colors.header_active)) >= 3.0, "a hovered glyph shows")
-    // Button glyphs are graphics: 3:1 on their button in every state.
-    fills: [Int]{colors.button_idle, colors.button_hover, colors.button_press}
-    loop fill in fills {
-        assert(contrast(colors.text_active, over(fill, colors.header_active)) >= 3.0, "a button's glyph shows")
-        assert(contrast(colors.text_inactive, over(with_alpha(fill, alpha_of(fill) /% 2), colors.header_inactive)) >= 3.0, "an unfocused button's glyph shows")
-        assert(contrast(colors.text_inactive, over(fill, colors.header_inactive)) >= 3.0, "a hovered or pressed unfocused button's glyph shows")
+#Test("the frame's colors meet WCAG 2.2 contrast, focused or not, in both themes") {
+    palettes: [Palette]{dark_palette(), light_palette()}
+    loop colors in palettes {
+        // Titles are text: 4.5:1 on their header, unfocused windows included.
+        assert(contrast(colors.text_active, colors.header_active) >= 4.5, "the title is readable")
+        assert(contrast(colors.text_inactive, colors.header_inactive) >= 4.5, "an unfocused window's title is readable")
+        assert(contrast(colors.glyph_hover, over(colors.button_hover, colors.header_active)) >= 3.0, "a hovered glyph shows")
+        // Button glyphs are graphics: 3:1 on their button in every state.
+        fills: [Int]{colors.button_idle, colors.button_hover, colors.button_press}
+        loop fill in fills {
+            assert(contrast(colors.text_active, over(fill, colors.header_active)) >= 3.0, "a button's glyph shows")
+            assert(contrast(colors.text_inactive, over(with_alpha(fill, alpha_of(fill) /% 2), colors.header_inactive)) >= 3.0, "an unfocused button's glyph shows")
+            assert(contrast(colors.text_inactive, over(fill, colors.header_inactive)) >= 3.0, "a hovered or pressed unfocused button's glyph shows")
+        }
+        assert(contrast(WHITE, colors.close_hover) >= 3.0, "the hovered close glyph shows")
+        assert(contrast(WHITE, colors.close_press) >= 3.0, "the pressed close glyph shows")
+        // The focus ring is a graphic: 3:1 on the header, focused or not.
+        assert(contrast(colors.focus, colors.header_active) >= 3.0 && contrast(colors.focus, colors.header_inactive) >= 3.0, "the ring shows focused or not")
     }
-    assert(contrast(WHITE, colors.close_hover) >= 3.0, "the hovered close glyph shows")
-    assert(contrast(WHITE, colors.close_press) >= 3.0, "the pressed close glyph shows")
-    // The focus ring is a graphic: 3:1 on the header, focused or not.
-    assert(contrast(colors.focus, colors.header_active) >= 3.0 && contrast(colors.focus, colors.header_inactive) >= 3.0, "the ring shows focused or not")
 }
 
 #Test("the title is centered on the window, shifted only to clear the buttons") {

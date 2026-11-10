@@ -6,6 +6,7 @@ use {
     core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIIconImage, UIPointerButton, UIRect]
     core.ui.host.[UITextRange]
     core.ui.host.ime.[UIIMEComposition]
+    dbus: __core_ui_dbus
     frame: __core_ui_frame
     xkb: core.ui.xkb
 }
@@ -60,6 +61,10 @@ REPEAT_DELAY: 600
 SIDE_MAX: 16384
 // The xdg_toplevel app_id until the program names its own.
 DEFAULT_APP_ID: "dev.jet.app"
+// How long the session bus and the settings portal may take to answer,
+// and how often an idle window looks for the portal's changes.
+PORTAL_WAIT_NS: 250000000
+PORTAL_POLL_NS: 250000000
 // Three buffers: one on screen, one queued, one being drawn.
 BUFFER_COUNT: 3
 // The chrome changes seldom: one on screen, one being drawn.
@@ -273,8 +278,13 @@ Connection: struct {
     // The chrome must be drawn again before it is next seen.
     priv chrome_stale: Bool
     priv painter: frame.Painter
-    // The title, focus, states and pressed buttons the frame shows.
+    // The title, focus, states, theme and pressed buttons the frame shows.
     priv look: frame.FrameLook
+    // The session bus, while the desktop's appearance is followed through
+    // the settings portal (empty when there is no bus), and the appearance
+    // it gave last.
+    priv portal: [dbus.DbusConnection]
+    priv appearance: dbus.PortalAppearance
     priv fullscreen: Bool
     // The window geometry set last (x, y, width, height); empty before.
     priv geometry: [Int]
@@ -416,7 +426,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
     look: frame.FrameLook{
         title: title.copy(), active: true, square: false, maximized: false, coarse: false,
-        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing,
+        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing, dark: true,
     }
     c := Connection{
         stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
@@ -437,7 +447,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         latencies: [Int]{}, latency_at: 0,
         subcompositor: 0, decoration: 0, framed: false, uncapped: sys_get("JET_UI_UNCAPPED") == "1", chrome: 0, chrome_subsurface: 0, chrome_viewport: 0,
         chrome_pool: 0, chrome_memory: chrome_memory, chrome_buffers: [ChromeBuffer]{}, chrome_width: 0, chrome_height: 0,
-        chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, fullscreen: false, geometry: [Int]{},
+        chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, portal: [dbus.DbusConnection]{}, appearance: dbus.default_appearance(), fullscreen: false, geometry: [Int]{},
         on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
         data_manager: 0, data_device: 0, offers: [Offer]{}, selection: 0, source: 0, source_text: "", old_sources: [Int]{}, input_serial: 0,
         text_manager: 0, text_input: 0, text_entered: false, text_area: [Int]{}, preedit_next: "", preedit_begin: -1, preedit_end: -1,
@@ -489,6 +499,8 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         c.framed = true
         // The smallest window the frame fits, title bar included.
         request(c, c.toplevel, 8, words([Int]{frame.MIN_WIDTH, frame.MIN_HEIGHT}))
+        // Its theme is the desktop's.
+        watch_portal(c)
     }
     if c.decoration_manager != 0 {
         c.decoration = new_id(c)
@@ -922,10 +934,11 @@ flush: fn(&c: Connection) -[Net, Time]> {
 
 // Waits up to `timeout_ns` (negative: until something arrives) for the
 // compositor on this OS thread, then reads and handles what arrived. A held
-// key's next repeat ends the wait early.
+// key's next repeat ends the wait early, and so does the next look at the
+// settings portal while it is followed.
 receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
     if c.failure != None -> return
-    wait_ns: repeat_wait(c, timeout_ns)
+    wait_ns: portal_wait(c, repeat_wait(c, timeout_ns))
     ready: net.unix_wait(c.stream, wait_ns) ?? {
         fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
         return
@@ -945,8 +958,9 @@ receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
         dispatch(c)
     }
     repeat_key(c)
-    // What only the frame shows (a hover, focus, a pressed button) goes out
-    // now; a new size waits for the frame drawn at it.
+    follow_portal(c)
+    // What only the frame shows (a hover, focus, a pressed button, the
+    // theme) goes out now; a new size waits for the frame drawn at it.
     if c.chrome_stale && c.mapped && !wants_reshape(c) -> refresh_chrome(c)
     flush(c)
 }
@@ -1472,6 +1486,55 @@ repeat_wait: fn(c: Connection, timeout_ns: Int) -[Time]> Int {
     left: (max_int(c.held_at + due_ms * 1000000 - core.time.__clock_mono_ns(), 0) + 999999) /% 1000000 * 1000000
     if timeout_ns >= 0 && timeout_ns < left -> return timeout_ns
     left
+}
+
+// How long a wait of `timeout_ns` (negative: no limit) may last before the
+// next look at the settings portal, while its changes are followed.
+portal_wait: fn(c: Connection, timeout_ns: Int) -> Int {
+    if c.portal.len() == 0 || (timeout_ns >= 0 && timeout_ns < PORTAL_POLL_NS) -> return timeout_ns
+    PORTAL_POLL_NS
+}
+
+// Follows the desktop's appearance through the settings portal on the
+// session bus: its color scheme picks the frame's theme, dark unless it
+// prefers light. No bus leaves the frame dark. A portal that does not
+// answer yet is read when it starts.
+watch_portal: fn(&c: Connection) -[Env, Net, Time]> {
+    bus := dbus.session(PORTAL_WAIT_NS) ?? return
+    dbus.watch_appearance(bus, PORTAL_WAIT_NS) ?? return
+    look: dbus.appearance(bus, PORTAL_WAIT_NS) ?? dbus.default_appearance()
+    c.portal.push(bus)
+    take_appearance(c, look)
+}
+
+// Applies the portal's signals since the last look: a changed setting,
+// or a restarted portal read anew. A bus that fails is let go, and the
+// frame keeps the theme it has.
+follow_portal: fn(&c: Connection) -[Net, Time]> {
+    if c.portal.len() == 0 -> return
+    bus := c.portal.pop() ?? return
+    got: dbus.signals(bus, 0) ?? return
+    look := c.appearance.copy()
+    loop m in got {
+        if dbus.portal_restarted(m) {
+            look = dbus.appearance(bus, PORTAL_WAIT_NS) ?? dbus.default_appearance()
+        } else {
+            _: dbus.apply_signal(look, m)
+        }
+    }
+    c.portal.push(bus)
+    take_appearance(c, look)
+}
+
+// The frame takes the desktop's appearance, and is drawn anew when its
+// theme changed.
+take_appearance: fn(&c: Connection, look: dbus.PortalAppearance) {
+    dark: look.scheme != .Light
+    if dark != c.look.dark {
+        c.look.dark = dark
+        c.chrome_stale = true
+    }
+    c.appearance = look
 }
 
 // The held key repeats once, as a KeyDown and its text, when a repeat has
