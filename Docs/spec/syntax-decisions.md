@@ -8305,8 +8305,8 @@ D-ARROW-RESPELL1=A)*: one arrow, `:>` (the historical spelling), in every arrow
 position — a callable result, a dispatch arm, a loop body, and a lambda. The
 effect ceiling becomes `:[IO]>` (historical spelling). This retires the split that
 D-ARROW-CONTROL1=A introduced (`=>` for a result, `->` for control) along with
-D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's `=[Effects]=>`
-row to `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
+D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's historical `=[Effects]=>`
+row to the historical `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
 still parse unambiguously against `:>`; the owning card carries that fixture.
 
 **2026-08-20 — D-TEST-XFAIL1=A** *(card #2107; ratified 2026-08-20)*: a test

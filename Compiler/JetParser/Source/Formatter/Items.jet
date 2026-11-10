@@ -679,18 +679,10 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
             external: if sugar == .Val(at) -> impl_keyword == None || (impl_keyword ?? 0) > at else -> false
             if external {
                 // The AST does not retain the marker ordering for this sugar,
-                // but the formatter still owns the canonical arrow. Restrict
-                // the rewrite to the declaration head; the path string and
-                // any quoted text remain verbatim.
-                split: jfmt_items_find(text_bytes, " = \"".bytes(), 0)
-                head_end: split ?? text_bytes.len()
-                tail: if split == .Val(position) -> jfmt_bytes_text(text_bytes, position + 4, text_bytes.len()) else -> ""
-                head: jfmt_bytes_text(text_bytes, 0, head_end).replace("=[", "-[").replace(":[", "-[").replace("]=>", "]>").replace("=>", "->")
-                jfmt_write(f, head)
-                if tail.len() > 0 {
-                    jfmt_write(f, " = \"")
-                    jfmt_write(f, tail)
-                }
+                // so the declaration is written as the source spelled it. The
+                // parser accepts only the canonical arrows, so there is no
+                // arrow to respell.
+                jfmt_write(f, jfmt_bytes_text(text_bytes, 0, text_bytes.len()))
                 jfmt_newline(f)
                 jfmt_skip_verbatim_comments(f, i.span.end)
             } else {

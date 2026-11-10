@@ -3667,7 +3667,7 @@ runtime, and schema. LuaRocks realization remains provider work. See
 
 **Binds.** `jet inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]`
 reads exported functions from an Ada package specification and compiles its
-sibling body with GNAT. Supported exports use `Export`, `Convention => C`, and
+sibling body with GNAT. Supported Ada exports use `Export`, `Convention => C`, and
 `External_Name`; scalar arguments and results use
 `Interfaces.C.long_long`/`Long_Long_Integer` or
 `Interfaces.C.double`/`Long_Float`.

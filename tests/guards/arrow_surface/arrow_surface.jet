@@ -1,0 +1,424 @@
+// Superseded arrow, exit and capture spellings never come back in tracked Jet
+// source, generated Jet artifacts or the Docs: the old callable and control
+// arrow `=>`, a `:>` that closes no `<:` fence, the old effect arrows
+// `=[E]=>`, `=[E]>` and `:[E]>` (the current one is `-[E]>`), the endpoint-pair
+// protocol line `client -> server: Msg`, the old loop exits `?break`,
+// `?return`, `?next`, `?continue`, `break.name`, `break @name` and
+// `next @name`, and the `take(...)` closure-capture prefix. Tokens come from the
+// Jet lexer, so comments and string text never count. A dated before/after
+// example, a line that names the spelling as retired, a negative UI fixture's
+// subject line and a `retired_*` fixture keep their spelling.
+use {
+    arrow_surface_files: core.files
+    jet_lexer.[lex, lexer_without_comments, Token, TokenTables, token_decoded, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_BREAK, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_QUESTION, TOKEN_GT, TOKEN_FENCE_CLOSE, TOKEN_DOT, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_UNIFIED_ARROW, TOKEN_EQ, TOKEN_FENCE_OPEN, TOKEN_COLON, TOKEN_KW_MOVE]
+    guards.[guards_enter_root]
+}
+
+// Directories the walk never enters: VCS state, build output, caches and the
+// Tower ledger.
+ARROW_SURFACE_SKIPPED_DIRS: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
+
+// Dated records keep the spellings they describe.
+ARROW_SURFACE_RECORD_ROOTS: [String]{"Docs/audits/", "Docs/research/", "Docs/archive/"}
+
+// The Markdown the guard reads: the Docs, the examples and the root documents.
+ARROW_SURFACE_MARKDOWN_ROOTS: [String]{"Docs/", "Examples/"}
+
+// A Docs line holding one of these names the spelling as superseded, or
+// quotes another language's code.
+ARROW_SURFACE_EXEMPT_LABELS: [String]{"retired", "Retired", "superseded", "Superseded", "historical", "Historical", "former", "Former", "Before", "before", "old spelling", "old form", "no longer", "not accepted", "rejected", "Rejected", "migration", "Migration", "teaching diagnostic", "Ada", "Rust", "JavaScript", "TypeScript"}
+
+ArrowSurfaceHit: struct {
+    offset: Int
+    spelling: String
+}
+
+ArrowSurfaceLine: struct {
+    line: Int
+    text: String
+    spelling: String
+}
+
+ArrowSurfaceFence: struct {
+    marker: Int
+    width: Int
+    rest: String
+}
+
+arrow_surface_slice: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes((bytes[start..<end]).copy()) ?? panic("fence and backtick runs split UTF-8 at ASCII bytes")
+}
+
+arrow_surface_touch: fn(left: Token, right: Token) -> Bool { left.span.end == right.span.start }
+
+arrow_surface_word: fn(tables: TokenTables, token: Token, word: String) -> Bool {
+    token.kind == TOKEN_IDENT && token_decoded(tables, token) == word
+}
+
+arrow_surface_endpoint: fn(tables: TokenTables, token: Token) -> Bool {
+    arrow_surface_word(tables, token, "client") || arrow_surface_word(tables, token, "server")
+}
+
+// The index of the `(` or `[` closer that matches the opener at `open`, or -1.
+arrow_surface_closer: fn(tokens: [Token], open: Int, opener: Int, closer: Int) -> Int {
+    depth := 0
+    at := open
+    loop at < tokens.len() {
+        if tokens[at].kind == opener -> depth += 1
+        if tokens[at].kind == closer {
+            depth -= 1
+            if depth == 0 -> return at
+        }
+        at += 1
+    }
+    -1
+}
+
+// The index of the `[` that opens the row closed by the `]` at `close`, or -1.
+arrow_surface_row_opener: fn(tokens: [Token], close: Int) -> Int {
+    depth := 0
+    at := close
+    loop at >= 0 {
+        if tokens[at].kind == TOKEN_RBRACKET -> depth += 1
+        if tokens[at].kind == TOKEN_LBRACKET {
+            depth -= 1
+            if depth == 0 -> return at
+        }
+        at -= 1
+    }
+    -1
+}
+
+// The `@` of `break @name` lexes on its own or as the head of a fact read.
+arrow_surface_at_sign: fn(bytes: [U8], token: Token) -> Bool {
+    token.span.start < bytes.len() && Int.from_u8(bytes[token.span.start]) == 64
+}
+
+arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[ArrowSurfaceHit]) {
+    tokens: lexer_without_comments(raw)
+    fences := 0
+    loop (index, token) in tokens {
+        if token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> arrow_surface_scan(bytes, tables, part.tokens, hits)
+            }
+        }
+        following: index + 1 < tokens.len()
+        if token.kind == TOKEN_FENCE_OPEN -> fences += 1
+        if token.kind == TOKEN_FENCE_CLOSE {
+            if fences > 0 {
+                fences -= 1
+            } else {
+                hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`:>` arrow"})
+            }
+        }
+        if token.kind == TOKEN_EQ && following && tokens[index + 1].kind == TOKEN_GT && arrow_surface_touch(token, tokens[index + 1]) {
+            hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`=>` arrow"})
+        }
+        // `]>` closes an effect arrow; only `-[` may open it.
+        if token.kind == TOKEN_RBRACKET && following && tokens[index + 1].kind == TOKEN_GT && arrow_surface_touch(token, tokens[index + 1]) {
+            open: arrow_surface_row_opener(tokens, index)
+            if open > 0 && arrow_surface_touch(tokens[open - 1], tokens[open]) && (tokens[open - 1].kind == TOKEN_EQ || tokens[open - 1].kind == TOKEN_COLON) {
+                hits.push(ArrowSurfaceHit{offset: tokens[open - 1].span.start, spelling: "effect arrow not spelled `-[E]>`"})
+            }
+        }
+        if token.kind == TOKEN_QUESTION && following && arrow_surface_touch(token, tokens[index + 1]) {
+            exit: tokens[index + 1]
+            if exit.kind == TOKEN_BREAK || exit.kind == TOKEN_RETURN || arrow_surface_word(tables, exit, "next") || arrow_surface_word(tables, exit, "continue") {
+                hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`?` loop exit"})
+            }
+        }
+        if token.kind == TOKEN_BREAK && following {
+            after: tokens[index + 1]
+            if after.kind == TOKEN_DOT && arrow_surface_touch(token, after) -> hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "dot loop exit"})
+            if arrow_surface_at_sign(bytes, after) -> hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`@` loop exit"})
+        }
+        if arrow_surface_word(tables, token, "next") && following && arrow_surface_at_sign(bytes, tokens[index + 1]) {
+            hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`@` loop exit"})
+        }
+        // `take` lexes as the move keyword; `.take(n)` is a method call.
+        if token.kind == TOKEN_KW_MOVE && token_decoded(tables, token) == "take" && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) && following && tokens[index + 1].kind == TOKEN_LPAREN && arrow_surface_touch(token, tokens[index + 1]) {
+            close: arrow_surface_closer(tokens, index + 1, TOKEN_LPAREN, TOKEN_RPAREN)
+            if close > 0 && close + 1 < tokens.len() && (tokens[close + 1].kind == TOKEN_LPAREN || tokens[close + 1].kind == TOKEN_UNIFIED_ARROW) {
+                hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`take(...)` capture prefix"})
+            }
+        }
+        if arrow_surface_endpoint(tables, token) && index + 3 < tokens.len() && tokens[index + 1].kind == TOKEN_UNIFIED_ARROW && arrow_surface_endpoint(tables, tokens[index + 2]) && tokens[index + 3].kind == TOKEN_COLON {
+            hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "endpoint-pair protocol line"})
+        }
+    }
+}
+
+arrow_surface_source_hits: fn(source: String) -> [ArrowSurfaceHit] {
+    bytes: source.bytes()
+    lexed: lex(source.bytes())
+    hits := [ArrowSurfaceHit]{}
+    arrow_surface_scan(bytes, lexed.tables, lexed.tokens, hits)
+    hits
+}
+
+// An inline span of one or two tokens (`=>`, `:>`, `?return`) names the
+// token in prose; it is not code.
+arrow_surface_mention: fn(source: String) -> Bool {
+    count := 0
+    loop token in lexer_without_comments(lex(source.bytes()).tokens) {
+        if token.span.end > token.span.start -> count += 1
+    }
+    count <= 2
+}
+
+arrow_surface_line_of: fn(bytes: [U8], offset: Int) -> Int {
+    line := 1
+    loop index in 0..<offset {
+        if Int.from_u8(bytes[index]) == 10 -> line += 1
+    }
+    line
+}
+
+arrow_surface_source_lines: fn(source: String) -> [ArrowSurfaceLine] {
+    bytes: source.bytes()
+    lines: source.lines()
+    out := [ArrowSurfaceLine]{}
+    loop hit in arrow_surface_source_hits(source) {
+        line_no: arrow_surface_line_of(bytes, hit.offset)
+        out.push(ArrowSurfaceLine{line: line_no, text: lines[line_no - 1], spelling: hit.spelling})
+    }
+    out
+}
+
+arrow_surface_fence: fn(line: String) -> ArrowSurfaceFence? {
+    bytes: line.bytes()
+    at := 0
+    loop at < bytes.len() && (Int.from_u8(bytes[at]) == 32 || Int.from_u8(bytes[at]) == 9) -> at += 1
+    if at == bytes.len() -> return None
+    marker: Int.from_u8(bytes[at])
+    if marker != 96 && marker != 126 -> return None
+    end := at
+    loop end < bytes.len() && Int.from_u8(bytes[end]) == marker -> end += 1
+    if end - at < 3 -> return None
+    Val(ArrowSurfaceFence{marker: marker, width: end - at, rest: arrow_surface_slice(bytes, end, bytes.len())})
+}
+
+// A fence holds Jet when its info string is empty or names Jet.
+arrow_surface_jet_fence: fn(fence: ArrowSurfaceFence) -> Bool {
+    info: fence.rest.trim()
+    info == "" || info == "jet" || info.starts_with("jet ") || info.starts_with("jet,")
+}
+
+// The spellings written in the line's inline code spans.
+arrow_surface_inline_hits: fn(line: String) -> [String] {
+    bytes: line.bytes()
+    found := [String]{}
+    at := 0
+    loop at < bytes.len() {
+        if Int.from_u8(bytes[at]) != 96 {
+            at += 1
+            next
+        }
+        delimiter := 0
+        loop at + delimiter < bytes.len() && Int.from_u8(bytes[at + delimiter]) == 96 -> delimiter += 1
+        content_start: at + delimiter
+        close := content_start
+        matched := false
+        loop close < bytes.len() {
+            if Int.from_u8(bytes[close]) != 96 {
+                close += 1
+                next
+            }
+            run := 0
+            loop close + run < bytes.len() && Int.from_u8(bytes[close + run]) == 96 -> run += 1
+            if run == delimiter {
+                code: arrow_surface_slice(bytes, content_start, close)
+                if !arrow_surface_mention(code) {
+                    loop hit in arrow_surface_source_hits(code) -> found.push(hit.spelling)
+                }
+                at = close + run
+                matched = true
+                break
+            }
+            close += run
+        }
+        if !matched -> return found
+    }
+    found
+}
+
+arrow_surface_fence_lines: fn(fenced: [String], start_line: Int, out: &[ArrowSurfaceLine]) {
+    loop found in arrow_surface_source_lines("{fenced.join("\n")}\n") {
+        out.push(ArrowSurfaceLine{line: start_line + found.line - 1, text: found.text, spelling: found.spelling})
+    }
+}
+
+// Lines of a Markdown document that write a superseded spelling as Jet: inside
+// an inline code span or a Jet fenced block. An unclosed fence runs to the end.
+arrow_surface_markdown_lines: fn(text: String) -> [ArrowSurfaceLine] {
+    out := [ArrowSurfaceLine]{}
+    open := false
+    jet := false
+    open_marker := 0
+    open_width := 0
+    start_line := 0
+    fenced := [String]{}
+    loop (index, line) in text.lines() {
+        fence: arrow_surface_fence(line)
+        if open {
+            closes := false
+            if fence == .Val(found) -> closes = found.marker == open_marker && found.width >= open_width && found.rest.trim().is_empty()
+            if !closes {
+                fenced.push(line)
+                next
+            }
+            if jet -> arrow_surface_fence_lines(fenced, start_line, out)
+            open = false
+            next
+        }
+        if fence == .Val(found) {
+            open = true
+            jet = arrow_surface_jet_fence(found)
+            open_marker = found.marker
+            open_width = found.width
+            start_line = index + 2
+            fenced = [String]{}
+            next
+        }
+        loop spelling in arrow_surface_inline_hits(line) -> out.push(ArrowSurfaceLine{line: index + 1, text: line, spelling: spelling})
+    }
+    if open && jet -> arrow_surface_fence_lines(fenced, start_line, out)
+    out
+}
+
+arrow_surface_exempt_line: fn(line: String) -> Bool {
+    loop label in ARROW_SURFACE_EXEMPT_LABELS {
+        if line.contains(label) -> return true
+    }
+    false
+}
+
+// A document whose file name carries a date (`memory-model-2026-10-05.md`) is
+// a dated record.
+arrow_surface_dated: fn(path: String) -> Bool {
+    parts: path.split("/").to_list()
+    name: parts[parts.len() - 1].bytes()
+    // `0` stands for any digit.
+    stamp: "-0000-00-00".bytes()
+    at := 0
+    loop at + stamp.len() <= name.len() {
+        matched := true
+        loop offset in 0..<stamp.len() {
+            byte: Int.from_u8(name[at + offset])
+            if Int.from_u8(stamp[offset]) == 48 {
+                if byte < 48 || byte > 57 -> matched = false
+            } else {
+                if byte != Int.from_u8(stamp[offset]) -> matched = false
+            }
+        }
+        if matched -> return true
+        at += 1
+    }
+    false
+}
+
+arrow_surface_markdown_path: fn(path: String) -> Bool {
+    if !path.contains("/") -> return true
+    loop root in ARROW_SURFACE_MARKDOWN_ROOTS {
+        if path.starts_with(root) -> return true
+    }
+    false
+}
+
+arrow_surface_paths: fn(root: String, out: &[String]) {
+    entries: arrow_surface_files.list_dir(root) ?? return
+    loop entry in entries {
+        kind: arrow_surface_files.stat(entry.path) ?? next
+        if kind.is_symlink -> next
+        if kind.is_dir {
+            if ARROW_SURFACE_SKIPPED_DIRS.contains(entry.name) || entry.name.starts_with("target-") || entry.name.starts_with("build-") || entry.name.starts_with("result-") -> next
+            arrow_surface_paths(entry.path, out)
+            next
+        }
+        if entry.name.ends_with(".jet") || entry.name.ends_with(".fixed") || entry.name.ends_with(".md") -> out.push(entry.path.removeprefix("./"))
+    }
+}
+
+arrow_surface_retired_fixture: fn(path: String) -> Bool {
+    parts: path.split("/").to_list()
+    name: parts[parts.len() - 1]
+    name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired.jet")
+}
+
+arrow_surface_record: fn(path: String) -> Bool {
+    loop root in ARROW_SURFACE_RECORD_ROOTS {
+        if path.starts_with(root) -> return true
+    }
+    false
+}
+
+// The lines of a `tests/ui` fixture that its `.stderr` snapshot reports an
+// Error at: a negative fixture keeps its subject spelling.
+arrow_surface_ui_subject_lines: fn(path: String) -> [Int] {
+    lines := [Int]{}
+    if !path.starts_with("tests/ui/") || !path.ends_with(".jet") -> return lines
+    snapshot: arrow_surface_files.read("{path.removesuffix(".jet")}.stderr") ?? return lines
+    marker: "--> {path}:"
+    error := false
+    loop line in snapshot.lines() {
+        if line.starts_with("Error [") {
+            error = true
+            next
+        }
+        if line.starts_with("Warning [") || line.starts_with("Stop [") || line.starts_with("Lint [") {
+            error = false
+            next
+        }
+        if !error || !line.contains(marker) -> next
+        rest: line.split(marker).to_list()
+        number: Int.parse(rest[rest.len() - 1].split(":").to_list()[0]) ?? next
+        lines.push(number)
+    }
+    lines
+}
+
+#Test("superseded arrow, exit and capture spellings stay out of source, artifacts and docs") {
+    guards_enter_root()
+    paths := [String]{}
+    arrow_surface_paths(".", paths)
+    failures := [String]{}
+    loop path in paths {
+        if arrow_surface_record(path) || arrow_surface_retired_fixture(path) -> next
+        markdown: path.ends_with(".md")
+        if markdown && (!arrow_surface_markdown_path(path) || arrow_surface_dated(path)) -> next
+        text: arrow_surface_files.read(path) ?? next
+        if markdown {
+            loop found in arrow_surface_markdown_lines(text) {
+                if !arrow_surface_exempt_line(found.text) -> failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+            }
+            next
+        }
+        subjects: arrow_surface_ui_subject_lines(path)
+        loop found in arrow_surface_source_lines(text) {
+            if !subjects.contains(found.line) -> failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+        }
+    }
+    assert(failures.is_empty(), "superseded spellings (write `->`, `-[E]>`, `break(name)`, `next(name)`, `client: Msg(...)`, or a plain capture):\n{failures.join("\n")}")
+}
+
+#Test("arrow surface scan reads tokens, not text") {
+    flagged: [String]{"f: fn() => Int {{ 1 }}", "f: fn() :> Int {{ 1 }}", "f: fn() =[IO]=> Int {{ 1 }}", "f: fn() :[IO]> Int {{ 1 }}", "f: fn() =[IO]> Int {{ 1 }}", "f: fn() {{ loop {{ ?break }} }}", "f: fn() {{ loop {{ ?return }} }}", "f: fn() {{ loop {{ ?next }} }}", "f: fn() {{ loop {{ break.outer }} }}", "f: fn() {{ loop {{ break @outer }} }}", "f: fn() {{ loop {{ next @outer }} }}", "g: take(a) (x) -> x", "g: take(a) -> a", "p: protocol {{\n    client -> server: Ping\n}}"}
+    loop source in flagged -> assert(arrow_surface_source_hits(source).len() == 1, source)
+    lawful: [String]{"f: fn() -[IO]> Int {{ 1 }}", "f: fn() -> Int {{ 1 }}", "// f: fn() => Int\nx: 1", "s: \"a => b, :[IO]>\"", "f: fn() {{ loop {{ break(outer) }} }}", "f: fn() {{ loop {{ next(outer) }} }}", "n: next.x", "t: take(9.99)", "r: fn() {{ loop x in xs.take(2) -> print(x) }}", "v: <:a:> + 1", "c: a <=> b", "w: a >= b", "l: x = [1]", "p: protocol {{\n    client: Ping()\n}}"}
+    loop source in lawful -> assert(arrow_surface_source_hits(source).is_empty(), source)
+    assert_eq(arrow_surface_source_hits("s: \"{{f(fn() => 1)}}\"").len(), 1)
+}
+
+#Test("arrow surface reads Markdown Jet code only") {
+    assert_eq(arrow_surface_markdown_lines("```jet\nf: fn() => Int {{ 1 }}\n```").len(), 1)
+    assert_eq(arrow_surface_markdown_lines("```\nf: fn() => Int {{ 1 }}\n```").len(), 1)
+    assert(arrow_surface_markdown_lines("```js\nconst f = (x) => x\n```").is_empty())
+    assert_eq(arrow_surface_markdown_lines("Write `f: fn() :[IO]> Int` here.").len(), 1)
+    assert(arrow_surface_markdown_lines("Prose says => and :> without code.").is_empty())
+    assert(arrow_surface_exempt_line("the retired `=>` arrow"))
+    assert(arrow_surface_markdown_lines("The `:>` token closes a fence; `?return` is gone.").is_empty())
+    assert(arrow_surface_dated("Docs/proposals/memory-model-2026-10-05.md"))
+    assert(!arrow_surface_dated("Docs/proposals/transactional-rollback-regions.md"))
+    assert_eq(arrow_surface_markdown_lines("~~~~jet\nx: 1\n~~~\ny: fn() => Int\n~~~~")[0].line, 4)
+}
