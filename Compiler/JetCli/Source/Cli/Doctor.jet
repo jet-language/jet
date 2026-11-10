@@ -16,7 +16,7 @@ use {
     ]
     jet_foundation.[diagnostic_theme_paint]
     jet_pkg_model.[
-        COMPILER_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
+        JET_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
         publication_resolve_publish_registry,
     ]
     jetpack_artifact_store.[ArtifactStore]
@@ -266,7 +266,7 @@ jet_cli_doctor_ffi_cache_dir: fn() -[Env]> String Never! {
 
 // A `--target` machine: the plan admitted only declared target machines.
 jet_cli_doctor_check_cross_target: fn(name: String) -> JetCLIDoctorCheck Never! {
-    machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
+    machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? {
         return jet_cli_doctor_problem("cross", name, "not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", false)
     }
     jet_cli_doctor_ok("cross", machine.name, "declared target machine ({machine.triple})")
@@ -317,7 +317,7 @@ jet_cli_doctor_plan: fn(raw: [String], jet_argv: [String], color: Bool) -> JetCL
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
+            machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? {
                 return jet_cli_fail("E3302", "target `{name}` is not available", "the name is not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", color, JET_DRIVER_EXIT_USAGE)
             }
             cross_target = Val(machine.name)

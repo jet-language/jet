@@ -1,9 +1,10 @@
-// `admit COMMIT`: the release gate of the a0_NNN compiler train.
+// `admit COMMIT`: the release gate of the a0.0.N compiler train.
 //
 //   jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
 //        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse DIR] [--seeds DIR] [--work DIR] [--check-gate]
 //
-// COMMIT is a commit on dev. The current release is `SEEDS/current` (default
+// COMMIT is a commit on dev whose JET_VERSION (Jetpack/PackageModel Manifest.jet)
+// is the next release, a0.0.N. The current release is `SEEDS/current` (default
 // $JET_SEEDS, Tools/agent/roots.sh); it is the chain's seed. The release column, the
 // compiler the suites and the Jetpack census compare against, is the current release when
 // its jet is the one it was released as (SHA256SUMS lists its sha256, and RELEASE.json records
@@ -47,20 +48,22 @@
 // check that fails then waits for them to end and blocks the suites. The release column's
 // rows follow, picked from the candidate's.
 //
-// Pass: assembles SEEDS/a0_NNN (the next number) with jet (its Core sources built in),
-// jet-runtime/, jetpack, IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS,
-// RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and evidence/, then publishes it, each step
-// only after the one before succeeds: COMMIT must be on origin/dev; `git tag -a a0_NNN -F
-// TAG_MSG COMMIT`; `git push origin a0_NNN`; then the new jet runs `jet run
-// Tools/release/Main.jet -- candidate SEEDS/a0_NNN` and `-- publish SEEDS/a0_NNN` from this
+// Pass: assembles SEEDS/a0.0.N (the next number) with jet (its Core sources built in),
+// jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<sha256 of jet>`), RELEASE, VERSION
+// (`a0.0.N COMMIT <date>`, which `jet --version` prints), the C toolchain pack,
+// SOURCE, SHA256SUMS, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and evidence/, then
+// publishes it, each step only after the one before succeeds: COMMIT must be on
+// origin/dev; `git tag -a a0.0.N -F TAG_MSG COMMIT`; `git push origin a0.0.N`; then the
+// new jet runs `jet run Tools/release/Main.jet -- candidate SEEDS/a0.0.N` and `-- publish
+// SEEDS/a0.0.N` from this
 // checkout, signing with the jet-release key (`jet registry keygen --registry jet-release`
 // writes it to $JET_KEYS_DIR, default ~/.jet/keys; the run does not start without it). Only
-// then does it write SEEDS/a0_NNN/current.env and print PASS with the commands left for
-// Main: make it current (jet-use) and merge it to master as `Merge dev: a0_NNN <summary>`.
+// then does it write SEEDS/a0.0.N/current.env and print PASS with the commands left for
+// Main: make it current (jet-use) and merge it to master as `Merge dev: a0.0.N <summary>`.
 // Fail: no current.env and no PASS. A failed check, or a publication step that fails before
-// the tag reaches origin, leaves no SEEDS/a0_NNN (the assembled directory moves to
-// SEEDS/.a0_NNN.unpublished-PID and the local tag is deleted); once the tag is on origin,
-// SEEDS/a0_NNN stays without current.env and the gate prints the steps left. The evidence
+// the tag reaches origin, leaves no SEEDS/a0.0.N (the assembled directory moves to
+// SEEDS/.a0.0.N.unpublished-PID and the local tag is deleted); once the tag is on origin,
+// SEEDS/a0.0.N stays without current.env and the gate prints the steps left. The evidence
 // stays in the work directory. The gate never repoints `current`, merges or pushes master.
 // One release run at a time (a lock in the work root); the run takes the release slot of
 // Tools/agent/Chain.jet (`slot --release`: CPUs 8-31, no other slot job meanwhile), and
@@ -536,7 +539,6 @@ SeedRelease: struct {
     dir: String
     name: String
     identity: String
-    version: String
     jet: String
     jet_sha: String
     jetpack: String
@@ -548,7 +550,7 @@ SeedRelease: struct {
 }
 
 no_seed: fn(error: String) -> SeedRelease Never! {
-    SeedRelease{dir: "", name: "", identity: "", version: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", release_name: "", genuine: "", error: error.copy()}
+    SeedRelease{dir: "", name: "", identity: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", release_name: "", genuine: "", error: error.copy()}
 }
 
 // The seed in `dir`. Its jet is genuine when SHA256SUMS lists its sha256 for
@@ -568,7 +570,6 @@ seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
     info.dir = dir.copy()
     info.name = files.basename(dir).copy()
     info.identity = (read_text(files.join(dir, "IDENTITY")) ?? "").trim().copy()
-    info.version = info.identity.partition("#").head.copy()
     info.jet = files.join(dir, "jet")
     info.jet_sha = sha256_file(info.jet)
     if files.exists(files.join(dir, "jetpack")) -> info.jetpack = files.join(dir, "jetpack")
@@ -838,8 +839,9 @@ chain_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     }
     sha: sha256_file(s2)
     // RELEASE.json records both chain stages so Tools/release can check the
-    // fixed point from the seed alone.
-    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "{ctx.release.version}#{sha}", jetpack: "", s2: "{ctx.release.version}#{sha}", s3: "{ctx.release.version}#{sha256_file(s3)}"}
+    // fixed point from the seed alone. The tree's JET_VERSION is the next
+    // release (run_gate), so each names `jet@<next>`.
+    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{sha}", jetpack: "", s2: "jet@{ctx.next}#{sha}", s3: "jet@{ctx.next}#{sha256_file(s3)}"}
     ctx.built = true
     row(ctx, "chain", "PASS", "fixed point s2 == s3 (jet {short(sha, 16)}) from {ctx.release.name}, no Rust ({stages.join(", ")}; {verdict_note})")
 }
@@ -1870,6 +1872,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     failed: write_all([(path: String, text: String)]{
         (path: files.join(temp, "IDENTITY"), text: "{ctx.candidate.identity}\n"),
         (path: files.join(temp, "RELEASE"), text: "{ctx.next}\n"),
+        (path: files.join(temp, "VERSION"), text: "{ctx.next} {ctx.sha} {date}\n"),
         (path: files.join(temp, "SOURCE"), text: "{ctx.sha} (dev, {ctx.next}: self-hosted s2 of {short(ctx.sha, 9)} from seed {ctx.release.name}; {verified}; Tools/release admit {date})\n"),
         (path: files.join(ctx.work, "current.env"), text: env_text),
         (path: files.join(temp, "MERGE_MSG"), text: "Merge dev: {ctx.next} {summary}\n\n{body}\n"),
@@ -1984,6 +1987,12 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     say("release", ctx.log, "release gate of {short(ctx.sha, 10)}: chain seed {ctx.release.name}; release column {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)}; next name {ctx.next}; work {work}")
     if export_commit(ctx.root, ctx.sha, ctx.tree) == .Val(why) {
         term.eprint("admit: {why}")
+        return 2
+    }
+    // The release prints the version its tree declares, so that version must be the release's name.
+    declared: tree_jet_version(ctx.tree)
+    if declared != ctx.next {
+        term.eprint("admit: {short(ctx.sha, 10)} declares JET_VERSION `{declared}` in {JET_VERSION_SOURCE}, but the next release is {ctx.next}; set it to \"{ctx.next}\" on dev first")
         return 2
     }
     files.write(files.join(ctx.tree, ".chain-base"), "{ctx.sha}\n") ?? ()

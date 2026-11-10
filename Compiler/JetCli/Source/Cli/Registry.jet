@@ -5,11 +5,11 @@
 // both front doors mean one thing (I9).
 use {
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FORMS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_INPUT_HELP, JET_CLI_JOB_INVOCATION_HELP, JET_CLI_RUN_INPUT_HELP, JetCLIActionSpec, JetCLIFlagSpec, JetCLIFormSpec]
-    jet_pkg_model.[COMPILER_VERSION, pkg_version_line]
+    jet_pkg_model.[JET_VERSION]
 }
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`. The `jet` version is
-// the package model's COMPILER_VERSION, the one constant `jet --version`, help,
+// the package model's JET_VERSION, the one constant `jet --version`, help,
 // `jet new` and the compiler identity read.
 JET_CLI_BINARY: "jet"
 JET_CLI_LANG_NAME: "Jet"
@@ -525,7 +525,7 @@ jet_cli_command_listed: fn(name: String) -> Bool Never! {
 // `jet help`: every listed command, each group's ported actions, then every
 // flag with its ported scopes.
 jet_cli_usage_page: fn(order: String) -> String Never! {
-    out := "Welcome to {JET_CLI_LANG_NAME}! (v{COMPILER_VERSION})\n\nUsage:\n"
+    out := "Welcome to {JET_CLI_LANG_NAME}! ({JET_VERSION})\n\nUsage:\n"
     commands: jet_cli_commands_in(order)
     loop index in commands {
         command: JET_CLI_COMMANDS[index]
@@ -559,11 +559,11 @@ jet_cli_palette_category: fn(name: String) -> String Never! {
     }
 }
 
-// Bare `jet`: the command palette, then the `jet --version` line, then every
-// canonical command under its category. It prints the same static text with
-// or without a terminal.
-jet_cli_palette: fn() -> String Never! {
-    out := "{JET_CLI_LANG_NAME} command palette\n{pkg_version_line()}\n"
+// Bare `jet`: the command palette, then `version_line` (the `jet --version`
+// line), then every canonical command under its category. It prints the same
+// text with or without a terminal.
+jet_cli_palette: fn(version_line: String) -> String Never! {
+    out := "{JET_CLI_LANG_NAME} command palette\n{version_line}\n"
     commands: jet_cli_commands_in("frequency")
     loop category in JET_CLI_PALETTE_CATEGORIES {
         out = "{out}\n{category}\n"

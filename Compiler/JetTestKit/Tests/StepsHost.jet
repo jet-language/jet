@@ -198,8 +198,8 @@ use {
 #Test("jet-semver tokens expand in argv environment and unquoted normalizer sources from real cases") {
     root: cases_test_root("host-semver-token")
     context := cases_test_context(root, files.join(root, "scratch"))
-    context.env.version = kit_steps_version("Jet 1.2.3-rc.4\n") ?? panic("version banner")
-    source: "step: printf '%s' {{jet-semver}}\nstdout: = \"1.2.3-rc.4\"\nstep: jet -c 'printf %s \"$VERSION\"'\nenv: VERSION={{jet-semver}}\nstdout: = \"1.2.3-rc.4\"\nstep: printf '%s' {{jet-semver}}\nnormalize: replace {{jet-semver}} \"VERSION\"\nstdout: = \"VERSION\"\n"
+    context.env.version = kit_steps_version("jet a0.0.43-dev+29517f5447\n") ?? panic("version banner")
+    source: "step: printf '%s' {{jet-semver}}\nstdout: = \"a0.0.43\"\nstep: jet -c 'printf %s \"$VERSION\"'\nenv: VERSION={{jet-semver}}\nstdout: = \"a0.0.43\"\nstep: printf '%s' {{jet-semver}}\nnormalize: replace {{jet-semver}} \"VERSION\"\nstdout: = \"VERSION\"\n"
     cases_test_source(root, "version", source)
     assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "PASS")
     cases_test_source(root, "wrong", "{source}stdout: = \"wrong\"\n")

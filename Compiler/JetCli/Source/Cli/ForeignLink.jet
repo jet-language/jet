@@ -9,7 +9,7 @@ use {
     cli_sys: core.sys
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
     jet_foundation.[BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_pkg_model.[JET_VERSION]
     jetpack_foundation.[foundation_find_folder, foundation_library_folders]
 }
 
@@ -180,7 +180,7 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
 // The `jetpack` engine of this jet's version beside it, if any.
 jet_cli_native_c_engine: fn() -[FS, Env, Exec, Time.Wait]> String? Never! {
     engine: jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) ?? return None
-    if jet_cli_query_engine_protocol(engine) != Val(COMPILER_VERSION) -> return None
+    if jet_cli_query_engine_protocol(engine) != Val(JET_VERSION) -> return None
     Val(engine)
 }
 

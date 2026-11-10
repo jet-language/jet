@@ -150,22 +150,26 @@ The `tls:` label is part of the API; an unlabeled third argument is rejected.
 
 ## Version banner
 
-`jet version` and `jet --version` render the same deterministic banner. The
-SemVer and release state come from `manifest::version_banner`; the exact output
-is golden-tested in `tests/release/version_banner.txt` and the
-`pkg_version_banner` assertions in `Jetpack/PackageModel/Tests/Manifest.jet`:
+`jet version` and `jet --version` render the same deterministic banner, and
+`jet --version --json` carries the same facts as one JSON object. The version
+is `JET_VERSION` (`a0.0.N`, alpha) in `Jetpack/PackageModel/Source/Manifest/Manifest.jet`;
+a release prints `jet a0.0.N (<commit10>, <date>, alpha)` from the `VERSION`
+stamp beside its executable, and any other build prints
+`jet a0.0.N-dev+<commit10>`. The output is golden-tested in
+`tests/release/version_banner.txt` and the `pkg_version_banner` assertions in
+`Jetpack/PackageModel/Tests/Manifest.jet`. A dev build prints:
 
 ```text
-Jet 0.1.0
-release status: prerelease
-release disposition: current
-release readiness: not-ready
-1.0 compatibility policy: future-1.0 (planned; not active)
-supported editions: 2026 (newest: 2026)
-registry protocol: v1
+jet a0.0.43-dev+29517f5447
+Release status: Prerelease
+Release disposition: Current
+Release readiness: Not ready
+Compatibility policy: Future 1.0 (planned; not active)
+Supported editions: 2026 (newest: 2026)
+Registry protocol: v1
 ```
 
-The `1.0 compatibility policy` line describes future law, not a shipped
+The `Compatibility policy` line describes future law, not a shipped
 promise. `jet inspect claims --json` is the machine-readable release-claim
 projection; it consumes the bounded `manifest.capability_relation.rows`
 source and remains fail-closed for missing, stale, unavailable, failed, or

@@ -14,7 +14,7 @@ use {
         evidence_producer_name, evidence_record_checked_derivation, evidence_record_validate, evidence_report_derivation,
         evidence_report_from_bytes, evidence_report_is_complete,
     ]
-    jet_pkg_model.[AuthorityResolver, COMPILER_VERSION, ForeignBoundaryContract, ForeignSourceReceipt, WorkspaceDeclarationCache]
+    jet_pkg_model.[AuthorityResolver, JET_VERSION, ForeignBoundaryContract, ForeignSourceReceipt, WorkspaceDeclarationCache]
 }
 
 jet_cli_import_update_error: fn(message: String) -> JetCLIImportPlanError Never! { JetCLIImportPlanError{message: message} }
@@ -300,7 +300,7 @@ jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: For
     target: jet_cli_receipt_target_identity(cache, plan.source, claim.inputs) ?? return Err(jet_cli_import_update_error(err.message))
     index := jet_cli_record_index_load(receipt_root) ?? return Err(jet_cli_import_update_error(err.message))
     receipt_bytes: jet_cli_receipt_encode(published) ?? return Err(jet_cli_import_update_error(err.message))
-    identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-receipt-v2"}
+    identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
     entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", receipt_bytes.len(), published.consumed, published.produced, false) ?? return Err(jet_cli_import_update_error(err.message))
     jet_cli_record_index_upsert_many_and_store(index, receipt_root, [JetCLIRecordIndexEntry]{entry.move()}) ?? return Err(jet_cli_import_update_error(err.message))
 }

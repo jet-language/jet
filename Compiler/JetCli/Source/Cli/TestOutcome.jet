@@ -20,7 +20,7 @@ use {
         evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
         evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry, diagnostic_stop_parse,
     ]
-    jet_pkg_model.[COMPILER_VERSION, ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
+    jet_pkg_model.[JET_VERSION, ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
 }
 
 // The first `Stop [CODE]: message` of a failed test's stderr and the
@@ -270,7 +270,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     profile_tag: "{build_options_key(build_options)};aot-target=native"
     default_profile: if build_options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> build_options.profile.copy()
     build: EvidenceBuild{
-        toolchain: jet_cli_test_env(EVIDENCE_TOOLCHAIN_ENV, COMPILER_VERSION),
+        toolchain: jet_cli_test_env(EVIDENCE_TOOLCHAIN_ENV, JET_VERSION),
         target: jet_cli_test_env(EVIDENCE_TARGET_ENV, jet_cli_host_triple(cli_sys.arch(), cli_sys.name())),
         profile: jet_cli_test_env(EVIDENCE_PROFILE_ENV, default_profile),
     }

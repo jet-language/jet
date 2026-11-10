@@ -277,7 +277,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
     private_source: files.join(context.scratch, "unlocked-toolchain")
     assert_eq(files.read(files.join(private_source, "main.jet")) ?? panic("staged E1250"), fixture)
-    assert_eq(files.read(files.join(private_source, "package.jet")) ?? panic("staged manifest"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
+    assert_eq(files.read(files.join(private_source, "package.jet")) ?? panic("staged manifest"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: \"a0.9\"\n")
     unlocked: kit_ui_invocation(fixture, "tests/ui/unlocked.jet", false)
     assert_eq(unlocked.argv, ["build", "main.jet", "--offline"])
     assert(unlocked.parent && unlocked.unlocked_toolchain)

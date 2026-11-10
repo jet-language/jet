@@ -23,7 +23,7 @@ use {
     ]
     jet_parser.[parse_source]
     jet_sema.[sema_taint_core_effect, sema_taint_effect_name]
-    jet_pkg_model.[COMPILER_VERSION]
+    jet_pkg_model.[JET_VERSION]
 }
 
 // The v1 bounds (proof-replay-decisions): 256 MiB per artifact, 100,000 frames, 1 MiB
@@ -839,7 +839,7 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     }
     indexed: ".jet/replays/{name}"
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_unfinalized(err.message))
-    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
     row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_unfinalized(err.message))
     Ok(indexed)
@@ -916,7 +916,7 @@ jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> Str
     jet_cli_replay_publish(root, [String]{".jet", "replays"}, "{record.name}.jetproof-replay", bytes) ?? return Err(err)
     path: jet_cli_replay_record_path(record.name)
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_record_index_failed(err.message))
-    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
     row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     Ok(path)

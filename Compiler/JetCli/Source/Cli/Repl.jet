@@ -29,14 +29,13 @@ use {
     ]
     jet_lexer.[TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
     jet_parser.[parse_source]
+    jet_pkg_model.[JET_VERSION]
     jet_repl.[ReplInput, ReplInputParse, repl_classify, repl_reanchor]
 }
 
 // The private verb a REPL turn's child `jet` runs; never in help, completions
 // or docs.
 JET_CLI_REPL_CHILD_VERB: "__jet_repl_run_stdin"
-// The jet-repl crate version the banner names.
-JET_CLI_REPL_VERSION: "0.1.0"
 JET_CLI_REPL_INTERRUPTED: "Interrupted. External effects already performed were not rolled back."
 // The label `jet eval <expression>` renders problems under.
 JET_CLI_REPL_EVAL_LABEL: "<eval>"
@@ -243,7 +242,7 @@ jet_cli_repl_mark: fn(session: JetCLIReplSession) -> String Never! {
 }
 
 jet_cli_repl_banner: fn(color: Bool) {
-    jet_cli_repl_out("{diagnostic_theme_accent(color, "Jet")} {JET_CLI_REPL_VERSION} — Interactive REPL  ({diagnostic_theme_bold(color, ":quit")}, {diagnostic_theme_bold(color, ":help")}, {diagnostic_theme_bold(color, "^B")} bindings)\n\n")
+    jet_cli_repl_out("{diagnostic_theme_accent(color, "Jet")} {JET_VERSION} — Interactive REPL  ({diagnostic_theme_bold(color, ":quit")}, {diagnostic_theme_bold(color, ":help")}, {diagnostic_theme_bold(color, "^B")} bindings)\n\n")
     jet_cli_repl_err("Try: {diagnostic_theme_bold(color, "?name")} docs · {diagnostic_theme_bold(color, ":pin/:fold/:rerun <id>")} · interactive keys require a TTY\n")
 }
 

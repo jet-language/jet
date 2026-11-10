@@ -28,10 +28,10 @@
 // toolchain pack (Compiler/JetCli ForeignLink.jet).
 //
 // The pack's files land in OUT, and OUT/native.key holds its content
-// identity. FILE gets JET's identity: the version of the running jet's
-// (JET_COMPILER_IDENTITY, which the build gives a step that runs jet) and the
-// sha256 of JET, the identity JET lowers the runtime under. The step declares
-// each file, so the build publishes the pack and IDENTITY beside jet.
+// identity. FILE gets JET's identity, `jet@<JET_VERSION>#<sha256 of JET>`:
+// the version JET names in `jet --version --json` (its `release`) and the
+// bytes JET lowers the runtime under. The step declares each file, so the
+// build publishes the pack and IDENTITY beside jet.
 //
 // `unit` writes the runtime's one-namespace unit, OUT/unit.jet, and its
 // OUT/package.jet, then prints OUT/unit.jet: each sources.list source after a
@@ -80,7 +80,7 @@ Inventory: struct {
 Toolchain: struct {
     root: String
     jet: String
-    // `name@version` of the jet's identity, the running compiler's.
+    // `jet@<JET_VERSION>` of the built jet, the running compiler's.
     version: String
     out: String
 }
@@ -330,12 +330,8 @@ pack: fn(args: [String]) {
     if !flags.trees.contains(RUNTIME_TREE) -> fail("the --tree folders must include the runtime's, {RUNTIME_TREE}")
     root: absolute(".")
     identity: flag(flags, "identity")
-    // The build gives a step that runs jet that jet's identity; the jet it
-    // built is the same version, known by its own bytes.
-    running: process.env_get("JET_COMPILER_IDENTITY") ?? ""
-    version: running.partition("#").head
-    if !version.contains("@") -> fail("JET_COMPILER_IDENTITY `{running}` names no `name@version`")
-    tool: Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out"))}
+    jet: absolute(flag(flags, "jet"))
+    tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{built_version(jet)}", out: absolute(flag(flags, "out"))}
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources: runtime_sources(manifest)
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
@@ -360,6 +356,23 @@ pack: fn(args: [String]) {
     build(tool, work, source, backend, lifecycle, compiler_sha256, recipe)
     files.remove_all(work) ?? ()
     files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
+}
+
+// The JET_VERSION the jet at `jet` was built at: the `release` of its
+// `--version --json`.
+built_version: fn(jet: String) -> String {
+    text: output_of(process.cmd([String]{jet.copy(), "--version", "--json"}).env_remove("JET_TOOLCHAIN_ROOT"), "{jet} --version --json")
+    facts: json.parse(text.trim()) ?? fail("`{jet} --version --json` is not JSON: {err}")
+    version: text_of(field(facts, "release"))
+    if version == "" || version.contains(" ") || version.contains("#") || version.contains("@") -> fail("`{jet} --version --json` names no release version")
+    version
+}
+
+// A command that must exit 0; its stdout.
+output_of: fn(spec: ProcessSpec, what: String) -> String {
+    receipt: spec.output_limit(268435456).run() ?? fail("{what} could not start: {err}")
+    if receipt.code != 0 || receipt.signal != None -> fail("{what} failed ({receipt.code}):\n{receipt.errors}")
+    receipt.output
 }
 
 // The runtime build's issue reports, kept in OUT when it fails.

@@ -6,14 +6,9 @@
 
 use {
     jetpack_foundation.[BuildEffect]
+    jet_pkg_model.[JET_VERSION]
     crypto: core.crypto
 }
-
-// The Rust key embeds `env!("CARGO_PKG_VERSION")` and
-// `CARGO_PKG_NAME@CARGO_PKG_VERSION` of the jet-comptime crate; the same
-// spellings keep one key per action across both implementations.
-BUILD_KEY_COMPILER_VERSION: "0.0.1"
-BUILD_KEY_COMPILER_IDENTITY: "jet-comptime@0.0.1"
 
 // Rust `KeyWriter`: u64 big-endian lengths, raw bytes, one-byte booleans.
 BuildKeyWriter: struct {
@@ -106,8 +101,10 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     loop cap in action.caps -> w.text(cap.flag())
     w.text("cache")
     w.text(if action.cache == ActionCache.Cached -> "cached" else -> "uncached-phony")
+    // The running Jet version: a new version never reuses an older one's
+    // action results.
     w.text("compiler-version")
-    w.text(BUILD_KEY_COMPILER_VERSION)
+    w.text(JET_VERSION)
     w.text("helper-versions")
     w.map(action.helper_versions)
     w.text("generated-modules")
@@ -263,7 +260,7 @@ build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: Hermet
         w.text(fact.toolchain_provenance.as_str())
     }
     w.text("compiler-identity")
-    w.text(BUILD_KEY_COMPILER_IDENTITY)
+    w.text("jet@{JET_VERSION}")
     w.finish()
 }
 

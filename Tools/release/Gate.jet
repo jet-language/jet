@@ -63,10 +63,18 @@ tag_commit: fn(tags: [Tag], name: String) -> String? Never! {
     None
 }
 
+// The number N of the release `a0.0.N`. A seed directory published before
+// the a0.0.N names, `a0_NNN`, still counts in the one sequence (a0_042 is
+// 42, so a0.0.43 follows it).
 release_number: fn(name: String) -> Int? Never! {
-    if name.len() != 6 || !name.starts_with("a0_") -> return None
+    digits: if {
+        name.starts_with("a0.0.") -> name.slice(5..<name.len()).copy()
+        name.len() == 6 && name.starts_with("a0_") -> name.slice(3..<6).copy()
+        else -> return None
+    }
+    if digits.len() == 0 || (name.starts_with("a0.0.") && digits.starts_with("0")) -> return None
     value := 0
-    loop byte in name.slice(3..<6).bytes() {
+    loop byte in digits.bytes() {
         code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
         value = value * 10 + code - 48
@@ -74,18 +82,13 @@ release_number: fn(name: String) -> Int? Never! {
     Val(value)
 }
 
-// The next release name after every a0_NNN in `names`.
+// The next release name, `a0.0.N`, after every release in `names`.
 next_release_name: fn(names: [String]) -> String Never! {
     highest := 0
     loop name in names {
         if release_number(name) == .Val(number) && number > highest -> highest = number
     }
-    next: highest + 1
-    if {
-        next < 10 -> "a0_00{next}"
-        next < 100 -> "a0_0{next}"
-        else -> "a0_{next}"
-    }
+    "a0.0.{highest + 1}"
 }
 
 contains_text: fn(list: [String], text: String) -> Bool Never! {

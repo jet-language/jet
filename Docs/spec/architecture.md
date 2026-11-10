@@ -2272,7 +2272,7 @@ original Rust runner, and no case compiles beside another. When outer
 tracing is enabled, run-wide scratch also remains until the final trace audit;
 ordinary runs remove it after reporting.
 UI `@jetpack_e1250` copies its program as `main.jet` into a private scratch
-package with `name: "e1250_fixture"`, `version: "1"` and `jet: 0.9`; it runs
+package with `name: "e1250_fixture"`, `version: "1"` and `jet: "a0.9"`; it runs
 public `jet build main.jet --offline`, requires a nonzero refusal, and compares
 combined stdout/stderr. `@web_target` uses public
 `jet build FILE --target=web`, not an internal compiler hook. Target availability

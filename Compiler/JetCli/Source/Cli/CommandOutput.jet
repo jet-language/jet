@@ -1,19 +1,21 @@
 // `write_renderable`, `run_version`. --json selects machine stdout and hides
-// primary human content; help and version have no machine record and succeed
-// without writing either stream.
+// primary human content; help has no machine record and succeeds without
+// writing either stream, and version's machine record is pkg_version_json.
 use {
     jet_driver.[JET_DRIVER_EXIT_OK]
-    jet_pkg_model.[pkg_version_banner]
+    jet_pkg_model.[pkg_jet_build, pkg_version_banner, pkg_version_json]
 }
 
 jet_cli_renderable: fn(text: String, json: Bool) -> JetCLIPlan Never! {
     jet_cli_done(if json -> "" else -> text, "", JET_DRIVER_EXIT_OK)
 }
 
-// Reuse the package model's canonical release/edition/protocol projection
-// (Jetpack/PackageModel/Source/Manifest/Manifest.jet; origin/port/compiler).
-jet_cli_version: fn(json: Bool) -> JetCLIPlan Never! {
-    jet_cli_renderable(pkg_version_banner(), json)
+// Reuse the package model's canonical version/release/edition/protocol
+// projection (Jetpack/PackageModel/Source/Manifest/Manifest.jet) of this
+// compiler's build stamps.
+jet_cli_version: fn(json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    build: pkg_jet_build()
+    jet_cli_done(if json -> pkg_version_json(build) else -> pkg_version_banner(build), "", JET_DRIVER_EXIT_OK)
 }
 
 // Engine compiler aliases own every raw argument,

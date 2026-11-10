@@ -64,7 +64,7 @@ use {
         test_settings_levels,
         test_settings_put,
     ]
-    jet_pkg_model.[WorkspaceDeclarationCache, pkg_discover_jobs_in]
+    jet_pkg_model.[WorkspaceDeclarationCache, pkg_discover_jobs_in, pkg_jet_build, pkg_version_line]
     jet_testkit.[KIT_SOURCE_LANGUAGES, kit_source_language]
 }
 
@@ -2334,7 +2334,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     quiet: owned.contains("--quiet")
     verbose: owned.contains("--verbose") || owned.contains("-v")
     json: jet_cli_wants_json(owned)
-    if raw.len() == 0 -> return jet_cli_renderable(jet_cli_palette(), json)
+    if raw.len() == 0 -> return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
 
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
     // no move out of it, E0201) and the binding `argv` owns its own.
@@ -2431,7 +2431,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
             return jet_cli_renderable(jet_cli_usage_page(order), json)
         }
-        return jet_cli_renderable(jet_cli_palette(), json)
+        return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
     }
     command: args[0]
     if !jet_cli_is_builtin(command) && !command.ends_with(".jet") {

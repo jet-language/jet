@@ -22,7 +22,11 @@ KitEnv: struct {
     // Count the child's live descendants too, not only the child.
     resident_tree: Bool{false}
     env_clear: Bool{false}
+    // The tested jet's JET_VERSION (`a0.0.43`, `{jet-semver}`) and its whole
+    // `jet --version` spelling after `jet ` (`a0.0.43-dev+29517f5447`); a
+    // `normalize: version` row writes each as VERSION.
     version: String{""}
+    version_display: String{""}
     version_error: String{""}
     // The entry's memory claim so far (kit_exec_run): its children's largest
     // resident peak plus the files a row held on a memory-backed scratch. None
@@ -854,6 +858,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
+        env.version_display = kit_steps_version_display(version_run.stdout) ?? ""
         if env.version == "" -> env.version_error = "unparseable jet --version banner"
     } else {
         env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"

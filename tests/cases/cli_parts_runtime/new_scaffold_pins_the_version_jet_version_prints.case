@@ -1,10 +1,10 @@
 # One version constant: `jet new` writes the version `jet --version` prints
 # into the scaffolded manifest's `jet:` field and the new lock's toolchain pin.
-# {jet-semver} is read from the `jet --version` banner of the jet under test.
+# {jet-semver} is the JET_VERSION of the `jet --version` banner of the jet under test.
 step: jet --version
 normalize: replace {jet-semver} "VERSION"
 exit: 0
-stdout: ^= "Jet VERSION\n" # the release lines after the version are not part of this claim
+stdout: ^= "jet VERSION" # a release adds ` (<commit10>, <date>, alpha)`, a dev build `-dev+<commit10>`
 step: jet new demo
 cwd: {work}/
 env: NO_COLOR=1

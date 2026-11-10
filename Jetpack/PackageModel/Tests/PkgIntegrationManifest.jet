@@ -5,7 +5,7 @@ use jet_pkg_model.[pkg_add_dep, pkg_check_toolchain, pkg_effect_enforce, pkg_new
 
 // Ported from pkg.rs:279-293; braces escape Jet interpolation only.
 pkg_integration_min_manifest: fn(name: String, version: String) -> String Never! {
-    "name: \"{name}\"\nversion: \"{version}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
+    "name: \"{name}\"\nversion: \"{version}\"\njet: \">=a0.0.43\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
 }
 
 pkg_integration_manifest_with_deps: fn(name: String, version: String, deps: String) -> String Never! {
@@ -28,11 +28,11 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:1570-1590.
 #Test("pkg integration manifest_parse_valid_fields") {
-    raw: "name:    \"myapp\"\nversion: \"1.2.3\"\njet:     \">=0.1.0\"\ndescription: \"A test package\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"https://example.com\"\ndeps: {{\n}}\n"
+    raw: "name:    \"myapp\"\nversion: \"1.2.3\"\njet:     \">=a0.0.43\"\ndescription: \"A test package\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"https://example.com\"\ndeps: {{\n}}\n"
     mf: Manifest.parse("package.jet", raw) ?? panic("valid manifest should parse")
     assert_eq(mf.package.name, "myapp")
     assert_eq(mf.package.version, "1.2.3")
-    assert_eq(mf.package.jet_constraint, Val(">=0.1.0"))
+    assert_eq(mf.package.jet_constraint, Val(">=a0.0.43"))
     assert_eq(mf.package.description, Val("A test package"))
     assert_eq(mf.package.license, Val("MIT OR Apache-2.0"))
     assert_eq(mf.dependencies.len(), 0)

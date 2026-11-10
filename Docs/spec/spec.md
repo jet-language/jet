@@ -4959,13 +4959,15 @@ The top-level `jet:` field pins the Jet compiler channel used for a package:
 ```jet
 name: "wordstats"
 version: "0.3.1"
-jet: "0.4"
+jet: "a0.0"
 ```
 
-A pin is a `MAJOR.MINOR` series, an exact `MAJOR.MINOR.PATCH`, or a named
-channel such as `main`, `stable`, or `nightly`. Comparison and wildcard forms
-such as `>=1.0.0` remain legacy minimum-version constraints and are not channel
-pins. A malformed channel pin is E1249. If `jet:` is absent, the running
+A pin is in Jet's own version spelling, `a0.0.N` (the leading letter is the
+release stage, `a` for alpha): an `aMAJOR.MINOR` series such as `a0.0`, an exact
+`aMAJOR.MINOR.PATCH` such as `a0.0.43`, or a named channel such as `main`,
+`stable`, or `nightly`. Comparison and wildcard forms such as `>=a0.0.43` remain
+minimum-version constraints and are not channel pins. A malformed channel pin,
+including an unstaged `0.4`, is E1249. If `jet:` is absent, the running
 compiler is used without a fetch.
 
 The resolved exact version is recorded in `.jet/lock` as a `[[toolchain]]`

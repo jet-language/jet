@@ -8,7 +8,7 @@
 // (#3721: a clean check prints one line).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverVerbOutput]
-    jet_pkg_model.[COMPILER_VERSION, WorkspaceDeclarationCache]
+    jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
     cli_files: core.files
     cli_sys: core.sys
     receipt_crypto: core.crypto
@@ -341,7 +341,7 @@ jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriv
     cache := WorkspaceDeclarationCache.new()
     target: jet_cli_receipt_target_identity(cache, recording.target, claim.inputs)
     index := jet_cli_record_index_load(recording.project_root)
-    identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-receipt-v2"}
+    identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
     entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", jet_cli_receipt_encode(current).len(), current.consumed, current.produced, false)
     jet_cli_record_index_upsert_many_and_store(index, recording.project_root, [JetCLIRecordIndexEntry]{entry})
 }

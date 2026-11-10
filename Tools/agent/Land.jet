@@ -2550,7 +2550,7 @@ release_train: fn(tools: String, sha: String) -[Exec, Env, FS, Time, Time.Wait]>
 // with `Tools/release/Main.jet -- admit` (run by the seed), then the newest
 // that arrived meanwhile; intermediate HEADs are skipped. The gate releases
 // only with at least RELEASE_MIN_GAINS gained rows; a "gains FAIL" just means
-// wait for more landings. A pass writes the next a0_NNN and the commands, and
+// wait for more landings. A pass writes the next a0.0.N and the commands, and
 // says RELEASE READY on the batch log for Main; nothing is merged, tagged,
 // pushed or made current here.
 release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
@@ -2775,25 +2775,25 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 
 #Test("a receipt admits only the source identity and the seed its census ran") {
     dir: files.mkdtemp("land-receipt") ?? panic("a temporary directory cannot be made: {err}")
-    source: "jet@0.1.0#aaaa"
-    seed: "jet@0.1.0#bbbb"
-    assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@0.1.0#aaaa")
+    source: "jet@a0.0.43#aaaa"
+    seed: "jet@a0.0.43#bbbb"
+    assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@a0.0.43#aaaa")
     written: write_receipt(source, seed, "0123456789abcdef", [String]{"Compiler/JetCli/Source/Main.jet"}, dir) ?? panic(err.message)
     assert_eq(written, receipt_path(source, dir))
     admitted: gate(source, seed, dir)
     assert(admitted.admitted)
-    assert(admitted.reason.contains(": census of 0123456789 + 1 worktree file(s) by seed jet@0.1.0#bbbb, finished "))
-    other: gate(source, "jet@0.1.0#cccc", dir)
+    assert(admitted.reason.contains(": census of 0123456789 + 1 worktree file(s) by seed jet@a0.0.43#bbbb, finished "))
+    other: gate(source, "jet@a0.0.43#cccc", dir)
     assert(!other.admitted)
-    assert_eq(other.reason, "the preflight receipt for source identity jet@0.1.0#aaaa is from a census by seed jet@0.1.0#bbbb, not jet@0.1.0#cccc")
-    assert(!gate("jet@0.1.0#dddd", seed, dir).admitted)
+    assert_eq(other.reason, "the preflight receipt for source identity jet@a0.0.43#aaaa is from a census by seed jet@a0.0.43#bbbb, not jet@a0.0.43#cccc")
+    assert(!gate("jet@a0.0.43#dddd", seed, dir).admitted)
     files.write(written, "{{") ?? panic("{written}: {err}")
     assert(gate(source, seed, dir).reason.starts_with("receipt {written} is not JSON ("))
     files.remove_all(dir) ?? ()
 }
 
 #Test("a refusal names the census that would admit the launch") {
-    assert_eq(refusal("Chain.jet", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "Chain.jet: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
+    assert_eq(refusal("Chain.jet", "no preflight receipt for source identity x", "/seeds/a0.0.32", "0123456789abcdef"), "Chain.jet: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0.0.32 jet Tools/agent/Land.jet census")
     assert(refusal("release", "r", "/s", "").contains("in the dev worktree (name each"))
 }
 
@@ -2857,7 +2857,7 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 }
 
 #Test("a release gate run becomes one batch-log line") {
-    assert_eq(train_verdict(0, "x\nPASS: a0_034 ready\n", "0123456789abcdef", "/w/t.log"), "RELEASE READY a0_034 from 0123456789; run the commands in /w/t.log")
+    assert_eq(train_verdict(0, "x\nPASS: a0.0.34 ready\n", "0123456789abcdef", "/w/t.log"), "RELEASE READY a0.0.34 from 0123456789; run the commands in /w/t.log")
     assert_eq(train_verdict(1, "FAIL: gains 3 < 10\nFAIL: rows\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: not released (gains 3 < 10; rows)")
     assert_eq(train_verdict(2, "boom\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: could not start rc=2 (boom)")
 }

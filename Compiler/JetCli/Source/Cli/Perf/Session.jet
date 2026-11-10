@@ -12,7 +12,7 @@ use {
         DEFAULT_EXCLUSIONS, SourceIdentity, TraceHardware, TraceToolchain, artifact_extension, trace_id,
         trace_profile_unsupported, verify_jettrace,
     ]
-    jet_pkg_model.[COMPILER_VERSION, WorkspaceDeclarationCache]
+    jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
 }
 
 // A `.jettrace` this session writes is at most this large when read back.
@@ -348,7 +348,7 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // published owner-only and read back verified. `jet run` and `jet test`
 // record no receipts, so the trace carries no receipt sections.
 jet_cli_perf_session_write: fn(capture: JetCLIPerfCapture, action: String, argv: [String], out: String?) -[FS, Env, Time]> String JetCLIReadError! {
-    toolchain: TraceToolchain{jet_version: COMPILER_VERSION, compiler_build_id: jet_cli_compiler_identity() ?? COMPILER_VERSION, stdlib_id: "jet-stdlib", runner_id: "jet-perf"}
+    toolchain: TraceToolchain{jet_version: JET_VERSION, compiler_build_id: jet_cli_compiler_identity() ?? JET_VERSION, stdlib_id: "jet-stdlib", runner_id: "jet-perf"}
     hardware: TraceHardware{cpu_arch: perf_sys.arch(), logical_cpus: U64.from_int(perf_sys.cpu_count()) ?? U64{1}, os: perf_sys.name(), target: jet_cli_perf_session_target()}
     bytes: jet_cli_perf_capture_bytes(capture, action, argv, toolchain, hardware)
     cwd: perf_files.cwd() ?? return Err(jet_cli_read_error("cannot resolve the working directory: {jet_cli_io_error_text(err)}"))

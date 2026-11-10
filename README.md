@@ -10,7 +10,7 @@ setup and no ceremony, mistakes are explained in plain words, and the same
 source becomes a small static executable. Expert control is there when you
 ask for it, and only where you write it.
 
-> Jet is **pre-release** (`a0_NNN` builds, version 0.x). It changes in place,
+> Jet is **pre-release** (alpha releases `a0.0.N`). It changes in place,
 > with no compatibility promise until 1.0.
 
 ---

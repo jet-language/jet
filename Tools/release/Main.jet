@@ -1,4 +1,4 @@
-// The one route to an a0_NNN GitHub release. Run from the checkout root:
+// The one route to an a0.0.N GitHub release. Run from the checkout root:
 //
 //   jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] ... [--check-gate]
 //   jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
@@ -82,10 +82,11 @@ parse_args: fn(args: [String]) -> Options Problem! {
 gather_remote: fn(root: String, commit: String, programs: Programs) -[Exec, Time.Wait]> Remote Never! {
     remote := Remote{slug: "", origin_tags: [Tag]{}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: "", problems: [Problem]{}}
     remote.slug = github_slug(run_argv([String]{"git", "-C", root, "remote", "get-url", "origin"}, root).output)
-    listed: run_argv([String]{"git", "-C", root, "ls-remote", "--tags", "origin", "a0_*"}, root)
+    // The a0.0.N tags and the a0_NNN ones published before them (Gate.jet release_number).
+    listed: run_argv([String]{"git", "-C", root, "ls-remote", "--tags", "origin", "a0.0.*", "a0_*"}, root)
     if listed.code != 0 -> remote.problems.push(problem(REMOTE, "git ls-remote origin failed: {listed.errors.trim()}"))
     remote.origin_tags = remote_tags(listed.output)
-    loop line in run_argv([String]{"git", "-C", root, "tag", "-l", "a0_*"}, root).output.split("\n").to_list() {
+    loop line in run_argv([String]{"git", "-C", root, "tag", "-l", "a0.0.*", "a0_*"}, root).output.split("\n").to_list() {
         if line.trim() != "" -> remote.local_tags.push(line.trim().copy())
     }
     if remote.slug != "" {

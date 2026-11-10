@@ -8,18 +8,15 @@ use {
     time: core.time
 }
 
-// The toolchain identity a fresh stamp records: the Rust `BuildStamp`
-// default (`CARGO_PKG_VERSION` of jet-foundation).
-PKG_BUILD_STAMP_TOOLCHAIN: "0.1.0"
-
 BuildStamp: struct {
     git: String?
     dirty: Bool
+    // The JET_VERSION of the jet that captured the stamp.
     toolchain: String
     at: String
 
     default: fn() -> BuildStamp Never! {
-        BuildStamp{git: None, dirty: false, toolchain: PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
+        BuildStamp{git: None, dirty: false, toolchain: JET_VERSION, at: ""}
     }
 }
 

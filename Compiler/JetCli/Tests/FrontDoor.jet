@@ -5,6 +5,7 @@ use {
         jet_cli_help, jet_cli_plan, jet_cli_renderable, jet_cli_structural_help,
     ]
     jet_driver.[JET_DRIVER_EXIT_USAGE]
+    jet_pkg_model.[pkg_jet_build, pkg_version_json]
 }
 
 cli_front_fixture_done: fn(plan: JetCLIPlan, stdout: String, stderr: String, code: Int) Never! {
@@ -41,9 +42,10 @@ cli_front_fixture_engine: fn(plan: JetCLIPlan, verb: String, argv: [String]) Nev
     if jet_cli_engine_commands("check", [String]{"check", "source.jet"}) != None -> panic("compiler verbs must not become engine dispatch")
     cli_front_fixture_done(jet_cli_renderable("human\n", false), "human\n", "", 0)
     cli_front_fixture_done(jet_cli_renderable("human\n", true), "", "", 0)
-    cli_front_fixture_done(jet_cli_plan([String]{"version", "--json"}), "", "", 0)
+    // Version has a machine record; help has none.
+    cli_front_fixture_done(jet_cli_plan([String]{"version", "--json"}), pkg_version_json(pkg_jet_build()), "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"help", "--json"}), "", "", 0)
-    cli_front_fixture_done(jet_cli_plan([String]{"--version", "--json"}), "", "", 0)
+    cli_front_fixture_done(jet_cli_plan([String]{"--version", "--json"}), pkg_version_json(pkg_jet_build()), "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"help", "diff"}), jet_cli_structural_help("diff") ?? panic("diff help"), "", 0)
     invalid: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true)
     if invalid == {
