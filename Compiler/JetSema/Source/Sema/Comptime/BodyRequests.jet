@@ -254,6 +254,7 @@ sema_comptime_body_capture: fn(
         site_span: site_span,
         prepared: sema_comptime_body_prepared_locals(environment, scopes),
         impure: sema_scope_inside_impure(scopes),
+        runtime_locals: sema_comptime_body_runtime_locals(scopes),
     }
     sema_comptime_body_source_append(context, source)
     source
@@ -271,6 +272,19 @@ sema_comptime_body_prepared_locals: fn(environment: SemaScopeEnvironment, scopes
         prepared.push(SemaComptimePreparedLocal{name: binding.symbol.name, ty: ty, value: value, span: binding.symbol.span})
     }
     prepared
+}
+
+// The run-time locals the site can see but not read: each visible binding
+// without a prepared value, by name.
+sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never! {
+    names := [String]{}
+    loop index in 0..<scopes.bindings.len() {
+        if scopes.bindings[index].prepared != None -> next
+        name: scopes.bindings[index].symbol.name
+        if sema_scope_resolve_index(scopes, name) != .Val(index) -> next
+        names.push(name.copy())
+    }
+    names
 }
 
 sema_comptime_body_value_find: fn(
@@ -315,6 +329,7 @@ sema_comptime_body_item_source: fn(source: SemaComptimeBodySource) -> SemaCompti
         checked_text: None,
         prepared: source.prepared,
         impure: source.impure,
+        runtime_locals: source.runtime_locals,
     }
 }
 

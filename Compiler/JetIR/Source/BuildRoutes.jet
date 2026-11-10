@@ -5351,8 +5351,15 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         .Prelude(name) -> name
         .SourceOwned -> { return ir_fail_slot(b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
+    // A compile-time value that reaches a route reading ambient state is
+    // refused as the call's effect when evaluation gets there
+    // (ir_comptime_ambient_refusal): the ambient random stream as
+    // non-deterministic, anything else as a Tier-2 effect.
     if p.comptime_values && b.impure == 0 {
-        if ir_comptime_ambient_refusal(symbol) == .Val(what) -> return ir_fail_slot(b, span, "{canonical.module_name}.{canonical.member} reads {what}, which a compile-time value must not depend on")
+        if ir_comptime_ambient_refusal(symbol) == .Val(what) {
+            refusal: if what == IR_COMPTIME_AMBIENT_RANDOM -> "Comptime.nondeterministic" else -> "Comptime.refuse"
+            _: ir_host_method_words(m, p, b, Type.Bool, "{refusal}:{what}", [Int]{}, span)
+        }
     }
     // Inside a build invocation's `#Impure` block, a route that reads or
     // writes ambient process state with no system call the runtime child's
@@ -5539,16 +5546,20 @@ ir_task_timeout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span
     return -1
 }
 
+// What ambient random state a route reads (ir_comptime_ambient_refusal).
+IR_COMPTIME_AMBIENT_RANDOM: "the ambient random stream"
+
 // What runtime route `symbol` reads when it reads ambient host or process
 // state with no system call: the comptime child's system-call filter
 // (JetEval Native.jet jet_eval_native_refused) refuses the clock, OS
 // randomness, files and the terminal, but these routes answer from memory,
-// so a compile-time value would bake one build's answer into every run.
+// so a compile-time value would bake one build's answer into every run; the
+// builder puts a refusal before each such call (ir_core_call_routed).
 // None for every other route. The wall-clock override stays: `time.now`
 // reads it before its clock read, which the filter refuses as the clock.
 ir_comptime_ambient_refusal: fn(symbol: String) -> String? Never! {
     if symbol == {
-        "jet_random_state_raw" | "jet_random_try_update_raw" | "jet_std_random_seed" -> Val("the ambient random stream")
+        "jet_random_state_raw" | "jet_random_try_update_raw" | "jet_std_random_seed" -> Val(IR_COMPTIME_AMBIENT_RANDOM)
         "jet_std_env_get" | "jet_std_env_vars" | "jet_sys_env_value_raw" | "jet_sys_env_columns_raw" | "jet_sys_startup_env_columns_raw" | "jet_rt_logical_env_get" | "jet_sys_host_env_raw" | "jet_time_raw_zone_env" | "jet_std::jet_fs_temp_directory_raw" -> Val("the environment")
         "jet_std_io_args" -> Val("the process arguments")
         "jet_sys_executable_raw" -> Val("the running executable's path")

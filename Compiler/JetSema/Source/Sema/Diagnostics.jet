@@ -325,8 +325,11 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
 // E0107 for a name an unresolved read or write spells in a function of an
 // entry file of top-level statements: when the file binds `name` at its top
 // level, that binding is a local of the file's entry (sema_script_entry),
-// which the function can't see, and the fix is to pass it in.
+// which the function can't see, and the fix is to pass it in. In a body
+// comptime site's staged check, a run-time local or parameter of the
+// function around the site is E0640 instead.
 sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
+    if scopes.comptime_runtime_locals.contains(name) -> return sema_comptime_reads_runtime_value(name, span)
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, environment.module_identity) == .Val(index) {
             if graph.modules[index].program.entry_locals.contains(name) {
@@ -335,6 +338,12 @@ sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnviron
         }
     }
     sema_unknown_name_in(name, span, scopes)
+}
+
+// E0640: compile-time code reads a run-time local or parameter.
+sema_comptime_reads_runtime_value: fn(name: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E0640") ?? panic("E0640 has no registry row")
+    sema_error("E0640", span, row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name))
 }
 
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {

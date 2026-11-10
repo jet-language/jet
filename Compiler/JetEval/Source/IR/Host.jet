@@ -77,13 +77,25 @@ jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int,
     // the marks Impure.enter and Impure.leave (IRProgram.invocation): a
     // system call the child's filter refuses in between is that block's
     // Tier-2 effect. Impure.refuse:<what> names one such effect that makes
-    // no system call, refused as it is reached.
+    // no system call, refused as it is reached. A compile-time value's call
+    // that reads ambient state with no system call is refused as it is
+    // reached too, by the item's effectful call (s.effect_call) when sema
+    // found one, else by what it reads: Comptime.refuse:<what> as a Tier-2
+    // effect, Comptime.nondeterministic:<what> as non-deterministic.
     if member == "Impure.enter" || member == "Impure.leave" {
         s.impure_sites += if member == "Impure.enter" -> 1 else -> -1
         return Val(0)
     }
     if member.starts_with("Impure.refuse:") {
         jet_eval_ir_effect_refused(s, member.removeprefix("Impure.refuse:"), false)
+        return None
+    }
+    if member.starts_with("Comptime.refuse:") {
+        jet_eval_ir_effect_refused(s, s.effect_call ?? member.removeprefix("Comptime.refuse:"), false)
+        return None
+    }
+    if member.starts_with("Comptime.nondeterministic:") {
+        jet_eval_ir_effect_refused(s, s.effect_call ?? member.removeprefix("Comptime.nondeterministic:"), true)
         return None
     }
     parts: jet_eval_compiler_value_method_owner(member) ?? return jet_eval_ir_primitive_shape(s, "jet_comptime_host_method")

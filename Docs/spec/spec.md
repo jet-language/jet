@@ -270,7 +270,10 @@ form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); the inner value must still
 be literal data, not a call or arithmetic expression.
-Inside a function, the same spellings are local bindings. In an entry file whose top level holds
+Inside a function, the same spellings are local bindings. A `comptime { … }` inside a function runs
+while building, before any call, so it reads the function's prepared `comptime` locals but not its
+run-time locals or parameters (E0640).
+In an entry file whose top level holds
 statements and no `run: fn`, every top-level line is the program's entry, in order: its statements
 run, and its bindings other than ALL_CAPS constants are locals of that entry, which the file's
 functions don't see (E0107 says to pass one as a parameter). A file with top-level statements and a

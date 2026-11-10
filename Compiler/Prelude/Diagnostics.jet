@@ -5193,6 +5193,20 @@ CompileTimeReadsStartupValue: struct {
     }
 }
 
+CompileTimeReadsRuntimeValue: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0640"
+        stage: [.Comptime]
+        meaning: "Compile-time code reads a run-time local or parameter of the function around it"
+        fix_next: "Compute the value at run time, or give the compile-time code a constant."
+        what: fn(self) -> String { "This compile-time code reads `{self.name}`, a run-time value of the function around it" }
+        why: fn(self) -> String { "Compile-time code runs once while building, before any call of the function, so `{self.name}` has no value yet." }
+        fix: fn(self) -> String { "Compute the value at run time without `comptime`, or read a constant or a `comptime` value instead of `{self.name}`." }
+    }
+}
+
 ModuleFileItemMember: struct {
     name: String
     member: String

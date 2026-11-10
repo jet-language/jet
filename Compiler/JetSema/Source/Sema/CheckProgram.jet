@@ -346,6 +346,9 @@ SemaComptimeItemSource: struct {
     // A body site lexically inside an `#Impure` block: its Tier-2 effects
     // need the invocation gate (E3411), not the block (E3410).
     impure: Bool{false}
+    // A body site's run-time locals and parameters, which its staged check
+    // names as run-time values (E0640) when the code reads one.
+    runtime_locals: [String]{[String]{}}
 }
 
 SemaComptimeItemRequest: struct {
@@ -7979,7 +7982,9 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // records only under an owner) and its purity can be read.
         if source.soft || source.startup -> _ := sema_scope_enter(probe.table, state, "{source.key}#init")
         if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, probe.table, state)
+        probe.table.comptime_runtime_locals = source.runtime_locals.copy()
         checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, probe.table, state, tail_store, context, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, probe.table, state, tail_store, context, diagnostics)
+        probe.table.comptime_runtime_locals = [String]{}
         sema_scope_rollback(probe.table, mark)
         // A compile-time value never reads the clock or randomness, and
         // reaches the network only through a pinned `fetch`; a startup or
