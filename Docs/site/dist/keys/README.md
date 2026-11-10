@@ -35,7 +35,7 @@ After the owner-controlled production key ceremony, stage the complete public
 set with:
 
 ```sh
-Tools/jetpack-infra/stage-trust-root.sh \
+jet Tools/jetpack-infra/StageTrustRoot.jet \
   --index-key <public-index-key> \
   --cache-key <public-cache-key> \
   --toolchain-key <public-toolchain-key> \

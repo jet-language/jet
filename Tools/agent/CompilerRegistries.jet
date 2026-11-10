@@ -1281,13 +1281,15 @@ link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, bin
     Ok()
 }
 
-// The object that defines jet_rt_fault_report, assembled into the lane.
+// The object that defines jet_rt_fault_report, assembled into the lane. Its
+// empty .note.GNU-stack section keeps the linked witness's stack
+// non-executable.
 fault_report: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
     cwd: lane.out.copy()
     repo: lane.repo.copy()
     report: "{cwd}/fault-report.S"
     report_object: "{cwd}/fault-report.o"
-    files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
+    files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n    .section .note.GNU-stack,\"\",@progbits\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
     execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     report_object
 }
