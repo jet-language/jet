@@ -1094,8 +1094,7 @@ sema_genmod_project_item: fn(item: Item, projections: [String:String], projected
     loop name in projected_names {
         canonical: projections.get(name) ?? next
         calls := sema_inline_rewrite_empty()
-        calls.sibling_module = canonical
-        calls.siblings[name] = true
+        calls.aliases[name] = canonical
         updated = sema_genmod_rewrite_item(calls, updated)
     }
     types := projection
