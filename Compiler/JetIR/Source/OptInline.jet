@@ -17,7 +17,10 @@
 // new slot of the caller. `return v` becomes a move of v into the call's
 // result slot (an aggregate result: fresh frame storage and a copy of its
 // bytes, as the call's result storage) and a Br out of that Block. Lines of
-// a callee from another file become the call's line.
+// a callee from another file become the call's line. The body's code lines
+// name the inline site it came from (IRFunction.inline_sites), so a reader
+// of the IR (the emission check's declassified verdicts) still finds it
+// after the Block goes: a mark that changes no pass's view of the code.
 //
 // Under `inline: always_marked` (IROptInline.Marked) only a callee marked
 // `#Inline(Always)` (IRFunction.inline_always) is taken, at every call site
@@ -70,6 +73,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
     out.host_symbol = caller.host_symbol.copy()
+    out.inline_sites = caller.inline_sites.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
@@ -161,11 +165,21 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
     }
     dst: caller.dst[at]
     callee_facts: ir_opt_facts(callee)
+    // This body is a new inline site in the call's own one; the callee's
+    // sites nest in it, renumbered as `f`'s (`sites`: by callee site).
+    sites := [Int]{f.inline_sites.len() /% 2 + 1}
+    f.inline_sites.push(caller.a[at])
+    f.inline_sites.push(ir_code_line_site(site_line))
+    loop row in 0..<(callee.inline_sites.len() /% 2) {
+        sites.push(f.inline_sites.len() /% 2 + 1)
+        f.inline_sites.push(callee.inline_sites[2 * row])
+        f.inline_sites.push(sites[callee.inline_sites[2 * row + 1]])
+    }
     _ := ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
     depth := 0
     loop k in 0..<callee.op.len() {
         op: callee.op[k]
-        line: if same_file -> callee.code_line[k] else -> site_line
+        line: ir_code_line_at(if same_file -> callee.code_line[k] else -> site_line, sites[ir_code_line_site(callee.code_line[k])])
         if op == .Return {
             value: callee.a[k]
             if value >= 0 && dst >= 0 {

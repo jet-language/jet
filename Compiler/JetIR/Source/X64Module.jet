@@ -37,6 +37,23 @@ IRX64Tables: struct {
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
     fma: Int
+    // Per function row: whether its selection keeps an emission log
+    // (JET_X64_EMIT_LOG, ir_x64_compile_module_logged); empty for none.
+    logged: [Bool]
+}
+
+ir_x64_logged: fn(tables: IRX64Tables, row: Int) -> Bool Never! {
+    row < tables.logged.len() && tables.logged[row]
+}
+
+// Whether JET_X64_EMIT_LOG entry list `names` names function `f`: an entry
+// is a function's name, or, holding a `/`, a part of its source path.
+ir_x64_log_names: fn(f: IRFunction, names: [String]) -> Bool Never! {
+    loop name in names {
+        if name == f.name -> return true
+        if name.contains("/") && f.source_file.contains(name) -> return true
+    }
+    false
 }
 
 // The module moves in and comes back in `program`, so the object writer
@@ -50,6 +67,9 @@ IRX64Result: struct {
     errors: [String]
     tables: IRX64Tables
     threads: CompilerThreads
+    // The logged functions' emission logs, in function order
+    // (ir_x64_log_text), one line per row.
+    log: [String]
 }
 
 ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
@@ -144,7 +164,7 @@ ir_x64_debug_type: fn(ty: IRType) -> X64DebugType Never! {
 }
 
 ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}, fma: -1}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}, fma: -1, logged: [Bool]{}}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words; a text row is bytes.
         align: if m.data_relocs.get(row) != None -> 8 else -> 1
@@ -223,10 +243,23 @@ IR_X64_MIN_INSTRUCTIONS_PER_THREAD: 20000
 // stops (an internal panic) costs only the function it was selecting: that
 // function gets an error row and fresh threads select the rest.
 ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX64Result Never! {
+    ir_x64_compile_module_logged(program, threads, [String]{})
+}
+
+// The same, keeping the emission log (X64Code) of each function `names`
+// names (ir_x64_log_names) in IRX64Result.log, after the members of the
+// module's structs (IRModule.struct_fields), so a reader of the log names
+// the member an `offset` or `load` reaches.
+ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String]) -> IRX64Result Never! {
     m := program.move()
     ir_drop_early(m)
     ir_tail_calls(m)
     tables := ir_x64_tables(m)
+    log := [String]{}
+    if names.len() > 0 {
+        loop f in m.functions -> tables.logged.push(ir_x64_log_names(f, names))
+        loop line in m.struct_fields -> log.push(line.copy())
+    }
     count: m.functions.len()
     weights := [Int]{}
     total := 0
@@ -244,11 +277,12 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
         loop row in 0..<count {
             compiled := ir_x64_compile_function(m, tables, row)
             errors.extend(compiler_take_rows<String>(compiled.errors))
+            log.extend(compiler_take_rows<String>(compiled.log))
             functions.push(compiled.function.move())
             debug.push(compiled.debug.move())
             variables.push(compiled.variables.move())
         }
-        return IRX64Result{program: m.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads}
+        return IRX64Result{program: m.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
@@ -264,6 +298,7 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
     // The rows leave their lists last-first (moved, never copied) and are
     // reversed into function order.
     row_errors := [[String]]{}
+    row_logs := [[String]]{}
     row := count - 1
     loop row >= 0 {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
@@ -271,11 +306,13 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
         if (taken.pop()) == .Val(compiled) {
             selected := compiled.move()
             row_errors.push(compiler_take_rows<String>(selected.errors))
+            row_logs.push(compiler_take_rows<String>(selected.log))
             functions.push(selected.function.move())
             debug.push(selected.debug.move())
             variables.push(selected.variables.move())
         } else {
             row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
+            row_logs.push([String]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             variables.push([X64DebugVariable]{})
@@ -289,9 +326,13 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
         listed := row_errors.pop() ?? { break }
         errors.extend(listed)
     }
+    loop row_logs.len() > 0 {
+        listed := row_logs.pop() ?? { break }
+        log.extend(listed)
+    }
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
     tables_back := shells.tables.pop() ?? panic("the x64 selection inputs lost the tables")
-    IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables_back.move(), threads: threads}
+    IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables_back.move(), threads: threads, log: log.move()}
 }
 
 // The selecting threads' inputs, read-only while they run: the module and

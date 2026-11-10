@@ -32,7 +32,7 @@
 // xmm0-xmm7), rsp is untouched, and the code falls through its last byte.
 
 x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
-    code := [U8]{}
+    code := x64_code()
     declines := [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
     // 0 <= first < end, end and the total (and an exact value) inline.
@@ -73,7 +73,7 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
     // The last elements, one at a time: r10 += (element == value).
     x64_test_rr(code, X64_R9, X64_R9)
     to_fold: x64_jcc_rel32(code, X64Cond.E)
-    single: code.len()
+    single: code.bytes.len()
     if stride == 1 -> x64_load_u8(code, X64_RDX, X64_RDI, 0) else -> x64_load(code, X64_RDX, X64_RDI, 0)
     x64_alu_rr(code, X64Alu.Cmp, X64_RDX, X64_R8)
     x64_setcc(code, X64Cond.E, X64_R11)
@@ -82,28 +82,28 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
     x64_alu_ri(code, X64Alu.Add, X64_RDI, stride)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 1)
     more: x64_jcc_rel32(code, X64Cond.NE)
-    x64_patch_rel32(code, more, single)
+    x64_patch_rel32(code.bytes, more, single)
     // The two vector counts into r10, r10 into the total.
-    x64_patch_rel32(code, to_fold, code.len())
+    x64_patch_rel32(code.bytes, to_fold, code.bytes.len())
     x64_movq_from_xmm(code, false, X64_RDX, 2)
     x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
     x64_sse(code, 0x66, false, 0x70, 2, 2)
-    x64_byte(code, 0xee)
+    x64_byte(code.bytes, 0xee)
     x64_movq_from_xmm(code, false, X64_RDX, 2)
     x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
     x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R10)
     x64_int_sum_test(code, X64_RCX, declines)
     x64_mov_rr(code, X64_RAX, X64_RCX)
-    end: code.len()
-    loop site in declines -> x64_patch_rel32(code, site, end)
-    code
+    end: code.bytes.len()
+    loop site in declines -> x64_patch_rel32(code.bytes, site, end)
+    code.bytes
 }
 
 // Whole 64-byte blocks: up to 63 at a time into xmm1's byte counts, then
 // psadbw (against the zeros of xmm6) adds them into xmm2's two words.
 // Leaves r9 the bytes left (under 64) and rdi the first of them.
-x64_count_bytes: fn(code: &[U8]) Never! {
-    outer: code.len()
+x64_count_bytes: fn(code: &X64Code) Never! {
+    outer: code.bytes.len()
     x64_alu_ri(code, X64Alu.Cmp, X64_R9, 64)
     to_tail: x64_jcc_rel32(code, X64Cond.L)
     // rsi = min(r9 / 64, 63) blocks; r9 -= rsi * 64.
@@ -117,7 +117,7 @@ x64_count_bytes: fn(code: &[U8]) Never! {
     x64_alu_rr(code, X64Alu.Sub, X64_R9, X64_RDX)
     // pxor xmm1, xmm1
     x64_sse(code, 0x66, false, 0xef, 1, 1)
-    block: code.len()
+    block: code.bytes.len()
     loop part in 0..<4 {
         xmm: if part == 0 -> 0 else -> part + 2
         x64_vector_load(code, xmm, X64_RDI, part * 16)
@@ -128,30 +128,30 @@ x64_count_bytes: fn(code: &[U8]) Never! {
     x64_alu_ri(code, X64Alu.Add, X64_RDI, 64)
     x64_alu_ri(code, X64Alu.Sub, X64_RSI, 1)
     again: x64_jcc_rel32(code, X64Cond.NE)
-    x64_patch_rel32(code, again, block)
+    x64_patch_rel32(code.bytes, again, block)
     // psadbw xmm1, xmm6; paddq xmm2, xmm1.
     x64_sse(code, 0x66, false, 0xf6, 1, 6)
     x64_sse(code, 0x66, false, 0xd4, 2, 1)
     back: x64_jmp_rel32(code)
-    x64_patch_rel32(code, back, outer)
-    x64_patch_rel32(code, to_tail, code.len())
+    x64_patch_rel32(code.bytes, back, outer)
+    x64_patch_rel32(code.bytes, to_tail, code.bytes.len())
 }
 
 // Four words per step into xmm2's two word counts. Leaves r9 the words
 // left (under four) and rdi the first of them.
-x64_count_words: fn(code: &[U8]) Never! {
+x64_count_words: fn(code: &X64Code) Never! {
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 4)
     to_tail: x64_jcc_rel32(code, X64Cond.L)
-    body: code.len()
+    body: code.bytes.len()
     x64_vector_load(code, 0, X64_RDI, 0)
     x64_vector_load(code, 1, X64_RDI, 16)
     // pcmpeqd x, xmm7; pshufd y, x, 0xb1; pand x, y; psubq xmm2, x.
     x64_sse(code, 0x66, false, 0x76, 0, 7)
     x64_sse(code, 0x66, false, 0x76, 1, 7)
     x64_sse(code, 0x66, false, 0x70, 3, 0)
-    x64_byte(code, 0xb1)
+    x64_byte(code.bytes, 0xb1)
     x64_sse(code, 0x66, false, 0x70, 4, 1)
-    x64_byte(code, 0xb1)
+    x64_byte(code.bytes, 0xb1)
     x64_sse(code, 0x66, false, 0xdb, 0, 3)
     x64_sse(code, 0x66, false, 0xdb, 1, 4)
     x64_sse(code, 0x66, false, 0xfb, 2, 0)
@@ -159,7 +159,7 @@ x64_count_words: fn(code: &[U8]) Never! {
     x64_alu_ri(code, X64Alu.Add, X64_RDI, 32)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 4)
     again: x64_jcc_rel32(code, X64Cond.GE)
-    x64_patch_rel32(code, again, body)
-    x64_patch_rel32(code, to_tail, code.len())
+    x64_patch_rel32(code.bytes, again, body)
+    x64_patch_rel32(code.bytes, to_tail, code.bytes.len())
     x64_alu_ri(code, X64Alu.Add, X64_R9, 4)
 }

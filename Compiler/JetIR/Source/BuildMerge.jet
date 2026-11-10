@@ -149,6 +149,27 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         out.types.push(parts[part].types[local].copy())
         out.type_keys.push(parts[part].type_keys[local].copy())
     }
+    // The members of each struct the program reached, one line each as the
+    // emission log prints them (X64Module.jet ir_x64_log_fields): the part
+    // memos that hold them name part rows and are not merged.
+    laid := [Int:Bool]{}
+    loop part in 0..<parts.len() {
+        loop at in 0..<parts[part].struct_members.texts.len() {
+            identity: parts[part].struct_members.texts[at]
+            local: name_rows_value(parts[part].layouts, "struct:{identity}") ?? -1
+            if local < 0 -> next
+            row: g.sides[part].type_new[local]
+            if row < 0 || laid.get(row) != None -> next
+            laid[row] = true
+            loop member in parts[part].member_lists[parts[part].struct_members.rows[at]] {
+                size: if member.boxed || member.ty < 0 -> 8 else -> parts[part].types[member.ty].size
+                // The member's checked type last (it may hold spaces): a
+                // reader folds an offset into a nested list or Option by it.
+                ty: if member.ty < 0 -> "-" else if member.boxed -> "box" else -> ir_type_name(parts[part].types[member.ty].ty)
+                out.struct_fields.push("field {identity} {member.offset} {size} {member.name} {ty}")
+            }
+        }
+    }
     loop (row, part) in g.name_part -> out.names.push(parts[part].names[g.name_local[row]].copy())
     loop (row, part) in g.data_part {
         local: g.data_local[row]

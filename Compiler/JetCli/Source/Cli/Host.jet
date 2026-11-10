@@ -147,7 +147,7 @@ use {
         ir_test_override_key,
         ir_lint_module,
         ir_optimize_module,
-        ir_x64_compile_module,
+        ir_x64_compile_module_logged,
         ir_x64_hot_order,
         ir_x64_object,
     ]
@@ -1228,6 +1228,30 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     JetCLINativeProgram{program: program.move(), failure: None}
 }
 
+// JET_X64_EMIT_LOG: the comma-separated function names (or, holding a `/`,
+// source path parts) whose selection keeps an emission log
+// (ir_x64_compile_module_logged); none when it is unset or
+// JET_X64_EMIT_LOG_REPORT, where the log goes, is.
+jet_cli_emit_log_names: fn() -[Env]> [String] Never! {
+    if cli_sys.get("JET_X64_EMIT_LOG_REPORT") == None -> return [String]{}
+    listed: cli_sys.get("JET_X64_EMIT_LOG") ?? return [String]{}
+    names := [String]{}
+    loop part in listed.split(",") {
+        name: part.trim()
+        if name != "" -> names.push(name)
+    }
+    names
+}
+
+// Writes the emission log `lines` to JET_X64_EMIT_LOG_REPORT; the write's
+// failure text, else "".
+jet_cli_emit_log_report: fn(lines: [String]) -[FS, Env]> String Never! {
+    report: cli_sys.get("JET_X64_EMIT_LOG_REPORT") ?? return ""
+    text: lines.join("\n")
+    cli_files.write(report, "{text}\n") ?? return "cannot write the emission log `{report}`: {err}"
+    ""
+}
+
 // `ir.build`, `ir.opt` (jet_cli_native_program), `ir.x64` and `ir.object` of
 // jet_cli_native_executable. The object lays out the functions `hot` names
 // first (ir_x64_hot_order); `--trace` counts the names that name none
@@ -1241,11 +1265,16 @@ jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLow
     function_count: program.functions.len()
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-    compiled := ir_x64_compile_module(program, threads)
+    log_names: jet_cli_emit_log_names()
+    compiled := ir_x64_compile_module_logged(program, threads, log_names)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
     // ir_x64_object hands a selection's findings back as its own: each is one row.
     selection_faulted: compiled.errors.len() > 0
     loop error in compiled.errors -> jet_driver_ice_record(census, "-", "ir.x64", "select", error)
+    if log_names.len() > 0 {
+        problem: jet_cli_emit_log_report(compiled.log)
+        if problem != "" -> jet_driver_ice_record(census, "-", "ir.x64", "emit-log", problem)
+    }
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     hot_missing: ir_x64_hot_order(compiled, hot)
     object := ir_x64_object(compiled, build_options_value(options, "debug_info") != "false")
