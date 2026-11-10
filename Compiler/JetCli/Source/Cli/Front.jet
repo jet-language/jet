@@ -1637,13 +1637,14 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
     JetCLIPlan.NativeSource{file: file, level: level, run: command == "run", program_args: program_args, color: color}
 }
 
-// The jet flags `jet run` honors (`--observe` and `-e` are a run's alone:
-// `jet dev`, which checks its own flags, refuses them as scoped to `run`).
-// `-e` is honored before a run's target (jet_cli_eval_flag_at) and refused
-// after it. Any other registered flag on a run is refused until its port
+// The jet flags `jet run` honors (`--observe`, `-e` and `--sha256` are a run's
+// alone: `jet dev`, which checks its own flags, refuses them as scoped to
+// `run`). `-e` is honored before a run's target (jet_cli_eval_flag_at) and
+// refused after it; `--sha256` pins a URL target's first fetch and is refused
+// on a local one. Any other registered flag on a run is refused until its port
 // lands, never ignored; an unregistered one was already refused by E2102, or
 // is ignored by the `jet <file>` shorthand as the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e"}
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256"}
 
 // `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
 // core.log level filter the program starts with, above JET_LOG

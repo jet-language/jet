@@ -370,6 +370,16 @@ jfmt_fmt_result_handler_expr: fn(f: &JetFmt, expr: Expr) {
     err_branch_start: jfmt_result_handler_branch_start(f, err_pattern_end)
     ok_branch_end: expr_span(inner.cond).start
     compact: jfmt_result_handler_compact_source(f, expr) && jfmt_result_handler_branch_inlineable(f, parts.ok_body, parts.ok_value) && jfmt_result_handler_branch_inlineable(f, parts.err_body, parts.err_value)
+    // In an interpolation hole the handler stays on one line, as written: a
+    // line break there would split the string.
+    if f.interp_depth > 0 && parts.ok_body.len() == 0 && parts.err_body.len() == 0 {
+        jfmt_fmt_expr(f, parts.subject, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, " ? {parts.ok_binding} -> ")
+        jfmt_fmt_expr(f, parts.ok_value, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, " ! {parts.err_binding} -> ")
+        jfmt_fmt_expr(f, parts.err_value, JFMT_PREC_OR_FALLBACK)
+        return
+    }
     if compact {
         mark: jfmt_mark(f)
         jfmt_fmt_expr(f, parts.subject, JFMT_PREC_OR_FALLBACK)
@@ -2586,7 +2596,9 @@ jfmt_fmt_debug_interp: fn(f: &JetFmt, parts: [StrPart], index: Int) -> Bool {
     if (jfmt_str_part_lit(parts[index + 1]) ?? "") != " = " -> return false
     if parts[index + 2] == .Interp(value, format) {
         jfmt_write(f, "{{")
+        f.interp_depth += 1
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        f.interp_depth -= 1
         jfmt_write(f, "=")
         jfmt_fmt_str_format(f, format)
         jfmt_write(f, "}}")
@@ -2608,7 +2620,9 @@ jfmt_lambda_of: fn(expr: Expr) -> Lambda? Never! {
 
 jfmt_fmt_interp: fn(f: &JetFmt, value: Expr, format: StrFormat) {
     jfmt_write(f, "{{")
+    f.interp_depth += 1
     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+    f.interp_depth -= 1
     jfmt_fmt_str_format(f, format)
     jfmt_write(f, "}}")
 }
