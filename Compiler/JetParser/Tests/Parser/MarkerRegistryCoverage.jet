@@ -3,7 +3,7 @@
 // MARKER_SOURCE) is written at one of its own declared sites and driven through
 // the parser, formatter and reflection.
 use {
-    jet_foundation.[Diagnostic, MARKER_SOURCE, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration]
+    jet_foundation.[Diagnostic, MARKER_SOURCE, SemaNameCase, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration, sema_casing_has_case]
     jet_lexer.[lex, lex_generated]
     jet_parser.[jet_format_source, parse_generated_source, parse_source]
     jet_sema.[SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog, sema_taint_builtin_tag_names]
@@ -194,4 +194,17 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
         }
     }
     assert_eq(failures.join("\n"), "")
+}
+
+// #4284 c67: every active row is named in the `marker` NameCase (PascalCase,
+// as sema checks a marker declaration's name), so `#allow` or `#wire` can never
+// be a second spelling of a rule.
+#Test("every_active_row_name_is_marker_name_case") {
+    catalog: mrc_catalog()
+    assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
+    wrong := [String]{}
+    loop rule in catalog.rows {
+        if !sema_casing_has_case(rule.name, SemaNameCase.Pascal) -> wrong.push("#{rule.name}")
+    }
+    assert_eq(wrong.join(", "), "")
 }
