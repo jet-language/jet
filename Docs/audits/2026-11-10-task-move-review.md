@@ -63,3 +63,21 @@ and are not reopened.
 - A moved task pays encoding and network time.
 - A full failure match on a moved task adds two arms.
 - Closures and block tasks must be rewritten with their captures as arguments.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independently checked evidence | Verdict |
+|---|---|---|
+| Local tasks and payload encoding work | Reran t01-t05: area 42 plus JSON, hits 1, hidden module hits 5, complete match ok 42, incomplete match E0307. | Holds locally only; no remote execution proved. |
+| Encode means portable | Decoding, hidden process handles, nested duties and user codecs can break portability. | Fails; require both directions and recursive state/ownership checks. |
+| Top-level plus direct-body inspection is enough | t03 reaches shared module state through a helper. Indirect calls and foreign edges may be unknown. | Fails; complete call-graph evidence or refusal required. |
+| Compile-time grants are final authority | D-SERVICE-IDENTITY1=D names freshness, revocation and stale-generation outcomes. | Fails; revalidate using the one endpoint mechanism at dispatch. |
+| Lost means work did not happen | A reply may be lost after remote side effects. Cancellation can also lose its acknowledgment. | Fails; explicitly report unknown outcome, no retry or rollback promise, and bound remote lifetime. |
+| Task/Lost/Mismatch exhaust remote failures | The ratified service law also distinguishes partition, stale directory and revocation; codecs can fail. | Fails; preserve nested service and codec failures without changing local TaskFailure. |
+| One-word change gives local semantics | Files and authority belong to the remote place; network failures and nested matches differ. | Fails; corrected to familiar operations, not equivalence. |
+| B requires a service deployment per job | One typed job-runner can serve several job shapes. | Fails; strengthened B. |
+| Closure payloads are necessarily hidden | An explicit capture list and payload inspection make them reviewable. | Fails; strengthened C. |
+
+Read D-SERVICE-IDENTITY1=D and D-ACTOR1=A directly, and Ray and Unison sources independently. The earlier source census is not independently remeasured. No remote transport, grants, cancellation or build-mismatch claim is signed off as working today.
+
+Agree with A only as an adapter over the existing service mechanism, with these failure and lifecycle obligations. No added option. Do not post transparent local/remote equivalence, exactly-once effects, or compile-time grants as permanent authority.
