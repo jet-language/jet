@@ -171,7 +171,7 @@ env_get: fn(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
 // A program's own exit status 101 becomes the user-error status 1 (S36): only
 // a Jet defect (a compiler or runtime panic) ends with 101.
-exit: fn(code: Int) -[Exec]> Never Never! {
+exit: fn(code: Int) -[Exec.Exit]> Never Never! {
     core.process.exit(if code == 101 -> 1 else -> code)
     loop {}
 }
@@ -179,7 +179,7 @@ exit: fn(code: Int) -[Exec]> Never Never! {
 /// End the process with exactly `code`, after the same cleanup boundary as
 /// `process.exit`, without mapping 101 to the user-error status 1. Only a tool
 /// that reports a Jet defect (a compiler panic) ends with 101.
-#Unsafe("process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status") exit_unmapped: fn(code: Int) -[Exec]> Never Never! {
+#Unsafe("process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status") exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
     core.process.exit(code)
     loop {}
 }
