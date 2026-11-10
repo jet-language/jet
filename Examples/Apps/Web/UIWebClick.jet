@@ -1,6 +1,6 @@
 // Jet owns the click listener, counter
 // signal, and render. The companion HTML is only a shell. Portable
-// `ui.button(...) { … }` carries the handler on the node — no `web.on`
+// `ui.button(..., () -> { … })` carries the handler on the node — no `web.on`
 // selector bind.
 // Explicit instead of implicit —
 // `jet dev`/`jet build`/`jet run` infer the web backend from #Target(Web)
@@ -39,9 +39,9 @@ run: fn() {
         backend: ui.null_backend()
         tree: ui.box([
             ui.node_color("Clicks: {n}", 160.0, 40.0, color),
-            ui.button("Click me") {
+            ui.button("Click me", () -> {
                 count.set(count.get() + 1)
-            }
+            })
         ])
         ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
     })

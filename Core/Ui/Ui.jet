@@ -128,7 +128,7 @@ InputEvent: enum {
 
 // One node of the portable tree: its label, its size in cells, and what
 // hosts and assistive tech read. A box stacks its children top to bottom;
-// a button built with a handler (`button(display) { … }`) holds its click
+// a button built with a handler (`button(display, () -> { … })`) holds its click
 // slot.
 UINode: struct {
     label: String
@@ -188,13 +188,13 @@ text: fn(value: String) -> UINode Never! {
 }
 
 // A button sized to its label plus two cells of padding on each side. The
-// callback form `button(display) { … }` is `__button_click`.
+// callback form `button(display, () -> { … })` is `__button_click`.
 button: fn(display: String) -> UINode Never! {
     width: Float{tui_text.display_width(display)} + 4.0
     leaf(display, width, 1.0, Val(UIAriaRole.Button), UINodeKind.Button, None)
 }
 
-// `button(display, shortcut:, label:) { on_click }`: the compiler registers
+// `button(display, shortcut:, label:, () -> { on_click })`: the compiler registers
 // the handler with the runtime's click registry as slot `click`, then builds
 // the button here. `label` names it to assistive tech.
 __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click: Int) -> UINode Never! {

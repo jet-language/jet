@@ -1489,20 +1489,6 @@ parser_parse_lambda_arrow_body: fn(state: &JetParserState, depth: Int, fallback_
     ParsedLambdaBody{body: LambdaBody.Expr{value: value.expr}, end: end}
 }
 
-// The brace body attached directly to a call.
-parser_parse_trailing_lambda: fn(state: &JetParserState) -> Lambda {
-    open: parser_current(state).span
-    body: parser_parse_lambda_arrow_body(state, 0, open.end)
-    Lambda{
-        take_names: [NamedSpan]{},
-        params: [LambdaParam]{},
-        effects: None,
-        body: body.body,
-        span: Span{start: open.start, end: body.end},
-        meta: ast_empty_lambda_meta(),
-    }
-}
-
 // After `.`, `[a, b, c]` lists member names that hang off the
 // prefix; S84 package names may be dashed (`util-linux`). Anything else in
 // the list is E0961, skipped to the next `,` or `]`.
@@ -1840,6 +1826,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 parser_add_fatal_code_structured_edit(state, "E-CALL-VALUE", open, "a function value is invoked with an adjacent call `)(`", "named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit", "write `callee.call(…)`", TextEdit{span: Span{start: open.start, end: open.start}, new_text: ".call"})
                 break
             }
+            paren_start: parser_current(state).span.start
             method_name: if expression.expr == {
                 .Field(_, method, _, _) -> method
                 else -> ""
@@ -1857,19 +1844,22 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 }
             }
             generated_block: parser_parse_generate_template_arg(state, method_name, args)
-            // A direct call may carry one trailing block
-            // closure, kept as a typed lambda argument; sema assigns its
-            // parameter label after resolving the call.
+            // Code arguments are `() -> { … }` lambdas inside
+            // the parentheses; a bare `{ }` after a direct call is E0335.
             optional_call: if expression.expr == {
                 .OptField(_, _, _, _, _, _) -> true
                 else -> false
             }
             if allow_struct_lit && !optional_call && !generated_block && parser_current_kind(state) == TOKEN_LBRACE {
-                lambda: parser_parse_trailing_lambda(state)
-                lambda_span: lambda.span
-                flags := ast_empty_call_arg_flags()
-                flags.is_trailing_block = true
-                args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}, span: lambda_span, flags: flags, label: None, spread: false})
+                callee_text := "callee"
+                if expression.expr == .Ident(_, _, _) {
+                    callee_text = parser_source_slice(state, expression.span.start, paren_start)
+                } else if expression.expr == .Field(_, _, _, _) {
+                    callee_text = parser_source_slice(state, expression.span.start, paren_start)
+                }
+                brace_span: parser_current(state).span
+                parser_add_fatal_code(state, "E0335", brace_span, "trailing blocks are gone — pass code with `() ->`", "a bare `{{ }}` after a call used to fill one last zero-parameter function argument; that sugar is retired", "write `{callee_text}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`")
+                break
             }
             close_span: parser_current(state)
             end := close_span.span

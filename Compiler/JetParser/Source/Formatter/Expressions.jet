@@ -1676,7 +1676,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             // their spelling.
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(f, "(")
             jfmt_fmt_expr(f, callee, JFMT_PREC_POSTFIX)
-            jfmt_fmt_call_args_or_trailing_block(f, args, Val(expr_span(callee).end))
+            jfmt_fmt_call_args_with_template(f, args, Val(expr_span(callee).end))
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(f, ")")
         }
         // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`.
@@ -2334,7 +2334,7 @@ jfmt_str_match_has_computed_hole: fn(f: JetFmt, span: Span) -> Bool Never! {
 jfmt_fmt_call: fn(f: &JetFmt, call: Call) {
     jfmt_write(f, call.name)
     jfmt_fmt_call_type_args(f, call.type_args, call.name_span.end)
-    jfmt_fmt_call_args_or_trailing_block(f, call.args, Val(call.name_span.end))
+    jfmt_fmt_call_args_with_template(f, call.args, Val(call.name_span.end))
 }
 
 // Call-site type arguments `<T, …>`.
@@ -2458,25 +2458,18 @@ jfmt_fmt_view_or_call_args: fn(f: &JetFmt, method: String, args: [CallArg], sour
         jfmt_write(f, ")")
         return
     }
-    jfmt_fmt_call_args_or_trailing_block(f, args, source_start)
+    jfmt_fmt_call_args_with_template(f, args, source_start)
 }
 
-jfmt_fmt_call_args_or_trailing_block: fn(f: &JetFmt, args: [CallArg], source_start: Int?) {
-    // A typed template rides as a hidden final argument;
-    // So does a parser-owned trailing block closure.
+jfmt_fmt_call_args_with_template: fn(f: &JetFmt, args: [CallArg], source_start: Int?) {
+    // A typed template rides as a hidden final argument.
     template := CallArg?{None}
-    trailing := Lambda?{None}
     if args.len() > 0 {
         last: args[args.len() - 1]
-        if last.flags.template_items != None {
-            template = Val(last)
-        } else if last.flags.is_trailing_block {
-            if last.expr == .Lambda(lambda, _) -> trailing = Val(lambda)
-        }
+        if last.flags.template_items != None -> template = Val(last)
     }
-    hidden: template != None || trailing != None
     call_args := args
-    if hidden -> _ := call_args.pop()
+    if template != None -> _ := call_args.pop()
     source := JetFmtSourceList?{None}
     if source_start == .Val(start) -> source = jfmt_source_list_span_after(f, start, JFMT_DELIM_PAREN)
     mark: jfmt_mark(f)
@@ -2505,8 +2498,6 @@ jfmt_fmt_call_args_or_trailing_block: fn(f: &JetFmt, args: [CallArg], source_sta
         jfmt_emit_leading(f, template_arg.span.end)
         if !f.at_line_start -> jfmt_newline(f)
         jfmt_write(f, "}}")
-    } else if trailing == .Val(lambda) {
-        jfmt_fmt_trailing_lambda(f, lambda)
     }
 }
 
@@ -2521,23 +2512,6 @@ jfmt_fmt_call_args_multiline: fn(f: &JetFmt, args: [CallArg], source: JetFmtSour
     }
     if source == .Val(list) -> jfmt_emit_leading(f, list.close_start)
     if !f.at_line_start -> jfmt_newline(f)
-}
-
-jfmt_fmt_trailing_lambda: fn(f: &JetFmt, lambda: Lambda) {
-    jfmt_write(f, " ")
-    if lambda.body == {
-        .Expr(value) -> {
-            jfmt_write(f, "{{ ")
-            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-            jfmt_write(f, " }}")
-        }
-        .Block(statements) -> {
-            jfmt_write(f, "{{")
-            jfmt_newline(f)
-            jfmt_fmt_limited_block(f, statements, lambda.span.end)
-            jfmt_end_block(f)
-        }
-    }
 }
 
 jfmt_fmt_call_args: fn(f: &JetFmt, args: [CallArg]) {

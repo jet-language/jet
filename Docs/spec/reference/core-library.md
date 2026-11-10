@@ -4554,7 +4554,8 @@ hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
 Setting a synchronized signal updates the provider state, not the Jet carrier
 binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
-button handlers use the trailing block form, `ui.button("Click") { … }`.
+button handlers are ordinary code arguments, `ui.button("Click", () -> { … })`
+(D-TRAILBLOCK2); a bare `{ }` after the call is E0335.
 
 ### `core.reactive.loadable` — asynchronous value state
 

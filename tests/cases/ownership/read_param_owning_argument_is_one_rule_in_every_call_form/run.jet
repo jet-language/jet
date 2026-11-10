@@ -1,6 +1,6 @@
 // #6611 c2: a call never copies on its own, so a read parameter handed to an
 // owning parameter is E0201 in every call form: a method call, a plain call, a
-// call with a trailing block, and the body of an operator hook (whose `rhs` is
+// call with a `() -> { … }` code argument, and the body of an operator hook (whose `rhs` is
 // a read parameter by the trait contract).
 Bag: struct {
     rows: [[Int]]
@@ -38,7 +38,7 @@ by_operator: fn(item: [Int]) -> Int {
 }
 
 by_block: fn(item: [Int]) -> Int {
-    with_rows(item) { 1 }
+    with_rows(item, () -> { 1 })
 }
 
 run: fn() {
