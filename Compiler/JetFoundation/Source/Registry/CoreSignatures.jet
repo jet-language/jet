@@ -180,7 +180,16 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_optional("disambiguation", ParamZone.Either, CoreCallDefault.String{value: "compatible"}),
         })
         module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_files"}) -> Val([CoreCallParameterContract]{
-            core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent),
+            core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent), core_param_optional("skip", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "list_dir" -> Val([CoreCallParameterContract]{
+            core_param_required("path"), core_param_optional("matching", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "canonicalize" -> Val([CoreCallParameterContract]{
+            core_param_required("path"), core_param_optional("missing_last", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "symlink" -> Val([CoreCallParameterContract]{
+            core_param_required("original"), core_param_required("link"), core_param_optional("replace", ParamZone.Either, absent),
         })
         module_name == "core.http.server" && core_sig_one_of(member, [String]{"bind", "serve"}) -> Val([CoreCallParameterContract]{
             core_param_required("address"), core_param_required("mux"),

@@ -1339,17 +1339,37 @@ mktemp: fn(prefix: String) -[FS, Env, Time]> String Never! {
 }
 
 
-canonicalize: fn(path: String | Path) -[FS.Read]> String IOError! {
+/// The absolute path of `path` with every symbolic link, `.` and `..`
+/// resolved; every part must exist. `missing_last: true` lets the last part
+/// be missing, as `readlink -f` does: its parent is resolved and the last
+/// name joined to it.
+canonicalize: fn(path: String | Path, missing_last: Bool{false}) -[FS.Read]> String IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    core.files.__canonicalize_raw(text)
+    whole: core.files.__canonicalize_raw(text) ?? {
+        missing: err == .NotFound(_)
+        if !missing_last || !missing -> return Err(err)
+        parent: dirname(text)
+        resolved: core.files.__canonicalize_raw(if parent == "" -> "." else -> parent)
+        return Ok(join(resolved, basename(text)))
+    }
+    Ok(whole)
 }
 
 
-list_dir: fn(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+/// The entries of directory `path` in name order. With `matching`, only those
+/// whose name matches that shell pattern, where `*` is any run of bytes and
+/// `?` is one byte: `files.list_dir(dir, matching: "*.files")` is `dir/*.files`.
+list_dir: fn(path: String | Path, matching: String?{None}) -[FS.Read]> [DirEntry] IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    core.files.__list_dir_raw(text)
+    entries: core.files.__list_dir_raw(text)
+    pattern: matching ?? return Ok(entries)
+    kept := [DirEntry]{}
+    loop entry in entries {
+        if entries_glob_match(pattern.bytes(), entry.name.bytes()) -> kept.push(entry.copy())
+    }
+    Ok(kept)
 }
 
 
@@ -1471,13 +1491,19 @@ rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Re
 /// Create `link` as a symbolic link naming `original`. The link text is stored
 /// as given and is not resolved; later path operations follow it, so lexical
 /// `Path.is_within` cannot see an escape through a link — compare
-/// `canonicalize` results instead.
-symlink: fn(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+/// `canonicalize` results instead. `replace: true` first removes a link or
+/// file already at `link`, so a link to a directory is replaced, not
+/// followed, as `ln -sfn` does; a real directory there is an error.
+symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) IOError! -[FS.Write]> {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
     platform: core.files.__os_family()
     if platform != "unix" && platform != "windows" -> return Err(files8_other(.Write, Val(target), "symbolic links are unavailable on this platform"))
+    if replace && core.files.__remove_raw(target) == .Err(failure) {
+        gone: failure == .NotFound(_)
+        if !gone -> return Err(failure)
+    }
     directory := false
     if platform == "windows" -> directory = core.files.__symlink_directory_raw(source)
     core.files.__symlink_raw(source, target, directory)
@@ -1747,7 +1773,7 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
 // yields every path in order without sorting the whole tree. Both lists are
 // in reverse, so the next one is the last. Every slot the batch is done with
 // is released; a child directory keeps its slot until it is read.
-__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> __WalkFrame IOError! {
+__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, skip: [String]) -[FS]> __WalkFrame IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
         rules: core.files.__walk_rules(context, directory, ignore)
@@ -1761,8 +1787,8 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
         entry: core.files.__walk_next(context, directory)
         if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, root))
         if entry.end -> break
-        skipped := false
-        if ignore != None {
+        skipped := skip.len() > 0 && skip.contains(basename(entry.relative))
+        if !skipped && ignore != None {
             skipped = entry.ignore_file || core.files.__walk_ignored(context, directory, entry.relative, entry.directory)
         }
         if !skipped && (!files_only || (!entry.directory && entry.file)) {
@@ -1799,6 +1825,7 @@ Walk: struct {
     priv root: String
     priv ignore: String?
     priv files_only: Bool
+    priv skip: [String]
 
     /// Every entry in walk order, or the first error the walk meets.
     list: fn(&&self) -[FS]> [WalkEntry] IOError! {
@@ -1812,7 +1839,7 @@ impl Walk.Iterable {
     Iter: __WalkCursor
 
     iter: fn(&&self) -> __WalkCursor {
-        __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, context: 0, frames: [__WalkFrame]{}, done: false}
+        __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, skip: self.skip, context: 0, frames: [__WalkFrame]{}, done: false}
     }
 }
 
@@ -1822,6 +1849,7 @@ __WalkCursor: struct {
     root: String
     ignore: String?
     files_only: Bool
+    skip: [String]
     context: Int
     frames: [__WalkFrame]
     done: Bool
@@ -1847,7 +1875,7 @@ impl __WalkCursor.Iterator {
             if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
                 child: self.frames[top].children.pop() ?? panic("walk child")
                 depth: self.frames[top].depth + 1
-                if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only) == {
+                if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
                     .Ok(frame) -> {
                         core.files.__walk_release(self.context, child.directory)
                         self.frames.push(frame)
@@ -1878,7 +1906,7 @@ __walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
     cursor.context = core.files.__walk_context(cursor.root, cursor.ignore ?? "", cursor.ignore != None)
     walk_validate(cursor.context, 0, cursor.root)
     if cursor.ignore != None -> core.files.__walk_matcher_new(cursor.context)
-    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only))
+    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only, cursor.skip))
     Ok()
 }
 
@@ -1892,14 +1920,16 @@ __walk_finish: fn(cursor: &__WalkCursor) -[FS]> {
 
 
 /// The entries below `root`, every directory and file, read lazily in path
-/// order (see `Walk`); the call keeps the FS authority every walk needs.
-walk: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
-    Walk{root: path_text(root), ignore: ignore, files_only: false}
+/// order (see `Walk`); the call keeps the FS authority every walk needs. An
+/// entry whose name is in `skip` is neither yielded nor entered, as
+/// `find root -name NAME -prune` leaves it out.
+walk: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: false, skip: skip}
 }
 
 
-walk_files: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
-    Walk{root: path_text(root), ignore: ignore, files_only: true}
+walk_files: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: true, skip: skip}
 }
 
 
@@ -2540,7 +2570,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 readdir: fn(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-walkdir: fn(root: String, ignore: String?) -[FS]> Walk { Walk{root: root, ignore: ignore, files_only: false} }
+walkdir: fn(root: String, ignore: String?) -[FS]> Walk { Walk{root: root, ignore: ignore, files_only: false, skip: [String]{}} }
 
 
 truncate: fn(path: String, size: Int) IOError! -[FS]> {
@@ -2957,6 +2987,36 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert_eq(read(join(destination, "top.txt")) ?? panic("copied top"), "top")
     assert_eq(read(join(destination, "nested/deep.txt")) ?? panic("copied deep"), "deep")
     assert(!exists(join(destination, "link")))
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("list_dir matching, canonicalize missing_last, symlink replace and walk skip read as the shell does") {
+    root: mktemp("files-shell-kat")
+    create_dir_all(join(root, "keep/.jet")) ?? panic("tree")
+    create_dir_all(join(root, "out")) ?? panic("out")
+    write(join(root, "a.files"), "one\n") ?? panic("a")
+    write(join(root, "b.files"), "") ?? panic("b")
+    write(join(root, "notes.txt"), "x") ?? panic("notes")
+    write(join(root, "keep/.jet/cache"), "c") ?? panic("cache")
+    write(join(root, "keep/src.jet"), "s") ?? panic("src")
+    names := [String]{}
+    loop entry in list_dir(root, matching: "*.files") ?? panic("list") -> names.push(entry.name.copy())
+    assert_eq(names, [String]{"a.files", "b.files"})
+    base: canonicalize(root) ?? panic("canonical root")
+    assert_eq(canonicalize(join(root, "new.txt"), missing_last: true) ?? panic("missing last"), join(base, "new.txt"))
+    assert(canonicalize(join(root, "new.txt")) == .Err(_))
+    if core.files.__os_family() == "unix" {
+        link: join(root, "current")
+        symlink("keep", link) ?? panic("first link")
+        assert(symlink("out", link) == .Err(_))
+        symlink("out", link, replace: true) ?? panic("replace link")
+        assert_eq(read_link(link) ?? panic("read link"), "out")
+        assert(!exists(join(root, "keep/out")))
+        assert(symlink("out", join(root, "keep"), replace: true) == .Err(_))
+    }
+    walked := [String]{}
+    loop entry in walk_files(join(root, "keep"), skip: [String]{".jet"}) -> walked.push((entry ?? panic("walk")).relative)
+    assert_eq(walked, [String]{"src.jet"})
     remove_all(root) ?? panic("cleanup")
 }
 

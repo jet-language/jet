@@ -936,16 +936,16 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `exists(path)` / `is_dir(path)` / `is_file(path)` | `Bool` | Return false when the path cannot be observed; these helpers do not raise a missing-path error. |
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
-| `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
+| `list_dir(path, matching: String?{None})` | `[DirEntry] !IOError` | List entries in name order. `matching` keeps the names that match a shell pattern (`*` any bytes, `?` one byte), so `list_dir(dir, matching: "*.files")` is `dir/*.files`. |
 | `create_dir_all(path)` | `!IOError` | Create a directory and any missing parents; an existing directory is success. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
-| `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
+| `symlink(original, link, replace: Bool{false})` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. `replace: true` first removes a link or file at `link`, so a link to a directory is replaced rather than followed (`ln -sfn`); a real directory there is an error. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
-| `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. `.list()` collects them all as `[WalkEntry] !IOError`. |
-| `walk_files(root, ignore)` | `Walk` | The same walk, keeping regular files only. |
+| `canonicalize(path, missing_last: Bool{false})` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. `missing_last: true` lets the last part be missing, as `readlink -f` does: the parent is resolved and the last name joined to it. |
+| `walk(root, ignore, skip: [String]{[String]{}})` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. An entry whose name is in `skip` is neither yielded nor entered (`find -name NAME -prune`). `.list()` collects them all as `[WalkEntry] !IOError`. |
+| `walk_files(root, ignore, skip:)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
