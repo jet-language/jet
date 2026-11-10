@@ -1,0 +1,29 @@
+// #6694 c3: Core's TLS server (core.http.server over core.net.tls) for
+// OpenSSL clients (`openssl s_client`). One listener holds the ECDSA P-256
+// certificate and one the RSA certificate; both answer `GET /` with "pong".
+// It prints "ready" once both listen; the case stops it.
+use {
+    files: core.files
+    server: core.http.server
+    term: core.term
+}
+
+listen: fn(addr: String, cert_file: String, key_file: String) -> HTTPServer {
+    cert: files.read(cert_file) ?? panic("certificate fixture {cert_file}")
+    key: files.read(key_file) ?? panic("key fixture {key_file}")
+    mux: server.mux()
+    mux.get("/", (_request: HTTPRequest) -> Ok(server.response(200, "pong")))
+    server.bind(addr, mux, tls: server.tls(cert, key)) ?? panic("bind TLS server {addr}")
+}
+
+run: fn() {
+    ec: listen("127.0.0.1:{free-port:srv_ec}", "ec.cert.pem", "ec.key.pem")
+    rsa: listen("127.0.0.1:{free-port:srv_rsa}", "rsa.cert.pem", "rsa.key.pem")
+    serving_ec: task { ec.serve() ?? panic("serve ECDSA listener") }
+    serving_rsa: task { rsa.serve() ?? panic("serve RSA listener") }
+    print("ready")
+    out := term.stdout()
+    out.flush() ?? panic("flush")
+    _: serving_ec.join() ?? panic("join ECDSA listener")
+    _: serving_rsa.join() ?? panic("join RSA listener")
+}
