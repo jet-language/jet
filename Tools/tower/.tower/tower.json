@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98893,
+    "rev": 98894,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55198,7 +55198,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-10T16:00:21.114Z",
+      "updated": "2026-11-10T17:20:30.608Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -183305,205 +183305,235 @@
       "id": "D-JAI-GENERIC1",
       "cardId": "c0ygtwb9",
       "group": "syntax",
-      "title": "##Pre: a rule on a function's arguments that must be decided while compiling",
-      "situation": "A function can carry a rule about its arguments, such as a lane count that must be 4, 8 or 16. Jet already agreed to check that rule while compiling whenever the values are fixed, and at run time otherwise. That agreement also said no new mark would be added.\n\nSome functions need the value always fixed, so a caller with a value read from input should never build. The owner suggested writing the rule with two hashes for that. The recommendation is A: two hashes on the rule, with callers keeping their usual arguments and one copy of the function.",
-      "gist": "Should ##Pre mean a rule that must be decided while compiling, so its parameters need no extra label?",
-      "lesson": "A #Pre rule checks a function's arguments. Jet already decides it while compiling when the arguments are fixed. Some functions need the arguments to always be fixed, such as a lane count. This vote decides how a function says so: two hashes on the rule, or a number parameter.",
-      "explainer": "Words used here. A contract is a rule written #Pre(condition, message) above a function. Known while compiling means the compiler can work out the value, such as a literal 8.\n\nA number parameter is a compile-time value in angle brackets, as in Ring<N: Int>. Each value gets its own copy of the function.",
-      "story": "Ola ports a Jai math library. Its simd_sum adds 4, 8 or 16 numbers at a time. A caller that passes the lane count from user input should be refused while compiling, at the caller's line, with Ola's message.",
-      "inWild": "// Jai: #modify runs for each use and may refuse it.\nsimd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    return lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\";\n} { ... }\n\n// Zig: a comptime parameter and @compileError in the body.\nfn simdSum(comptime lanes: u32, xs: []const f32) f32 {\n    if (lanes != 4 and lanes != 8) @compileError(\"lanes must be 4 or 8\");\n    ...\n}",
-      "detail": "What this ballot decides. How a function requires that some arguments are always known while compiling, and which markers may be written with two hashes. It does not change D-PRE-COMPILE1's rule for an ordinary #Pre.\n\nToday, with the a0.0.43 compiler (dev c460ba91e5). Probe j01 puts #Pre(lanes == 4 || lanes == 8 || lanes == 16, message) on simd_sum. simd_sum(8, xs) prints 10, and simd_sum(6, xs) stops at run time with E3005, #Pre contract failed: lanes must be 4, 8 or 16.\n\nProbe j05 shows the literal call is not yet decided while compiling: it prints before, then stops with E3005. That is PRE-COMPILE1, ratified and not yet built. Probe j02 shows ##Pre does not parse today: E0003, Expected a name after # in a statement marker.\n\nProbes j03 and j04 write simd_sum: fn<lanes: Int>(xs) and call simd_sum<8>(xs); the call gets E0003, Expected a type, found 8. Number parameters on functions are ratified by D-CONSTGEN2 and D-META-SPELL1=A but not built, so no option here is argued from that failure.\n\nThe rule under A. ##Pre(condition, message) is a #Pre that must be decided while compiling. Every parameter the condition reads must be known while compiling at every call. Callers pass those arguments in their usual place, as simd_sum(8, xs), with no label on the parameter. This is the owner's proposed form.\n\nAt each call the compiler decides the rule. False is a build error at the caller's line with the author's message. True leaves no run-time check. A run-time value, such as a number read from input, is a build error at the caller's line that names the ##Pre line and shows a fix.\n\nEngineering away the first downside, that run-time callers are refused. The fix jet offers is a match that turns a run-time value into known ones. Its arms are 4 -> simd_sum(4, xs) and 8 -> simd_sum(8, xs), plus a fallback arm. jet fix writes the match from the allowed values when the condition is a list of equalities.\n\nEngineering away the second downside, extra machine code. A parameter read only by ##Pre is checked at each call but stays an ordinary argument in the body, so simd_sum compiles once, not once per lane count. The body gets a copy per value only if it needs the value while compiling, as a number parameter would.\n\nEngineering away the third downside, wrappers that forward the value. sum_lanes: fn(lanes: Int, xs: [Int]) -> Int { simd_sum(lanes, xs) } would be refused, because lanes is not known inside one shared body. Under A, a parameter that the enclosing function's own ##Pre reads counts as known when passed on unchanged.\n\nSo ##Pre(lanes == 4 || lanes == 8, message) on sum_lanes makes that inner call legal. Each call of sum_lanes then decides both rules with its own value: sum_lanes(8, xs) builds, sum_lanes(16, xs) fails simd_sum's rule at that line. Number parameters forward the same way under B and D, as simd_sum<lanes>(xs).\n\nEngineering away the fourth downside, function values. A bare simd_sum used as a value is refused, because a call through it could not be checked; the error suggests a wrapper. sum4: fn(xs: [Int]) -> Int { simd_sum(4, xs) } is an ordinary function and is Jai's #bake_arguments under every option.\n\nThe marker rule for two hashes. A marker kind opts in with early: true in its impl Marker; Pre does, and a user marker with a Bool condition and a String message may. ## on a marker that has not opted in is a registered error. early is one new setting beside sites, repeatable and the others in Compiler/Prelude/Markers.jet:9-17, where Pre is declared (:66). ##Post is refused, because a result is not known while compiling.\n\nSpellings agree with D-META-SPELL1=A: #run, #if and #loop for compile-time code, and <N: Int> for number parameters. ## is written only on markers, and # keeps every meaning D-META-HASH1=A gives it. D-META-SPELL1=A was ratified on 2026-11-10 and is unbuilt: dev has no #run line and 2,816 comptime uses.\n\nWhat remains after the engineering. There are two ways to require a known value: ##Pre, which checks it, and <N: Int>, which builds a copy per value and can shape types such as [Int#N]. The cost is one more thing to learn; the mitigation is a rule of thumb shown in the error. Use <N: Int> when the value shapes a type, and ##Pre otherwise.\n\nBeginner path. Write #Pre as today; Jet decides it while compiling where it can. Write ##Pre only when a call with a run-time value must never build.\n\nExpert path. jet inspect on a call shows whether its #Pre was decided while compiling or kept for run time. A user marker can opt in to ## with early: true.\n\nOther options. B keeps PRE-COMPILE1 as ratified: #Pre is decided early when it can be, and a function that requires a known value uses a number parameter, simd_sum<8>(xs). C lets any marker be written with two hashes, with no opt-in. D is Zig's form: a number parameter plus a #run block in the body that stops the build with a message.\n\nB moves the lane count out of the argument list and into angle brackets, and makes a copy of the function per value. C allows ## on markers that have nothing to decide while compiling, such as #Post. D puts the rule inside the body, where a reader of the signature cannot see it.",
+      "title": "Required compile-time argument checks: marker mode or explicit value parameters",
+      "situation": "Ratified #Pre checks fixed inputs during compilation when it can, with a runtime check otherwise. It deliberately added no second marker. Some APIs instead need callers to supply build-known values. This ballot chooses a required-check surface, rather than treating a known-value predicate as the same thing as a known-value requirement. A adds ##Pre; B uses ratified number parameters; E adds explicit #run parameters in the ordinary argument list. None is implemented by the supplied snippets.",
+      "gist": "Should required compile-time argument checks use ##Pre or explicit compile-time parameters?",
+      "lesson": "A value can satisfy a rule at runtime without being known during compilation. Requiring it to be known is an additional contract. A puts that contract on ##Pre; B and E put it on the value parameter. Ordinary #Pre keeps its ratified fallback behavior.",
+      "explainer": "A required check fails the build when inputs are unavailable or evaluation cannot complete. A number parameter is a compile-time generic value. Distinct generic instances need not imply distinct emitted machine bodies if the compiler can share them safely.",
+      "story": "Ola needs a lane argument fixed to 4, 8 or 16 before compilation finishes. The example only adds a list; it does not perform SIMD or depend on lane width. Every option must sum [1,2,3,4] to 10 at an accepted lane count and reject an invalid or unavailable required count.",
+      "inWild": "// Jai community example: #modify can refuse a resolved use.\n// Documentation illustration, not executed with a Jai compiler:\n#modify { return do_something(T); }\n// Zig uses an explicit comptime parameter and @compileError.",
+      "detail": "Authority. A amends PRE-COMPILE1's no-new-mark choice and extends HASH1's marker grammar with ##. Ordinary #Pre keeps fallback. META-SPELL1=A supplies #run, #if, #loop and <N: Int>. Add no retired-spelling teaching or rewrite service. B keeps the ratified value-parameter mechanism; E reuses it with a new parameter location.\n\nIndependent a0.0.43 probes. j01 prints 10 then stops with E3005, exit 70, for lanes 6. j05 prints before then stops: fixed false #Pre is not a build error on this compiler. j02 rejects ##Pre; j03/j04 reject numeric generic calls; j06 rejects unbounded addition with E0360. These failures do not rank unbuilt alternatives.\n\nThe body ignores lanes and sums four elements even for lanes 8. No SIMD, specialization-speed or code-size result was measured. This is a contract example, not proof that a shared body implements lane-dependent instructions.\n\nA requires every argument fact referenced by ##Pre's condition and required message to be build-available. True removes its runtime check. False reports the author's message at the call. Unknown input, evaluator failure and budget exhaustion are distinct build errors, never false predicates or runtime fallback.\n\nKnownness exceeds truth: runtime n is refused even for a tautology mentioning n. Pure constant expressions and resolved defaults may supply facts. Effectful calls cannot execute early merely because their result seems predictable. Arguments unread by the early clause remain runtime values. Evaluate them once in normal order; do not duplicate effects, loans or moves.\n\nReuse the bounded native evaluator and pure contract checker. Preserve tags in diagnostics. Cache results by declaration revision, generic bindings and canonical argument facts. User markers cannot bypass authority, effects, budget or ownership checks.\n\nA's body parameters remain ordinary runtime arguments. They cannot shape types or feed #run merely because a marker reads them; those uses need number parameters. A value-independent body may be shared, not guaranteed as one emitted machine body. Inlining, specialization and target lowering can still create variants.\n\nForwarding carries checked symbolic obligations, not magic constants inside a runtime body. Preserve dependency expressions and call-chain sites in interfaces. An early wrapper can forward unchanged arguments or pure build-evaluable expressions; discharge both clauses at outer calls. An unannotated runtime wrapper cannot hide the requirement. Recursive evaluation remains budgeted.\n\nA wrapper admitting 4, 8, 16 and 32 can call an inner function admitting only 4, 8 and 16. Calling the wrapper with 32 fails the inner clause with both sites shown. The original wrapper admitting only 4 and 8 could not demonstrate that distinction using 16: its own clause already failed.\n\nReject conversion into function values, trait slots or foreign callables that erase unresolved early obligations. A may use an ordinary constant-binding wrapper. B/D can bind sum<4> directly; they do not inherently need wrappers. E also binds its value parameter before erasure. Reflection and generated calls keep the same checks.\n\nRuntime dispatch needs an application policy. Authors may match finite inputs to literal calls, but a generated fix cannot invent fallback errors, panics, return types or effects. Offer a rewrite only when an existing complete fallback is preserved. No universal generated-match repair is promised.\n\nA's early: true setting permits required mode for a marker kind. Require a pure Bool condition and build-available String message. Unknown or ineligible doubled markers fail. Mandatory early gates cannot be stripped by runtime-contract suppression. Custom expansion still uses canonical marker semantics.\n\nOrigin/dev Markers lists settings near 9-17, and declares Pre at 72-80, not 66. A registry setting does not implement evaluation, forwarding or callable preservation. Repository text counts are not semantic coverage.\n\nB uses <lanes: Int> with ordinary #Pre, making knownness explicit through an existing mechanism that also shapes types. Distinct generic instances can share emitted code; no measured per-value machine-copy disadvantage is assigned. Call organization differs from ordinary arguments.\n\nC infers required-mode applicability from each marker's typed contract, with no opt-in flag. A marker without an evaluable predicate fails. ##Post requires result facts established by permitted pure early evaluation; otherwise it fails. C is uniform but broadens applicability and result-proof scope. It does not blindly accept ##Post.\n\nD combines a number parameter with #run body validation and a registered build-error operation. Rich pure logic fits, and tools can render it in hover/docs. The predicate is absent only from the authored signature. Current absence of compile_error does not rank this unbuilt option.\n\nE writes #run lanes: Int in the ordinary list, with sum(8, xs) calls. Lower it to the same value-parameter mechanism as <lanes: Int>, including type-shaping and bound-instance rules. This adds parameter grammar, not another knownness engine, and places the requirement beside the value declaration.\n\nCosts. A adds marker mode, dependency summaries and higher-order limits. B/E make parameter knownness explicit; D authors validation in the body; C infers wider applicability. None has measured compile-time, executable-size or runtime superiority. Beginners keep ordinary #Pre; experts inspect required call obligations.",
       "options": [
         {
           "key": "A",
-          "name": "##Pre requires the rule to be decided while compiling",
-          "detail": "##Pre must be decided at each call while compiling, and the parameters it reads need no label. A run-time value is a build error with a fix. #Pre keeps PRE-COMPILE1's rule.",
-          "technical": "Amends D-PRE-COMPILE1=A's no-new-mark clause. Uses PRE-COMPILE1's evaluator and budget; an unknown value is an error, not a fallback. Known means literals, :: constants, number parameters, and the enclosing function's own ##Pre-read parameters passed on unchanged; the callee's rule is then decided at each outer call. Parameters read only by ##Pre stay runtime arguments in one body. Marker kinds opt in with early: true; Pre opts in, Post cannot.",
-          "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n\nrun: fn() {\n    print(simd_sum(8, [1, 2, 3, 4]))   // 10\n    print(simd_sum(6, [1, 2, 3, 4]))   // build error here: lanes must be 4, 8 or 16\n}\n// Proposed (A), not built: today ##Pre does not parse (probe j02)."
+          "name": "Required ##Pre marker mode",
+          "detail": "Ordinary argument spelling; parameters referenced by the early clause must be build-known.",
+          "technical": "Amends the no-new-mark ruling. Reuse canonical evaluator and contracts; preserve forwarding obligations, budgets and callable boundaries. Ordinary body parameters cannot shape types just because a marker reads them.",
+          "code": "// Proposed A; not built.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum(8, [1,2,3,4]) => 10\n// sum(6, xs): clause failure; sum(runtime_lanes, xs): unavailable input."
         },
         {
           "key": "B",
-          "name": "Keep PRE-COMPILE1; require with a number parameter",
-          "detail": "#Pre is decided early when it can be. A function that must have a known lane count takes it as a number parameter, simd_sum<8>(xs).",
-          "technical": "D-PRE-COMPILE1=A unchanged, with its comptime parameter respelled by D-META-SPELL1=A as <lanes: Int>. Each lane count builds its own copy of the function.",
-          "code": "#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n\nrun: fn() {\n    print(simd_sum<8>([1, 2, 3, 4]))   // 10\n    print(simd_sum<6>([1, 2, 3, 4]))   // build error here: lanes must be 4, 8 or 16\n}\n// Ratified (B), not built: today simd_sum<8> does not parse (probe j03)."
+          "name": "Ratified number parameter and #Pre",
+          "detail": "Write knownness in <lanes: Int>; keep ordinary #Pre validation.",
+          "technical": "One existing compile-time value-parameter mechanism. Instances can shape types and can be bound for function values. Distinct instances are not proof of distinct machine bodies.",
+          "code": "// Ratified parameter mechanism, proposed program; seed rejects numeric call.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum<8>([1,2,3,4]) => 10; sum<6>(xs) fails its clause.\n// A runtime generic argument is refused."
         },
         {
           "key": "C",
-          "name": "Any marker may take two hashes",
-          "detail": "## before any marker means it runs while compiling, with no opt-in by the marker kind.",
-          "technical": "As A, but every marker kind accepts ##. Kinds with nothing to decide early, such as Post, fail inside the marker's own code instead of at a registered error.",
-          "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n\nrun: fn() {\n    print(simd_sum(8, [1, 2, 3, 4]))   // 10\n    print(simd_sum(6, [1, 2, 3, 4]))   // build error here\n}\n// ##Post(...) is accepted and fails later, inside Post.\n// Proposed (C), not built."
+          "name": "Required mode inferred for any suitable marker",
+          "detail": "No early opt-in flag; infer whether a marker's typed contract supports required build-time proof.",
+          "technical": "Share A's evaluator and obligation rules. Ineligible markers fail. Postconditions require pure build-known result facts, not blind acceptance. Wider inference and proof scope than A.",
+          "code": "// Proposed C: same sum program and calls as A.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\n// No early: true registry setting is required.\n// ##Post(result > 0, \"positive\") requires a permitted result proof,\n// and fails if that proof cannot be supplied."
         },
         {
           "key": "D",
-          "name": "Zig's form: a check inside the body",
-          "detail": "A number parameter plus a #run block in the body that stops the build with a message.",
-          "technical": "No new marker form. #run in a body runs once per copy; a new Core function compile_error (none exists today) stops the build at the caller that created the copy.",
-          "code": "simd_sum: fn<lanes: Int>(xs: [Int]) -> Int {\n    #run { if !(lanes == 4 || lanes == 8 || lanes == 16) -> compile_error(\"lanes must be 4, 8 or 16\") }\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n\nrun: fn() {\n    print(simd_sum<8>([1, 2, 3, 4]))   // 10\n    print(simd_sum<6>([1, 2, 3, 4]))   // build error: lanes must be 4, 8 or 16\n}\n// Proposed (D), not built."
+          "name": "Number parameter with body validation",
+          "detail": "Knownness stays in the value parameter; pure validation runs in a #run block.",
+          "technical": "Reuses the same evaluator with a registered build-error operation. Tools can render the rule, but source-signature readers must open the body. No generic body-copy penalty is assumed.",
+          "code": "// Proposed D; compile_error is part of this option, not a working seed API.\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    #run {\n        if lanes != 4 && lanes != 8 && lanes != 16 -> compile_error(\"need 4, 8 or 16\")\n    }\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum<8>([1,2,3,4]) => 10; invalid or runtime generic counts fail."
+        },
+        {
+          "key": "E",
+          "name": "Explicit #run parameter, ordinary calls",
+          "detail": "Write #run lanes: Int at the parameter while callers use sum(8, xs).",
+          "technical": "New parameter spelling for the canonical compile-time value parameter, not another evaluation mechanism. Retain ordinary #Pre, generic identity, type-shaping ability and concrete binding before function-value erasure.",
+          "code": "// Proposed E; new parameter grammar, not built.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn(#run lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum(8, [1,2,3,4]) => 10; invalid or unavailable counts fail.\n// Same value-parameter mechanism as B, different declaration/call organization."
         }
       ],
       "comparisons": [
         {
           "lang": "Jai",
-          "note": "#modify runs for each use and may refuse it with a message.",
-          "code": "simd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    return lanes == 4 || lanes == 8, \"need 4 or 8\";\n} { ... }"
+          "note": "Community documentation describes #modify per resolved call and #bake_arguments currying. This is not a tested claim about the current private compiler.",
+          "code": "#modify { return do_something(T); }"
         },
         {
           "lang": "Zig",
-          "note": "A comptime parameter and @compileError inside the body.",
-          "code": "if (lanes != 4) @compileError(\"need 4\");"
+          "note": "An explicit comptime parameter provides knownness; @compileError fails when analyzed. Pure body validation is a real alternative, not inherently invisible to tools. Illustration not executed.",
+          "code": "fn sum(comptime lanes: u32, xs: []const i32) i32"
         },
         {
           "lang": "C++",
-          "note": "A requires-clause on the signature; the error has no author message.",
-          "code": "template<int L> requires (L == 4 || L == 8)\nfloat simd_sum(std::span<const float> xs);"
+          "note": "Requires-clauses validate template arguments during substitution; named concepts improve reusable constraints. This differs from arbitrary runtime-argument validation. Documentation checked, illustration not executed.",
+          "code": "template<int L> requires (L == 4 || L == 8 || L == 16) int sum();"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A is the owner's proposed form: the rule sits on the signature and callers keep their usual argument list. One body serves every lane count.",
+        "why": "A keeps ordinary calls and separates required proof from body specialization. That benefit must be weighed against E's explicit parameter contract and B's smaller existing surface.",
         "gains": [
-          "A run-time lane count is refused at the caller's line, with the author's message.",
-          "Callers write simd_sum(8, xs), with no label on the parameter.",
-          "The function compiles once, not once per lane count."
+          "Required argument checks at caller sites.",
+          "Ordinary argument lists and potentially shared value-independent bodies."
         ],
         "losses": [
           {
-            "loss": "Two ways to require a known value: ##Pre and <N: Int>.",
-            "mitigation": "The error says: use <N: Int> when the value shapes a type, ##Pre otherwise."
+            "loss": "A adds a second marker form and a knownness dependency that is not written at the parameter.",
+            "mitigation": "State the amendment, show required facts on signatures, and offer B/E as explicit parameter alternatives."
           },
           {
-            "loss": "A bare function value of simd_sum is refused.",
-            "mitigation": "The error suggests a wrapper such as sum4, an ordinary function."
+            "loss": "Forwarding, budgets and callable erasure add proof obligations.",
+            "mitigation": "Preserve checked summaries and reject unavailable or erased requirements without runtime fallback."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B moves the lane count into angle brackets and builds a copy per value."
+            "reason": "B is smaller and explicit; A instead keeps the ordinary argument list. Neither has a measured code-size advantage."
           },
           {
             "key": "C",
-            "reason": "C accepts ## on markers that have nothing to decide while compiling."
+            "reason": "C is uniform but adds result-proof and inferred-applicability scope."
           },
           {
             "key": "D",
-            "reason": "D hides the rule in the body, where the signature does not show it."
+            "reason": "D supports rich body logic and tooling; its authored rule is not on the signature."
+          },
+          {
+            "key": "E",
+            "reason": "E is a strong explicit ordinary-call alternative, but adds a new parameter spelling."
           }
         ],
-        "tradeoff": "One more marker form, in return for a required rule that callers meet with their usual arguments."
+        "tradeoff": "A new required marker mode versus reusing explicit compile-time value parameters; no measured speed or size ranking."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Probes j01 to j06 match on a0.0.43, and the early setting is placed among the marker settings in Markers.jet. Owner-addressed wording and a card ID are removed, and D-META-SPELL1=A is marked as unbuilt."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran j01-j06 and checked ratified rules and marker source. Removed SIMD and body-copy overclaims, repaired forwarding and runtime-fix semantics, and added explicit ordinary-list parameter E."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-JAI-GENERIC1/probes. Expected: j01 prints 10 then E3005, j02 to j04 E0003, j05 prints before then E3005, j06 E0360. Marker settings are in Compiler/Prelude/Markers.jet. The #run and comptime counts use git grep -c on dev.",
+      "checkInstructions": "Independent probes/review7-j*.run.txt establish current diagnostics only. Pre is at origin/dev Markers.jet:72-80. Before shipping, prove unknown inputs, evaluator budget, wrappers, defaults, pure expressions, callable erasure, policy suppression, user markers and tier parity. No proposed API or code-size advantage was executed.",
       "surface": {
-        "gist": "Should ##Pre mean a rule that must be decided while compiling, so its parameters need no extra label?",
-        "lesson": "A #Pre rule checks a function's arguments, and Jet decides it while compiling when they are fixed. Some functions need them always fixed, such as a lane count. This vote decides how a function says so.",
+        "gist": "Should required compile-time checks use ##Pre or explicit value parameters?",
+        "lesson": "Truth at runtime is not knownness during compilation. A places required knownness on a marker; B/E place it on a parameter. Ordinary #Pre retains automatic early checking with runtime fallback.",
         "trio": {
           "current": {
-            "note": "Today #Pre stops at run time.",
-            "code": "simd_sum(6, [1, 2, 3, 4])\n// Stop [E3005]: #Pre contract failed"
+            "note": "j01 prints 10 then stops; j05 prints before then stops, exit 70.",
+            "code": "sum(6, [1,2,3,4]) // current #Pre is E3005 at runtime"
           },
           "wild": {
-            "lang": "Jai",
-            "note": "#modify refuses a use.",
-            "code": "#modify { return lanes == 4, \"need 4\"; }"
+            "lang": "Zig",
+            "note": "Explicit parameter knownness; documentation illustration, not executed.",
+            "code": "fn sum(comptime lanes: u32, xs: []const i32) i32"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "##Pre",
-            "gist": "A rule that must be decided while compiling.",
+            "name": "Required ##Pre",
+            "gist": "Ordinary calls; clause dependencies must be build-known.",
             "gains": [
-              "Refused at the caller's line.",
-              "Usual argument list."
+              "Caller-site proof.",
+              "No forced body specialization."
             ],
             "losses": [
-              "Two ways to require a value."
+              "New marker mode and inferred dependencies."
             ],
             "proposed": {
-              "code": "##Pre(lanes == 4 || lanes == 8, \"lanes must be 4 or 8\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int { ... }\nsimd_sum(6, xs)   // build error"
+              "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")"
             }
           },
           {
             "key": "B",
-            "name": "Keep ratified",
-            "gist": "#Pre as ratified, plus a number parameter.",
+            "name": "Number parameter",
+            "gist": "Use the ratified <lanes: Int> mechanism.",
             "gains": [
-              "No new form."
+              "No new marker mode.",
+              "Explicit knownness."
             ],
             "losses": [
-              "A copy per value."
+              "Angle-bracket calls."
             ],
             "proposed": {
-              "code": "simd_sum: fn<lanes: Int>(xs: [Int]) -> Int { ... }\nsimd_sum<6>(xs)   // build error"
+              "code": "sum<8>(xs)"
             }
           },
           {
             "key": "C",
-            "name": "## on any marker",
-            "gist": "No opt-in by the marker kind.",
+            "name": "Inferred marker applicability",
+            "gist": "Required mode for every suitable typed marker.",
             "gains": [
-              "Simplest rule."
+              "No opt-in setting."
             ],
             "losses": [
-              "##Post accepted."
+              "Wider applicability and result-proof scope."
             ],
             "proposed": {
-              "code": "##Post(result > 0, \"...\")   // accepted"
+              "code": "##Post(result > 0, \"positive\") // only with a valid early result proof"
             }
           },
           {
             "key": "D",
-            "name": "Check in the body",
-            "gist": "Zig's #run check inside the body.",
+            "name": "Body validation",
+            "gist": "Number parameter and #run build check.",
             "gains": [
-              "No new marker form."
+              "Rich pure logic.",
+              "Tools can render it."
             ],
             "losses": [
-              "Hidden from the signature."
+              "Predicate absent from authored signature."
             ],
             "proposed": {
-              "code": "#run { if lanes != 4 -> compile_error(\"need 4\") }"
+              "code": "#run { if lanes == 6 -> compile_error(\"invalid count\") }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Explicit ordinary-list parameter",
+            "gist": "Same value-parameter mechanism; ordinary calls.",
+            "gains": [
+              "Knownness visible at parameter.",
+              "sum(8, xs) calls."
+            ],
+            "losses": [
+              "New parameter spelling."
+            ],
+            "proposed": {
+              "code": "sum: fn(#run lanes: Int, xs: [Int]) -> Int"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A is the owner's proposed form: the rule sits on the signature, and callers keep their usual arguments.",
+          "why": "A keeps ordinary calls, but B's existing surface and E's explicit parameter contract are strong alternatives.",
           "gains": [
-            "Refused at the caller's line.",
-            "One body for every lane count."
+            "Required proof without forcing body specialization."
           ],
           "losses": [
             {
-              "loss": "Two ways to require a value.",
-              "mitigation": "The error says which to use."
+              "loss": "New marker mode and preserved call obligations.",
+              "mitigation": "Expose dependencies and reject missing proof honestly."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Angle brackets and copies."
+              "reason": "Smaller, but angle-bracket calls."
             },
             {
               "key": "C",
-              "reason": "Accepts ##Post."
+              "reason": "Broader inferred phase scope."
             },
             {
               "key": "D",
-              "reason": "Hidden in the body."
+              "reason": "Rule is authored inside the body."
+            },
+            {
+              "key": "E",
+              "reason": "Explicit and ordinary-call friendly, but adds parameter syntax."
             }
           ],
-          "tradeoff": "One more marker form, for a rule callers meet with usual arguments."
+          "tradeoff": "Surface and staging clarity, not a measured speed ranking."
         }
       },
       "draft": false,
@@ -183512,93 +183542,79 @@
       "designAway": [
         {
           "option": "A",
-          "loss": "A caller with a run-time value is refused.",
+          "loss": "A wrapper cannot treat its runtime body as if inputs were constants.",
           "attempts": [
-            "Fall back to a run-time check, as #Pre does; that drops the point of ##Pre.",
-            "Offer a fix: jet fix writes a match from the allowed values, 4 -> simd_sum(4, xs) and so on, with a fallback arm."
+            "Propagate symbolic call obligations in checked interfaces.",
+            "Discharge them at outer calls; keep ordinary body staging unchanged."
           ],
-          "result": "Reduced to one generated match; the refusal is the point of A."
+          "result": "Required implementation, not proof from j01."
         },
         {
           "option": "A",
-          "loss": "A forwarding wrapper such as sum_lanes could never build.",
+          "loss": "Runtime inputs need a dispatch or rejection policy.",
           "attempts": [
-            "Require every wrapper to take a number parameter; that is B for wrappers.",
-            "Count the enclosing function's own ##Pre-read parameters as known when passed on unchanged, so each outer call decides both rules."
+            "Manual literal-call match with an author-chosen fallback."
           ],
-          "result": "Removed by the second attempt."
+          "result": "No universal generated fix can invent application behavior."
         },
         {
           "option": "A",
-          "loss": "One copy per value would add machine code.",
+          "loss": "Bare function values can erase requirements.",
           "attempts": [
-            "Copy the body per value, as a number parameter does.",
-            "Keep a parameter read only by ##Pre as an ordinary argument, so the body compiles once."
+            "Reject erased unresolved obligations; allow constant-binding ordinary wrappers."
           ],
-          "result": "Removed: one body, as j01's simd_sum is today."
-        },
-        {
-          "option": "A",
-          "loss": "Two ways to require a known value: ##Pre and <N: Int>.",
-          "attempts": [
-            "Drop <N: Int>; then a value cannot shape a type such as [Int#N].",
-            "Teach the rule of thumb in the error: <N: Int> when the value shapes a type, ##Pre otherwise."
-          ],
-          "result": "Reduced to one rule in the error text."
-        },
-        {
-          "option": "A",
-          "loss": "A bare simd_sum used as a function value is refused.",
-          "attempts": [
-            "Check calls through the value at run time; that reopens the run-time path.",
-            "Suggest a wrapper, sum4, an ordinary function, which is Jai's #bake_arguments."
-          ],
-          "result": "Reduced to one wrapper, the same under every option."
+          "result": "Higher-order restriction remains; bound B/D instances do not need wrappers."
         },
         {
           "option": "B",
-          "loss": "The lane count moves into angle brackets and each value builds a copy.",
+          "loss": "Calls use angle-bracket value arguments.",
           "attempts": [
-            "Infer <lanes> from a literal argument.",
-            "Share one body when the parameter is not used in a type."
+            "Share emitted code where semantics permit.",
+            "E relocates parameter spelling and inference to ordinary calls."
           ],
-          "result": "Reduced; the second attempt is A's rule under another spelling."
+          "result": "Code duplication is not inherent; declaration/call organization still differs."
         },
         {
           "option": "C",
-          "loss": "## is accepted on markers with nothing to decide, such as #Post.",
+          "loss": "Some markers have no suitable early predicate.",
           "attempts": [
-            "Fail inside the marker's own code.",
-            "Add a registry opt-in; that is A."
+            "Infer applicability from the typed contract and reject unavailable result facts."
           ],
-          "result": "Removed only by becoming A."
+          "result": "Broader inference, not silent ##Post acceptance."
         },
         {
           "option": "D",
-          "loss": "The rule sits in the body, out of the signature.",
+          "loss": "Authored validation is inside the body.",
           "attempts": [
-            "Show the #run check in docs and hover.",
-            "Add compile_error, which does not exist today, with the caller's line."
+            "Render validation summaries in hover and documentation."
           ],
-          "result": "Reduced, not removed: a reader of the signature still cannot see it."
+          "result": "Tool visibility improves; the source signature still lacks the predicate."
+        },
+        {
+          "option": "E",
+          "loss": "Another parameter spelling is added.",
+          "attempts": [
+            "Lower both locations to the existing value-parameter contract, not parallel semantics."
+          ],
+          "result": "Syntax scope remains, while knownness is explicit at declaration."
         }
       ],
       "reports": [
         {
-          "title": "##Pre review: probes, marker settings and adversarial review",
+          "title": "Required argument checks: probes and different-family review",
           "path": "Docs/audits/2026-11-10-jai-generic-review.md",
-          "note": "j01-j06 on a0.0.43 (PRE-COMPILE1 still unbuilt: j05 stops at run time); early fits Markers.jet's settings; D-META-SPELL1=A unbuilt (no #run, 2,816 comptime); Jai, Zig, C++ sources."
+          "note": "j01-j06 rerun; corrected marker source line, contract workload, body-copy and wrapper claims. Added explicit parameter E; no candidate performance proof."
         },
         {
-          "title": "Jai community wiki: #modify and #bake_arguments",
+          "title": "Jai community #modify and currying",
           "url": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Advanced"
         },
         {
-          "title": "Zig language reference: @compileError",
+          "title": "Zig @compileError",
           "url": "https://ziglang.org/documentation/master/#compileError"
         },
         {
-          "title": "C++ constraints and requires-clauses",
+          "title": "C++ constraints",
           "url": "https://en.cppreference.com/w/cpp/language/constraints"
         }
       ]
@@ -200080,6 +200096,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:20:30.608Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-JAI-GENERIC1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T17:13:18.937Z",
       "by": "Main",
