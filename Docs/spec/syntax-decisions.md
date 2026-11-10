@@ -391,8 +391,8 @@ named form and a bare value appear for the same field, the named value wins.
 opt-out for secrets and similar). `#Flag` on a Bool / optional / defaulted
 field is E1309. Declaration order of required value fields is
 part of the command interface; the always-available named spelling keeps scripts
-stable across reorders. Help lists positionals before flags. Marker constant:
-`MARKER_FLAG` (`Flag`).
+stable across reorders. Help lists positionals before flags. Registry row: the
+`Flag` struct of `Compiler/Prelude/Markers.jet`.
 
 **D-CLI-FIELD-MARKERS1=A — per-field short names and environment fallbacks**
 *(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Short("n")`
@@ -401,8 +401,8 @@ rules use the existing field marker list and lower to the existing `core.args`
 builder. Explicit command input wins over the environment, and the environment
 wins over the field `{expr}` default. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
-Typed-CLI markers with no builder mapping are E1319. Marker constants:
-`MARKER_SHORT` (`Short`) and `MARKER_ENV` (`Env`).
+Typed-CLI markers with no builder mapping are E1319. Registry rows: the
+`Short` and `Env` structs of `Compiler/Prelude/Markers.jet`.
 
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `run: fn(args: T)` is

@@ -55,6 +55,9 @@ Scrub: struct {
     }
 }
 
+// Stores a pure function result or a computed field result until its checked
+// inputs change. A function uses the bounded default or `bound: none`; the
+// field form is bare `#Memo` before `name: T -> expr`.
 Memo: struct {
     bound: MemoBound{.Default}
 
@@ -63,6 +66,9 @@ Memo: struct {
     }
 }
 
+// A precondition on a function signature, `#Pre(cond, "msg")`. The condition
+// is a pure expression (the `#Pure` checker); it is checked in every build
+// unless a module's build policy strips it.
 Pre: struct {
     condition: Value
     message: String
@@ -73,6 +79,8 @@ Pre: struct {
     }
 }
 
+// A postcondition, `#Post(cond, "msg")`; `result` names the return value
+// inside `cond`.
 Post: struct {
     condition: Value
     message: String
@@ -85,6 +93,8 @@ Post: struct {
 
 // These rows stay separate. Kernel requests a checked
 // worker-boundary proof; Inline(Always) is a checked promise, not a hint.
+// `#Kernel(.parallel) name: fn …`: the mode is a closed argument, so another
+// execution mode needs a new owner ruling.
 Kernel: struct {
     mode: KernelMode
 
@@ -93,6 +103,8 @@ Kernel: struct {
     }
 }
 
+// `#Inline` on a function or method is a soft hint to inline it; sema never
+// rejects it and the compiler may ignore it.
 Inline: struct {
     mode: InlineMode{.Hint}
 
@@ -179,6 +191,8 @@ FFI: struct {
     }
 }
 
+// `#Undo(inverse)` names the compensating function a foreign binding
+// registers on the enclosing transaction's rollback path.
 Undo: struct {
     inverse: Ident
 
@@ -187,6 +201,9 @@ Undo: struct {
     }
 }
 
+// `#Close(close)` joins a returned foreign handle to the consuming
+// `close(handle)` protocol; the named foreign function is checked against the
+// returned handle before the binding is registered.
 Close: struct {
     close: Ident
 
@@ -195,6 +212,8 @@ Close: struct {
     }
 }
 
+// A C declaration's native calling convention. C is the implicit default;
+// another ABI is never inherited.
 ABI: struct {
     name: ABI
 
@@ -209,6 +228,8 @@ MustUse: struct {
     }
 }
 
+// Marks a named type as an allowed explicit error domain for a `!Error`
+// callable contract.
 Error: struct {
     impl Marker {
         sites: [.Type]
@@ -296,6 +317,9 @@ CodableAsBase: struct {
     }
 }
 
+// `#CLI` on a struct: a resolved `run: fn(args: T)` parameter type owns
+// parsing, defaults, help, completion, validation and audit facts. The marker
+// is optional; plain `run: fn()` stays a complete entry.
 CLI: struct {
     pack: Ident{none}
 
@@ -304,6 +328,8 @@ CLI: struct {
     }
 }
 
+// Derives a nested `T.Patch` with `apply`, `diff` and `merge`, Codable by
+// construction.
 Patchable: struct {
     impl Marker {
         sites: [.Type]
@@ -405,6 +431,7 @@ Flatten: struct {
     }
 }
 
+// Field and command help for CLI-derived arguments.
 Doc: struct {
     text: String
 
@@ -414,12 +441,16 @@ Doc: struct {
     }
 }
 
+// Opts a `#CLI` required value field out of positional filling: without it,
+// required scalars fill from bare argv in declaration order; with it, only
+// `--field` is accepted.
 Flag: struct {
     impl Marker {
         sites: [.Field]
     }
 }
 
+// A one-letter alias for a `#CLI` field.
 Short: struct {
     name: String
 
@@ -428,6 +459,7 @@ Short: struct {
     }
 }
 
+// The environment fallback for a `#CLI` value field.
 Env: struct {
     name: String
 
@@ -436,6 +468,9 @@ Env: struct {
     }
 }
 
+// A dev-tier contract on a module-level binding: the value survives `jet dev`
+// hot reloads (identity is module path plus binding name). Inert in release
+// builds.
 Persist: struct {
     impl Marker {
         sites: [.Declaration]
@@ -594,6 +629,8 @@ Interrupt: struct {
     }
 }
 
+// Marks a free function's first bare-read parameter as the receiver for the
+// equivalent `value.function(…)` spelling.
 Root: struct {
     impl Marker {
         sites: [.Parameter]
@@ -628,6 +665,9 @@ Bindgen: struct {
     }
 }
 
+// `#Allow(jet.FloatMoney, "why")` on a declaration, field or statement
+// silences that one lint there; the lint is named by its diagnostic type path
+// (JetSema/Source/Sema/LintAllowances.jet).
 Allow: struct {
     lint: Ident
     reason: String{none}

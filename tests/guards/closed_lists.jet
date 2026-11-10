@@ -587,10 +587,38 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
 // The syntax dictionary (`jet syntax`) keeps its rows' meanings, but each
 // row's token is a copy of the syntax registry spelling the row names in
 // `registry_name`: the registry (Compiler/JetFoundation/Data/Syntax) is the
-// token's one hand-written home. A row whose `registry_name` is its token,
-// or the generated trait-marker block's OWNED_TRAITS, copies no spelling.
+// token's one hand-written home. A marker row names MARKER_SOURCE, the one
+// marker registry (Compiler/Prelude/Markers.jet), whose structs are the
+// marker names; Data/Syntax/Markers.jet holds marker syntax and copies none
+// of them. A row whose `registry_name` is its token, or the generated
+// trait-marker block's OWNED_TRAITS, copies no spelling.
 CLOSED_LIST_SYNTAX_REGISTRY_DIR: "Compiler/JetFoundation/Data/Syntax"
 CLOSED_LIST_SYNTAX_DICTIONARY_PATH: "Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet"
+CLOSED_LIST_MARKER_REGISTRY_PATH: "Compiler/Prelude/Markers.jet"
+CLOSED_LIST_MARKER_SYNTAX_PATH: "Compiler/JetFoundation/Data/Syntax/Markers.jet"
+
+// The marker names `text` (a MARKER_SOURCE file) declares: its top-level
+// `Name: struct` lines.
+closed_list_marker_names: fn(text: String) -> [String:Int] {
+    names := [String:Int]{}
+    loop line in text.lines() {
+        ident: closed_list_ident_prefix(line)
+        if ident == "" || !policy_slice_bytes(line, ident.bytes().len(), line.bytes().len()).starts_with(": struct") -> next
+        names[ident] = 1
+    }
+    names
+}
+
+// Every spelling (of the marker syntax file) that is a registered marker
+// name: a second list of the registry's names.
+closed_list_marker_syntax_copies: fn(spellings: [ClosedListSpelling], markers: [String:Int]) -> [String] {
+    problems := [String]{}
+    loop spelling in spellings {
+        if markers.get(spelling.text) == None -> next
+        problems.push("{spelling.path} {spelling.name} copies the marker name `{spelling.text}`; markers are named only by their struct in {CLOSED_LIST_MARKER_REGISTRY_PATH}, so delete the constant and read the registry")
+    }
+    problems
+}
 
 // One registry spelling: the constant's name, its literal as written, and
 // its file.
@@ -638,8 +666,9 @@ closed_list_row_field: fn(line: String, name: String) -> String? {
 }
 
 // Every dictionary row in `dictionary` whose token differs from the registry
-// spelling it names, or that names no spelling.
-closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [ClosedListSpelling]) -> [String] {
+// spelling it names, or that names no spelling. A MARKER_SOURCE row's token
+// is one of `markers`, the marker registry's names.
+closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [ClosedListSpelling], markers: [String:Int]) -> [String] {
     by_name := [String:Int]{}
     loop (index, spelling) in spellings -> by_name[spelling.name] = index
     problems := [String]{}
@@ -648,6 +677,10 @@ closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [Close
         token: closed_list_row_field(line, "token") ?? next
         name: closed_list_row_field(line, "registry_name") ?? next
         if name == token || name == "OWNED_TRAITS" -> next
+        if name == "MARKER_SOURCE" {
+            if markers.get(token) == None -> problems.push("{CLOSED_LIST_SYNTAX_DICTIONARY_PATH} row `{token}` names MARKER_SOURCE, but {CLOSED_LIST_MARKER_REGISTRY_PATH} declares no `{token}` marker; the registry is the marker's one home")
+            next
+        }
         index: by_name.get(name) ?? -1
         if index < 0 {
             problems.push("{CLOSED_LIST_SYNTAX_DICTIONARY_PATH} row `{token}` names `{name}`, which no spelling in {CLOSED_LIST_SYNTAX_REGISTRY_DIR} declares; name the registry constant that spells the token")
@@ -668,20 +701,42 @@ closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [Close
         path: "{CLOSED_LIST_SYNTAX_REGISTRY_DIR}/{entry.name}"
         closed_list_spellings_in(path, closed_list_files.read(path) ?? panic("read {path}"), spellings)
     }
+    markers: closed_list_marker_names(closed_list_files.read(CLOSED_LIST_MARKER_REGISTRY_PATH) ?? panic("read {CLOSED_LIST_MARKER_REGISTRY_PATH}"))
+    assert(markers.len() > 50, "{CLOSED_LIST_MARKER_REGISTRY_PATH} declares no marker structs")
     dictionary: closed_list_files.read(CLOSED_LIST_SYNTAX_DICTIONARY_PATH) ?? panic("read {CLOSED_LIST_SYNTAX_DICTIONARY_PATH}")
-    problems: closed_list_syntax_dictionary_problems(dictionary, spellings)
+    problems: closed_list_syntax_dictionary_problems(dictionary, spellings, markers)
     loop problem in problems -> print(problem)
     assert_eq(problems.len(), 0)
     // Editing a copied token alone fails, naming the home; so does a row
-    // that names no spelling.
+    // that names no spelling, or a marker the registry doesn't declare.
     home := [ClosedListSpelling]{}
     closed_list_spellings_in("h.jet", "KW_BREAK: \"break\"\nKW_IF: \"if\" // the `if` keyword\n", home)
     assert_eq(home.len(), 2)
     assert_eq(home[1].text, "if")
-    kept: "    {{token: \"break\", query: \"break\", registry_name: \"KW_BREAK\", kind: K.Keyword}},\n    {{token: \"Min\", registry_name: \"Min\"}},\n"
-    assert_eq(closed_list_syntax_dictionary_problems(kept, home).len(), 0)
-    drift: closed_list_syntax_dictionary_problems("    {{token: \"brake\", registry_name: \"KW_BREAK\"}},\n    {{token: \"when\", registry_name: \"KW_WHEN\"}},\n", home)
-    assert_eq(drift.len(), 2)
+    registry: closed_list_marker_names("Pre: struct {{\n    condition: Value\n}}\n// Post: struct\nPost: struct {{\n}}\n")
+    assert_eq(registry.len(), 2)
+    kept: "    {{token: \"break\", query: \"break\", registry_name: \"KW_BREAK\", kind: K.Keyword}},\n    {{token: \"Min\", registry_name: \"Min\"}},\n    {{token: \"Pre\", registry_name: \"MARKER_SOURCE\"}},\n"
+    assert_eq(closed_list_syntax_dictionary_problems(kept, home, registry).len(), 0)
+    drift: closed_list_syntax_dictionary_problems("    {{token: \"brake\", registry_name: \"KW_BREAK\"}},\n    {{token: \"when\", registry_name: \"KW_WHEN\"}},\n    {{token: \"Pree\", registry_name: \"MARKER_SOURCE\"}},\n", home, registry)
+    assert_eq(drift.len(), 3)
     assert(drift[0].contains("row `brake` is a copy of h.jet KW_BREAK (`break`) and no longer matches it"))
     assert(drift[1].contains("names `KW_WHEN`, which no spelling"))
+    assert(drift[2].contains("declares no `Pree` marker"))
+}
+
+#Test("the marker syntax file copies no marker name") {
+    guards_enter_root()
+    markers: closed_list_marker_names(closed_list_files.read(CLOSED_LIST_MARKER_REGISTRY_PATH) ?? panic("read {CLOSED_LIST_MARKER_REGISTRY_PATH}"))
+    spellings := [ClosedListSpelling]{}
+    closed_list_spellings_in(CLOSED_LIST_MARKER_SYNTAX_PATH, closed_list_files.read(CLOSED_LIST_MARKER_SYNTAX_PATH) ?? panic("read {CLOSED_LIST_MARKER_SYNTAX_PATH}"), spellings)
+    assert(spellings.len() > 0, "{CLOSED_LIST_MARKER_SYNTAX_PATH} declares no syntax")
+    problems: closed_list_marker_syntax_copies(spellings, markers)
+    loop problem in problems -> print(problem)
+    assert_eq(problems.len(), 0)
+    // A name copied back into the syntax file fails, naming the registry.
+    copied := [ClosedListSpelling]{}
+    closed_list_spellings_in("m.jet", "RULE_PREFIX: \"#\"\nMARKER_PRE: \"Pre\"\n", copied)
+    found: closed_list_marker_syntax_copies(copied, closed_list_marker_names("Pre: struct {{\n}}\n"))
+    assert_eq(found.len(), 1)
+    assert(found[0].contains("m.jet MARKER_PRE copies the marker name `Pre`"))
 }
