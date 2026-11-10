@@ -323,10 +323,12 @@ impl AdvisoryLock.Close {
     }
 }
 
-/// An open file for reading. `read_line`, `lines`, and `read(max)` advance
-/// one shared position; `read` returns up to `max` bytes and an empty list
-/// at end of file. Only Core's opens fill the `priv handle`, so a literal
-/// outside core.files cannot forge one.
+/// An open file for reading. `read_line`, `lines`, `read(max)` and
+/// `read_into(buffer, limit)` advance one shared position; `read` returns up
+/// to `max` bytes and an empty list at end of file, and `read_into` appends up
+/// to `limit` bytes to `buffer` and returns the count, 0 at end of file.
+/// Only Core's opens fill the `priv handle`, so a literal outside core.files
+/// cannot forge one.
 FileReader: struct {
     priv stored_path: String
     path: String -> stored_path

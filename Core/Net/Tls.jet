@@ -232,6 +232,18 @@ impl TLSStream {
         __read(guard.value, max_bytes, end_ns)
     }
 
+    // Appends up to `limit` plaintext bytes to `buffer` and returns the
+    // count, 0 at the end of the stream. The bytes move from the engine's
+    // record buffer into `buffer`, so a caller that clears and reuses one
+    // List reads without allocating (#5976).
+    read_into: fn(self, &buffer: [U8], limit: Int, /, *, deadline: Duration) -[Net, Time.Wait]> Int IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read_into limit must be positive")))
+        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __read_into(guard.value, buffer, limit, end_ns)
+    }
+
     write_all: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
         end_ns: __deadline_end(deadline, "tls write all") ?? return Err(__net_to_io(err))
         state: __state(self) ?? return Err(__io_error(.Write, "TLS stream is closed"))
@@ -1131,6 +1143,14 @@ __await: fn(&tls: __TLSState, status: Int, end_ns: Int, operation: String) -[Net
 
 // One engine read of at most `limit` bytes (mbedtls_ssl_read).
 __engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> __Got NetError! {
+    status: __engine_read_status(tls, limit, end_ns, operation) ?? return Err(err)
+    if status > 0 -> return Ok(__Got{status: status, bytes: __slice(tls.buffer, 0, status)})
+    Ok(__Got{status: status, bytes: [U8]{}})
+}
+
+// One engine read of at most `limit` bytes into `tls.buffer`: the count, or
+// the settled status when no byte came.
+__engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     size: if limit < C_RECORD_BYTES -> limit else -> C_RECORD_BYTES
     status := 0
     if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
@@ -1138,8 +1158,8 @@ __engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) 
         .Err(e) -> status = __code(e)
     }
     sent: __flush(tls, end_ns, operation) ?? return Err(err)
-    if status > 0 -> return Ok(__Got{status: status, bytes: __slice(tls.buffer, 0, status)})
-    Ok(__Got{status: __settle(status, sent), bytes: [U8]{}})
+    if status > 0 -> return Ok(status)
+    Ok(__settle(status, sent))
 }
 
 // ---- handshake and I/O --------------------------------------------------------
@@ -1232,6 +1252,38 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
         if status == C_PEER_CLOSE_NOTIFY {
             tls.read_eof = true
             return Ok([U8]{})
+        }
+        // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
+        if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            status = __await(tls, status, end_ns, "tls read") ?? return Err(__net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(__io_error(.Read, "TLS read failed: {__mbedtls_text(status)}"))
+    }
+}
+
+// read_into under the stream's lock: __read's steps, the bytes appended to
+// `buffer` rather than returned.
+__read_into: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+    if tls.closed -> return Err(__io_error(.Read, "TLS stream is closed"))
+    if tls.pending.len() > 0 {
+        count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
+        loop index in 0..<count -> buffer.push(tls.pending[index])
+        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        return Ok(count)
+    }
+    if tls.read_eof -> return Ok(0)
+    loop {
+        status := __engine_read_status(tls, limit, end_ns, "tls read") ?? return Err(__net_to_io(err))
+        if status > 0 {
+            loop index in 0..<status -> buffer.push(tls.buffer[index])
+            return Ok(status)
+        }
+        if status == C_PEER_CLOSE_NOTIFY {
+            tls.read_eof = true
+            return Ok(0)
         }
         // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
         if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))

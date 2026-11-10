@@ -1127,6 +1127,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
 | `reader.read_line()` | `?String !IOError` | Read from the shared buffered position, remove all trailing CR/LF bytes, and return `None` only at EOF. A final unterminated line is returned; invalid UTF-8 is `IOError.InvalidInput`. |
 | `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.read_into(buffer: &[U8], limit)` | `Int !IOError` | Append up to `limit` bytes from the shared position to the caller's `buffer` and return the count; 0 is EOF, and a limit below one is `IOError.InvalidInput` before any read. A cleared, reused buffer reads without allocating. |
 | `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
 | `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
@@ -5058,6 +5059,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
+| `stream.read_into(buffer: &[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int !NetError` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
@@ -5080,6 +5082,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `stream.read_into(buffer: &[U8], limit, deadline:)` on `UnixStream` | `Int !NetError` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit !NetError` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
 | `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage !NetError` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
@@ -5200,6 +5203,7 @@ Mbed TLS 3.6.7); configuration carriers are validated before network use. See
 | `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
+| `stream.read_into(buffer: &[U8], limit, deadline:)` | `Int !IOError` | Append up to `limit` decrypted bytes to the caller's `buffer` and return the count; 0 is close-notify, and a limit below one is `IOError.InvalidInput`. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
 
 TLS handshake, read, write, and close-notify drive the engine over the consumed

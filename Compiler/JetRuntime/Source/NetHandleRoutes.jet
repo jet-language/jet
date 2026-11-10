@@ -300,6 +300,84 @@ net_tcp_read_deadline: fn(stream: I64, limit: I64, milliseconds: I64, output: I6
 }
 #Export(c) jet_net_tcp_read_bytes_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, length, false, error) }
 #Export(c) jet_net_tcp_read_text_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, I64{0}, true, error) }
+// `read_into` (#5976): one read of at most `limit` bytes appended to the
+// caller's List<U8> at `header` [len@0][capacity@8][data@16]; the count is
+// the output, 0 at end of stream, and a limit below 1 is invalid input. A
+// List without room for the read and its scratch grows
+// (rt_host_u8_list_room), so a caller that clears and reuses its List reads
+// without allocating: the bytes go straight into its buffer, and the scratch
+// words sit in its spare room. A carry a text read left is appended first,
+// without reading the socket.
+// `milliseconds` is an explicit deadline, or -1 for the stream's own.
+// TCP and Unix streams share it; Unix also retries an interrupted read.
+NET_READ_INTO_SCRATCH: I64{72}
+net_read_into: fn(stream: I64, header: I64, word: I64, milliseconds: I64, tcp: Bool, output: I64, error: I64) -> I64 {
+    operation: if tcp -> rt_static_text("tcp read") else -> rt_static_text("unix read")
+    limit: host_native_int(word)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_direction_open(stream, true, operation, error) -> return I64{0}
+    if (limit <= I64{0}) {
+        message: if tcp -> rt_static_text("tcp read_into limit must be positive") else -> rt_static_text("unix read_into limit must be positive")
+        return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(message), I64{0}, error)
+    }
+    cap: if (limit < I64{16777216}) -> limit else -> I64{16777216}
+    carried: net_carry_count(stream)
+    if (carried > I64{0}) {
+        rt_host_u8_list_room(header, carried)
+        held: net_word(header, I64{0})
+        end: wrapping(net_word(header, I64{16}) + held * RT_HOST_U8_STRIDE)
+        _ := net_carry_take(stream, end)
+        taken: if (carried < cap) -> carried else -> cap
+        if (taken < carried) -> net_carry_keep(stream, end, taken, carried - taken)
+        net_put(header, I64{0}, held + taken)
+        net_put(output, I64{0}, taken)
+        return I64{1}
+    }
+    // The read's 64 scratch bytes (errno words, the stream's deadline save at
+    // 32 and an explicit deadline's at 48) sit word-aligned in the List's spare
+    // room past the `cap` bytes the read may fill: no block is taken, and a
+    // reused List keeps the room, so the steady loop allocates nothing.
+    rt_host_u8_list_room(header, cap + NET_READ_INTO_SCRATCH)
+    held: net_word(header, I64{0})
+    past: wrapping(net_word(header, I64{16}) + (held + cap) * RT_HOST_U8_STRIDE)
+    scratch: wrapping(past + I64{7}).bit_and(I64{-8})
+    save: wrapping(scratch + I64{48})
+    if (milliseconds >= I64{0}) -> net_route_deadline_push(milliseconds, save)
+    net_tcp_deadline(stream, true, wrapping(scratch + I64{32}))
+    result := I64{0}
+    if (!tcp || net_tcp_apply_deadlines(stream, operation, scratch, error)) {
+        length: net_word(header, I64{0})
+        into: wrapping(net_word(header, I64{16}) + length * RT_HOST_U8_STRIDE)
+        result = I64{-1}
+        loop result < (I64{0}) {
+            count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), into, cap, scratch)
+            if (count >= I64{0}) {
+                net_put(header, I64{0}, length + count)
+                net_put(output, I64{0}, count)
+                result = I64{1}
+            } else {
+                code: net_word(scratch, I64{8})
+                if (code != I64{11} && (tcp || code != I64{4})) {
+                    _ := net_route_errno(operation, I64{0}, code, error)
+                    result = I64{0}
+                } else if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) {
+                    result = I64{0}
+                }
+            }
+        }
+    }
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
+    if (milliseconds >= I64{0}) -> jet_ctx_pop_deadline(save)
+    result
+}
+net_read_into_deadline: fn(stream: I64, header: I64, word: I64, deadline: I64, tcp: Bool, output: I64, error: I64) -> I64 {
+    milliseconds: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, if tcp -> rt_static_text("tcp read") else -> rt_static_text("unix read"), error) -> return I64{0}
+    net_read_into(stream, header, word, milliseconds, tcp, output, error)
+}
+#Export(c) jet_net_tcp_read_into: fn(stream: I64, header: I64, limit: I64, output: I64, error: I64) -> I64 { net_read_into(stream, header, limit, I64{-1}, true, output, error) }
+#Export(c) jet_net_tcp_read_into_deadline: fn(stream: I64, header: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_read_into_deadline(stream, header, limit, deadline, true, output, error) }
 net_tcp_write_current: fn(stream: I64, data: I64, length: I64, scratch: I64, error: I64) -> I64 {
     operation: rt_static_text("tcp write")
     if !net_tcp_direction_open(stream, false, operation, error) -> return I64{-1}

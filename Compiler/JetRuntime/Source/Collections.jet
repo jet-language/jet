@@ -39,6 +39,24 @@ host_u8_put: fn(data: I64, index: I64, byte: I64) {
     true
 }
 
+// Room in the exclusively lent List<U8> at `header` for `room` more bytes:
+// one without it grows to at least twice its capacity, its bytes copied
+// over, so a caller that clears and reuses one List stops allocating
+// (`read_into`, #5976).
+rt_host_u8_list_room: fn(header: I64, room: I64) {
+    length: trap_word(header)
+    capacity: trap_word(wrapping(header + I64{8}))
+    if (capacity - length >= room) -> return
+    grown := capacity * I64{2}
+    if (grown < length + room) -> grown = length + room
+    next: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
+    data: trap_word(wrapping(header + I64{16}))
+    if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * RT_HOST_U8_STRIDE)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * RT_HOST_U8_STRIDE, I64{8})
+    trap_store(wrapping(header + I64{8}), grown)
+    trap_store(wrapping(header + I64{16}), next)
+}
+
 coll_payload: fn(meta: I64) -> I64 {
     kind: trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})
     if (kind == I64{11}) { return I64{0} }

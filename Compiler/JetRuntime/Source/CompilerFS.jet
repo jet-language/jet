@@ -300,6 +300,38 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     compiler_fs_bytes_take(bytes, limit, count, output, len)
     I64{1}
 }
+// FileReader.read_into(buffer, limit) (#5976): one read of at most `limit`
+// bytes appended to the caller's List<U8> at `header` [len@0][capacity@8]
+// [data@16]; the count is the output, 0 at end of file. A List without room
+// grows (rt_host_u8_list_room), so a caller that clears and reuses its List
+// reads without allocating: the bytes go straight into it, and the read's
+// 32 error words sit in its spare capacity past the read.
+#Export(c) jet_std_file_reader_read_into: fn(reader: I64, header: I64, maximum: I64, output: I64, error: I64) -> I64 {
+    path: fd_word(reader, I64{24})
+    if compiler_fs_fault(path, error) -> return I64{0}
+    if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
+        count: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
+        cause: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("read_into needs a positive byte count, got "))
+        rt_text_push_number(cause, count)
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
+    }
+    limit := I64{16777216}
+    if (jet_int_compare(maximum, limit) < I64{0}) -> limit = jet_int_owned_to_i64(maximum)
+    rt_host_u8_list_room(header, limit + I64{40})
+    length: rt_text_word(header)
+    into: wrapping(rt_text_word(wrapping(header + I64{16})) + length * RT_HOST_U8_STRIDE)
+    scratch: wrapping(into + limit * RT_HOST_U8_STRIDE + I64{7}).bit_and(I64{-8})
+    count := I64{0}
+    loop {
+        count = jet_fd_read_raw(reader, into, limit, scratch)
+        if (count >= I64{0} || rt_text_word(wrapping(scratch + I64{8})) != I64{4}) -> break
+    }
+    if (count < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(wrapping(scratch + I64{8})), error)
+    rt_text_store(header, length + count)
+    rt_text_store(output, jet_int_owned_from_i64(count))
+    I64{1}
+}
 // FileReader.seek(position): std Seek::seek(SeekFrom::Start(position)) on
 // the reader's descriptor. jet_fd_seek_raw drops buffered read-ahead, so the
 // next read, read_line or lines starts at `position`.

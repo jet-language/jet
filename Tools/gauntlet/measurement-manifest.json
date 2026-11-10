@@ -331,6 +331,56 @@
         },
         "verdict": "win",
         "verdict_reason": "Strict win on the native tier: median ratio 0.056, paired-bootstrap 95% upper bound 0.058 (100 trials, 10 warmups)."
+      },
+      {
+        "id": "net_read_into_vs_read",
+        "card": "#5976 c112",
+        "surface": "read_into into one cleared buffer",
+        "plain": "read(4096) returning a fresh list",
+        "workload": "64 MiB over loopback TCP, written in 4 KiB blocks by a writer task, read in 4096-byte reads until end of stream",
+        "surface_program": "gauntlet:performance-surface:net_read_into_vs_read:surface",
+        "plain_program": "gauntlet:performance-surface:net_read_into_vs_read:plain",
+        "evidence_key": "net_read_into_vs_read",
+        "evidence_file": "Tools/gauntlet/performance-surface-read-into-evidence.json",
+        "memory_evidence_file": "Tools/gauntlet/performance-surface-read-into-memory.json",
+        "surface_field": "surface_wall_time_ms",
+        "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: net_read_into_vs_read surface spelling\npackage: {\n    name: \"read_into_pair_surface\"\n    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }\n}\nuse net: core.net\n\nrun: fn() {\n    listener: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"listen\")\n    address: net.listener_local_socket_addr(listener) ?? panic(\"listener address\")\n    writer: task {\n        accepting := listener.move()\n        side: accepting.accept() ?? panic(\"accept\")\n        block := [U8]{}\n        loop _ in 0..<4096 { block.push(U8{97}) }\n        loop _ in 0..<16384 { side.write_all(block) ?? panic(\"write\") }\n        side.close() ?? panic(\"close\")\n    }\n    client := net.tcp_connect_addr(address) ?? panic(\"connect\")\n    total := 0\n    reads := 0\n    buffer := [U8]{}\n    loop {\n        buffer.clear()\n        count: client.read_into(buffer, 4096) ?? panic(\"read_into\")\n        if count == 0 -> break\n        total += count\n        reads += 1\n    }\n    writer.join() ?? panic(\"writer\")\n    eprint(\"reads={reads}\")\n    print(\"performance-surface:net_read_into_vs_read:{total}\")\n}",
+        "plain_source": "// Real paired workload: net_read_into_vs_read plain spelling\npackage: {\n    name: \"read_into_pair_plain\"\n    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }\n}\nuse net: core.net\n\nrun: fn() {\n    listener: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"listen\")\n    address: net.listener_local_socket_addr(listener) ?? panic(\"listener address\")\n    writer: task {\n        accepting := listener.move()\n        side: accepting.accept() ?? panic(\"accept\")\n        block := [U8]{}\n        loop _ in 0..<4096 { block.push(U8{97}) }\n        loop _ in 0..<16384 { side.write_all(block) ?? panic(\"write\") }\n        side.close() ?? panic(\"close\")\n    }\n    client := net.tcp_connect_addr(address) ?? panic(\"connect\")\n    total := 0\n    reads := 0\n    loop {\n        bytes: client.read(4096) ?? panic(\"read\")\n        if bytes.len() == 0 -> break\n        total += bytes.len()\n        reads += 1\n    }\n    writer.join() ?? panic(\"writer\")\n    eprint(\"reads={reads}\")\n    print(\"performance-surface:net_read_into_vs_read:{total}\")\n}",
+        "input_range": "0..<16384",
+        "inputs": {
+          "blocks": 16384,
+          "block_bytes": 4096,
+          "read_limit": 4096,
+          "range": "0..<16384",
+          "expected_total": 67108864
+        },
+        "expected_output": "performance-surface:net_read_into_vs_read:67108864\n",
+        "metrics": [
+          "wall_time_ms",
+          "allocations_per_read",
+          "peak_live_heap_bytes",
+          "peak_rss_kb"
+        ],
+        "measured": {
+          "surface_wall_time_ms": 46.709,
+          "plain_wall_time_ms": 55.039,
+          "ratio": 0.8486527734878905,
+          "surface_allocations_per_read": 3.042,
+          "plain_allocations_per_read": 5.047,
+          "surface_peak_live_heap_bytes": 145240,
+          "plain_peak_live_heap_bytes": 147240,
+          "surface_peak_rss_kb": 15212,
+          "plain_peak_rss_kb": 15220
+        },
+        "metric_verdicts": {
+          "wall_time_ms": "win",
+          "allocations_per_read": "win",
+          "peak_live_heap_bytes": "win",
+          "peak_rss_kb": "inconclusive"
+        },
+        "verdict": "win",
+        "verdict_reason": "Strict win on the native tier: median ratio 0.849, paired-bootstrap 95% upper bound 0.947 (100 trials, 10 warmups); allocations per read and peak live heap win; peak RSS ratio 0.9995 with its 95% interval 0.9984..1.0008 across 1, inconclusive at page resolution."
       }
     ]
   },

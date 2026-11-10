@@ -160,7 +160,8 @@ sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) 
     }
     if owner == "FileReader" {
         if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead{into: false}, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "read_into" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead{into: true}, result_type: sema_stream_handle_result(Type.Int, io), params: [SemaCallParam]{sema_stream_handle_param("buffer", bytes, AccessConvention.Write), sema_stream_handle_param("limit", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
         if method == "seek" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderSeek, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("position", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "FileWriter" {
@@ -256,7 +257,7 @@ sema_stream_handle_read_spec: fn(operation: THandleOp, result_type: Type, params
 }
 
 sema_stream_handle_known_wrong_direction: fn(owner: String, method: String) -> Bool Never! {
-    (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
+    (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read" || method == "read_into"))
 }
 
 // Rust `file_handle_method_return` (E2-M7) types the methods of these handles
@@ -355,6 +356,14 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
         if !compatible {
             diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
             return None
+        }
+        // A `&` argument keeps its Write borrow of the caller's place, so the
+        // route writes the original, never a copy (#5976).
+        if params[slot].convention == AccessConvention.Write {
+            borrow_type: checked.ty.copy()
+            borrow_span: checked.span
+            values.push(sema_tree_node(borrow_type, TExprKind.Borrow{place: checked, access: AccessConvention.Write}, borrow_span))
+            next
         }
         values.push(checked)
     }

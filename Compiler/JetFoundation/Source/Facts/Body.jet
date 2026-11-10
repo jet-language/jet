@@ -443,7 +443,8 @@ BodyHandleOp: enum {
     Hardware(operation: THardwareCall)
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
-    FileReaderRead
+    // `into`: read_into, appending to the caller's List<U8> (#5976).
+    FileReaderRead(into: Bool)
     FileReaderSeek
     FileReaderPath
     MappedFileWindow
@@ -543,8 +544,9 @@ BodyHandleOp: enum {
     TCPStreamPeerAddr
     TCPStreamLocalAddr
     TCPStreamClose
-    TCPStreamReadBytes
-    TCPStreamReadBytesDeadline
+    // `into`: read_into, appending to the caller's List<U8> (#5976).
+    TCPStreamReadBytes(into: Bool)
+    TCPStreamReadBytesDeadline(into: Bool)
     TCPStreamReadText
     TCPStreamReadTextDeadline
     TCPStreamWriteBytes
@@ -560,7 +562,7 @@ BodyHandleOp: enum {
     UDPSocketReceiveDeadline
     UDPSocketSendToDeadline
     UnixListenerAcceptDeadline
-    UnixStreamReadDeadline
+    UnixStreamReadDeadline(into: Bool)
     UnixStreamWriteAllDeadline
     UnixStreamReady
     UnixStreamClose

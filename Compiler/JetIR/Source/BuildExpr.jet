@@ -2362,6 +2362,12 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     loop arg in args {
         slot: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
+        // A route writes a `&` List argument's buffer in place
+        // (`stream.read_into(buffer, limit)`): a buffer another holder
+        // shares is first the argument's own.
+        if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
+            if access == .Write -> ir_make_unique(m, p, b, slot)
+        }
         inputs.push(slot)
     }
     if operation == .ReaderOver(_) || operation == .ReaderTake {
