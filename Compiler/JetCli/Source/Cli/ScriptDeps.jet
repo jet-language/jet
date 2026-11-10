@@ -4,6 +4,7 @@
 // network; only `jet run`'s first run fetches (jet_cli_script_dependency_fetch).
 use {
     jet_driver.[JetDriverScriptDependency]
+    jet_lexer.[lex_may_pin_inline_version]
     jet_pkg_model.[
         InlineDep, InlineDepUnresolved, PKG_INLINE_DEPS_FIXTURES_ENV, PackageFacts,
         pkg_inline_deps_collect, pkg_inline_deps_e1253, pkg_inline_deps_numeric_version,
@@ -33,7 +34,7 @@ jet_cli_script_dependency_error: fn(path: String, source: String, dep: InlineDep
 // the network. A local package stays authoritative, and admission
 // (jet_cli_script_dependency_roots) owns every other failure.
 jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, json: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput? Never! {
-    if !source.contains("#") -> return None
+    if !lex_may_pin_inline_version(source.bytes()) -> return None
     entry_path: cli_files.realpath(file) ?? return None
     script_dir: jet_cli_parent(entry_path) ?? return None
     if cli_files.exists(cli_files.join(script_dir, "package.jet")) -> return None
@@ -99,6 +100,8 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
         }
     }
     entry: loop file in entry_root.files { if file.path == entry_path -> break file } ?? return None
+    // A source with no `#` before a number pins nothing: no parse to find out.
+    if !lex_may_pin_inline_version(entry.source.bytes()) -> return None
     program: jet_cli_parsed_program(entry.source) ?? return None
     script_dir: jet_cli_parent(entry_path) ?? "/"
     loop dep in pkg_inline_deps_collect(program) {
