@@ -10,7 +10,8 @@
 // of a compiler-private source part (Compiler/Prelude/CoreSourceParts.tsv: not
 // a Core module, not importable, its members not user items) are outside it,
 // counted on their own line, and reached only through the public functions
-// that call them. Prelude functions and types are in scope unqualified.
+// that call them. Prelude functions and types, and the compiler's bare
+// spellings of Core types (`Path`, `URL`), are in scope unqualified.
 //
 // Usage (from anywhere in the checkout):
 //     jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]
@@ -31,6 +32,7 @@ use {
 TOOL: "/Tools/agent/CoreCoverage.jet"
 RATCHET: "Tools/agent/core-coverage-ratchet.json"
 PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
+BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 USAGE: "usage: jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
@@ -136,6 +138,12 @@ Call: struct {
 Owner: struct {
     name: String
     kind: String
+}
+
+// A name a program starts with and the declaration it stands for.
+Alias: struct {
+    name: String
+    target: String
 }
 
 Chain: struct {
@@ -1131,6 +1139,39 @@ record: fn(functions: &[Function], seen: &[String: Bool], table: Table, program:
     }
 }
 
+// The bare spellings the compiler resolves in every program, by
+// CORE_BARE_SOURCE_MODULES in BARE_SPELLINGS: each bare name and the Core
+// declaration it stands for (`Path` is core.files.Path, `Date` is
+// core.time.LocalDate). A tree without that table (a fixture) has none.
+bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
+    found := [Alias]{}
+    source: files.read("{root}/{BARE_SPELLINGS}") ?? return found
+    inside := false
+    loop line in source.split("\n") {
+        if line.starts_with("CORE_BARE_SOURCE_MODULES:") {
+            inside = true
+            next
+        }
+        if !inside -> next
+        if line.starts_with("}}") -> break
+        pieces := [String]{}
+        loop piece in line.split("\"") -> pieces.push(piece.copy())
+        if pieces.len() < 5 || !pieces[0].contains("name:") -> next
+        declared: if pieces.len() >= 7 && pieces[4].contains("declared:") -> pieces[5] else -> pieces[1]
+        found.push(Alias{name: pieces[1].copy(), target: "{pieces[3]}.{declared}"})
+    }
+    found
+}
+
+// `aliases` with every bare spelling it does not already bind.
+with_bare: fn(aliases: [String: String], bare: [Alias]) -> [String: String] Never! {
+    out := aliases.copy()
+    loop alias in bare {
+        if !out.has_key(alias.name) -> out[alias.name.copy()] = alias.target.copy()
+    }
+    out
+}
+
 census: fn(root: String) -[FS]> Report CoverageError! {
     parts: part_paths(root) ?? return Err(err)
     listed := [String]{}
@@ -1155,14 +1196,15 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     unique := 0
     loop _ in table.by_id -> unique += 1
     if functions.len() == 0 || unique != functions.len() -> return Err(fail("Core census is empty or contains duplicate public function identities"))
+    bare: bare_spellings(root)
     seen := [String: Bool]{}
     loop index in 0..<paths.len() {
         programs: doctest_programs(sources[index])
         if programs.len() == 0 -> next
-        initial: initial_aliases(table, module_name(paths[index]))
+        initial: with_bare(initial_aliases(table, module_name(paths[index])), bare)
         loop at in 0..<programs.len() -> record(functions, seen, table, programs[at], "{paths[index]}#doctest-{at + 1}", DOCTESTS, initial)
     }
-    plain: initial_aliases(table, "")
+    plain: with_bare(initial_aliases(table, ""), bare)
     kinds: [Int]{EXAMPLES, TESTS}
     loop kind in kinds {
         found := [String]{}
@@ -1675,6 +1717,25 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     report: census(root) ?? panic(err.message)
     assert_eq(find_function(report, "Place.display").tests, [String]{"tests/place.jet:3"})
     assert_eq(report.total_uncovered, 0)
+    files.remove_all(root) ?? ()
+}
+
+#Test("a compiler bare spelling of a Core type is in scope unqualified, renamed or not") {
+    root: files.mkdtemp("core-coverage-bare") ?? panic("a temporary directory cannot be made: {err}")
+    put(root, "Core/Draw/Draw.jet", "impl Shape.Checked {{ check: fn(text: String) -> Bool Never! {{ text != \"\" }} }}\nLocalDay: struct {{\n    today: fn() -> Int Never! {{ 1 }}\n}}\n")
+    // A same-named type in another module is not what the bare name binds.
+    put(root, "Core/Other/Other.jet", "Shape: struct {{\n    check: fn(text: String) -> Bool Never! {{ true }}\n}}\n")
+    put(root, BARE_SPELLINGS, "CoreBareSourceModule: struct {{}}\nCORE_BARE_SOURCE_MODULES: [CoreBareSourceModule]{{\n    {{name: \"Shape\", module_name: \"core.draw\"}},\n    {{name: \"Day\", module_name: \"core.draw\", declared: \"LocalDay\"}},\n}}\n")
+    put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n")
+    put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
+    put(root, "tests/shape.jet", "run: fn() {{\n    print(Shape.check(\"a\"))\n    print(Day.today())\n}}\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(find_function(report, "Shape.check").tests, [String]{"tests/shape.jet:2"})
+    assert_eq(find_function(report, "LocalDay.today").tests, [String]{"tests/shape.jet:3"})
+    other: report.functions.filter(row -> row.unit == "core.other")
+    assert_eq(other.map(row -> row.id.copy()), [String]{"core.other.Shape.check"})
+    assert_eq(other[0].tests, [String]{})
+    assert_eq(report.total_uncovered, 1)
     files.remove_all(root) ?? ()
 }
 

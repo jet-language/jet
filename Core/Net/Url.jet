@@ -199,7 +199,7 @@ impl URL.CheckedText {
     Hole: String
 
     check: fn(text: String) URLLiteralError! -[]> {
-        if literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
+        if __url_literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
         return Ok()
     }
 
@@ -210,7 +210,7 @@ impl URL.CheckedText {
 
 // A marker that occurs in none of `literals`, standing for each hole while the
 // skeleton parses.
-hole_marker: fn(literals: [String]) -> String Never! {
+__url_hole_marker: fn(literals: [String]) -> String Never! {
     nonce := 0
     marker := ""
     loop {
@@ -228,7 +228,7 @@ hole_marker: fn(literals: [String]) -> String Never! {
 // Why the checked skeleton `text` (a `{}` at each hole) is no URL, or None.
 // Scheme, port and data-URL MIME holes are found structurally; the rest
 // parses with the URL grammar `literal` uses.
-literal_reason: fn(text: String) -> String? {
+__url_literal_reason: fn(text: String) -> String? {
     raw: text.bytes()
     literals := [String]{}
     start := 0
@@ -239,7 +239,7 @@ literal_reason: fn(text: String) -> String? {
         start = next_hole + 2
     }
     literals.push(slice(raw, start, raw.len()))
-    marker: hole_marker(literals)
+    marker: __url_hole_marker(literals)
     skeleton: unicode.trim(literals.join(marker))
     bytes: skeleton.bytes()
     colon: index_of(bytes, 58)
@@ -286,7 +286,7 @@ literal_reason: fn(text: String) -> String? {
 
 literal: fn(literals: [String], holes: [String]) -> URL Never! {
     if literals.len() != holes.len() + 1 -> panic("typed URL literal and hole counts do not match")
-    marker: hole_marker(literals)
+    marker: __url_hole_marker(literals)
     skeleton := literals[0]
     loop i in 0..<holes.len() -> skeleton = "{skeleton}{marker}{literals[i + 1]}"
     // Match the validator's Unicode-whitespace skeleton boundary, without

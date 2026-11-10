@@ -1,0 +1,98 @@
+// The CheckedText hooks of Core's typed heads, called directly: what `check`
+// accepts and refuses, what `encode_hole` makes of a value, and what `build`
+// assembles from literal parts and encoded holes.
+use core.db.[SQL, DBValue]
+use core.net.url.[URL]
+use core.process.[Sh]
+use core.text.html.[HTML]
+use time: core.time
+use core.time.[DateTime]
+
+// A bound value as `kind:value` text, so one assert_eq checks its variant too.
+bound: fn(value: DBValue) -> String {
+    if value == {
+        .Null -> "null"
+        .Int(n) -> "int:{n}"
+        .Float(f) -> "float:{f}"
+        .Text(t) -> "text:{t}"
+        .Bool(b) -> "bool:{b}"
+        .Blob(bytes) -> "blob:{bytes.len()}"
+    }
+}
+
+path_refusal: fn(text: String) -> String {
+    Path.check(text) ?? return err.reason
+    ""
+}
+
+url_refusal: fn(text: String) -> String {
+    URL.check(text) ?? return err.reason
+    ""
+}
+
+datetime_refusal: fn(text: String) -> String {
+    DateTime.check(text) ?? return err.reason
+    ""
+}
+
+#Test("SQL accepts any text and keeps each hole a bound value") {
+    SQL.check("select * from users where id = {{}}") ?? panic("SQL refused a query")
+    assert_eq(bound(SQL.encode_hole(7)), "int:7")
+    assert_eq(bound(SQL.encode_hole(true)), "bool:true")
+    assert_eq(bound(SQL.encode_hole("o'hara")), "text:o'hara")
+    assert_eq(bound(SQL.encode_hole(DBValue.Null)), "null")
+    assert_eq(bound(SQL.encode_hole([U8]{1, 2, 3})), "blob:3")
+    query: SQL.build([String]{"select * from users where id = ", " and name = ", ""}, [DBValue]{DBValue.Int(7), DBValue.Text("o'hara")})
+    assert_eq(query.template(), "select * from users where id = ? and name = ?")
+    assert_eq(query.params().map(value -> bound(value)), [String]{"int:7", "text:o'hara"})
+}
+
+#Test("Path refuses NUL and encodes each hole as one component") {
+    assert_eq(path_refusal("/srv/{{}}/data"), "")
+    nul: String.from_bytes([U8]{47, 97, 0, 98}) ?? panic("{err}")
+    assert_eq(path_refusal(nul), "a Path cannot contain a NUL character")
+    assert_eq(Path.encode_hole(42), "42")
+    built: Path.build([String]{"/srv/", "/data"}, [String]{"a/b"})
+    assert_eq("{built}", "/srv/a%2Fb/data")
+}
+
+#Test("URL refuses an interpolated scheme and keeps holes opaque") {
+    assert_eq(url_refusal("https://example.com/{{}}"), "")
+    assert_eq(url_refusal("{{}}://example.com/"), "URL scheme cannot contain interpolation")
+    assert_eq(URL.encode_hole(8080), "8080")
+    built: URL.build([String]{"https://example.com/files/", ""}, [String]{"a b"})
+    assert_eq(built.host() ?? "", "example.com")
+    assert_eq("{built}", "https://example.com/files/a%20b")
+}
+
+#Test("URL finds port and data-URL MIME holes before the skeleton parses") {
+    assert_eq(url_refusal("https://example.com:{{}}/"), "URL port cannot contain interpolation")
+    assert_eq(url_refusal("data:{{}},hello"), "data URL MIME metadata cannot contain interpolation")
+    assert_eq(url_refusal("data:{{}}"), "data URL payload needs a MIME separator")
+    assert_eq(url_refusal("data:text/plain,{{}}"), "")
+    assert_eq(url_refusal("http://[::1/{{}}"), "the text is not a valid URL (Syntax)")
+}
+
+#Test("Sh splits literal text on whitespace and keeps each hole one argument") {
+    Sh.check("ls -l {{}}") ?? panic("Sh refused a command")
+    assert_eq(Sh.encode_hole(3), "3")
+    built: Sh.build([String]{"ls -l ", " --color"}, [String]{"my file"})
+    assert_eq(built.args(), [String]{"ls", "-l", "my file", "--color"})
+}
+
+#Test("HTML escapes a plain hole and keeps an HTML hole as markup") {
+    HTML.check("<p>{{}}</p>") ?? panic("HTML refused markup")
+    assert_eq(HTML.encode_hole("<b>&"), "&lt;b&gt;&amp;")
+    assert_eq(HTML.encode_hole(HTML.raw("<i>x</i>")), "<i>x</i>")
+    built: HTML.build([String]{"<p>", "</p>"}, [String]{"&lt;b&gt;"})
+    assert_eq(built.text(), "<p>&lt;b&gt;</p>")
+}
+
+#Test("DateTime accepts one RFC 3339 instant and refuses interpolation") {
+    assert_eq(datetime_refusal("2024-02-29T13:04:05Z"), "")
+    assert_eq(datetime_refusal("2024-02-29T{{}}:04:05Z"), "a `DateTime` literal cannot contain interpolation")
+    assert(datetime_refusal("2024-02-30T13:04:05Z") != "")
+    assert_eq(DateTime.encode_hole(5), "5")
+    built: DateTime.build([String]{"2024-02-29T13:04:05Z"}, [String]{})
+    assert_eq(built, time.parse_rfc3339("2024-02-29T13:04:05Z") ?? panic("{err}"))
+}
