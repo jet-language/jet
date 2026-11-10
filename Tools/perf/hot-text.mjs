@@ -12,8 +12,8 @@
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
 // so they are the functions below the first one the runtime pack
-// (jet-runtime/jet_runtime.pack.o) defines; libc and libgcc
-// come after the pack. The environment names the toolchain as for any run
+// (jet-runtime/jet_runtime.pack.o) defines; libc and libgcc, when a link
+// takes them, come after the pack. The environment names the toolchain as for any run
 // (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Needs `cc` and ptrace of a
 // child: each command runs under Tools/perf/fntrace.c, which puts a
 // breakpoint at every function of <jet> and records each one's first entry.

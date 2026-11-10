@@ -37,8 +37,8 @@
 // args) and the canonical root. A stage whose key is in the store is REUSED:
 // copied out and verified, never rebuilt. The rest build at the canonical
 // root $JET_SCRATCH_ROOT/discovery/r14/snap: each build stage runs in the dev
-// shell (Tools/agent/JetEnv.jet --norust, which supplies the C toolchain and
-// static musl the runtime pack needs) in a private user and mount namespace
+// shell (Tools/agent/JetEnv.jet --norust: no Rust tool on PATH; the build
+// compiles no C and links no musl) in a private user and mount namespace
 // with the tree bound there, so equal sources give equal binaries whatever
 // the tree's path. Only
 // clean results are stored (rc 0, no keep-going rows, no `todo` traps). The
@@ -349,8 +349,8 @@ compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wa
 // reads the compiler's source identity inputs (workspace files, every package
 // the compiler compiles, Core), the Prelude and runtime trees the toolchain
 // root serves, the pack recipe (Compiler/Toolchain), every runtime source
-// sources.list names, and the dev-shell definition, which fixes the C
-// toolchain and musl. Sorted and unique.
+// sources.list names, and the dev-shell definition the stage runs in.
+// Sorted and unique.
 stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
     read := compiler_packages(tree, [String]{"inputs"})
     loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
@@ -1439,7 +1439,7 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
 // build_stage: NAME (jet, jet.o and its runtime pack jet-runtime/) built by
 // BUILDER_DIR/jet (sha BUILDER, its pack hash BUILDER_PACK) under IDENTITY:
 // `jet build --threads THREADS Compiler` at the canonical root, in the dev
-// shell, which supplies the C toolchain and static musl the pack links.
+// shell with no Rust tool on PATH; the build compiles no C.
 // 0 built or reused, 1 failed, 3 a miss outside a run.
 build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     mat: build_mat(c, builder, builder_pack, identity, threads)
