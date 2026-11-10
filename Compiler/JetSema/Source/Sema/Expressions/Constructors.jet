@@ -1728,7 +1728,7 @@ sema_expression_typed_literal_text_parts: fn(parts: [StrPart], kind: TypedHeadKi
                 // binds it as-is (sema_expression_sql_hole_value), never as text.
                 bound: kind == TypedHeadKind.SQL && sema_expression_typed_hole_is(hole.ty, "DBValue")
                 if !trusted && !bound && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
-                    diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
+                    diagnostics.push(sema_expression_typed_hole_error(kind, hole.ty, expr_span(value)))
                     return None
                 }
                 holes.push(hole)
@@ -1738,6 +1738,18 @@ sema_expression_typed_literal_text_parts: fn(parts: [StrPart], kind: TypedHeadKi
         }
     }
     Val(SemaExpressionTypedTextParts{literals: literals, holes: holes, trusted_html: trusted_html})
+}
+
+// E0112 for a hole value the typed head cannot carry, worded for that head.
+sema_expression_typed_hole_error: fn(kind: TypedHeadKind, ty: Type, span: Span) -> Diagnostic {
+    name: type_name(ty)
+    if kind == TypedHeadKind.SQL {
+        return sema_error("E0112", span, "`{name}` can't be bound in an `SQL{{…}}` hole", "an SQL hole sends its value to the database as one bound parameter, so it must be a printable value or a `DBValue`", "pass one field, such as `{{row.id}}`, or a `DBValue`")
+    }
+    if kind == TypedHeadKind.HTML {
+        return sema_error("E0112", span, "`{name}` can't be escaped into an `HTML{{…}}` hole", "an HTML hole escapes its value's printed text, or places an `HTML` value as it is", "pass a printable field, such as `{{page.title}}`, or an `HTML` value")
+    }
+    sema_error("E0112", span, "`{name}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole")
 }
 
 sema_expression_validate_boundary_literal: fn(kind: TypedHeadKind, parts: [StrPart], span: Span, diagnostics: &[Diagnostic]) -> Bool {

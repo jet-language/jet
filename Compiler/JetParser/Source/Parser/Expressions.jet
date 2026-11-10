@@ -1021,6 +1021,11 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         return ParsedExpr{expr: Expr.Spread{value: value.expr, span: span, id: parser_node_id(state)}, span: span}
     }
 
+    // A hole's token stream ends at its closing `}`, which has no token text of its own.
+    if kind == TOKEN_EOF && state.in_hole {
+        parser_add_error(state, token.span, "expected a value before this hole's closing `}}`", "a `{{ }}` hole holds one complete value", "finish the value, for example `{{a + b}}`, or remove the hole")
+        return ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}, span: token.span}
+    }
     found: parser_text(state, token)
     parser_add_error(state, token.span, "expected a value, found `{found}`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
     if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET && kind != TOKEN_COMMA && kind != TOKEN_SEMI -> parser_bump(state)
@@ -1109,6 +1114,7 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         // A hole inside a pipe step reads that step's `<>`.
         pipe_step_names: state.pipe_step_names.copy(),
         pipe_step_reads: state.pipe_step_reads.copy(),
+        in_hole: true,
     }
     // The nested state parses with the outer tables and source; every exit
     // hands them back.

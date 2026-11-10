@@ -105,6 +105,8 @@ JetParserState: struct {
     // cancels the abort); `abort_position` is the cursor where it was found.
     abort_mark: Int{0}
     abort_position: Int{0}
+    // An interpolation hole's own parser: its end is the hole's closing `}`.
+    in_hole: Bool{false}
     // Depth of one-statement `->` bodies; their statement may end before `else`.
     adjacent_if_body_depth: Int{0}
     // Rust `block_depth`: braced statement lists entered so far. Value
@@ -498,7 +500,17 @@ parser_take_abort: fn(state: &JetParserState, start: Int) -> Bool Never! {
 }
 
 parser_recover_aborted_statement: fn(state: &JetParserState, start: Int) Never! {
-    if parser_take_abort(state, start) -> parser_sync_stmt(state)
+    if !parser_take_abort(state, start) -> return
+    // Braces the statement opened before the error, such as a typed literal's
+    // `HTML{` around a bad hole, close inside it; skip their closers too.
+    open := 0
+    loop index in start..<state.position {
+        if index >= state.tokens.len() -> break
+        kind: state.tokens[index].kind
+        if kind == TOKEN_LBRACE -> open += 1
+        if kind == TOKEN_RBRACE && open > 0 -> open -= 1
+    }
+    parser_sync_stmt_from(state, open)
 }
 
 parser_recover_aborted_item: fn(state: &JetParserState, start: Int) Never! {
@@ -899,9 +911,14 @@ parser_sync_top: fn(state: &JetParserState) Never! {
 }
 
 // After a failed statement: skip to just past the next `;` at this brace
-// depth, or stop before the block's closing `}`.
+// depth, or stop before the block's closing `}`. `open` counts braces the
+// failed statement opened and left unclosed; their closers belong to it.
 parser_sync_stmt: fn(state: &JetParserState) Never! {
-    depth := 0
+    parser_sync_stmt_from(state, 0)
+}
+
+parser_sync_stmt_from: fn(state: &JetParserState, open: Int) Never! {
+    depth := open
     loop {
         kind: parser_current_kind(state)
         if kind == TOKEN_EOF -> break

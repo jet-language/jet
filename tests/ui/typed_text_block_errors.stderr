@@ -1,0 +1,53 @@
+Error [jet.UnknownAppliedRule]: `#Sql` isn't a known applied rule
+  --> tests/ui/typed_text_block_errors.jet:14:6
+    |
+ 14 |     #Sql(User) {
+    |      ^^^
+ Why: `Sql` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Did you mean `#SQL`?
+More: jet-lang.dev/e/E0927
+
+Error [jet.UnknownAppliedRule]: `#CSS` isn't a known applied rule
+  --> tests/ui/typed_text_block_errors.jet:17:6
+    |
+ 17 |     #CSS {
+    |      ^^^
+ Why: `CSS` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Did you mean `#CLI`?
+More: jet-lang.dev/e/E0927
+
+Error [jet.UnknownType]: There's no type called `Missing`
+  --> tests/ui/typed_text_block_errors.jet:11:10
+    |
+ 11 |     #SQL(Missing) {
+    |          ^^^^^^^
+ Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: Check the spelling, or define the struct or enum first
+More: jet-lang.dev/e/E0119
+
+Error [jet.ValueTypeMismatch]: `User` can't be bound in an `SQL{…}` hole
+  --> tests/ui/typed_text_block_errors.jet:21:50
+    |
+ 21 |     query: SQL{"select id from users where id = {user}"}
+    |                                                  ^^^^
+ Why: An SQL hole sends its value to the database as one bound parameter, so it must be a printable value or a `DBValue`
+ Fix: Pass one field, such as `{row.id}`, or a `DBValue`
+More: jet-lang.dev/e/E0112
+
+Error [jet.ValueTypeMismatch]: `User` can't be escaped into an `HTML{…}` hole
+  --> tests/ui/typed_text_block_errors.jet:23:21
+    |
+ 23 |     page: HTML{"<p>{user}</p>"}
+    |                     ^^^^
+ Why: An HTML hole escapes its value's printed text, or places an `HTML` value as it is
+ Fix: Pass a printable field, such as `{page.title}`, or an `HTML` value
+More: jet-lang.dev/e/E0112
+
+Error [jet.ValueTypeMismatch]: `render` wants `HTML` for argument 1, but this is `SQL`
+  --> tests/ui/typed_text_block_errors.jet:25:18
+    |
+ 25 |     print(render(SQL{"select 1"}))
+    |                  ^^^^^^^^^^^^^^^
+ Why: Every argument must match its parameter's type
+ Fix: Use `HTML` here
+More: jet-lang.dev/e/E0112
