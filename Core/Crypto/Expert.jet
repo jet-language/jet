@@ -774,11 +774,13 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     }
     work := [U64]{}
     saved := [U64]{}
+    reference := [U64]{}
     address_block := [U64]{}
     input_block := [U64]{}
     loop _ in 0..<128 {
         work.push(U64{0})
         saved.push(U64{0})
+        reference.push(U64{0})
         address_block.push(U64{0})
         input_block.push(U64{0})
     }
@@ -806,19 +808,8 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                     }
                     if data_independent && index %% 128 == 0 -> argon2_next_addresses(address_block, input_block, saved)
                     random_word: argon2_random_word(memory, address_block, data_independent, index, previous_position * 128)
-                    reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
-                    same_lane: reference_lane == lane
-                    area: if {
-                        pass == 0 && slice == 0 -> index - 1
-                        pass == 0 && same_lane -> slice * segment_length + index - 1
-                        pass == 0 -> slice * segment_length - (if index == 0 -> 1 else -> 0)
-                        same_lane -> lane_length - segment_length + index - 1
-                        else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
-                    }
-                    start: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
-                    reference_index: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
-                    reference_position: reference_lane * lane_length + reference_index
-                    argon2_fill_block(memory, work, saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
+                    __argon2_reference_block(memory, reference, random_word, pass, slice, index, lane, lanes, segment_length, lane_length)
+                    __argon2_fill_block(memory, work, saved, reference, previous_position * 128, position * 128, pass != 0)
                 }
             }
         }
@@ -870,6 +861,28 @@ argon2_random_word: fn(memory: [U64], address_block: [U64], data_independent: Bo
     memory[previous]
 }
 
+/// RFC 9106 3.4.1 and 3.4.2: copy into `block` the reference block for the
+/// block at `index` of `slice` in `lane`, chosen by the pseudo-random word:
+/// its high half picks the lane (the current one in the first slice of the
+/// first pass), its low half J1 the block of the reference area. From the
+/// second half of the first pass on, the word is a previous block's: the
+/// data-dependent addressing of Argon2id.
+__argon2_reference_block: fn(memory: [U64], block: &[U64], random_word: U64, pass: Int, slice: Int, index: Int, lane: Int, lanes: Int, segment_length: Int, lane_length: Int) Never! {
+    reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
+    same_lane: reference_lane == lane
+    area: if {
+        pass == 0 && slice == 0 -> index - 1
+        pass == 0 && same_lane -> slice * segment_length + index - 1
+        pass == 0 -> slice * segment_length - (if index == 0 -> 1 else -> 0)
+        same_lane -> lane_length - segment_length + index - 1
+        else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
+    }
+    start: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
+    reference_index: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
+    at: (reference_lane * lane_length + reference_index) * 128
+    loop i in 0..<128 -> block[i] = memory[at + i]
+}
+
 /// RFC 9106 3.4.2: map J1 (below 2^32) onto the reference area.
 argon2_mapping: fn(j1: U64, area: Int) -> Int Never! {
     x: Int.from_u64((j1 * j1) >> 32)
@@ -895,11 +908,11 @@ argon2_next_addresses: fn(address_block: &[U64], input_block: &[U64], saved: &[U
     loop i in 0..<128 -> address_block[i] = (address_block[i]).bit_xor(saved[i])
 }
 
-/// Compress block `previous` with block `reference` into block `next` of
-/// `memory` (word offsets); later passes XOR into the existing block.
-argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], previous: Int, reference: Int, next: Int, with_xor: Bool) Never! {
+/// Compress block `previous` of `memory` with the reference block into
+/// block `next` (word offsets); later passes XOR into the existing block.
+__argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], reference: [U64], previous: Int, next: Int, with_xor: Bool) Never! {
     loop i in 0..<128 {
-        mixed: (memory[previous + i]).bit_xor(memory[reference + i])
+        mixed: (memory[previous + i]).bit_xor(reference[i])
         work[i] = mixed
         if with_xor -> saved[i] = (mixed).bit_xor(memory[next + i]) else -> saved[i] = mixed
     }

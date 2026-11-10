@@ -526,13 +526,14 @@ ssl_own_cert_pk_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
     pk.pk_get_len(ssl.conf.key_cert[i].cert[0].pk)
 }
 
-/// A decryption with the own private key (mbedtls_pk_decrypt on
-/// mbedtls_ssl_own_key); BadInput when there is no own key.
-ssl_own_key_decrypt: fn<R: RNG>(ssl: &ssldefs.SSLContext, input: [U8], osize: Int, rng: &R) -> [U8] pk.PKError! {
+/// A fixed-length decryption with the own private key, with implicit
+/// rejection (pk.pk_decrypt_fixed on mbedtls_ssl_own_key); BadInput when
+/// there is no own key.
+ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: &ssldefs.SSLContext, input: [U8], len: Int, rng: &R) -> rsa.V15Fixed pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
-    if ssl_own_key_cert_is_hs(ssl) -> return pk.pk_decrypt(ssl.handshake.sni_key_cert[i].key, input, osize, rng)
-    pk.pk_decrypt(ssl.conf.key_cert[i].key, input, osize, rng)
+    if ssl_own_key_cert_is_hs(ssl) -> return pk.pk_decrypt_fixed(ssl.handshake.sni_key_cert[i].key, input, len, rng)
+    pk.pk_decrypt_fixed(ssl.conf.key_cert[i].key, input, len, rng)
 }
 
 /// Give the handshake an ECDH context if it has none yet (C's
@@ -3932,6 +3933,86 @@ ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
     ct_dudect("core.crypto PBKDF2-HMAC-SHA256, password", 2000, 1, ct_bytes(r, 32), (x) -> ct_pbkdf2(x, salt))
 }
 
+/// A ClientKeyExchange's encrypted premaster secret under `key`, by
+/// `kind`: 0 a good one (version 3.3, then 46 drawn bytes); 1 a block
+/// whose first byte is 1; 2 a block with no zero after its padding; 3 a
+/// 47-byte message; 4 a 48-byte message with version 3.2.
+ct_rsa_kx_sealed: fn(key: &rsa.RSAContext, rng: &drbg.HMACDrbg, r: &CtRand, kind: Int) -> [U8] {
+    if kind == 1 || kind == 2 {
+        // The block's private-key image is no EME-PKCS1-v1_5 encoding: the
+        // raw public operation turns it into the ciphertext.
+        block := ct_bytes(r, key.len)
+        loop i in 0..<block.len() -> block[i] = block[i].bit_or(U8{1})
+        block[0] = if kind == 1 -> U8{1} else -> U8{0}
+        block[1] = U8{2}
+        if kind == 1 -> block[key.len - 49] = U8{0}
+        return rsa.rsa_public(key, block) ?? panic("raw public operation: {err}")
+    }
+    pms := ct_bytes(r, if kind == 3 -> 47 else -> 48)
+    pms[0] = U8{3}
+    pms[1] = if kind == 4 -> U8{2} else -> U8{3}
+    rsa.rsa_pkcs1_encrypt(key, rng, pms) ?? panic("encrypt: {err}")
+}
+
+/// A TLS 1.2 server whose own RSA key is `key` and whose ClientKeyExchange
+/// body is `sealed`, for srv12.ssl_srv12_parse_encrypted_pms (RFC 5246
+/// section 7.4.7.1).
+ct_rsa_kx_server: fn(key: &rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
+    own := pk.pk_new()
+    pk.pk_setup(own, pk.pk_info_from_type(.RSA)) ?? panic("own key: {err}")
+    own.rsa = rsa.rsa_copy(key)
+    crt := x509crt.x509_crt_new()
+    pk.pk_setup(crt.pk, pk.pk_info_from_type(.RSA)) ?? panic("certificate key: {err}")
+    crt.pk.rsa = rsa.rsa_copy(key)
+    ssl := ssldefs.SSLContext{}
+    ssl.conf.key_cert.push(ssldefs.SSLKeyCert{cert: [x509crt.X509Crt]{crt}, key: own})
+    ssl.in_buf = ssldefs.ssl_zeros(2 + sealed.len())
+    ssldefs.ssl_put_u16(ssl.in_buf, 0, sealed.len())
+    ssldefs.ssl_copy_into(ssl.in_buf, 2, sealed, 0, sealed.len())
+    ssl.handshake.premaster = ssldefs.ssl_zeros(48)
+    ssl.spool.push(ssldefs.SSLSession{})
+    ssl.session_negotiate = 0
+    ssl.spool[0].tls_version = ssldefs.SSL_VERSION_TLS1_2
+    ssl
+}
+
+/// The premaster secret a server takes from its ClientKeyExchange: the
+/// client's, or a random one in its place.
+ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
+    srv12.ssl_srv12_parse_encrypted_pms(ssl, 0, ssl.in_buf.len(), 0, rng) ?? panic("premaster: {err}")
+    ssl.handshake.premaster.copy()
+}
+
+// Bleichenbacher's attack, and its timing form (Marvin), need a server whose
+// answer or time tells a good PKCS#1 v1.5 padding from a bad one. The fixed
+// class always gets a good premaster; the random class half good ones and
+// half each kind of bad one (bad first byte, no separator, a 47-byte
+// message, another version).
+#Test("dudect: a TLS 1.2 server takes as long on a good RSA premaster as on each kind of bad padding, and replaces a bad one") {
+    r := CtRand{s: U64{59}}
+    key := ct_rsa_key()
+    rng := vec_rng()
+    servers := [ssldefs.SSLContext]{}
+    loop i in 0..<32 {
+        kind: if i %% 2 == 0 -> 0 else -> 1 + (i >> 1) %% 4
+        sealed: ct_rsa_kx_sealed(key, rng, r, kind)
+        ssl := ct_rsa_kx_server(key, sealed)
+        // The good premaster comes out as sent, on every run; a bad one is
+        // replaced by a new random one each time.
+        if kind == 0 {
+            clear := rsa.rsa_pkcs1_decrypt(key, rng, sealed, 48) ?? panic("decrypt: {err}")
+            assert_eq(ct_rsa_kx_premaster(ssl, rng), clear)
+            assert_eq(ct_rsa_kx_premaster(ssl, rng), clear)
+        } else {
+            first: ct_rsa_kx_premaster(ssl, rng)
+            assert_eq(first.len(), 48)
+            assert(ct_rsa_kx_premaster(ssl, rng) != first)
+        }
+        servers.push(ssl)
+    }
+    ct_dudect("TLS 1.2 RSA premaster, padding", 1000, 1, [U8]{0}, (x) -> Int.from_u8(ct_rsa_kx_premaster(servers[Int.from_u8(x[0]) %% 32], rng)[2]))
+}
+
 // ---------------------------------------------------------------------------
 // Constant time: the emission check's entry
 // ---------------------------------------------------------------------------
@@ -4031,6 +4112,15 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     // RSA-PSS signing, a TLS 1.3 CertificateVerify's.
     pss: rsa.rsa_rsassa_pss_sign_no_mode_check(ctx, rng, Val(hashes.Md.SHA256), ct_bytes(r, 32)) ?? panic("RSA-PSS sign: {err}")
     assert_eq(pss.len(), 128)
+    // A TLS 1.2 RSA key exchange: the client's premaster encrypted, and the
+    // server's decryption with implicit rejection of a good premaster and
+    // of a bad padding.
+    kx_good_sealed: ct_rsa_kx_sealed(ctx, rng, r, 0)
+    kx_good := ct_rsa_kx_server(ctx, kx_good_sealed)
+    assert_eq(ct_rsa_kx_premaster(kx_good, rng).len(), 48)
+    kx_bad_sealed: ct_rsa_kx_sealed(ctx, rng, r, 1)
+    kx_bad := ct_rsa_kx_server(ctx, kx_bad_sealed)
+    assert_eq(ct_rsa_kx_premaster(kx_bad, rng).len(), 48)
     // core.crypto's own paths beside the expert ones above: the envelope
     // (X25519, HKDF-SHA256, XChaCha20-Poly1305) sealed to and opened by a
     // test identity, a key wrapped and unwrapped, Ed25519 signing, X25519,
