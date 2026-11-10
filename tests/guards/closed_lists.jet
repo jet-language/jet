@@ -15,9 +15,11 @@ CLOSED_LIST_DUPLICATES_PATH: "tests/guards/closed_lists/duplicates.tsv"
 CLOSED_LIST_MIRRORS_PATH: "tests/guards/closed_lists/mirrors.tsv"
 
 // The migration baseline and the duplicate baseline only shrink: delete a row
-// when its list moves to a declared home, then lower the ceiling to match.
+// when its list moves to a declared home, then lower the ceiling to match. A
+// duplicate baseline row also records how many members its pair shares, and
+// that count only shrinks.
 CLOSED_LIST_BASELINE: 1002
-CLOSED_LIST_DUPLICATE_BASELINE: 357
+CLOSED_LIST_DUPLICATE_BASELINE: 358
 
 // The reasons a list may stay closed. Each kernel ledger row names one.
 CLOSED_LIST_REASONS: [String]{"grammar", "soundness", "ir", "kernel", "protocol", "fixed-standard"}
@@ -341,10 +343,19 @@ closed_list_pair_key: fn(a: ClosedListFinding, b: ClosedListFinding) -> String {
 // A pair of list positions packs into one map key as `left * SPAN + right`.
 CLOSED_LIST_SPAN: 1000000
 
-// Pairs of hand-written lists in different files sharing at least 80% of the
-// smaller list's members. Each member chains the lists that hold it, so only
-// lists that share a member are ever compared.
-closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
+// Two hand-written lists in different files that share members: the pair
+// key, how many members they share, and whether that is at least 80% of the
+// smaller list's members.
+ClosedListPair: struct {
+    key: String
+    shared: Int
+    duplicate: Bool
+}
+
+// Every pair of hand-written lists in different files that share a member.
+// Each member chains the lists that hold it, so only lists that share a
+// member are ever compared.
+closed_list_shared_pairs: fn(findings: [ClosedListFinding]) -> [ClosedListPair] {
     ids := [String:Int]{}
     chain_head := [Int]{}
     posting_list := [Int]{}
@@ -389,7 +400,7 @@ closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
             later = posting_next[later]
         }
     }
-    pairs := [String]{}
+    pairs := [ClosedListPair]{}
     loop slot in 0..<pair_count.len() {
         left: pair_left[slot]
         right: pair_right[slot]
@@ -397,7 +408,17 @@ closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
         left_size: findings[left].members.len()
         right_size: findings[right].members.len()
         smaller: if left_size < right_size -> left_size else -> right_size
-        if pair_count[slot] * 5 >= smaller * 4 -> pairs.push(closed_list_pair_key(findings[left], findings[right]))
+        pairs.push(ClosedListPair{key: closed_list_pair_key(findings[left], findings[right]), shared: pair_count[slot], duplicate: pair_count[slot] * 5 >= smaller * 4})
+    }
+    pairs
+}
+
+// Pairs of hand-written lists in different files sharing at least 80% of the
+// smaller list's members.
+closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
+    pairs := [String]{}
+    loop pair in closed_list_shared_pairs(findings) {
+        if pair.duplicate -> pairs.push(pair.key)
     }
     pairs
 }
@@ -410,32 +431,46 @@ closed_list_mirror_pair: fn(pair: String, copies: [String]) -> Bool {
     false
 }
 
-// Every pair of lists in different files that the duplicate baseline does not
-// hold, every stale baseline pair, and a baseline past its ceiling either way.
-// A mirror copy matches its home, so its pairs are its home's pairs.
+// Every pair of lists in different files that shares 80% or more of the
+// smaller list's members and that the duplicate baseline does not hold, every
+// baselined pair whose shared count differs from its row, and a baseline past
+// its ceiling either way. A baselined pair is judged by its shared count
+// alone: deleting a member only one of the lists holds never fails it, and a
+// new shared member does, even when unique ones arrive with it. A mirror copy
+// matches its home, so its pairs are its home's pairs.
 closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: &[String]) {
-    pairs := [String]{}
-    loop pair in closed_list_duplicate_pairs(findings) {
-        if !closed_list_mirror_pair(pair, copies) -> pairs.push(pair)
+    pairs := [String:ClosedListPair]{}
+    pair_keys := [String]{}
+    loop pair in closed_list_shared_pairs(findings) {
+        if closed_list_mirror_pair(pair.key, copies) -> next
+        pair_keys.push(pair.key)
+        pairs[pair.key] = pair
     }
     known := [String:Bool]{}
-    known_keys := [String]{}
+    rows := 0
     loop row in closed_list_rows(CLOSED_LIST_DUPLICATES_PATH) {
-        known[row.join("\t")] = true
-        known_keys.push(row.join("\t"))
+        rows += 1
+        count: if row.len() == 5 -> Int.parse(row[4]) ?? -1 else -> -1
+        if count < 0 {
+            problems.push("duplicate baseline row needs file, name, file, name and shared count: {row.join("\t")}")
+            next
+        }
+        key: "{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}"
+        known[key] = true
+        shared: if pairs.get(key) == .Val(pair) -> pair.shared else -> 0
+        if {
+            shared == 0 -> problems.push("duplicate baseline row no longer shares a member: {key}; delete the row and lower CLOSED_LIST_DUPLICATE_BASELINE")
+            shared > count -> problems.push("{key} now share {shared} members, up from {count}; a baselined pair's shared count may shrink, never grow. Keep one hand-written home: {CLOSED_LIST_DECLARE}")
+            shared < count -> problems.push("{key} now share {shared} members, down from {count}; lower the row's count to {shared}")
+            else -> {}
+        }
     }
-    rows: known_keys.len()
     print("closed-list duplicate baseline: {rows} pairs (ceiling {CLOSED_LIST_DUPLICATE_BASELINE})")
     if rows > CLOSED_LIST_DUPLICATE_BASELINE -> problems.push("the duplicate baseline grew past {CLOSED_LIST_DUPLICATE_BASELINE}; a row may be removed, never added")
     if rows < CLOSED_LIST_DUPLICATE_BASELINE -> problems.push("the duplicate baseline shrank to {rows} pairs; lower CLOSED_LIST_DUPLICATE_BASELINE to {rows}")
-    found := [String:Bool]{}
-    loop pair in pairs {
-        found[pair] = true
-        if known.get(pair) ?? false -> next
-        problems.push(closed_list_duplicate_problem(pair))
-    }
-    loop key in known_keys {
-        if !(found.get(key) ?? false) -> problems.push("duplicate baseline row no longer duplicates: {key}; delete the row and lower CLOSED_LIST_DUPLICATE_BASELINE")
+    loop key in pair_keys {
+        pair: pairs.get(key) ?? next
+        if pair.duplicate && !(known.get(key) ?? false) -> problems.push(closed_list_duplicate_problem(key))
     }
 }
 
@@ -538,6 +573,11 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
     assert_eq(pairs.len(), 1)
     assert_eq(closed_list_duplicate_pairs([ClosedListFinding]{found[1], ClosedListFinding{path: "a.jet", name: "Same", members: [String]{"go", "java", "r"}}}).len(), 0)
     assert_eq(closed_list_duplicate_pairs([ClosedListFinding]{found[1], ClosedListFinding{path: "c.jet", name: "Few", members: [String]{"go", "lua", "ada", "tcl"}}}).len(), 0)
+    // Every pair that shares a member carries its shared count, below 80% too.
+    few: closed_list_shared_pairs([ClosedListFinding]{found[1], ClosedListFinding{path: "c.jet", name: "Few", members: [String]{"go", "java", "ada", "tcl", "lua"}}})
+    assert_eq(few.len(), 1)
+    assert_eq(few[0].shared, 2)
+    assert(!few[0].duplicate)
     // A failure names the declaration form to use instead and the kernel ledger.
     message: closed_list_new_list_problem(found[0])
     assert(message.contains("Core trait with one `impl` per member") && message.contains("--check") && message.contains(CLOSED_LIST_KERNEL_PATH))
