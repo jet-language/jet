@@ -1,0 +1,23 @@
+# #5976 c40 (#4664): a TLS text read never drops bytes. Against OpenSSL
+# `s_server -rev` with the checked-in test CA chain, a character the read
+# limit cuts stays for the next read, and bytes that are not UTF-8 fail each
+# text read and stay for a byte read.
+requires: tool:openssl
+fixture: tls_text_reads_keep_a_cut_character_for_the_next_read.fixture
+copy: {root}/tests/fixtures/tls/custom-root.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+session tls raw: openssl s_server -quiet -rev -accept {free-port:tls} -cert server.cert.pem -key server.key.pem
+sleep: 250ms
+write: main.jet tls_text_reads_keep_a_cut_character_for_the_next_read.fixture/main.template
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = tls_text_reads_keep_a_cut_character_for_the_next_read.out
+stderr: empty
+signal tls: KILL
+close tls
+exit: any # s_server is killed by the case; its exit status is not part of the contract

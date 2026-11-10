@@ -1,0 +1,48 @@
+// TLS text reads lose no byte (#4664) against the case's OpenSSL
+// `s_server -rev`, which answers each line with its bytes reversed: a
+// character the read limit cuts stays for the next read, and bytes that are
+// not UTF-8 fail each text read and stay for a byte read.
+use {
+    files: core.files
+    net: core.net
+    tls: core.net.tls
+}
+
+show: fn(label: String, result: String IOError!) {
+    if result == {
+        .Ok(text) -> print("{label}: \"{text}\" ({text.bytes().len()} bytes)")
+        .Err(err) -> print("{label}: error: {err}")
+    }
+}
+
+// Sends `bytes` reversed, so the server answers `bytes` and a newline.
+ask: fn(&secure: TLSStream, bytes: [U8]) -[Net, Time.Wait]> {
+    line := [U8]{}
+    at := bytes.len()
+    loop at > 0 {
+        at -= 1
+        line.push(bytes[at])
+    }
+    line.push(10)
+    secure.write_all(line, deadline: 5s) ?? panic("write: {err}")
+}
+
+run: fn() {
+    ca: files.read_bytes("ca.pem") ?? panic("CA fixture")
+    roots: tls.RootCertificates.from_pem(ca) ?? panic("validate CA")
+    config: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
+    tcp := net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")
+    secure := tls.client(tcp, server_name: "localhost", config: config, deadline: 5s) ?? panic("TLS handshake: {err}")
+
+    ask(secure, [U8]{97, 226, 130, 172})
+    show("limit 2 on a E2 82 AC", tls.read_text(secure, 2))
+    show("limit 1", tls.read_text(secure, 1))
+    show("rest", tls.read_text(secure, 64))
+
+    ask(secure, [U8]{98, 255, 99})
+    show("b FF c", tls.read_text(secure, 64))
+    show("then", tls.read_text(secure, 64))
+    show("again", tls.read_text(secure, 64))
+    print("bytes: {tls.read(secure, 64) ?? panic("read: {err}")}")
+    secure.close() ?? panic("close: {err}")
+}

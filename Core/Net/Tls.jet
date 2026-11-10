@@ -272,10 +272,16 @@ read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     stream.read(n, deadline: __forever())
 }
 
+// Up to `n` bytes as text; no byte is lost (#4664). A character the limit or
+// a record cuts stays for the next read, and one that starts the read is
+// read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a
+// character the end of the stream cuts, fail the read and stay for `read`.
 read_text: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
-    bytes: read(stream, n)
-    Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
+    end_ns: __deadline_end(__forever(), "tls read") ?? return Err(__net_to_io(err))
+    state: __state(stream) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+    guard := state.guard_edit()
+    __read_text(guard.value, n, end_ns)
 }
 
 write: fn(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
@@ -1188,6 +1194,98 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
         }
         return Err(__io_error(.Read, "TLS read failed: {__mbedtls_text(status)}"))
     }
+}
+
+// read_text under the stream's lock: the bytes it takes past the text it
+// returns go back in front of `pending`.
+__read_text: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
+    bytes := [U8]{}
+    loop {
+        want: if bytes.len() < max_bytes -> max_bytes - bytes.len() else -> 1
+        more: __read(tls, want, end_ns) ?? {
+            __unread(tls, bytes)
+            return Err(err)
+        }
+        if more.len() == 0 {
+            if bytes.len() == 0 -> return Ok("")
+            __unread(tls, bytes)
+            return Err(tls_error("read_text", "", "the stream ended inside a UTF-8 character"))
+        }
+        loop b in more -> bytes.push(b)
+        valid: __utf8_valid(bytes)
+        if valid > 0 || valid == bytes.len() {
+            __unread(tls, __slice(bytes, valid, bytes.len()))
+            return Ok(String.from_bytes(__slice(bytes, 0, valid)) ?? "")
+        }
+        if !__utf8_cut(bytes) {
+            __unread(tls, bytes)
+            return Err(tls_error("read_text", "", "read bytes are not UTF-8"))
+        }
+        // Only the start of one character so far: read on for the rest.
+    }
+}
+
+__unread: fn(&tls: __TLSState, bytes: [U8]) Never! {
+    if bytes.len() == 0 -> return
+    out := bytes.copy()
+    loop b in tls.pending -> out.push(b)
+    tls.pending = out
+}
+
+// The length of the longest prefix of `bytes` that is UTF-8.
+__utf8_valid: fn(bytes: [U8]) -> Int Never! {
+    at := 0
+    loop at < bytes.len() {
+        width: __utf8_width(bytes, at)
+        if width <= 0 -> return at
+        at += width
+    }
+    at
+}
+
+// Whether `bytes` are the start of one UTF-8 character that more bytes may
+// complete.
+__utf8_cut: fn(bytes: [U8]) -> Bool Never! {
+    bytes.len() > 0 && __utf8_width(bytes, 0) == -1
+}
+
+// The width of the UTF-8 character at `at`: 0 when the bytes there are not
+// UTF-8, -1 when they are the start of a character the bytes end inside.
+__utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
+    lead: Int.from_u8(bytes[at])
+    if lead < 128 -> return 1
+    width := 0
+    low := 128
+    high := 191
+    if lead >= 194 && lead <= 223 -> width = 2
+    if lead >= 224 && lead <= 239 {
+        width = 3
+        if lead == 224 -> low = 160
+        if lead == 237 -> high = 159
+    }
+    if lead >= 240 && lead <= 244 {
+        width = 4
+        if lead == 240 -> low = 144
+        if lead == 244 -> high = 143
+    }
+    if width == 0 -> return 0
+    loop part in 1..<width {
+        if at + part >= bytes.len() -> return -1
+        byte: Int.from_u8(bytes[at + part])
+        valid: if part == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
+        if !valid -> return 0
+    }
+    width
+}
+
+#Test("TLS text reads split UTF-8 at the last whole character") {
+    assert_eq(__utf8_valid([U8]{104, 195}), 1)
+    assert(__utf8_cut([U8]{195}))
+    assert(__utf8_cut([U8]{240, 159, 152}))
+    assert_eq(__utf8_valid([U8]{97, 255, 98}), 1)
+    assert(!__utf8_cut([U8]{255, 98}))
+    assert(!__utf8_cut([U8]{226, 130, 65}))
+    assert_eq(__utf8_valid([U8]{226, 130, 172, 33}), 4)
 }
 
 // Buffers decrypted bytes for `ready`; true once a read would not block.

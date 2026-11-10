@@ -5024,7 +5024,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
 | `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
@@ -5162,7 +5162,7 @@ Mbed TLS 3.6.7); configuration carriers are validated before network use. See
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. Like `tcp_read_text`, `read_text` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read`. |
 | `write(stream: &TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
 | `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |

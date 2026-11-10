@@ -1,4 +1,4 @@
-// Unix listener/stream routes over Listener8/Stream56 (HostNetCarriers.jet) and
+// Unix listener/stream routes over Listener8/Stream64 (HostNetCarriers.jet) and
 // FD72. Accept, shutdown, ready and deadlines share the TCP handle policy;
 // unlike TCP, the reference applies no OS socket timeouts and retries
 // Interrupted as well as WouldBlock on read/write. An inherited listener
@@ -43,7 +43,8 @@ net_unix_path_refused: fn(status: I64, operation: I64, path: I64, error: I64) ->
 #Export(c) jet_net_unix_accept: fn(listener: I64, output: I64, error: I64) -> I64 { net_route_accept(listener, rt_static_text("unix accept"), output, error) }
 #Export(c) jet_net_unix_accept_deadline: fn(listener: I64, deadline: I64, output: I64, error: I64) -> I64 { net_listener_accept_deadline(listener, deadline, rt_static_text("unix accept"), output, error) }
 
-// Read once into at most min(limit, 16 MiB) bytes; text decodes as UTF-8.
+// Read once into at most min(limit, 16 MiB) bytes; text decodes as UTF-8 and
+// keeps a cut character for the next read (net_carry_*, NetHandleRoutes.jet).
 // limit is the caller's exact Int word.
 net_unix_read_result: fn(stream: I64, word: I64, output: I64, length: I64, text: Bool, error: I64) -> I64 {
     operation: rt_static_text("unix read")
@@ -52,34 +53,40 @@ net_unix_read_result: fn(stream: I64, word: I64, output: I64, length: I64, text:
     if !net_tcp_direction_open(stream, true, operation, error) -> return I64{0}
     if (limit <= I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("unix read limit must be positive")), I64{0}, error)
     cap: if (limit < I64{16777216}) -> limit else -> I64{16777216}
+    if (!text && net_carry_bytes(stream, cap, output, length)) -> return I64{1}
     scratch: jet_rt_alloc(I64{48}, I64{8})
     net_tcp_deadline(stream, true, wrapping(scratch + I64{32}))
-    bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
-    result := I64{0}
-    loop {
-        count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), bytes, cap, scratch)
+    size: net_read_size(stream, cap, text)
+    block: net_read_buffer_take(stream, size)
+    bytes: wrapping(block + I64{8})
+    filled := if text -> net_carry_take(stream, bytes) else -> I64{0}
+    result := I64{-1}
+    if (filled > I64{0}) -> result = net_read_text_publish(stream, bytes, filled, false, false, rt_static_text("unix read text"), output, error)
+    loop result < (I64{0}) {
+        want: if (filled < cap) -> cap - filled else -> size - filled
+        count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), wrapping(bytes + filled * RT_HOST_U8_STRIDE), want, scratch)
         if (count >= I64{0}) {
             if text {
-                result = net_read_decode_text(bytes, count, false, rt_static_text("unix read text"), output, error)
+                filled += count
+                result = net_read_text_publish(stream, bytes, filled, count == I64{0}, false, rt_static_text("unix read text"), output, error)
             } else {
                 // Publish exactly len slots: the list destructor reads no capacity.
-                owned: if (count == I64{0}) -> I64{1} else if (count == cap) -> bytes else -> jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
-                if (count != cap && count != I64{0}) -> rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
-                net_put(output, I64{0}, owned)
-                net_put(length, I64{0}, count)
-                if (count == cap) -> bytes = I64{0}
+                net_read_publish_bytes(bytes, count, output, length)
                 result = I64{1}
             }
-            break
+        } else {
+            code: net_word(scratch, I64{8})
+            if (code != I64{11} && code != I64{4}) {
+                _ := net_route_errno(operation, I64{0}, code, error)
+                result = I64{0}
+            } else if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) {
+                result = I64{0}
+            }
+            // A read that fails after the start of a character keeps it.
+            if (result == I64{0} && filled > I64{0}) -> net_carry_keep(stream, bytes, I64{0}, filled)
         }
-        code: net_word(scratch, I64{8})
-        if (code != I64{11} && code != I64{4}) {
-            _ := net_route_errno(operation, I64{0}, code, error)
-            break
-        }
-        if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) -> break
     }
-    if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
+    net_read_buffer_give(stream, block)
     jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result

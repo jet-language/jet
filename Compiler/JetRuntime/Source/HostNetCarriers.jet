@@ -1,13 +1,15 @@
 // Native network holders, independent of Rust std/Arc/Mutex representations.
-// Stream56: owned FD72*0, reserved8, readShutdown16, writeShutdown24,
-// readTimeoutMs32, writeTimeoutMs40, metadata mutex48. Only FD72.closed16 is
-// the close source of truth. TCP and Unix streams use the same holder shape.
+// Stream64: owned FD72*0, carry8, readShutdown16, writeShutdown24,
+// readTimeoutMs32, writeTimeoutMs40, metadata mutex48, readBuffer56. Only
+// FD72.closed16 is the close source of truth. TCP and Unix streams use the
+// same holder shape. carry8 is the bytes a text read kept for the next read
+// (net_carry_*); readBuffer56 is the block every read reuses (net_read_buffer_*).
 // Listener8 owns one FD72 reference. TCP clone duplicates the native fd;
 // Unix listener clone retains the shared fd, matching its Rust Arc ownership.
 // UDP8 -> State32(refs0, mutex8, ownedFD72*16, singleTimeoutMs24).
 #Export(c) jet_socket_stream_from_fd_raw: fn(state: I64) -> I64 {
-    value: jet_rt_alloc(I64{56}, I64{8})
-    thread_zero(value, I64{56})
+    value: jet_rt_alloc(I64{64}, I64{8})
+    thread_zero(value, I64{64})
     net_put(value, I64{0}, state)
     net_put(value, I64{32}, I64{-1})
     net_put(value, I64{40}, I64{-1})
@@ -16,7 +18,9 @@
 net_stream_drop: fn(value: I64) {
     if (value == I64{0}) -> return
     jet_fd_drop_raw(net_word(value, I64{0}))
-    jet_rt_free(value, I64{56}, I64{8})
+    net_carry_drop(value)
+    net_read_buffer_drop(value)
+    jet_rt_free(value, I64{64}, I64{8})
 }
 #Export(c) jet_rt_handle_drop_jet_tcp_stream: fn(value: I64) { net_stream_drop(value) }
 #Export(c) jet_rt_handle_drop_jet_unix_stream: fn(value: I64) { net_stream_drop(value) }
