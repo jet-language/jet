@@ -579,7 +579,10 @@ ir_handle_row_laid: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> In
     handle: ir_handle_runtime(p, name) ?? return None
     // A bare `Group` is the task group handle (sema types `task.group`'s
     // binding so); Core's data `Group` is always applied to its arguments.
-    if found == .Val(row) && name != "Group" {
+    // A private Core part's nominal is never what a bare spelling names: the
+    // part is internal, so a bare `Field` is core.reflect's handle, not the
+    // `Field` struct of the private __core_crypto_ecp part.
+    if found == .Val(row) && name != "Group" && (name == p.types[row].key || !core_source_part_owns_type(p.types[row].key)) {
         definition: p.types[row]
         native: ir_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         // A compiler-owned row (its key is its bare name) is no program type:
