@@ -1,0 +1,17 @@
+#!/usr/bin/env jet
+// Stands in for `jet test Compiler --profile P --filter F`: a filter naming
+// `broken` fails two tests, `quiet` prints no summary, any other passes one.
+use {
+    process: core.process
+}
+
+run: fn() {
+    filter: process.args().get(5) ?? ""
+    print("running {filter}")
+    if filter.contains("quiet") -> return
+    if filter.contains("broken") {
+        print("{{\"PASS\":0,\"FAIL\":2,\"KNOWN-FAILING\":0}}")
+        process.exit(1)
+    }
+    print("{{\"PASS\":1,\"FAIL\":0,\"KNOWN-FAILING\":0}}")
+}
