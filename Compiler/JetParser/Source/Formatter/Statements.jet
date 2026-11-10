@@ -24,6 +24,7 @@ use {
         Span,
         Stmt,
         SwitchArm,
+        arithmetic_mode_name,
         expr_source_start,
         expr_span,
         type_name,
@@ -172,6 +173,7 @@ jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
         .Sentries -> "sentries"
+        .Arithmetic -> "arithmetic"
     }
 }
 
@@ -192,6 +194,7 @@ jfmt_policy_value_display: fn(value: PolicyValue) -> String Never! {
         .On -> ".On"
         .Off -> ".Off"
         .Explicit -> ".Explicit"
+        .Arithmetic(mode) -> ".{arithmetic_mode_name(mode)}"
     }
 }
 
@@ -201,7 +204,7 @@ jfmt_fmt_policy_entry: fn(f: &JetFmt, declaration: PolicyDeclaration) {
     jfmt_write(f, jfmt_policy_key_name(declaration.key))
     if declaration.value == {
         .Limit(limit) -> jfmt_write(f, "({limit})")
-        .On | .Off | .Explicit -> {
+        .On | .Off | .Explicit | .Arithmetic(_) -> {
             jfmt_write(f, ": ")
             jfmt_write(f, jfmt_policy_value_display(declaration.value))
         }

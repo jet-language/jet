@@ -6648,12 +6648,11 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})
     }
-    // Rust `#Arithmetic(mode) { … }`: one lexical
-    // fixed-width arithmetic mode over the block, read by the operator checks
-    // as `context.arithmetic_policy`. An argument that names no mode is the
-    // block application's E0930, reported where every marked statement binds
-    // its signature (sema_marker_rules_check_statement_facts); the block is
-    // still checked.
+    // `#Arithmetic(mode) { … }`: one lexical fixed-width arithmetic mode over
+    // the block, as `#Policy(arithmetic: mode) { … }` is, read until every
+    // in-repo use is the policy. An argument that names no mode is the block
+    // application's E0930 (sema_marker_rules_check_statement_facts); the
+    // block is still checked.
     if name == "Arithmetic" {
         mode := ArithmeticMode?{None}
         if args.len() == 1 -> mode = sema_function_arithmetic_mode(args[0])
@@ -9525,7 +9524,13 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         .Policy(declarations, body, span) -> {
             previous_unit_policy := sema_scope_push_unit_policy(scopes, declarations)
             previous_copies_policy := sema_string_view_push_copies_policy(scopes, declarations)
+            // `#Policy(arithmetic: mode) { … }` is one lexical
+            // fixed-width arithmetic mode over the block, read by the
+            // operator checks as `context.arithmetic_policy`.
+            outer_arithmetic: context.arithmetic_policy
+            if sema_policy_arithmetic_mode(declarations) == .Val(mode) -> context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})
             nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "policy@{span.start}", loop_depth)
+            context.arithmetic_policy = outer_arithmetic
             sema_scope_pop_unit_policy(scopes, previous_unit_policy)
             scopes.copies_explicit = previous_copies_policy
             if {

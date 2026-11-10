@@ -24,6 +24,7 @@ foundation_core_menu_variant: fn(name: String, variant: String) -> String? {
         if variant == "ExplicitUnits" -> return Val("explicit_units")
         if variant == "Copies" -> return Val("copies")
         if variant == "Sentries" -> return Val("sentries")
+        if variant == "Arithmetic" -> return Val("arithmetic")
     }
     Val(variant)
 }
@@ -77,7 +78,12 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
         if name != "IntType" {
             kind := CoreLeafKind.Plain
             if core_module_enum_variants(module_name, name) == .Val(enum_variants) -> kind = CoreLeafKind.Enum{variants: enum_variants}
-            variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
+            variants := foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
+            // `arithmetic: .Wrapping` takes its value from the ArithmeticMode
+            // enum that PolicySetting.Arithmetic carries.
+            if name == "PolicySetting" && core_module_enum_variants(module_name, "ArithmeticMode") == .Val(modes) {
+                loop mode in modes -> variants.push(mode)
+            }
             menus.push(TAppliedRuleArgumentMenu{
                 name: name,
                 variants: variants,

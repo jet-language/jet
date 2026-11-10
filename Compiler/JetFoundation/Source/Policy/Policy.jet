@@ -27,6 +27,7 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
         .Sentries -> "sentries"
+        .Arithmetic -> "arithmetic"
     }
 }
 
@@ -53,6 +54,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
         "sentries" -> Val(PolicyKey.Sentries)
+        "arithmetic" -> Val(PolicyKey.Arithmetic)
         else -> None
     }
 }
@@ -60,7 +62,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
 // Rust `PolicyKey::is_audited_gate`.
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
-        .ScopedGC | .ExplicitUnits | .Copies | .Sentries -> false
+        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic -> false
         else -> true
     }
 }
@@ -82,6 +84,26 @@ policy_value_display: fn(value: PolicyValue) -> String Never! {
         .On -> ".On"
         .Off -> ".Off"
         .Explicit -> ".Explicit"
+        .Arithmetic(mode) -> ".{arithmetic_mode_name(mode)}"
+    }
+}
+
+// The variant name of an arithmetic mode, as `.Wrapping` writes it.
+arithmetic_mode_name: fn(mode: ArithmeticMode) -> String Never! {
+    if mode == {
+        .Checked -> "Checked"
+        .Wrapping -> "Wrapping"
+        .Saturating -> "Saturating"
+    }
+}
+
+// The arithmetic mode a written variant name selects.
+arithmetic_mode_parse: fn(name: String) -> ArithmeticMode? Never! {
+    if name == {
+        "Checked" -> Val(ArithmeticMode.Checked)
+        "Wrapping" -> Val(ArithmeticMode.Wrapping)
+        "Saturating" -> Val(ArithmeticMode.Saturating)
+        else -> None
     }
 }
 
@@ -117,6 +139,8 @@ PolicyRule: struct {
 
 POLICY_PACKAGE_SCOPES: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 POLICY_ALL_SCOPES: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+// Arithmetic is a function, method or block policy.
+POLICY_BODY_SCOPES: comptime { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
 POLICY_RULES: comptime { [PolicyRule]{
@@ -140,6 +164,8 @@ POLICY_RULES: comptime { [PolicyRule]{
     {key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Sentries, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    // The innermost mode wins: a wrapping block inside a checked function wraps.
+    {key: PolicyKey.Arithmetic, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Override},
 } }
 
 // Rust `rule`.
@@ -229,6 +255,7 @@ policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
         .ExplicitUnits -> "ExplicitUnits"
         .Copies -> "Copies"
         .Sentries -> "Sentries"
+        .Arithmetic -> "Arithmetic"
     }
 }
 
@@ -248,6 +275,7 @@ policy_value_debug_text: fn(value: PolicyValue) -> String Never! {
         .On -> "On"
         .Off -> "Off"
         .Explicit -> "Explicit"
+        .Arithmetic(mode) -> "Arithmetic({arithmetic_mode_name(mode)})"
     }
 }
 
@@ -363,6 +391,7 @@ policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueEr
             else -> return Err(PolicyValueError{detail: "`sentries` must be `.On` or `.Off`"})
         }
     }
+    if key == PolicyKey.Arithmetic -> return Err(PolicyValueError{detail: "`arithmetic` is not a package policy; write `#Policy(arithmetic: …)` on the function, method or block"})
     if !policy_key_is_audited_gate(key) -> return Err(PolicyValueError{detail: "package policy `{policy_key_name(key)}` has an unsupported value"})
     if key != PolicyKey.Unsafe && key != PolicyKey.Impure && key != PolicyKey.Nondeterministic {
         if value == {

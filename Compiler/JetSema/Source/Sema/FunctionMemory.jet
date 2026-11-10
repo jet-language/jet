@@ -447,8 +447,9 @@ sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclarati
         // and sema_scope_push_unit_policy). `sentries` only turns the runtime
         // witness of a sentry build on or off; the lexical #Unsafe gate and its
         // obligations are checked either way, and a normal build lowers a
-        // sentry scope as a plain scope (JetIR BuildExpr ir_stmt).
-        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries -> next
+        // sentry scope as a plain scope (JetIR BuildExpr ir_stmt). An
+        // `arithmetic` mode only routes fixed-width operators.
+        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries || declaration.key == PolicyKey.Arithmetic -> next
         // An audited-gate key (`unsafe: .Forbid`, `check_removal: .Forbid`, …)
         // is no memory policy: the gate ledger and pkg_check_project_gate
         // enforce it.

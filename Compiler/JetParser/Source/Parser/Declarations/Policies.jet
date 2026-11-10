@@ -2,7 +2,8 @@
 // is a file-scoped source policy (Rust `policy_is_file_decl` and
 // `policy_declarations_from_marker`). Its arguments become the module's
 // policy declarations; a callable policy (`#Policy(retry(3))`) stays a marker
-// on the declaration that follows it.
+// on the declaration that follows it, and so does a policy naming
+// `arithmetic` written directly above a declaration.
 use {
     jet_foundation.[
         Marker,
@@ -12,6 +13,7 @@ use {
         Program,
         Span,
         Stmt,
+        arithmetic_mode_parse,
         marker_registered_site_bound,
         policy_key_parse,
         type_name,
@@ -42,12 +44,56 @@ parser_policy_file_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
             depth -= 1
             if depth == 0 {
                 after: parser_kind_at(state, offset + 1)
-                return after == TOKEN_SEMI || after == TOKEN_EOF
+                if after == TOKEN_EOF -> return true
+                if after != TOKEN_SEMI -> return false
+                // An arithmetic mode has no module rung: on the line just
+                // above a declaration, `#Policy(arithmetic: …)` is that
+                // declaration's policy. Only a blank line or the end of the
+                // file leaves it a module declaration, which E0355 refuses.
+                if parser_policy_names_arithmetic(state, offset) && !parser_policy_blank_line_follows(state, offset) -> return false
+                return true
             }
         }
         offset += 1
     }
     true
+}
+
+// True when an argument of the `#Policy(...)` whose closing parenthesis is at
+// lookahead `close` is the `arithmetic` key.
+parser_policy_names_arithmetic: fn(state: &JetParserState, close: Int) -> Bool Never! {
+    loop offset in 3..<close {
+        if parser_kind_at(state, offset) == TOKEN_IDENT && parser_value(state, parser_lookahead(state, offset)) == "arithmetic" -> return true
+    }
+    false
+}
+
+// True when a blank line, or only line breaks up to the end of the file,
+// follows the closing parenthesis at lookahead `close`. A comment line is not
+// blank. Without the source text the policy stays a module declaration.
+parser_policy_blank_line_follows: fn(state: &JetParserState, close: Int) -> Bool Never! {
+    next := close + 1
+    loop parser_kind_at(state, next) == TOKEN_SEMI {
+        next += 1
+    }
+    if parser_kind_at(state, next) == TOKEN_EOF || state.sources.len() == 0 -> return true
+    bytes: state.sources[0]
+    start: parser_lookahead(state, close).span.end
+    end: parser_lookahead(state, next).span.start
+    if start < 0 || end > bytes.len() || end <= start -> return true
+    saw_newline := false
+    only_space_since_newline := true
+    loop index in start..<end {
+        byte: Int.from_u8(bytes[index])
+        if byte == 10 {
+            if saw_newline && only_space_since_newline -> return true
+            saw_newline = true
+            only_space_since_newline = true
+        } else if byte != 32 && byte != 9 && byte != 13 && byte != 59 {
+            only_space_since_newline = false
+        }
+    }
+    false
 }
 
 parser_parse_policy_file_decl: fn(state: &JetParserState, program: &Program) {
@@ -122,7 +168,7 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
         name := label
         name_span := marker.span
         mode := PolicyValue?{None}
-        if label == "copies" || label == "sentries" {
+        if label == "copies" || label == "sentries" || label == "arithmetic" {
             variant: if expr == {
                 .EnumLit(type_name, written, _, args, _, _, _) -> if type_name == "" && args.len() == 0 -> written else -> ""
                 else -> ""
@@ -131,10 +177,16 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
                 variant == "Explicit" && label == "copies" -> Val(PolicyValue.Explicit)
                 variant == "On" && label == "sentries" -> Val(PolicyValue.On)
                 variant == "Off" && label == "sentries" -> Val(PolicyValue.Off)
+                label == "arithmetic" && arithmetic_mode_parse(variant) == .Val(arithmetic) -> Val(PolicyValue.Arithmetic{mode: arithmetic})
                 else -> {
                     parser_marker_shape_error(state, marker)
                     return None
                 }
+            }
+            // An arithmetic mode is lexical to one body.
+            if label == "arithmetic" && scope == PolicyScope.Module {
+                parser_add_error_code(state, "E0355", marker.span, "`arithmetic` is not a module policy", "an arithmetic mode governs one function, method or block body and never crosses a call", "write `#Policy(arithmetic: …)` on the function, method or block")
+                return None
             }
         } else {
             if expr == .Ident(written, span, _) {
@@ -151,7 +203,7 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
             if marker_registered_site_bound(name) {
                 parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them", "use `#{name}` at its sound site")
             } else {
-                parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
+                parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, `sentries: .Off`, or `arithmetic: .Wrapping`; write memory floors as `!Mem.*` effect denials")
             }
             return None
         }
@@ -162,6 +214,10 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
             }
             .Sentries -> mode ?? {
                 parser_add_error_code(state, "E0355", name_span, "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`")
+                return None
+            }
+            .Arithmetic -> mode ?? {
+                parser_add_error_code(state, "E0355", name_span, "`arithmetic` needs an explicit mode", "fixed-width arithmetic is checked, wrapping or saturating", "write `arithmetic: .Checked`, `arithmetic: .Wrapping` or `arithmetic: .Saturating`")
                 return None
             }
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
