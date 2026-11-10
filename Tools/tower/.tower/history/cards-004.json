@@ -88664,6 +88664,1870 @@
       "completedAt": "2026-11-07T06:16:14.694Z",
       "questions": [],
       "retiredAt": "2026-11-10T06:31:52.816Z"
+    },
+    {
+      "id": "c0max8v8",
+      "num": 4599,
+      "title": "Master golden suite: every example passes on the JetIR native path",
+      "body": "Measured 2026-10-05 by PerfMerge2 on master 53d28027e with bounded workers (all 17 subsets completed): $JET_STATE_ROOT/scratch/perfmerge2/master-golden-failures.tsv (test, error, detail). By area: memory 25, collections 22, lowlevel 18, text 12, errors 10, basics 6, contracts 2, others 1 each. By first error: panic 34, rustc E0308 18, E3208 8, E0425 4, plus E0106/E0277/E0502/E0108/E0112/L0507/E1212. Every rustc-coded failure is an internal compiler error under I2 (sema must reject or codegen must emit valid Rust). Known pieces: returned_views E0106 (#4392 follow-up, Fix4392b), pretty_interpolation (fmt rulings, FmtRulings). Done when the golden suite passes on master; each failure fixed at the root or its golden corrected only where the expectation is stale (reviewed).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "a0_030 release attempt on eb94f67b7a (2026-11-06 21:09): chain fixed point s2 == s3, cc-pack, pack, jetpack, jetpack-engine, golden (4350 rows, 40 gained, 0 lost) and ui (2391, 145 gained, 0 lost) PASS. Cases: 4510 rows, 138 gained, 1 lost: build_entry/program_owned_main_stops_as_the_process_root_does, because plain.jet's image now links jet_rt_thread_attach. Root: 76cbe208be's production receipt renderer in JetRuntime Trap.jet allocates on every root stop. Sent to CoreCliLead; the release reruns on the fix."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-06), replacing the design note above. c66: build it. Port the grant, canonical-path, symlink, read and header-parse steps to a runtime Mod.jet. Map Jet mod objects with the runtime's own loader (mmap plus relocation, no dlopen), and carry the compiler identity into the runtime for the E1338 check. \"Always Unsupported\" is not an option. c4: port whole-invocation receipt replay (Rust ReceiptStore run_if_needed, lookup_context, replay_receipt) for `jet check`, so the receipt-invalidation case runs as written. Owner: CoreCliLead, after `--coverage` slice 1."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c66 (ModLoadErrors): blocked on design, not port. No jet_mod_* runtime export exists; ModGrant's read: [String] can't cross as a runtime record (ir_record_member_crosses refuses List.Text); the native runtime is static musl with no dlopen, and has no compiler identity for the E1338 version check. CoreCliLead proposed making Mod.load always Unsupported on native; Main declined (a self-mapping loader is possible without dlopen, so that would be a product decision). c4: case (1) check_fixed_dynamic_size_reports_e0103_without_internal_failure PASSES on 76cbe208be; case (2) check_receipt_invalidates_when_higher_priority_entry_appears fails because whole-invocation receipt replay (Rust ReceiptStore run_if_needed/lookup_context/replay_receipt, ~4.6k lines) was never ported. c4 stays open; retargeting the case would change the criterion."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c73 landed 76cbe208be (CoreCliLead): the runtime writes the production-failure receipt on root stops; awaiting Main's batch run. Not yet ported: the Rust index_production_receipt record-index entry; the c73 case does not need it, so it stays an open gap on this card."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c52: Examples/features/serde/field_metadata_edges.jet -> tests/run/Encoding/FieldMetadataEdges.jet; c66: Examples/features/packages/mod_load_errors.jet -> tests/run/Packages/ModLoadErrors.jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c76 follow-up dev ce5343187f (GoldenRoots3): router handlers Net-only (router-owned handler list; HTTPMux __select split into __pick + handle). s1 7c9a5fd1a9+patch: cases http_router_dispatch and http_router_named_catchall_and_encoded_marker_literals PASS, KF rows removed; golden web/ o0/o1/o2 79/0; golden net/ 136/0; ui http_route 8 PASS; cases http 27 FAIL identical to base (0 regressions)"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c9 partial dev 3fa1dfa440 (GoldenRoots3): web/state_surface 15 check errors fixed, jet check clean; jet run ICEs 101 on o0/o1/o2: core.web.store Derived<T>!E generic results unlowered, core.web Auth struct lowering, runtime routes jet_openapi_router_inputs and jet_http_router_new missing. app_hello, forms_table, web_compute_webgpu PASS o0/o1/o2; browser_surface PASS o0, UNSUPPORTED o1/o2 (E2104 browser.report_json)"
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 4 criteria from archived #1143, #2898: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "G15 audit on dev 0d1ea12f79 (Docs/audits/g15-2026-11/VERDICTS-g15-6096-4599.md, commit 125e2e8f89): 12 criteria settled, 15 stay open; each open row names what is left."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patch lanes/Main/unitarg/Main-6-parked.patch is superseded by e49bd059c4 and is not held."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c54/c65 tier note (Main, 2026-11-02): the default golden run is tier o0 (run). The same four examples also pass at o1: TESTKIT_ARGS=\"--tier o1 --filter Examples/features/<name>\" jet test Tools/testkit \"suite golden\" on base f2898ba8d5 gives 1 passed, 0 failed for ui/ui_native_linux, ui/ui_tui_reactive, ui/ui_view_tree and io/agent_executor."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c91 progress (Main, 2026-11-02). Root of the sema half: sema_call_concurrency_check_parallel_callback (Compiler/JetSema/Source/Sema/Calls/Concurrency.jet) treats a callback as a named function only when its name has NO scope binding. A top-level fn has a binding (symbol.kind == SymbolKind.Function), so `values.para_map(callback)` gets a false E1102 (\"isn't sendable\"). A fix that also accepts a binding whose symbol kind is Function is parked at $JET_SCRATCH_ROOT/lanes/Main/unitarg/Main-6-parked.patch. On that s1, core_and_closures/parallel_collection_adapters_report_lowest_input_failure passes and use_stable_bounded_chunks matches 10 of 11 golden lines. NOT landable yet: it exposes a lowering bug. `values.para_fold(one, step, merge)` with a named SEED crashes with SIGSEGV at 0x0 at run time (repro $JET_STATE_ROOT/scratch/Main/m71/pf1.jet; the lambda seed gives the right 201761130258). A named step or merge was not isolated because the run stops at the fault. The fold lowering is ir_para_fold in Compiler/JetIR/Source/BuildParallel.jet:326. Lowering must take a named fn seed (and step/merge) as a closure value before the sema fix lands; otherwise a compile error becomes a crash. select_across_runtime_failure_carriers then reaches a separate E0360 (DateTime - Int has no Sub hook)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-45: compute_autodiff: jet check exit 0; jet run ICE exit 101, 7 \"generic Core call core.compute.*\" ir.build unlowered faults"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in GoldC-51 (patch row: criterion/count 29): GoldC-51: Examples/features/tooling/compiler_api/run.jet testkit golden PASS o0+o1+o2 on 94dacfc354 + wave/10/in + GoldC-46/50/51, s1 08502753f0395a26; census passed (wave 10 failed)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in GoldC-51 (patch row: criterion/count 25): GoldC-51: Examples/features/tooling/compiler_api/run.jet builds and runs its comptime compiler API items (no E0956 or comptime.build fault); testkit golden PASS o0+o1+o2 on 94dacfc354 + wave/10/in + GoldC-46/50/51, s1 08502753f0395a26"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in GoldC-50 (patch row: criterion/count 87): GoldC-50: Examples/features/serde/shape_projection.jet testkit golden PASS o0+o1+o2 on 94dacfc354 + wave/10/in + GoldC-46/50/51, s1 08502753f0395a26; census passed (wave 10 failed)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6001 \"Map: Goldens: parser gaps (E0003/E0119/E0930/E0067)\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 3 open item(s) are carried as \"(was #6001)\" criteria, and its 11 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5998 \"Map: Goldens: ownership, write marks, effects and task-group rules\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 14 open item(s) are carried as \"(was #5998)\" criteria, and its 10 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5997 \"Map: Goldens: members, constructors and static methods (E0302/E0311/E0102/E0107)\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 6 open item(s) are carried as \"(was #5997)\" criteria, and its 11 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5991 \"Map: Goldens: JetIR runtime routes for io, net, terminal, time and crypto\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 9 open item(s) are carried as \"(was #5991)\" criteria, and its 12 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5972 \"Map: Goldens: JetIR runtime routes for collections\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 3 open item(s) are carried as \"(was #5972)\" criteria, and its 9 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5993 \"Map: Goldens: JetIR expression, type and record lowering gaps; output mismatches\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 7 open item(s) are carried as \"(was #5993)\" criteria, and its 20 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5992 \"Map: Goldens: generic Core calls and serde/data/compute/UI routes\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 13 open item(s) are carried as \"(was #5992)\" criteria, and its 10 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5995 \"Map: Goldens: E0112/E0113 argument and result typing\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 5 open item(s) are carried as \"(was #5995)\" criteria, and its 6 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5994 \"Map: Goldens: E0108 call-argument checking\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 3 open item(s) are carried as \"(was #5994)\" criteria, and its 9 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5996 \"Map: Goldens: Core call resolution in sema (E0904/E0902/E0905/E1004/E0109/E0510)\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 7 open item(s) are carried as \"(was #5996)\" criteria, and its 6 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5999 \"Map: Goldens: control flow, patterns, optionals and operators\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 4 open item(s) are carried as \"(was #5999)\" criteria, and its 8 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6002 \"Map: Goldens: comptime evaluation (E0956/E3010/E3410/E0114)\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 6 open item(s) are carried as \"(was #6002)\" criteria, and its 4 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6000 \"Map: Goldens and cases: diagnostic-code drift and lint expectations\" into this card (master golden suite: every example passes on the native path; the per-family golden maps are slices of the same goal); its 12 open item(s) are carried as \"(was #6000)\" criteria, and its 11 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "LiveUI triage 2026-10-30 (de339 golden fails, logged and skipped, each >45 min): devloop/job_runner (no #Job argv dispatch, see #6061 C2); errors/stack_overflow o1/o2 (C10); web_compute_webgpu (native build instead of web, E1803 then ICE jet_compute_matrix); serde/field_metadata_edges (JSON encode sorts keys, omits null optionals, 'found null' vs 'found Null'); packages/build_contribution (b.contribute not folded: 1 vs 4); foundations/units (E0113 quantity -> unit family); bridges/opaque_handles (E3203 FFI opaque handles); net/network_projection (needs a DNS fixture: live dns_srv of example.test); devtools E1410/E1411/E1413/E1414 gates unported."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed GoldC-rebase797 1edc185711 (encoding_cbor_stream met): explicit type args resolved in the caller's module (Solver.jet sema_infer_validate_explicit); __reserve_checked<ReadFrame> now uses CborStream struct ReadFrame; encoding_cbor_stream PASS o0/o1/o2 on rg9c"
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed GoldC-rebase797 1edc185711 (encoding_cbor_stream met): with GoldC-tyarg: encoding_cbor_stream PASS o0/o1/o2 on rg9c (n6d: ERROR exit 101)"
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed GoldC-rebase797 1edc185711 (encoding_csv_stream met): testkit golden --filter serde on rg9c (g9 d089910dbf): encoding_csv_stream PASS o0/o1/o2 (n6d: ERROR exit 101); serde rows vs n6d: +6 gained, 0 lost"
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed GoldC-rebase797 1edc185711 (- progress): task.timeout installs the deadline through core.time.__task_timeout on every tier (Sema used to drop it as Unit); Examples/features/concurrency/task_timeout_deadline passes on o0/o1/o2."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "progress: Three goldens move to passing on o0/o1/o2 with hand-derived expected streams (golden compare b6d->n6d: +31 PASS, 0 lost, which includes these three). (landed dev 1edc185711, receipt GoldC-rebase797)"
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "progress: #Test(expected_fail: true) now marks the test (port of Rust CheckerMarkers.rs materialize_test_expected_fail into TestArtifacts.jet checked_test_expected_fail). Examples/features/tooling/expected_fail.jet prints the expected_fail.test.out rows (expected-fail / pass / UNEXPECTED-PASS) on rg8b. jet_test_expected_fail_tracks_failure_and_unexpected_pass still fails at step 3: `jet test --json` has no native JSON envelope (separate gap). (landed dev 496e49a853, receipt GoldC-xfail)"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5845 \"5 web examples have no golden: app_hello, browser_surface, forms_table, state_surface, web_compute_webgpu (Examples/features/web)\" (CardTrim 2026-10-28: single-root bug step of map #4599 (Master golden suite: every example passes on the); 1 criteria, 0 ratified decisions). Body: From the #4717 port of tests/web_examples_doc.rs (RustTestsD K2, 2026-10-23): the case web_examples_are_documented_and_have_expected_outputs requires every web example to have a golden under Examples/features/expected/web/. These 5 have none: app_hello.jet, browser_surface.jet, forms_table.jet, state_surface.jet, web_compute_webgpu.jet. I5 requires an executable example with golden output on every applicable tier. Acceptance: each has a golden that passes (or an honest known-failing row with its own card), and the case passes."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5091 \"Golden audit: owner questions from the overnight audit (2026-10-22)\" (CardTrim 2026-10-28: single-root task step of map #4599 (Master golden suite: every example passes on the); 0 criteria, 4 ratified decisions). Body: The golden audit (GoldenFront lanes) found UI fixtures whose expected diagnostic no ratified decision settles. Each genuine question is a ballot on this card. Questions an existing decision or the registry already answers are listed in the card log with the citation, so the owner can overrule them. Evidence: $JET_SCRATCH_ROOT/discovery/golden/audit/ (verdicts.tsv, owner-questions.md)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4945 \"UNCOVERED after Rust removal: run-display-goldens-1 and freeze-age-fixtures-0 lost their Rust oracle\" (CardTrim 2026-10-28: single-root task step of map #4599 (Master golden suite: every example passes on the); 0 criteria, 0 ratified decisions). Body: Per owner directives #38(b) and #59, two S5 fixture modes that existed only to compare against Rust captures now report UNCOVERED (cardRequired=true) instead of BLOCKED or PASS (a9b86621e, DevGreenLead, 2026-10-09): (1) run-display-goldens-1 has no historical display comparator capture; (2) freeze-age-fixtures-0 has no AGE Rust testkit generator. The mandatory native gates are unchanged: the native golden union / shared native results, and run-crypto-fixtures-4 (AgeCodec/AgeV1 open/seal coverage, run-crypto-fixtures.mjs:16,90-106). Work: replace each with a native, spec-derived oracle (display golden expectations written from the spec; AGE vectors from the AGE spec/test vectors), then remove"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4885 \"Golden harnesses ignore stdout on failing runs, masking missing Close-on-panic output (#4881)\" (CardTrim 2026-10-28: single-root bug step of map #4599 (Master golden suite: every example passes on the); 0 criteria, 0 ratified decisions). Body: Found by PreflightE2-2. The Close-on-panic goldens HAVE expected stdout (release: 'body / close second / close first'; scope: 'body first second / close second / close first'), but the harnesses don't compare stdout when the program fails: the golden runner's failure expectation checks stderr only (harness ~line 113), Compiler/JetBackend/Tests/run-goldens.mjs:560 ignores failure stdout, and the native trap wrapper (:59-64) compares only stderr + exit. So a tier that skips Close on panic (#4881: native ordinary root should_unwind false → direct process exit; the seed Core.rs:913 / :1092 likely the same) still passes those goldens. Fix: every golden harness compares the full expected stdout (a"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4771 \"Self-host parser-contract harness (L2) assembly gaps: missing lint-policy deps, Data vs DataTree, imported encoding metadata\" (CardTrim 2026-10-28: single-root bug step of map #4599 (Master golden suite: every example passes on the); 1 criteria, 0 ratified decisions). Body: Found by Stage0Sweep4 (2026-10-07) running the generated self-host parser-contract harness on the gate-2 line: the L2 harness assembly is missing dependencies (POLICY_FIELD_LINTS / LINTS_FIELD_DENY), mixes Data vs DataTree, and lacks imported encoding metadata. Not a gate step (make-pipeline/proofs.list) and not caused by the parser fix. Receipt: $JET_SCRATCH_ROOT/tmp/Stage0Sweep4-contract/receipt. Acceptance: the parser-contract harness assembles from the canonical fixture assembly with all dependencies and runs green on dev."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4699 \"Verify two suspected defects in CLI fixtures\" (CardTrim 2026-10-28: single-root bug step of map #4599 (Master golden suite: every example passes on the); 0 criteria, 0 ratified decisions). Body: Only two suspected real defects stay: (1) check_fixed_dynamic_size_reports_e0103 exits 0 where E0103 is expected (possible sema gap); (2) check_receipt_invalidates_when_higher_priority_entry_appears does not replay the receipt (possible receipt bug). Verify each on the Jet tier and fix real defects with goldens. The other stale Rust test expectations die with the Rust test suite (#4717) and are not re-blessed. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Pre-existing on master 3e5349196, at the s2 batch 3f64b4fb6 and at dev 595e0dca3 (GateTriage2, master gate 2026-10-05; $JET_SCRATCH_ROOT/gate/595e0dca3/PROOFLIST-TR"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4585 \"GoldenLower driver accumulates memory across cases (13 of 14 golden lower-crashes are 8 GB OOMs that pass in fresh processes)\" (CardTrim 2026-10-28: single-root bug step of map #4599 (Master golden suite: every example passes on the); 0 criteria, 0 ratified decisions). Body: From BackendO5 (2026-10-05): the long-lived interpreted GoldenLower driver grows across cases until the 8 GB cap; rerunning the same cases in fresh processes passes 10 and reports 3 as honest unsupported. Find what the driver retains between cases (the lowering state should be dropped per case), fix it, and keep types/enum_many_variants (which OOMs alone) as a separate lowering-scaling case."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Destination: Every shipped example runs under the golden kit with stdout checked on failures, and every example has a golden.\nNotes: Batch G17 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET JET_TOOLCHAIN_ROOT=<worktree> Tools/agent/jet-env node Tools/agent/goldens-census.mjs --jobs 2 --timeout 90 (milestone token required for the full census). Order: #3065 #4885 #4585 #4699 #4771 #4945 #5091 #5845.\nDecisions so far: D-PERSIST-BORROW1 (ratified=A) on #5091; D-DIAG-CORE-NAME1 (ratified=A) on #5091; D-PREP-LOCAL1 (ratified=A) on #5091; D-AUTH-METHOD1 (ratified=A) on #5091; D-CFFI-DIAG1 (open) on #5091; D-WEB-SUITE-QUOTE1 (open) on #5091\nFog: no criteria yet on #4885 #4945 #4585 #5845 #5091 #4699 #4771 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; per-root fixes live in G01-G16."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Audit 2026-10-28 (HEALTH-01, TOWER-04): goldens 808 pass / 312 fail; 210 open `golden:` cards record one symptom each (60 say \"E2104 runtime route\"). Group them by root cause. The RustOut lane owns the 440-failure grouping; TowerDedup is merging exact duplicates."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "2026-10-23 ~07:50: owner assigned the RustOut lane to this card (Rust removal paused on #4717). First deliverable: all 440 failures grouped by root cause and ranked by examples unblocked; then fixes land root by root."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Census 2026-10-23 ~07:40 (O0Load, HEAD-equivalent tree, all 1182 examples): jet run passed 620 / failed 440 / no-match 50 / skipped 71; jet build+run passed 617 / failed 440 / no-match 53 / skipped 71. Run is never worse than build (0); better on 3 (effects/authority_*). Failure buckets (run): E2104 backend gaps 163 (top: generic Core call json.decode 11, jet_db_with_policy 9, HTTP mux handle 7, TypedTextInterp 4, jet_duration_in 4, CursorTakePattern 3, DecodeUnder 3, UI null backend 3, then a long tail of missing runtime routes left by the Rust removal: deque, list union/counts, set difference, VecDeque, JetPool, JetRegex, os_atexit, reflect_of, BitCount, vault...), ICE exit 101 28, E0108 19, E0112 15, E0003 12, E0102 12, timeouts 16, E1002 9, E2105 8 (#CLI typed entries), then smaller sema codes. By area: serde 49, tooling 48, io 42, memory 33, lowlevel 31, net 26, types 22, collections 21, text 17, ui 16, concurrency 15. Raw: $JET_RUN_ROOT/census/census-{run,build}.json."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed Goldens5 h16 stack (rebased onto reshaped TIR): gbF3 193050dc0 (CSVRow and core.data records source-owned), gbI e53fc761a (source-owned generic Core structs lay out by fields; gbO's one-file hunk in BuildPriorityQueues.jet landed inside this commit because both touched the file), gbZ+gbM b113abb54 (zip/unzip builtins), gbX 6c19d7473 (distinct), gbY 408270b47 (Iter any/all/position), gbS bd6a23a26 (Float List total_cmp sort). Chain k14 FIXED POINT 2f46d07599f077bf on 7b183aa47; targeted examples +7 pass, +9 further, 0 regressions; rebased tree seed checks 0; lander precommit OK."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: Title updated: the generated-Rust failures in the old title no longer exist; the suite runs on the JetIR native path."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #4262 (Jet compiler 1:1 parity burn-down: every golden passes on the Jet-built compiler): Every golden passing on the Jet-built compiler is the golden burndown #4599. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed on dev at 13870d08e (lander batch, PRECOMMIT OK: check/build/selfcheck 0 rows): gbB+gbD (be10d2161), gbE (0b20f4839), gbH (541190dea). Golden repairs; targeted examples per lane receipts."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner rulings 2026-10-22 ~20:50: (1) Push all work at milestones so nothing is lost if the machine crashes. dev is the staging branch: once dev is proven (self-host FIXED POINT, tests roughly equal to master with minimal regressions) promote dev to master and push, then keep working on dev. (2) Only master and dev branches; integrate cutover-ready (#4956) unique work into dev, then delete that branch and worktree. (3) Seeds: keep current a0_010 and rollback a0_009; delete older seeds and stage trees after recording identities on Tower. (4) Scratch evidence: distill plans/handoffs into Tower cards, measured results into card logs (and audits where durable), land or attach unlanded patches, then delete raw logs and build trees. (5) Keep $JET_SCRATCH_ROOT below 75% full (it slows badly above that); keep root and scratch disks clean of OBE Jet work."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22 ~20:45: Tower burndown authorized: Main may close obsolete (Rust-only/OBE) cards with a reason, merge duplicates, rewrite Rust-era cards for the Jet architecture and re-phase everything; real product/language choices go to ballots, not card text. Cross-platform and JetOS stay frozen and untouched. Up to 8 Opus agents overnight."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22 ~20:30 (chat, before bed): Main may rotate the seed when proven: chain FIXED POINT plus full golden suite no worse than the current seed."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed 2a4dbe795 gbA and 54126db8c gbC (Goldens lane). gbB, gbD, gbE queued; targeted examples 14 -> 46 of 88 for gbA-D, none worse."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "Goldens5 found that data_hostile, data_loader and data_stream_bounds bind DataStream/DataLoader with :: and then pass &reader. core.data.stream next is source-owned Core taking &DataStream (it edits stream.index), so E0205 is correct under current semantics; the old Rust core_call stream ops accepted it. Main chose (a): change the 3 example sources to := (goldens unchanged). The alternative (b), a handle-state rule letting :: handle bindings take &, is new product behavior and would need an owner ballot if wanted."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "Owner policy 2026-10-22: the full golden suite runs only before releasing a new compiler version (seed rotation or release candidate), not after every patch. Per patch: targeted examples plus the self-host chain."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22: E1803 (application authority undecided) on 11 single-file examples: the examples are stale; the compiler is unchanged; each example gets a leading package block declaring exactly the effects it uses under authority.holds. Assigned to the Goldens lane."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "2026-10-22 golden census, dev 592fff309 content with the self-hosted s2 (JetIR-built), official run-feature-examples: 1170 examples, 531 passed, 517 failed, 51 no-match, 71 skipped. 333 distinct first-error clusters; top: 27 ICE semantic body rechecking incomplete package, 22 stdout mismatch, 21 E0311 method missing, 11 E0107, 11 E0205, 11 E1803, about 45 E2104 backend gaps, 9 E1002. Mostly front end. Data: $JET_RUN_ROOT/gold/k29.json, clusters $JET_RUN_ROOT/gold/k29-clusters.txt. Burn-down follows cutovers A/B per owner sequencing."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "The grouping table (test, first error, cause card) is regenerated from a fresh golden run and attached to this card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: the grouping table (test, tiers, first error, cause card) was regenerated from fresh golden runs on o0, o1 and o2 and is in Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89).",
+          "at": "2026-11-04T19:42:48.800Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #4585) GoldenLower driver accumulates memory across cases (13 of 14 golden lower-crashes are 8 GB OOMs that pass in fresh processes)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoldenLower was deleted (c357547df1); goldens now run through Tools/testkit in fresh processes.",
+          "at": "2026-11-04T19:42:49.373Z"
+        },
+        {
+          "n": 4,
+          "text": "Both suspected CLI-fixture defects are fixed: tests/cases/cli_parts_commands/check_fixed_dynamic_size_reports_e0103_without_internal_failure.case and tests/cases/cli_parts_commands/check_receipt_invalidates_when_higher_priority_entry_appears.case pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Fixed by 7fb2b1cb85, 22c9a04985 and 7c3d88a56e. Batch vb9 (s1 at dev 6a31fd6143, Main): both cases PASS. PortsLead-2 also shows both PASS on its s1 (base 01c7879e02).",
+          "at": "2026-11-07T04:59:44.845Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #4771) Self-host parser-contract harness (L2) assembly gaps: missing lint-policy deps, Data vs DataTree, imported encoding metadata: the parser-contract harness assembles from the canonical fixture assembly with all dependencies and",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The parser-contract harness was deleted (23872f7ab7), so its assembly gaps no longer apply.",
+          "at": "2026-11-04T19:42:49.865Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #4885) Golden harnesses ignore stdout on failing runs, masking missing Close-on-panic output (#4881)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "met: Tools/testkit/Golden.jet:73-80 compares stdout on failing runs too (a failing run's stdout is diffed against the golden), so a missing Close-on-panic line fails the row | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:43.186Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #4945) UNCOVERED after Rust removal: run-display-goldens-1 and freeze-age-fixtures-0 lost their Rust oracle",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "0b86a01810; a0_032 release-gate kit of dev 34290833a9 (chain s2 613ff4f17287d935): golden tests/run/CoreMathNumeric/FloatDisplayEdges.jet PASS on o0, o1 and o2 (the run-display oracle is now a golden row); the age oracle is Compiler/JetRuntime/Tests/AgeV1Fixtures.json, read by Compiler/JetRuntime/Tests: 2 passed, 0 failed in the batch environment on dev 5e49306946 (the freeze-age-fixtures.mjs Rust-era generator is deleted).",
+          "at": "2026-11-07T06:28:07.755Z"
+        },
+        {
+          "n": 8,
+          "text": "The overnight-audit owner questions are answered and implemented: D-CFFI-DIAG1=A (one E3203 naming the callback type when a function can't be a C callback) and D-WEB-SUITE-QUOTE1=A (type names quoted through the shared type display). tests/ui/cffi_callback_*.jet (9) and tests/ui/web_suite_{forms,query,router}_type_mismatch.jet pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch vb9 (s1 at dev 6a31fd6143, Main): all 9 tests/ui/cffi_callback_*.jet PASS (allocation, bound_method, capture, effect, generic, non_c_safe_signature, nullable, panic, runtime_handle), and tests/ui/web_suite_forms_type_mismatch.jet, web_suite_query_type_mismatch.jet and web_suite_router_type_mismatch.jet PASS. The type quoting was re-recorded in 0684625f43.",
+          "at": "2026-11-07T05:02:04.306Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #5845) 5 web examples have no golden: app_hello, browser_surface, forms_table, state_surface, web_compute_webgpu (Examples/features/web): each has a golden that passes (or an honest known-failing row with its own card), and",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a93d1800d1 (GoldenRoots3): app_hello, forms_table, web_compute_webgpu golden PASS o0/o1/o2; browser_surface PASS o0 (o1/o2 E2104 browser.report_json with #6419); state_surface gains Examples/features/expected/web/state_surface.out, output identical at none/basic/full on s1 with the two router lines removed, and an honest known-failing row tied to #4599 c76 (runtime jet_http_router_new / jet_openapi_router_inputs unexported). core.web::Auth and core.web.store::Derived made source-owned Core types; check-core-surface-ledger --check clean; golden web/ PASS 75, auth 29, store 21, form 48",
+          "at": "2026-11-05T23:42:43.826Z"
+        },
+        {
+          "n": 10,
+          "text": "errors/stack_overflow at o1/o2: the compiled-tier E3012 stop prints the same source-context snippet o0 prints, and the golden passes on o0/o1/o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 errors/stack_overflow: `jet run --optimize=none|basic|full` stderr is byte-identical to Examples/features/expected/errors/stack_overflow.err.out (cmp OK x3, exit 70, empty stdout), including the source-context snippet \"2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:49.304Z"
+        },
+        {
+          "n": 11,
+          "text": "collections/bits_native_range: the runtime stop reads 'exact Int does not fit the native i64 ABI @ bits_native_range.jet:8' (user span, not '@ <core.prelude>:0'), and the golden passes on o0/o1/o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): `jet run --optimize={none,basic,full} Examples/features/collections/bits_native_range.jet` -> exit 70 on each level, with stderr byte-identical (cmp) to expected/collections/bits_native_range.err.out \"Stop [E3010]: `exact Int does not fit the native i64 ABI` --> bits_native_range.jet:8\" (user span), and stdout == expected .out on o0/o1/o2 (g4599.out) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:50.169Z"
+        },
+        {
+          "n": 12,
+          "text": "tooling/sync_crdt passes on o0/o1/o2: Core/App/App.jet sync no longer calls itself (use app as provider resolves to its own module, so E3012); the CRDT document parse, merge, session registry and live publish of the retired jet_app_sync route are ported to Jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "golden tooling/sync_crdt PASS o0/o1/o2 (q/sg/golden-liveui-l7g.txt; was E3012 stack overflow); app_live unchanged PASS | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:51.313Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #6000) tests/cases/encoding_parity/serde_derive_examples_match_production_cli_tiers.case pass o0+o1 goldens (was #5511: Codable default cannot route EncodingError into a [FieldError] contract)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 57e578b3cf (GoldenRoots3): the case's fixtures are synced to Examples/features/serde (fallible json.to_string); testkit cases encoding_parity/serde_derive_examples_match_production_cli_tiers PASS 1/1 with base/latest",
+          "at": "2026-11-05T23:06:03.841Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #6000) tests/cases/same_subject_dispatch/rewrite_compiles_formats_and_preserves_parser_dispatch_behavior.case pass o0+o1 goldens (was #5518: L0514 is not suggested for the same-subject dispatch witness)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/same_subject_dispatch/rewrite_compiles_formats_and_preserves_parser_dispatch_behavior.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/same_subject_dispatch/rewrite_compiles_formats_and_preserves_parser_dispatch_behavior jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:26.929Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #6000) tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case pass o0+o1 goldens (was #5524: Exclusive-or width mismatch has no E0109)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:28.003Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #6000) tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case pass o0+o1 goldens (was #5525: Infix caret no longer teaches pow)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/power_and_exclusive_or/infix_caret_teaches_pow jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:29.336Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #6000) tests/cases/run_entry/loose_top_level_statements_require_explicit_run.case pass o0+o1 goldens (was #5527: Loose top-level statement gets no E0621)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/run_entry/loose_top_level_statements_require_explicit_run.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/run_entry/loose_top_level_statements_require_explicit_run jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:30.686Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #6000) tests/cases/failure_tier_parity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.case pass o0+o1 goldens (was #5544: Runtime integer range stop is E3010, not the registered E1003)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/failure_tier_parity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/failure_tier_parity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:31.920Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #6000) tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate.case pass o0+o1 goldens (was #5546: Labelled call to a positional parameter before `*` is rejected (E0764))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:33.019Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #6000) tests/cases/http/auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers.case pass o0+o1 goldens (was #5548: #server.Get is not a known applied rule with auto-derived inputs (E0927))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit `cases --cases caselist.txt`: \"PASS tests/cases/http/auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers.case\" (PASS, not KNOWN-FAILING/UNEXPECTED-PASS) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:52.159Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #6000) tests/cases/outcome_carrier/the_middle_states_read_off_the_same_carrier.case pass o0+o1 goldens (was #5554: Explicit failure domain must be an Error type (E2417) for a plain struct)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/outcome_carrier/the_middle_states_read_off_the_same_carrier.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/outcome_carrier/the_middle_states_read_off_the_same_carrier jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:34.076Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #6000) tests/cases/tir_modules_and_enums/imported_soft_public_declared_types_warn_once_per_occurrence.case pass o0+o1 goldens (was #5561: L0601 soft-public lint is never emitted)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The case moved to tests/cases/modules_and_enums/imported_soft_public_declared_types_warn_once_per_occurrence.case when cec30755ec dropped the tir_ group prefix. It passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/modules_and_enums/imported_soft_public jet test Tools/testkit 'suite cases' gives 1 passed, 0 failed.",
+          "at": "2026-11-02T23:39:23.741Z"
+        },
+        {
+          "n": 23,
+          "text": "(was #6000) (was #5575) jet fix does not apply the L0523 repeated-list-head edit",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Release kit of aaa6331fc0 (a0_031, chain s2 jet 98d89707fb97975a): tests/cases/ui_fixes/repeated_list_head_fix_preserves_behavior.case PASS. That case applies the L0523 repeated-list-head edit with jet fix and checks the program's behavior is unchanged (PortsLead-2 also saw it pass on kit eb94).",
+          "at": "2026-11-07T03:48:57.373Z"
+        },
+        {
+          "n": 24,
+          "text": "(was #6000) Examples/features/serde/encoding_json_stream.jet pass o0+o1 goldens (was #5779: golden: E0405 `_` only works on a fallible value, not DataEvent)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): ./gold4.sh serde/encoding_json_stream (g4599.out): \"stdout == …/expected/serde/encoding_json_stream.out\" on --optimize=none/basic/full, plus [build exit 0] and AOT \"stdout ==\" [run exit 0] | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:53.041Z"
+        },
+        {
+          "n": 25,
+          "text": "(was #6002) (was #4867) Comptime evaluator: '__fragment: call argument local has no resolved type' (E0956) in golden tooling/compiler_api",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-10-31: landed on dev 8439d4bdb3 (wave 11, GoldC-51). Examples/features/tooling/compiler_api passes on the run tier (wave/11/out/golden-wave.json) and the build tier (O1, re-run on the 8439d base jet); no comptime evaluator fault.",
+          "at": "2026-10-31T16:29:19.986Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #6002) tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields.case pass o0+o1 goldens (was #5507: Rechecking a measurement(..) binding ICEs)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:35.121Z"
+        },
+        {
+          "n": 27,
+          "text": "(was #6002) (was #5569) Comptime examples failing on sema/codegen/parser roots (ct65 triage 2026-10-23)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: all 55 Examples/features/comptime goldens pass on o0 (jet run), o1 (jet build) and o2 (jet build --release). Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:50.306Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #6002) (was #5572) Comptime closure type-checks FFI(asm) bodies it can never run and fails with E0114",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "69cf6bd063; batch vb10 (dev e4756389a9, s1 kit): golden tests/run/Comptime/ForeignBranchNotTaken.jet PASS on o0, o1 and o2.",
+          "at": "2026-11-07T05:55:59.409Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #6002) Examples/features/tooling/compiler_api/run.jet pass o0+o1 goldens (was #5855: golden: E0956 The comptime evaluator can't build this item's code yet: __c in compiler_api/run)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-10-31: landed on dev 8439d4bdb3 (wave 11, GoldC-51). Examples/features/tooling/compiler_api passes on the run tier (wave/11/out/golden-wave.json) and the build tier (O1, re-run on the 8439d base jet); no comptime evaluator fault.",
+          "at": "2026-10-31T16:29:21.819Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #6002) Comptime CompilerManifest results lower (tooling/compiler_api_package passes on every tier). (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 tooling/compiler_api_package: harness `node Tools/agent/run-feature-examples.mjs tooling/compiler_api_package --tier run` and `--tier build` both \"passed\" (JET=w11); staged like the harness (project copied, fixture-state -> .jet, cwd = stage root) `jet run --optimize=none|basic|full Examples/features/tooling/compiler_api_package/run.jet` stdout == expected/tooling/compiler_api_package.out rc=0 x3. My earlier E3010 \"lock view failed\" came from not mapping fixture-state to .jet | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:53.939Z"
+        },
+        {
+          "n": 31,
+          "text": "(was #5999) Examples/features/collections/pad_minimum.jet, Examples/features/dyn/wrap_and_decode.jet, Examples/features/serde/json_number_events.jet pass o0+o1 goldens (was #5684: golden: E2404 `_` fails with `_`, which can't propagate into `_` here)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh (g4599.out, summarised by gsum.mjs): collections/pad_minimum, dyn/wrap_and_decode and serde/json_number_events each \"stdout ==\" expected on o0/o1/o2 and the AOT binary, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:54.840Z"
+        },
+        {
+          "n": 32,
+          "text": "(was #5999) Examples/features/lowlevel/linalg_dispatch.jet, Examples/features/lowlevel/vector_mul_dispatch.jet, Examples/features/operators/mixed_types.jet pass o0+o1 goldens (was #5686: golden: E0133 * Isn't defined between `_` and `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: lowlevel/linalg_dispatch, lowlevel/vector_mul_dispatch and operators/mixed_types each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:55.713Z"
+        },
+        {
+          "n": 33,
+          "text": "(was #5999) Examples/features/serde/encoding_cbor_stream.jet, Examples/features/serde/encoding_csv_stream.jet, Examples/features/serde/encoding_jsonl_stream.jet pass o0+o1 goldens (was #5690: golden: E0408 `_` is not available in an optional fallback)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: serde/encoding_cbor_stream, encoding_csv_stream and encoding_jsonl_stream each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:56.609Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #5999) Examples/features/tooling/service_runtime/run.jet pass o0+o1 goldens (was #5869: golden: E0307 This if doesn't cover every case — missing: Panicked, Cancel in service_runtime/run)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 gold4.sh tooling/service_runtime: \"stdout == .../expected/tooling/service_runtime.out\" exit 0 on o0/o1/o2 and the AOT build (build exit 0, run exit 0) (queue3.out) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:57.494Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #5996) tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case pass o0+o1 goldens (was #5493: core.net has no compile-time fetch)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:36.194Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #5996) tests/cases/arena/close_while_a_view_is_live_is_e0212.case pass o0+o1 goldens (was #5534: Arena is not Close (Core/Mem stub struct Arena {}))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/arena/close_while_a_view_is_live_is_e0212.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/arena/close_while_a_view_is_live_is_e0212 jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:37.294Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #5996) tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case pass o0+o1 goldens (was #5551: Floating contract methods report E0905 instead of E0112/E0109)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:38.370Z"
+        },
+        {
+          "n": 38,
+          "text": "(was #5996) Examples/features/lowlevel/mmio_board_write.jet, Examples/features/lowlevel/pointer_cast_deref.jet, Examples/features/memory/pin.jet pass o0+o1 goldens (was #5677: golden: E1004 `_` exposes `_`, but not in this position)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: lowlevel/mmio_board_write, lowlevel/pointer_cast_deref and memory/pin each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:58.330Z"
+        },
+        {
+          "n": 39,
+          "text": "(was #5996) Examples/features/crypto/vault_key_wrap.jet, Examples/features/crypto/vault_keys.jet pass o0+o1 goldens (was #5711: golden: E0510 `_` requires an audited `_` region)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: crypto/vault_key_wrap and crypto/vault_keys each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:59.148Z"
+        },
+        {
+          "n": 40,
+          "text": "(was #5996) Examples/features/serde/encoding_xml_stream.jet, Examples/features/tooling/sync_crdt.jet pass o0+o1 goldens (was #5719: golden: E1004 `_` has no item `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: serde/encoding_xml_stream and tooling/sync_crdt each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:08:59.975Z"
+        },
+        {
+          "n": 41,
+          "text": "(was #5996) Examples/features/modules/run.jet pass o0+o1 goldens (was #5789: golden: E0902 This `_` can't live here)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Examples/features/modules/run.jet no longer exists; the directory's examples are now individual golden entries. On dev f2898ba8d5 (base $JET_SCRATCH_ROOT/discovery/base/f2898ba8d5, 2026-11-02): o0, the wave-35 base golden run (wave/35/out/golden-base.json, tier run) has all 31 modules/* entries passed, none failed, skipped or known-failing. o1: TESTKIT_ARGS=\"--tier o1 --filter Examples/features/modules/\" jet test Tools/testkit 'suite golden' passes (no failure rows; an empty selection fails, so the selection ran). The original E-code failure no longer reproduces.",
+          "at": "2026-11-03T00:07:58.579Z"
+        },
+        {
+          "n": 42,
+          "text": "(was #5994) tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.case pass o0+o1 goldens (was #5521: The ui scaffold does not check: ui.SizeConstraint is not SizeConstraint)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:39.510Z"
+        },
+        {
+          "n": 43,
+          "text": "(was #5994) tests/cases/ui_backend/ui_host_rights_source_preserves_storage_across_hosted_tiers.case pass o0+o1 goldens (was #5565: ui host rights example fails E0108 (Field `bits` needs a value))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/ui_backend/ui_host_rights_source_preserves_storage_across_hosted_tiers.case\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:00.792Z"
+        },
+        {
+          "n": 44,
+          "text": "(was #5994) Examples/features/tooling/run.jet pass o0+o1 goldens (was #5735: golden: E0108 This needs Count, but the value is Int)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: the example now lives at Examples/features/foundations/tooling/run.jet and passes on o0 (jet run), o1 (jet build) and o2 (jet build --release) (no E0108). Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:50.812Z"
+        },
+        {
+          "n": 45,
+          "text": "(was #5995) tests/cases/compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers.case pass o0+o1 goldens (was #5494: compute.matrix result typed Matrix<r, c> instead of Tensor)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:40.548Z"
+        },
+        {
+          "n": 46,
+          "text": "(was #5995) tests/cases/effects/callback_bound_unknown_effect_is_e0119.case pass o0+o1 goldens (was #5540: Unknown callback effect adds a stray E0112 beside E0119)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed dbab4fb5fd (Main-12). The Rust test was never ported (Docs/audits/rust-exit-parity/tests.tsv row callback_bound_unknown_effect_is_e0119); Main-12 ports it as tests/cases/effects/callback_bound_unknown_effect_is_e0119.case and fixes #5540: sema_type_names_undeclared answers true for a fn type whose effect row names an unknown effect, so the argument mismatch E0112 no longer cascades beside E0119. On HEAD dbab4fb5fd published jet: suite cases --filter effects/callback_bound_unknown_effect_is_e0119 1 passed on o0 and 1 passed on o1 (base 1a6e2765c3 failed it: stream predicate count failed).",
+          "at": "2026-11-03T02:31:57.987Z"
+        },
+        {
+          "n": 47,
+          "text": "(was #5995) Examples/features/tooling/compute_capabilities.jet, Examples/features/tooling/compute_linalg.jet, Examples/features/tooling/compute_metal.jet pass o0+o1 goldens (was #5676: golden: E0112 `_` wants `_` for argument N, but this is `_`<N, N>)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: tooling/compute_capabilities, compute_linalg and compute_metal each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:01.615Z"
+        },
+        {
+          "n": 48,
+          "text": "(was #5995) Examples/features/tooling/compute_autodiff.jet pass o0+o1 goldens (was #5746: golden: E0112 `_` needs a function returning `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate of #3955 c3 (compute_autodiff golden). Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:36.732Z"
+        },
+        {
+          "n": 49,
+          "text": "(was #5995) Examples/features/lowlevel/transform_source_identity.jet pass o0+o1 goldens (was #5866: golden: E0113 This value is Transform2<Float, Screen, View>, but float_the in lowlevel/transform_source_ide...)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: lowlevel/transform_source_identity \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:02.442Z"
+        },
+        {
+          "n": 50,
+          "text": "(was #5992) Examples/features/tooling/compute_cuda.jet, tests/cases/compute_cuda/cuda_public_precision_gate_is_identical_on_all_tiers.case pass o0+o1 goldens (was #5495: Backend has no runtime route for compute.full)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/compute_cuda/cuda_public_precision_gate_is_identical_on_all_tiers.case\"; gold4.sh tooling/compute_cuda: o0/o1/o2 \"stdout == .../expected/tooling/compute_cuda.out\" [exit 0], AOT basic build exit 0, binary stdout == compute_cuda.out [run exit 0] | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:03.262Z"
+        },
+        {
+          "n": 51,
+          "text": "(was #5992) tests/cases/ui_backend/mount_twice_is_idempotent.case pass o0+o1 goldens (was #5564: Backend cannot lower the UI null backend runtime routes)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/ui_backend/mount_twice_is_idempotent.case\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:04.078Z"
+        },
+        {
+          "n": 52,
+          "text": "(was #5992) Examples/features/serde/field_metadata_edges.jet pass o0+o1 goldens (was #5584: golden: struct JSON keeps declaration order and null optionals; kind name Null)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a kit (PortsLead-2 criteria run on dev 337f7f205a rows): tests/run/Encoding/FieldMetadataEdges.jet PASS on o0, o1 and o2.",
+          "at": "2026-11-07T03:03:47.273Z"
+        },
+        {
+          "n": 53,
+          "text": "(was #5992) Examples/features/serde/encoding_base_expert.jet, Examples/features/serde/encoding_base_expert/run.jet pass o0+o1 goldens (was #5592: golden: base64 rejects ASCII whitespace the example expects accepted)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh serde/encoding_base_expert: Examples/features/serde/encoding_base_expert/run.jet (the only form present; there is no encoding_base_expert.jet) \"stdout ==\" expected/serde/encoding_base_expert.out on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:04.892Z"
+        },
+        {
+          "n": 54,
+          "text": "(was #5992) Examples/features/ui/ui_native_linux.jet, Examples/features/ui/ui_tui_reactive.jet, Examples/features/ui/ui_view_tree.jet pass o0+o1 goldens (was #5597: golden: E2104 generic Core call core.reactive.signal)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ui/ui_native_linux, ui/ui_tui_reactive and ui/ui_view_tree goldens pass on dev f2898ba8d5 (base $JET_SCRATCH_ROOT/discovery/base/f2898ba8d5, 2026-11-02): TESTKIT_ARGS=--filter Examples/features/<name> jet test Tools/testkit 'suite golden' gives 1 passed, 0 failed, 0 skipped for each; no known-failing row.",
+          "at": "2026-11-02T23:59:36.744Z"
+        },
+        {
+          "n": 55,
+          "text": "(was #5992) Examples/features/tooling/data_loader.jet pass o0+o1 goldens (was #5620: golden: E2104 field of DataSourceIdentity)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: tooling/data_loader \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:05.718Z"
+        },
+        {
+          "n": 56,
+          "text": "(was #5992) Examples/features/io/app_config.jet pass o0+o1 goldens (was #5624: golden: E2104 generic Core call core.sys.decode)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: io/app_config \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:06.539Z"
+        },
+        {
+          "n": 57,
+          "text": "(was #5992) Examples/features/serde/tensor_codec.jet pass o0+o1 goldens (was #5638: golden: E2104 runtime route jet_compute_from_list)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: serde/tensor_codec \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:07.378Z"
+        },
+        {
+          "n": 58,
+          "text": "(was #5992) Examples/features/tooling/compute_device.jet pass o0+o1 goldens (was #5639: golden: E2104 runtime route jet_compute_ones)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: tooling/compute_device \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:08.219Z"
+        },
+        {
+          "n": 59,
+          "text": "(was #5992) Services raw-tree routes and service handle helpers lower (service_tree, service_authority); the 17 service census roots pass on every tier. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: goldens tooling/service_tree and tooling/service_authority/run pass on o0 (jet run), o1 (jet build) and o2 (jet build --release), and case services_runtime/source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox passes. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:51.318Z"
+        },
+        {
+          "n": 60,
+          "text": "(was #5992) Compute routes lower (compute_ndarray, compute_kernel, compute_simd, compute_tensor, compute_parity case); the 8 compute census roots pass on every tier. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: every census file passes: the 18 compute goldens on o0 (jet run), o1 (jet build) and o2 (jet build --release), and the census cases compute_parity (5 pass incl. cpu_oracle_default_run and result_tensor_payload), compute_extended census cases, cuda_public_precision_gate, measure_rows and memo_computed_and_view_copy. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:51.884Z"
+        },
+        {
+          "n": 61,
+          "text": "(was #5992) Null UI backend routes lower (ui_a11y, ui_component_kit): JetNullBackend dispatch_event and focused_label rows pass on every tier. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: goldens ui/ui_a11y, ui/ui_null_backend, ui/ui_component_kit, web/web_hello, web/ui_showcase and web/ui_web_reactive pass on o0 (jet run), o1 (jet build) and o2 (jet build --release), and case dev_parts_tier_parity/ui_and_web_match_..._ui_showcase passes. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:53.215Z"
+        },
+        {
+          "n": 62,
+          "text": "(was #5992) core.data.query call and query routes lower (analytics_query); the 3 data.query census roots pass on every tier. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: goldens tooling/data_analysis, tooling/data_schema, serde/analytics_query and tooling/typed_query pass on o0 (jet run), o1 (jet build) and o2 (jet build --release), and case corelib/core_net_dns_transaction_ids_are_not_a_fixed_sequence passes. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:53.950Z"
+        },
+        {
+          "n": 63,
+          "text": "(was #5993) tests/cases/checked_text/html_composition_matches_aot_jit_interpreter_and_web.case pass o0+o1 goldens (was #5500: Backend cannot lower TypedTextInterp)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/checked_text/html_composition_matches_aot_jit_interpreter_and_web.case\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:09.040Z"
+        },
+        {
+          "n": 64,
+          "text": "(was #5993) tests/cases/task_control_tiers/a_shielded_yield_defers_the_consumer_cancel_on_every_tier.case pass o0+o1 goldens (was #5556: Backend cannot lower Stream<T> ! Err)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/task_control_tiers/a_shielded_yield_defers_the_consumer_cancel_on_every_tier.case\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:09.853Z"
+        },
+        {
+          "n": 65,
+          "text": "(was #5993) Examples/features/io/agent_executor.jet pass o0+o1 goldens (was #5587: golden: process.run_spec fails (panic agent receipt))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "io/agent_executor golden passes on dev f2898ba8d5 (base $JET_SCRATCH_ROOT/discovery/base/f2898ba8d5, 2026-11-02): TESTKIT_ARGS=--filter Examples/features/<name> jet test Tools/testkit 'suite golden' gives 1 passed, 0 failed, 0 skipped for each; no known-failing row.",
+          "at": "2026-11-02T23:59:38.613Z"
+        },
+        {
+          "n": 66,
+          "text": "(was #5993) Examples/features/packages/mod_load_errors.jet pass o0+o1 goldens (was #5635: golden: E2104 record ModGrant has a member no runtime export carries)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6a31fd6143 (core.mod: the static runtime provides the mod routes). Batch vb9 (s1 at dev 6a31fd6143, Main): tests/run/Packages/ModLoadErrors.jet, the mod_load_errors example's current path, PASS o0, o1 and o2 (a0_031 kit: KNOWN-FAILING on o0, UNSUPPORTED on o1 and o2).",
+          "at": "2026-11-07T04:56:26.364Z"
+        },
+        {
+          "n": 67,
+          "text": "(was #5993) Examples/features/game/raylib_window.jet pass o0+o1 goldens (was #5636: golden: E2104 record RaylibWindow has a member no runtime export carries)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: game/raylib_window \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:10.679Z"
+        },
+        {
+          "n": 68,
+          "text": "(was #5993) Examples/features/packages/build_contribution/run.jet pass o0+o1 goldens (was #5865: golden: NO-MATCH line 1: expected \"4\" got \"1\" in build_contribution/run)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: packages/build_contribution (run.jet) \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:11.511Z"
+        },
+        {
+          "n": 69,
+          "text": "(was #5993) Each of the 14 expression/type census roots lowers on O0, O1 and O2 or is carded: List SplitWrite, GetDisjointWrite and EditDisjoint (tests/run/Ownership/RuntimeDisjointSplitAndIndexesWriteThrough.jet and RuntimeDisjointViewsMatchAOTJITDevAndInterpreter.jet; GetDisjointWrite's result-pattern contract carded #4796); TryPush (Examples/Text/StringTryPush.jet, Examples/Tooling/Testing/TestingHelpers.jet); statement Reactive (tests/run/DataMathReactive/ReactiveStringSignal.jet, Examples/Apps/UI/Reactive.jet); Stream<T> ! Err from source factories (carded #6108); function-valued parameter type Measure (tests/run/IOAndOwnership/GenericInherentMethodsUsePerMethodCloneBounds.jet); Pool<Item> types (cases allocator_families/stale_pool_id_panics_instead_of_reading_reused_slot and multi_file_package/package_members_have_all_tier_parity); SharedGuard<Int> carriers and guard dereference provenance (tests/cases/shared_guards/*.case, 9 cases, formerly ICE exit 101); ?HistoryStrategy (Examples/Tooling/Testing/TestHistory/run.jet); comptime SerdeEncode (carded #5454: comptime_diff/cbor_canonical_typed_corpus_matches_comptime_and_aot); jet_rt_handle_show_alloc_error (Examples/Memory/Allocation/FixedBacking.jet). All named rows PASS in one batch or release kit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): 39 named rows PASS on every tier (RuntimeDisjoint* o0/o1/o2, StringTryPush, TestingHelpers, ReactiveStringSignal, Apps/UI/Reactive, GenericInherentMethodsUsePerMethodCloneBounds, allocator_families/stale_pool_id_panics_instead_of_reading_reused_slot, multi_file_package/package_members_have_all_tier_parity, tests/cases/shared_guards/* (9 cases, no exit 101), TestHistory/run, FixedBacking); carded roots: GetDisjointWrite result pattern #4796, Stream<T> ! Err #6108, comptime SerdeEncode #5454 (cbor_canonical_typed_corpus KNOWN-FAILING; fixed by 8334e62797 after this cut).",
+          "at": "2026-11-07T07:08:15.582Z"
+        },
+        {
+          "n": 70,
+          "text": "(was #5972) Examples/features/tooling/data_core.jet, Examples/features/tooling/data_hostile.jet, Examples/features/tooling/data_json.jet pass o0+o1 goldens (was #5595: golden: E2104 generic Core call .collect)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: tooling/data_core, data_hostile and data_json each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:12.607Z"
+        },
+        {
+          "n": 71,
+          "text": "(was #5972) Examples/features/collections/bits_native_range.jet pass o0+o1 goldens (was #5661: golden: E2104 runtime route JetBitSet::new)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): collections/bits_native_range golden passes: stdout == expected on o0/o1/o2 and AOT (g4599.out), and stderr cmp-equal to bits_native_range.err.out on all 3 levels (exit 70 is the golden's expected stop); no E2104 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:13.424Z"
+        },
+        {
+          "n": 72,
+          "text": "(was #5972) core.collections.set StringSet fields and handle clone lower (core_data_group_fields case passes on every tier). (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: cases corelib/core_data_group_fields_survive_core_name_registration_across_tiers (jet build, AOT run and jet run) and core_data_lazy_and_join_routes_match_aot_in_forced_interpreter pass. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:54.484Z"
+        },
+        {
+          "n": 73,
+          "text": "(was #5991) tests/cases/production_receipt/production_failure_receipt_is_canonical_redacted_and_tier_stable.case pass o0+o1 goldens (was #5513: jet run writes no failure receipt under .jet/reports)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/production_receipt/production_failure_receipt_is_canonical_redacted_and_tier_stable.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:10:46.505Z"
+        },
+        {
+          "n": 74,
+          "text": "(was #5991) tests/cases/diagnostic_gate/warnings_never_choose_execution_exit_code.case pass o0+o1 goldens (was #5519: Backend cannot lower core.http.client get)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w9b testkit: \"PASS tests/cases/diagnostic_gate/warnings_never_choose_execution_exit_code.case\" | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:14.322Z"
+        },
+        {
+          "n": 75,
+          "text": "(was #5991) tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case pass o0+o1 goldens (was #5530: FileScope can not lower)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/sema_burndown/source_qualified_file_scope_read_tiers jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:41.699Z"
+        },
+        {
+          "n": 76,
+          "text": "(was #5991) (was #5578) Backend does not lower HTTPRouterRegister / jet_http_mux_new routes",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6bfbe39f2c (GoldenRoots3): HTTPRouter is a source-owned Core struct over HTTPMux; http.router/dispatch/web.openapi run in Jet; jet_http_router_new/__dispatch/__openapi_inputs/__openapi_render rows, the HTTPRouter runtime handle and HTTPRouterRegister removed. golden web/state_surface o0/o1/o2 3/3 PASS on s1 of 8a6d501edc+patch; its known-failing row removed. Follow-up: http_router_dispatch and named_catchall cases fail E1803 FS.Read from the shared mux handler type (in progress)",
+          "at": "2026-11-06T01:54:39.987Z"
+        },
+        {
+          "n": 77,
+          "text": "(was #5991) Examples/features/io/path.jet pass o0+o1 goldens (was #5651: golden: E2104 runtime route jet_path_walk List of Handle { name: JetPath } result)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: io/path \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:15.155Z"
+        },
+        {
+          "n": 78,
+          "text": "(was #5991) Examples/features/concurrency/task_runtime_audit.jet pass o0+o1 goldens (was #5654: golden: E2104 runtime route jet_std::after_value)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: concurrency/task_runtime_audit \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:16.072Z"
+        },
+        {
+          "n": 79,
+          "text": "(was #5991) Examples/features/io/terminal_parity.jet pass o0+o1 goldens (was #5657: golden: E2104 runtime route jet_terminal8_stty)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-10-31 on dev 94dacfc354 base jet: run-feature-examples.mjs io/terminal_parity passed on the run tier (wave/11/out/golden-base.json) and the build tier (O1, --tier build, re-run by Main).",
+          "at": "2026-10-31T15:56:57.222Z"
+        },
+        {
+          "n": 80,
+          "text": "(was #5991) Examples/features/crypto/vault_secret.jet pass o0+o1 goldens (was #5660: golden: E2104 runtime route jet_vault_get_impl)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: crypto/vault_secret \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:16.988Z"
+        },
+        {
+          "n": 81,
+          "text": "(was #5991) io/byte_buffer.jet: ByteBuffer builtins and JetByteBuffer routes lower; the 26 byte_buffer census roots pass on O0/O1/O2. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 verdict 2026-10-31: w11 gold4 io/byte_buffer: \"stdout == .../expected/io/byte_buffer.out\" exit 0 on o0/o1/o2 and AOT build+run (build exit 0, run exit 0) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:17.833Z"
+        },
+        {
+          "n": 82,
+          "text": "(was #5997) tests/cases/checked_text/checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web.case pass o0+o1 goldens (was #5499: CheckedText distinct type has no static from)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/checked_text/checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/checked_text/checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:42.772Z"
+        },
+        {
+          "n": 83,
+          "text": "(was #5997) tests/cases/generics/generic_module_diagnostics_hide_instance_mangling.case pass o0+o1 goldens (was #5547: Diagnostics leak the mangled generic instance name (M5BoxedEntry))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/generics/generic_module_diagnostics_hide_instance_mangling.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/generics/generic_module_diagnostics_hide_instance_mangling jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:43.813Z"
+        },
+        {
+          "n": 84,
+          "text": "(was #5997) Examples/features/net/tls_peer_identity.jet, Examples/features/syntax/maturity_tags.jet pass o0+o1 goldens (was #5706: golden: E0330 Can't infer the enum type for `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11: net/tls_peer_identity run from its directory (its .case `step: jet run tls_peer_identity.jet`, run3d.sh) \"stdout == .../expected/net/tls_peer_identity.out\" exit 0 on o0/o1/o2; syntax/maturity_tags \"stdout == expected\" exit 0 on o0/o1/o2 and the AOT build (queue3.out) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:18.694Z"
+        },
+        {
+          "n": 85,
+          "text": "(was #5997) Examples/features/lowlevel/transform_source_identity.jet pass o0+o1 goldens (was #5771: golden: E0302 `_` has no static member `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: lowlevel/transform_source_identity \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:19.669Z"
+        },
+        {
+          "n": 86,
+          "text": "(was #5997) Examples/features/tooling/compute_views.jet pass o0+o1 goldens (was #5783: golden: E0505 Only lists and strings can be sliced, not Tensor)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: tooling/compute_views \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:20.678Z"
+        },
+        {
+          "n": 87,
+          "text": "(was #5997) Examples/features/serde/shape_projection.jet pass o0+o1 goldens (was #5868: golden: E0302 The reflected layout has no field port_slot in serde/shape_projection)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh on w11 (queue2.out): serde/shape_projection \"stdout == .../expected/serde/shape_projection.out\" [exit 0] on jet run --optimize=none/basic/full and the AOT build (build exit 0, run exit 0) | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:21.533Z"
+        },
+        {
+          "n": 88,
+          "text": "(was #5998) tests/cases/local_cell_tiers/local_cell_full_surface_runs_through_default_tier.case pass o0+o1 goldens (was #5501: CellEditGuard set classified read-only)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/local_cell_tiers/local_cell_full_surface_runs_through_default_tier.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/local_cell_tiers/local_cell_full_surface_runs_through_default_tier jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:44.922Z"
+        },
+        {
+          "n": 89,
+          "text": "(was #5998) tests/cases/local_cell_tiers/local_cell_generic_shapes_run_through_default_tier.case pass o0+o1 goldens (was #5502: Cell.new on a fallible owned parameter needs implicit clone)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/local_cell_tiers/local_cell_generic_shapes_run_through_default_tier.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/local_cell_tiers/local_cell_generic_shapes_run_through_default_tier jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:46.005Z"
+        },
+        {
+          "n": 90,
+          "text": "(was #5998) tests/cases/sema_burndown/mapped_byte_element_and_copy_inference_tiers.case pass o0+o1 goldens (was #5529: Local mapped-file window view rejected by E2305)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/sema_burndown/mapped_byte_element_and_copy_inference_tiers.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/sema_burndown/mapped_byte_element_and_copy_inference_tiers jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:47.076Z"
+        },
+        {
+          "n": 91,
+          "text": "(was #5998) tests/cases/tir_core_and_closures/parallel_collection_adapters_use_stable_bounded_chunks.case pass o0+o1 goldens (was #5531: Named fns are not sendable to parallel adapters)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: tests/cases/core_and_closures/parallel_collection_adapters_use_stable_bounded_chunks.case (renamed from tir_core_and_closures) passes its jet build step, and `jet run` of its fixture prints the same .out bytes. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:55.081Z"
+        },
+        {
+          "n": 92,
+          "text": "(was #5998) tests/cases/arena/region_confines_view_escape.case pass o0+o1 goldens (was #5536: Arena view lifetime checks are missing (no E0631/E0632/E0212))",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/arena/region_confines_view_escape.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/arena/region_confines_view_escape jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed. The case runs every tier it declares. The root was fixed by earlier landings.",
+          "at": "2026-11-02T23:33:48.078Z"
+        },
+        {
+          "n": 93,
+          "text": "(was #5998) tests/cases/effects/named_zone_lookup_requires_environment_and_read_effects.case pass o0+o1 goldens (was #5541: Zone lookup effect ceiling reports E3401 instead of E0740/E3403)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed dbab4fb5fd (Main-12). Never ported before (tests.tsv row named_zone_lookup_requires_environment_and_read_effects); Main-12 ports it as tests/cases/effects/named_zone_lookup_requires_environment_and_read_effects.case over tests/ui/time_zone_effects.jet and tests/fixtures/time_zone_effects_truthful.jet. Only the three named ceilings fail; the `-[]>` ceiling is E3401 (the blessed tests/ui/time_zone_effects.stderr; E3401 replaced the Rust test E0740, as tests/cases/closures/member_namespaces_preserve_method_receiver_and_effect_checks.case records). On HEAD dbab4fb5fd published jet: suite cases --filter effects/named_zone_lookup_requires 1 passed on o0 and on o1.",
+          "at": "2026-11-03T02:31:59.144Z"
+        },
+        {
+          "n": 94,
+          "text": "(was #5998) tests/cases/task_control_tiers/sema_resolves_direct_nested_task_control_bindings.case pass o0+o1 goldens (was #5557: E1110 rejects a Group used in a directly nested task)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/task_control_tiers/sema_resolves_direct_nested_task_control_bindings.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/task_control_tiers/sema_resolves_direct_nested_task_control_bindings jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed.",
+          "at": "2026-11-02T23:35:00.529Z"
+        },
+        {
+          "n": 95,
+          "text": "(was #5998) tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case pass o0+o1 goldens (was #5559: L1101 `still owes join` rejects an early return that closes the group)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed.",
+          "at": "2026-11-02T23:35:01.499Z"
+        },
+        {
+          "n": 96,
+          "text": "(was #5998) tests/cases/taskgroup_params/taskgroup_type_is_second_class.case pass o0+o1 goldens (was #5560: Group escapes through return types, lists, tuples, Val and closure params)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/taskgroup_params/taskgroup_type_is_second_class.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/taskgroup_params/taskgroup_type_is_second_class jet test Tools/testkit \"suite cases\" gives 1 passed, 0 failed.",
+          "at": "2026-11-02T23:35:02.756Z"
+        },
+        {
+          "n": 97,
+          "text": "(was #5998) Examples/features/collections/iter_tools_audit.jet, Examples/features/effects/determinism.jet, Examples/features/math/random_audit.jet pass o0+o1 goldens (was #5682: golden: E0224 This call writes `_`, but it has no `_` mark)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): gold4.sh: collections/iter_tools_audit, effects/determinism and math/random_audit each \"stdout ==\" expected on o0/o1/o2 and AOT, all exits 0 | Present in release a0_032 (dev 2ec700da30): its golden/ui/cases gate lost 0 rows against a0_031.",
+          "at": "2026-11-07T07:09:22.409Z"
+        },
+        {
+          "n": 98,
+          "text": "(was #5998) Examples/features/types/run.jet pass o0+o1 goldens (was #5786: golden: E0711 The `_` handle `_` can't escape its `_` block)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Examples/features/types/run.jet no longer exists; the directory's examples are now individual golden entries. On dev f2898ba8d5 (base $JET_SCRATCH_ROOT/discovery/base/f2898ba8d5, 2026-11-02): o0, the wave-35 base golden run (wave/35/out/golden-base.json, tier run) has all 89 types/* entries passed, none failed, skipped or known-failing. o1: TESTKIT_ARGS=\"--tier o1 --filter Examples/features/types/\" jet test Tools/testkit 'suite golden' passes (no failure rows; an empty selection fails, so the selection ran). The original E-code failure no longer reproduces.",
+          "at": "2026-11-03T00:07:59.655Z"
+        },
+        {
+          "n": 99,
+          "text": "(was #5998) tests/ui/mem_use_after_free and tests/ui/mem_use_after_reset pass: E0121 on a Close type (Arena) carries the resource Note lost in the Jet ownership port, ' Note: acquire a new `Arena` resource; closed resources cannot be copied or reused' (ownership state learns the value is a Close resource from sema's trait facts).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/ui/mem_use_after_free and tests/ui/mem_use_after_reset pass: sema_ownership_diag_moved (Compiler/JetSema/Source/Sema/Ownership/Checks.jet) adds \" Note: acquire a new `{leaf}` resource; closed resources cannot be copied or reused\" when the consumer is `close`. Landed in wave 35 as dev e6deb8540a (2026-11-02). Wave 35 run on f2898ba8d5: the wave ui suite reports this row PASS (q/sg/ui-w35-wave.txt), with its known-failing row removed. Goldens 1207/1207, 0 regressions. ui gained 3; its 1 lost row, ffi_foreign_unsafe (TIMEOUT under load), passes when rerun on the wave compiler.",
+          "at": "2026-11-03T00:47:07.147Z"
+        },
+        {
+          "n": 100,
+          "text": "(was #5998) tests/ui/assignment_move_use_after_move passes: kept = evens moves a one-pass value (as the frozen Rust CheckerOwnership did), so a later ^evens.to_list() reports E0121.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/ui/assignment_move_use_after_move passes. Its snapshot was re-blessed to sema's consumer text \"the assignment to `kept`\" (E0121 registry row DiagnosticRows.jet:970-972 fills {{consumer}} from sema; Statements.jet:4811 supplies it). Landed in wave 35 as dev e6deb8540a (2026-11-02). Wave 35 run on f2898ba8d5: the wave ui suite reports this row PASS (q/sg/ui-w35-wave.txt), with its known-failing row removed. Goldens 1207/1207, 0 regressions. ui gained 3; its 1 lost row, ffi_foreign_unsafe (TIMEOUT under load), passes when rerun on the wave compiler.",
+          "at": "2026-11-03T00:47:08.688Z"
+        },
+        {
+          "n": 101,
+          "text": "(was #5998) tests/ui/loop_move_reuse_next_iteration passes: ^evens.to_list() inside a loop body reports the move carried from the earlier iteration (E0121), as the frozen Rust CheckerOwnership did.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-10-31: landed on dev 8439d4bdb3 (wave 11, DeclTypes-11). tests/ui/loop_move_reuse_next_iteration.jet PASS in q/sg/ui-w11-wave.txt (E0121 move carried from the earlier iteration).",
+          "at": "2026-10-31T16:29:22.684Z"
+        },
+        {
+          "n": 102,
+          "text": "(was #6001) (was #4606) Parser/scope gaps found by the port codemod: `next` in a value table, `fail` as a table statement, loop-condition pattern bindings",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): golden Examples/Data/Analysis/DataLoader.jet and tests/run/ControlAndData/DecisionTableLoopArms.jet PASS on o0/o1/o2 (43aa2e02a0: next in a value table, fail as a table statement, loop-condition pattern bindings; 2ec700da30 keeps a pattern-bound next a name).",
+          "at": "2026-11-07T07:08:16.455Z"
+        },
+        {
+          "n": 103,
+          "text": "(was #6001) (was #4970) Jet front end: literal sub-patterns in variant payloads (parse gap + silent wrong code in codegen)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: probe c4599_103_literal_subpattern (literal Int and String sub-patterns in variant payloads) selects the right arm for all six inputs on jet run and --release. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:55.725Z"
+        },
+        {
+          "n": 104,
+          "text": "(was #6001) Examples/features/memory/run.jet pass o0+o1 goldens (was #5758: golden: E0119 `_` expects N type arguments, got N)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Examples/features/memory/run.jet no longer exists; the directory's examples are now individual golden entries. On dev f2898ba8d5 (base $JET_SCRATCH_ROOT/discovery/base/f2898ba8d5, 2026-11-02): o0, the wave-35 base golden run (wave/35/out/golden-base.json, tier run) has all 87 memory/* entries passed, none failed, skipped or known-failing. o1: TESTKIT_ARGS=\"--tier o1 --filter Examples/features/memory/\" jet test Tools/testkit 'suite golden' passes (no failure rows; an empty selection fails, so the selection ran). The original E-code failure no longer reproduces.",
+          "at": "2026-11-03T00:08:00.701Z"
+        },
+        {
+          "n": 108,
+          "text": "A new TIR variant without its lowering fails the compiler build: ir_expr's TExprKind dispatch and ir_pattern_test in Compiler/JetIR/Source/BuildExpr.jet name every variant with no wildcard arm, so removing any arm fails jet check Compiler/JetIR with E0307 NonExhaustiveDispatch. Core rows: every executable row routes to the Jet runtime (coreCallRequireJetRoute in check-core-surface-ledger.mjs, run by tests/cases/core_surface_ledger/core_surface_ledger_matches_its_sources.case). aot_broken and interpreter_refused appear in no live gate.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "58668cf0a5 (PortsLead-2). Main applied 58668cf0a5 to a scratch export, deleted .Uninit from ir_expr's dispatch arm (BuildExpr.jet:1909), and ran a0_031 jet check Compiler/JetIR: rc=1, Error [jet.NonExhaustiveDispatch] 'This if doesn't cover every case — missing: Uninit' at Source/BuildExpr.jet:1400:5 (E0307). Unmodified, jet check Compiler/JetIR rc=0 (PortsLead-2, with CHECK OK on BuildExpr.jet). The ledger route check is in the core_surface_ledger case, whose only current failure is the hard-coded row count that TestSystemLead-2 is fixing.",
+          "at": "2026-11-07T05:03:51.138Z"
+        },
+        {
+          "n": 113,
+          "text": "Native tier parity after the Rust removal: in a batch or release kit of dev (golden, run and ui suites at O0, O1 and O2), no row passes on one tier while it fails, errors, times out, is known-failing or is unsupported on another tier (SKIP-HOST excepted). Measured over every tiered row of the kit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch vb10 (dev e4756389a9, s1 kit): tierparity.cjs over every tiered golden, run and ui row: 1510 rows, 0 pass on one tier while failing on another (vb9: 1505 rows, 0).",
+          "at": "2026-11-07T05:56:00.251Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "audit-2026-10-28",
+        "wayfinder:map"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-05T10:55:41.702Z",
+      "updated": "2026-11-07T07:09:26.088Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G1",
+        "G2"
+      ],
+      "criteriaLastN": 113,
+      "completedAt": "2026-11-07T07:09:26.088Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T07:27:48.498Z"
+    },
+    {
+      "id": "c0rdxo6y",
+      "num": 6564,
+      "title": "Hand-off anywhere: a fresh clone is enough for any agent to continue work",
+      "body": "Owner order 2026-11-04: work must be able to move to another machine or a remote/cloud agent at once. Today, landing, building, suites, ballots and preflight depend on files outside the repo: the lander and queue (lanes/Main/q.mjs, stackcheck.sh, pareto-approved.txt, $JET_RUN_ROOT), the chain (chain.sh, chain-lib.mjs, build-slot.sh, publish-base.sh, publish-latest.sh, SeedRotate/norust.sh, gsel.mjs), the suites (q/sg/suite.sh, TestGreen/tk-build.sh), the ballot validator (lanes/Main/ballots/validate.mjs), the preflight ($JET_STATE_ROOT/scratch/Main/preflight.mjs), $JET_STATE_ROOT/cheap.sh, and the admitted compilers in $JET_SCRATCH_ROOT/discovery/base. Repo files also hard-code machine paths (Compiler/JetRuntime/Tests/check-runtime.mjs, CryptoEd25519SignatureFixtures.json, AGENTS.md, skills).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "1) Inventory every out-of-repo script, config and path that agent work relies on (briefs, skills, AGENTS.md, Tools, lane scripts). 2) Port each into Tools/ (agent/, ci/ and so on), with roots taken from environment variables (JET_SCRATCH_ROOT, JET_TARGET_ROOT, JET_SEED) and machine defaults set only in jet-env. 3) Make the seed path explicit: a fresh clone names where its admitted compiler comes from (D-SEED-DIST1), plus a bootstrap doc. 4) Prove it: a fresh clone in a new HOME with a new scratch root runs jet-env, builds, runs one suite slice, lands a trivial patch and runs the ballot validator.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "a0_032 fresh proof ($JET_SCRATCH_ROOT/lanes/Main/fresh031.sh, 752 s, rc 0): besides c24, Docs/spec/contributing/bootstrap.md steps run verbatim from the a0_032 tag with the archive's seed (digest and signature verified, jet build Compiler, ReuseSeedRuntime, ui row PASS 1/0, Examples/Basics/Hello) end ALL OK."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner order 2026-11-06 18:15, durable: where a spec or criterion exists, workers write the code first and land on LaneCheck alone, then move on; the orchestrator tests landed commits in batches, never gates a landing on proof, and returns failures to their owners, who fix and move on. Written into AGENTS.md (Delegation) and .agents/skills/orchestration/SKILL.md (standing work order)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c4 progress (Main, owner order 2026-11-06): created the jet-release Ed25519 signing key on the owner's workstation (public key f13c2f810919fccb3b950b216c1a8211844d1fee66379ab45ebe748135ae56c8; the owner backs up the secret); created and pushed the annotated tag a0_029 at 42f746371b (a0_026-a0_028 were never tagged). Blockers found by the candidate dry run: Tools/release/package.jet declares no authority (E1803 for Env, Exec, FS, Time), and admission (release-compiler) never ran the candidate/publish steps it prints. A candidate run from a git checkout is in progress."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c7 cutover step 1 done: master merged a0_027 (dfc887571e, which carries 9c7ddf1359) as 063ff80cdd, local only. The archive shard dry run on master gives a manifest plus 9 shards, the largest 8.0 MiB. Waiting for the owner to stop serve; then apply and commit the board."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c7 code is on dev (9c7ddf1359, HistoryShards). JetpackEngine rehearsed on a copy of the live board: 9 shards, the largest 8.0 MiB, and 0 of 2046 decisions, 4534 cards or 91499 events lost. The cutover is owner-gated: merge dev into master, stop serve, run archive shard --apply on master, commit the board, restart serve."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Seed a0_026 released and rotated: dev 48b6bce25e, s2==s3 36bf9a2483922344, no Rust. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2266 (0 lost, 144 new passing), cases 4491 (0 lost); 2431 gains over a0_025. Evidence: $JET_STATE_ROOT/jet-seeds/a0_026/evidence."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Seed cut a0_026 on ba870ef22f: the chain reached a fixed point, and cc-pack, pack, jetpack, golden and ui all PASS. cases lost 13 rows, with these roots: (A) 7 stale predicates (the header now prints [jet.Name] and the code is on the More: line), (B) the fetch-toolchain summary says Hangar in --help, (C) E3412 refuses a pure core.net call at comptime by module prefix (Recover3), (D) a fixture puts #FX on a struct (the registry allows Block only), (E) a nested impl Debug loses to the derived one, for EncodingError (Recover3), (F) the foreign-crate provenance tmp race (JetpackEngine), (G) E-WEB-RUN refused full-stack web.app() entries. A, B, D and G are fixed in afab0cf28b (Main). Recut after C, E and F land."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c23 follow-up (Builder5). Pre-fetch: with fresh HOME, env -i and no host compiler, jet env fetch-toolchain fetched and unpacked the pack (clang 21.1.8, musl 1.2.5, glibc 2.42; 289.8 s, rc 0); after the source copy was deleted and JETPACK_DENY_NETWORK=1 set, jet cc --target x86_64-linux-gnu (PIE) and aarch64-linux-musl (static, musl built on first use, run under qemu) both built and ran. CcDriver has no Nix-index route: its ProviderCtx sets nix_index None and allow_local_nix_catalog false, and the cc provider reads only the Hangar, the JETPACK_FIXTURES test double, then the pack. 80e3ee6251 removes two decision citations from comments (I7). Remaining for c23: a real jet release carrying the pack; the seed cut on 864c10a4d0 builds it through release-compiler's cc-pack stage."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c23 partial, 25c21787a5 + b44941163a (Builder5, continuing Builder4). Reproducible pack (nix-build --check gives the same out path): sha256 7c991b6c41e2ed9b41b34bfe84c0a241df60b25d91f73c58b3ad70494e3ecef3, 111,338,169 bytes, pinned in jet; built by release tooling (cc-pack.nix, release-compiler.mjs, Tools/release). Lane check CHECK OK on 137704d910 + both. End to end with fresh HOME, env -i and no host compiler on PATH: jet cc --target builds and runs hello.c for x86_64-linux-gnu (PIE), x86_64-linux-musl (static), aarch64-linux-gnu (qemu) and aarch64-linux-musl (static); offline JET_CC_PACK_URL=file:// with JETPACK_DENY_NETWORK=1 passes; a one-byte-flipped pack is refused with E1340, deleted, and the Hangar stays empty. CLI cc claims 6/6, Engine cc and Closure claims, testkit help/completions/man/cc cases and guard cc_driver_hosts 3/3 pass. Remaining for c23: publishing the pack on a real jet release (owner release step); confirm jet env fetch-toolchain and the Nix index path leaving CcDriver. Known limits: glibc 2.42 sysroot (binaries need glibc 2.34+), no C++ standard library, 8 case-colliding iptables headers dropped."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c6 owner gate (Builder4): goldens and the runtime pack need a C compiler via jet cc, which refuses (E1348) without a Jet-signed nixpkgs index: IndexClient.jet:57-89 needs <JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub and config/nix-index-v1.endpoint. Official https://index.jet-lang.dev and keys.jet-lang.dev (trust-root.md:57) don't resolve. Needs either the offline-ceremony signing key plus a published signed index (Tools/jetpack-nix-index/publish.sh --sign-index/--sign-manifest), or a ruling allowing a dogfood signer as a non-official root. Ballot being drafted."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c11f2f1321 (Builder4): rest2 roots 1+3 built: OSTarget.jet emits E-OSTARGET-MIXED-AXIS and E-OSTARGET-UNMATCHED-CALL; Driver/Boundaries.jet emits E0619, L0619 and E1215. Each code has a passing ui row; their known-failing rows are removed. lane-check CHECK OK on a HEAD export. E1355 is still to come."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "6564-rest landed as 5cc41468da (Builder3; lane-check CHECK OK on the dev worktree): E3540, E-WEB-RUN, E3412, the E3411 refusal, L0520 and L0601 are emitted; E1299 is active; E1801 is retired. ui --coverage no-emitter codes 16 -> 8; ui lost 0 (PASS 2052 -> 2060). Still open: L0601 for signature types; the E3411 allowed path (#6418 c8); E-OSTARGET-MIXED-AXIS/UNMATCHED-CALL, E1355 and E0619/L0619/E1215 (6564-rest2)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "E2967 emitted: on_frame callbacks get a checked schedule; a resource call with no checked completion is refused at the callback (7f35b4d15b). E3004 retired (cancellation is a value). ui --coverage no-emitter codes 18 -> 16 on 67ef0a446f"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "E3011 emitted: a #Todo reached at comptime stops the build with E3011 at its file and line (66c2a661a6); ui --coverage no-emitter codes 18 -> 17"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "2559996f5a: prove --capture and --replay refuse what they cannot model, built from the spec: E3620, E3623, E3625, E3627, E3628 and E3629 now have emitters; prove cases 33 PASS + 16 KF to 46 PASS + 5 KF, 0 FAIL; ui --coverage snapshot-without-emitter rows 26 to 20; chain fixed point. E3014 moves to #6366 (needs the FFI v3 foreign-call path)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "2559996f5a: the verify-full blocker's prove batch (6 of the 23 unported snapshot codes). jet prove --capture/--capture-sensitive/--replay run their checks from Docs/spec/proof-replay-decisions.md before any program runs: authority preflight (E3625, E3627, E3623), capture destination (E3629), and the complete v1 artifact reader (E3620, E3622, E3628). Only the producer is left, as E2104. ui --coverage snapshot-without-emitter rows 26 -> 20. Six tests/cli snapshots regenerated from Jet. prove cases 33 PASS + 16 KNOWN-FAILING on base -> 46 PASS + 5 KNOWN-FAILING (2 new cases, 11 ledger rows removed), 0 FAIL."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: the retired E1225 tests (jetpack_engine jetpack_toml_retirement_fires_e1225_from_cli and _from_nested_directory, tests/cli/jetpack_toml_retired.txt) are held out of the tree with their known-failing rows; RustTestMapping marks them obsolete. E1225 stays registered as retired, so old logs still explain."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: the E1402 ui tests (compiler_extension_host_failed, compiler_extension_incompatible) are held out of the tree with their known-failing rows. They pinned Rust output for the compiler-extension host, which the Jet compiler does not have; E1402 stays registered and returns with that host."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: ui --coverage on dev 7b6764ff4f found 38 registered codes with no snapshot. 16 now have real ones (E0063 E0081 E0158 E0223 E0391 E0992 E1404 E1412 E2474 E3106 E2501 E2932 L0303 E2113 L2201 E3502). 22 stay missing, each with its root in the commit message: 18 have no CLI path today, JT0198/JT0199 move with #6568 c2, E0401 and E2476 render text that misses the spec. Diagnostic pages regenerated; tests/guards/diagnostic_pages.jet FAIL -> PASS."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Defects found while snapshotting codes for ui --coverage (2026-11-05): (1) E0401 for an 'Int Err!' value reads 'needs Int, but the value is Int', and its fix names the retired bare '?'; (2) E2476's registry row is staged runtime, so sema prints 'Error [E2476]' without its jet. name; (3) two b.generate(\"alpha\") calls report E3502 'fn build returns nothing' instead of E3511; (4) the 4 criterion9 programmable_build cases exit 0 on base and have no known-failing rows. (1) and (2) are diagnostic-text defects of the kind #6568's generation and registry-render checks catch structurally; (3) and (4) are build-script defects."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-05: unbuilt work is built to the spec and the owner's requirements for that feature, not to the Rust compiler's output. Rust is removed and is not an oracle; Jet will differ from Rust and is meant to be better. A ui row whose Rust-era snapshot differs from Jet's spec-conforming output (registered code, what, why and fix) gets its snapshot regenerated from Jet, not Jet bent to match Rust bytes. KF-UNPORTED rows mean 'build to spec'."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "ui --coverage: registered codes with no reachable CLI path (unfinished features or defects); these stay missing in the gate, with no allowlist (I4), until fixed: E0122 (only a defect path emits it: decide internal error or user path); E1410 (parser E0999 StackedRuleLines fires first on a doubled panel marker); E2389-E2392 (only text cells in Inspect proof rows, Inspect.jet:1751, never rendered as diagnostics); E3105 (the driver never fills request.gate_policies outside tests, so org and package unsafe declarations never reach sema_unsafe_inspect; #4268); E1257 and E1260 (plugin interface facts not loaded under jet check); E3512 (jet build --locked unbuilt; also locked_generated_drift_fails_before_materialization.case fails on base with no known-failing row); E3503 (ungranted build-action refusal unbuilt, #4268). Still being checked: E0998, E1300, E4201-E4203."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "ui --coverage triage of the 26 snapshot-without-emitter rows, checked against the Rust tree at c9129d174d^: 23 codes Rust emitted are unported, and porting them is part of the verify-full blocker: E3540, E-WEB-RUN (main.rs); L0520 (CheckerInfer/expr.rs); E0619, L0619 (Loader.rs); E3411, E3412 (comptime); E-OSTARGET-MIXED-AXIS, E-OSTARGET-UNMATCHED-CALL (OSTarget.rs); E3004 (TaskGroup.rs); E2967 (ResourceSchedule.rs); E3011, E3014 (Prelude Core.rs); L0601 (Bundle.rs); E3620, E3623, E3625, E3627, E3628, E3629 (CmdProve.rs, ProveReplay.rs); E1801 (comptime Interpreter.rs); E1355 (CmdCompile.rs); E1299 (Store/Ingest.rs, reserved row). E1402 and E1225 stay retired (the extension host doesn't exist yet; jetpack.toml is a retired format) and their snapshots move to held. E2103 is emitted as a hand-rendered string at ProgramCompletions.jet:154 and moves onto its registry row."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "verify-full blocker found 2026-11-05 on dev 94de50f4ff: ui --coverage reports 137 errors: 1 plane drift (E3611 and E3614 added in 9ccd43faaf with no plane bump), 72 stale left-only allowances (e.g. E0343, whose snapshot 602d0dfea3 regenerated), 38 emitted codes without a ui snapshot, and 26 snapshots whose code no source emits (e.g. E1402, the retired E1225). Plan: plane bump, stale rows and the 38 snapshots in one patch; each of the 26 is ported (Rust emitted it) or retired with its snapshot held. No allowlist (I4)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "4ba209e1d8: c6 progress. Every tool call that needs only jet runs $JET directly instead of through jet-env, and s3 built without jet-env is byte-identical. The runtime pack, the host-tool suite rows and GNU as stay on jet-env until #3402 moves environment setup into jet. c6 stays open."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c4 dependency found 2026-11-05: verify-full (Tools/agent/native-suite.mjs:39) passes only if every ui, golden and cases row is PASS; KNOWN-FAILING counts as a failure. On dev about 2026-11-05 the ui suite has ~306 FAIL and 114 KNOWN-FAILING and golden has 57 FAIL, so no dev commit can pass verify-full until #6035 c15 (ui green) and the golden and cases failures, including every known-failing row tied to goal-2 bug cards, are fixed. The owner's rule (publish only from a verify-full-green commit) therefore makes c4 and c3 depend on all suites going fully green."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 13 criteria from archived #2344, #2401, #2931, #3046, #3069: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "SelfMem landed 9b3784dfaa (jet defaults its toolchain root and identity, one resolver with E2105 refusals and 7 cases; Tools/packaging/ReuseSeedRuntime.jet refuses a mismatched seed pack; bootstrap.md fresh-clone sequence) and b2ce5f23d9 (docs give plain jet commands). Proof: env -i fresh run from a chain export with an empty HOME and base/latest as the stand-in seed (a0_025 pack refused, 88 of 480 files; matching pack installed; ui row and hello pass); ui, golden and touched cases lost 0; CHECK OK x3. Still open: c3 needs the run from a real clone against the published release, also landing a patch and validating a ballot; c6 still has jet-env in the examples.md census and the bootstrap chain section (both need musl/C witnesses)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c4 tooling landed (Builder3): Tools/agent/publish-release.mjs is the one publish route. build makes s1 to s3 from a seed in a mount namespace (neutral /tmp/jet-src paths, s2 == s3 required); publish is gated by verify-full evidence or a release-compiler RELEASE.json, scans the assets with the personal-info rule table, and ships the seed tarball, jet, IDENTITY and SHA256SUMS as a0_NNN. A dry run correctly refuses a0_025's jet (machine path, c8). c4 is met once the first release is published tonight."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c7 code landed (HistoryShards, Prep-2): history is stored as size-bounded shards (rehearsal: 9 shards, none above 8 MiB, same logical history). The live migration (archive shard --apply) waits until master advances past this commit, because tower.mjs and tower serve load master's Tower code and old code refuses a sharded board."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner order 2026-11-04 (branch policy): everything lives on dev. Board commits, which Tower makes on local master, are fast-forwarded into dev at once, and only dev is pushed. master (local and origin) advances to a dev commit only after Tools/agent/verify-full.sh passes on that exact commit. origin/master stays at 2b060094ec (pushed earlier today before this rule; no rewind, per the owner)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c3 depends on c4 (SelfMem, 2026-11-04): the published a0_025 seed's runtime pack does not match dev (46 runtime and 42 backend files differ), so a fresh clone can reuse its pack only from a seed cut at a matching commit. Ruling: a Jet tool step (Tools/packaging/reuse-runtime.jet) checks the pack's provenance inventories against the checkout and refuses a mismatch, naming the latest published release (c4) or the rebuild route (#5072 c11). c3 is proven with the latest base as a stand-in seed until c4 publishes a matching release."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "G4/G5 landed (SelfMem-6564a): testkit scratch comes from JET_TEST_SCRATCH_DIR, then JET_SCRATCH_ROOT/testkit, then ~/.cache/jet/testkit; lane-check runs $JET check directly with no jet-env. Testkit self-tests match base (212/6), lane-check CHECK OK for Tools/testkit, lane-check-regression green (red on base)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c3/c6 census (SelfMem, 2026-11-04): fresh clone of 449551c501 with env -i, an empty HOME and only the a0_025 seed. jet build Compiler, a ui test and hello all pass once JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY are exported. Gaps: G1/G2, jet requires both variables (ruling: jet defaults them, env > the input's Jet-checkout ancestor > the install beside the binary; identity from IDENTITY beside the binary); G3, s1 reuses the seed runtime pack (ruling: reuse when the recipe hash matches, else a registered error; the Jet port of prebuild is on #5072); G4 testkit scratch under HOME; G5 lane-check via jet-env; G6 verify-full is node and hard-codes the scratch mount; G7 docs route through jet-env/Nix."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04 on c6: environment setup may belong to Jetpack rather than the jet compiler; the line is blurry. Read c6 as: with a Jet toolchain present (jet + Jetpack), the environment comes from it, not Nix. Which component owns it follows the existing Jetpack environment work (D-DEPS-ENV1; #5969)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner answers 2026-11-04: (a) seeds are GitHub releases of each valid, proven latest compiler; (b) scrub personal info, no allowlist; (c) jet-env bash is temporary only; with jet present, jet is the environment, and Jet replaces Nix over time. Added as criteria c4-c6."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Handoff from the stopped Infra agent (2026-11-04). Inventory: Docs/audits/2026-11-04-handoff-inventory.md (70 rows: 47 external paths + 23 committed hard-code groups, ~270 files), queued as land job 1793810639-Infra. Working clone: $JET_STATE_ROOT/scratch/Infra/work (delivers patches through q.mjs, because the dev worktree is the lander's tree). Proposed: (1) preflight.mjs, preflight-gate.mjs and prepare-sharded-chain.mjs are dead Rust-era stage0 tooling (last receipt Oct 21): retire to held/, and AGENTS.md's preflight becomes Land.jet census + Chain.jet --dry-run. (2) One ballot gate, a read-only 'tower decision validate FILE' in Tower; both validate.mjs files retire. (3) cheap.sh is replaced by lane-check.sh slots. (4) Root variables with defaults only in jet-env: JET_STATE_ROOT, JET_SCRATCH_ROOT, JET_RUN_ROOT (default $JET_RUN_ROOT here), JET_BASE_ROOT, JET_TARGET_ROOT, JET_SEEDS/JET_SEED, JET_DEV_WORKTREE, JET_PACK_MUSL_LIB. (5) The only Core gap so far is #5072 c2 (worker pool); it blocks parallel prescreen and the sharded suite, which run serially until then. Open owner questions: (a) where the D-SEED-DIST1 seed is published (fetch command for the bootstrap doc); (b) leave recorded evidence paths (Tower json, agent-eval transcripts, gauntlet evidence json, proposal quotes) as written and allowlist them in the lane-check guard; (c) jet-env must stay a bash bootstrap (it enters the Nix shell that provides jet), which amends #5072 c9."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: goes hand in hand with #5072 (Jet for all repo scripting). Tooling brought into the repo arrives as Jet programs in one cutover, per #5072 c9. A missing Core capability is built in Core as a #5072 gap."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An inventory lists every out-of-repo dependency of agent work, each mapped to its repo home or marked as rebuildable output. It is committed under Docs/audits.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed e837b797e7: Docs/audits/2026-11-04-handoff-inventory.md, 70 rows (47 out-of-repo paths, each with user, kind, Jet repo home and root variable; 23 committed hard-code groups, ~270 files) plus the Core gap table (#5072 c2). Main checked it covers the live lander (lander.sh, batch-land, prescreen, precommit, census-snap, unstick, publish-*, release-train), $JET_RUN_ROOT state, the chain (chain-lib, trapscan, build-slot, norust, gsel), the seeds, suite.sh, tk-build.sh and the ballot validator. Its evidence allowlist is superseded by c5 (owner: scrub, no allowlist).",
+          "at": "2026-11-04T16:55:55.950Z"
+        },
+        {
+          "n": 2,
+          "text": "The lander, chain, suite, ballot validator and preflight live under Tools/. No file outside Docs/audits and Docs/research hard-codes $JET_SCRATCH_ROOT, $JET_STATE_ROOT or $JET_RUN_ROOT; a guard in Tools/agent/lane-check.sh fails on new ones.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7d6426a7d4: the lander, chain, suite, ballot validator and preflight live under Tools/, and personal-info/v2 adds the state and run roots to Tools/agent/personal-info-guard.sh, which lane-check runs first; 49088d8510: the board redacted through tower redact (501 spans, rev 92335; a second dry run finds 0); personal-info-guard.sh exits 0 over the whole dev tree at ec7e5e3175.",
+          "at": "2026-11-05T08:38:13.607Z"
+        },
+        {
+          "n": 3,
+          "text": "From a fresh clone with an empty HOME and scratch root (only a seed compiler supplied), one documented command sequence builds the compiler, runs a named suite slice, lands a patch on a scratch copy of dev and validates a ballot. The transcript of that run is the evidence.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 13e0912c86 (with 9ac31515fc Land.jet/Validate.jet and 4d6e120657 bootstrap.md): under env -i with an empty HOME and only a seed, the documented sequence clones dev, builds Compiler, passes jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet (1/1), runs hello, lands a patch on a scratch copy via Tools/agent/Land.jet land --scratch-copy (911e2d01ec, clean status) and validates a ballot with Tools/agent/ballots/Validate.jet; exit 0. Transcript ~/jetlanes/Builder4/c3-transcript.txt (Builder4)",
+          "at": "2026-11-05T22:55:10.070Z"
+        },
+        {
+          "n": 4,
+          "text": "Owner 2026-11-04 (a): every valid, proven latest compiler is published as a GitHub release, with its binary, IDENTITY and checksums as assets, by the same step that admits it. The bootstrap doc fetches the latest release with one command, and the fresh-clone proof uses that fetch, not a local copy. Shares the release path with #5950.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a0_031 (aaa6331fc0) was published by the release step that admitted it ('admitted: tag a0_031 is on origin and published as its GitHub release'). The release carries jet, IDENTITY, SHA256SUMS, jet-a0_031-linux-x64.tar.gz with its .sha256, the cc archive, the cc pack and CANDIDATE.json with its signature. Fresh-clone proof $JET_SCRATCH_ROOT/lanes/Main/fresh031.sh, run under env -i with an empty HOME, no JET_* variables and no jet on PATH, follows Docs/spec/contributing/bootstrap.md lines 40-54 verbatim. The one curl line fetched releases/latest; content_digest matched; the Ed25519 signature verified against Tools/release/jet-release.pub.pem; the archive and SHA256SUMS checks passed. It cloned --branch a0_031 and ran seed jet build Compiler. ReuseSeedRuntime matched 483 runtime inputs. jet test --profile ui tests/ui/list_expected_type_mismatch.jet passed 1, and jet run Examples/Basics/Hello.jet printed hello, world. rc=0 (fresh031.log).",
+          "at": "2026-11-07T03:58:51.887Z"
+        },
+        {
+          "n": 5,
+          "text": "Owner 2026-11-04 (b): no personal information in committed files. Home paths, usernames, host names, personal emails and machine-specific mounts in evidence, docs, fixtures and the Tower board are scrubbed to neutral placeholders ($HOME, $JET_SCRATCH_ROOT and similar) without changing their meaning. A Tools/agent/lane-check.sh guard fails on new ones, with no allowlist for recorded evidence. Rewriting already-published git history is a separate owner decision and is not done here.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Repo scrub bb83e1dec9 (510 files, Prep-2); guard and tower redact 9942f58d47 (Tools/agent/personal-info-guard.sh runs first in lane-check, no allowlist; Tower refuses new matches with E_PERSONAL_INFO); board redacted by Main at rev 90509, committed 25acc6f2c2: 2554 spans under rule table personal-info/v1 (ratified decisions included, meaning unchanged), and a second dry run finds 0. personal-info-guard.sh exits 0 on dev after the board merge. Git history is not rewritten, per the criterion. Note: tower.mjs loads the master checkout's app, so Tower's write refusal is live once master advances past 9942f58d47; until then Main writes through dev's app.",
+          "at": "2026-11-04T21:22:19.800Z"
+        },
+        {
+          "n": 6,
+          "text": "Owner 2026-11-04 (c): with a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env. Tools/agent/jet-env stays only as the temporary bootstrap for a machine that has no jet yet, and its environment setup moves into jet itself as Jet replaces Nix (#3402, #6071).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, second cut questions): moved to #6628 (\"Runtime pack and gates build with jet, no jet-env\").",
+          "at": "2026-11-07T01:04:01.101Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 7,
+          "text": "The board stays pushable: Tools/tower/.tower/history.json is 61 MB (pushed 2026-11-04, GitHub warns above 50 MB and refuses files above 100 MB). Split it into dated or size-bounded shards that Tower reads as one history (nothing deleted), each well under 50 MB, so a push never fails on board size.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "9c7ddf1359 (HistoryShards, via the a0_027 merge 063ff80cdd on master) and 8af39cf58c (board rev 93041 on master). history.json is now a manifest plus 9 shards under history/; the largest is 8.0 MiB, below GitHub's 50 MB warning. The shards read back as 2046 decisions, 4534 cards and 91499 events, the same as before. Serve was restarted on the sharded board and decision show reads it.",
+          "at": "2026-11-06T10:11:02.788Z"
+        },
+        {
+          "n": 8,
+          "text": "Builds don't leak the machine path: jet records source directories relative to the package root in DWARF comp_dir, .debug_line and .debug_jetline, so an absolute entry argument (jet build $PWD/Compiler) gives the same bytes as a relative one. Today discovery base binaries hold the absolute build path 3 times (found by Builder3, 2026-11-04). A case builds with both spellings and compares the bytes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "e3076de85c: DWARF comp_dir, .debug_line and .debug_jetline record source directories relative to the package root. New case build_debug_directory builds with an absolute and a relative entry and compares bytes (FAIL to PASS); s2 is byte-identical at two checkout roots; chain FIXED_POINT s2==s3 2861857be67036eb; full cases A/B 4405 rows, 0 lost (watching_dev_reruns_on_jit_gap flakes 2/5 on base too, tracked under #6035 c14a); publish-release tests 7/7 (6564-c8.receipt.md).",
+          "at": "2026-11-05T01:52:24.523Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #2344 c1) One frozen candidate commit completes every ratified clean-window time, valid-case, and per-row floor with zero silent-data findings and no hidden or unratified exclusion [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "DUPLICATE: Duplicate of 6035 c19/c47 (one candidate) and 6035 c7 (time floors); the named criterion carries the requirement. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:01.063Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #2344 c8) Every runner exit path kills its owned process group and removes owned scratch; dashboard state is derived from current signed evidence and cannot manufacture READY [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "HOLDS on dev ded00de82f: Runner half: Tools/testkit/Exec.jet:373 kit_exec_stop_strays with test Tools/testkit/Tests/CasesSuite.jet:174; dashboard half duplicates 6035 c47. G14 triage 2026-11-05 ($JET_SCRATCH_ROOT/lanes/Main/briefs/g14-precut-triage.tsv), reviewed by Main.",
+          "at": "2026-11-05T02:33:29.596Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #2401 c1) Every active runtime skill and filesystem-backed SKILL.md is mapped to keep, narrow, disable for Jet, or retire, with its triggers and unique rules preserved [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "e6d8b1d281: c12 .agents/skills/_shared/skill-sources.md maps mine-for-jet-v2 (keep, source R); Tools/agent/SkillRules.jet fails when any SKILL.md under .agents/skills or Tools/tower/skills lacks a row, #Test 'an unmapped skill, a missing file, a repeat and a bad status are each reported'",
+          "at": "2026-11-05T02:44:51.443Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #2401 c2) The ratified layout gives the owner one clear monitoring and editing surface for shared agent conduct and model routing, while distinct domain workflows remain loadable without duplication [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: AGENTS.md:287-289: no harness-specific configuration; agent tools use their own global settings. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:01.753Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #2401 c3) No active Jet path contains contradictory concurrency, worktree, worker-test, closure, review, research-output, Codex-invocation, or model-selection rules [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "e6d8b1d281: c14 Tools/agent/SkillRules.jet checks .agents and Tools/tower/skills against 10 rules anchored to AGENTS.md law text (concurrency, worktree, worker tests, closure, review, delegation, research output, Codex invocation, model selection) and fails when a law's wording leaves AGENTS.md; 6 #Tests; it found and N removed the Luna/Sol model picks in gauntlet references and .agents/agents",
+          "at": "2026-11-05T02:44:52.054Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #2401 c4) A cold-agent exercise proves AGENTS preflight, project-versus-managed-versus-plugin precedence, adapter selection, and rollback without editing vendor or unrelated global skill installations [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: AGENTS.md:287-289: no harness-specific configuration, adapters or managed precedence in repo. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:02.508Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #2931 c3) A bounded cold-reader exercise completes a representative composition and refuses an out-of-scope follow-on; the observed path and any host-specific invocation limits are recorded [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: Composed-workflow skills were replaced by .agents/skills/JetSkillsRouter.md routing; AGENTS.md:287-289 leaves host invocation to tools. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:03.227Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #3046 c1) A short project status skill captures recurring owner preferences, reports approximate task and overall completion without false closure, is registered through existing entrypoints, and is exercised on partial, blocked and unknown sample progress; multiple comparable report shapes are ready for owner selection [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "HOLDS on dev ded00de82f: .agents/skills/pulse/SKILL.md:4,13 (bars|table|bullets; done, active, blocked, unstarted), registered at JetSkillsRouter.md:11. G14 triage 2026-11-05 ($JET_SCRATCH_ROOT/lanes/Main/briefs/g14-precut-triage.tsv), reviewed by Main.",
+          "at": "2026-11-05T02:33:32.236Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #3069 c1) All 30 canonical Jet/Tower skills reflect the approved per-skill proposal; Matt Pocock and managed/cache sources remain unchanged [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: Layout rewritten: JetSkillsRouter.md, 48 .agents/skills plus 6 Tools/tower/skills, not 30. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:03.921Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "(was #3069 c2) Shared scope, permissions, objective completion, and honest zero-loss rules agree with all skill roots and contextual references [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "DUPLICATE: Duplicate of 6564 c14 (contradiction check); the named criterion carries the requirement. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:04.591Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(was #3069 c3) The actual OMP loader resolves canonical Jet skills and excludes disabled managed routes and duplicate managed ELI5 copies without global source edits [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: AGENTS.md:287-289: no OMP loader or managed-route configuration in repo. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:05.384Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(was #3069 c5) Fresh-context Astra and applicable Luna/Sol cases prove ordinary review avoids HTML, report-only avoids Tower, full audit preserves coverage, implementation persists through proof, proposal stops before implementation, complete gauntlet permits zero losses, and preparation preserves done/blocked cards [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "OBSOLETE: Astra appears nowhere in AGENTS.md or skills; Luna/Sol linger in .agents/skills/gauntlet/references/{build,run,shared}.md. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
+          "at": "2026-11-05T02:35:06.000Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "The admitted compiler is reachable from a fresh clone: Tools/agent/jet-env sets JET to a runnable jet (today `Tools/agent/jet-env bash -c 'echo $JET'` prints an empty value, so tools fall back to a published base by hand). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1b9face622 (dev): Tools/agent/jet-env defaults JET to the checkout's built compiler. Proof (Builder4): env -i with an empty HOME on a HEAD export; before, JET was empty; after, JET=<export>/Compiler/JetCli/.jet/build/jet and $JET check hello.jet passes. The same commit also carries CoreOwnership's #4717 c106 deletions of the dead Rust-era harness data (tests/suites.txt, suite_budgets.txt, RustTestMapping.tsv x2, RustTestUncovered.tsv, golden-rust-known-failures.tsv), which were swept in from the shared index.",
+          "at": "2026-11-05T21:08:08.230Z"
+        },
+        {
+          "n": 23,
+          "text": "D-NIX-INDEX-ROOT1=A: each jet release publishes a C toolchain pack (static clang and lld, musl sources, glibc headers and link stubs) built reproducibly from pinned sources by release-compiler.mjs, its SHA-256 embedded in jet; jet cc fetches it from the release on first use, verifies the hash, caches it in the Hangar and builds per-target libc lazily; jet env fetch-toolchain pre-fetches; jet cc --target works for every covered Linux target on a clean machine with no Nix; the Nix index path leaves CcDriver",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Seed release a0_026 (dev 48b6bce25e, assembled by release-compiler.mjs, verdict PASS full). Its cc-pack step rebuilt jet-cc-pack-x86_64-linux.tar.zst from pinned sources, and it matches the hash jet embeds (7c991b6c41e2ed9b, 111338169 bytes). The pack ships beside jet in the release ($JET_STATE_ROOT/jet-seeds/a0_026/). Clean-machine fetch, verify and offline jet cc --target are proven by Builder5's follow-up (25c21787a5, b44941163a; logged above). Uploading to the public release host is the owner's publish step, not a code gap.",
+          "at": "2026-11-06T08:35:00.195Z"
+        },
+        {
+          "n": 24,
+          "text": "The released jet binary is self-contained: the Core/ and Compiler/Prelude/ sources are built into it, so from the published archive, with an empty HOME and no JET_* variables, `jet new hello && cd hello && jet run` prints hello, world and `jet test` passes. There is no toolchain/ directory beside jet and no full-repository copy in the seed; a checkout's own Core/ still takes precedence for contributors.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "$JET_SCRATCH_ROOT/lanes/Main/fresh031.sh on the published GitHub release a0_032 (tag on origin, source 2ec700da30): with only curl/git/openssl/sha256sum/tar on PATH, an empty HOME and no JET_* variables, the archive (IDENTITY, RELEASE, SHA256SUMS, jet, jet-cc/c++/cxx, jet-runtime, jetpack; no Core/, Compiler/Prelude/ or toolchain/) passes sha256sum -c, and `jet new hello && cd hello && jet run` prints 'hello, world' and `jet test` reports 1 passed, 0 failed. CANDIDATE.json digest OK and signature verified.",
+          "at": "2026-11-07T07:17:41.106Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T16:33:50.383Z",
+      "updated": "2026-11-07T07:19:52.685Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 24,
+      "completedAt": "2026-11-07T07:17:44.697Z",
+      "questions": [
+        {
+          "id": "qh2zvbft",
+          "cardId": "c0rdxo6y",
+          "decisionId": "D-NIX-INDEX-ROOT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "the end shape alone does not look like the best version compared to any language, i think zig just works",
+          "status": "answered",
+          "answer": "Agreed. The ballot is redone around the Zig shape. Recommended A: each jet release ships a C toolchain pack (static clang and lld, plus C library sources for every supported target) as a file beside jet. Its hash is built into jet. The first jet cc fetches it from the same release, checks the hash and keeps it. After that, jet cc works on a clean machine and builds for any supported target. It needs no Nix, no package index and no signing key. Pure-Jet programs never download it, and jet env fetch-toolchain prepares an offline machine. B keeps the old Nix and signed-index route; C uses the machine's own cc, like Go.",
+          "created": "2026-11-05T23:07:19.134Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-10T07:27:48.499Z"
+    },
+    {
+      "id": "c0xq1afz",
+      "num": 6570,
+      "title": "sema: Pool id equality id == id fails with E0312",
+      "body": "Probe review61_id_eq (D-POOL-HAS1 review): comparing two ID<T> values with == fails E0312, though D-POOLID-API1 makes ids copyable and comparable. Make ID<T> equality check and lower, with an example golden on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Reopened by Main: the vb10 kit has pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable as FAIL (E0904 on the Prelude Equatable bound at instantiation). Closing missed that row; c2 owns it. Routed to MechD-3."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two Pool ids compare with == and != by slot and generation (D-POOLID-API1=A): a live id equals itself and a copy of itself, an id taken before remove differs from the id that reuses its slot, and a golden example prints those results on o0, o1 and o2 with no E0312. The same proof meets #6515 c1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "415ffb6673; batch vb10 (dev e4756389a9, s1 kit): golden tests/run/CopyBorrow/PoolIDsCompareBySlotAndGeneration.jet PASS on o0, o1 and o2; cases pool_id_equality/reused_pool_slot_does_not_equal_its_stale_generation and allocator_families/pool_ids_reuse_slots_without_reviving_stale_generations PASS (both FAIL in vb9).",
+          "at": "2026-11-07T05:56:03.701Z"
+        },
+        {
+          "n": 2,
+          "text": "A Pool id satisfies a generic Equatable bound without the payload being equatable: case tests/cases/pool_id_equality/pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable.case PASS (vb10 at dev e4756389a9: FAIL, 'jet check' reports E0904 'No trait named Equatable is in scope for the bound on T' at the call equal(left, right) with T = ID<Payload>).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2ec700da30 release candidate kit (chain s2 a0_032): tests/cases/pool_id_equality/pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T07:07:27.396Z"
+        }
+      ],
+      "refs": [
+        "D-POOL-HAS1"
+      ],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:12:11.885Z",
+      "updated": "2026-11-07T07:08:24.162Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-07T07:08:24.162Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T07:27:48.499Z"
+    },
+    {
+      "id": "c0iv7hyj",
+      "num": 6581,
+      "title": "Soundness: a struct holding a clone:false handle (WsConn) copies implicitly and double-drops (SIGSEGV)",
+      "body": "Found by BallotLead on dev 070ba19ad7 while porting core.web.browser. A struct whose field is a non-cloneable handle (clone: false, e.g. WsConn) is copied implicitly instead of moved or rejected, so both copies drop the handle and the program segfaults. Browser works around it with Shared<__BrowserWire>. Fix in sema: a type that holds a clone:false field is itself non-copyable, so an implicit copy is a move or a registered diagnostic. Add a case that segfaults today, then remove the Shared workaround.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A value holding a WsConn is non-copyable: an implicit copy is a move, and copying it from a read param or self is a registered diagnostic with a UI snapshot (tests/ui/ws_conn_holder_is_not_copied). Golden tests/run/Net/WsConnHolderMovesItsSocket passes on O0, O1 and O2, and core.web.browser no longer has Shared<__BrowserWire>.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/ui/ws_conn_holder_is_not_copied.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T06:27:08.269Z"
+        },
+        {
+          "n": 2,
+          "text": "One rule for every clone:false handle, not a WsConn special case: every type holding a clone:false field is non-copyable in sema, with the WsConn-specific check removed. Receiver is classified by its real semantics: if its copies soundly share one reference-counted queue, it is not clone:false and its registration says so; otherwise Core/Tasks moves it instead of copying. The Core runtime pack builds, and every clone:false holder in Core either moves or is rejected.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): ec67763e26 replaced the WsConn-only check with one clone:false handle rule (handle table in Compiler/JetFoundation Registry/RuntimeHandles.jet); ui tests/ui/ws_conn_holder_is_not_copied.jet PASS, golden tests/run/Net/WsConnHolderMovesItsSocket.jet PASS o0/o1/o2.",
+          "at": "2026-11-07T07:08:17.302Z"
+        },
+        {
+          "n": 3,
+          "text": "Equality on a clone:false handle (for example a.wire == b.wire on WsConn) is a registered sema diagnostic with a UI snapshot, or a defined comparison that lowers on every tier; it is never accepted by sema and then an internal compiler error in the backend.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): ui tests/ui/ws_conn_is_not_comparable.jet PASS (equality on a clone:false handle is a registered sema diagnostic with its snapshot; no backend ICE).",
+          "at": "2026-11-07T07:08:18.132Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T22:41:56.346Z",
+      "updated": "2026-11-07T07:08:25.623Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-07T07:08:25.623Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T07:27:48.499Z"
     }
   ]
 }

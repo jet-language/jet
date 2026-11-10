@@ -16394,6 +16394,327 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-31",
       "retiredAt": "2026-11-10T04:01:57.362Z"
+    },
+    {
+      "id": "D-G12-SCOPE1",
+      "cardId": "c0max8v8",
+      "group": "other",
+      "title": "Finish G1 and G2 sooner by moving the feature backlogs to the goals that own them",
+      "situation": "G1 has 18 open cards and G2 has 9. The backlog cards are #6418 unbuilt CLI commands (12/141), #6419 unbuilt Core APIs (27/52) and #5454 failing ported Rust tests (1/92). They also include test-toolkit features #6012, #6015, #6060 and #6064, and in G2 #6425 silent checker families (0/7). With only three agents running, these backlogs would keep both goals open for a long time after the hand-off work itself is done.",
+      "gist": "Should the feature-backlog cards leave G1 and G2, with every row they block kept as a tracked known failure?",
+      "lesson": "G1 is hand-off and durability, and G2 is finishing Rust removal. Both still hold cards that are really feature backlogs, such as unbuilt CLI commands and unbuilt Core APIs. G1 also says every golden, ui and cases row must pass. About 1,100 rows are known-failing today, and almost all of them wait on a feature from one of those backlogs. So G1 and G2 cannot finish until those features are built.",
+      "explainer": "",
+      "story": "The hand-off work is nearly done: #6564 is at 20 of 23 criteria and test.jet is at 60 of 66. G1 still shows 18 open cards. Most of the remaining criteria sit in #6418 with 141 criteria and #5454 with 92.",
+      "inWild": "Rust's release trains ship when the train leaves. Unfinished features stay behind their own tracking issues instead of holding the release.\n// https://doc.rust-lang.org/book/appendix-07-nightly-rust.html",
+      "detail": "Under A nothing is deleted. Every affected row stays a KNOWN-FAILING row that names its card. The release gate still refuses any new or untracked failure.\n\nG1 then finishes on hand-off work: #6564, #6035, #4599, #6003, #6096 and the small kit and witness cards. G2 finishes on #4717 and #3590 after reconciling their criteria against today's code, plus #6096, #6599 and #6600. Criteria for unbuilt features move onto #6418 or #6419.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move the backlogs and count tracked known failures",
+          "detail": "Move #6418, #6012, #6015, #6060, #6064 and #6425 to G5. Move #5454 to G3, #6605 to G10, #6582 to G9 and #6604 to G7. #6419 leaves G1 and stays in G3. G1's row rule becomes: every row passes or is known-failing on an open card in a later goal.",
+          "technical": "Goal membership edits plus one amendment to G1's text. The release gate already counts KNOWN-FAILING rows apart and refuses growth of untracked failures. A known-failing row must name a card in a later goal; no row may be untracked, ERROR or TIMEOUT.",
+          "code": "G1 row rule, after:\n  every golden, ui and cases row passes,\n  or is KNOWN-FAILING on an open card in a later goal;\n  no row is untracked, ERROR or TIMEOUT"
+        },
+        {
+          "key": "B",
+          "name": "Move the cards but keep every row passing",
+          "detail": "The same cards move, but G1 still needs every row to pass. The moved features' rows stay red, so G1 still waits on them. Only the card count drops.",
+          "technical": "Goal membership edits only.",
+          "code": "G1 row rule, unchanged:\n  every golden, ui and cases row passes;\n  no row is skipped, unsupported or an internal error"
+        },
+        {
+          "key": "C",
+          "name": "Keep G1 and G2 as they are",
+          "detail": "G1 and G2 finish only after the CLI commands, Core APIs, test-toolkit features and checker families are all built.",
+          "technical": "No change.",
+          "code": "No change to G1, G2 or card membership"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "G1 is about hand-off and durability, and the backlogs are features. Tracked known failures keep every gap visible on a card while the hand-off work finishes now.",
+        "gains": [
+          "G1 and G2 can close on the work they are actually about.",
+          "Every unbuilt feature keeps its card and its known-failing rows."
+        ],
+        "losses": [
+          {
+            "loss": "'Every row passes' stops being a G1 exit condition.",
+            "mitigation": "The release gate still refuses any untracked, ERROR or TIMEOUT row, and every known failure names an open card."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B moves the cards but G1 still waits on the same red rows."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps G1 and G2 open until every backlog feature is built."
+          }
+        ],
+        "tradeoff": "G1 and G2 finish on their own work, while unbuilt features finish under the goals that own them."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": "Owner question 2026-11-06: which big blockers can go in later stages so G1 and G2 finish soonest",
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the feature-backlog cards leave G1 and G2, with every row they block kept as a tracked known failure?",
+        "lesson": "G1 and G2 still hold feature backlogs, and G1 says every row must pass. About 1,100 rows are known-failing today, almost all waiting on a backlog feature. So neither goal can finish until those features are built.",
+        "trio": {
+          "current": {
+            "note": "G1 needs every row to pass, so it waits on every unbuilt feature.",
+            "code": "G1: every golden, ui and cases row passes;\n    no row is skipped, unsupported or an internal error\nopen: #6418 12/141, #6419 27/52, #5454 1/92, ..."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust ships on a release train; unfinished features stay behind their own tracking issues. See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html.",
+            "code": "// feature gated, tracked separately\n#![feature(unfinished_thing)]  // tracking issue #NNNN"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Move backlogs, count tracked failures",
+            "gist": "Backlog cards move to their own goals; a row may be known-failing if it names an open later card.",
+            "gains": [
+              "G1 and G2 close on their own work.",
+              "Every gap stays on a card."
+            ],
+            "losses": [
+              "'Every row passes' is no longer a G1 exit condition."
+            ],
+            "proposed": {
+              "code": "every row passes,\nor is KNOWN-FAILING on an open card in a later goal;\nno row is untracked, ERROR or TIMEOUT"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Move cards, keep every row passing",
+            "gist": "Only the card count drops; G1 still waits on the same red rows.",
+            "gains": [
+              "The strict row rule stays."
+            ],
+            "losses": [
+              "G1 still waits on every backlog feature."
+            ],
+            "proposed": {
+              "code": "every golden, ui and cases row passes"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No change",
+            "gist": "G1 and G2 wait until every backlog feature is built.",
+            "gains": [
+              "No goal edits."
+            ],
+            "losses": [
+              "G1 and G2 stay open for a long time."
+            ],
+            "proposed": {
+              "code": "unchanged"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "G1 is about hand-off and durability, and the backlogs are features. Tracked known failures keep every gap visible while the hand-off work finishes now.",
+          "gains": [
+            "G1 and G2 close on their own work."
+          ],
+          "losses": [
+            {
+              "loss": "'Every row passes' stops being a G1 exit condition.",
+              "mitigation": "The release gate still refuses any untracked, ERROR or TIMEOUT row."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B moves the cards but G1 still waits on the same red rows."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps G1 and G2 open until every backlog feature is built."
+            }
+          ],
+          "tradeoff": "G1 and G2 finish on their own work; features finish under the goals that own them."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-06T11:11:57.778Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-10T07:27:48.499Z"
+    },
+    {
+      "id": "D-NIX-INDEX-ROOT1",
+      "cardId": "c0rdxo6y",
+      "group": "other",
+      "title": "jet cc ships its own C toolchain with jet, like zig cc: no Nix, no index, no key",
+      "situation": "jet cc compiles C code, for example a C library a Jet package wraps. Today it downloads a C compiler from the Nix package collection, found through a package index signed by Jet's own key. That key and index were never published, so on a fresh machine jet cc fails. You said the end shape is not the best of any language, and that Zig just works. Zig ships its C compiler and every C library it needs with zig itself. We recommend the same for Jet.",
+      "gist": "Should jet cc ship its own C toolchain with jet, the way zig cc does?",
+      "lesson": "To compile C, you need a C compiler, a linker and the C library for the machine you build for. Zig ships all of these with zig, so zig cc works on any machine and can build for any other, with nothing else installed. Jet can do the same: the toolchain comes with jet, checked against a hash built into jet.",
+      "explainer": "",
+      "story": "Ana installs jet on a new laptop with nothing else on it, and runs jet build on a package that wraps a small C library. It just builds. Then she builds the same package for an ARM board with --target and it builds too, with no Nix, no package index and no second install.",
+      "inWild": "Zig: zig cc is a C compiler shipped inside the zig download, with C library sources for every target, so cross-compiling needs nothing installed. Source: https://ziglang.org/learn/overview/#zig-is-also-a-c-compiler\n\nGo: cgo uses the C compiler already installed on the machine, so it fails where none is. Source: https://pkg.go.dev/cmd/cgo",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe last draft kept the Nix route and only asked how to trust it before the key exists. You said the end shape itself was not the best, and that Zig just works. The new A drops Nix, the index and the key from jet cc entirely. It ships the toolchain with jet, as Zig does.\n\nTODAY\n\njet cc looks for a verified C toolchain already in the Hangar, Jet's local store. If none is there, it fetches one through the Nix package index (Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:256-282). The index needs a public key and an address that were never published, so it fails with E1348 (Jetpack/Provider/Source/Core/Realized.jet:188-201).\n\nThe owner ordered that every proven compiler be published as a GitHub release with its checksums (card #6564 c4), and that repo tools run with no Nix once jet exists (#6564 c6).\n\nSHAPE UNDER A\n\n1. The toolchain pack. Each jet release publishes one more file beside jet: a C toolchain pack. It holds a static clang and lld, and the source of the musl C library. It also holds the headers and link stubs for each glibc version, as Zig makes them. Today it covers the Linux targets; other systems join when Jet supports them.\n\n2. Trust by hash. The pack's SHA-256 is written into jet itself when the release is built. jet accepts only a pack with that exact hash, so no key, index or signature server is needed. A new pack comes only with a new jet.\n\n3. Just works. The first jet cc, or a jet build that compiles C, downloads the pack from the same release as jet, checks its hash, and keeps it in the Hangar. Later runs use it at once. jet env fetch-toolchain downloads it ahead of time, for a machine that will be offline.\n\n4. Any target. The C library for each target is built from the pack's sources the first time it is needed, and cached, exactly as Zig does. So --target builds for another machine with nothing else installed.\n\n5. Building the pack. The release tool builds it from pinned LLVM and musl sources, so anyone can rebuild it and compare the hash. Nix may help build it on the release machine, but no user ever needs Nix.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Size. A static clang and lld are about 60 MB packed, like Zig's download. The pack is a separate file, fetched only when C is first compiled, so a pure-Jet program never downloads it.\n\n2. Offline first use. jet env fetch-toolchain fetches it ahead of time, and the release also offers one archive with jet and the pack together. A missing pack offline gives one error naming both fixes.\n\n3. Trusting an outside build of clang. The release tool rebuilds the pack from pinned sources and fails if the hash differs. The hash inside jet then guards every download, with no key to lose.\n\n4. Two ways to get C tools. Nix leaves jet cc completely. The Nix index work for jet cc is deleted, and Jetpack's Nix support stays only for system packages a project asks for by name.\n\nNo loss remains.\n\nEDGE CASES\n\n- A machine that already has the pack in its Hangar never touches the network.\n- A pack with the wrong hash is refused and deleted, with an error naming the expected hash.\n- jet cc --target for a system the pack does not cover yet gives a typed error naming the covered targets.\n\n- A C program that needs a library beyond libc, such as zlib, declares it as a package dependency, as today.\n- Updating jet updates the pack with it, since the hash lives in jet.\n\nWHY NOT B OR C\n\nB keeps the Nix route but publishes the signed index first. jet cc then depends on Nix's package servers, a signing key and an index host, and still cannot cross-compile out of the box. C uses the C compiler already on the machine, as Go does. That fails on a clean machine, differs from machine to machine, and cannot build for other targets.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ship the toolchain with jet, like Zig",
+          "detail": "Each jet release ships a C toolchain pack: clang, lld and C library sources for every supported target. jet checks the pack against a hash built into jet, fetches it the first time C is compiled, and keeps it. jet cc then works on any machine and builds for any supported target, with no Nix, no index and no key.",
+          "technical": "release-compiler.mjs builds the pack reproducibly from pinned LLVM and musl sources and embeds its SHA-256 in jet's IDENTITY. jet cc resolves the pack from the Hangar, else fetches it from the release, verifies the hash, and builds per-target libc lazily into a cache. The Nix index path leaves CcDriver.",
+          "code": "$ jet cc -c hello.c\n// first use: fetching the C toolchain for jet 0.4.2 (61 MB)\n//   hash matches the one built into jet\n// hello.o\n\n$ jet cc -c hello.c --target aarch64-linux-musl\n// building musl for aarch64-linux (first time only)\n// hello.o\n\n$ jet env fetch-toolchain    // ahead of time, for an offline machine"
+        },
+        {
+          "key": "B",
+          "name": "Keep Nix, publish the signed index",
+          "detail": "jet cc keeps fetching clang from Nix's package servers, through an index signed with Jet's key. The key and index must be published first. Building for another target needs a matching toolchain from Nix.",
+          "technical": "Key ceremony, publish.sh with the signer, DNS and TLS for index.jet-lang.dev. Until then a reviewed local list in the repo stands in, as the last draft proposed.",
+          "code": "$ jet cc -c hello.c\n// toolchain: clang from the signed Nix index"
+        },
+        {
+          "key": "C",
+          "name": "Use the machine's C compiler",
+          "detail": "jet cc runs the cc already installed, as Go's cgo does. A clean machine has none, results differ between machines, and building for another target needs a separate cross compiler.",
+          "technical": "CcDriver resolves cc or clang on PATH and records its version in receipts. No pack, no index.",
+          "code": "$ jet cc -c hello.c\nerror: no C compiler found on PATH\n  fix: install clang or gcc"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "zig cc ships clang and C library sources with zig, so it works and cross-compiles with nothing installed. Source: https://ziglang.org/learn/overview/#zig-is-also-a-c-compiler",
+          "code": "zig cc -o hello hello.c\nzig cc -target aarch64-linux-musl -o hello hello.c"
+        },
+        {
+          "lang": "Go",
+          "note": "cgo uses the installed C compiler, so it fails where there is none. Source: https://pkg.go.dev/cmd/cgo",
+          "code": "CGO_ENABLED=1 go build ./...\n# needs gcc or clang on PATH"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "It is the Zig shape you named: jet cc works on a clean machine and builds for any supported target. It needs no Nix, no index and no signing key, because the hash inside jet guards the one download.",
+        "gains": [
+          "jet cc works on a clean machine with nothing else installed.",
+          "Building C for another target works out of the box.",
+          "No Nix, no package index and no signing key.",
+          "Pure-Jet programs never download the C toolchain."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B depends on Nix servers, a signing key and an index host, and still cannot cross-compile out of the box."
+          },
+          {
+            "key": "C",
+            "reason": "C fails on a clean machine, differs between machines, and cannot build for other targets."
+          }
+        ],
+        "tradeoff": "A ships the toolchain with jet. B fetches it from Nix through a signed index. C relies on the machine."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should jet cc ship its own C toolchain with jet, the way zig cc does?",
+        "lesson": "Compiling C needs a compiler, a linker and a C library for the target machine. Zig ships all three with zig, so zig cc works anywhere and builds for any target. Jet can do the same, checked by a hash inside jet.",
+        "trio": {
+          "current": {
+            "note": "Today jet cc needs a signed Nix index that was never published, so it fails on a fresh machine.",
+            "code": "$ jet cc -c hello.c\nerror[E1348]: signed nixpkgs index endpoint and public key\n  must be configured explicitly"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "zig cc ships its compiler and C library sources. Source: ziglang.org",
+            "code": "zig cc -o hello hello.c\nzig cc -target aarch64-linux-musl -o hello hello.c"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Ship the toolchain with jet",
+            "gist": "Each jet release ships a C toolchain checked by a hash inside jet.",
+            "gains": [
+              "Works on a clean machine and cross-compiles.",
+              "No Nix, no index, no key."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "$ jet cc -c hello.c\n// first use: fetching the C toolchain (61 MB), hash matches jet\n\n$ jet cc -c hello.c --target aarch64-linux-musl\n// hello.o"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep Nix, publish the index",
+            "gist": "Fetch clang from Nix through an index signed with Jet's key.",
+            "gains": [
+              "Reuses Nix's builds."
+            ],
+            "losses": [
+              "Needs a key, an index host and Nix servers.",
+              "No cross-compiling out of the box."
+            ],
+            "proposed": {
+              "code": "$ jet cc -c hello.c\n// toolchain: clang from the signed Nix index"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Use the machine's compiler",
+            "gist": "Run whatever cc is installed, as Go does.",
+            "gains": [
+              "Nothing to download."
+            ],
+            "losses": [
+              "Fails on a clean machine.",
+              "No cross-compiling."
+            ],
+            "proposed": {
+              "code": "$ jet cc -c hello.c\nerror: no C compiler found on PATH"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The Zig shape: jet cc works anywhere and cross-compiles, guarded only by a hash inside jet.",
+          "gains": [
+            "Works on a clean machine.",
+            "No Nix, index or key."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Needs a key, an index host and Nix servers."
+            },
+            {
+              "key": "C",
+              "reason": "Fails on a clean machine."
+            }
+          ],
+          "tradeoff": "A ships the toolchain. B fetches from Nix. C trusts the machine."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-05T21:35:25.300Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-10T07:27:48.499Z"
     }
   ]
 }
