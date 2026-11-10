@@ -130,7 +130,7 @@ parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped
                 } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                     alignment_span = Val(expr_span(argument))
                 } else {
-                    parser_add_fatal_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `$build.cpu.cache_line` (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align($build.cpu.cache_line)` or `align(target, 2097152)`")
+                    parser_add_fatal_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `build.cpu.cache_line` (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align(build.cpu.cache_line)` or `align(target, 2097152)`")
                     return None
                 }
             } else {
@@ -242,7 +242,7 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
                     alignment = Val(number)
                 } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                 } else {
-                    parser_add_error_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `$build.cpu.cache_line` (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align($build.cpu.cache_line)` or `align(target, 2097152)`")
+                    parser_add_error_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `build.cpu.cache_line` (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align(build.cpu.cache_line)` or `align(target, 2097152)`")
                 }
             } else if value == .Ident(name, name_span, _) {
                 parser_layout_struct_bare_argument(state, name, name_span, marker.span, false)
@@ -270,13 +270,13 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
 }
 
 // An `align(…)` byte value: a non-negative integer literal, or the build fact
-// `$build.cpu.cache_line`. Jet has no CPU selection, so
+// `build.cpu.cache_line`. Jet has no CPU selection, so
 // the fact is the generic cache-line size on every target, as sema reads it.
 parser_layout_align_bytes: fn(argument: Expr) -> Int? {
     if argument == .Int(number, _, _, _, _) && number >= 0 -> return Val(number)
     if argument == .Field(base, member, _, _) && member == "cache_line" {
         if base == .Field(root, group, _, _) && group == "cpu" {
-            if root == .Ident(name, _, _) && name == "$build" -> return Val(COMPILER_BUILD_CPU_CACHE_LINE_GENERIC)
+            if root == .Ident(name, _, _) && name == "build" -> return Val(COMPILER_BUILD_CPU_CACHE_LINE_GENERIC)
         }
     }
     None

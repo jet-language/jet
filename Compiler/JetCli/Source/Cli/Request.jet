@@ -1558,7 +1558,7 @@ jet_cli_compile_executable_file: fn(file: String, entry: String?, color: Bool, t
 }
 
 // jet_cli_compile_prepared for the native executable route under the build
-// `options`: their selected profile is the front end's (`$build.profile`, its
+// `options`: their selected profile is the front end's (`build.profile`, its
 // package.jet settings); `entry` selects the function the program starts at
 // (None: the package's own entry); `input_log` as there, else a log of this
 // compile's own: either way the result lists the comptime inputs it read
@@ -1577,7 +1577,7 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             selected.comptime_input_log = Val(log.copy())
             if options.profile != "" -> selected.profile = options.profile
             selected.artifact_build = options.command == "build"
-            // An OS-less build (`os: web`) folds `$build.os` on its own OS,
+            // An OS-less build (`os: web`) folds `build.target.os` on its own OS,
             // which no host triple names.
             os_option: build_options_value(options, "os")
             if target_os_parse(os_option) == .Val(os) && !target_os_native(os) -> selected.build_os = os_option

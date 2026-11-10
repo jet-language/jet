@@ -763,7 +763,7 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
     }
 }
 
-jfmt_fmt_marker_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
+jfmt_fmt_fact_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
     source: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
     multiline: jfmt_comma_begin(f, params.len(), source)
     loop index in 0..<params.len() {
@@ -771,17 +771,7 @@ jfmt_fmt_marker_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_st
         jfmt_comma_before(f, index, multiline, param.name_span.start)
         jfmt_write(f, param.name)
         jfmt_write(f, ": ")
-        if param.ty == .Val(ty) {
-            if param.variadic -> jfmt_write(f, "...")
-            jfmt_fmt_type(f, ty)
-            if param.value == .Val(default) {
-                jfmt_write(f, "{{")
-                jfmt_fmt_expr(f, default, JFMT_PREC_OR_FALLBACK)
-                jfmt_write(f, "}}")
-            }
-        } else if param.value == .Val(value) {
-            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        }
+        if param.value == .Val(value) -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
         jfmt_comma_after(f, multiline, param.name_span.end)
     }
     jfmt_comma_end(f, multiline, source)
@@ -791,7 +781,7 @@ jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
     jfmt_write(f, "fact ")
     jfmt_write(f, declaration.name)
     jfmt_write(f, "(")
-    jfmt_fmt_marker_decl_params(f, declaration.params, declaration.name_span.end)
+    jfmt_fmt_fact_decl_params(f, declaration.params, declaration.name_span.end)
     jfmt_write(f, ")")
     jfmt_newline(f)
 }

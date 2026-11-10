@@ -9,8 +9,8 @@ stdout: ~ "resolved=[]" # original predicate
 step: jet inspect expand --facts layout {root}/tests/fixtures/expand_effects_layout.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "AuditPacket.$layout" # original predicate
-stdout: ~ "AuditPacket.$layout   kind=default size=8 alignment=8 stride=8" # a struct without #Layout reports the bytes the compiler placed (the original predicates, byte_facts=unavailable and [E0959], predate them)
+stdout: ~ "AuditPacket.reflect().layout" # original predicate
+stdout: ~ "AuditPacket.reflect().layout   kind=default size=8 alignment=8 stride=8" # a struct without #Layout reports the bytes the compiler placed (the original predicates, byte_facts=unavailable and [E0959], predate them)
 stdout: !~ "E0959" # every byte fact of AuditPacket is known
 step: jet inspect expand --facts effects --json {root}/tests/fixtures/expand_effects_layout.jet
 env: NO_COLOR=1

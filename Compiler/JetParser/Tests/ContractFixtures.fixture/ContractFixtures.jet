@@ -418,11 +418,11 @@ pc_allow_and_fact_roots: fn() {
         pc_require(source.slice(span.start..<span.end) == word, "dollar diagnosis highlights exactly the authored word")
         pc_require(if word == "$HOME" -> rejected.diagnostics[0].what.contains("config") else -> rejected.diagnostics[0].what.contains("compiler fact"), "ALL_CAPS environment read and unknown fact diagnoses remain distinct")
     }
-    fact_roots: [String]{"$build", "$package", "$phase", "$program", "$here", "$caller"}
+    fact_roots: [String]{"build", "#package", "phase", "program", "$here", "$caller"}
     loop root in fact_roots {
         pc_require(parse_source("run: fn() {{ print({root}.name) }}".bytes()).diagnostics.len() == 0, "canonical fact root parses")
     }
-    pc_require(parse_source("run: fn() {{ print(Int.$layout) }}".bytes()).diagnostics.len() == 0, "subject member fact parses")
+    pc_require(parse_source("run: fn() {{ print(Int.reflect().layout) }}".bytes()).diagnostics.len() == 0, "subject member fact parses")
 }
 run: fn() {
     canonical: parse_source("run: fn() {{\n values: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())

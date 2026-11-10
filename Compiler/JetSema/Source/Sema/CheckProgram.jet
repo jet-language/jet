@@ -3424,11 +3424,11 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// `fact_identity`: `$name` when it is a plain string, otherwise the
+// `fact_identity`: `name` when it is a plain string, otherwise the
 // declaration's source name.
 sema_fact_identity: fn(definition: FactDecl) -> String {
     loop parameter in definition.params {
-        if parameter.name != "$name" -> next
+        if parameter.name != "name" -> next
         value: parameter.value ?? break
         if value == .Str(parts, _, _) {
             identity := ""

@@ -1508,7 +1508,7 @@ jet_driver_check_profile_settings: fn(settings: [JetDriverPackageSetting], profi
         declared: loop setting in settings {
             if setting.name == entry.name -> break true
         } ?? false
-        if !declared -> diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`$build.settings.{entry.name}` is undeclared", "build profile `{entry.profile}` gives it a value, but `package.jet` declares no such setting", "add `{entry.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`"))
+        if !declared -> diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`build.settings.{entry.name}` is undeclared", "build profile `{entry.profile}` gives it a value, but `package.jet` declares no such setting", "add `{entry.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`"))
     }
 }
 
@@ -3451,7 +3451,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
         alias := -1
         if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
         if row.name == "SourceLocation" -> alias = jet_driver_core_demand_name(tables, "$here")
-        if row.name == "Phase" -> alias = jet_driver_core_demand_name(tables, "$phase")
+        if row.name == "Phase" -> alias = jet_driver_core_demand_name(tables, "phase")
         bare_alias.push(alias)
     }
     bare_rows := [Int]{}

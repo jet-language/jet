@@ -300,7 +300,7 @@ JetDriverCompileRequest: struct {
     // A shipped artifact (`jet build`): sema rejects every remaining `debug`
     // trace (E3405), as a release-profile compile does.
     artifact_build: Bool{false}
-    // The OS an OS-less build option selects (`os: web`), which `$build.os`
+    // The OS an OS-less build option selects (`os: web`), which `build.target.os`
     // folds on instead of the host triple's; empty for a native build.
     build_os: String{""}
     capture_build_program: Bool{false}
@@ -323,7 +323,7 @@ JetDriverCompileRequest: struct {
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
     // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host:
-    // the provenance `$build.stamp.*` folds. None keeps the default stamp
+    // the provenance `build.stamp.*` folds. None keeps the default stamp
     // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
     // The `[[build.contribution]]` rows of that lock: what
@@ -538,7 +538,7 @@ JetDriverPackageInfo: struct {
     // that declares a Library and no Executable has no `run: fn` (E0625).
     outputs: JetDriverPackageOutputs
     // The declared `settings:` and the values `build:` profiles give them
-    // (`$build.settings.*`, jet_driver_build_facts).
+    // (`build.settings.*`, jet_driver_build_facts).
     settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
     profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
     // `boundaries: { deny: [...] }`: denied import edges

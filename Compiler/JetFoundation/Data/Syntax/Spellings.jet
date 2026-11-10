@@ -30,11 +30,14 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "comptime fn", meaning: "build-time literal-hook method" },
     { spelling: "comptime use {{ … }} / comptime use alias: path", meaning: "build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime {{ … }}` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration" },
-    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left`" },
-    { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`)" },
-    { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`" },
-    { spelling: "$phase", meaning: "total evaluation-site phase fact" },
-    { spelling: "$program", meaning: "authorized checked-program fact root" },
+    { spelling: "$", meaning: "template name splice `$method: fn`, `self.$field`, `.$left`" },
+    { spelling: "x.reflect().fact", meaning: "compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin`" },
+    { spelling: "build", meaning: "Prelude build-fact value: `build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`); a binding named `build` shadows it" },
+    { spelling: "#package", meaning: "package site value: `#package.name`, `.version`" },
+    { spelling: "#line", meaning: "the `Int` source line where it is written" },
+    { spelling: "#file", meaning: "the `String` source file where it is written" },
+    { spelling: "phase", meaning: "Prelude evaluation-site `Phase` value; a binding named `phase` shadows it" },
+    { spelling: "program", meaning: "Prelude authorized checked-program fact value" },
     { spelling: FACT_ROOT_HERE, meaning: "the `SourceLocation` (file, line, column, function, module) where it is written" },
     { spelling: FACT_ROOT_CALLER, meaning: "the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{{$caller}}` or inside an #Expand macro" },
     { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)" },
@@ -70,9 +73,9 @@ LEXICAL_LEDGER: [LexicalEntry]{
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.
-/// `$phase`, `$program`, `$package`, `$here` and `$caller` are the fact roots; type, function,
+/// `phase`, `program`, `#package`, `$here` and `$caller` are the fact roots; type, function,
 /// method, closure and value facts are `$` members of their subject
-/// (`T.$fields`).
+/// (`T.reflect().fields`).
 META_QUERY_SOURCE: "@SOURCE"
 
 META_QUERY_TYPES: "@TYPES"

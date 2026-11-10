@@ -37,11 +37,12 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [Find](Comptime/Find.jet) — `find(glob)` expands a build-time glob, sorts the relative file paths, and records each matched file hash for reproducible builds.
 - [FoldConstants](Comptime/FoldConstants.jet) — `:` asks for build-time evaluation as an optimization; `comptime` forces it.
 - [FrozenMap](Comptime/FrozenMap.jet) — A Map constant is frozen at build time like a List constant: its entries sit in static data in key order, and every read borrows them instead of building…
-- [Phase](Comptime/Phase.jet) — `$phase` reads the evaluation-site `Phase`: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
+- [Phase](Comptime/Phase.jet) — `phase` reads the evaluation-site `Phase`: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
 - [PrepBlock](Comptime/PrepBlock.jet) — `comptime { … }` is the explicit shared-preparation block.
 - [PrepFn](Comptime/PrepFn.jet) — `comptime fn` marks a literal hook, a method that runs while building to turn a written number into a value.
 - [PrepLoop](Comptime/PrepLoop.jet) — `comptime loop` repeats declarations while building.
 - [RungSpellings](Comptime/RungSpellings.jet)
+- [SiteValues](Comptime/SiteValues.jet) — `#line` and `#file` are the line and file where they are written; `build` and `phase` are plain Prelude values a binding of the same name shadows.
 - [StartupConstants](Comptime/StartupConstants.jet)
 - [StartupTrap](Comptime/StartupTrap.jet) — A constant whose build-time try stops (here a `panic`) is not a build error: the program computes it at startup instead, and the same stop then ends the…
 - [StaticConstant](Comptime/StaticConstant.jet) — `#Static` gives a compile-time constant a stable address.

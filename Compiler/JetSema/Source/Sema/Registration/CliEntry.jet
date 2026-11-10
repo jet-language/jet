@@ -355,7 +355,7 @@ sema_cli_entry_spec_line: fn(help: String, root: [SemaCLIInput], commands: [Sema
         table = "{table}c{sema_cli_entry_field(command.name)}{sema_cli_entry_field(sema_cli_entry_command_help(command, root))}"
         loop input in command.inputs -> table = "{table}{sema_cli_entry_record(input)}"
     }
-    version: if standard -> "$package.version" else -> "\"\""
+    version: if standard -> "#package.version" else -> "\"\""
     "    __spec: __jet_cli_args.__cli_spec({sema_cli_entry_text(table)}, {sema_cli_entry_text(help)}, {version}, {standard}, [String?]{{{envs.join(", ")}}})"
 }
 
@@ -674,7 +674,7 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
     lines.push("    }}")
     if spec.standard {
         lines.push("    if __version {{")
-        lines.push("    print($package.version)")
+        lines.push("    print(#package.version)")
         lines.push("    {help_end}")
         lines.push("    }}")
     }

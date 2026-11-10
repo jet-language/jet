@@ -44,6 +44,7 @@ use {
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
         expr_span,
+        fact_read_kind,
         marker_registered,
         foundation_named_type,
         pipe_value_is_name,
@@ -933,6 +934,14 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
             span: span,
         }
     }
+    // `#package`, `#line` and `#file`: the site values, one name written
+    // against the `#`. A marker path `#file.Name` stays a marker.
+    if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) {
+        parser_bump(state)
+        name_token: parser_bump(state)
+        span: parser_cover(token.span, name_token.span)
+        return ParsedExpr{expr: Expr.Ident{name: "#{parser_value(state, name_token)}", span: span, id: parser_node_id(state)}, span: span}
+    }
     // One marker read at expression position (Rust `primary`): the marker
     // name is read first, then classified. Any name without its own value
     // meaning is a declared tag applied to the value after it.
@@ -1755,6 +1764,14 @@ parser_is_adjacent_call_result: fn(expr: Expr) -> Bool Never! {
     }
 }
 
+// The subject `x` of a bare `x.reflect()` call.
+parser_reflect_subject: fn(expr: Expr) -> Expr? Never! {
+    if expr == {
+        .MethodCall(receiver, method, _, owner_type_args, type_args, args, _) -> if method == "reflect" && owner_type_args.len() == 0 && type_args.len() == 0 && args.len() == 0 -> Val(receiver.copy()) else -> None
+        else -> None
+    }
+}
+
 parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: Int, allow_struct_lit: Bool, primary_tail: Bool) -> ParsedExpr {
     expression := initial.move()
     // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
@@ -1999,7 +2016,20 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             keyword_member: parser_is_keyword_token(state, next_token)
             member: if keyword_member -> parser_bump(state) else -> parser_expect_name(state, "after the field-access operator")
             member_name: if keyword_member -> parser_text(state, member) else -> parser_value(state, member)
+            // A `$` member is a derive or marker template read; a program
+            // reads a compiler fact through `x.reflect().fact`.
+            if member_name.starts_with("$") && state.derive_template_depth == 0 {
+                parser_add_error_code(state, "E0003", member.span, "`{member_name}` is not a member name", "a member after `.` is a plain name", "write the member's name")
+            }
             span := parser_cover(expression.span, member.span)
+            // `x.reflect().fact` reads the compiler fact `fact` of `x`; the
+            // tree keeps it as the `$fact` member of `x`.
+            if operator.kind == TOKEN_DOT && parser_current_kind(state) != TOKEN_LPAREN && fact_read_kind("${member_name}") != None {
+                if parser_reflect_subject(expression.expr) == .Val(subject) {
+                    expression = ParsedExpr{expr: Expr.Field{base: subject, member: "${member_name}", span: member.span, id: parser_node_id(state)}, span: span}
+                    next
+                }
+            }
             // A field access is spanned at its member name, as in the
             // reference; `span` covers the base too.
             expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr.move(), member: member_name, member_span: member.span, flatten: false, span: span, id: parser_node_id(state)}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr.move(), member: member_name, span: member.span, id: parser_node_id(state)}, span: span}

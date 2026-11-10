@@ -22,47 +22,47 @@ Order: struct {
 send_report: fn() {}
 
 sendability_for: fn(cell: Cell<Int>) -> Bool {
-    known: comptime { cell.$sendability.known }
+    known: comptime { cell.reflect().sendability.known }
     return known
 }
 
-RANGE: comptime { Severity.$range }
+RANGE: comptime { Severity.reflect().range }
 
-EFFECTS: comptime { send_report.$effects }
+EFFECTS: comptime { send_report.reflect().effects }
 
-STATES: comptime { Order.$states }
+STATES: comptime { Order.reflect().states }
 
-DIMENSION: comptime { Meter.$dimension }
+DIMENSION: comptime { Meter.reflect().dimension }
 
-MEASURE: comptime { PlaneFacts.$measure }
+MEASURE: comptime { PlaneFacts.reflect().measure }
 
-EXACTNESS: comptime { PlaneFacts.$exactness }
+EXACTNESS: comptime { PlaneFacts.reflect().exactness }
 
-CLASSIFICATION: comptime { PlaneFacts.$classification }
+CLASSIFICATION: comptime { PlaneFacts.reflect().classification }
 
-OBLIGATION: comptime { PlaneFacts.$obligation }
+OBLIGATION: comptime { PlaneFacts.reflect().obligation }
 
-PACKAGE_NAME: comptime { $package.name }
+PACKAGE_NAME: comptime { #package.name }
 
-PACKAGE_VERSION: comptime { $package.version }
+PACKAGE_VERSION: comptime { #package.version }
 
-OS: comptime { $build.os }
+OS: comptime { build.target.os }
 
-PROFILE: comptime { $build.profile }
+PROFILE: comptime { build.profile }
 
-SENDABILITY: comptime { Severity.$sendability }
+SENDABILITY: comptime { Severity.reflect().sendability }
 
-MOVEDNESS: comptime { Severity.$movedness }
+MOVEDNESS: comptime { Severity.reflect().movedness }
 
-ATTRIBUTION: comptime { report.$attribution }
+ATTRIBUTION: comptime { report.reflect().attribution }
 
-ORIGIN: comptime { Severity.$origin }
+ORIGIN: comptime { Severity.reflect().origin }
 
-VIEW_PROVENANCE: comptime { send_report.$view_provenance }
+VIEW_PROVENANCE: comptime { send_report.reflect().view_provenance }
 
-UNIT_SCALE: comptime { Meter.$unit_scale_provenance }
+UNIT_SCALE: comptime { Meter.reflect().unit_scale_provenance }
 
-MATURITY: comptime { send_report.$maturity }
+MATURITY: comptime { send_report.reflect().maturity }
 
 run: fn() {
     print(RANGE.start)

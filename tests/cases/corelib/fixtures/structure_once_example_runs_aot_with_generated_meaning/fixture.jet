@@ -12,11 +12,11 @@ AddMarkerFields: struct {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
-            type_name: target.$name
-            comptime loop field in target.$fields {
-                method: "marked_{field.$name}"
+            type_name: target.reflect().name
+            comptime loop field in target.reflect().fields {
+                method: "marked_{field.reflect().name}"
                 impl $type_name {
-                    $method: fn(self) -> String { field.$name }
+                    $method: fn(self) -> String { field.reflect().name }
                 }
             }
         }

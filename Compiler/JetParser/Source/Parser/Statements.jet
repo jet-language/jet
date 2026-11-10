@@ -106,6 +106,7 @@ use {
 parser_statement_is_keyword: fn(state: &JetParserState) -> Bool Never! {
     token: parser_current(state)
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
+    if token.kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) -> return false
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
     if token.kind == TOKEN_KW_COMPTIME && (parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(state, 0, TOKEN_LBRACE)) -> return true
     if parser_scope_member_ahead(state) -> return true
@@ -516,7 +517,7 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
         }
         // `#Todo`, the one marker allowed only as an expression, starts an
         // ordinary expression statement, not a statement marker.
-        TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Todo" -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
+        TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && (parser_value_at(state, 1) == "Todo" || parser_site_value_ahead(state)) -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
         TOKEN_KW_COMPTIME -> {
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(state)
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(state)

@@ -500,8 +500,8 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
-Compile-time fragment lowering binds direct nominal `$layout`, `$name`, and
-`$fields` reads before ordinary field lowering, including reads inside reached
+Compile-time fragment lowering binds direct nominal `T.reflect().layout`,
+`T.reflect().name` and `T.reflect().fields` reads before ordinary field lowering, including reads inside reached
 helper functions. These values use the fragment caller's selected target and
 the checked nominal declarations through the shared target-aware reflection
 builder; a type name is never an evaluator local. Lexical reflected-value

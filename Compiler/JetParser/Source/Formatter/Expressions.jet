@@ -459,6 +459,17 @@ jfmt_write_postfix_member: fn(f: &JetFmt, member: String) Never! {
     jfmt_write(f, member)
 }
 
+// A fact read `x.reflect().fact` is the `$fact` member of `x` in the tree,
+// spanned at the plain `fact`; a template's written `$` member stays as is.
+jfmt_write_field_member: fn(f: &JetFmt, member: String, span: Span) Never! {
+    if member.starts_with("$") && !jfmt_src_text(f, span.start, span.end).starts_with("$") {
+        jfmt_write(f, "reflect().")
+        jfmt_write(f, member.slice(1..<member.len()))
+        return
+    }
+    jfmt_write(f, member)
+}
+
 // True when the author wrote this value inside its own `{ … }`: the source
 // token before the value's left edge is the only surviving evidence.
 jfmt_value_was_braced: fn(f: JetFmt, value: Expr) -> Bool Never! {
@@ -1566,11 +1577,11 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                 f.indent += 1
                 jfmt_newline(f)
                 jfmt_write(f, ".")
-                jfmt_write_postfix_member(f, field)
+                jfmt_write_field_member(f, field, span)
                 f.indent -= 1
             } else {
                 jfmt_write(f, ".")
-                jfmt_write_postfix_member(f, field)
+                jfmt_write_field_member(f, field, span)
             }
         }
         .OptField(base, member, _, _, _, _) -> {

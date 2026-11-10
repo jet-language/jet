@@ -217,60 +217,32 @@ parser_finish_marker_struct: fn(state: &JetParserState, value: &StructDef) {
 parser_parse_fact_decl: fn(state: &JetParserState) -> Item {
     start: parser_bump(state)
     name: parser_expect_name(state, "the fact name in `fact Name(params…)`")
-    params: parser_marker_decl_params(state)
+    params: parser_fact_decl_params(state)
     end := parser_lookahead(state, -1).span
     if parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
     Item.FactDecl{value: FactDecl{name: parser_value(state, name), name_span: name.span, params: params, span: parser_cover(start.span, end)}}
 }
 
-// Rule arguments read `name: Type{default}`;
-// a fixed fact about the rule reads `$name: value`. A parameter may be named
-// by any written word, including a keyword.
-parser_marker_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
-    parser_expect(state, TOKEN_LPAREN, "`(` to open the marker's parameter list")
+// A fact's metadata reads `name: value`, the same named form as marker
+// settings. A name may be any written word, including a keyword.
+parser_fact_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
+    parser_expect(state, TOKEN_LPAREN, "`(` to open the fact's parameter list")
     params := [MarkerDeclParam]{}
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop !parser_aborting(state) {
             token: parser_current(state)
-            marked: token.kind == TOKEN_IDENT && parser_value(state, token).starts_with("$")
             keyword_name: token.kind != TOKEN_IDENT && parser_is_keyword_token(state, token)
-            name_token: if {
-                keyword_name -> parser_bump(state)
-                marked -> parser_expect_name(state, "a marker fact name")
-                else -> parser_expect_name(state, "a marker parameter name")
-            }
+            name_token: if keyword_name -> parser_bump(state) else -> parser_expect_name(state, "a fact parameter name")
             name: if token.kind == TOKEN_IDENT -> parser_value(state, name_token) else -> parser_text(state, name_token)
-            parser_expect(state, TOKEN_COLON, "`:` between the parameter name and its type or value")
-            if {
-                marked -> {
-                    value: parser_parse_expression_no_struct_lit(state, 1)
-                    params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
-                }
-                else -> {
-                    variadic := false
-                    if parser_current_kind(state) == TOKEN_DOT_DOT_DOT {
-                        parser_bump(state)
-                        variadic = true
-                    }
-                    parsed: parser_parse_type(state, 0)
-                    default := Expr?{None}
-                    if {
-                        parser_current_kind(state) == TOKEN_LBRACE -> {
-                            parser_bump(state)
-                            default = Val(parser_parse_expression_no_struct_lit(state, 1).expr)
-                            parser_expect(state, TOKEN_RBRACE, "`}}` after a marker parameter default")
-                        }
-                        else -> {}
-                    }
-                    params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: default.move(), variadic: variadic})
-                }
-            }
+            parser_expect(state, TOKEN_COLON, "`:` between the parameter name and its value")
+            value: parser_parse_expression_no_struct_lit(state, 1)
+            params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
             if parser_current_kind(state) == TOKEN_RPAREN -> break
-            parser_expect(state, TOKEN_COMMA, "`,` between marker parameters")
+            parser_expect(state, TOKEN_COMMA, "`,` between fact parameters")
             if parser_current_kind(state) == TOKEN_RPAREN -> break
         }
     }
-    parser_expect(state, TOKEN_RPAREN, "`)` to close the marker's parameter list")
+    parser_expect(state, TOKEN_RPAREN, "`)` to close the fact's parameter list")
     params
 }
 
@@ -335,7 +307,7 @@ parser_parse_template_loop: fn(state: &JetParserState) -> ItemTemplateLoop {
     parser_expect(state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
     variable: parser_expect_name(state, "for a declaration loop binding")
     parser_expect(state, TOKEN_KW_IN, "between a declaration loop binding and source")
-    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
+    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.reflect().fields {` opens
     // the loop body instead of a struct literal.
     source: parser_parse_expression_no_struct_lit(state, 0)
     body: parser_marker_body(state)

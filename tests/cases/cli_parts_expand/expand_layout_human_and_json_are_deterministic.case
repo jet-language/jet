@@ -5,15 +5,15 @@ step human: jet inspect expand --facts layout {root}/tests/fixtures/expand_layou
 env: NO_COLOR=1
 exit: 0
 stdout: !~ "\u001b" # original predicate
-stdout: ~ "PlainPacket.$layout" # original predicate
-stdout: ~ "CPacket.$layout" # original predicate
-stdout: ~ "ColumnPacket.$layout" # original predicate
-stdout: ~ "PacketState.$layout" # original predicate
-stdout: ~ "PlainPacket.$layout   kind=default size=16 alignment=8 stride=16" # a struct without #Layout reports the bytes the compiler placed (the original predicate, size=unknown, predates them)
+stdout: ~ "PlainPacket.reflect().layout" # original predicate
+stdout: ~ "CPacket.reflect().layout" # original predicate
+stdout: ~ "ColumnPacket.reflect().layout" # original predicate
+stdout: ~ "PacketState.reflect().layout" # original predicate
+stdout: ~ "PlainPacket.reflect().layout   kind=default size=16 alignment=8 stride=16" # a struct without #Layout reports the bytes the compiler placed (the original predicate, size=unknown, predates them)
 stdout: ~ "fields=[count:Int(offset=0,size=8),label:String(offset=8,size=8)]" # PlainPacket's compiler-placed fields
-stdout: ~ "CPacket.$layout   kind=c size=8 alignment=4 stride=8" # original predicate
+stdout: ~ "CPacket.reflect().layout   kind=c size=8 alignment=4 stride=8" # original predicate
 stdout: ~ "fields=[count:U32(offset=0,size=4),flag:U8(offset=4,size=1)]" # original predicate
-stdout: ~ "ColumnPacket.$layout   kind=columnar size=32 alignment=8 stride=32" # original predicate
+stdout: ~ "ColumnPacket.reflect().layout   kind=columnar size=32 alignment=8 stride=32" # original predicate
 stdout: ~ "fields=[count:Int(offset=0,size=8),label:String(offset=8,size=24)]" # original predicate
 stdout: ~ "byte_facts=unavailable" # original predicate
 stdout: ~ "E0959" # original predicate

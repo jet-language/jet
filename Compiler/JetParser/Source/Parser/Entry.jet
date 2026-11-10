@@ -1316,10 +1316,24 @@ parser_constant_name: fn(name: String) -> Bool Never! {
     has_upper
 }
 
-// The subjectless compiler fact roots; `$here` and `$caller` are source
-// locations, and sema decides where `$caller` is legal.
+// The `$` site locations; sema decides where `$caller` is legal. The other
+// subjectless facts are the plain Prelude values `build`, `phase` and
+// `program` and the site values `#package`, `#line` and `#file`.
 parser_fact_root: fn(name: String) -> Bool Never! {
-    name == "$build" || name == "$package" || name == "$phase" || name == "$program" || name == "$here" || name == "$caller"
+    name == "$here" || name == "$caller"
+}
+
+// At `#`: `#package`, `#line` or `#file` written as one word, which is no
+// marker path (`#file.Name`).
+parser_site_value_ahead: fn(state: &JetParserState) -> Bool Never! {
+    word: parser_value_at(state, 1)
+    if word != "package" && word != "line" && word != "file" -> return false
+    if parser_lookahead(state, 0).span.end != parser_lookahead(state, 1).span.start -> return false
+    if parser_kind_at(state, 2) == TOKEN_DOT && parser_kind_at(state, 3) == TOKEN_IDENT {
+        next: parser_value_at(state, 3)
+        if next != "" && next.bytes()[0] >= (U8{65}) && next.bytes()[0] <= (U8{90}) -> return false
+    }
+    true
 }
 
 // Rust `Parser::unknown_fact_root` a `$`
@@ -1333,7 +1347,7 @@ parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: 
         parser_add_error(state, span, "`$NAME` is an environment read for config surfaces only", "Jet reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
         return
     }
-    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase`, `$program`, `$here` and `$caller`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks only the site locations `$here` and `$caller`", "drop the `$` from a plain name, or read a fact through its subject, such as `T.reflect().fields`")
 }
 
 // After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.

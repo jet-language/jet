@@ -32,7 +32,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 
 - [Arena](Allocation/Arena.jet) — Explicit arena allocators under `core.mem`.
 - [ArenaRegions](Allocation/ArenaRegions.jet) — Real bump-allocated arenas with scope-bound regions.
-- [CacheLinePadding](Allocation/CacheLinePadding.jet) — `$build.cpu.cache_line` is the cache-line size of the selected CPU in bytes.
+- [CacheLinePadding](Allocation/CacheLinePadding.jet) — `build.cpu.cache_line` is the cache-line size of the selected CPU in bytes.
 - [FixedBacking](Allocation/FixedBacking.jet) — `mem.Fixed.over(bytes)` allocates typed values inside a caller-owned buffer.
 - [GCCyclic](Allocation/GCCyclic.jet) — Scoped promotion traces nested ownership and cyclic mutations while the source keeps ordinary bare-value syntax.
 - [PoolStaleID](Allocation/PoolStaleID.jet) — Pools: a stale `Id<T>` — its pool slot was removed — panics at runtime, mirroring the array-out-of-bounds panic precedent (jet_index_vec/jet_pool_get): a…

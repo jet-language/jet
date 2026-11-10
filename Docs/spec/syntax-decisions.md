@@ -40,11 +40,14 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `comptime fn` | build-time literal-hook method |
 | `comptime use { … } / comptime use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime { … }` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
 | `<comptime N: Int>` | compile-time number parameter declaration |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left` |
-| `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) |
-| `$package` | package fact root: `$package.name`, `.version` |
-| `$phase` | total evaluation-site phase fact |
-| `$program` | authorized checked-program fact root |
+| `$` | template name splice `$method: fn`, `self.$field`, `.$left` |
+| `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
+| `build` | Prelude build-fact value: `build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`); a binding named `build` shadows it |
+| `#package` | package site value: `#package.name`, `.version` |
+| `#line` | the `Int` source line where it is written |
+| `#file` | the `String` source file where it is written |
+| `phase` | Prelude evaluation-site `Phase` value; a binding named `phase` shadows it |
+| `program` | Prelude authorized checked-program fact value |
 | `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
 | `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
@@ -2465,7 +2468,7 @@ single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `[T#N]` and package selectors `pkg#1.2.3`. The caller-location value this entry
 once spelled `#Caller()` is the fact root `$caller` (D-JAI-SITE1=A).
 Later rulings assign `$name` to known-value splice (D-NAME-SPLICE1=B), `<: … :>`
-to statement expansion (D-FENCE2=A), and `T.$layout` to the compiler-known
+to statement expansion (D-FENCE2=A), and `T.reflect().layout` to the compiler-known
 layout projection (D-COMPILER-NS1=A); the `@` and older `$` spellings are retired.
 
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
@@ -3638,7 +3641,7 @@ Constant: `COMPTIME_MARK` in
 `Examples/Metaprogramming/Comptime/PrepBlock.jet` and `comptime_if.jet`.
 
 **D-LAYOUT-FACTS1=B — Compiler-owned type facts** *(spelling amended by
-D-COMPILER-NS1=A)*: `T.$layout`, `T.$name` and `T.$fields` are one closed spelling,
+D-COMPILER-NS1=A)*: `T.reflect().layout`, `T.reflect().name` and `T.reflect().fields` are one closed spelling,
 each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
@@ -3698,7 +3701,7 @@ copies. The difference is therefore an intentional projection boundary, not a
 second metadata model.
 
 **D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
-2026-08-03, spelling amended by D-COMPILER-NS1=A)*: `T.$layout` is exactly the
+2026-08-03, spelling amended by D-COMPILER-NS1=A)*: `T.reflect().layout` is exactly the
 focused projection of `T.reflect().layout`, not a second metadata model. Users
 cannot declare `$` members.
 Layout exposes kind, optional size/alignment/stride, target,
@@ -3714,7 +3717,7 @@ physical layout is not guaranteed. Completion visibly groups
 the body contains typed Jet members. `@` holes are filled at expansion and the
 resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
 never inject unchecked AST or re-lex emitted text). `comptime loop` over
-`T.$fields` contributes one checked member per field. Local-only orphan rule.
+`T.reflect().fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
 **D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
@@ -3943,8 +3946,8 @@ E1109); `columnar [T]` type-position reserved (E1107); deferred surface ops
 E1108; serialization-transparent. **D-REPRC1**: `#Layout(c)` = C repr in the
 same family (growable field under it = compile error).
 **D-PLACE1=A — Layout alignment and lock-free scalar cells** *(ratified)*:
-reuse the one `T.$layout` fact, including its exact
-`T.$layout.size` and `T.$layout.alignment` projections; no `size_of` or
+reuse the one `T.reflect().layout` fact, including its exact
+`T.reflect().layout.size` and `T.reflect().layout.alignment` projections; no `size_of` or
 `align_of` aliases enter the language. `#Layout(c, align(N))` puts alignment
 inside the existing layout family. The portable form accepts positive
 power-of-two byte values from 1 through 1048576 inclusive. The explicit

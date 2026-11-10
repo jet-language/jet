@@ -5,10 +5,10 @@ package: {
 
 // The current spellings of the compile-time and effect rungs the ratified
 // prose names (ladder audit L-24, card #6059): a compiler fact is a `$`
-// member (`T.$layout`, `$build.os`), the effect row sits
+// member (`T.reflect().layout`, `build.target.os`), the effect row sits
 // between the inputs and the result, and `FS.Read` is the
 // Prelude's effect type, named without a declaration. The retired
-// `T.@layout` is E0302 and `@build.os` teaches `$build.os`
+// `T.@layout` is E0302 and `@build.os` teaches `build.target.os`
 // (E-OSTARGET-BUILD-CONTEXT).
 use files: core.files
 
@@ -18,14 +18,14 @@ Point: struct {
     y: Int
 }
 
-POINT_LAYOUT: comptime { Point.$layout }
+POINT_LAYOUT: comptime { Point.reflect().layout }
 
 bounded: fn(path: String) -[FS.Read]> String { files.read(path) ?? "" }
 
 hash: fn(text: String) -[]> Int { text.len() }
 
 run: fn() {
-    comptime if $build.os == {
+    comptime if build.target.os == {
         .Linux -> print("os: linux")
         .MacOS -> print("os: macos")
         .Windows -> print("os: windows")

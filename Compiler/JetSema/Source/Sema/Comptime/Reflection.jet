@@ -1209,17 +1209,17 @@ sema_comptime_reflection_declared_function_facts: fn(method: Func, path: String)
         SemaComptimeReflectionField{name: "column", value: sema_comptime_reflection_none(Type.Int)},
         SemaComptimeReflectionField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
     })
-    facts.push(sema_comptime_reflection_fact_info("Sendability", "sendability", "{path}.$sendability", sema_comptime_reflection_fact_value("Sendability", "sendability", [String]{}, None, None, "sendability", Val(sendability))))
-    facts.push(sema_comptime_reflection_fact_info("Movedness", "movedness", "{path}.$movedness", sema_comptime_reflection_fact_value("Movedness", "movedness", [String]{}, None, None, "movedness", Val(movedness))))
-    facts.push(sema_comptime_reflection_fact_info("Origin", "origin", "{path}.$origin", sema_comptime_reflection_fact_value("Origin", "origin", [String]{}, None, None, "origin", Val(origin))))
+    facts.push(sema_comptime_reflection_fact_info("Sendability", "sendability", "{path}.reflect().sendability", sema_comptime_reflection_fact_value("Sendability", "sendability", [String]{}, None, None, "sendability", Val(sendability))))
+    facts.push(sema_comptime_reflection_fact_info("Movedness", "movedness", "{path}.reflect().movedness", sema_comptime_reflection_fact_value("Movedness", "movedness", [String]{}, None, None, "movedness", Val(movedness))))
+    facts.push(sema_comptime_reflection_fact_info("Origin", "origin", "{path}.reflect().origin", sema_comptime_reflection_fact_value("Origin", "origin", [String]{}, None, None, "origin", Val(origin))))
     maturity: sema_comptime_reflection_maturity(method)
-    facts.push(sema_comptime_reflection_fact_info("Maturity", "maturity", "{path}.$maturity", sema_comptime_reflection_fact_value("Maturity", "maturity", [String]{}, None, None, "maturity", Val(maturity))))
+    facts.push(sema_comptime_reflection_fact_info("Maturity", "maturity", "{path}.reflect().maturity", sema_comptime_reflection_fact_value("Maturity", "maturity", [String]{}, None, None, "maturity", Val(maturity))))
     provenance := ViewProvenance?{None}
     if method.return_view_provenance == {
         .Val(value) -> {
             loop entry in value.entries {
                 slot_name: if entry.slot.len() == 0 -> "return" else -> entry.slot.join(".")
-                facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.$view_provenance.{slot_name}", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{slot_name}, None, None, "view_provenance", Val(sema_comptime_reflection_view_provenance(entry.value)))))
+                facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.reflect().view_provenance.{slot_name}", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{slot_name}, None, None, "view_provenance", Val(sema_comptime_reflection_view_provenance(entry.value)))))
             }
             if value.entries.len() == 0 -> provenance = Val(ViewProvenance{sources: [ViewSourcePath]{}, mutable: false})
         }
@@ -1227,7 +1227,7 @@ sema_comptime_reflection_declared_function_facts: fn(method: Func, path: String)
     }
     if provenance == .Val(value) {
         view: sema_comptime_reflection_view_provenance(value)
-        facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.$view_provenance.return", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{"return"}, None, None, "view_provenance", Val(view))))
+        facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.reflect().view_provenance.return", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{"return"}, None, None, "view_provenance", Val(view))))
     }
     facts
 }
@@ -1315,7 +1315,7 @@ sema_comptime_reflection_type_fact_range: fn(name: String, path: String, start: 
 sema_comptime_reflection_distinct_facts: fn(definition: DistinctDef) -> [TComptimeValue] Never! {
     facts := [TComptimeValue]{}
     if definition.range == .Val(range) {
-        facts.push(sema_comptime_reflection_type_fact_range("range", "{definition.name}.$range", range.lo, range.hi))
+        facts.push(sema_comptime_reflection_type_fact_range("range", "{definition.name}.reflect().range", range.lo, range.hi))
     }
     if definition.quantity == .Val(quantity) {
         kind: if quantity.kind == {
@@ -1324,7 +1324,7 @@ sema_comptime_reflection_distinct_facts: fn(definition: DistinctDef) -> [TCompti
             .Delta -> "Delta"
         }
         value: sema_comptime_reflection_fact_value("Dimension", "dimension", [String]{kind}, None, Val(sema_comptime_reflection_dimension(quantity.dimension)), "", None)
-        facts.push(sema_comptime_reflection_fact_info("Dimension", "dimension", "{definition.name}.$dimension", value))
+        facts.push(sema_comptime_reflection_fact_info("Dimension", "dimension", "{definition.name}.reflect().dimension", value))
     }
     facts
 }
@@ -1342,7 +1342,7 @@ sema_comptime_reflection_distinct_layout: fn(engine: TargetLayoutEngine) -> TCom
     )
 }
 
-// A builtin scalar named as the subject (`U64.$layout`): its fixed target
+// A builtin scalar named as the subject (`U64.reflect().layout`): its fixed target
 // bytes, the same numbers a declared field of that type is laid out with.
 sema_comptime_reflection_builtin_layout: fn(graph: SemaRegistrationGraph, name: String) -> TComptimeValue? {
     scalar: if name == "Bool" -> Type.Bool else -> jet_target_layout_numeric_type(name) ?? return None

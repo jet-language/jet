@@ -1018,7 +1018,7 @@ sema_derive_expand_field: fn(expansion: &SemaDeriveExpansion, base: Expr, member
         }
     }
     // A `$` member naming no template binding is a compiler fact
-    // (`self.$layout`) and stays for sema; one that does is a splice.
+    // (`self.reflect().layout`) and stays for sema; one that does is a splice.
     if member.starts_with("$") && sema_derive_scope_index(expansion, member) != None {
         if sema_derive_field_payload_owner(expansion, binding) == .Val(payload_owner) {
             field_name: sema_derive_expand_name(expansion, member, span)
@@ -1045,7 +1045,7 @@ sema_derive_prep_if_selected: fn(expansion: &SemaDeriveExpansion, cond: Expr, co
     expanded: sema_derive_expand_expr(expansion, cond)
     if expansion.failure != None -> return false
     value: sema_derive_static_value(expansion, expanded) ?? {
-        sema_derive_fail(expansion, sema_error("E0956", cond_span, "a `comptime if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$type == T.$name`"))
+        sema_derive_fail(expansion, sema_error("E0956", cond_span, "a `comptime if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$type == T.reflect().name`"))
         return false
     }
     if value == .Bool(selected) -> return selected
@@ -1079,7 +1079,7 @@ sema_derive_expand_loop_block: fn(expansion: &SemaDeriveExpansion, body: [Stmt],
     if body[0] == .For(var, _, _, kind, loop_body, _, _, _, _) {
         if kind == .In(collection, _) {
             values: sema_derive_loop_values(expansion, collection) ?? {
-                sema_derive_fail(expansion, sema_error("E0956", span, "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.$fields`"))
+                sema_derive_fail(expansion, sema_error("E0956", span, "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.reflect().fields`"))
                 return
             }
             // Each iteration's bindings (the loop variable and the bindings
@@ -1477,7 +1477,7 @@ sema_derive_expand_body: fn(expansion: &SemaDeriveExpansion, body: [DeriveBodyIt
             .Item(item) -> out.push(sema_derive_expand_item(expansion, item))
             .Loop(var, _, source, loop_body, _) -> {
                 values: sema_derive_loop_values(expansion, source) ?? {
-                    sema_derive_fail(expansion, sema_error("E0956", expr_span(source), "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one item template for each value in its source list", "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`"))
+                    sema_derive_fail(expansion, sema_error("E0956", expr_span(source), "a `comptime loop` source is not a compile-time list", "`comptime loop` expands one item template for each value in its source list", "use a reflected/comptime list such as `T.reflect().fields`, or a closed type list like `[TypeA, TypeB]`"))
                     return
                 }
                 // Each iteration's bindings (the loop variable and the
@@ -1510,7 +1510,7 @@ sema_derive_binding_failure: fn(expansion: SemaDeriveExpansion, span: Span, init
             }
         }
     }
-    sema_error("E0956", span, "a derive template binding is not a known-time value", "a template binding names a reflected fact or literal the expansion reads directly", "bind a reflected fact such as `T.$fields` or a literal")
+    sema_error("E0956", span, "a derive template binding is not a known-time value", "a template binding names a reflected fact or literal the expansion reads directly", "bind a reflected fact such as `T.reflect().fields` or a literal")
 }
 
 sema_derive_stmt_span: fn(stmt: Stmt) -> Span Never! {

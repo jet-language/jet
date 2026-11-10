@@ -23,9 +23,9 @@ use jet_cli.[
     if jet_cli_edit_distance("é", "f") != 1 -> panic("nearest syntax counts Unicode scalars")
     if jet_cli_explain_policy("copies", false, true) == .None -> panic("standalone policy explanation")
     if jet_cli_explain_policy("not_a_policy", false, true) != .None -> panic("unknown policy remains with caller")
-    if jet_cli_explain_build_fact_name("$build.os") != .Val("Build.OS") -> panic("build fact precedes syntax typo classification")
+    if jet_cli_explain_build_fact_name("build.target.os") != .Val("Build.OS") -> panic("build fact precedes syntax typo classification")
     if jet_cli_explain_build_fact_name("Build.Settings.Mode") != .Val("Build.Settings.mode") -> panic("dynamic setting normalization")
-    if jet_cli_explain_build_fact_name("$build.settings.") != .None || jet_cli_explain_build_fact_name("$build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
+    if jet_cli_explain_build_fact_name("build.settings.") != .None || jet_cli_explain_build_fact_name("build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
     loop row in JET_CLI_SYNTAX_ROWS {
         if row.meanings.len() == 0 || row.registry_name == "" -> panic("every syntax row explains itself")
         found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")

@@ -23,8 +23,8 @@ become part of a program. The boundary is visible in source:
   again from the evaluator's erased value representation. The retired
   `@ { ... }` spelling teaches `comptime { ... }` (E0388).
 - `@name: expression` binds a value evaluated during compilation.
-- Compiler facts carry `$`: members of their subject such as `T.$fields`, or
-  the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
+- Compiler facts carry `$`: members of their subject such as `T.reflect().fields`, or
+  the roots `build`, `#package`, `phase` and `program`. They do not replace
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
@@ -68,7 +68,7 @@ Nested `@if` forms use the same rule. See
 
 `comptime loop` is the one typed compile-time repetition mechanism used by derive
 and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptime/PrepLoop.jet)
-uses it to create methods from `T.$fields`, to emit an `impl` for each type,
+uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
 Inside a template the fact sigil also splices a template binding
@@ -76,7 +76,7 @@ Inside a template the fact sigil also splices a template binding
 declaration from the binding's text, `self.$field` reads the member a loop
 value names, `.$left` matches the variant it names, and `{$count}` or a bare
 `$count` reads the binding's build-time value. A `$` word that names no
-template binding, or that is read on a bound value such as `field.$name`,
+template binding, or that is read on a bound value such as `field.reflect().name`,
 stays a compiler fact. The retired `@` splice teaches E0388 with the `$`
 respelling; prefix `@` in code marks only a live link.
 
@@ -210,8 +210,8 @@ compile-time name of the items.
 Jet has two related reflection paths:
 
 1. A compile-time fact read is a `$` member of its subject. Examples include
-   `Severity.$range`, `send_report.$effects`, `T.$layout`, and
-   `$package.name`. These reads produce typed fact records that can be
+   `Severity.reflect().range`, `send_report.reflect().effects`, `T.reflect().layout`, and
+   `#package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
 2. `T.reflect()` returns aggregate type information for a derive body, while
    `reflect.of(value)` returns the runtime reflection floor for a value.
@@ -257,18 +257,18 @@ record rather than infer a fact from a string. `fact_reads.jet` and
 
 The owner-controlled lexical ledger names these ratified fact roots
 (D-META-ROOT3=A, D-BUILD-FACT3=A). Facts about a type, function, method,
-closure or value are `$` members of that subject, such as `T.$fields`, so no
+closure or value are `$` members of that subject, such as `T.reflect().fields`, so no
 query root exists for them. `@SOURCE` and `@TYPES` keep their registry
 spelling until a ballot names their `$` root.
 
 ```text
-$build  $package  $phase  $program
+build  #package  phase  program
 ```
 
-`$phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
+`phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
 exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
 block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
-program. The evaluation site decides it, so `print($phase)` in `run` prints
+program. The evaluation site decides it, so `print(phase)` in `run` prints
 `Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
 shows both sites. Do not confuse that language phase with `CompilerStage`,
 which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and

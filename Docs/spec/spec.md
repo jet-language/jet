@@ -309,7 +309,7 @@ not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
 `#Track name: value` and `#Track name := value` attach the origin fact. Read
-that fact as `value.$origin -> ?OriginInfo`; there is no runtime origin
+that fact as `value.reflect().origin -> ?OriginInfo`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
@@ -739,8 +739,8 @@ build. `#Off(.Release) <stmt>` type-checks in every build and is erased only in
 release builds (the `release` and `hardened` profiles); the condition menu is
 closed (D-OFF-RELEASE1). Two `#Off` forms on one statement are E0344. Names
 introduced inside either form are scoped to that marker body.
-The registered build-profile fact is `$build.profile`; bare `build.profile` is
-not a user-typeable comptime value (D-CANVASSTATE1).
+The registered build-profile fact is `build.profile`, read through the Prelude
+value `build` (D-CANVASSTATE1, D-META-HASH1).
 
 `#Meta(category: "Movement", tunable)` attaches checked tooling facts to a
 binding, top-level const, or function. `category` is a non-empty plain string
@@ -755,7 +755,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-comptime if $build.os == {
+comptime if build.target.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -764,7 +764,7 @@ comptime if $build.os == {
 ```
 
 The switch folds before target-gating checks. Arms must cover each OS or provide
-`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `$build.os`
+`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `build.target.os`
 (E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
@@ -827,7 +827,7 @@ chain per row (D-MIGRATE4=A).
 A struct without `#Layout` is laid out by the compiler: its stored fields take
 offsets by descending alignment (declaration order among equals), each at its
 own alignment, and the struct rounds up to a multiple of 8 bytes, so
-`{U8, Int, U8, Int, U8}` takes 24 bytes. `T.$layout` reports the size,
+`{U8, Int, U8, Int, U8}` takes 24 bytes. `T.reflect().layout` reports the size,
 alignment and offsets the compiler chose, with guarantee `optimized`. A C
 declaration that follows them, with explicit padding fields, takes such a
 struct by reference: an `#Import` C function with a `&T` parameter receives the
@@ -2679,7 +2679,7 @@ module has no record, so binding or passing one, such as `m: math` after
 
 A type is not a value: binding, passing or printing a type, such as
 `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
-read a compile-time fact of it such as `Rock.$fields`.
+read a compile-time fact of it such as `Rock.reflect().fields`.
 
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
@@ -5592,7 +5592,7 @@ setting and its type, and `build: fn` only computes a value (D-CONF-SPLIT1).
 Before a package that declares settings compiles (`jet build`, `jet run`,
 `jet test`), its `build: fn` runs, and the project lock records each
 contribution as a `[[build.contribution]]` row. Every compile of the package
-reads those rows: `$build.settings.cache_slots` folds to the contributed value
+reads those rows: `build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
 [`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
@@ -5670,7 +5670,7 @@ and may have `panic`. A locked package requires `name`, `version`, `source_kind`
 `content_hash`, `layer`, and `inferred_layer`. Empty collections remain empty
 lists. Optional source fields remain optional strings. Git sources redact
 credentials, URL queries, and fragments. Current package identity remains
-available through `$package.name` and `$package.version`, not as a
+available through `#package.name` and `#package.version`, not as a
 repeated field in each view.
 
 Each operation returns a compile-time `Result`. The Rust facade reports

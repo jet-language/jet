@@ -566,8 +566,8 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
         return None
     }
-    // `$package.*` / `$build.*` fold from the build snapshot.
-    build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)
+    // `#package.*` / `build.*` fold from the build snapshot.
+    build_fact: sema_fact_build_read(base, member, span, expected, environment, program, scopes, context, diagnostics)
     if build_fact.handled -> return build_fact.value
     // `subject.$fact` reads a compiler-held plane.
     if member.starts_with("$") {
