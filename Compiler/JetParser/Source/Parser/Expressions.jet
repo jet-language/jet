@@ -2036,6 +2036,13 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
         }
         break
     }
+    // A capitalized name's `<…>` that no member, call or literal took is a
+    // generic type written where a value goes (`show(Box<Int>)`): the tree
+    // keeps the whole type, and sema refuses it as a value.
+    if owner_type_args.len() > 0 && expression.expr == .Ident(name, _, _) {
+        type_span: Span{start: expression.span.start, end: parser_previous_end(state)}
+        return ParsedExpr{expr: Expr.TypeValue{ty: Type.Apply{name: name, args: owner_type_args.move()}, span: type_span, id: parser_node_id(state)}, span: type_span}
+    }
     expression
 }
 

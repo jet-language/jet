@@ -57,6 +57,10 @@ Expr: enum {
     CallValue(callee: Expr, args: [CallArg], span: Span, id: Int)
     PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span, id: Int)
     ComptimeName(name: String, span: Span, value: CtValue?, id: Int)
+    // A generic type written where a value goes (`show(Box<Int>)`), kept
+    // whole so the tree shows its type arguments; sema refuses it as a type,
+    // not a value (E0636).
+    TypeValue(ty: Type, span: Span, id: Int)
     Paren(value: Expr, span: Span, id: Int)
     // `head |> step |> step`: each step reads the value of the
     // line above as `<>`, which the parser spells as the step's hidden name.
@@ -555,6 +559,7 @@ expr_span: fn(expr: Expr) -> Span {
         .CallValue(_, _, span, _) -> return span
         .PtrFromAddr(_, _, _, _, span, _) -> return span
         .ComptimeName(_, span, _, _) -> return span
+        .TypeValue(_, span, _) -> return span
         .Paren(_, span, _) -> return span
         .Pipe(_, _, span, _) -> return span
     }
@@ -612,6 +617,7 @@ expr_node_id: fn(expr: Expr) -> Int Never! {
         .CallValue(_, _, _, id) -> id
         .PtrFromAddr(_, _, _, _, _, id) -> id
         .ComptimeName(_, _, _, id) -> id
+        .TypeValue(_, _, id) -> id
         .Paren(_, _, id) -> id
         .Pipe(_, _, _, id) -> id
     }

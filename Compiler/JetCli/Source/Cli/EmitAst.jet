@@ -583,6 +583,7 @@ jet_cli_emit_ast_expr: fn(expression: Expr) -> JetCLIEmitNode Never! {
         }
         .PtrFromAddr(alias, _, elem, address, _, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
         .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "comptime name {name}")
+        .TypeValue(ty, _, _) -> jet_cli_emit_leaf("TypeValue", "type {type_name(ty)}")
         .Paren(value, _, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
         .Pipe(head, steps, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(head)}

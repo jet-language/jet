@@ -2539,7 +2539,7 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
             jet_cli_replay_boundary("native pointer boundary", sites)
             jet_cli_replay_expr(addr, aliases, locals, sites)
         }
-        .ComptimeName(_, _, _, _) -> {}
+        .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
         .Paren(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
         .Pipe(head, steps, _, _) -> {
             jet_cli_replay_expr(head, aliases, locals, sites)

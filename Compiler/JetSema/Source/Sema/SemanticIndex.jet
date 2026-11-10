@@ -743,6 +743,7 @@ sema_compiler_index_expr_shape: fn(expression: Expr) -> String {
         .Paren(_, _, _) -> 48
         .OptMethodCall(_, _, _, _, _, _, _) -> 49
         .Pipe(_, _, _, _) -> 50
+        .TypeValue(_, _, _) -> 51
     }
     "Discriminant({index})"
 }
@@ -1072,7 +1073,7 @@ sema_compiler_index_walk_expr: fn(state: &SemaCompilerIndexWalkState, expression
         }
         .PatternTest(subject, _, _, _) -> sema_compiler_index_walk_expr_slot(state, "subject", subject, module_path)
         .Paren(value, _, _) -> sema_compiler_index_walk_expr_slot(state, "inner", value, module_path)
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     _ := state.parents.pop()
 }

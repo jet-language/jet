@@ -5640,6 +5640,10 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
         .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, context, diagnostics)
         .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, scopes, state, context, diagnostics)
+        .TypeValue(ty, span, _) -> {
+            diagnostics.push(sema_type_used_as_value(type_name(ty), span))
+            None
+        }
         .Paren(value, span, _) -> {
             checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
