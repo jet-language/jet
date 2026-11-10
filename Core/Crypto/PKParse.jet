@@ -95,7 +95,7 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
 // SEQUENCE, that must end at `end`.
 get_ecparams: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf pk.PKError! {
     if end - p < 1 -> return Err(.KeyInvalidFormat(Val(.OutOfData)))
-    tag_id: Int.from_u8(data[p])
+    tag_id: Int.from_u8(asn1.layout_byte(data, p))
     if tag_id != asn1.ASN1_OID && tag_id != SEQUENCE -> return Err(.KeyInvalidFormat(Val(.UnexpectedTag)))
     len: asn1.get_tag(data, p, end, tag_id) ?? return Err(.KeyInvalidFormat(Val(err)))
     params: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
@@ -104,14 +104,27 @@ get_ecparams: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf pk.PKError! {
     Ok(params)
 }
 
-// pk_use_ecparams: load the curve the parameters name or specify.
+// pk_use_ecparams: load the curve the parameters name or specify. They are
+// read from a copy of their own (public_part).
 use_ecparams: fn(data: [U8], params: asn1.ASN1Buf, key: &pk.PKContext) pk.PKError! {
+    curve: public_part(data, params.p, params.len)
+    own: asn1.ASN1Buf{tag_id: params.tag_id, p: 0, len: params.len}
     id := ecp.GroupID.Unknown
     if {
-        params.tag_id == asn1.ASN1_OID -> id = oids.ec_grp(data, params) ?? return Err(.UnknownNamedCurve)
-        else -> id = group_id_from_specified(data, params)
+        params.tag_id == asn1.ASN1_OID -> id = oids.ec_grp(curve, own) ?? return Err(.UnknownNamedCurve)
+        else -> id = group_id_from_specified(curve, own)
     }
     pk.pk_ecc_set_group(key, id)
+}
+
+// A part of a private key's text that is public, copied out: the curve's
+// parameters, which every key on the curve shares; the public key; or the
+// whole of an EncryptedPrivateKeyInfo, whose algorithm, parameters and
+// ciphertext anyone holding the file reads. The emission check takes it as
+// public; the private value is copied out by cipher.bytes_of alone.
+public_part: fn(data: [U8], at: Int, len: Int) -> [U8] Never! {
+    if len == 0 -> return [U8]{}
+    cipher.bytes_of(data, at, len)
 }
 
 // pk_use_ecparams_rfc8410: an X25519 or X448 AlgorithmIdentifier has no
@@ -226,7 +239,7 @@ parse_key_sec1_der: fn<R: RNG>(key: &pk.PKContext, data: [U8], rng: &R) pk.PKErr
                 end2: p + pub_len
                 bits_len: asn1.get_bitstring_null(data, p, end2) ?? return Err(.KeyInvalidFormat(Val(err)))
                 if p + bits_len != end2 -> return Err(.KeyInvalidFormat(Val(.LengthMismatch)))
-                if pk.pk_ecc_set_pubkey(key, cipher.bytes_of(data, p, end2 - p)) == {
+                if pk.pk_ecc_set_pubkey(key, public_part(data, p, end2 - p)) == {
                     .Ok(_) -> pubkey_done = true
                     .Err(e) -> {
                         if e != .Ecp(.FeatureUnavailable) -> return Err(.KeyInvalidFormat(None))
@@ -279,9 +292,13 @@ parse_key_pkcs8_unencrypted_der: fn<R: RNG>(data: [U8], rng: &R) -> pk.PKContext
 /// The key of an EncryptedPrivateKeyInfo (PKCS#8) under `pwd`: PBES2 or a
 /// PKCS #12 PBE scheme decrypts a PrivateKeyInfo
 /// (mbedtls_pk_parse_key_pkcs8_encrypted_der). A wrong password is
-/// PasswordMismatch.
-pk_parse_key_pkcs8_encrypted_der: fn<R: RNG>(data: [U8], pwd: [U8], rng: &R) -> pk.PKContext pk.PKError! {
+/// PasswordMismatch. The structure is read from a public copy (public_part):
+/// pk_parse_key tries it first on any DER key when a password is given, and
+/// a PrivateKeyInfo, an RSAPrivateKey or an ECPrivateKey fails at its second
+/// tag, where its version INTEGER stands for the AlgorithmIdentifier.
+pk_parse_key_pkcs8_encrypted_der: fn<R: RNG>(input: [U8], pwd: [U8], rng: &R) -> pk.PKContext pk.PKError! {
     if pwd.len() == 0 -> return Err(.PasswordRequired)
+    data: public_part(input, 0, input.len())
     p := 0
     len: asn1.get_tag(data, p, data.len(), SEQUENCE) ?? return Err(.KeyInvalidFormat(Val(err)))
     end: p + len

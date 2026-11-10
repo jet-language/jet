@@ -106,7 +106,7 @@ is_string_tag: fn(tag_id: Int) -> Bool Never! {
 oid_is: fn(oid: [U8], data: [U8], buf: ASN1Buf) -> Bool Never! {
     if buf.len != oid.len() || buf.p < 0 -> return false
     loop i in 0..<oid.len() {
-        if data[buf.p + i] != oid[i] -> return false
+        if layout_byte(data, buf.p + i) != oid[i] -> return false
     }
     true
 }
@@ -114,11 +114,19 @@ oid_is: fn(oid: [U8], data: [U8], buf: ASN1Buf) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // Parsing.
 
+/// data[at], a byte of a DER item's layout: a tag or length byte, the
+/// content of a small INTEGER (a version or a count), a BIT STRING's
+/// unused-bits count or an OID byte. The parsers read the layout through it
+/// alone; key material is copied out whole (cipher.bytes_of) and read by
+/// its own parser. In a private key the layout around the key material
+/// holds no key bit, so the emission check takes this byte as public.
+layout_byte: fn(data: [U8], at: Int) -> U8 Never! { data[at] }
+
 /// A definite length of at most four bytes, which must fit before `end`
 /// (mbedtls_asn1_get_len).
 get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
     if end - p < 1 -> return Err(.OutOfData)
-    first: Int.from_u8(data[p])
+    first: Int.from_u8(layout_byte(data, p))
     len := 0
     if first.bit_and(0x80) == 0 {
         len = first
@@ -129,7 +137,7 @@ get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
         if end - p <= n -> return Err(.OutOfData)
         p += 1
         loop _ in 0..<n {
-            len = (len << 8).bit_or(Int.from_u8(data[p]))
+            len = (len << 8).bit_or(Int.from_u8(layout_byte(data, p)))
             p += 1
         }
     }
@@ -140,7 +148,7 @@ get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
 /// The length of an item that must carry `tag_id` (mbedtls_asn1_get_tag).
 get_tag: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error! {
     if end - p < 1 -> return Err(.OutOfData)
-    if Int.from_u8(data[p]) != tag_id -> return Err(.UnexpectedTag)
+    if Int.from_u8(layout_byte(data, p)) != tag_id -> return Err(.UnexpectedTag)
     p += 1
     len: get_len(data, p, end)
     Ok(len)
@@ -161,16 +169,16 @@ get_tagged_int: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error!
     len := get_tag(data, p, end, tag_id)
     // An empty content is malformed: zero is 020100.
     if len == 0 -> return Err(.InvalidLength)
-    if data[p].bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
-    loop len > 0 && data[p] == (U8{0}) {
+    if layout_byte(data, p).bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
+    loop len > 0 && layout_byte(data, p) == (U8{0}) {
         p += 1
         len -= 1
     }
     if len > 4 -> return Err(.InvalidLength)
-    if len == 4 && data[p].bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
+    if len == 4 && layout_byte(data, p).bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
     val := 0
     loop _ in 0..<len {
-        val = (val << 8).bit_or(Int.from_u8(data[p]))
+        val = (val << 8).bit_or(Int.from_u8(layout_byte(data, p)))
         p += 1
     }
     Ok(val)
@@ -204,7 +212,7 @@ get_bitstring: fn(data: [U8], p: &Int, end: Int) -> ASN1Bitstring ASN1Error! {
     len := get_tag(data, p, end, ASN1_BIT_STRING)
     if len < 1 -> return Err(.OutOfData)
     len -= 1
-    unused: Int.from_u8(data[p])
+    unused: Int.from_u8(layout_byte(data, p))
     if unused > 7 -> return Err(.InvalidLength)
     p += 1
     bs: ASN1Bitstring{len: len, unused_bits: unused, p: p}
@@ -219,7 +227,7 @@ get_bitstring_null: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
     len := get_tag(data, p, end, ASN1_BIT_STRING)
     if len == 0 -> return Err(.InvalidData)
     len -= 1
-    if data[p] != (U8{0}) -> return Err(.InvalidData)
+    if layout_byte(data, p) != (U8{0}) -> return Err(.InvalidData)
     p += 1
     Ok(len)
 }
@@ -238,7 +246,7 @@ traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: &Int, end: Int, must
     len := get_tag(data, p, end, ASN1_CONSTRUCTED.bit_or(ASN1_SEQUENCE))
     if p + len != end -> return Err(.LengthMismatch)
     loop p < end {
-        tag_id: Int.from_u8(data[p])
+        tag_id: Int.from_u8(layout_byte(data, p))
         p += 1
         if tag_id.bit_and(must_mask) != must_val -> return Err(.UnexpectedTag)
         len = get_len(data, p, end)
@@ -275,13 +283,13 @@ get_sequence_of: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN
 get_alg: fn(data: [U8], p: &Int, end: Int) -> (alg: ASN1Buf, params: ASN1Buf) ASN1Error! {
     len: get_tag(data, p, end, ASN1_CONSTRUCTED.bit_or(ASN1_SEQUENCE))
     if end - p < 1 -> return Err(.OutOfData)
-    alg_tag: Int.from_u8(data[p])
+    alg_tag: Int.from_u8(layout_byte(data, p))
     seq_end: p + len
     alg_len: get_tag(data, p, seq_end, ASN1_OID)
     alg: ASN1Buf{tag_id: alg_tag, p: p, len: alg_len}
     p += alg_len
     if p == seq_end -> return Ok((alg: alg, params: asn1_none()))
-    params_tag: Int.from_u8(data[p])
+    params_tag: Int.from_u8(layout_byte(data, p))
     p += 1
     params_len: get_len(data, p, seq_end)
     params: ASN1Buf{tag_id: params_tag, p: p, len: params_len}

@@ -144,14 +144,16 @@ rsa_copy: fn(src: RSAContext) -> RSAContext Never! {
 // Import, completion and export.
 
 /// Set one core parameter; setting n sets len (mbedtls_rsa_import with one
-/// non-NULL argument).
+/// non-NULL argument). Every part keeps all its limbs, the public ones too:
+/// `value` is a private part on the other calls, so no import tests one of
+/// its limbs for zero.
 rsa_import: fn(ctx: &RSAContext, part: RSAPart, value: bn.Mpi) RSAError! {
     if part == {
-        .N -> bn.set_mpi(ctx.n, value) ?? return Err(.BadInput(Val(err)))
-        .P -> bn.set_mpi(ctx.p, value) ?? return Err(.BadInput(Val(err)))
-        .Q -> bn.set_mpi(ctx.q, value) ?? return Err(.BadInput(Val(err)))
-        .D -> bn.set_mpi(ctx.d, value) ?? return Err(.BadInput(Val(err)))
-        .E -> bn.set_mpi(ctx.e, value) ?? return Err(.BadInput(Val(err)))
+        .N -> bn.set_mpi_ct(ctx.n, value) ?? return Err(.BadInput(Val(err)))
+        .P -> bn.set_mpi_ct(ctx.p, value) ?? return Err(.BadInput(Val(err)))
+        .Q -> bn.set_mpi_ct(ctx.q, value) ?? return Err(.BadInput(Val(err)))
+        .D -> bn.set_mpi_ct(ctx.d, value) ?? return Err(.BadInput(Val(err)))
+        .E -> bn.set_mpi_ct(ctx.e, value) ?? return Err(.BadInput(Val(err)))
     }
     if part == .N -> ctx.len = bn.size(ctx.n)
 }
@@ -1289,14 +1291,18 @@ rsa_pkcs1_verify: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RS
 /// absent (asn1_get_nonzero_mpi).
 get_nonzero_mpi: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi RSAError! {
     x := asn1.get_mpi(data, p, end) ?? return Err(.Asn1(err))
-    if bn.cmp_int(x, 0) == 0 -> return Err(.BadInput(None))
+    if part_is_zero(x) -> return Err(.BadInput(None))
     Ok(x)
 }
 
-/// A key from its DER RSAPrivateKey (PKCS#1, RFC 8017 A.1.2), completed
-/// and checked as a public key (mbedtls_rsa_parse_key). The CRT values are
-/// taken as given, which keeps the secret-dependent deduction off the load
-/// path (eprint 2020/055).
+/// Whether a key part read as unsigned is zero, with no test of its limbs:
+/// only the verdict leaves, and a zero part refuses the key.
+part_is_zero: fn(x: bn.Mpi) -> Bool Never! { bn.core_check_zero_ct(x.p, x.p.len()) == U64{0} }
+
+/// A key from its DER RSAPrivateKey (PKCS#1, RFC 8017 A.1.2), checked as
+/// rsa_complete checks a key it has every part of, and as a public key
+/// (mbedtls_rsa_parse_key). The CRT values are taken as given, which keeps
+/// the secret-dependent deduction off the load path (eprint 2020/055).
 rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
     ctx := rsa_new()
     p := 0
@@ -1316,12 +1322,15 @@ rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
     q: get_nonzero_mpi(key, p, end)
     rsa_import(ctx, .Q, q)
     dp: get_nonzero_mpi(key, p, end)
-    bn.set_mpi(ctx.dp, dp)
+    bn.set_mpi_ct(ctx.dp, dp)
     dq: get_nonzero_mpi(key, p, end)
-    bn.set_mpi(ctx.dq, dq)
+    bn.set_mpi_ct(ctx.dq, dq)
     qp: get_nonzero_mpi(key, p, end)
-    bn.set_mpi(ctx.qp, qp)
-    rsa_complete(ctx)
+    bn.set_mpi_ct(ctx.qp, qp)
+    // Every part is present and non-zero, so rsa_complete would deduce
+    // nothing and run only this check; calling it alone keeps the
+    // deductions, which test the values they work on, off the parse.
+    if !rsa_check_context(ctx, is_priv: true) -> return Err(.BadInput(None))
     rsa_check_pubkey(ctx)
     if p != end -> return Err(.Asn1(.LengthMismatch))
     Ok(ctx)

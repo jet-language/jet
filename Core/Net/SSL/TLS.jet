@@ -46,6 +46,7 @@ use {
     drbg: __core_crypto_drbg
     ecdsa: __core_crypto_ecdsa
     rsa: __core_crypto_rsa
+    asn1: __core_crypto_asn1
     pem: __core_crypto_pem
     pkparse: __core_crypto_pkparse
     core.encoding.[Dyn]
@@ -4232,6 +4233,93 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     ctx
 }
 
+/// P-256 private key `d` as a SEC1 ECPrivateKey naming the curve, with no
+/// public key (RFC 5915), so every key of the class has one layout and the
+/// parse derives the public point.
+ct_sec1_der: fn(d: [U8]) -> [U8] Never! {
+    out := [U8]{0x30, 0x31, 0x02, 0x01, 0x01, 0x04, 0x20}
+    loop b in d -> out.push(b)
+    curve: [U8]{0xA0, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07}
+    loop b in curve -> out.push(b)
+    out
+}
+
+/// The same P-256 key as a PKCS#8 PrivateKeyInfo (RFC 5208, RFC 5480) whose
+/// SEC1 body leaves the curve to the algorithm identifier.
+ct_pkcs8_p256_der: fn(d: [U8]) -> [U8] Never! {
+    out := [U8]{0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20}
+    loop b in d -> out.push(b)
+    out
+}
+
+/// An X25519 private key as a PKCS#8 PrivateKeyInfo (RFC 8410 section 7).
+ct_pkcs8_x25519_der: fn(k: [U8]) -> [U8] Never! {
+    out := [U8]{0x30, 0x2E, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x6E, 0x04, 0x22, 0x04, 0x20}
+    loop b in k -> out.push(b)
+    out
+}
+
+/// `pkcs1`, an RSAPrivateKey, as a PKCS#8 PrivateKeyInfo (RFC 5208;
+/// rsaEncryption with NULL parameters, RFC 8017 A.1). `pkcs1` holds at
+/// least 256 bytes, so both lengths take the two-byte long form.
+ct_pkcs8_rsa_der: fn(pkcs1: [U8]) -> [U8] Never! {
+    body: pkcs1.len()
+    total: body + 22
+    out := [U8]{0x30, 0x82, U8{total >> 8}, U8{total.bit_and(255)}, 0x02, 0x01, 0x00, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82, U8{body >> 8}, U8{body.bit_and(255)}}
+    loop b in pkcs1 -> out.push(b)
+    out
+}
+
+/// The bit length of the key pk_parse_key reads from `key`, 0 when it
+/// refuses it.
+ct_parsed_bits: fn(key: [U8], rng: &drbg.HMACDrbg) -> Int {
+    ctx := pkparse.pk_parse_key(key, None, rng) ?? return 0
+    pk.pk_get_bitlen(ctx)
+}
+
+/// The PKCS#1 RSAPrivateKey of ct_rsa_key, written from a key of its own:
+/// the layout the emission check's RSA key parses draw their secrets into.
+ct_rsa_key_der: fn() -> [U8] {
+    buf := cipher.zero_bytes(2048)
+    at := buf.len()
+    len: rsa.rsa_write_key(ct_rsa_key(), buf, at, 0) ?? panic("RSAPrivateKey: {err}")
+    cipher.bytes_of(buf, at, len)
+}
+
+/// `der`, a PKCS#1 RSAPrivateKey, with the content of its six private
+/// INTEGERs (d, p, q, dp, dq, qp) drawn again from r. Each keeps its length
+/// and its bit length, p and q stay odd, and n and e are kept. The parse
+/// checks the private values only for being positive and p and q for being
+/// odd (rsa_check_context), so the result parses, at the original's layout.
+ct_rsa_redrawn: fn(r: &CtRand, der: [U8]) -> [U8] {
+    out := der.copy()
+    end: out.len()
+    p := 0
+    _ := asn1.get_tag(out, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? panic("RSAPrivateKey: {err}")
+    _ := asn1.get_int(out, p, end) ?? panic("version: {err}")
+    loop part in 0..<8 {
+        len: asn1.get_tag(out, p, end, asn1.ASN1_INTEGER) ?? panic("INTEGER {part}: {err}")
+        // n and e (parts 0 and 1) are public; p and q are parts 3 and 4.
+        if part >= 2 -> ct_redraw_integer(r, out, p, len, part == 3 || part == 4)
+        p += len
+    }
+    out
+}
+
+/// The content buf[at..at + len] of a positive DER INTEGER drawn again from
+/// r: a leading zero byte and the top set bit stay where they are; `odd`
+/// sets the lowest bit.
+ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
+    lead := at
+    if buf[lead] == (U8{0}) -> lead += 1
+    top := U8{0x80}
+    loop top.bit_and(buf[lead]) == (U8{0}) -> top = top >> 1
+    fresh: ct_bytes(r, at + len - lead)
+    loop i in 0..<fresh.len() -> buf[lead + i] = fresh[i]
+    buf[lead] = buf[lead].bit_and(top - U8{1}).bit_or(top)
+    if odd -> buf[at + len - 1] = buf[at + len - 1].bit_or(U8{1})
+}
+
 // Each primitive of the dudect tests above runs once here, so a build of this
 // test alone selects every secret-dependent primitive; the case
 // tests/cases/core_net_tls/constant_time_primitives_emit_no_secret_branch_or_index.case
@@ -4242,12 +4330,13 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     r := CtRand{s: U64{37}}
     ctx := ct_rsa_key()
     rng := vec_rng()
+    rsa_der: ct_rsa_key_der()
     #Unsafe("test keys and nonces, each used for this run only") {
-        ct_entry(r, ctx, rng)
+        ct_entry(r, ctx, rng, rsa_der)
     }
 }
 
-#Unsafe("`r` draws test keys and nonces, each used for this run only") ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg) {
+#Unsafe("`r` draws test keys and nonces, each used for this run only") ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg, rsa_der: [U8]) {
     mac: ct_bytes(r, 32)
     flipped: ct_last_flipped(mac)
     assert(ctime.memcmp(mac, 0, flipped, 0, 32) != 0)
@@ -4329,6 +4418,19 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     assert_eq(oaep_good.len(), 32)
     oaep_bad_sealed: ct_oaep_sealed(oaep, r, oaep_label, 2)
     assert(rsa.rsa_rsaes_oaep_decrypt(oaep, rng, oaep_label, oaep_bad_sealed, 32) == .Err(.InvalidPadding))
+    // Private-key parsing (pk_parse_key): a P-256 key as SEC1, as PKCS#8
+    // and as SEC1 in PEM, an X25519 key as PKCS#8, and an RSA key at
+    // ct_rsa_key's layout with its private INTEGERs drawn from r, as
+    // PKCS#1 and as PKCS#8. Each parse also runs the PEM header scans and
+    // the DER attempts before the one that takes the key.
+    ec_d: ct_scalar(ct_bytes(r, 32))
+    assert_eq(ct_parsed_bits(ct_sec1_der(ec_d), rng), 256)
+    assert_eq(ct_parsed_bits(ct_pkcs8_p256_der(ec_d), rng), 256)
+    assert_eq(ct_parsed_bits(pem.pem_write_buffer("-----BEGIN EC PRIVATE KEY-----\n", "-----END EC PRIVATE KEY-----\n", ct_sec1_der(ec_d)), rng), 256)
+    assert_eq(ct_parsed_bits(ct_pkcs8_x25519_der(ct_bytes(r, 32)), rng), 255)
+    rsa_redrawn: ct_rsa_redrawn(r, rsa_der)
+    assert_eq(ct_parsed_bits(rsa_redrawn, rng), 1024)
+    assert_eq(ct_parsed_bits(ct_pkcs8_rsa_der(rsa_redrawn), rng), 1024)
     // core.crypto's own paths beside the expert ones above: the envelope
     // (X25519, HKDF-SHA256, XChaCha20-Poly1305) sealed to and opened by a
     // test identity, a key wrapped and unwrapped, Ed25519 signing, X25519,

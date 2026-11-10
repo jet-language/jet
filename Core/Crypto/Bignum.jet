@@ -806,6 +806,19 @@ set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
     copy_limbs(x.p, y.p, i)
 }
 
+/// x = y in place with all of y's limbs, leading zero ones too, so no limb
+/// is tested: set_mpi for a secret, as copy_mpi_ct is copy_mpi for one.
+/// x is grown to y's length and zeroed above it.
+set_mpi_ct: fn(x: &Mpi, y: Mpi) MpiError! {
+    x.s = y.s
+    if x.p.len() < y.p.len() {
+        grow(x, y.p.len()) ?? return Err(err)
+    } else {
+        loop j in y.p.len()..<x.p.len() -> x.p[j] = U64{0}
+    }
+    copy_limbs(x.p, y.p, y.p.len())
+}
+
 /// Exchange x and y.
 swap: fn(x: &Mpi, y: &Mpi) Never! {
     s: x.s
@@ -1790,6 +1803,22 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
     d: div_int(a, most_negative) ?? panic("div_int")
     assert(cmp_int(d.q, 1) == 0 && cmp_int(d.r, 0) == 0)
     assert(mod_int(a, most_negative) == .Err(.NegativeValue))
+}
+
+#Test("set_mpi_ct keeps every limb of its source, leading zero ones too, and zeroes a longer target above them") {
+    y: read_binary([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{7}}) ?? panic("read")
+    assert(y.p.len() == 2)
+    short := mpi()
+    set_mpi_ct(short, y) ?? panic("grow")
+    assert(short.p.len() == 2 && short.p[0] == (U64{7}) && short.p[1] == (U64{0}) && cmp_int(short, 7) == 0)
+    trimmed := mpi()
+    set_mpi(trimmed, y) ?? panic("set")
+    assert(trimmed.p.len() == 1 && cmp_mpi(trimmed, short) == 0)
+    long: read_string(16, "112233445566778899AABBCCDDEEFF00") ?? panic("long")
+    wide := copy_mpi_ct(long)
+    set_mpi_ct(wide, from_int(-5)) ?? panic("wide")
+    assert(wide.s == -1 && wide.p.len() == long.p.len() && cmp_int(wide, -5) == 0)
+    loop j in 1..<wide.p.len() -> assert(wide.p[j] == (U64{0}))
 }
 
 #Test("Strings, bytes and files round-trip, with mbedtls's error for each malformed input") {

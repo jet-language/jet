@@ -441,7 +441,10 @@ inputs: fn(c: Check, i: Int, k: Int) -> [Int] Never! {
 /// inlines a small verdict function (OptInline.jet: each instruction of its
 /// body names its inline site), so no call bounds it; the body's writes of
 /// the slots the code outside it reads are its verdict, which is public as
-/// the call's result is. The rest of the body is judged as the caller's code.
+/// the call's result is. So are the body's copies and stores into such a
+/// slot's storage: a returned aggregate is copied into fresh frame storage
+/// (OptInline.jet ir_opt_result), as a call's result is. The rest of the
+/// body is judged as the caller's code.
 declassify_inlined: fn(c: &Check, spec: Spec) Never! {
     loop f in 0..<c.fn_op.len() {
         first: c.fn_op[f]
@@ -456,8 +459,16 @@ declassify_inlined: fn(c: &Check, spec: Spec) Never! {
                 if in_site(c, sites_at, c.op_site[j], site) -> next
                 loop slot in reads(c, j) -> read_outside[slot] = true
             }
+            verdict := [Int:Bool]{}
             loop j in first..<last {
-                if in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] >= 0 && read_outside.get(c.op_dst[j]) != None -> c.op_declassified[j] = true
+                if in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] >= 0 && read_outside.get(c.op_dst[j]) != None {
+                    c.op_declassified[j] = true
+                    verdict[c.op_dst[j]] = true
+                }
+            }
+            loop j in first..<last {
+                into: c.op_name[j] == "copy_bytes" || c.op_name[j] == "store"
+                if into && in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] < 0 && verdict.get(c.op_a[j]) != None -> c.op_declassified[j] = true
             }
         }
     }
@@ -786,7 +797,8 @@ public_field: fn(c: Check, spec: Spec, ty: String, offset: Int) -> Bool Never! {
 /// of an Option or a Result (after its 8-byte tag word: a payload holding
 /// a struct or a list is 8-byte aligned; a Result's ok type is the one
 /// read), since an optimized build folds a nested member's offset into one
-/// access; whether a member on the way is a spec `public-field`; and the
+/// access; whether a member on the way is a spec `public-field` or of a
+/// `public-type` (a key's curve, as a slot of that type is); and the
 /// type of the member, element or payload the access lands in when the
 /// layout tells it (`leaf`, "" when not).
 FieldAt: struct {
@@ -801,7 +813,7 @@ field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
     off := offset
     leaf := ""
     loop {
-        if public_field(c, spec, at, off) -> return FieldAt{ty: at, offset: off, public: true, leaf: ""}
+        if public_field(c, spec, at, off) || spec.public_types.get(key_base(at)) != None -> return FieldAt{ty: at, offset: off, public: true, leaf: ""}
         inner := ""
         start := -1
         if is_tuple(at) {
@@ -913,8 +925,10 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
     c.at_inst = i
     op: c.op_name[k]
     d: slot_of(c, i, c.op_dst[k])
-    c.at_declassified = if c.op_declassified[k] -> d else -> -1
     a: if op == "call_runtime" -> -1 else -> slot_of(c, i, c.op_a[k])
+    // A declassified copy or store writes the verdict's storage (its address
+    // `a`); any other declassified instruction writes the verdict `d`.
+    c.at_declassified = if !c.op_declassified[k] -> -1 else if c.op_dst[k] >= 0 -> d else -> a
     changed := false
     if op == {
         "copy" | "move" | "offset" -> {
