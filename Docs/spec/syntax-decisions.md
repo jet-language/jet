@@ -2624,7 +2624,7 @@ an error.
 **D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
 card #1268)*: `print` and bare interpolation show a quantity's magnitude and
 declared unit symbol by default. Derived dimensions use a normalized product
-or quotient, such as `4 meter/ns`. An explicit `Display` implementation
+or quotient, such as `4 meter/s`. An explicit `Display` implementation
 replaces this default for its concrete unit type.
 
 `{value:Unit(name)}` uses the generated unit type name.

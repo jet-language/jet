@@ -1881,7 +1881,7 @@ sema_expr_unit_conversion_gate: fn(value: TExpr, source: SemaRegistrationUnitFac
         }
         if !exact && !sema_scope_knowledge_gate_allows(scopes, SemaKnowledgePlane.Unit, SemaKnowledgeGate.RoundedConversion) {
             method := sema_expr_unit_conversion_method(source)
-            diagnostics.push(sema_error("E0127", span, "this implicit unit conversion would round", "the exact scale or offset cannot be represented as an integer conversion at this boundary", "write `{destination.name}.{method}_rounded(expr, .NearestEven, digits: 0)?` or choose another rounding policy"))
+            diagnostics.push(sema_error("E0127", span, "this implicit unit conversion would round", "the exact scale or offset cannot be represented as an integer conversion at this boundary", "write `{destination.name}.{method}_rounded(expr, .NearestEven, digits: 0) ?? fallback` (the rounded conversion returns a Result) or choose another rounding policy"))
             return false
         }
     }
