@@ -324,7 +324,7 @@ separate meanings:
 | View | Shape | Ordering and scope |
 | --- | --- | --- |
 | `manifest()` | `CompilerManifest` | The uncomposed `package.jet` or inline package carrier. `dependencies` and `outputs` use manifest map-key order; `packages` and `build_profiles` keep declaration order. |
-| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `build.package` values. |
+| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `#package` values. |
 | `lock()` | `CompilerLock` | `schema_version`, `file`, `version`, `root_dependencies`, and locked package records. Root dependencies and locked packages retain lock-model order. |
 | `profiles()` | `CompilerProfileSet` | `schema_version`, `file`, and named profiles. Profile and collision maps use key order; `extends`, `packages`, and `sources` retain declaration order. |
 
@@ -4818,7 +4818,7 @@ On x86-64 a value of four or eight bytes is written with `movnti`; narrower
 values and aggregates use an ordinary store. A function that streams fences
 those writes (`sfence`) before each call and at its return, so callers,
 callees and other threads see them in program order. Pad hot fields to the
-cache line with `#Layout(c, align(build.cpu.cache_line))`; the fact is 64 on
+cache line with `#Layout(c, align(#build.cpu.cache_line))`; the fact is 64 on
 every target until Jet selects CPUs (D-CACHE-CONTROL1).
 
 ### `core.text.parse` — text parsing and scanning

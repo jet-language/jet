@@ -1317,17 +1317,17 @@ parser_constant_name: fn(name: String) -> Bool Never! {
 }
 
 // The `$` site locations; sema decides where `$caller` is legal. The other
-// subjectless facts are the plain Prelude values `build`, `phase` and
-// `program` and the site values `#package`, `#line` and `#file`.
+// subjectless facts are the compiler values `#build`, `#phase`, `#program`,
+// `#package`, `#line` and `#file`.
 parser_fact_root: fn(name: String) -> Bool Never! {
     name == "$here" || name == "$caller"
 }
 
-// At `#`: `#package`, `#line` or `#file` written as one word, which is no
-// marker path (`#file.Name`).
+// At `#`: `#build`, `#phase`, `#program`, `#package`, `#line` or `#file`
+// written as one word, which is no marker path (`#file.Name`).
 parser_site_value_ahead: fn(state: &JetParserState) -> Bool Never! {
     word: parser_value_at(state, 1)
-    if word != "package" && word != "line" && word != "file" -> return false
+    if word != "build" && word != "phase" && word != "program" && word != "package" && word != "line" && word != "file" -> return false
     if parser_lookahead(state, 0).span.end != parser_lookahead(state, 1).span.start -> return false
     if parser_kind_at(state, 2) == TOKEN_DOT && parser_kind_at(state, 3) == TOKEN_IDENT {
         next: parser_value_at(state, 3)

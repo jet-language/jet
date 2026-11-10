@@ -55,7 +55,7 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
                     folded: fact.explain().split("\n").to_list()[0].split(" = ").to_list()
                     shown: if folded.len() > 1 -> folded[folded.len() - 1] else -> ""
                     lines.push("`{value.binding}` is `{value.instantiation}`: `{value.function}` reads its module argument `{value.parameter}`")
-                    lines.push("{value.parameter} = build.settings.{value.setting} value:{shown}")
+                    lines.push("{value.parameter} = #build.settings.{value.setting} value:{shown}")
                     code = value.query.copy()
                 }
                 loop line in fact.explain().split("\n") -> lines.push(line.removeprefix("  "))
@@ -71,7 +71,7 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
 
 // The module value `query` names in `source`, None when `query` is not
 // `<binding>.<function>` of a top-level instantiation that passes a
-// `build.settings.<name>` argument to a module declaring `function`.
+// `#build.settings.<name>` argument to a module declaring `function`.
 jet_cli_module_value: fn(query: String, source: String) -> JetCLIModuleValue? Never! {
     parts: query.split(".").to_list()
     if parts.len() != 2 || parts[0] == "" || parts[1] == "" -> return None
@@ -103,8 +103,8 @@ jet_cli_module_value: fn(query: String, source: String) -> JetCLIModuleValue? Ne
     if !declares -> return None
     loop (index, argument) in arguments {
         written: argument.trim()
-        if !written.starts_with("build.settings.") || index >= parameters.len() -> next
-        return Val(JetCLIModuleValue{query: query.copy(), binding: parts[0].copy(), instantiation: instantiation.copy(), function: parts[1].copy(), parameter: parameters[index].copy(), setting: written.removeprefix("build.settings.")})
+        if !written.starts_with("#build.settings.") || index >= parameters.len() -> next
+        return Val(JetCLIModuleValue{query: query.copy(), binding: parts[0].copy(), instantiation: instantiation.copy(), function: parts[1].copy(), parameter: parameters[index].copy(), setting: written.removeprefix("#build.settings.")})
     }
     None
 }

@@ -24,7 +24,7 @@ become part of a program. The boundary is visible in source:
   `@ { ... }` spelling teaches `comptime { ... }` (E0388).
 - `@name: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.reflect().fields`, or
-  the roots `build`, `#package`, `phase` and `program`. They do not replace
+  the roots `#build`, `#package`, `#phase` and `#program`. They do not replace
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
@@ -262,13 +262,13 @@ query root exists for them. `@SOURCE` and `@TYPES` keep their registry
 spelling until a ballot names their `$` root.
 
 ```text
-build  #package  phase  program
+#build  #package  #phase  #program
 ```
 
-`phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
+`#phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
 exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
 block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
-program. The evaluation site decides it, so `print(phase)` in `run` prints
+program. The evaluation site decides it, so `print(#phase)` in `run` prints
 `Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
 shows both sites. Do not confuse that language phase with `CompilerStage`,
 which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and

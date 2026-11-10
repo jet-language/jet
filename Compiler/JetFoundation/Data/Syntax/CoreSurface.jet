@@ -123,21 +123,21 @@ MARKER_TRACK: "Track"
 /// The site-location sigil: `$here` and `$caller`. A program reads a
 /// compiler fact through its subject (`T.reflect().layout`,
 /// `f.reflect().effects`, `value.reflect().origin`); the subjectless facts are
-/// the Prelude values `build`, `phase` and `program` and the site value
-/// `#package`. A derive or marker template pastes a binding as `#{name}`
+/// the compiler values `#build`, `#phase`, `#program` and `#package`. A derive
+/// or marker template pastes a binding as `#{name}`
 /// (`#{method}: fn`, `self.#{field}`, `.#{left}`). The mark belongs to the
 /// name, and programs never declare a `$` name. Config surfaces read the same
 /// token as a `$NAME` environment read
 COMPTIME_MARK: "$"
 
-/// The subjectless fact roots.
-FACT_ROOT_BUILD: "build"
+/// The subjectless fact roots: compiler values, which no binding shadows.
+FACT_ROOT_BUILD: "#build"
 
 FACT_ROOT_PACKAGE: "#package"
 
-FACT_ROOT_PHASE: "phase"
+FACT_ROOT_PHASE: "#phase"
 
-FACT_ROOT_PROGRAM: "program"
+FACT_ROOT_PROGRAM: "#program"
 
 /// The `SourceLocation` (file, line, column, function, module) where `$here` is
 /// written.
@@ -578,10 +578,9 @@ TARGET_OS_MACOS: "MacOS"
 TARGET_OS_WINDOWS: "Windows"
 
 /// (ratified 2026-07-03): the compiler-known comptime value
-/// `build` and its `.os` field — the subject of an `comptime if build.target.os == { }`
-/// switch that folds to the arm matching the build's active OS. `build` is not
-/// a reserved keyword: it is recognized only in that syntactic position (an
-/// ordinary local named `build` is still fine); a `build.target.os` anywhere else has
+/// `#build` and its `.target.os` field — the subject of an `comptime if #build.target.os == { }`
+/// switch that folds to the arm matching the build's active OS. An ordinary
+/// local named `build` is unrelated; a `#build.target.os` anywhere else has
 /// no compiler meaning.
 BUILD_INFO: "build"
 
@@ -598,26 +597,26 @@ COMPILER_BUILD_FACT_PACKAGE_NAME: "#package.name"
 
 COMPILER_BUILD_FACT_PACKAGE_VERSION: "#package.version"
 
-COMPILER_BUILD_FACT_OS: "build.target.os"
+COMPILER_BUILD_FACT_OS: "#build.target.os"
 
-COMPILER_BUILD_FACT_PROFILE_PATH: "build.profile"
+COMPILER_BUILD_FACT_PROFILE_PATH: "#build.profile"
 
 /// Declared settings are dynamic leaves of the same
 /// compiler-owned build-fact namespace.
-COMPILER_BUILD_FACT_SETTINGS_PREFIX: "build.settings."
+COMPILER_BUILD_FACT_SETTINGS_PREFIX: "#build.settings."
 
-COMPILER_BUILD_FACT_STAMP_GIT: "build.stamp.git"
+COMPILER_BUILD_FACT_STAMP_GIT: "#build.stamp.git"
 
-COMPILER_BUILD_FACT_STAMP_DIRTY: "build.stamp.dirty"
+COMPILER_BUILD_FACT_STAMP_DIRTY: "#build.stamp.dirty"
 
-COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: "build.stamp.toolchain"
+COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: "#build.stamp.toolchain"
 
-COMPILER_BUILD_FACT_STAMP_AT: "build.stamp.at"
+COMPILER_BUILD_FACT_STAMP_AT: "#build.stamp.at"
 
 /// The selected CPU's cache-line size in bytes (an `Int`).
 /// Jet has no CPU selection, so every target is generic and reads 64
 /// (`COMPILER_BUILD_CPU_CACHE_LINE_GENERIC`, Registry/RegistrationFacts.jet).
-COMPILER_BUILD_FACT_CPU_CACHE_LINE: "build.cpu.cache_line"
+COMPILER_BUILD_FACT_CPU_CACHE_LINE: "#build.cpu.cache_line"
 
 /// Bare lowercase `unsafe` is not Jet syntax; the gate is `#Unsafe`.
 FOREIGN_UNSAFE: "unsafe"

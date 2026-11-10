@@ -43,12 +43,12 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$` | site location `$here`, `$caller` |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
-| `build` | Prelude build-fact value: `build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`); a binding named `build` shadows it |
+| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) |
 | `#package` | package site value: `#package.name`, `.version` |
 | `#line` | the `Int` source line where it is written |
 | `#file` | the `String` source file where it is written |
-| `phase` | Prelude evaluation-site `Phase` value; a binding named `phase` shadows it |
-| `program` | Prelude authorized checked-program fact value |
+| `#phase` | compiler evaluation-site `Phase` value |
+| `#program` | compiler authorized checked-program fact value |
 | `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
 | `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
@@ -2611,7 +2611,7 @@ type-checks the statement, then emits no code in every build. `#Off(.Release) <s
 statement in every build, emits in debug/dev builds, and is erased in release
 builds. Both attach to statements only; item position is E0342, expression
 position is E0343, and two `#Off` forms on one statement are E0344.
-Names introduced inside the marker body do not escape. Bare `build.profile` is
+Names introduced inside the marker body do not escape. Bare `#build.profile` is
 not a user-typeable comptime value; the registered fact spelling is
 `$build.profile` (D-BUILD-FACT3=A).
 

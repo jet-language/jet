@@ -1572,7 +1572,7 @@ sema_genmod_folded_consts: fn(items: [Item], inherited: [String:Expr], enums: [S
     values
 }
 
-// A declared `build.settings.<key>` is one closed Tier-0
+// A declared `#build.settings.<key>` is one closed Tier-0
 // value of its declared type, so a module argument may name it. Each setting
 // joins the closed values under its full path; one whose value its type
 // cannot read stays out, and an argument naming it is not known (E0857).
@@ -1580,7 +1580,7 @@ sema_genmod_setting_literals: fn(settings: [SemaBuildSetting], enums: [String:Bo
     values := [String:Expr]{}
     loop setting in settings {
         literal: sema_genmod_setting_literal(setting, enums) ?? next
-        values["build.settings.{setting.name}"] = literal
+        values["#build.settings.{setting.name}"] = literal
     }
     values
 }
@@ -1591,7 +1591,7 @@ sema_genmod_setting_types: fn(settings: [SemaBuildSetting], enums: [String:Bool]
     loop setting in settings {
         literal: sema_genmod_setting_literal(setting, enums) ?? next
         value_type: sema_genmod_value_type(literal, [String:Type]{}, enums) ?? next
-        values["build.settings.{setting.name}"] = value_type
+        values["#build.settings.{setting.name}"] = value_type
     }
     values
 }

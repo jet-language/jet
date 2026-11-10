@@ -1,7 +1,7 @@
-// `phase` is the `Phase` of where it is evaluated: `.Preparation` inside
+// `#phase` is the `Phase` of where it is evaluated: `.Preparation` inside
 // `comptime` code, `.Build` in `build: fn`, and `.Runtime` in the running
 // program. The site decides it, not the tier, so every tier prints the same.
-PREPARED: comptime { phase }
+PREPARED: comptime { #phase }
 
 describe: fn(phase: Phase) -> String {
     if phase == {
@@ -12,10 +12,10 @@ describe: fn(phase: Phase) -> String {
 }
 
 run: fn() {
-    print(phase)
+    print(#phase)
     print(PREPARED)
-    local: comptime { phase }
+    local: comptime { #phase }
     print(describe(local))
-    print(describe(phase))
-    if phase == .Runtime -> print("this line runs in the program")
+    print(describe(#phase))
+    if #phase == .Runtime -> print("this line runs in the program")
 }

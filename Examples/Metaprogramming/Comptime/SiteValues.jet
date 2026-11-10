@@ -1,6 +1,6 @@
-// `#line` and `#file` are the line and file where they are written. `build`
-// and `phase` are plain Prelude values, so a binding of the same name
-// shadows them.
+// `#line` and `#file` are the line and file where they are written. `#build`
+// and `#phase` are compiler values, so a local named `build` or `phase` is an
+// ordinary binding beside them.
 Settings: struct {
     profile: String
 }
@@ -15,7 +15,7 @@ run: fn() {
     print(where())
     print(#line)
     print(#file.ends_with("SiteValues.jet"))
-    comptime if build.target.os == {
+    comptime if #build.target.os == {
         .Linux -> { print("built for Linux") }
         else -> { print("built for another OS") }
     }
@@ -23,4 +23,5 @@ run: fn() {
     print(build.settings.profile)
     phase: "a local named phase"
     print(phase)
+    print(#phase)
 }

@@ -24,18 +24,18 @@ jet_cli_explain_build_fact_name: fn(query: String) -> String? Never! {
     fixed: if name == {
         "#package.name" | "build.package.name" -> Val("Build.Package.Name")
         "#package.version" | "build.package.version" -> Val("Build.Package.Version")
-        "build.target.os" -> Val("Build.OS")
-        "build.profile" -> Val("Build.Profile")
-        "build.stamp.git" -> Val("Build.Stamp.Git")
-        "build.stamp.dirty" -> Val("Build.Stamp.Dirty")
-        "build.stamp.toolchain" -> Val("Build.Stamp.Toolchain")
-        "build.stamp.at" -> Val("Build.Stamp.At")
-        "build.cpu.cache_line" -> Val("Build.Cpu.CacheLine")
+        "#build.target.os" -> Val("Build.OS")
+        "#build.profile" -> Val("Build.Profile")
+        "#build.stamp.git" -> Val("Build.Stamp.Git")
+        "#build.stamp.dirty" -> Val("Build.Stamp.Dirty")
+        "#build.stamp.toolchain" -> Val("Build.Stamp.Toolchain")
+        "#build.stamp.at" -> Val("Build.Stamp.At")
+        "#build.cpu.cache_line" -> Val("Build.Cpu.CacheLine")
         else -> None
     }
     if fixed != None -> return fixed
-    if !name.starts_with("build.settings.") -> return None
-    key: name.removeprefix("build.settings.")
+    if !name.starts_with("#build.settings.") -> return None
+    key: name.removeprefix("#build.settings.")
     if key == "" || key.contains(".") -> return None
     Val("Build.Settings.{key}")
 }

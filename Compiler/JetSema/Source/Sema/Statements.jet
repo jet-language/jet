@@ -9185,11 +9185,11 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
 }
 
 // Rust OSTarget `fold_switch` `comptime if
-// build.target.os == { .Linux -> … }` folds to the chain of `comptime if` arms whose
-// conditions are this build's `build.target.os == .OS` as Bool literals, so the
+// #build.target.os == { .Linux -> … }` folds to the chain of `comptime if` arms whose
+// conditions are this build's `#build.target.os == .OS` as Bool literals, so the
 // `comptime if` check selects the arm. Every arm head is a distinct bare OS
 // variant, and the arms cover every OS or carry an `else`, whatever the
-// target. A `build.settings.<key>` dispatch folds against the declared
+// target. A `#build.settings.<key>` dispatch folds against the declared
 // setting's value (sema_stmt_check_setting_switch).
 sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // `comptime if T == { … }` over a type parameter is the
@@ -9197,21 +9197,21 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
     if sema_stmt_type_switch_param(subject, environment, scopes) != None -> return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
     subject_span: expr_span(subject)
     path: sema_fact_expr_path(subject)
-    if path != (Val("build.target.os")) {
+    if path != (Val("#build.target.os")) {
         if path == .Val(text) {
             if sema_fact_build_setting_key(text) == .Val(key) {
                 setting: sema_fact_build_setting(key, subject_span, environment, program, diagnostics) ?? return false
                 return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
             }
         }
-        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `build.target.os`", "`build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""
     if program.registration_graph == .Val(graph) {
         active = graph.build_facts.os
     } else {
-        sema_check_unsupported(context, "the `comptime if build.target.os` dispatch at offset {span.start} has no build facts to fold on")
+        sema_check_unsupported(context, "the `comptime if #build.target.os` dispatch at offset {span.start} has no build facts to fold on")
         return false
     }
     oses: loop os in TARGET_OS_ALL -> target_os_name(os)
@@ -9239,7 +9239,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         }
         if missing.len() != 0 {
             list: missing.join(", ")
-            diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `build.target.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
+            diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `#build.target.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
             return false
         }
     }
@@ -9308,9 +9308,9 @@ sema_stmt_setting_arm_matches: fn(cond: Expr, value: TComptimeValue) -> Bool? Ne
     }
 }
 
-// `comptime if build.settings.<key> == { … }`: each arm head is compared
+// `comptime if #build.settings.<key> == { … }`: each arm head is compared
 // with the setting's value for this build, and the folded Bool conditions
-// select the arm through the `comptime if` chain, as the `build.target.os`
+// select the arm through the `comptime if` chain, as the `#build.target.os`
 // dispatch does.
 sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     matched := [Bool]{}
@@ -9319,7 +9319,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
         if sema_stmt_setting_arm_matches(arm.cond, value) == .Val(flag) {
             matched.push(flag)
         } else {
-            diagnostics.push(sema_error("E0302", arm.span, "this arm doesn't name a value of the setting `{key}`", "a `build.settings.{key}` dispatch compares each arm head with the setting's value for this build", "write each arm head as a literal or `.Variant` of the setting's declared type"))
+            diagnostics.push(sema_error("E0302", arm.span, "this arm doesn't name a value of the setting `{key}`", "a `#build.settings.{key}` dispatch compares each arm head with the setting's value for this build", "write each arm head as a literal or `.Variant` of the setting's declared type"))
             valid = false
         }
     }
@@ -9344,10 +9344,10 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
 }
 
 sema_stmt_os_dispatch_arm: fn(found: String, span: Span) -> Diagnostic {
-    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`", "each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once", "write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)")
+    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `#build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`", "each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once", "write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)")
 }
 
-// A short display of a refused `build.target.os` arm head.
+// A short display of a refused `#build.target.os` arm head.
 sema_stmt_os_dispatch_arm_head: fn(cond: Expr) -> String Never! {
     if cond == .PatternTest(_, pattern, _, _) {
         if pattern == .Variant(variant, _, _, _) -> return ".{variant}"

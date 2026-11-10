@@ -5887,11 +5887,11 @@ OsGatedTypeUngatedUse: struct {
 OsDispatchSubjectMismatch: struct {
     impl Diagnostic {
         code: "E-OSTARGET-BUILD-CONTEXT"
-        meaning: "A `comptime if … == {{ }}` OS dispatch's subject is not `build.target.os`"
+        meaning: "A `comptime if … == {{ }}` OS dispatch's subject is not `#build.target.os`"
         detail: true
-        what: fn(self) -> String { "A `comptime if … == {{ … }}` dispatch branches on `build.target.os`." }
-        why: fn(self) -> String { "`build.target.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time." }
-        fix: fn(self) -> String { "Write `comptime if build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
+        what: fn(self) -> String { "A `comptime if … == {{ … }}` dispatch branches on `#build.target.os`." }
+        why: fn(self) -> String { "`#build.target.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time." }
+        fix: fn(self) -> String { "Write `comptime if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
     }
 }
 
@@ -5900,9 +5900,9 @@ InvalidOsDispatchArm: struct {
 
     impl Diagnostic {
         code: "E-OSTARGET-DISPATCH-ARM"
-        meaning: "A `comptime if build.target.os == {{ }}` arm head is not a bare OS variant, or repeats one"
+        meaning: "A `comptime if #build.target.os == {{ }}` arm head is not a bare OS variant, or repeats one"
         detail: true
-        what: fn(self) -> String { "`{self.found}` is not an OS arm — a `build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`." }
+        what: fn(self) -> String { "`{self.found}` is not an OS arm — a `#build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`." }
         why: fn(self) -> String { "Each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once." }
         fix: fn(self) -> String { "Write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)." }
     }
@@ -5913,10 +5913,10 @@ NonExhaustiveOsDispatch: struct {
 
     impl Diagnostic {
         code: "E-OSTARGET-DISPATCH-EXHAUSTIVE"
-        meaning: "A `comptime if build.target.os == {{ }}` dispatch leaves some target OS uncovered with no `else`"
+        meaning: "A `comptime if #build.target.os == {{ }}` dispatch leaves some target OS uncovered with no `else`"
         detail: true
         fix_next: "Add one dispatch arm for each missing OS or add an `else` catch-all."
-        what: fn(self) -> String { "This `build.target.os` dispatch doesn't cover every target OS — missing: {self.list}." }
+        what: fn(self) -> String { "This `#build.target.os` dispatch doesn't cover every target OS — missing: {self.list}." }
         why: fn(self) -> String { "A build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run." }
         fix: fn(self) -> String { "Add an arm for each missing OS ({self.list}), or an `else -> …` catch-all." }
     }
