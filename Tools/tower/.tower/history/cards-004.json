@@ -88322,6 +88322,235 @@
       "completedAt": "2026-11-07T04:53:53.581Z",
       "questions": [],
       "retiredAt": "2026-11-10T04:59:00.624Z"
+    },
+    {
+      "id": "c03jg20v",
+      "num": 6515,
+      "title": "Declare Encode, Decode, Equatable and Comparable as Core traits in Jet source (D-EXTEND-ARCH1)",
+      "body": "The codec and comparison traits are synthetic: Compiler/JetSema/Source/Sema/Calls/Methods.jet:333 lists them by name and Compiler/JetFoundation/Source/Facts/Checked.jet:20 maps them. Core declares only two traits in Jet source (Compiler/Prelude/core/prelude.jet:19, Core/Math/Math.jet:3590). A package cannot add a format the way Core does.\n\nDone when: the traits are declared in Core source; the synthetic list is gone; derives for `#Codable` and friends produce ordinary impls visible in `jet inspect expand`; a test package adds a new format codec with the same form.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.4.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two `ID<T>` values compare with `==`/`!=` by slot and generation, as D-POOLID-API1=A says. A live id equals itself, and an id taken before `remove` differs from the id `add` returns for the reused slot. Golden at O0/O2, plus a UI snapshot proving E0312 is no longer raised for `ID<T>`. Found by the 2026-11-05 Doom port investigation (defect against a ratified rule; compiler 0ccdff27ea).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "415ffb6673; batch vb10 (dev e4756389a9, s1 kit): golden tests/run/CopyBorrow/PoolIDsCompareBySlotAndGeneration.jet PASS on o0, o1 and o2, and ui tests/ui/pool_id_equality_needs_the_same_element_type.jet PASS.",
+          "at": "2026-11-07T05:56:04.605Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "declarative"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": "c085f598",
+      "needsAcceptance": false,
+      "created": "2026-11-01T01:14:38.449Z",
+      "updated": "2026-11-07T05:56:12.403Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T05:56:12.403Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:06:22.195Z"
+    },
+    {
+      "id": "c0g8hybt",
+      "num": 6560,
+      "title": "E0107 'Did you mean' reports carry no fix_edits",
+      "body": "jet check --json on a misspelled local (fixture tests/cases/cli_parts_surface/fixtures/name_fix/name.jet, print(scor) with score in scope) reports E0107 with fix 'Did you mean `score`?' but fix_edits: [] and no applicability, so jet fix cannot apply the suggestion. tests/cases/cli_parts_surface/name_suggestion_json_edit_applies_and_rechecks_clean.case and name_suggestion_json_golden.case pin the edit (span 37..41, new_text score) and sit under a blanket #6419 known-failing row. check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence.case fails at $.reports[0].applicability, possibly the same root. Observed at 7c67280960 plus Main-35.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "name_suggestion_json_edit_applies_and_rechecks_clean.case and name_suggestion_json_golden.case pass with their known-failing rows removed; the check_fix_and_format determinism case passes or its separate root is carded.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "f30c0ff188; batch vb10 (dev e4756389a9, s1 kit): cases cli_parts_surface/name_suggestion_json_golden and name_suggestion_json_edit_applies_and_rechecks_clean PASS with their known-failing rows removed; cli_parts_runtime/check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence PASS (FAIL in vb9).",
+          "at": "2026-11-07T05:56:06.404Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T11:05:45.066Z",
+      "updated": "2026-11-07T05:56:15.174Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T05:56:15.174Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:06:22.195Z"
+    },
+    {
+      "id": "c0iuwxty",
+      "num": 6569,
+      "title": "sema: Pool.remove through a read-only Pool parameter is accepted (must be a write error)",
+      "body": "Probe review61_edges (BallotLead, D-POOL-HAS1 review) removes an entry through a read-only Pool<T> parameter and compiles. spec.md:1574-1576 says add, remove and pool[id] = v need a writable pool (a := binding or & parameter). Fix in Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:378-429 so remove/add/index-write on a read-only Pool is the registered write error (E0202 today; under D-CALLSITE-MARK2=A the changeability error quotes the parameter), with a UI snapshot.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: E0202 retires under D-CALLSITE-MARK2=A; the bug stands as a missing changeability error."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "remove, add and index-write on a read-only Pool parameter are the registered changeability error, with a UI snapshot of the review61_edges probe.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7719ab429f; batch vb10 (dev e4756389a9, s1 kit): ui tests/ui/pool_changes_need_a_writable_pool.jet PASS (the review61_edges probe's remove, add and index-write).",
+          "at": "2026-11-07T05:56:02.802Z"
+        }
+      ],
+      "refs": [
+        "D-POOL-HAS1"
+      ],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:12:10.986Z",
+      "updated": "2026-11-07T05:56:09.577Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T05:56:09.577Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:06:22.195Z"
+    },
+    {
+      "id": "c07pwu5t",
+      "num": 6588,
+      "title": "E0003 fix text for an effect row before a unit-fallible rail does not teach the ratified order",
+      "body": "Found by JetpackEngine on dev 7de2280131: fn build(b: Build) -[Exec, FS]> BuildError! fails with E0003 'unit-fallible signature has no ->'. An effect row and a unit-fallible failure rail should compose as they do with a result type. Parser work: wait until the name: value declaration cutover (#6586) lands, since that rewrites declaration parsing.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The ratified spelling (D-FAIL-UNIT1=A: the error contract precedes the optional effect arrow, `build: fn(b: Build) BuildError! -[Exec, FS]> { }`) checks and runs, and writing the effect row first (`-[Exec, FS]> BuildError!`) gives E0003 whose fix text shows the ratified order `E! -[FX]>`, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "3108d6f6b0; batch vb10 (dev e4756389a9, s1 kit): ui tests/ui/unit_fallible_contract_precedes_effect_arrow.jet PASS (E0003 with the ratified-order fix text).",
+          "at": "2026-11-07T05:56:01.972Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T02:33:27.897Z",
+      "updated": "2026-11-07T05:56:07.893Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T05:56:07.893Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:06:22.195Z"
+    },
+    {
+      "id": "c0o9h3uo",
+      "num": 6613,
+      "title": "jet fix renames a used loop variable to _n and skips the real := fix (E0111)",
+      "body": "Repro on a0_029 (release binary, empty HOME): oops.jet is\nrun: fn() {\n    total: 0\n    loop n in 1..3 -> total = total + n\n    print(total)\n}\n`jet run` correctly reports E0111 (total was made with `:`; Fix: declare it with `total := ...`). `jet fix oops.jet` then says 'applied 1 fix, skipped 1 suggestion for review'. The applied fix renames `n` to `_n` as if unused, although `total + n` uses it, so the program is now wrong. The real E0111 fix (`:` to `:=`) is the skipped one. Probe: $JET_SCRATCH_ROOT/lanes/Main/readme-probe/fresh/oops.jet.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet fix` on the oops.jet repro applies the E0111 `:` to `:=` fix and never renames a used variable; a test proves both.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "01c7879e02 (+4337521436 for uses inside unresolved calls); batch vb10 (dev e4756389a9, s1 kit): cases cli_parts_surface/fix_applies_e0111_and_keeps_used_loop_variable, e0102_and_e0111_typed_fix_edits_apply and fix_safety_tiers_are_reported_and_applied PASS.",
+          "at": "2026-11-07T05:56:05.546Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T20:35:29.254Z",
+      "updated": "2026-11-07T05:56:13.784Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T05:56:13.784Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T06:06:22.195Z"
     }
   ]
 }
