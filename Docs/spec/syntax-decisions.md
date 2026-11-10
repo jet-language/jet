@@ -8263,14 +8263,11 @@ live development state across a hot reload. The owner's frame: game state in a
 game you are developing is pinned, you edit an enemy's logic, `jet dev` reloads
 the changed code, and you keep playtesting without resetting the world.
 
-That purpose settles the semantics. A pinned value is state a running program
-mutates — a score, a position, a world — so a `#Persist` binding is writable
-from a function. It is the one module binding that is, because surviving the
-reload is the entire reason it exists; every other module binding stays
-immutable from a function with the existing E0111 teaching text. This amends
-D-VERDICT-1231-2, which ratified the spelling `#Persist counter := 0` but left
-that spelling with no program that compiles: writing `counter += 1` from a
-function reported E0111, so the marker could not express the thing it was for.
+That purpose settles the semantics: `#Persist` keeps a binding's value across
+a hot reload, and that is all the marker means (owner ruling 2026-11-09). It is
+not the way to make module state writable from a function; E0111 teaches a
+`shared` holder for that. This amends D-VERDICT-1231-2, which ratified the
+spelling `#Persist counter := 0`.
 
 **2026-08-20 — D-SERVICE1=D reaffirmed** *(card #444; owner ruling in session)*:
 the typed `service.tree(…)` surface the decision describes is the law, and the

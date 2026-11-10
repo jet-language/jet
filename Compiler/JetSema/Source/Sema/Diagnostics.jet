@@ -526,7 +526,7 @@ sema_type_fix_hint: fn(want: Type, got: Type) -> String Never! {
     if want == {
         .Float -> {
             if got == Type.Int -> return "write the number with a decimal part, like `2.0`"
-            if sema_type_nominal_leaf(got) == "Decimal" -> return "write the literal as Float{{3.4}}, or keep Decimal on both sides"
+            if sema_type_nominal_leaf(got) == "Decimal" -> return "convert it with `.to_float()`, or keep Decimal on both sides"
         }
         .Int -> {
             if got == Type.Float -> return "drop the decimal part, like `2`"

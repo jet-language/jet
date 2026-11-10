@@ -5467,7 +5467,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if binding.symbol.kind == SymbolKind.Constant {
         if sema_stmt_module_storage_binding(environment, program, binding.symbol.id) == .Val(persists) {
             if !persists && context.unsafe_depth == 0 {
-                diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name}: shared Count{{value: 0}}`, written `{name}.value += 1`) or mark it `#Persist`; code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
+                diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name}: shared Count{{value: 0}}`, written `{name}.value += 1`); code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
                 return None
             }
             context.module_writes.push(TEffectSpan{name: name, span: name_span})
@@ -8046,7 +8046,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // E0364: inclusive `0..xs.len()` whose body
                         // indexes that same `xs` with this loop's index name.
                         if !exclusive && sema_stmt_range_end_len_root(end_expr) == .Val(len_root) && sema_stmt_index_root_with_stmts(body, len_root, var) {
-                            diagnostics.push(sema_error("E0364", expr_span(end_expr), "this range includes `{len_root}.len()`, one past the last index", "`{len_root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{len_root}`", "write `loop (i, item) in {len_root}` — or `loop i in {len_root}.indexes` — or `0..<{len_root}.len()`"))
+                            diagnostics.push(sema_error("E0364", expr_span(end_expr), "this range includes `{len_root}.len()`, one past the last index", "`{len_root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{len_root}`", "write `loop (i, item) in {len_root}` — or `loop i in {len_root}.indexes()` — or `0..<{len_root}.len()`"))
                         }
                         if label != None -> sema_scope_pop_loop_label(scopes)
                         sema_single_use_leave_scope(scopes, state, diagnostics)

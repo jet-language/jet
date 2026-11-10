@@ -1383,11 +1383,21 @@ sema_call_local_default_values: fn(target: SemaCallDirectTarget, binding: SemaCa
 
 // `waiting` is the first argument whose probe checked to no value without an
 // error: a read still waiting on a compile-time value (another module's
-// constant not staged yet) that gives inference no type.
+// constant not staged yet) that gives inference no type. `lambda_returns` are
+// the written-parameter lambdas' return facts, also the last of the type lists.
 SemaCallInferenceFacts: struct {
     parameter_types: [Type]
     argument_types: [Type]
     waiting: Int?
+    lambda_returns: [SemaCallLambdaReturn]
+}
+
+// Argument `argument`, a lambda whose parameters are all written, returns
+// `value` where its parameter's `fn` type returns `required`.
+SemaCallLambdaReturn: struct {
+    argument: Int
+    required: Type
+    value: Type
 }
 
 sema_call_inference_needs_context: fn(expr: Expr) -> Bool Never! {
@@ -1403,6 +1413,7 @@ sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCall
     parameter_types := [Type]{}
     argument_types := [Type]{}
     waiting := Int?{None}
+    lambda_returns := [SemaCallLambdaReturn]{}
     loop index in 0..<args.len() {
         slot: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
@@ -1417,12 +1428,20 @@ sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCall
                         waiting = Val(index)
                     }
                 } else if sema_call_lambda_params_written(args[index].expr) {
-                    sema_call_lambda_return_fact(required, args[index].expr, parameter_types, argument_types, environment, program, scopes, state, tail_store, context)
+                    fact: sema_call_lambda_return_fact(index, required, args[index].expr, environment, program, scopes, state, tail_store, context) ?? next
+                    lambda_returns.push(fact)
                 }
             }
         }
     }
-    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types, waiting: waiting}
+    // The lambda returns unify after the plain arguments, so a type parameter
+    // a plain argument settles stays settled and a lambda returning another
+    // type is the conflict (sema_call_lambda_return_conflicts).
+    loop row in lambda_returns {
+        parameter_types.push(row.required)
+        argument_types.push(row.value)
+    }
+    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types, waiting: waiting, lambda_returns: lambda_returns}
 }
 
 // A trait-bounded variadic's arity function gives each trailing argument its
@@ -1469,29 +1488,46 @@ sema_call_lambda_params_written: fn(expr: Expr) -> Bool Never! {
 // return fills the type parameters of the required `fn` return. Of a
 // `U E!` return only `U` is this fact: the failure part is
 // sema_call_lambda_failure_facts' own.
-sema_call_lambda_return_fact: fn(required: Type, lambda: Expr, parameter_types: &[Type], argument_types: &[Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) Never! {
+sema_call_lambda_return_fact: fn(argument: Int, required: Type, lambda: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallLambdaReturn? Never! {
     required_value := Type?{None}
     if required == .Fn(_, required_ret, _, _, _, _) -> required_value = required_ret
-    ret: required_value ?? return
+    ret: required_value ?? return None
     probe_diagnostics := [Diagnostic]{}
-    checked: sema_probe_expression(lambda, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return
+    checked: sema_probe_expression(lambda, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
     lambda_value := Type?{None}
     if checked.ty == .Fn(_, lambda_ret, _, _, _, _) -> lambda_value = lambda_ret
-    value: lambda_value ?? return
+    value: lambda_value ?? return None
     if value == .Named(name) {
-        if name == "Never" -> return
+        if name == "Never" -> return None
     }
     if ret == .Result(ok, _) {
-        parameter_types.push(ok)
-        if value == .Result(value_ok, _) {
-            argument_types.push(value_ok)
-        } else {
-            argument_types.push(value)
-        }
-        return
+        if value == .Result(value_ok, _) -> return Val(SemaCallLambdaReturn{argument: argument, required: ok, value: value_ok})
+        return Val(SemaCallLambdaReturn{argument: argument, required: ok, value: value})
     }
-    parameter_types.push(ret)
-    argument_types.push(value)
+    Val(SemaCallLambdaReturn{argument: argument, required: ret, value: value})
+}
+
+// A type parameter the plain arguments settled that a written-parameter
+// lambda returns another type for is E0904 at the callee, naming both
+// sources; checking the arguments then reports the lambda's own E0112.
+sema_call_lambda_return_conflicts: fn(target: SemaCallDirectTarget, rows: [SemaCallLambdaReturn], params: [SemaCallParam], binding: SemaCallBinding, span: Span, diagnostics: &[Diagnostic]) {
+    loop row in rows {
+        if row.required == .Named(name) {
+            loop substitution in target.generic_substitutions {
+                if substitution.name != name || type_identity_equal(substitution.ty, row.value) -> next
+                source := "the other arguments"
+                loop index in 0..<binding.slots.len() {
+                    slot: binding.slots[index]
+                    if index == row.argument || slot < 0 || slot >= params.len() -> next
+                    if sema_call_parameter_type(params[slot]) == (Val(Type.Named{name: name})) {
+                        source = "argument {index + 1}"
+                        break
+                    }
+                }
+                diagnostics.push(sema_error("E0904", span, "can't figure out what `{name}` should be here", "one generic type parameter received incompatible concrete types", "{name} is {type_name(substitution.ty)} from {source} but {type_name(row.value)} from the lambda return; make those types agree"))
+            }
+        }
+    }
 }
 
 // A lambda argument fills a failure-type parameter `E`
@@ -1605,6 +1641,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
             return None
         }
         loop diagnostic in inference_diagnostics -> diagnostics.push(diagnostic)
+        sema_call_lambda_return_conflicts(inferred, inferred_facts.lambda_returns, params, binding, call.name_span, diagnostics)
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {
             diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))

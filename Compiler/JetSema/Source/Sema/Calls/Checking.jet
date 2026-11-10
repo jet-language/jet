@@ -631,7 +631,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 }
                 if unmet -> return None
             } else {
-                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), expr_span(args[index].expr)))
+                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr)))
                 complete = false
                 next
             }
@@ -948,7 +948,7 @@ sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter:
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
-sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
+sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, value: Expr, span: Span) -> Diagnostic {
     // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
     // not a typed pointer, or the written value is not the pointer's element
     // type.
@@ -974,7 +974,20 @@ sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offe
             return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix_text}}", "write `impl {name}.{bound} {{ … }}` with every required method"))
         }
     }
-    sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+    sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_call_argument_fix_hint(required, offered, value))
+}
+
+// A Decimal argument to a Float parameter is taught on the argument as
+// written: its literal as a Float, or its binding converted.
+sema_call_argument_fix_hint: fn(required: Type, offered: Type, value: Expr) -> String Never! {
+    if required == Type.Float && sema_type_nominal_leaf(offered) == "Decimal" {
+        if value == {
+            .Float(_, _, _, raw, _) -> if raw == .Val(text) -> return "write the literal as Float{{{text}}}, or keep Decimal on both sides"
+            .Ident(name, _, _) -> return "convert it with `{name}.to_float()`, or keep Decimal on both sides"
+            else -> {}
+        }
+    }
+    sema_type_fix_hint(required, offered)
 }
 
 // A parameter type that names nothing already has its E0119 where the
@@ -996,12 +1009,15 @@ sema_call_argument_drop_mismatch: fn(value: Expr, diagnostic_start: Int, diagnos
 }
 
 // The argument's own check rejected it against its parameter with the generic
-// E0108 at the value; that report becomes the call's E0112, with the value's
-// own type inferred without the parameter as a target. A lambda value is
-// probed under the parameter's escape policy, so its capture facts match.
+// E0108 at the value (for an expression-bodied lambda, at its body); that
+// report becomes the call's E0112, with the value's own type inferred without
+// the parameter as a target. A lambda value is probed under the parameter's
+// escape policy, so its capture facts match.
 sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     value_span: expr_span(value)
-    mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+    found := sema_value_mismatch_index(diagnostics, diagnostic_start, value_span)
+    if found == None && value == .Lambda(body_lambda, _) && body_lambda.body == .Expr(body) -> found = sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(body))
+    mismatch_index: found ?? return
     probe_diagnostics := [Diagnostic]{}
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = lambda_escapes
@@ -1022,7 +1038,7 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     // call's span is its name).
     shown_span := value_span
     if value == .Lambda(shown_lambda, _) && shown_lambda.body == .Expr(shown_body) -> shown_span = Span{start: value_span.start, end: expr_span(shown_body).end}
-    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, shown_span)
+    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, value, shown_span)
 }
 
 // Whether an argument after `own` references the binding `key`: arguments

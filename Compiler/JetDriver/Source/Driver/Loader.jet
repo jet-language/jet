@@ -236,6 +236,18 @@ jet_driver_authority_diagnostic: fn(span: Span, detail: String) -> Diagnostic {
     jet_driver_diagnostic("E1221", span, "the package's `authority:` block is malformed", detail, "`authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights")
 }
 
+// E1221's reason for an `FFI` right written with an argument, such as
+// `FFI.C("nativeffi")` (#6281 c144): that is the foreign-call effect naming
+// a library, not a memory denial, and an authority list names the right
+// alone. None for every other root.
+jet_driver_authority_ffi_argument: fn(name: String, place: String) -> String? {
+    if sema_effect_root(name) != "FFI" -> return None
+    open: name.find("(")
+    if open < 0 -> return None
+    right: String.from_bytes_lossy(name.bytes()[0..<open])
+    Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
+}
+
 jet_driver_is_ui_capability: fn(name: String) -> Bool Never! {
     loop call in CORE_CALLS {
         loop capability in call.ui_capabilities {
@@ -278,7 +290,7 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
                         root: sema_effect_root(name)
                         if {
                             !jet_driver_is_ui_capability(name) && sema_effect_parse_name(root) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect or UI capability"))
-                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`authority.needs`") ?? "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
                             root == "Panic" || root == "Mem" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is deny-only and cannot be declared in `authority.needs`"))
                             else -> needs.push(name)
                         }
@@ -342,8 +354,8 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
-            name.contains("(") && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
-            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
+            name.contains("(") && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
+            name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> names.push(name)
         }
         item_index = item.next_index
@@ -559,16 +571,19 @@ jet_driver_manifest_field_value: fn(source: String, tokens: [Token], start_index
         }
         cursor += 1
     }
+    // The value's own text with comments dropped. The source between two
+    // tokens is whitespace and stays, so a record body keeps the newline
+    // that separates `harden: true` from the field after it (#6281 c140).
     text := ""
+    previous_end := -1
     loop token_index in start_index..<cursor {
         token: tokens[token_index]
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
-            start: token.span.start
-            end: token.span.end
-            if start >= 0 && end >= start && end <= source_bytes.len() {
-                text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
-            }
-        }
+        start: token.span.start
+        end: token.span.end
+        if start < 0 || end < start || end > source_bytes.len() -> next
+        if previous_end >= 0 && start > previous_end -> text = "{text}{String.from_bytes(source_bytes[previous_end..<start]) ?? ""}"
+        previous_end = end
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
     }
     JetDriverManifestFieldValue{text: text.trim(), next_index: cursor}
 }

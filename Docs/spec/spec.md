@@ -460,7 +460,10 @@ forms:
 ```jet
 loop value in source, stride if keep(value) -> value
 loop (key, value) in source -> key
-loop i := init, i < limit, i + 1 -> print(i)
+loop i := init, i < limit {
+    print(i)
+    i += 1
+}
 ```
 
 A source loop may use `-> expression` or a braced value body. Each accepted
