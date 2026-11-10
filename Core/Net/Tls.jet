@@ -7,6 +7,8 @@ use {
     sslmsg: __core_net_ssl_msg
     x509crt: __core_crypto_x509crt
     pk: __core_crypto_pk
+    x509: __core_crypto_x509
+    asn1: __core_crypto_asn1
     pkparse: __core_crypto_pkparse
     drbg: __core_crypto_drbg
     hashes: __core_crypto_md
@@ -1709,8 +1711,6 @@ __hex: fn(value: Int, width: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-__hex_lower: fn(value: Int) -> String Never! { "0x{ascii_lower(__hex(value, 1))}" }
-
 // ---- verified peer identity ---------------------------------------------------
 
 __empty_certificate: fn() -> TLSCertificate Never! {
@@ -1721,31 +1721,14 @@ __empty_identity: fn() -> TLSPeerIdentity Never! {
     TLSPeerIdentity{verified_server_name: "", leaf: __empty_certificate(), certificate_chain: [TLSCertificate]{}, cipher_suite: "", tls_version: TLSVersion.TLS12}
 }
 
-// The DER of each certificate the peer sent, leaf first
-// (mbedtls_ssl_get_peer_cert).
-__peer_chain: fn(ssl: ssldefs.SSLContext) -> [[U8]] Never! {
-    out := [[U8]]{}
-    if ssl.session < 0 || ssl.session >= ssl.spool.len() -> return out
-    if ssl.spool[ssl.session].peer_cert == .Val(certs) {
-        loop crt in certs -> out.push(crt.raw.copy())
-    }
-    out
-}
-
+// The verified peer's identity. Each certificate's fields come from the
+// engine's parsed X509Crt chain, leaf first (mbedtls_ssl_get_peer_cert), so
+// every certificate x509 accepted reports them and no second DER walk can
+// refuse one.
 __peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity __TLSFailure! {
     chain := [TLSCertificate]{}
-    loop der in __peer_chain(ssl) {
-        parts: __certificate_parts(der) ?? return Err(err)
-        chain.push(TLSCertificate{
-            der: der.copy(),
-            sha256: crypto.sha256(der).bytes,
-            spki_sha256: crypto.sha256(parts.spki).bytes,
-            dns_names: parts.dns_names.copy(),
-            valid_from_unix_ms: parts.valid_from,
-            valid_until_unix_ms: parts.valid_until,
-            subject: parts.subject.copy(),
-            issuer: parts.issuer.copy(),
-        })
+    if ssl.session >= 0 && ssl.session < ssl.spool.len() && ssl.spool[ssl.session].peer_cert == .Val(certs) {
+        loop crt in certs -> chain.push(__certificate(crt))
     }
     if chain.len() == 0 -> return Err(__fail("TLS verified peer did not provide a certificate chain"))
     suite: ssltls.ssl_get_ciphersuite(ssl) ?? ""
@@ -1760,6 +1743,26 @@ __peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIden
     Ok(TLSPeerIdentity{verified_server_name: server_name.copy(), leaf: leaf, certificate_chain: chain, cipher_suite: __suite_name(suite), tls_version: tls_version})
 }
 
+// A dNSName that is not UTF-8 stays as escaped source bytes, like a name.
+__certificate: fn(crt: x509crt.X509Crt) -> TLSCertificate Never! {
+    dns_names := [String]{}
+    loop san in crt.subject_alt_names {
+        if x509crt.x509_crt_san_type(san) != x509.X509_SAN_DNS_NAME -> next
+        bytes: x509crt.x509_crt_san_bytes(crt, san)
+        dns_names.push(String.from_bytes(bytes) ?? __escaped(bytes))
+    }
+    TLSCertificate{
+        der: crt.raw.copy(),
+        sha256: crypto.sha256(crt.raw).bytes,
+        spki_sha256: crypto.sha256(__slice(crt.raw, crt.pk_raw.p, crt.pk_raw.p + crt.pk_raw.len)).bytes,
+        dns_names: dns_names,
+        valid_from_unix_ms: __unix_ms(crt.valid_from),
+        valid_until_unix_ms: __unix_ms(crt.valid_to),
+        subject: __name_text(crt.subject),
+        issuer: __name_text(crt.issuer),
+    }
+}
+
 // Mbed TLS names suites like "TLS1-3-AES-128-GCM-SHA256"; report the IANA
 // spelling rustls used ("TLS13_AES_128_GCM_SHA256").
 __suite_name: fn(name: String) -> String Never! {
@@ -1767,147 +1770,18 @@ __suite_name: fn(name: String) -> String Never! {
     name.replace("-", "_")
 }
 
-__DER: struct {
-    kind: Int
-    start: Int
-    content: Int
-    end: Int
-}
-
-__CertParts: struct {
-    spki: [U8]
-    dns_names: [String]
-    valid_from: Int
-    valid_until: Int
-    subject: String
-    issuer: String
-}
-
-__der_element: fn(input: [U8], pos: Int) -> __DER __TLSFailure! {
-    if pos >= input.len() -> return Err(__fail("TLS certificate DER is truncated"))
-    kind: Int.from_u8(input[pos])
-    if pos + 1 >= input.len() -> return Err(__fail("TLS certificate DER length is truncated"))
-    first: Int.from_u8(input[pos + 1])
-    at := pos + 2
-    length := first
-    if first >= 128 {
-        count := first - 128
-        if count == 0 || count > 8 -> return Err(__fail("TLS certificate DER has an invalid length"))
-        length = 0
-        loop count > 0 {
-            if at >= input.len() || length > 36028797018963967 -> return Err(__fail("TLS certificate DER length overflow"))
-            length = length * 256 + Int.from_u8(input[at])
-            at += 1
-            count -= 1
-        }
-    }
-    if length > input.len() - at -> return Err(__fail("TLS certificate DER value is truncated"))
-    Ok(__DER{kind: kind, start: pos, content: at, end: at + length})
-}
-
-__der_expect: fn(input: [U8], pos: Int, expected: Int) -> __DER __TLSFailure! {
-    element: __der_element(input, pos) ?? return Err(err)
-    if element.kind != expected -> return Err(__fail("TLS certificate DER expected tag {__hex_lower(expected)}, found {__hex_lower(element.kind)}"))
-    Ok(element)
-}
-
-__certificate_parts: fn(der: [U8]) -> __CertParts __TLSFailure! {
-    outer: __der_expect(der, 0, 48) ?? return Err(err)
-    if outer.end != der.len() -> return Err(__fail("TLS certificate DER has trailing data"))
-    tbs: __der_expect(der, outer.content, 48) ?? return Err(err)
-    p := tbs.content
-    if p < der.len() && Int.from_u8(der[p]) == 160 {
-        version: __der_element(der, p) ?? return Err(err)
-        p = version.end
-    }
-    serial: __der_element(der, p) ?? return Err(err)
-    p = serial.end
-    signature: __der_element(der, p) ?? return Err(err)
-    p = signature.end
-    issuer_name: __der_expect(der, p, 48) ?? return Err(err)
-    p = issuer_name.end
-    issuer: __der_name(der, issuer_name.content, issuer_name.end) ?? return Err(err)
-    validity: __der_expect(der, p, 48) ?? return Err(err)
-    p = validity.end
-    not_before: __der_element(der, validity.content) ?? return Err(err)
-    not_after: __der_element(der, not_before.end) ?? return Err(err)
-    if not_after.end != validity.end -> return Err(__fail("TLS certificate validity has extra fields"))
-    valid_from: __der_time(not_before.kind, __slice(der, not_before.content, not_before.end)) ?? return Err(err)
-    valid_until: __der_time(not_after.kind, __slice(der, not_after.content, not_after.end)) ?? return Err(err)
-    subject_name: __der_expect(der, p, 48) ?? return Err(err)
-    p = subject_name.end
-    subject: __der_name(der, subject_name.content, subject_name.end) ?? return Err(err)
-    spki: __der_expect(der, p, 48) ?? return Err(err)
-    p = spki.end
-    dns_names := [String]{}
-    loop p < tbs.end {
-        element: __der_element(der, p) ?? return Err(err)
-        p = element.end
-        if element.kind == 163 {
-            extensions: __der_expect(der, element.content, 48) ?? return Err(err)
-            ext := extensions.content
-            loop ext < extensions.end {
-                one: __der_expect(der, ext, 48) ?? return Err(err)
-                ext = one.end
-                oid: __der_expect(der, one.content, 6) ?? return Err(err)
-                at := oid.end
-                if at < der.len() && Int.from_u8(der[at]) == 1 {
-                    critical: __der_element(der, at) ?? return Err(err)
-                    at = critical.end
-                }
-                value: __der_expect(der, at, 4) ?? return Err(err)
-                at = value.end
-                subject_alt_name: [U8]{85, 29, 17}
-                if __slice(der, oid.content, oid.end) == subject_alt_name {
-                    dns_names = __der_dns_names(__slice(der, value.content, value.end)) ?? return Err(err)
-                }
-                if at != one.end -> return Err(__fail("TLS certificate extension has trailing fields"))
-            }
-            if extensions.end != element.end -> return Err(__fail("TLS certificate extensions have trailing data"))
-        }
-    }
-    Ok(__CertParts{spki: __slice(der, spki.start, spki.end), dns_names: dns_names, valid_from: valid_from, valid_until: valid_until, subject: subject, issuer: issuer})
-}
-
-__der_dns_names: fn(value: [U8]) -> [String] __TLSFailure! {
-    names_seq: __der_expect(value, 0, 48) ?? return Err(err)
-    if names_seq.end != value.len() -> return Err(__fail("TLS subjectAltName has trailing data"))
-    names := [String]{}
-    p := names_seq.content
-    loop p < names_seq.end {
-        item: __der_element(value, p) ?? return Err(err)
-        p = item.end
-        if item.kind == 130 {
-            name: String.from_bytes(__slice(value, item.content, item.end)) ?? return Err(__fail("TLS DNS name is not valid ASCII"))
-            names.push(name)
-        }
-    }
-    Ok(names)
-}
-
-__der_name: fn(der: [U8], start: Int, end: Int) -> String __TLSFailure! {
+// Each attribute as LABEL=value, in certificate order, comma-joined.
+__name_text: fn(names: [asn1.NamedData]) -> String Never! {
     parts := [String]{}
-    p := start
-    loop p < end {
-        set: __der_expect(der, p, 49) ?? return Err(err)
-        p = set.end
-        q := set.content
-        loop q < set.end {
-            attr: __der_expect(der, q, 48) ?? return Err(err)
-            q = attr.end
-            oid: __der_expect(der, attr.content, 6) ?? return Err(err)
-            value: __der_element(der, oid.end) ?? return Err(err)
-            if value.end != attr.end -> return Err(__fail("TLS certificate name has trailing fields"))
-            bytes: __slice(der, value.content, value.end)
-            // Non-UTF8 DirectoryStrings, including Teletex and BMP/Universal,
-            // stay as escaped source bytes: audit text is lossless and cannot
-            // fail an already-verified handshake.
-            text := __escaped(bytes)
-            if value.kind == 12 -> text = String.from_bytes(bytes) ?? text
-            parts.push("{__name_label(__slice(der, oid.content, oid.end))}={text}")
-        }
+    loop name in names {
+        // Non-UTF8 DirectoryStrings, including Teletex and BMP/Universal,
+        // stay as escaped source bytes: audit text is lossless and cannot
+        // fail an already-verified handshake.
+        text := __escaped(name.val)
+        if name.val_tag == 12 -> text = String.from_bytes(name.val) ?? text
+        parts.push("{__name_label(name.oid)}={text}")
     }
-    Ok(parts.join(","))
+    parts.join(",")
 }
 
 __name_label: fn(oid: [U8]) -> String Never! {
@@ -1943,52 +1817,39 @@ __escaped: fn(bytes: [U8]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-__digits: fn(bytes: [U8], start: Int, count: Int) -> Int? Never! {
-    value := 0
-    loop at in start..<(start + count) {
-        n: Int.from_u8(bytes[at])
-        if n < 48 || n > 57 -> return None
-        value = value * 10 + n - 48
-    }
-    Val(value)
-}
-
-// UTCTime / GeneralizedTime "...Z" to Unix milliseconds (days_from_civil).
-__der_time: fn(kind: Int, bytes: [U8]) -> Int __TLSFailure! {
-    _: String.from_bytes(bytes) ?? return Err(__fail("TLS certificate time is not ASCII"))
-    year := 0
-    rest := 0
-    zulu: bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{90})
-    if {
-        kind == 23 && bytes.len() == 13 && zulu -> {
-            yy: __digits(bytes, 0, 2) ?? return Err(__fail("TLS certificate UTC time is invalid"))
-            year = if yy >= 50 -> 1900 + yy else -> 2000 + yy
-            rest = 2
-        }
-        kind == 24 && bytes.len() == 15 && zulu -> {
-            year = __digits(bytes, 0, 4) ?? return Err(__fail("TLS certificate generalized time is invalid"))
-            rest = 4
-        }
-        else -> {
-            return Err(__fail("TLS certificate time uses an unsupported encoding"))
-        }
-    }
-    month: __digits(bytes, rest, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
-    day: __digits(bytes, rest + 2, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
-    hour: __digits(bytes, rest + 4, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
-    minute: __digits(bytes, rest + 6, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
-    second: __digits(bytes, rest + 8, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
-    if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60 {
-        return Err(__fail("TLS certificate time is out of range"))
-    }
-    y: if month <= 2 -> year - 1 else -> year
+// An x509 time to Unix milliseconds (days_from_civil).
+__unix_ms: fn(time: x509.X509Time) -> Int Never! {
+    y: if time.mon <= 2 -> time.year - 1 else -> time.year
     era: y /% 400
     yoe: y - era * 400
-    mp: if month > 2 -> month - 3 else -> month + 9
-    doy: (153 * mp + 2) /% 5 + day - 1
+    mp: if time.mon > 2 -> time.mon - 3 else -> time.mon + 9
+    doy: (153 * mp + 2) /% 5 + time.day - 1
     doe: yoe * 365 + yoe /% 4 - yoe /% 100 + doy
     days: era * 146097 + doe - 719468
-    Ok((days * 86400 + hour * 3600 + minute * 60 + second) * 1000)
+    (days * 86400 + time.hour * 3600 + time.min * 60 + time.sec) * 1000
+}
+
+#Test("Peer identity fields come from the parsed X509Crt, so a dNSName x509 keeps but that is not UTF-8 still reports") {
+    pem: core.files.read_bytes("tests/fixtures/tls/custom-root.server.cert.pem") ?? panic("{err}")
+    chain := [x509crt.X509Crt]{}
+    _: x509crt.x509_crt_parse(chain, pem) ?? panic("{err:Debug}")
+    leaf: __certificate(chain[0])
+    assert_eq(leaf.subject, "CN=localhost")
+    assert_eq(leaf.issuer, "CN=Jet-Test-CA")
+    assert_eq(leaf.dns_names, [String]{"localhost"})
+    assert_eq(leaf.valid_from_unix_ms, 1783974691000)
+    assert_eq(leaf.valid_until_unix_ms, 2099334691000)
+    assert_eq(leaf.der, chain[0].raw)
+    // The first dNSName byte set to 0xff: x509 parses it (no signature check
+    // here) and the identity escapes the byte instead of failing.
+    der := chain[0].raw.copy()
+    loop san in chain[0].subject_alt_names {
+        if x509crt.x509_crt_san_type(san) == x509.X509_SAN_DNS_NAME -> der[san.p] = U8{255}
+    }
+    odd := [x509crt.X509Crt]{}
+    x509crt.x509_crt_parse_der(odd, der) ?? panic("{err:Debug}")
+    assert_eq(__certificate(odd[0]).dns_names, [String]{"\\xffocalhost"})
+    assert_eq(__certificate(odd[0]).spki_sha256, leaf.spki_sha256)
 }
 
 // ---- `jet prove` journal --------------------------------------------------------
