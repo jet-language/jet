@@ -33,6 +33,7 @@ use {
         build_options_check_removals,
         build_option_flag_row,
         build_option_flags,
+        build_option_level_spelling,
         build_option_profile_hint,
         build_option_refusal,
         build_option_row,
@@ -579,8 +580,10 @@ jet_cli_positionals: fn(jet_argv: [String]) -> [String] Never! {
     positionals
 }
 
-// `check_flags`: the first unknown `--flag` teaches E2102, and so does the
-// first registered one whose registry row scopes it to other commands.
+// `check_flags`: the first flag no registry row has teaches E2102, a `--flag`
+// and a single-dash word alike, and so does the first registered `--flag`
+// whose registry row scopes it to other commands. The word after a
+// separate-value flag is its value, never a flag.
 jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
     external_fmt := false
     if command == "fmt" {
@@ -588,40 +591,53 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
             if argument == "--lang" || argument.starts_with("--lang=") -> external_fmt = true
         }
     }
+    value_next := false
     loop argument in jet_argv {
-        if !argument.starts_with("--") || argument == "--" -> next
+        if value_next {
+            value_next = false
+            next
+        }
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> value_next = true
+        if !argument.starts_with("-") || argument == "-" || argument == "--" -> next
         head: argument.split("=").to_list()[0]
+        if jet_cli_is_help_flag(head) -> next
+        if !argument.starts_with("--") {
+            if jet_cli_is_known_flag(head) -> next
+            return Val(jet_cli_unknown_flag(head, command, color))
+        }
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
         if jet_cli_flag_spec(head) == .Val(spec) {
             if jet_cli_flag_takes(spec, command) -> next
             return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
         }
         if build_option_flag_refusal(head) == .Val(refusal) -> return Val(jet_cli_fail("E2102", "`{head}` isn't a build option jet has", refusal.law, "drop `{head}`", color, JET_DRIVER_EXIT_USAGE))
-        program: command == "run" || command == "test"
-        fix := ""
-        if jet_cli_closest_flag(head) == .Val(close) {
-            if {
-                program -> fix = "did you mean `{close}`? Or use `jet {command} <file> -- {head}` to pass it to your program"
-                command == "jobs" -> fix = "did you mean `{close}`? Or write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
-                else -> fix = "did you mean `{close}`? (run `jet help` for the flags)"
-            }
-        } else {
-            if {
-                program -> fix = "use `jet {command} <file> -- {head}` to pass this flag to your program"
-                command == "jobs" -> fix = "write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
-                else -> fix = "drop the flag, or run `jet help` to see the flags"
-            }
-        }
-        return Val(jet_cli_fail(
-            "E2102",
-            "`{head}` isn't a flag jet understands",
-            "flags before `--` belong to jet; everything after `--` is forwarded to your program",
-            fix,
-            color,
-            JET_DRIVER_EXIT_USAGE,
-        ))
+        return Val(jet_cli_unknown_flag(head, command, color))
     }
     None
+}
+
+// E2102 for a flag no registry row has. A C compiler's level word (`-O1`)
+// points at the `--optimize` value it names.
+jet_cli_unknown_flag: fn(head: String, command: String, color: Bool) -> JetCLIPlan Never! {
+    what: "`{head}` isn't a flag jet understands"
+    why: "flags before `--` belong to jet; everything after `--` is forwarded to your program"
+    if build_option_level_spelling(head) == .Val(spelling) -> return jet_cli_fail("E2102", what, why, "write `{spelling}`: jet picks the optimization level with `--optimize`", color, JET_DRIVER_EXIT_USAGE)
+    program: command == "run" || command == "test"
+    fix := ""
+    if jet_cli_closest_flag(head) == .Val(close) {
+        if {
+            program -> fix = "did you mean `{close}`? Or use `jet {command} <file> -- {head}` to pass it to your program"
+            command == "jobs" -> fix = "did you mean `{close}`? Or write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
+            else -> fix = "did you mean `{close}`? (run `jet help` for the flags)"
+        }
+    } else {
+        if {
+            program -> fix = "use `jet {command} <file> -- {head}` to pass this flag to your program"
+            command == "jobs" -> fix = "write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
+            else -> fix = "drop the flag, or run `jet help` to see the flags"
+        }
+    }
+    jet_cli_fail("E2102", what, why, fix, color, JET_DRIVER_EXIT_USAGE)
 }
 
 // E2102 for a registered flag the command does not take: names the commands
@@ -1642,8 +1658,9 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
 // `run`). `-e` is honored before a run's target (jet_cli_eval_flag_at) and
 // refused after it; `--sha256` pins a URL target's first fetch and is refused
 // on a local one. Any other registered flag on a run is refused until its port
-// lands, never ignored; an unregistered one was already refused by E2102, or
-// is ignored by the `jet <file>` shorthand as the Rust host ignores it.
+// lands, never ignored; an unregistered one, a single-dash word too, was
+// already refused by E2102 (jet_cli_check_flags), on `jet run` and on the
+// `jet <file>` shorthand alike.
 JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256"}
 
 // `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
@@ -2469,8 +2486,9 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
 
     if !jet_cli_is_builtin(command) {
         if jet_cli_looks_like_source(command) {
-            // `jet <file>` is `jet run <file>`; the Rust original dispatches it
-            // before the help and flag checks, so it ignores both.
+            // `jet <file>` is `jet run <file>`: the words before the file are
+            // jet's and are checked as `jet run` checks them; a help flag
+            // among them is ignored, as the run goes ahead.
             if jet_cli_pinned_toolchain(raw, Val(command), color, quiet || json) == .Val(plan) -> return plan
             threads := Int?{None}
             if !jet_cli_any_help_flag(jet_argv) {
@@ -2479,6 +2497,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
                     .Cap(cap) -> threads = cap
                 }
             }
+            if jet_cli_check_flags(jet_argv, "run", color) == .Val(refusal) -> return refusal
             if jet_cli_trace_refusal(jet_argv, "run", color) == .Val(refusal) -> return refusal
             run_args := [String]{"run"}
             loop word in args -> run_args.push(word)

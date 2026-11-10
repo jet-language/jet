@@ -1,0 +1,33 @@
+# A single-dash word no flag owns is refused with E2102, never ignored, on
+# `jet run`, `jet build`, `jet check` and the `jet <file>` shorthand. A C
+# compiler's level word names the `--optimize` value it stands for, so a
+# typed `-O1` can't quietly run at the stock level. Registered single-dash
+# flags and the real level flag still run.
+fixture: fixtures/unknown_flag
+env: NO_COLOR=1
+step: jet run -O1 jet_cli_ok2.jet
+exit: 2
+stdout: = ""
+stderr: = single-dash-level.stderr
+step: jet build -O2 jet_cli_ok2.jet
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `-O2` isn't a flag jet understands" # the refusal names the single-dash word
+stderr: ~ "Fix: Write `--optimize=full`: jet picks the optimization level with `--optimize`" # the fix names the level it stands for
+step: jet -O0 jet_cli_ok2.jet
+exit: 2
+stdout: = ""
+stderr: ~ "Error [jet.UnknownFlag]: `-O0` isn't a flag jet understands" # the refusal names the single-dash word
+stderr: ~ "Fix: Write `--optimize=none`: jet picks the optimization level with `--optimize`" # the fix names the level it stands for
+step: jet check -Zqqqqqq jet_cli_ok2.jet
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `-Zqqqqqq` isn't a flag jet understands" # the refusal names the single-dash word
+step: jet --bogus-flag jet_cli_ok2.jet
+exit: 2
+stdout: = ""
+stderr: ~ "Error [jet.UnknownFlag]: `--bogus-flag` isn't a flag jet understands" # the refusal names the flag
+step: jet run --optimize=basic jet_cli_ok2.jet
+exit: 0
+stdout: = "hi\n"
+step: jet -A jet_cli_ok2.jet
+exit: 0
+stdout: = "hi\n"

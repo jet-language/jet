@@ -266,6 +266,18 @@ build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     None
 }
 
+// The `--optimize=<value>` spelling of a C compiler's level word `-O<n>`: the
+// optimize row's values are the levels in order (none is O0), so `-O1` is
+// `--optimize=basic`. None for any other word, which includes a level past
+// the last value.
+build_option_level_spelling: fn(word: String) -> String? {
+    row: build_option_row("optimize") ?? return None
+    loop (level, value) in row.values {
+        if word == ("-O{level}") -> return Val("{build_option_flag(row.name)}={value}")
+    }
+    None
+}
+
 // A value as a `build: fn` argument: `min_size` -> `.MinSize` for a Choice
 // row, `false` as it is for a Bool row, `"dist"` for a Text row and
 // `["z", "bz2"]` for a List row.
