@@ -3452,21 +3452,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 397,
+      "line": 434,
       "column": 9,
       "reason": "the caller holds an existing owner; atomic retain cannot race final-owner retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 418,
+      "line": 455,
       "column": 9,
       "reason": "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 423,
+      "line": 460,
       "column": 13,
       "reason": "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement"
     },
@@ -10616,9 +10616,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 28:5 | "write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 397:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 418:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 423:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 434:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 455:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 460:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 13:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 92:5 | "the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 22:5 | "runtime-init runs before any other thread exists" |

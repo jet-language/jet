@@ -36,17 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/c_import_reaches_past_allow_row_listing_ffi_c.stderr</code>.</p>
-<pre class="diag">Error [jet.ProhibitedEffectReached]: `c_import_reaches_past_allow_row_listing_ffi_c::run` reaches the `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time` effect, which the package&#39;s `authority: { allow: […] }` row doesn&#39;t list
-  --&gt; tests/ui/c_import_reaches_past_allow_row_listing_ffi_c.jet:12:1
+<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/c_import_needs_ffi_c_in_allow_row.stderr</code>.</p>
+<pre class="diag">Error [jet.ProhibitedEffectReached]: `c_import_needs_ffi_c_in_allow_row::run` reaches the `FFI.C` effect, which the package&#39;s `authority: { allow: […] }` row doesn&#39;t list
+  --&gt; tests/ui/c_import_needs_ffi_c_in_allow_row.jet:12:1
     |
  12 | run: fn() {
     | ^^^
  Why: A written `allow` row is a ceiling: the package&#39;s code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)
- Fix: Add `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time` to `authority.allow`, or remove the call that reaches it
- Note: `c_import_reaches_past_allow_row_listing_ffi_c::run` calls a C binding no descriptor owns; the checker cannot see its body, so the call reaches every effect
+ Fix: Add `FFI.C` to `authority.allow`, or remove the call that reaches it
  Denial: invocation
- Call chain: c_import_reaches_past_allow_row_listing_ffi_c::run
+ Call chain: c_import_needs_ffi_c_in_allow_row::run
 More: jet-lang.dev/e/E0749
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
