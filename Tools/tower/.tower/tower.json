@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98354,
+    "rev": 98355,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59097,6 +59097,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "c17: the missing conveniences in the nine gauntlet entries where Jet uses more source tokens than Python (read from Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py} at dev 8a85d45051 by PortsLead). Each Gap is a candidate Core API (an owner gate: new public API is balloted before it is built); a Rewrite needs only an entry edit.\n\nRead from `Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py}` at dev 8a85d45051.\nEach gap below is a candidate Core API gap card. A \"rewrite\" line means the API already exists and the\nentry should simply use it; that needs no card.\n\n## wordfreq (4.1x)\n- **Gap: whitespace tokens over bytes or text.** The Jet entry has a 20-line byte loop (ASCII whitespace\n  constants, token buffer, flush twice); Python uses `data.split()`. Wanted: `bytes.split_ws()` /\n  `text.words()`, a lazy iterator of whitespace-separated pieces. Core has `split_ws` in\n  core.text.parse, but not over `[U8]` or as an iterator.\n- **Gap: tally.** `counts[word] = (counts.get(word) ?? 0) + 1` is written by hand twice. Wanted:\n  `iter.tally() -> [T: Int]` (Counter) or `counts.bump(key)`.\n- **Rewrite:** `counts.top_n(20)` already exists (logreport uses it). It replaces `to_list` + `sort_by`\n  + the `shown` counter.\n\n## tensor-map-4k (1.8x)\n- **Gap: whole-tensor reduction.** `sum_axis(…, 0)` twice, then `get(total, [0])`. Wanted:\n  `compute.sum(t) -> Float`.\n- **Gap: infallible element-wise ops.** `full`, `add` and `get` each need `?? panic` even when the\n  shapes are literal and equal. Wanted: a shape-checked form that the compiler proves, or a panicking\n  variant for literal shapes.\n- **Gap: negative indices.** `get(mapped, [4095, 4095])` against Python's `mapped[-1, -1]`.\n\n## csvtransform (1.5x)\n- **Gap: several aggregates per group in one pass.** The entry runs two `group_by` queries (sum and\n  count) and then a nested linear search to join them. Wanted: `.group_by(k).agg(count(), sum(f))`\n  that yields one row per key.\n- **Gap: grouped result as a Map.** Wanted: `.to_map()` on a grouped query, so a join is `counts[key]`,\n  not a loop.\n\n## bulkrename (1.5x)\n- **Gap: regex full-match with typed captures.** The entry runs `is_match` and then `match` again,\n  then `Int.parse(match.group(1) ?? panic) ?? panic`. Wanted: `pattern.full_match(text)?.int(1)`.\n- **Language/ownership noise:** `(pattern.copy()).is_match(…)` inside the filter closure. A Regex used\n  read-only in a closure should not need a copy.\n- **Gap: zero-padded integer format spec.** `\"{index + 1}\".pad_start(4, \"0\")` against `{index:04}`.\n  Wanted: `{n:0>4}` / `{n:04}` in interpolation.\n- **Gap: enumerate from 1.** `loop (index, photo)` then `index + 1`.\n\n## regex-find-all-4mb (1.4x)\n- **Rewrite:** the task counts a literal; `text.count(\"struct\")` exists (core.text.parse `count`).\n  Using it drops the regex import and the `find_all` list.\n\n## tzreport (1.3x)\n- **Gap: infallible whole-unit duration.** `a.difference(b).in(.Minutes) ?? panic(\"gap\")` is used twice.\n  Wanted: `duration.whole_minutes() -> Int` (floor), with no error path for an in-range difference.\n- **Gap: a named-tuple return needs `return (…)` and a separate parse function.** Wanted:\n  `line.split_once(\"|\")` destructuring in a `map` lambda (`.map(((name, stamp)) -> …)`).\n\n## taskfile-cli (1.3x)\n- **Gap: in-place update of the first matching element.** The `done` arm rebuilds the whole list with a\n  `found` flag. Wanted: `tasks.find_mut(t -> t.id == id)` or `first_index_where`, plus field\n  assignment through it.\n- **Gap: read-or-default file decode.** `files.exists` + `files.read` + `json.decode<Store>`. Wanted:\n  `json.load<Store>(path, default: …)`.\n- **Gap: statically encodable JSON should not be fallible.** `json.to_string(…) ?? panic(…)` plus a\n  comment explaining why it cannot fail.\n\n## fft-4096 (1.2x)\n- **Gap: filled list / impulse constructor.** A 6-line loop builds `[1.0, 0.0 …]`. Wanted:\n  `[Float].filled(n, 0.0)` with index assignment, or `compute.zeros(n)` with `set`.\n- **Gap: complex view.** The output is interleaved `[re, im, …]` and indexed `2*i` / `2*i+1`. Wanted:\n  `spectrum.real()` / `spectrum.imag()` or a complex element type.\n\n## logreport (1.2x)\n- **Gap: bounded split with destructuring.** Three chained `split_once` calls with `?? panic` each.\n  Wanted: `(stamp, level, component, _) := line.split(\" \", limit: 4)` as a checked tuple.\n- **Gap: tally/default-0 increment.** The `bump` helper re-implements Counter (same as wordfreq).\n- **Gap: RFC 3339 → epoch ms in one call.** `parse_millis` exists only to chain `parse_rfc3339`,\n  `?? panic` and `to_unix_ms`.\n\n## Cross-cutting\n1. A tally/Counter API (wordfreq, logreport).\n2. Bounded split into a tuple (logreport, tzreport).\n3. Typed regex captures (bulkrename).\n4. Width/zero-pad format specs in interpolation (bulkrename).\n5. Multi-aggregate group_by and grouped `.to_map()` (csvtransform).\n6. Whole-unit duration accessors without an error path (tzreport).\n7. Element find-and-update (taskfile-cli).\n8. Whole-tensor reductions and negative indices in core.compute (tensor-map-4k, fft-4096).\n9. Infallible forms where the type proves success (json encode of a closed schema, literal-shape\n   tensor ops). This removes `?? panic` noise across entries."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-09) for c15: a named script that is already broken (prepush.sh and verify-batch.sh call a chain.sh that no longer exists) and has no live caller is deleted rather than paired, and c15 counts it done by removal; a live one is repointed to Tools/agent/Chain.jet and paired. lane-commit.sh is live and is paired."
         },
         {
@@ -59411,7 +59416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T01:28:01.622Z",
+      "updated": "2026-11-10T01:34:28.371Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -194048,6 +194053,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T01:34:28.371Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-10T01:33:15.249Z",
       "by": "Main",
