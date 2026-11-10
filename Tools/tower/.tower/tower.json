@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98809,
+    "rev": 98810,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69092,7 +69092,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-10T12:52:42.569Z",
+      "updated": "2026-11-10T16:19:04.056Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -193487,7 +193487,7 @@
       "explainer": "Words used here. A Shared value is one object that several holders use; it is freed when the last strong holder lets go. A weak link points to it without keeping it alive, and upgrade() returns None once it is gone.\n\nA Pool stores values and hands out IDs, small numbers that name an entry. #Policy(gc) opts types into a collector that frees loops.",
       "story": "Mira builds a folder tree where each folder knows its parent through a weak link. Her add helper is refused with E0221, though no loop can form. Meanwhile a listener that holds its feed strongly is accepted and leaks.",
       "inWild": "// Swift: strong cycles leak; weak or unowned breaks them by hand.\nclass Folder { var kids: [Folder] = []; weak var parent: Folder? }\n\n// CPython: counting plus a cycle collector that frees any loop.\n// Rust: Rc cycles leak; Weak breaks them, and no checker refuses the loop.",
-      "detail": "What this ballot decides. Which rule stops accidental strong loops of Shared values, and how intentional loops are freed. CYCLE1=C's law stays under A: a beginner never builds a leaking loop by accident, and intentional loops free or are refused. GC-OPTIN1=A's #Policy(gc) opt-in stays as ratified.\n\nToday, on the t6c compiler (dev 76955986d0), every probe gives the seed's result. Four safe programs are refused with E0221, This write can close a strong Shared cycle. They are w1, a doubly linked list with weak back links; w2, the folder tree with a weak parent and an add helper; w3, a task graph; and w5, a scene graph.\n\nToday's check also misses a real loop. w7 stores a listener that captures its feed strongly and is accepted, printing 1. In probe s20 the feed owns a stream that should close, and the program prints end but never closed 7. The cause is in Compiler/JetSema/Source/Sema/SharedCycles.jet: a lambda is treated as fresh, and places of function type are skipped.\n\nCollector and denial, also probed today. c01 puts #Policy(gc) on the strong-parent Folder and still gets E0221, so GC-OPTIN1 is ratified but not built. c02 writes -[!Mem.Gc]> on a function and gets UnknownEffectLeaf, Mem.Gc isn't a declared effect. Neither failure is used below as an argument.\n\nThe rule under A, part 1: reach sets. For each value, the compiler tracks which existing Shared cells it may reach through strong handles, owned fields, lists, options, enums, generic instances and function captures. A new cell reaches only what its fields reach. Weak links and IDs add nothing.\n\nPart 2: the write rule. Writing a value v into a cell c is refused when c may be in v's reach set, unless c's type is opted in with #Policy(gc). A write is a field set, an element set, a push or a replace. Names changed in a loop get their reach sets by repeating to a fixed point, which accepts w1.\n\nPart 3: functions and hidden edges. Each function carries two inferred facts: which results may reach which parameters, and which parameter it stores into another. Callers check with their own reach sets, which accepts w2's add helper. A function value reaches whatever it captures strongly. That fact travels through returns, parameters, lists, trait objects and package interfaces, which refuses w7 and s20.\n\nPart 4: unknown facts. A value from a foreign call, or the payload of a trait value, may reach every cell unless its type cannot hold a Shared. Storing it into a shared cell is refused unless the cell's type is opted in.\n\nDecoded data is not unknown. A decoder builds new values, so its result reaches only the cells it creates, and its reach facts are inferred like any function's. So cache[key] = decode(text) into a shared cell is accepted, and no common program pays for part 4.\n\nPart 5: one error. Every refusal is E0221. It shows the path that would close the loop, and lists three fixes: use a weak link, use a Pool and ID, or opt the type in, which jet fix writes. Hover and jet inspect show a function's reach facts; nobody writes them.\n\nThe collector, per GC-OPTIN1. It traces every cell reachable by strong links from an opted cell, opted or not, and finds dead loops by trial deletion, CPython's method, with no stack scan. It runs when enough opted cells were made since the last run, and at task exit. A weak link to a freed cell upgrades to None.\n\nFree-or-leak proof, CYCLE1's law. Every loop is closed by some write. Each write is proved safe, refused, or lands in an opted cell. So every loop holds an opted cell, and the collector frees every unreachable loop with its unopted members.\n\nClose in a collected loop. Every close runs once, all before any member is freed, in creation order. If a close makes a member reachable again, nothing in that loop is freed, Python's PEP 442 rule. Across tasks, per D-MEMREF-TASK1, an opted type whose values reach another task keeps E0221 until a thread-safe collector is proven.\n\n!Mem.Gc, per D-DENY-COST1 and D-MEMREF-LIFE1. A function that denies collection has writes into opted cells checked as if unopted. So inside it an opted loop is refused with E0221, and the error names the denial.\n\nDownsides of A, and how the design removes them. First, a flow rule is harder to predict than a type rule. The error therefore shows the exact path and three fixes, and hover shows each function's facts, so the reason is always visible.\n\nSecond, inferred facts cross package interfaces, so editing a body could change a public fact. The fact is recorded in the package interface. If the open API ballot passes, it is part of package.api, so a changed fact shows at the library's own jet check, before any caller sees it.\n\nWhat remains. Reparenting, taking a value out of a cell and storing it where that cell may reach, stays conservatively refused; the fix is a weak link, an ID or the opt-in. Close in a collected loop runs at collection, not at scope end; a weak link gives a prompt close, as probe s22 shows with end, then closed 7.\n\nThe same program under every option is the folder tree. Under A it is w2 as written, refused today and accepted by A. Under B it is a2, the Pool and ID form, which prints notes is in docs and root has 1 kid today. Under C it is b2, the inline form today's check accepts.\n\nCensus on the seed, from G6Lead's cycle-census.tsv over Core, Compiler, Jetpack, Tools, Examples and tests: 9,833 types. A type-level rule would refuse 9 of them, all in tests: 7 in tests/ui and 2 in tests/cases, with 238 uses. One generic type depends on its instance: ExpiringSecret in Core/Crypto/Vault.jet. Four Shared-reachable types hold function values, the sites part 3 covers.\n\nFive tests/ui files expect E0221 today, plus the fixtures of Compiler/JetSema/Tests/SharedCycleParity.jet. Under A they keep E0221, since each closes a real strong loop, and w1, w2, w3 and w5 become new accepted tests.\n\nBeginner path. Write the program the natural way with weak parent links, and it builds. A strong loop gets E0221 with a path and three fixes.\n\nExpert path. #Policy(gc) for graphs that really are cyclic, !Mem.Gc for code that must not depend on the collector, and jet inspect for reach facts.\n\nOther options. B is the type-level rule the owner approved: a mutable Shared type may reach its own type only through Weak or an ID. Its frozen exception covers nothing, because freezing a value that holds a Shared is E1114. C keeps today's check unchanged. D collects every type that could form a loop, with no opt-in. E is Swift's and Rust's rule: no check, and loops leak unless broken by hand.\n\nB refuses the strong kids list of every tree, so trees move to Pool and ID, and a type check alone still misses loops through stored functions. C keeps four false refusals and one leak. D reverses GC-OPTIN1 and puts a collector under every program. E reverses CYCLE1=C's law that a beginner never leaks by accident.",
+      "detail": "What this ballot decides. Which rule stops accidental strong loops of Shared values, and how intentional loops are freed. CYCLE1=C's law stays under A: a beginner never builds a leaking loop by accident, and intentional loops free or are refused. GC-OPTIN1=A's #Policy(gc) opt-in stays as ratified.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5), every probe gives the seed's result. Four safe programs are refused with E0221, This write can close a strong Shared cycle. They are w1, a doubly linked list with weak back links; w2, the folder tree with a weak parent and an add helper; w3, a task graph; and w5, a scene graph.\n\nToday's check also misses a real loop. w7 stores a listener that captures its feed strongly and is accepted, printing 1. In probe s20 the feed owns a stream that should close, and the program prints end but never closed 7. The cause is in Compiler/JetSema/Source/Sema/SharedCycles.jet: a lambda is treated as fresh (:159), and places of function type are skipped.\n\nCollector and denial, also probed today. c01 puts #Policy(gc) on the strong-parent Folder and still gets E0221, so GC-OPTIN1 is ratified but not built. c02 writes -[!Mem.Gc]> on a function and gets UnknownEffectLeaf, Mem.Gc isn't a declared effect. Neither failure is used below as an argument.\n\nThe rule under A, part 1: reach sets. For each value, the compiler tracks which existing Shared cells it may reach through strong handles, owned fields, lists, options, enums, generic instances and function captures. A new cell reaches only what its fields reach. Weak links and IDs add nothing.\n\nPart 2: the write rule. Writing a value v into a cell c is refused when c may be in v's reach set, unless c's type is opted in with #Policy(gc). A write is a field set, an element set, a push or a replace. Names changed in a loop get their reach sets by repeating to a fixed point, which accepts w1.\n\nPart 3: functions and hidden edges. Each function carries two inferred facts: which results may reach which parameters, and which parameter it stores into another. Callers check with their own reach sets, which accepts w2's add helper. A function value reaches whatever it captures strongly. That fact travels through returns, parameters, lists, trait objects and package interfaces, which refuses w7 and s20.\n\nBuild order for part 3. Function types do not yet carry facts: D-FNVAL-WRITE1=A, ratified on 2026-11-05, is unbuilt, and probe c04's fn(&Mobj) field is E0003. Until it lands, a function value read back out of a list or field counts as reaching every cell.\n\nThat is stricter, never unsound. Lambdas made in the same function, and callbacks passed as parameters, keep exact facts from parts 1 and 3, so w6 and the s22 listener still build.\n\nPart 4: unknown facts. A value from a foreign call, or the payload of a trait value, may reach every cell unless its type cannot hold a Shared. Storing it into a shared cell is refused unless the cell's type is opted in.\n\nDecoded data is not unknown. A decoder builds new values, so its result reaches only the cells it creates, and its reach facts are inferred like any function's. So cache[key] = decode(text) into a shared cell is accepted, and no common program pays for part 4.\n\nPart 5: one error. Every refusal is E0221. It shows the path that would close the loop, and lists three fixes: use a weak link, use a Pool and ID, or opt the type in, which jet fix writes. Hover and jet inspect show a function's reach facts; nobody writes them.\n\nThe collector, per GC-OPTIN1. It traces every cell reachable by strong links from an opted cell, opted or not, and finds dead loops by trial deletion, CPython's method, with no stack scan. It runs when enough opted cells were made since the last run, and at task exit. A weak link to a freed cell upgrades to None.\n\nFree-or-leak proof, CYCLE1's law. Every loop is closed by some write. Each write is proved safe, refused, or lands in an opted cell. So every loop holds an opted cell, and the collector frees every unreachable loop with its unopted members.\n\nClose in a collected loop. Every close runs once, all before any member is freed, in creation order. If a close makes a member reachable again, nothing in that loop is freed, Python's PEP 442 rule. Across tasks, per D-MEMREF-TASK1, an opted type whose values reach another task keeps E0221 until a thread-safe collector is proven.\n\n!Mem.Gc, per D-DENY-COST1 and D-MEMREF-LIFE1. A function that denies collection has writes into opted cells checked as if unopted. So inside it an opted loop is refused with E0221, and the error names the denial.\n\nDownsides of A, and how the design removes them. First, a flow rule is harder to predict than a type rule. The error therefore shows the exact path and three fixes, and hover shows each function's facts, so the reason is always visible.\n\nSecond, inferred facts cross package interfaces, so editing a body could change a public fact. The fact is recorded in the package interface. If the open API ballot passes, it is part of package.api, so a changed fact shows at the library's own jet check, before any caller sees it.\n\nWhat remains. Reparenting, taking a value out of a cell and storing it where that cell may reach, stays conservatively refused; the fix is a weak link, an ID or the opt-in. Close in a collected loop runs at collection, not at scope end; a weak link gives a prompt close, as probe s22 shows with end, then closed 7.\n\nThe same program under every option is the folder tree. Under A it is w2 as written, refused today and accepted by A. Under B it is a2, the Pool and ID form, which prints notes is in docs and root has 1 kid today. Under C it is b2, the inline form today's check accepts.\n\nCensus on the seed, from a type census over Core, Compiler, Jetpack, Tools, Examples and tests: 9,833 types. A type-level rule would refuse 9 of them, all in tests: 7 in tests/ui and 2 in tests/cases, with 238 uses. One generic type depends on its instance: ExpiringSecret in Core/Crypto/Vault.jet. Four Shared-reachable types hold function values, the sites part 3 covers.\n\nFive tests/ui files expect E0221 today on dev, plus the fixtures of Compiler/JetSema/Tests/SharedCycleParity.jet. Under A they keep E0221, since each closes a real strong loop, and w1, w2, w3 and w5 become new accepted tests.\n\nBeginner path. Write the program the natural way with weak parent links, and it builds. A strong loop gets E0221 with a path and three fixes.\n\nExpert path. #Policy(gc) for graphs that really are cyclic, !Mem.Gc for code that must not depend on the collector, and jet inspect for reach facts.\n\nOther options. B is the type-level rule the owner approved: a mutable Shared type may reach its own type only through Weak or an ID. Its frozen exception covers nothing, because freezing a value that holds a Shared is E1114. C keeps today's check unchanged. D collects every type that could form a loop, with no opt-in. E is Swift's and Rust's rule: no check, and loops leak unless broken by hand.\n\nB refuses the strong kids list of every tree, so trees move to Pool and ID, and a type check alone still misses loops through stored functions. C keeps four false refusals and one leak. D reverses GC-OPTIN1 and puts a collector under every program. E reverses CYCLE1=C's law that a beginner never leaks by accident.",
       "options": [
         {
           "key": "A",
@@ -193559,6 +193559,10 @@
           {
             "loss": "A close inside a collected loop runs at collection, not scope end.",
             "mitigation": "A weak link gives a prompt close, as probe s22 shows."
+          },
+          {
+            "loss": "Until D-FNVAL-WRITE1=A is built, a function value read back out of storage counts as reaching every cell.",
+            "mitigation": "Local lambdas and callback parameters keep exact facts; the rule relaxes when function types carry them."
           }
         ],
         "whyNot": [
@@ -193586,9 +193590,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0; BallotReview3 reviewed an earlier draft. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Part 3 carries reach facts in function types, but c04 shows D-FNVAL-WRITE1=A unbuilt, so A now states a sound interim rule. All 22 earlier probes match on a0.0.43, and the census drops an agent name."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh on probes/cycle2, probes/cycle (s19 to s22) and probes/cy; outputs are in each out6. Read D-SHARED-CYCLE1 and D-GC-OPTIN1 in Tower's history files. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-SHARED-CYCLE2/probes/cycle2, probes/cycle (s19 to s22) and probes/cy (c01 to c04). c04 is E0003 at fn(&Mobj). The lambda case is SharedCycles.jet:159. Read D-SHARED-CYCLE1, D-GC-OPTIN1 and D-FNVAL-WRITE1 in Tower.",
       "surface": {
         "gist": "Should Jet repair today's cycle check and build the opt-in collector, instead of a type-level rule?",
         "lesson": "Two shared values that hold each other strongly are never freed. Today's check refuses some safe programs and misses loops through stored functions. This vote decides whether to repair it or replace it with a rule on types.",
@@ -193712,7 +193716,122 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:48:00.063Z"
+      "created": "2026-11-10T03:48:00.063Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "A flow rule is harder to predict than a type rule.",
+          "attempts": [
+            "Publish the rule as a type check; that is B, which refuses every strong kids list.",
+            "Show the exact loop path and three fixes in E0221, and each function's reach facts on hover and in jet inspect."
+          ],
+          "result": "Reduced: the reason for every refusal is on screen."
+        },
+        {
+          "option": "A",
+          "loss": "Editing a library body could change a public reach fact.",
+          "attempts": [
+            "Check facts at publish time; that is later than the library's own check.",
+            "Record them in package.api under D-API-SURFACE1, so a change shows at the library's own jet check."
+          ],
+          "result": "Removed if D-API-SURFACE1 passes; otherwise the caller's build reports it."
+        },
+        {
+          "option": "A",
+          "loss": "Decoded data could be counted as unknown and refuse every decoded cache.",
+          "attempts": [
+            "Opt cache types into the collector.",
+            "Infer a decoder's reach facts like any function's: it builds new values, so its result reaches only cells it creates."
+          ],
+          "result": "Removed: cache[key] = decode(text) is accepted."
+        },
+        {
+          "option": "A",
+          "loss": "Function types cannot carry reach facts until D-FNVAL-WRITE1=A is built (c04).",
+          "attempts": [
+            "Refuse every stored function value in a shared cell.",
+            "Count only function values read back out of storage as reaching everything; local lambdas and callback parameters keep exact facts."
+          ],
+          "result": "Reduced to a narrow, sound case that relaxes when the facts land."
+        },
+        {
+          "option": "A",
+          "loss": "Reparenting a value into a place its old cell reaches is refused.",
+          "attempts": [
+            "Track moves out of a cell exactly; that needs whole-program flow.",
+            "Offer a weak link, an ID or the opt-in in E0221; jet fix writes the opt-in."
+          ],
+          "result": "Reduced to a one-line fix."
+        },
+        {
+          "option": "A",
+          "loss": "A close in a collected loop runs at collection, not scope end.",
+          "attempts": [
+            "Collect at every scope end; that costs every program.",
+            "Use a weak link for prompt close, as s22 prints end, then closed 7."
+          ],
+          "result": "Reduced; prompt close stays one weak link away."
+        },
+        {
+          "option": "B",
+          "loss": "Trees, lists and graphs move to Pool and ID, and stored functions are still missed.",
+          "attempts": [
+            "Add a frozen exception; it covers nothing, since freezing a value that holds a Shared is E1114.",
+            "Add a conservative rule for function-valued fields."
+          ],
+          "result": "Not removed: the strong kids list of every tree stays refused."
+        },
+        {
+          "option": "C",
+          "loss": "Four false refusals (w1, w2, w3, w5) and one leak (w7, s20).",
+          "attempts": [
+            "Document the workarounds.",
+            "Fix the lambda case at SharedCycles.jet:159 alone; the helper and loop refusals remain."
+          ],
+          "result": "Not removed without becoming A."
+        },
+        {
+          "option": "D",
+          "loss": "A collector runs under every program that could loop.",
+          "attempts": [
+            "Collect only types proven cyclic.",
+            "Skip collection under !Mem.Gc."
+          ],
+          "result": "Reverses D-GC-OPTIN1=A either way."
+        },
+        {
+          "option": "E",
+          "loss": "A beginner can leak by accident.",
+          "attempts": [
+            "Report leaks after each test with jet test --leaks.",
+            "Warn on strong back links."
+          ],
+          "result": "Reverses D-SHARED-CYCLE1=C's law."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Shared cycle check review: probes, build order and adversarial review",
+          "path": "Docs/audits/2026-11-10-shared-cycle-review.md",
+          "note": "All cycle2, cycle and cy probes match on a0.0.43; new c04 shows D-FNVAL-WRITE1=A unbuilt, so part 3 gets a sound interim rule; lambda-as-fresh at SharedCycles.jet:159; 5 tests/ui E0221 files on dev; Swift, CPython, PEP 442 and Rust sources."
+        },
+        {
+          "title": "PEP 442: safe object finalization",
+          "url": "https://peps.python.org/pep-0442/"
+        },
+        {
+          "title": "CPython garbage collector design",
+          "url": "https://raw.githubusercontent.com/python/cpython/main/InternalDocs/garbage_collector.md"
+        },
+        {
+          "title": "Swift automatic reference counting",
+          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/"
+        },
+        {
+          "title": "Rust std::rc::Weak",
+          "url": "https://doc.rust-lang.org/std/rc/struct.Weak.html"
+        }
+      ]
     },
     {
       "id": "D-SHARED-TYPE1",
@@ -199892,6 +200011,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:19:04.056Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SHARED-CYCLE2",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:16:08.778Z",
       "by": "Main",
