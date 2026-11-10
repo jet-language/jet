@@ -14972,6 +14972,141 @@
       "outcome": "B",
       "ratifiedAt": "2026-11-01",
       "retiredAt": "2026-11-09T18:18:24.781Z"
+    },
+    {
+      "id": "D-COMPUTE-AUTODIFF-SCOPE1",
+      "cardId": "c0n1stxi",
+      "group": "scope",
+      "title": "Cut or keep automatic differentiation in core.compute",
+      "situation": "Automatic differentiation is a compiler feature that turns a function into one that computes its slopes, the core tool for training machine-learning models. On 2026-09-30 the owner cut the AI and ML parts of Jet's Core library, naming autodiff among them. On 2026-10-04 the port instead kept autodiff as general math, pending owner review. Four ratified decisions still describe how autodiff works. We recommend cutting it, as the owner ruled, and marking those four decisions superseded.",
+      "gist": "Should core.compute's automatic differentiation (gradient, vjp, jvp) be cut as the owner ruled on 2026-09-30, or kept as general math?",
+      "lesson": "Automatic differentiation computes how a result changes when its inputs change. Training a model needs it, and so do some optimization and physics codes. In Jet it is not just a library: the compiler checks which functions can be differentiated and reports why one cannot. Keeping it means porting and maintaining that compiler rule during self-hosting.",
+      "explainer": "",
+      "story": "Ana reads that the owner cut Jet's ML library, then finds compute.gradient still exported and its example still in the feature corpus. She cannot tell whether autodiff is supported, deprecated or about to vanish. Whichever way this goes, the export list and the decisions should agree.",
+      "inWild": "# JAX: a function transform, like Jet's ratified design\nimport jax\ndloss = jax.grad(loss)\ngw = dloss(w, x)",
+      "detail": "Sources: card #3955 log. On 2026-09-30 the owner ruled: for core.compute, cut only the ML parts (autodiff, loss functions, optimizer steps, model serialization). Keep tensors, linear algebra, matmul, GPU compute, solve and tensor_codec. On 2026-10-04 at 21:50, Main's port ruling, pending owner review, ported tensor math, GPU compute, linear algebra, solvers and autodiff (Gradient/VJP/JVP). It marked only training-specific code CUT #3955.\n\nRatified decisions on autodiff: D-COMPUTE-AUTODIFF1=D (2026-07-10), D-AUTODIFF1=A (2026-08-05), D-COMPUTE-GRAD1=E and D-COMPUTE-VJP1=A (2026-08-08). Under A, each gets a supersededBy link to this ballot.\n\nCurrent tree: CoreCallRows.jet still exports gradient, vjp, jvp, VJPRun, mse_loss and sgd_step for core.compute. The compiler rule lives in Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet (434 lines, 31 autodiff references). Examples: Examples/features/tooling/compute_autodiff.jet and compute_ml.jet.\n\nUnder both options, mse_loss, sgd_step and any model serialization are cut, as both rulings agree. Tensor serialize and deserialize stay if they are the kept tensor_codec. Card #3955 is in Review; this vote decides what Review checks.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cut autodiff, as the owner ruled",
+          "detail": "Remove gradient, value_and_gradient, vjp, jvp and VJPRun from core.compute, with their compiler rules, examples and tests, in one cutover. Also remove the training helpers mse_loss and sgd_step. Tensors, linear algebra, matmul, GPU compute, solve and the tensor codec stay. The four autodiff decisions are marked superseded and can be reopened later.",
+          "code": "use core.compute as compute\n\nx :: compute.solve(a, b) ?? panic(\"solve\")      // kept\ng :: compute.gradient(loss, w, x)\n// error: `compute.gradient` was removed from core.compute (cut 2026-09-30)"
+        },
+        {
+          "key": "B",
+          "name": "Keep autodiff as general math",
+          "detail": "Keep gradient, value_and_gradient, vjp, jvp and VJPRun as general calculus, under the four ratified decisions. Cut only training-specific code: mse_loss, sgd_step, optimizers, training loops and model APIs. The compiler keeps and ports the differentiation checks.",
+          "code": "use core.compute as compute\n\n(dw, dx) :: compute.gradient(loss, w, x)          // kept\nstep :: compute.sgd_step(w, dw, 0.01)\n// error: `compute.sgd_step` was removed from core.compute"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Julia",
+          "note": "Julia keeps autodiff out of the standard library; packages such as Zygote and Enzyme provide it.",
+          "code": "using Zygote; gradient(loss, w)"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift built differentiable programming into its compiler, and it has stayed experimental for years.",
+          "code": "@differentiable(reverse) func loss(_ w: Float) -> Float"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The owner named autodiff explicitly in the 2026-09-30 cut. It is a compiler feature, so keeping it adds compiler work during the self-hosting push, and no compiler or Core code uses it.",
+        "tradeoff": "Optimization and physics users lose built-in gradients; the four ratified designs stay on record for a later return.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It overrides an explicit owner ruling and keeps a compiler-side feature with no user inside Jet itself."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "No built-in gradients for optimization or physics code.",
+            "mitigation": "Linear algebra and solve stay; the four designs remain on record and can be reopened as one card."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet cut automatic differentiation from core.compute, as the owner ruled, or keep it as general math?",
+        "lesson": "Automatic differentiation computes how a result changes when its inputs change. Model training needs it; some optimization and physics code does too. In Jet the compiler checks which functions can be differentiated, so keeping it means porting a compiler rule during self-hosting.",
+        "trio": {
+          "current": {
+            "note": "Still exported today, despite the 2026-09-30 cut.",
+            "code": "(dw, dx) :: compute.gradient(loss, w, x)\nrun :: compute.vjp(loss, w, x)\nstep :: compute.sgd_step(w, dw, 0.01)"
+          },
+          "wild": {
+            "lang": "Julia",
+            "note": "Julia leaves autodiff to packages, outside the standard library.",
+            "code": "using Zygote; gradient(loss, w)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cut autodiff",
+            "gist": "Remove gradient, vjp and jvp, as the owner ruled.",
+            "gains": [
+              "Matches the owner's ruling.",
+              "Less compiler code to port."
+            ],
+            "losses": [
+              "No built-in gradients for optimization or physics."
+            ],
+            "proposed": {
+              "code": "x :: compute.solve(a, b) ?? panic(\"solve\")   // kept\ng :: compute.gradient(loss, w, x)\n// error: `compute.gradient` was removed"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep autodiff",
+            "gist": "Keep it as general math; cut only training helpers.",
+            "gains": [
+              "Gradients stay available."
+            ],
+            "losses": [
+              "Overrides the owner's explicit cut.",
+              "Compiler rule must be ported."
+            ],
+            "proposed": {
+              "code": "(dw, dx) :: compute.gradient(loss, w, x)   // kept\nstep :: compute.sgd_step(w, dw, 0.01)\n// error: `compute.sgd_step` was removed"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The owner named autodiff in the cut. It needs compiler support, and nothing in Jet itself uses it.",
+          "gains": [
+            "Smaller compiler during self-hosting."
+          ],
+          "losses": [
+            {
+              "loss": "No built-in gradients.",
+              "mitigation": "Solve and linear algebra stay; the designs remain on record."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It overrides an explicit ruling for a feature Jet does not use."
+            }
+          ],
+          "tradeoff": "Fewer math tools for a leaner compiler now."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-17T19:30:40.274Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-10-17",
+      "retiredAt": "2026-11-10T02:13:18.217Z"
     }
   ]
 }

@@ -86058,6 +86058,178 @@
       "completedAt": "2026-11-06T20:12:03.604Z",
       "questions": [],
       "retiredAt": "2026-11-09T20:15:22.731Z"
+    },
+    {
+      "id": "c0n1stxi",
+      "num": 3955,
+      "title": "Cut the AI/ML/LLM/model Core library (owner ruling 2026-09-30)",
+      "body": "Owner direction in chat on 2026-09-30: Jet's toolchain must beat Zig, Go and Skip on build and check time, and both compilers should be slimmed with no behavior change. Owner rulings: self-hosting keeps priority; slimming cuts dead, duplicate and retired code only; the AI/ML/LLM/model Core library (training helpers such as mse_loss/sgd_step and compute_ml) is cut, while compute autodiff stays.\n\nClarified 2026-10-28: Jet's AI/ML direction is a Mojo-style hardware model, where new hardware (GPUs, accelerators) is supported by adding a library rather than changing the compiler. That work is tracked on its own card, not here. The old \"Cranelift for dev builds and rustc/LLVM for release\" line is gone: Rust is being removed (#4717) and Jet has its own code generator.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "All 7 criteria met (c2 re-met on ec3f46ada8); D-CUT-3955 removed as obsolete after the owner answered in chat. Closed by Main."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c3: Examples/features/tooling/compute_autodiff.jet -> Examples/Math/Compute/ComputeAutoDiff.jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 3 criteria from archived #2772, #2970: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Main verify 2026-11-04 at dev 2d8aea4762 with admitted compiler 7c67280960: criteria 1-2 hold (mse_loss/sgd_step only in Docs/audits and Docs/research; compute_ml.jet and its golden gone; ComputeModels.jet keeps the gradient checks). Criterion 3 FAILS: jet run, jet build and jet build --release of Examples/features/tooling/compute_autodiff.jet all exit 101 with 7 'ir.build unlowered: generic Core call' faults for core.compute.gradient (3 sites), jvp, vjp (2) and value_and_gradient (I2 internal error). Script and logs: $JET_SCRATCH_ROOT/lanes/Main/v3955/. Back to ready for the fix: lower the generic compute autodiff calls on every tier."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "c3 probe on base 190f826022 (2026-11-02): Examples/features/tooling/compute_autodiff.jet is ICE 101 on o0, o1 and o2 with 7 faults, all \"ir.build unlowered: generic Core call core.compute.{gradient x3, jvp, vjp x2, value_and_gradient}\". The native IR refuses every generic Core call it has no special lowering for (Compiler/JetIR/Source/BuildRoutes.jet:5009, ir_core_call), and these four members have no lowering: they differentiate a Jet closure, so they need a real IR differentiation transform (or a source-owned dual-number route), not a runtime symbol. The golden expected/tooling/compute_autodiff.out is unchanged. Sema keeps ComputeModels.jet checks."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-25 (patch row: criterion/count 1): CardClose-25: the last 8 mse_loss/sgd_step call sites (area-ai agent-eval probes) are rewritten with local helpers, and sgd_probe.jet is deleted. After the patch, rg -w mse_loss/sgd_step outside Docs/audits and Docs/research gives 0 hits on wave/13/tree. pkg/run.jet reproduces the archived loss curve 0.5 -> 0.0037189569727621593 exactly. C3 stays open: testkit golden compute_autodiff is KNOWN-FAILING on o0/o1/o2 under #4599 (compute.jvp E0112)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "2026-10-29 Main: landed ec3f46ada8 (KitSpeed-3955). Removed mse_loss and sgd_step from the Prelude, core surface tables, signatures, the structure registry, core-library.md, WebGPU JS, the conformance corpus, the compute fixtures and .jet/hardening-manifest.json (10 entries, JSON-preserving; that file's generator is dead). Deleted Examples/features/tooling/compute_ml.jet and its golden. Still open: C1 git grep still matches Tools/agent-eval area-ai evidence (historical) and the board itself. C2/C3: compute_autodiff and the compute fixtures already fail on base (E0112 compute.jvp; unlowered jet_compute_full route), with the same status before and after."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "2026-10-28 Main (dedup review): body refreshed. Dropped the stale Cranelift/rustc sentence; recorded the owner's clarification that AI/ML means Mojo-style hardware extensibility via libraries (separate card). Criteria unchanged."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: conflict for the owner: the 2026-09-30 cut of AI/ML from Core vs ratified D-COMPUTE-AUTODIFF-SCOPE1 (2026-10-17), which keeps autodiff as general math."
+        },
+        {
+          "at": "2026-10-17",
+          "by": "Main",
+          "text": "D-COMPUTE-AUTODIFF-SCOPE1=B ratified 2026-10-17: autodiff is KEPT as general calculus (gradient, value_and_gradient, vjp, jvp, VJPRun) under D-AUTODIFF1, D-COMPUTE-AUTODIFF1, D-COMPUTE-GRAD1 and D-COMPUTE-VJP1, which all stay in force. This replaces the 2026-09-30 chat ruling's 'cut autodiff' and confirms Main's 2026-10-04 port ruling. Only training-specific code is cut; in the registry that is mse_loss and sgd_step (CoreCallRows.jet:708-709). serialize/deserialize are the kept tensor codec. Plan: FOLLOWTHROUGH.md section 11."
+        },
+        {
+          "at": "2026-10-06",
+          "by": "Pip",
+          "text": "Landed on master 277033b7c (2026-10-06 04:05; merge of dev 595e0dca3, s2 batch + tonight's merges). Master gate green: fixed point stage2==stage3, lane-check, goldens 0 regressions (3 newly passing), proof list complete (pre-existing FAILs triaged: $JET_SCRATCH_ROOT/gate/595e0dca3/PROOFLIST-TRIAGE.md). Ready for criteria verification by a fresh reviewer."
+        },
+        {
+          "at": "2026-10-05",
+          "by": "Pip",
+          "text": "Port scope ruling (Main, 2026-10-04 21:50, pending owner review): in the Prelude/CoreLib port, general tensor math, GPU compute, linear algebra, solvers and autodiff (Gradient/VJP/JVP) are ported; only training/model-specific code (ML loss metrics like MSE, optimizers like SGD, training loops, model/LLM/inference APIs) is marked CUT #3955 and left unported; uncertain functions are ported with a REVIEW #3955 marker for the owner."
+        },
+        {
+          "at": "2026-09-30",
+          "by": "Pip",
+          "text": "Owner rulings in chat, 2026-09-30: cut the AI/ML/LLM/model Core library. For core.compute, cut only the ML parts (autodiff, loss functions, optimizer steps, model serialization) and keep tensors, linear algebra, matmul, GPU compute, solve and tensor_codec. Self-hosting scope: the compiler is phase 1; all Rust in the repo ports to Jet eventually."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-COMPUTE-AUTODIFF-SCOPE1=B: mse_loss and sgd_step are removed from core.compute in every home (CoreCallRows.jet rows and export names, CoreValueSignatures.jet, StructureRegistry.jet, core-library.md, the Rust prelude/runtime/sema rows, conformance corpus, compiler-proof obligations); `git grep -nw -e mse_loss -e sgd_step` outside Docs/audits and Docs/research is empty.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-25: the last 8 mse_loss/sgd_step call sites (area-ai agent-eval probes) are rewritten with local helpers, and sgd_probe.jet is deleted. After the patch, rg -w mse_loss/sgd_step outside Docs/audits and Docs/research gives 0 hits on wave/13/tree. pkg/run.jet reproduces the archived loss curve 0.5 -> 0.0037189569727621593 exactly. C3 stays open: testkit golden compute_autodiff is KNOWN-FAILING on o0/o1/o2 under #4599 (compute.jvp E0112). — landed on dev b1ebcb8a3b (wave 16+17; wave REPORT: goldens 1203/0 regressions, ui lost 0, cases lost 0)",
+          "at": "2026-10-31T23:49:52.530Z"
+        },
+        {
+          "n": 2,
+          "text": "Examples/features/tooling/compute_ml.jet (training-loop example) and its golden are deleted; the compute_extended and compute_parity fixtures drop only their mse/sgd lines and keep passing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ec3f46ada8 deletes Examples/features/tooling/compute_ml.jet and its golden; dev 2edea7b26a has neither file (git log --diff-filter=D).",
+          "at": "2026-11-07T01:06:49.524Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples/features/tooling/compute_autodiff.jet passes on every tier with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, second cut questions): moved to #6627 (automatic differentiation).",
+          "at": "2026-11-07T01:03:38.270Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "(replaces C1: Tower's store quotes this card, so Tools/tower is excluded) git grep -nw -e mse_loss -e sgd_step -- ':!Docs/audits' ':!Docs/research' ':!Tools/tower' is empty.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ec3f46ada8. Main on dev c9470eea21: git grep -nw -e mse_loss -e sgd_step -- ':!Docs/audits' ':!Docs/research' ':!Tools/tower' prints nothing (0 hits).",
+          "at": "2026-11-06T22:54:27.875Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #2772 c1, #2777 c1) The repro program passes with identical output on default jet run, --release, and jet build (and jet debug --replay where the defect is in replay). Proof: the command from the body exits 0 on each tier [precut audit: failing on 9c7ddf1359: C:compute_extended/autodiff_sparse_simd_and_streams_use_real_paths KNOWN-FAILING #3955 ICE ir.build unlowered generic Core call core.compute.gradient/jvp/vjp/value_and_gradient: autodiff is not built in Core, runtime or IR: int (known-failing #3955: ICE ir.build unlowered generic Core…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6627 (\"Automatic differentiation in core.compute\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:25:46.059Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "(was #2772 c3) The probe program(s) that surfaced the defect (area-ai-G1) pass on the affected tier. Proof: the probe command from its gaps.json [precut audit: failing on 9c7ddf1359: C:compute_extended/autodiff_sparse_simd_and_streams_use_real_paths KNOWN-FAILING #3955 ICE ir.build unlowered generic Core call core.compute.gradient/jvp/vjp/value_and_gradient: autodiff is not built in Core, runtime or IR: int (known-failing #3955: ICE ir.build unlowered generic Core…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6627 (\"Automatic differentiation in core.compute\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:25:47.246Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 7,
+          "text": "(was #2970 c1) Implementation-only closure: typed, versioned model packages use one canonical shared runtime with signature/artifact policy, provider execution, task cancellation and native and Web caller adapters. Original runtime, tier, golden and measurement requirements remain in #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): the model-package runtime is dropped; the AI/ML/model Core library is already cut on this card.",
+          "at": "2026-11-06T23:23:53.663Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:task"
+      ],
+      "parentId": "c00dtttx",
+      "needsAcceptance": false,
+      "created": "2026-09-30T16:14:24.984Z",
+      "updated": "2026-11-07T02:07:13.866Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "completedAt": "2026-11-07T02:07:13.866Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T02:13:18.216Z"
     }
   ]
 }
