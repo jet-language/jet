@@ -439,15 +439,33 @@ thread_rlimit_soft: fn(resource: I64) -> I64 {
 // more than a THREAD_STACK_SPACE_SHARE-th of the address space (at least
 // THREAD_STACK_FLOOR), so the carriers' and fibers' stacks leave the heap its
 // room, which one RLIMIT_STACK-sized stack per thread and fiber would not.
+// A floor set through jet_rt_thread_stack_floor_set raises the size before
+// that cap.
 thread_stack_bytes: fn() -> I64 {
     soft: thread_rlimit_soft(I64{3})
     bytes := if (soft <= I64{201326592}) -> I64{201326592} else if (soft > I64{8589934592}) -> I64{8589934592} else -> soft
+    if bytes < thread_stack_minimum -> bytes = thread_stack_minimum
     space: thread_rlimit_soft(I64{9})
     if (space > I64{0}) {
         share: (space / THREAD_STACK_SPACE_SHARE).bit_and(I64{-4096})
         if share < bytes -> bytes = if share > THREAD_STACK_FLOOR -> share else -> THREAD_STACK_FLOOR
     }
     bytes
+}
+
+// The least stack a runtime thread takes, 0 to 8 GiB; 0 until
+// jet_rt_thread_stack_floor_set sets it.
+thread_stack_minimum := I64{0}
+
+// core.sys.__thread_stack_floor(bytes): every runtime thread started after
+// this call (carriers, fibers' threads, Core threads) takes at least `bytes`
+// of stack, clamped to 0..8 GiB, still under the RLIMIT_AS share cap. The
+// compiler sets its own stages' floor this way before it starts any task.
+#Export(c) jet_rt_thread_stack_floor_set: fn(bytes: I64) {
+    floor: if (bytes < I64{0}) -> I64{0} else if (bytes > I64{8589934592}) -> I64{8589934592} else -> bytes
+    #Unsafe("one aligned word, set before the threads it sizes start; thread_spawn reads it once per thread") {
+        thread_stack_minimum = floor
+    }
 }
 
 // The smallest stack thread_spawn falls back to.
