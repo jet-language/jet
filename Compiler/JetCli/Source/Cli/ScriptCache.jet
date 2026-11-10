@@ -22,18 +22,17 @@
 // outside the snapshot, so the record would not name them.
 //
 // The record names the optimize level its program was built at. A plain run
-// compiles at the stock `none`, so the first run starts quickly. A rerun that
-// reuses a `none` program whose level no profile or flag chose also starts one
-// background build of the same sources at `full` (jet_cli_script_promote),
-// which keeps its program in the same slot. From then on a rerun runs the
-// `full` program. Every level means the same, so only speed changes.
+// compiles at the stock `none`, so it starts quickly. The level is one of the
+// build options that name the slot, so a run at another level
+// (`--optimize=full`, `-O2`, a profile) keeps its program in a slot of its own,
+// and a record whose level is not the run's (a `full` program an earlier
+// compiler kept in a plain run's slot) is a miss, so the run compiles again.
 use {
     script_crypto: core.crypto
     cli_files: core.files
-    cli_process: core.process
     cli_sys: core.sys
     cli_time: core.time
-    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept, x64_file_spawn_detached]
+    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
         JetDriverComptimeInputLog,
@@ -42,7 +41,7 @@ use {
         JetDriverVerbOutput,
         schema_cache_dir,
     ]
-    jet_foundation.[BuildOptionLayer, BuildOptions, build_options_key]
+    jet_foundation.[BuildOptions, build_options_key, build_options_value]
     jet_lexer.[TOKEN_EOF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, lex]
     jet_parser.[parse_source]
 }
@@ -58,15 +57,6 @@ JET_CLI_SCRIPT_RECORD_HEAD: 8
 // The toolchain rows of a record (jet_cli_script_toolchain), before its Core
 // rows.
 JET_CLI_SCRIPT_TOOLCHAIN_ROWS: 6
-
-// Set in the background `full` build of a reused `none` program to its slot:
-// that `jet run` compiles, keeps and exits without running the program
-// (Host.jet jet_cli_compile_promoted).
-JET_CLI_SCRIPT_PROMOTE_ENV: "JET_RUN_FULL_BUILD"
-
-// The level a background build keeps, and the level it replaces.
-JET_CLI_SCRIPT_LEVEL_FULL: "full"
-JET_CLI_SCRIPT_LEVEL_NONE: "none"
 
 // The most slots the cache holds; a keep past it removes the least recently
 // used ones.
@@ -384,20 +374,19 @@ jet_cli_script_record_program: fn(rows: [String]) -> String? Never! {
     Val(program)
 }
 
-// The program kept in `keep`'s slot for exactly its toolchain and sources,
-// to run with this invocation's authority; None when the slot holds no such
-// program, so the file compiles. The kept program runs from memory as a
-// compiled one does, or from the file `binary` (Host.jet jet_cli_run_step). A
-// program a concurrent keep removed before it was read is a miss too. A
-// reused `none` program whose level the options left at the stock starts its
-// `full` build (jet_cli_script_promote).
+// The program kept in `keep`'s slot for exactly its toolchain, sources and
+// optimize level, to run with this invocation's authority; None when the
+// slot holds no such program, so the file compiles. The kept program runs
+// from memory as a compiled one does, or from the file `binary` (Host.jet
+// jet_cli_run_step). A program a concurrent keep removed before it was read
+// is a miss too.
 jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, json: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep? {
     directory: jet_cli_script_cache_dir() ?? return None
     record: "{directory}/{keep.slot}.run"
     text: cli_files.read(record) ?? return None
     rows: text.split("\n").to_list()
     program: jet_cli_script_record_program(rows) ?? return None
-    if !jet_cli_script_record_matches(rows, keep) -> return None
+    if !jet_cli_script_record_matches(rows, keep) || rows[3] != build_options_value(options, "optimize") -> return None
     executable: x64_executable_kept("{directory}/{program}") ?? return None
     authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}}
     jet_cli_with_invocation(authority, invocation)
@@ -406,7 +395,6 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
     if stopped.move() == .Val(output) -> return Val(JetCLIRunStep.Output{output: output})
     jet_cli_script_used(record, text)
-    if rows[3] == JET_CLI_SCRIPT_LEVEL_NONE && jet_cli_script_level_stock(options) -> jet_cli_script_promote(directory, keep, file)
     Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color})
 }
 
@@ -421,93 +409,6 @@ jet_cli_script_record_matches: fn(rows: [String], keep: JetCLIScriptKeep) -> Boo
         if jet_cli_script_file_identity(stat) != named.tail -> return false
     }
     true
-}
-
-// Whether `options` leave the optimize level at its stock value: no profile
-// and no flag chose it, so a background build may raise it.
-jet_cli_script_level_stock: fn(options: BuildOptions) -> Bool Never! {
-    loop choice in options.values {
-        if choice.name == "optimize" -> return choice.layer == BuildOptionLayer.Stock
-    }
-    false
-}
-
-// The lock file of `slot`'s background `full` build in `directory`: a build
-// holds its lock while it runs; the file stays until the slot is trimmed.
-jet_cli_script_promote_lock: fn(directory: String, slot: String) -> String Never! {
-    "{directory}/{slot}.full"
-}
-
-// The file a failed background build of `slot` leaves, naming the sources it
-// failed on; a later build of the slot removes it once it keeps its program.
-jet_cli_script_promote_failed: fn(directory: String, slot: String) -> String Never! {
-    "{directory}/{slot}.failed"
-}
-
-// Start the background `full` build of `keep`'s sources: this `jet` again with
-// the same arguments and environment, with JET_CLI_SCRIPT_PROMOTE_ENV naming
-// the slot, as a daemon in the idle I/O class (x64_file_spawn_detached). The
-// start leaves this `jet` no thread and no child, so the reused program then
-// runs in its place as a compiled one does (Host.jet jet_cli_launch), with
-// its pid and its signals, and the build is never the program's child nor in
-// its terminal's process group. `jet run -` is given its entry `file` in
-// place of the `-`, as the build has no standard input to read. None starts
-// while a build holds the slot's lock, or after one failed on these sources.
-// A build that was killed leaves the `none` program in use, and a later rerun
-// starts it again.
-jet_cli_script_promote: fn(directory: String, keep: JetCLIScriptKeep, file: String) {
-    if cli_files.read(jet_cli_script_promote_failed(directory, keep.slot)) == .Ok(text) {
-        if text == keep.sources -> return
-    }
-    // `??` leaves on an error and on None, the lock a running build holds.
-    // The build takes the lock itself; one started twice finds it held, or
-    // finds the slot already holding the `full` program.
-    lock: cli_files.try_lock(jet_cli_script_promote_lock(directory, keep.slot)) ?? return
-    close(lock)
-    arguments := cli_process.args()
-    if jet_cli_stdin_source_at(arguments) == .Val(at) -> arguments[at] = file.copy()
-    jet: cli_sys.executable()
-    argv := [String]{jet}
-    loop argument in arguments -> argv.push(argument)
-    // A build that can't start leaves the `none` program in use.
-    _ := x64_file_spawn_detached(jet, argv, jet_cli_launch_env([JetCLIEnvVar]{JetCLIEnvVar{name: JET_CLI_SCRIPT_PROMOTE_ENV, value: keep.slot}}))
-}
-
-// The lock of `keep`'s background build when this process is that build and
-// the slot still holds the `none` program of exactly its sources and
-// toolchain; None leaves the build to stop.
-jet_cli_script_promotion: fn(keep: JetCLIScriptKeep) -> cli_files.FileLock? {
-    if cli_sys.get(JET_CLI_SCRIPT_PROMOTE_ENV) != Val(keep.slot) -> return None
-    directory: jet_cli_script_cache_dir() ?? return None
-    lock: cli_files.try_lock(jet_cli_script_promote_lock(directory, keep.slot)) ?? return None
-    if !jet_cli_script_promotable("{directory}/{keep.slot}.run", keep) {
-        close(lock)
-        return None
-    }
-    Val(lock)
-}
-
-// Whether `record` names the `none` program of exactly `keep`'s sources and
-// toolchain.
-jet_cli_script_promotable: fn(record: String, keep: JetCLIScriptKeep) -> Bool {
-    text: cli_files.read(record) ?? return false
-    rows: text.split("\n").to_list()
-    if jet_cli_script_record_program(rows) == None -> return false
-    jet_cli_script_record_matches(rows, keep) && rows[3] == JET_CLI_SCRIPT_LEVEL_NONE
-}
-
-// End the background build holding `lock`: a kept `full` program removes the
-// slot's failure file, any other end writes it naming the sources.
-jet_cli_script_promoted: fn(lock: &&cli_files.FileLock, keep: JetCLIScriptKeep, kept: Bool) {
-    if jet_cli_script_cache_dir() == .Val(directory) {
-        failed: jet_cli_script_promote_failed(directory, keep.slot)
-        if kept {
-            cli_files.remove(failed).drop("most builds never failed")
-        } else {
-            cli_files.write(failed, keep.sources).drop("an unwritten failure lets a later rerun try again")
-        }
-    }
-    close(lock.move())
 }
 
 // Mark the slot record `record`, whose text is `text`, as just used, so the
@@ -541,10 +442,9 @@ jet_cli_script_record_put: fn(record: String, text: String) -> Bool {
 }
 
 // Remove the least recently used slots of `directory` past
-// JET_CLI_SCRIPT_KEEP_MAX, each record before its program, its background
-// build's lock file and its failure file, so the cache stays bounded however
-// many entry files run. A run that read a removed record before its removal
-// finds the program gone and compiles again.
+// JET_CLI_SCRIPT_KEEP_MAX, each record before its program, so the cache
+// stays bounded however many entry files run. A run that read a removed
+// record before its removal finds the program gone and compiles again.
 jet_cli_script_trim: fn(directory: String) {
     listed: cli_files.list_dir(directory) ?? return
     names := [String]{}
@@ -574,10 +474,6 @@ jet_cli_script_trim: fn(directory: String) {
         if jet_cli_script_record_program(text.split("\n").to_list()) == .Val(program) {
             cli_files.remove("{directory}/{program}").drop("a run reads its program whole before it runs")
         }
-        // A slot name is hex, so the record's name before its dot.
-        slot: names[oldest].split(".").to_list()[0]
-        cli_files.remove(jet_cli_script_promote_lock(directory, slot)).drop("a slot never rerun had no background build")
-        cli_files.remove(jet_cli_script_promote_failed(directory, slot)).drop("most slots never had a failed build")
     }
 }
 

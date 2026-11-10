@@ -1,26 +1,41 @@
 # #5005: `jet inspect decisions` reports the optimizer as `jet build`
 # compiles the entry: the build option flags apply over the profile, so the
-# report never contradicts the build. Under the stock `inline: auto` the small
-# `bump` is spliced at its calls; `--inline=off` inlines nothing;
-# `--optimize=full` runs the O2 passes; a value outside the row is refused
-# as `jet build` refuses it. JET_OPT_DUMP names functions by a comma list
-# and dumps them on every tier, O0 (`--optimize=none`) included.
+# report never contradicts the build. The default build runs the O2 passes.
+# Under the stock `inline: auto` the small `bump` is spliced at its calls;
+# `--inline=off` inlines nothing; `--optimize=basic` and its short form `-O1`
+# run the O1 passes, and `-O1` against `--optimize=full`, in either order, is
+# refused as two disagreeing levels; a value outside the row is refused as
+# `jet build` refuses it. JET_OPT_DUMP names functions by a comma list and
+# dumps them on every tier, O0 (`--optimize=none`) included.
 fixture: fixtures/build_inline
 env: NO_COLOR=1
 step: jet inspect decisions main.jet
 cwd: open
 exit: 0
-stdout: ~ "O1:" # the default build runs the O1 passes
+stdout: ~ "O2:" # the default build runs the O2 passes
 stdout: !~ "inlined 0," # auto splices `bump` at its calls
 step: jet inspect decisions --inline=off main.jet
 cwd: open
 exit: 0
-stdout: ~ "O1:" # the flag keeps the profile's level
+stdout: ~ "O2:" # the flag keeps the build's level
 stdout: ~ "inlined 0," # off inlines nothing
-step: jet inspect decisions --optimize=full main.jet
+step: jet inspect decisions --optimize=basic main.jet
 cwd: open
 exit: 0
-stdout: ~ "O2:" # optimize: full runs the O2 passes
+stdout: ~ "O1:" # optimize: basic runs the O1 passes
+step: jet inspect decisions -O1 main.jet
+cwd: open
+exit: 0
+stdout: ~ "O1:" # -O1 is --optimize=basic
+step: jet inspect decisions -O1 --optimize=full main.jet
+cwd: open
+exit: 2
+stderr: ~ "E2104" # two levels that disagree
+stderr: ~ "`--optimize=basic` and `--optimize=full` disagree" # -O1 reads as --optimize=basic
+step: jet inspect decisions --optimize=full -O1 main.jet
+cwd: open
+exit: 2
+stderr: ~ "`--optimize=full` and `--optimize=basic` disagree" # the other order too
 step: jet inspect decisions --optimize=none main.jet
 cwd: open
 env: JET_OPT_DUMP=stage_one,bump

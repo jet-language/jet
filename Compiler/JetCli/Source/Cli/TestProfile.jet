@@ -279,7 +279,8 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     options.coverage = test_settings_on(settings, "diagnostic_coverage")
     if test_settings_time_limit_ms(settings) == .Val(limit) -> options.timeout = (limit + 999) /% 1000
     // `optimize` picks the golden tiers: none is o0 (`jet run`), basic o1
-    // (`jet build`), full o2 (`jet build --release`); unset runs all three.
+    // (`jet build --optimize=basic`), full o2 (`jet build --release`); unset
+    // runs all three.
     levels: test_settings_levels(settings)
     if levels.len() > 0 -> options.tiers = (loop level in levels -> if level == "none" -> "o0" else if level == "basic" -> "o1" else -> "o2")
     if chosen.baseline == .Val(ledger) {

@@ -12,8 +12,8 @@ Jet source
   -> IR builder -> slot IR, optimized in place
   -> x86-64 selection and object emission (Compiler/JetIR, Compiler/JetBackend), one runtime
        O0: machine code in memory (`jet run`, `jet dev`, comptime)
-       O1: executable file (`jet build` default)
-       O2: executable file (`--release`)
+       O1: executable file (`--optimize=basic`, `-O1`)
+       O2: executable file (`jet build` default, `--release`)
 ```
 
 This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).

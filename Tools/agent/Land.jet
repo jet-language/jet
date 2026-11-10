@@ -976,10 +976,11 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     if !passes.build -> return 0
 
     // `jet build Compiler` makes jet and, beside it, the runtime pack that jet
-    // lowers, behind the dev shell (Tools/agent/JetEnv.jet).
+    // lowers, behind the dev shell (Tools/agent/JetEnv.jet). It builds at
+    // `basic`, as the chain stages do (Chain.jet build_stage).
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
     build_report: "{out}/build-keep-going.tsv"
-    built: run_heavy(snap, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
+    built: run_heavy(snap, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--optimize=basic", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
     build_rows: report_rows(build_report)
     print("build rc={built} rows={build_rows}")
     show(census_rows(build_report, snap, package_dirs), 21)

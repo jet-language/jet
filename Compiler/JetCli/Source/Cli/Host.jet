@@ -1385,8 +1385,8 @@ jet_cli_native_report: fn(file: String, command: String, failure: JetCLINativeFa
 }
 
 // AGENTS.md I9: the backend level of the `optimize` build option: `none` is
-// O0 (the stock value of run, dev and test), `basic` O1 (stock for build),
-// `full` O2 (the stock `release` profile).
+// O0 (the stock value of run, dev and test, and the stock `debug` profile),
+// `basic` O1, `full` O2 (the stock value of build and the `release` profile).
 jet_cli_native_level: fn(options: BuildOptions) -> Int Never! {
     if build_options_value(options, "optimize") == {
         "full" -> 2
@@ -2013,7 +2013,6 @@ jet_cli_run_settled: fn(step: &&JetCLIRunStep) -> JetCLIRunStep {
 // A plain `jet run`: run the program kept for exactly these inputs, or
 // compile it, keep it, and run it (ScriptCache.jet).
 jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
-    if cli_sys.get(JET_CLI_SCRIPT_PROMOTE_ENV) != None -> return jet_cli_compile_promoted(file, source, json, options, threads, invocation)
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     held: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
     keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
@@ -2053,61 +2052,6 @@ jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, e
         _: jet_cli_script_keep(kept, executable, authority, build_options_value(options, "optimize"))
     }
     JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color}
-}
-
-// The background `full` build a reused `none` program started
-// (ScriptCache.jet jet_cli_script_promote): compile `file` as its plain run
-// did, with every option of that run (`--observe` and `--log` among them)
-// but the optimize level `full`, keep the program in that run's slot, and
-// end without running it or printing anything. Its threads run at the
-// lowest CPU priority.
-jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
-    jet_cli_script_lower_priority()
-    held: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, false)
-    keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
-    if keep == .Val(kept) {
-        lock: jet_cli_script_promotion(kept) ?? return jet_cli_promoted_end()
-        full: jet_cli_build_options_set(options, "optimize", JET_CLI_SCRIPT_LEVEL_FULL)
-        prepared: if held.move() == {
-            .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Program)
-            .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
-        }
-        kept_core: jet_cli_script_with_core(keep, prepared) ?? return jet_cli_promoted_end()
-        compiled := jet_cli_compile_executable(prepared, None, full, Val(kept_core.input_log.copy()), None, false)
-        stored := false
-        if compiled.move() == {
-            .Refused(_) -> {}
-            .Checked(result, inputs, snapshot) -> {
-                authority: jet_cli_application_authority(result, None)
-                built := jet_cli_run_build(file, source, false, full, false, json, invocation, result, inputs, snapshot)
-                if built.move() == {
-                    .Failed(_) -> {}
-                    .Image(executable, _) -> stored = jet_cli_script_keep(kept_core, executable, authority, JET_CLI_SCRIPT_LEVEL_FULL)
-                }
-            }
-        }
-        jet_cli_script_promoted(lock, kept, stored)
-    }
-    jet_cli_promoted_end()
-}
-
-// A background build ends with success and no output, whatever it kept.
-jet_cli_promoted_end: fn() -> JetCLIRunStep Never! {
-    JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
-}
-
-// Put every thread of this process at the lowest CPU priority, so a
-// background build takes only time no other program wants. Linux keeps the
-// priority per thread, and a thread starts with its creator's, so the
-// threads the compile starts later inherit it.
-jet_cli_script_lower_priority: fn() {
-    tasks: cli_files.list_dir("/proc/self/task") ?? return
-    loop task in tasks {
-        thread: Int.parse(task.name) ?? next
-        #Unsafe("posix setpriority: the build lowers only its own threads, never raising one") {
-            cli_sys.setpriority(thread, 19).drop("a thread left at its priority only finishes sooner")
-        }
-    }
 }
 
 jet_cli_native_test_unrun_check_report: fn() -> String Never! {

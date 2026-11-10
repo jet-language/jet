@@ -20,9 +20,8 @@
 // 3. Enter: a machine-code executor (LOADER_EXECUTOR) makes the plan's calls,
 //    switches to the new stack and jumps to the image's entry. In process
 //    (x64_image_exec) it needs a single-threaded jet; after a fork
-//    (x64_image_spawn, and x64_file_spawn_detached's start of a file) the
-//    child runs only the executor, never Jet code, so no lock another jet
-//    thread held at the fork matters.
+//    (x64_image_spawn) the child runs only the executor, never Jet code, so
+//    no lock another jet thread held at the fork matters.
 //
 // Every failure before the executor runs returns its reason; the caller then
 // writes the same image to a file and executes it (x64_file_exec): when
@@ -1414,83 +1413,4 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     }
     _ := os_unmap(block, size)
     "execve of {path} failed (errno {-result})"
-}
-
-// Start the executable file `path` with `argv` (argv[0] included) and the
-// environment `env` (NAME=value rows; None: this process's own, as it is)
-// as a daemon: not this process's child, in a session of its own, so no
-// signal of this process's terminal reaches it, its standard streams on
-// /dev/null and no other descriptor open, in the idle I/O class. A forked
-// child starts it with a second fork (a kind-2 record, LOADER_EXECUTOR) and
-// ends at once, and this process reaps that child before returning: the
-// start leaves this process no thread and no child, so it may still become
-// a program in place (x64_image_exec). Both forked processes run only the
-// executor, never Jet code. "" once the first child ended (a daemon whose
-// execve fails ends with status 127), else why nothing started.
-x64_file_spawn_detached: fn(path: String, argv: [String], env: [String]?) -> String {
-    environ: loader_environ(env) ?? return "couldn't read /proc/self/environ"
-    starts: loader_environ_starts(environ)
-    texts := [String]{path, "/dev/null"}
-    loop argument in argv -> texts.push(argument.copy())
-    bytes := 8 * (argv.len() + starts.len() + 2) + 16 + environ.len()
-    loop text in texts -> bytes += text.bytes().len() + 1
-    size: os_page_round(bytes)
-    block: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(block) -> return "mapping execve's arguments failed (errno {-block})"
-    at := loader_put_bytes(block + size, environ)
-    env_start: at
-    addresses := [Int]{}
-    loop text in texts {
-        at = loader_put_text(at, text)
-        addresses.push(at)
-    }
-    args: block + 16
-    envp: args + 8 * (argv.len() + 1)
-    rows := [Int]{}
-    loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
-    loader_record(rows, OS_SYS_SETSID, 0, 0, 0, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 2)
-    // /dev/null opens as descriptor 0, the lowest free one once 0 is closed.
-    loader_record(rows, OS_SYS_CLOSE, 0, 0, 0, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_OPENAT, OS_AT_FDCWD, addresses[1], OS_O_RDWR, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_DUP2, 0, 1, 0, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_DUP2, 0, 2, 0, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_CLOSE_RANGE, 3, 0xffffffff, 0, 0, 0, 0, 0)
-    // ioprio_set(IOPRIO_WHO_PROCESS, itself, IOPRIO_CLASS_IDLE << IOPRIO_CLASS_SHIFT)
-    loader_record(rows, OS_SYS_IOPRIO_SET, 1, 0, 3 << 13, 0, 0, 0, 0)
-    // execve keeps the signal mask; the daemon starts with none blocked.
-    loader_record(rows, OS_SYS_RT_SIGPROCMASK, 2, block, 0, 8, 0, 0, 0)
-    loader_record(rows, OS_SYS_EXECVE, addresses[0], args, envp, 0, 0, 0, 0)
-    loader_record(rows, OS_SYS_EXIT_GROUP, 127, 0, 0, 0, 0, 0, 0)
-    // The record block: count, records, then the stack and entry words the
-    // executor never reaches.
-    plan_size: os_page_round((rows.len() + 3) * 8)
-    plan: os_map(plan_size, OS_PROT_READ + OS_PROT_WRITE)
-    executor: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
-    protected: if { os_failed(plan) || os_failed(executor) -> 0 else -> loader_executor_fill(executor) }
-    failure := if {
-        os_failed(plan) -> "mapping the start plan failed (errno {-plan})"
-        os_failed(executor) -> "mapping the executor failed (errno {-executor})"
-        os_failed(protected) -> "executable memory was refused (errno {-protected})"
-        else -> ""
-    }
-    if failure == "" {
-        pid := 0
-        #Unsafe("the arrays and the record block are this function's fresh mappings; the executor's first record forks, the child runs only the executor, the parent returns here") {
-            loop k in 0..<argv.len() { os_store_word(args + 8 * k, addresses[2 + k]) }
-            os_store_word(args + 8 * argv.len(), 0)
-            loop (k, start) in starts { os_store_word(envp + 8 * k, env_start + start) }
-            os_store_word(envp + 8 * starts.len(), 0)
-            os_store_word(plan, rows.len() /% 8)
-            loop (k, word) in rows { os_store_word(plan + 8 + k * 8, word) }
-            pid = os_call_address(executor, plan)
-        }
-        // The intermediate exits at once; reap it so it leaves no zombie.
-        failure = if { os_failed(pid) -> "fork failed (errno {-pid})" else -> "" }
-        if failure == "" -> _ := x64_process_wait(pid)
-    }
-    if !os_failed(plan) -> _ := os_unmap(plan, plan_size)
-    if !os_failed(executor) -> _ := os_unmap(executor, OS_PAGE_SIZE)
-    _ := os_unmap(block, size)
-    failure
 }

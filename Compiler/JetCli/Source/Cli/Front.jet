@@ -39,6 +39,7 @@ use {
         build_option_row,
         build_options_resolve,
         build_options_stock,
+        build_options_value,
         JET_CLI_COMMANDS,
         JET_CLI_HANDLERS,
         JET_COMPILER_SERVICE_VERB,
@@ -616,12 +617,33 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
     None
 }
 
-// E2102 for a flag no registry row has. A C compiler's level word (`-O1`)
-// points at the `--optimize` value it names.
+// Does `command` read the short level flags as `--optimize`? Every command
+// does but one that validates its own flags and takes no `--optimize`.
+jet_cli_takes_level_words: fn(command: String) -> Bool Never! {
+    if !JET_CLI_OWNS_FLAGS.contains(command) -> return true
+    spec: jet_cli_flag_spec("--optimize") ?? return false
+    jet_cli_flag_takes(spec, command)
+}
+
+// `argv` with each short level flag `-O<n>` among its first `end` words
+// written as its `--optimize=<value>` (AGENTS.md I9), so precedence, pins,
+// conflicts and the cache identity are the long flag's. A separate-value
+// flag's value word stays as written.
+jet_cli_level_words: fn(argv: [String], end: Int) -> [String] Never! {
+    words := [String]{}
+    value_next := false
+    loop (index, word) in argv {
+        spelling: if index < end && !value_next -> build_option_level_spelling(word) else -> String?{None}
+        value_next = index < end && !value_next && JET_CLI_SEPARATE_VALUE_FLAGS.contains(word)
+        words.push(spelling ?? word.copy())
+    }
+    words
+}
+
+// E2102 for a flag no registry row has.
 jet_cli_unknown_flag: fn(head: String, command: String, color: Bool) -> JetCLIPlan Never! {
     what: "`{head}` isn't a flag jet understands"
     why: "flags before `--` belong to jet; everything after `--` is forwarded to your program"
-    if build_option_level_spelling(head) == .Val(spelling) -> return jet_cli_fail("E2102", what, why, "write `{spelling}`: jet picks the optimization level with `--optimize`", color, JET_DRIVER_EXIT_USAGE)
     program: command == "run" || command == "dev" || command == "test"
     fix := ""
     if jet_cli_closest_flag(head) == .Val(close) {
@@ -1226,7 +1248,7 @@ jet_cli_profile_name: fn(jet_argv: [String]) -> String Never! {
 // selected profile's fields, then the flags (`--optimize=full`); a package
 // build adds its `build: fn` layer between the two (jet_cli_build_package). A
 // profile `package.jet` declares replaces the stock profile of that name:
-// `release` is `optimize: full, debug_info: split`, `debug` the stock values.
+// `release` is `optimize: full, debug_info: split`, `debug` `optimize: none`.
 // `os_web` builds for the browser, as `--target web` does (the web preview of
 // `jet dev`).
 jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool, os_web: Bool{false}) -[FS, Env]> JetCLIBuildOptions Never! {
@@ -1269,8 +1291,12 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         } else {
             if {
                 name == "release" -> written.extend(jet_cli_stock_release_choices())
-                // The stock `debug` profile is the stock values; the front end keeps its `dev` profile.
-                name == "debug" -> profile = ""
+                // The stock `debug` profile is `optimize: none` over the stock values; the front end
+                // keeps its `dev` profile.
+                name == "debug" -> {
+                    written.extend(jet_cli_stock_debug_choices())
+                    profile = ""
+                }
                 name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
                 // The registered E1219 row is the unknown-profile report; its holes name the profile.
                 // An undeclared profile name is a user problem (exit 1), not a malformed flag (exit 2).
@@ -1283,8 +1309,10 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
     }
     loop flag in flags -> written.push(flag)
     // `jet build --target web` is the web build (BuildWeb.jet), and so is the
-    // web preview of `jet dev`: its OS is web.
+    // web preview of `jet dev`: its OS is web. The preview is a `jet dev`
+    // build, so its stock level is dev's (AGENTS.md I9), under any profile.
     web := os_web
+    if os_web -> written.insert(0, BuildOptionChoice{name: "optimize", value: build_options_value(build_options_stock("dev"), "optimize"), layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false})
     if jet_cli_target_flag(jet_argv) == .Named(target) {
         if target == "web" -> web = true
     }
@@ -1369,6 +1397,11 @@ jet_cli_stock_release_choices: fn() -> [BuildOptionChoice] Never! {
         {name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: site.copy(), pinned: false},
         {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.copy(), pinned: false},
     }
+}
+
+// The stock `debug` profile: `optimize: none`, the level of `jet run`.
+jet_cli_stock_debug_choices: fn() -> [BuildOptionChoice] Never! {
+    [BuildOptionChoice]{{name: "optimize", value: "none", layer: BuildOptionLayer.Profile, written: "optimize: none", site: "of the stock `debug` profile", pinned: false}}
 }
 
 // `plan` (a build, package build, or run) with the build options its entry
@@ -1623,32 +1656,36 @@ jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
 // `jet {command} <file>` of a C or C++ file (#6686): its plan at the
 // optimize level the flags select, or the refusal of a flag it doesn't take.
 // It takes `--release` (O2) and `--optimize=none|basic|full` (O0, O1, O2)
-// over the command's stock level (run O0, build O1, as for Jet), and the
-// output flags. Any other is refused, never ignored.
+// over the command's stock level (run O0, build O2, as for Jet), and the
+// output flags. An explicit level wins over `--release`; two that disagree
+// are refused, as are the other flags, never ignored.
 jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: String, command: String, program_args: [String], color: Bool) -> JetCLIPlan Never! {
-    level := if command == "run" -> 0 else -> 1
+    level := jet_cli_native_level(build_options_stock(command))
     named: if language == "c" -> "C" else -> "C++"
+    release := false
+    explicit := ""
     loop argument in jet_argv {
         if argument == "--" -> break
         if !argument.starts_with("-") || argument == "-" -> next
         head: argument.split("=").to_list()[0]
         if head == {
-            "--release" -> level = 2
+            "--release" -> release = true
             "--optimize" -> {}
             "--color" | "--no-color" | "--quiet" | "-q" -> {}
             else -> return jet_cli_fail("E2104", "`jet {command} {file}` compiles {named}, which takes no `{head}`", jet_cli_why("E2104"), "remove `{head}`; a C or C++ file takes `--release` or `--optimize=none|basic|full`", color, JET_DRIVER_EXIT_USAGE)
         }
-        if head == "--optimize" {
-            if argument == "--optimize=none" {
-                level = 0
-            } else if argument == "--optimize=basic" {
-                level = 1
-            } else if argument == "--optimize=full" {
-                level = 2
-            } else {
-                return jet_cli_fail("E2104", "`{argument}` isn't an optimize level", jet_cli_why("E2104"), "write `--optimize=none`, `--optimize=basic` or `--optimize=full`", color, JET_DRIVER_EXIT_USAGE)
-            }
+        if head != "--optimize" -> next
+        if argument != "--optimize=none" && argument != "--optimize=basic" && argument != "--optimize=full" {
+            return jet_cli_fail("E2104", "`{argument}` isn't an optimize level", jet_cli_why("E2104"), "write `--optimize=none`, `--optimize=basic` or `--optimize=full`", color, JET_DRIVER_EXIT_USAGE)
         }
+        if explicit != "" && explicit != argument -> return jet_cli_fail("E2104", "`{explicit}` and `{argument}` disagree", jet_cli_why("E2104"), "pass `--optimize` once", color, JET_DRIVER_EXIT_USAGE)
+        explicit = argument.copy()
+    }
+    if {
+        explicit == "--optimize=none" -> level = 0
+        explicit == "--optimize=basic" -> level = 1
+        explicit == "--optimize=full" || release -> level = 2
+        else -> {}
     }
     JetCLIPlan.NativeSource{file: file, level: level, run: command == "run", program_args: program_args, color: color}
 }
@@ -2437,7 +2474,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     // every word after the file of the `jet <file>` shorthand (a `--` right
     // after that file still only separates).
     separator: jet_cli_owned_end(argv)
-    jet_argv: jet_cli_prefix(argv, separator)
+    jet_argv := jet_cli_prefix(argv, separator)
     passthrough := [String]?{None}
     if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, if argv[separator] == "--" -> separator + 1 else -> separator))
     loop (index, argument) in jet_argv {
@@ -2462,6 +2499,14 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     command: args[0]
     if !jet_cli_is_builtin(command) && !command.ends_with(".jet") {
         if jet_cli_project_job(argv, command, color, quiet, verbose) == .Val(plan) -> return plan
+    }
+    // `-O0`, `-O1` and `-O2` are `--optimize=none|basic|full` from here on, on
+    // every command but one that validates its own flags and takes no
+    // `--optimize` (a job's or the program's words came before or stay past
+    // the separator).
+    if jet_cli_takes_level_words(command) {
+        argv = jet_cli_level_words(argv, separator)
+        jet_argv = jet_cli_prefix(argv, separator)
     }
 
     // `--lib` and `--output` belong to the commands that produce those artifacts.

@@ -267,14 +267,15 @@ jet_cli_word_group: fn(word: String) -> String? Never! {
 }
 
 // Does the registry row of `spec` let `command` take it? Unscoped flags go
-// with every command; a short form (`-u`) goes where its long form goes. A
+// with every command; a short form (`-u`, `-O1`) goes where its long form
+// (`--update-snapshots`, `--optimize=basic`) goes. A
 // group's action (`jet inspect digest`, dispatched as `digest`) takes its
 // group's flags, and a group that keeps its own word (`jet inspect expand`,
 // dispatched as `inspect`) takes its actions' flags.
 jet_cli_flag_takes: fn(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
     short_prefix: "Short form of "
     if spec.help.starts_with(short_prefix) {
-        long: spec.help.slice(short_prefix.len()..<spec.help.len())
+        long: spec.help.slice(short_prefix.len()..<spec.help.len()).split("=").to_list()[0]
         loop other in JET_CLI_FLAGS {
             if other.long == long -> return jet_cli_flag_takes(other, command)
         }

@@ -901,7 +901,8 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
 } }
 
 // Every jet flag: the fixed rows, with one row per build option
-// (BuildOptions.jet) after `--profile` and one per `jet test` setting
+// (BuildOptions.jet) after `--profile`, the short level flags `-O0`, `-O1`
+// and `-O2` after `--optimize`, and one per `jet test` setting
 // (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
 // fixed row shared with other commands keeps that row; one whose flag is a
 // build option's (`--optimize`) shares that option's row, which says both.
@@ -917,6 +918,8 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
                 help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
                 rows.push(JetCLIFlagSpec{long: flag, help: help, value: jet_cli_build_option_value(option)})
+                if option.name != "optimize" -> next
+                loop (level, value) in option.values -> rows.push(JetCLIFlagSpec{long: "-O{level}", help: "Short form of {flag}={value}"})
             }
         }
         if spec.long != "--explain-partition" -> next
@@ -961,6 +964,14 @@ jet_cli_test_setting_of_flag: fn(flag: String) -> TestSettingRow? Never! {
     rows: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
     assert_eq(rows.len(), 1)
     assert(rows[0].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
+}
+
+#Test("-O0, -O1 and -O2 are the short forms of the three optimize levels") {
+    rows: JET_CLI_FLAGS.filter(row -> row.long.starts_with("-O"))
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].help, "Short form of --optimize=none")
+    assert_eq(rows[1].help, "Short form of --optimize=basic")
+    assert_eq(rows[2].help, "Short form of --optimize=full")
 }
 
 // A setting's help line: what it does and its three spellings.

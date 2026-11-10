@@ -7,10 +7,10 @@
 # a call, and the program prints the same values on every tier.
 fixture: small_results_live_in_registers_and_large_values_move_by_address.fixture
 env: NO_COLOR=1
-step: jet inspect decisions main.jet
+step: jet inspect decisions --optimize=basic main.jet
 env: JET_OPT_DUMP=run
 exit: 0
-stdout: ~ "O1:" # the default build runs the O1 passes
+stdout: ~ "O1:" # optimize: basic runs the O1 passes
 stdout: ~ "scalar-replaced 2," # divmod's and quad's tuples
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied

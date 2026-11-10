@@ -245,33 +245,32 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
 }
 
 // `jet inspect decisions` up to the projection: the profile name (`--release`
-// wins over `--profile`, default `debug`), which selects the optimization
-// level, the build option flags over it (`--inline=off`), the scope name,
-// and the resolved entry.
+// wins over `--profile`, default `debug`, the name a plain `jet build`
+// compiles under), which with the build option flags over it (`--inline=off`)
+// selects the optimization level, the scope name, and the resolved entry.
 jet_cli_inspect_decisions: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     plane: request.plane
-    profile := "debug"
+    chosen := ""
     release := false
     index := 0
     loop index < request.options.len() {
         option: request.options[index]
         if option == "--release" -> release = true
-        if option.starts_with("--profile=") -> profile = option.slice(10..<option.len())
+        if option.starts_with("--profile=") -> chosen = option.slice(10..<option.len())
         if option == "--profile" && index + 1 < request.options.len() {
-            profile = request.options[index + 1]
+            chosen = request.options[index + 1]
             index += 1
         }
         index += 1
     }
-    if release -> profile = "release"
-    release_build := false
+    if release -> chosen = "release"
+    profile: if chosen == "" -> "debug" else -> chosen.copy()
     if profile == {
-        "release" | "hardened" -> release_build = true
-        "debug" | "ci" -> {}
+        "release" | "hardened" | "debug" | "ci" -> {}
         else -> return jet_cli_not_ported("inspect {plane} --profile {profile}", color)
     }
     build := BuildOptions?{None}
-    if jet_cli_decisions_options(request.options, release_build) == {
+    if jet_cli_decisions_options(request.options, chosen) == {
         .Refused(code, what, fix) -> return jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)
         .Resolved(options, _) -> build = Val(options)
     }

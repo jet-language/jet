@@ -44,7 +44,8 @@ BuildOptionRow: struct {
 
 JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
-    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "basic", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
+    // `jet build` is full; `jet run`, `jet dev` and `jet test` are none.
+    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "full", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
     // A failed list bounds check: fatal stops the program (the stock), report
     // writes the failure to stderr and goes on with the access unchecked, off
     // drops the check.
@@ -266,7 +267,7 @@ build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     None
 }
 
-// The `--optimize=<value>` spelling of a C compiler's level word `-O<n>`: the
+// The `--optimize=<value>` spelling of the short level flag `-O<n>`: the
 // optimize row's values are the levels in order (none is O0), so `-O1` is
 // `--optimize=basic`. None for any other word, which includes a level past
 // the last value.

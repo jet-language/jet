@@ -3985,7 +3985,7 @@ crossing the provider boundary.
 
 The list adapters `para_map`, `para_filter`, `para_partition` and `para_fold`
 run their callback on the task scheduler's pool on every tier: `jet run`
-and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
+and `jet dev` (O0), `jet build --optimize=basic` (O1) and `jet build` (O2) all call the one
 runtime kernel, `jet_rt_native_para_walk` in
 [`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). Each
 worker runs on a task fiber, so the pool's carrier threads (by default one

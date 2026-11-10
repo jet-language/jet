@@ -1,12 +1,11 @@
 // `jet run` keeps its program (Compiler/JetCli/Source/Cli/ScriptCache.jet).
-// A rerun of a `none` program reuses it with identical output and starts the
-// background `full` build that replaces it in the same slot; a rerun of the
-// `full` program reuses it, and marks it used only when its last mark is past
-// the ten-minute use grain. A source edit, a Core change and a compiler
-// change each compile again and replace it. The cache holds 64
-// programs and drops the least recently run one. Runs against copies: the
-// compiler (beside its jet-runtime), a toolchain root holding only Core, and
-// its own XDG caches.
+// A rerun reuses the `none` program with identical output, and marks it used
+// only when its last mark is past the ten-minute use grain; no rerun builds
+// it again at another level. A source edit, a Core change and a compiler
+// change each compile again and replace it. A run at `-O2` keeps its `full`
+// program in a slot of its own. The cache holds 64 programs and drops the
+// least recently run one. Runs against copies: the compiler (beside its
+// jet-runtime), a toolchain root holding only Core, and its own XDG caches.
 // Usage: jet run Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet -- <jet> <scratch>
 // Run from the repository root: Core is copied from the working directory.
 // It prints one line, the CompilerRegistries row's exact verdict.
@@ -52,16 +51,23 @@ Slot: struct {
     level: String
 }
 
-run_raw: fn(keep: Keep, target: String, xdg: String) -> Ran {
-    receipt: process.cmd([String]{keep.jet.copy(), "run", target.copy()}).cwd(keep.work.copy()).env("JET_TOOLCHAIN_ROOT", keep.root.copy()).env("XDG_CACHE_HOME", xdg.copy()).env("NO_COLOR", "1").run() ?? fail("jet run failed: {err}")
+run_raw: fn(keep: Keep, flags: [String], target: String, xdg: String) -> Ran {
+    argv := [String]{keep.jet.copy(), "run"}
+    loop flag in flags -> argv.push(flag.copy())
+    argv.push(target.copy())
+    receipt: process.cmd(argv).cwd(keep.work.copy()).env("JET_TOOLCHAIN_ROOT", keep.root.copy()).env("XDG_CACHE_HOME", xdg.copy()).env("NO_COLOR", "1").run() ?? fail("jet run failed: {err}")
     signal: receipt.signal ?? 0
     Ran{code: receipt.code, signal: signal, output: receipt.output.copy(), errors: receipt.errors.copy()}
 }
 
-run_ok: fn(keep: Keep, target: String, xdg: String) -> String {
-    ran: run_raw(keep, target, xdg)
+run_at: fn(keep: Keep, flags: [String], target: String, xdg: String) -> String {
+    ran: run_raw(keep, flags, target, xdg)
     if ran.code != 0 || ran.signal != 0 -> fail("jet run failed: code={ran.code} signal={ran.signal}\n{ran.output}{ran.errors}")
     ran.output.copy()
+}
+
+run_ok: fn(keep: Keep, target: String, xdg: String) -> String {
+    run_at(keep, [String]{}, target, xdg)
 }
 
 check: fn(step: String, output: String, expected: String) {
@@ -77,10 +83,9 @@ names_in: fn(directory: String) -> [String] {
     names
 }
 
-// A kept program's file: not a slot record, nor a background build's lock or
-// failure file.
+// A kept program's file: anything but a slot record.
 program_file: fn(name: String) -> Bool {
-    !name.ends_with(".run") && !name.ends_with(".full") && !name.ends_with(".failed")
+    !name.ends_with(".run")
 }
 
 slot: fn(kept: String) -> Slot {
@@ -98,45 +103,17 @@ slot: fn(kept: String) -> Slot {
     Slot{record: record.copy(), text: text.copy(), secs: modified.secs, nanos: modified.nanos, program: program.copy(), sources: lines[2].copy(), level: lines[3].copy()}
 }
 
-// How many slot records in `kept` name a `full` program.
-full_records: fn(kept: String) -> Int {
-    full := 0
+// The optimize level of each slot record in `kept`, sorted.
+levels: fn(kept: String) -> [String] {
+    found := [String]{}
     loop name in names_in(kept).filter(name -> name.ends_with(".run")) {
         text: files.read("{kept}/{name}") ?? fail("cannot read {name}: {err}")
         lines: text.split("\n").to_list()
-        if lines.len() > 3 && lines[3] == "full" -> full += 1
+        if lines.len() < 4 -> fail("slot record {name} names no program")
+        found.push(lines[3].copy())
     }
-    full
-}
-
-// Wait until `full` slot records in `kept` name a `full` program and no
-// background build holds its lock file. A failure file is a failed build.
-settle: fn(kept: String, step: String, full: Int) {
-    waits := 0
-    loop {
-        names: names_in(kept)
-        loop name in names.filter(name -> name.ends_with(".failed")) {
-            text: files.read("{kept}/{name}") ?? ""
-            fail("{step}: the background full build failed: {text}")
-        }
-        held := 0
-        loop name in names.filter(name -> name.ends_with(".full")) {
-            lock: "{kept}/{name}"
-            if files.try_lock(lock.copy()) == {
-                .Ok(found) -> {
-                    if found == {
-                        .Val(free) -> close(free)
-                        .None -> held += 1
-                    }
-                }
-                .Err(err) -> fail("{step}: cannot test the lock {lock}: {err}")
-            }
-        }
-        if held == 0 && full_records(kept) >= full -> return
-        if waits >= 1200 -> fail("{step}: no full program after 10 minutes")
-        waits += 1
-        time.sleep(500ms)
-    }
+    found.sort()
+    found
 }
 
 // Reused: the same record naming the same program, left as it was: a record
@@ -149,12 +126,16 @@ reused: fn(kept: String, step: String, before: Slot) -> Slot {
     after
 }
 
+// Set the mark of the slot record `record` to `secs` seconds.
+age: fn(record: String, secs: Int) {
+    #Unsafe("the test owns the slot record it ages") {
+        sys.utime(record.copy(), secs, secs) ?? fail("cannot age {record}: {err}")
+    }
+}
+
 // `before`'s record with its mark set back eleven minutes, past the use grain.
 aged: fn(kept: String, before: Slot) -> Slot {
-    back: before.secs - 660
-    #Unsafe("the test owns the slot record it ages") {
-        sys.utime(before.record.copy(), back, back) ?? fail("cannot age {before.record}: {err}")
-    }
+    age(before.record, before.secs - 660)
     slot(kept)
 }
 
@@ -165,17 +146,6 @@ marked: fn(kept: String, step: String, before: Slot) -> Slot {
     if after.text != before.text -> fail("{step}: the kept program was replaced, not reused")
     later: after.secs > before.secs || (after.secs == before.secs && after.nanos > before.nanos)
     if !later -> fail("{step}: the reused record, last marked eleven minutes ago, was not marked used")
-    after
-}
-
-// Promoted: the rerun of `before`'s `none` program started the background
-// build, which kept the `full` program of the same sources in its place.
-promoted: fn(kept: String, step: String, before: Slot) -> Slot {
-    if before.level != "none" -> fail("{step}: the reused program was built at {before.level}, not none")
-    settle(kept, step, 1)
-    after: slot(kept)
-    if after.level != "full" || after.program == before.program -> fail("{step}: the background build kept no full program; the slot holds {after.program} at {after.level}")
-    if after.sources != before.sources -> fail("{step}: the full program names other sources")
     after
 }
 
@@ -202,12 +172,10 @@ greeting: fn(word: String) -> String {
     "run: fn() {{\n    print(\"hello {word}\")\n}}\n"
 }
 
-// A cap cache's slot records, its programs (one beside each record), and how
-// many records name a `full` program.
+// A cap cache's slot records and its programs (one beside each record).
 Cap: struct {
     records: [String]
     programs: [String]
-    full: Int
 }
 
 cap_state: fn(cap_kept: String) -> Cap {
@@ -215,7 +183,7 @@ cap_state: fn(cap_kept: String) -> Cap {
     records: names.filter(name -> name.ends_with(".run"))
     programs: names.filter(name -> program_file(name))
     if records.len() != programs.len() -> fail("cap: {records.len()} records beside {programs.len()} programs: {names.join(", ")}")
-    Cap{records: records.copy(), programs: programs.copy(), full: full_records(cap_kept)}
+    Cap{records: records.copy(), programs: programs.copy()}
 }
 
 cap_entry: fn(keep: Keep, index: Int) -> String {
@@ -259,9 +227,8 @@ run: fn() {
     image_size: (files.stat(image.copy()) ?? fail("cannot stat {image}: {err}")).size
     if kept_size >= image_size -> fail("first run: the kept program has {kept_size} bytes, no fewer than the runtime image {image}")
     check("rerun", run_ok(keep, file, keep.cache), first)
-    state = promoted(kept, "rerun", state)
-    check("rerun of the full program", run_ok(keep, file, keep.cache), first)
-    state = reused(kept, "rerun of the full program", state)
+    state = reused(kept, "rerun", state)
+    if state.level != "none" -> fail("rerun: the reused program was built at {state.level}, not none")
     state = aged(kept, state)
     check("rerun of an old mark", run_ok(keep, file, keep.cache), first)
     state = marked(kept, "rerun of an old mark", state)
@@ -270,7 +237,7 @@ run: fn() {
     check("source edit", run_ok(keep, file, keep.cache), "hello two\n")
     state = rebuilt(kept, "source edit", state)
     check("rerun after the edit", run_ok(keep, file, keep.cache), "hello two\n")
-    state = promoted(kept, "rerun after the edit", state)
+    state = reused(kept, "rerun after the edit", state)
     // A file the program writes beside its source is no compile input.
     write("{keep.work}/greet.out", "written beside the source\n")
     check("non-source file beside the entry", run_ok(keep, file, keep.cache), "hello two\n")
@@ -286,34 +253,57 @@ run: fn() {
     check("compiler change", run_ok(keep, file, keep.cache), "hello two\n")
     state = rebuilt(kept, "compiler change", state)
     check("rerun after the compiler change", run_ok(keep, file, keep.cache), "hello two\n")
-    state = promoted(kept, "rerun after the compiler change", state)
+    state = reused(kept, "rerun after the compiler change", state)
 
-    // A program that stops: the kept `none` and `full` runs report it as the
-    // compiling run did.
+    // A slot an earlier compiler's background build left holding a `full`
+    // program: the plain run's level is `none`, so it compiles again.
+    stale := state.text.split("\n").to_list()
+    stale[3] = "full"
+    write(state.record, stale.join("\n"))
+    check("rerun of a promoted slot", run_ok(keep, file, keep.cache), "hello two\n")
+    state = rebuilt(kept, "rerun of a promoted slot", state)
+
+    // A program that stops: the kept run reports it as the compiling run did.
     write(file, "run: fn() {{\n    print(\"before\")\n    panic(\"run-keep stop\")\n}}\n")
-    compiled: run_raw(keep, file, keep.cache)
+    compiled: run_raw(keep, [String]{}, file, keep.cache)
     state = rebuilt(kept, "stopping program", state)
     if compiled.code == 0 && compiled.signal == 0 -> fail("stopping program: exit 0\n{compiled.errors}")
-    rerun: run_raw(keep, file, keep.cache)
-    state = promoted(kept, "stopping program rerun", state)
-    full: run_raw(keep, file, keep.cache)
-    state = reused(kept, "stopping program full rerun", state)
+    rerun: run_raw(keep, [String]{}, file, keep.cache)
+    state = reused(kept, "stopping program rerun", state)
     same_stop("kept run", rerun, compiled)
-    same_stop("full run", full, compiled)
 
-    // The cap: 64 entry files fill the cache; a rerun of the first marks it
-    // used and keeps its full program in its slot, so keeping a 65th drops the
-    // second, which compiles again when run.
+    // The level: a run at `-O2` keeps its `full` program in a slot of its
+    // own beside the plain run's `none` one, and each rerun reuses its own.
+    level_kept: "{scratch}/level-cache/jet/scripts"
+    write(file, greeting("three"))
+    check("plain run", run_ok(keep, file, "{scratch}/level-cache"), "hello three\n")
+    check("-O2 run", run_at(keep, [String]{"-O2"}, file, "{scratch}/level-cache"), "hello three\n")
+    leveled: cap_state(level_kept)
+    if levels(level_kept) != ([String]{"full", "none"}) -> fail("-O2 run: the slots hold programs built at {levels(level_kept).join(", ")}, not full and none")
+    check("plain rerun", run_ok(keep, file, "{scratch}/level-cache"), "hello three\n")
+    check("-O2 rerun", run_at(keep, [String]{"-O2"}, file, "{scratch}/level-cache"), "hello three\n")
+    if cap_state(level_kept).programs != leveled.programs -> fail("level reruns: a kept program was compiled again")
+
+    // The cap: 64 entry files fill the cache. Each entry's mark is set back
+    // past the use grain, a second later than the one before, so the marks
+    // keep the order of the runs to the second. A rerun of the first marks it
+    // used, so keeping a 65th drops the second, which compiles again when run.
     cap_cache: "{scratch}/cap-cache"
     cap_kept: "{cap_cache}/jet/scripts"
     loop index in 0..<65 -> write(cap_entry(keep, index), "run: fn() {{\n    print(\"entry {index}\")\n}}\n")
-    loop index in 0..<64 -> cap_run(keep, cap_cache, index)
+    base := 0
+    loop index in 0..<64 {
+        known: if index == 0 -> [String]{} else -> cap_state(cap_kept).records.copy()
+        cap_run(keep, cap_cache, index)
+        fresh: cap_state(cap_kept).records.filter(name -> !known.contains(name))
+        if fresh.len() != 1 -> fail("cap: entry {index} kept {fresh.len()} new records")
+        record: "{cap_kept}/{fresh[0]}"
+        if index == 0 -> base = (files.stat(record.copy()) ?? fail("cannot stat {record}: {err}")).modified.secs - 700
+        age(record, base + index)
+    }
     before := cap_state(cap_kept)
-    if before.records.len() != 64 || before.full != 0 -> fail("cap: {before.records.len()} programs kept after 64 entries, {before.full} of them full")
+    if before.records.len() != 64 -> fail("cap: {before.records.len()} programs kept after 64 entries")
     cap_run(keep, cap_cache, 0)
-    settle(cap_kept, "cap: the rerun of entry 0", 1)
-    promoted_cap: cap_state(cap_kept)
-    if promoted_cap.records != before.records || promoted_cap.full != 1 -> fail("cap: the rerun of entry 0 did not keep its full program in its slot")
     cap_run(keep, cap_cache, 64)
     before = cap_state(cap_kept)
     if before.records.len() != 64 -> fail("cap: {before.records.len()} programs kept after a 65th entry")
@@ -323,5 +313,5 @@ run: fn() {
     after: cap_state(cap_kept)
     fresh: after.records.filter(name -> !before.records.contains(name))
     if after.records.len() != 64 || fresh.len() == 0 -> fail("cap: entry 1, the least recently run, was not compiled again")
-    term.print("run-keep: reuse, the background full build, source/Core/compiler rebuilds, stop parity and the 64-program cap: ok")
+    term.print("run-keep: reuse and its use mark, source/Core/compiler rebuilds, a promoted slot rebuilt, stop parity, a slot per level and the 64-program cap: ok")
 }

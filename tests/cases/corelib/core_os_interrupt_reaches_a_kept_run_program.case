@@ -1,10 +1,9 @@
 # The second `jet run` (or `jet dev --watch=off`) of a file reuses the kept
-# `none` program and starts its background `full` build. That build leaves
-# `jet` single-threaded and childless, so the kept program runs in its place
-# as the first run's compiled one did: SIGINT to that pid reaches the
-# program, which exits after its handler, while the build still runs. Each
-# tier gets its own script cache, beside the program's directory so the cache
-# is no part of its source tree; its first run compiles and its second reuses.
+# `none` program, which runs in place of `jet` as the first run's compiled one
+# did: SIGINT to that pid reaches the program, which exits after its handler.
+# Neither run starts a build of its own beside the program. Each tier gets its
+# own script cache, beside the program's directory so the cache is no part of
+# its source tree; its first run compiles and its second reuses.
 requires: os:unix
 fixture: fixtures/core_os_interrupt_delivery_matches_aot_jit_and_interpreter
 copy: fixture.jet app/fixture.jet
@@ -21,7 +20,7 @@ end repeat
 close jit_first
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-jit/jet/scripts name $= ".full" = 0 # the compiling run starts no build
+entries: scripts-jit/jet/scripts name $= ".run" = 1 # the compiling run keeps one slot
 session jit_kept raw: jet run --allow=Env,Exec fixture.jet
 cwd: app
 env: NO_COLOR=1
@@ -35,7 +34,7 @@ end repeat
 close jit_kept
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-jit/jet/scripts name $= ".full" = 1 # the kept run started the full build
+entries: scripts-jit/jet/scripts name $= ".run" = 1 # the kept run reused that slot
 session interpret_first raw: jet run --allow=Env,Exec fixture.jet
 cwd: app
 env: NO_COLOR=1
@@ -49,7 +48,7 @@ end repeat
 close interpret_first
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-interpreter/jet/scripts name $= ".full" = 0 # the compiling run starts no build
+entries: scripts-interpreter/jet/scripts name $= ".run" = 1 # the compiling run keeps one slot
 session interpret_kept raw: jet run --allow=Env,Exec fixture.jet
 cwd: app
 env: NO_COLOR=1
@@ -63,7 +62,7 @@ end repeat
 close interpret_kept
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-interpreter/jet/scripts name $= ".full" = 1 # the kept run started the full build
+entries: scripts-interpreter/jet/scripts name $= ".run" = 1 # the kept run reused that slot
 session dev_first raw: jet dev --allow=Env,Exec fixture.jet --watch=off
 cwd: app
 env: NO_COLOR=1
@@ -77,7 +76,7 @@ end repeat
 close dev_first
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-dev/jet/scripts name $= ".full" = 0 # the compiling run starts no build
+entries: scripts-dev/jet/scripts name $= ".run" = 1 # the compiling run keeps one slot
 session dev_kept raw: jet dev --allow=Env,Exec fixture.jet --watch=off
 cwd: app
 env: NO_COLOR=1
@@ -91,4 +90,4 @@ end repeat
 close dev_kept
 exit: 0
 stdout: = "first\nsecond\n"
-entries: scripts-dev/jet/scripts name $= ".full" = 1 # the kept run started the full build
+entries: scripts-dev/jet/scripts name $= ".run" = 1 # the kept run reused that slot
