@@ -877,8 +877,8 @@ release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations
 low-byte normalization, independent clones and exact-sized shell deallocation.
 
 `core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
-connection, scope, pool and lease carriers are Jet structs over the vendored
-SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
+connection, scope, pool and lease carriers are Jet structs over the Jet
+SQLite engine (`Core/Db/Engine`), `RowPolicy` and `SQL` are source values, and
 typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
 
 `core.service` trees, endpoints, workflows, upgrade receipts, deliveries and

@@ -8,9 +8,9 @@
 // made lowers the runtime, and no C compiler runs. The pack carries no C or
 // libc: a program's C closure links the musl sysroot of jet's C toolchain
 // pack (JetCli ForeignLink.jet). The `vendored-c` step, the one C the build
-// still compiles, puts Core's vendored sqlite3 and mbedtls archives beside
-// the pack (Toolchain/VendoredC.jet) with the machine's C compiler and
-// archiver; it goes when they are Jet (#6694, #6695).
+// still compiles, puts Core's vendored mbedtls archive beside the pack
+// (Toolchain/VendoredC.jet) with the machine's C compiler and archiver; it
+// goes when mbedtls is Jet (#6694).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
@@ -19,9 +19,8 @@ RUNTIME_FILES: [String]{
 }
 // Core's vendored C libraries, in the order native.key records their
 // archives, and the files of each beside the pack.
-VENDORED_C: [String]{"sqlite3", "mbedtls"}
+VENDORED_C: [String]{"mbedtls"}
 VENDORED_C_FILES: [String]{
-    "foreign/sqlite3/libsqlite3.a", "foreign/sqlite3/LICENSE",
     "foreign/mbedtls/libmbedtls.a", "foreign/mbedtls/LICENSE", "foreign/mbedtls/VERSION",
 }
 // The runtime's folder, then the IR builder, optimizer and selector, the
@@ -68,7 +67,6 @@ build: fn(b: Build) -[Exec, FS]> {
         vendored.arg("--")
         vendored.file(b.found(cc), flag: "--cc=")
         vendored.file(b.found(ar), flag: "--ar=")
-        vendored.file(b.dependency("sqlite3"), flag: "--sqlite3=")
         vendored.file(b.dependency("mbedtls"), flag: "--mbedtls=")
         vendored.input("JetCli/Source/Cli/native-c-policy.tsv", flag: "--policy=")
         vendored.arg("--out={RUNTIME_DIR}/foreign")

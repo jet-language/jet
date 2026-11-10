@@ -1,0 +1,69 @@
+// core.db and C SQLite 3.45.0 share database files in the rollback (DELETE)
+// journal mode, which core.db uses.
+//
+// DBFileFormatBase.sqlite was written by the sqlite3 3.45.0 CLI:
+//   sqlite3 DBFileFormatBase.sqlite "PRAGMA journal_mode=DELETE;"
+//   sqlite3 DBFileFormatBase.sqlite "CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL, ratio REAL, body BLOB); CREATE INDEX item_name ON item (name); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400) INSERT INTO item SELECT i, printf('Item %04d', i), i / 8.0, CAST(printf('%040d', i) AS BLOB) FROM n; INSERT INTO item VALUES (401, 'Ünit', -2.25, X'00FF');"
+// DBFileFormatAfter.sqlite is a copy of it after the CLI ran each statement in
+// WRITES, one `sqlite3 DBFileFormatAfter.sqlite "<statement>"` per statement.
+//
+// Jet opens a copy of the C file and reads it, which tests C to Jet. It then
+// runs the same statements, and the file it leaves must be byte-identical to
+// the one the CLI left, so C opens it as its own file (Jet to C).
+package: {
+    name: "db_file_format"
+    authority: { allow: [DB, DB.Read, DB.Write, FS, Env, Time, IO, Mem.Alloc] }
+}
+
+use {
+    db: core.db
+    fs: core.files
+}
+
+BASE: "tests/run/CoreDB/DBFileFormatBase.sqlite"
+AFTER: "tests/run/CoreDB/DBFileFormatAfter.sqlite"
+
+WRITES: [SQL]{
+    SQL{"INSERT INTO item (id, name, ratio, body) VALUES (1000, 'From Jet', 4.5, X'4A4554')"},
+    SQL{"UPDATE item SET ratio = ratio * 2, name = name || ' Updated' WHERE id % 7 = 0"},
+    SQL{"DELETE FROM item WHERE id BETWEEN 100 AND 180"},
+}
+
+// Print the row count, the id sum and a few rows, so a read through the
+// engine shows what the file holds.
+summary: fn(scope: db.DBScope, label: String) {
+    totals: scope.query(SQL{"SELECT count(*) AS n, sum(id) AS total FROM item"}) ?? panic("{label} totals: {err.message}")
+    loop row in totals -> print("{label}: {db.row_int(row, "n") ?? panic("n")} rows, id sum {db.row_int(row, "total") ?? panic("total")}")
+    rows: scope.query(SQL{"SELECT id, name, ratio, length(body) AS size FROM item WHERE id IN (1, 7, 99, 401, 1000) ORDER BY id"}) ?? panic("{label} rows: {err.message}")
+    loop row in rows {
+        id: db.row_int(row, "id") ?? panic("id")
+        name: db.row_text(row, "name") ?? panic("name")
+        ratio: db.row_float(row, "ratio") ?? panic("ratio")
+        size: db.row_int(row, "size") ?? panic("size")
+        print("  {id}|{name}|{ratio}|{size} body bytes")
+    }
+    indexed: scope.query(SQL{"SELECT id FROM item WHERE name = 'Item 0014 Updated'"}) ?? panic("{label} index: {err.message}")
+    print("  Rows the index finds for 'Item 0014 Updated': {indexed.len()}")
+}
+
+run: fn() {
+    dir: fs.mkdtemp("db_file_format") ?? panic("temporary directory: {err}")
+    path: fs.join(dir, "Shared.sqlite")
+    fs.copy(BASE, path) ?? panic("copy: {err}")
+    conn: db.open(path)
+    policy: db.policy("item", "true") ?? panic("policy")
+    scope: conn.with_policy(policy, "owner")
+    summary(scope, "C wrote")
+    loop statement in WRITES {
+        changed: scope.execute(statement) ?? panic("write: {err.message}")
+        print("Jet changed {changed} rows")
+    }
+    summary(scope, "Jet wrote")
+    print("Closed: {conn.close()}")
+    bytes: fs.read_bytes(path) ?? panic("read: {err}")
+    expected: fs.read_bytes(AFTER) ?? panic("read: {err}")
+    print("The header's file-format bytes 18 and 19 are {bytes[18]} and {bytes[19]} (1 is the rollback journal)")
+    print("A journal is left: {fs.exists("{path}-journal")}")
+    print("Jet's file is byte-identical to the file C wrote: {bytes == expected}")
+    fs.remove_all(dir) ?? panic("cleanup: {err}")
+}

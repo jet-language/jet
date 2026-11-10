@@ -24,8 +24,8 @@
 // encoder of the web partition. Their files make up the pack's identity.
 //
 // The pack carries no C, libc or compiler runtime archive, and the step runs
-// no C compiler or archiver. Core's vendored sqlite3 and mbedtls are compiled
-// beside it by the `vendored-c` step (Toolchain/VendoredC.jet), into
+// no C compiler or archiver. Core's vendored mbedtls is compiled beside it
+// by the `vendored-c` step (Toolchain/VendoredC.jet), into
 // OUT/foreign/<lib>/lib<lib>.a: each `--archive` is one, checked for Rust
 // symbols like the pack, and `--vendored` holds their recipe; the archive
 // digests are part of native.key and both are in provenance.json
@@ -502,8 +502,7 @@ build: fn(tool: Toolchain, vendored: VendoredC, work: String, source: Inventory,
 // Core's vendored C beside the pack, which the `vendored-c` step
 // (Toolchain/VendoredC.jet) compiled into OUT/foreign/<lib>/lib<lib>.a. It
 // goes, with its `--archive` and `--vendored` flags and the `vendored` rows
-// of the recipe, identity and provenance, when sqlite3 and mbedtls are Jet
-// (#6694, #6695).
+// of the recipe, identity and provenance, when mbedtls is Jet (#6694).
 
 // One vendored library's archive as the pack records it.
 ForeignArchive: struct {

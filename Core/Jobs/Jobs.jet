@@ -228,13 +228,13 @@ queue_now: fn() -[Time]> Int Never! {
     if millis > 9223372036854775807 -> return 9223372036854775807
     millis
 }
-queue_begin: fn(driver: db.__Driver) ServiceError! -[DB]> {
+queue_begin: fn(driver: &db.__Driver) ServiceError! -[DB]> {
     if !db.__driver_begin(driver) -> return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
     Ok()
 }
 // Operations unwrap inside the guarded transaction and roll back there on
 // failure. Only a successful value reaches commit; failed commits roll back.
-queue_finish: fn<T>(driver: db.__Driver, value: &&T) -[DB]> T ServiceError! {
+queue_finish: fn<T>(driver: &db.__Driver, value: &&T) -[DB]> T ServiceError! {
     if db.__driver_commit(driver) -> return Ok(value)
     _: db.__driver_rollback(driver)
     Err(queue_sql_error("commit", queue_unavailable("queue SQLite commit failed")))

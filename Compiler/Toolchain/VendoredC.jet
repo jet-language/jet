@@ -1,19 +1,18 @@
 #!/usr/bin/env jet
 // Core's vendored C, made by Compiler/build.jet's `vendored-c` step: the one
 // C the toolchain build still compiles. It goes, with this script, that step
-// and the archives' rows in the runtime pack's identity and provenance, when
-// sqlite3 and mbedtls are Jet (#6694, #6695).
+// and the archive's rows in the runtime pack's identity and provenance, when
+// mbedtls is Jet (#6694).
 //
-//   jet Toolchain/VendoredC.jet --cc=CC --ar=AR --sqlite3=DIR --mbedtls=DIR
+//   jet Toolchain/VendoredC.jet --cc=CC --ar=AR --mbedtls=DIR
 //       --policy=FILE --out=DIR --recipe=FILE
 //
-// Core's vendored C (Core/Vendor/Sqlite3 and Core/Vendor/Mbedtls, read from
-// the `--sqlite3` and `--mbedtls` folders) backs Core modules' `c.sqlite3`
-// and `c.mbedtls` imports. CC compiles it under the one native C policy
-// (FILE, Compiler/JetCli/Source/Cli/native-c-policy.tsv) and AR archives it
-// as OUT/<lib>/lib<lib>.a, with the library's LICENSE and VERSION beside it,
-// so neither jet's self-compile nor a core.db or core.net.tls program needs a
-// C compiler. A program whose live code calls it links it, and user foreign
+// Core's vendored C (Core/Vendor/Mbedtls, read from the `--mbedtls` folder)
+// backs core.net.tls's `c.mbedtls` imports. CC compiles it under the one
+// native C policy (FILE, Compiler/JetCli/Source/Cli/native-c-policy.tsv) and
+// AR archives it as OUT/<lib>/lib<lib>.a, with the library's LICENSE and
+// VERSION beside it, so neither jet's self-compile nor a core.net.tls program
+// needs a C compiler. A program whose live code calls it links it, and user foreign
 // closures, with the musl libc and compiler builtins of jet's C toolchain
 // pack (Compiler/JetCli ForeignLink.jet). The runtime pack links none of it:
 // the `runtime` step (Toolchain/RuntimePack.jet) only checks and records the
@@ -28,20 +27,8 @@ use {
     term: core.term
 }
 
-USAGE: "usage: jet Toolchain/VendoredC.jet --cc=CC --ar=AR --sqlite3=DIR --mbedtls=DIR --policy=FILE --out=DIR --recipe=FILE"
+USAGE: "usage: jet Toolchain/VendoredC.jet --cc=CC --ar=AR --mbedtls=DIR --policy=FILE --out=DIR --recipe=FILE"
 VENDOR_BASE_FLAGS: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
-// libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
-SQLITE_FLAGS: [String]{
-    "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
-    "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
-    "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
-    "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
-    "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
-    "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
-    "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
-    "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
-    "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
-}
 NOTICES: [String]{"LICENSE", "VERSION"}
 // At most this many C compilers run at once.
 JOBS: 6
@@ -83,7 +70,7 @@ absolute: fn(path: String) -> String {
 
 // `--name=value` flags, each given once.
 parse_flags: fn(args: [String]) -> [String: String] {
-    known: [String]{"cc", "ar", "sqlite3", "mbedtls", "policy", "out", "recipe"}
+    known: [String]{"cc", "ar", "mbedtls", "policy", "out", "recipe"}
     values := [String: String]{}
     loop arg in args {
         if !arg.starts_with("--") || !arg.contains("=") -> fail(USAGE)
@@ -231,21 +218,19 @@ run: fn() {
         ar: absolute(flag(flags, "ar")),
         policy: read_policy(flag(flags, "policy")),
         vendored: [Vendored]{
-            Vendored{name: "sqlite3", source: "Core/Vendor/Sqlite3", folder: absolute(flag(flags, "sqlite3")), flags: SQLITE_FLAGS.copy()},
             Vendored{name: "mbedtls", source: "Core/Vendor/Mbedtls", folder: absolute(flag(flags, "mbedtls")), flags: [String]{}},
         },
     }
     out: absolute(flag(flags, "out"))
     recipe_path: flag(flags, "recipe")
     sha256: recipe(c)
-    // The step's folder, not /tmp: sqlite3's objects outgrow a small
-    // temporary file system.
+    // The step's folder, not /tmp: the objects outgrow a small temporary
+    // file system.
     work: absolute(".vendored-c")
     files.remove_all(work) ?? ()
     files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
     libraries := [Library]{}
     units := [String]{}
-    // sqlite3's single large unit first.
     jobs: compile_jobs(c, work, libraries, units)
     results: process.run_all(jobs, JOBS) ?? fail("the C compilers could not start: {err}")
     problems := [String]{}

@@ -354,7 +354,7 @@ compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wa
 // toolchain and musl. Sorted and unique.
 stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
     read := compiler_packages(tree, [String]{"inputs"})
-    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "Core/Vendor/Sqlite3", "Core/Vendor/Mbedtls", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
+    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "Core/Vendor/Mbedtls", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
     sources: files.join(tree, "Compiler/JetRuntime/sources.list")
     if files.exists(sources) {
         text: files.read(sources) ?? fail("cannot read `{sources}`: {err}")

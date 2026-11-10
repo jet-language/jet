@@ -26,7 +26,7 @@ Its stage-2 compiler becomes the seed of the next release.
 A clone, the latest published release and a C toolchain are enough: no
 `Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables,
 only `git`, `curl`, `jq`, OpenSSL 3 and a C compiler and archiver (`cc` and
-`ar` on `PATH`), which compile Core's vendored SQLite and Mbed TLS; `nix
+`ar` on `PATH`), which compile Core's vendored Mbed TLS; `nix
 develop` supplies all of them. A release tag whose own copy of this page also
 names `nm` and static musl needs those too. This fetches the latest release, checks its signed
 record, clones the release's tag, builds that compiler and its runtime pack

@@ -18,16 +18,16 @@ function receipt(t) {
   const recipe = nativePackRecipe(source, backend, lifecycle, compiler, vendoredRecipe);
   const key = hash(JSON.stringify({ format: 'jet-native-runtime/v3', source, abi: hash(abi), threads: hash(threads), backend, lifecycle, vendored: [hash(archive)] }));
   const directory = root;
-  mkdirSync(join(directory, 'foreign', 'sqlite3'), { recursive: true });
+  mkdirSync(join(directory, 'foreign', 'mbedtls'), { recursive: true });
   const provenance = { backend: 'jet-native', runtimeKey: key, rustObjects: 0, llvmObjects: 0,
     source: { sha256: source }, backendInputs: { sha256: backend }, lifecycle: { sha256: lifecycle },
-    vendoredC: { recipeSha256: vendoredRecipe, archives: [{ name: 'sqlite3', path: 'foreign/sqlite3/libsqlite3.a', sha256: hash(archive) }] },
+    vendoredC: { recipeSha256: vendoredRecipe, archives: [{ name: 'mbedtls', path: 'foreign/mbedtls/libmbedtls.a', sha256: hash(archive) }] },
     compilerSha256: compiler,
     recipeSha256: recipe, objectSha256: hash(object), packSha256: hash(pack), imageSha256: hash(image), abiSha256: hash(abi), threadsSha256: hash(threads) };
   const publish = () => writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance));
   publish();
   writeFileSync(join(root, 'native.key'), key + '\n');
-  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['jet_runtime.pack.o', pack], ['jet_runtime.image', image], ['runtime.abi.json', abi], ['runtime.threads', threads], ['runtime.exports', 'jet_rt_alloc_init\n'], ['foreign/sqlite3/libsqlite3.a', archive]]) writeFileSync(join(directory, name), bytes);
+  for (const [name, bytes] of [['jet_runtime_jet.o', object], ['jet_runtime.pack.o', pack], ['jet_runtime.image', image], ['runtime.abi.json', abi], ['runtime.threads', threads], ['runtime.exports', 'jet_rt_alloc_init\n'], ['foreign/mbedtls/libmbedtls.a', archive]]) writeFileSync(join(directory, name), bytes);
   return { root, directory, provenance, recipe, key, pack, publish };
 }
 
@@ -49,7 +49,7 @@ test('matching cached receipt admits held artifact bytes', t => {
 test('changed recipe and every damaged artifact refuse reuse', t => {
   const f = receipt(t);
   assert.throws(() => readNativeRuntimePack(f.root, hash('new recipe')), /recipe/);
-  for (const name of ['jet_runtime_jet.o', 'jet_runtime.pack.o', 'jet_runtime.image', 'runtime.abi.json', 'runtime.threads', 'foreign/sqlite3/libsqlite3.a']) {
+  for (const name of ['jet_runtime_jet.o', 'jet_runtime.pack.o', 'jet_runtime.image', 'runtime.abi.json', 'runtime.threads', 'foreign/mbedtls/libmbedtls.a']) {
     const admitted = readNativeRuntimePack(f.root);
     writeFileSync(join(f.directory, name), 'damaged');
     assert.throws(() => readNativeRuntimePack(f.root), /digest mismatch/);
@@ -61,10 +61,10 @@ test('a pack without its vendored C archives refuses reuse', t => {
   const archives = f.provenance.vendoredC.archives;
   f.provenance.vendoredC.archives = []; f.publish();
   assert.throws(() => readNativeRuntimePack(f.root), /vendored C archives/);
-  f.provenance.vendoredC.archives = [{ ...archives[0], path: 'foreign/sqlite3/../../jet_runtime.pack.o' }]; f.publish();
+  f.provenance.vendoredC.archives = [{ ...archives[0], path: 'foreign/mbedtls/../../jet_runtime.pack.o' }]; f.publish();
   assert.throws(() => readNativeRuntimePack(f.root), /foreign\/<lib>/);
   f.provenance.vendoredC.archives = archives; f.publish();
-  rmSync(join(f.directory, 'foreign/sqlite3/libsqlite3.a'));
+  rmSync(join(f.directory, 'foreign/mbedtls/libmbedtls.a'));
   assert.throws(() => readNativeRuntimePack(f.root), /ENOENT/);
 });
 test('key traversal, symbol inventory drift and inconsistent identity refuse reuse', t => {

@@ -1,13 +1,20 @@
-// A core.db program: it calls SQLite, so it links SQLite's closure.
+// A core.db program: SQLite is Jet, so it calls no C and links none.
 use core.[db, files]
 
-// The defined symbols of this executable's `.symtab`.
-defined_symbols: fn() -[FS]> [String:Bool] Never! {
+// The defined symbols of this executable's `.symtab` and the ones at its
+// entry address.
+LinkFacts: struct {
+    entry: [String]
+    defined: [String:Bool]
+}
+
+link_facts: fn() -[FS]> LinkFacts Never! {
     b: files.read_bytes("/proc/self/exe") ?? panic("can't read /proc/self/exe: {err}")
+    entry: le(b, 24, 8)
     shoff: le(b, 40, 8)
     shentsize: le(b, 58, 2)
     shnum: le(b, 60, 2)
-    defined := [String:Bool]{}
+    facts := LinkFacts{entry: [String]{}, defined: [String:Bool]{}}
     loop i in 0..<shnum {
         s: shoff + i * shentsize
         // SHT_SYMTAB
@@ -20,11 +27,15 @@ defined_symbols: fn() -[FS]> [String:Bool] Never! {
         at := off
         loop ent > 0 && at + ent <= off + size {
             // A defined symbol: st_shndx is not SHN_UNDEF.
-            if le(b, at + 6, 2) != 0 -> defined[c_string(b, strings + le(b, at, 4))] = true
+            if le(b, at + 6, 2) != 0 {
+                name: c_string(b, strings + le(b, at, 4))
+                if le(b, at + 8, 8) == entry -> facts.entry.push(name.copy())
+                facts.defined[name.copy()] = true
+            }
             at += ent
         }
     }
-    defined
+    facts
 }
 
 // The `width`-byte little-endian unsigned value at `at`.
@@ -52,5 +63,8 @@ run: fn() {
     row: scoped.query_one(SQL{"SELECT name FROM items"}) ?? panic("query")
     name: db.row_value(row, "name") ?? panic("row value")
     print("name={name.text() ?? panic("text")}")
-    print("defines sqlite3_open_v2: {defined_symbols().get("sqlite3_open_v2") != None}")
+    facts: link_facts()
+    print("entry is __jet_start: {facts.entry.contains("__jet_start")}")
+    names: [String]{"__libc_start_main", "pthread_create", "sqlite3_open_v2"}
+    loop name in names -> print("defines {name}: {facts.defined.get(name) != None}")
 }

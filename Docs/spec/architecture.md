@@ -196,7 +196,7 @@ bytes are a complete static executable at the
 run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
 (`Image/Loader.jet`). The step runs no C compiler or archiver: Core's
-vendored sqlite3 and mbedtls archives (`foreign/<lib>/`) beside the pack are
+vendored mbedtls archive (`foreign/<lib>/`) beside the pack is
 the `vendored-c` step's (`Compiler/Toolchain/VendoredC.jet`), which the
 `runtime` step checks for Rust symbols and records; the pack packages no C
 platform archives, which a program with C takes from jet's C toolchain pack
@@ -1536,19 +1536,18 @@ check the archive digest. System V scalar calls preserve
 their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 
-SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
-`Core/Vendor/Sqlite3`, with its license and the seed's bundled feature flags,
-never a system SQLite. The upstream `sqlite3.c` SHA-256 is
-`7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
-Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
+SQLite is Jet source: `core.db` runs on the Jet port of SQLite 3.45.0 in
+`Core/Db/Engine`, written against the amalgamation `libsqlite3-sys` 0.28.0
+bundles and that crate's Linux build options, never a system SQLite.
+Core's vendored C (`Core/Vendor/Mbedtls`) is compiled
 once when the toolchain is built: the `vendored-c` step of `jet build Compiler`
 (`Compiler/Toolchain/VendoredC.jet`), the one C the build still compiles,
-builds each library with the host C compiler under the native C policy and
+builds the library with the host C compiler under the native C policy and
 installs `jet-runtime/foreign/<lib>/lib<lib>.a` (with its LICENSE and VERSION)
-beside the pack. The `runtime` step runs no C compiler: it checks those
-archives, and their digests are part of the runtime key and the vendored
+beside the pack. The `runtime` step runs no C compiler: it checks that
+archive, and its digest is part of the runtime key and the vendored
 sources, flags and C compiler identity part of the pack recipe. The step goes
-when SQLite and Mbed TLS are Jet. A Core `c.<lib>` import links that archive, so neither jet's
+when Mbed TLS is Jet. A Core `c.<lib>` import links that archive, so neither jet's
 self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
 C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
@@ -1571,7 +1570,7 @@ the pack carries the startup of a program with no libc (`__jet_start`), while
 the linker starts this one through musl's `__libc_start_main`, which
 initializes the libc it links. A program links only the C its live code calls: when only
 checked foreign declarations name C (a C provider of an imported module, such
-as `core.data`'s import of `core.db` and SQLite), the linker's own collection
+as `core.net.tls` and Mbed TLS), the linker's own collection
 over the program object and the pack (`x64_link_live_undefined` in
 `Compiler/JetBackend/Source/Image/StaticLink.jet`) names the symbols live code
 references and nothing defines, and only the providers of those declarations
@@ -1594,8 +1593,8 @@ C String parameters instead use per-call NUL-terminated copies; their String
 results are copied before those temporaries are released.
 `Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
 embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
-`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI and the
-bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
+`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI against
+exact tier-parity output.
 
 `jet inspect bind cpp` is owned by
 [`Cpp.jet`](../../Jetpack/Integrations/Source/Foreign/Binders/Cpp.jet): clang
