@@ -2328,10 +2328,10 @@ sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
 // ir_iterable_walk), so their effects are the loop's: edges to all three, the
 // close methods found by owner name as for `close(value)`. A lambda's rows
 // come from its call facts, which hold no loop, so its loops charge the
-// enclosing function (SemaEffectWalk.IterableLoops).
+// enclosing function (SemaEffectWalk.LambdaBody).
 sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
     node_index: if walk == {
-        .Collect(index) | .IterableLoops(index) -> index
+        .Collect(index) | .LambdaBody(index) -> index
         .Region(index, region) -> if sema_effect_span_contains(region, span) -> index else -> return
         else -> return
     }
@@ -2403,20 +2403,15 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         }
     }
     sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
+    sema_effect_record_stop(nodes, node_index, node)
     if node.kind == {
-        .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
-        // Rust `check_panic_call`: `value ?? panic(message)` stops through
-        // the same sentinel as a bare `panic(message)`.
-        .OrFallback(_, fallback, _) -> {
-            if fallback == .Panic(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
-        }
         .Call(_, _, args) | .IndirectCall(_, _, args, _) -> sema_effect_record_function_arguments(nodes, facts.node_by_key, node_index, tree, args)
         // `close(value)` runs the value type's own `Close.close`, so that
         // method's effects are this function's (codegen calls it directly).
         .Close(value) -> sema_effect_record_close(nodes, facts, node_index, body_type(tree, value))
         .Lambda(value) -> {
             sema_effect_merge_lambda(nodes, node_index, value)
-            sema_effect_walk_lambda_children(SemaEffectWalk.IterableLoops{node_index: node_index}, nodes, facts, diagnostics, caller, tree, value)
+            sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: node_index}, nodes, facts, diagnostics, caller, tree, value)
             return false
         }
         .StrLit(parts) -> {
@@ -4041,8 +4036,9 @@ SemaEffectWalk: enum {
     Unsafe(audited: Bool)
     Region(node_index: Int, region: Span)
     PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
-    // A lambda body's Iterable loops, charged to the enclosing node.
-    IterableLoops(node_index: Int)
+    // A lambda body: its Iterable loops, value reads and stops, none of which
+    // its call facts hold, charged to the enclosing node.
+    LambdaBody(node_index: Int)
 }
 
 sema_effect_walk_visit: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
@@ -4062,12 +4058,25 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             sema_prelude_conversion_demands_enter(state, node)
             Val(walk)
         }
-        .IterableLoops(node_index) -> {
-            // A lambda body's value reads are the enclosing node's value
-            // edges, as its calls are the enclosing node's edges.
+        .LambdaBody(node_index) -> {
+            // A lambda body's value reads and stops are the enclosing node's,
+            // as its calls are the enclosing node's edges.
             sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
+            sema_effect_record_stop(nodes, node_index, node)
             Val(walk)
         }
+    }
+}
+
+// A stop (`panic`, `assert`, a `Never` value, `value ?? panic(message)`)
+// puts `Panic` in the row of the node it is charged to.
+sema_effect_record_stop: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
+    if node.kind == {
+        .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
+        .OrFallback(_, fallback, _) -> {
+            if fallback == .Panic(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
+        }
+        else -> {}
     }
 }
 

@@ -1,0 +1,16 @@
+// The same lambdas under rows that do not deny `Panic` check clean and run.
+through_map: fn(items: [Int]) -> [Int] {
+    items.map((n: Int) -> if n < 0 -> panic("negative") else -> n * 2)
+}
+
+through_local: fn(n: Int) -> Int {
+    check := (m: Int) -> {
+        assert(m >= 0)
+        m + 1
+    }
+    check(n)
+}
+
+run: fn() {
+    print("{through_map([Int]{1, 2})} {through_local(2)}")
+}
