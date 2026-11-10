@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98880,
+    "rev": 98881,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76050,7 +76050,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T16:36:05.864Z",
+      "updated": "2026-11-10T16:38:20.454Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -192687,19 +192687,19 @@
       "cardId": "c0oev2ib",
       "group": "syntax",
       "title": "Delete the result operator r ? ok -> … ! error -> …; the arm table, single-arm if and ?? cover it",
-      "situation": "Jet has two exhaustive ways to branch on a result. One is the arm table every enum uses, with .Ok(n) and .Err(e) arms. The other is a dedicated operator, r ? n -> … ! e -> …, ratified so a short handler fits on one line.\n\nThe owner's language review proposed deleting the operator, so ? and ! each keep one meaning. The repository uses it 419 times, almost all in Jetpack and tests. A deletes it and reverses that ratified choice; keeping it is option B.",
+      "situation": "Jet has an exhaustive arm table for every enum and a dedicated two-branch operator for results. The operator is compact and was ratified for short handlers.\n\nA removes that result-specific surface and reverses the earlier choice. B keeps it. C removes it while allowing compact layout of the same ordinary arm table.",
       "gist": "Should the result operator r ? ok -> … ! error -> … go, leaving the arm table, single-arm if and ?? to cover it?",
       "lesson": "A function that can fail returns a result: a value or an error. Jet has two ways to handle both cases. One is the arm table used for every enum. The other is an operator made only for results. This vote decides whether the second one goes.",
       "explainer": "Words used here. A result is a value or an error. An arm table is if subject == { … } with one arm per case. A single-arm if tests one case, as in if r == .Ok(n) -> …. The ?? fallback gives a value when the result is an error.",
       "story": "Kai sees r ? n -> save(n) ! e -> warn(e) and reads ? as optional and ! as not. Under A he only ever sees the arm table, which he already uses for every other enum.",
       "inWild": "// Rust: one match for every enum, results included.\nmatch parse(text) {\n    Ok(n) => println!(\"got {n}\"),\n    Err(e) => println!(\"failed {e:?}\"),\n}",
-      "detail": "What this ballot decides. Whether the dedicated result operator stays. Results, errors, ?? and the arm table are unchanged.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5), every probe matches. Probe r01 uses the operator three times and prints got 3, failed Empty, size 2. Probe r02 writes the same program with arm tables and ?? and prints the same lines. Probe r06 computes one value three ways and prints 20 20 20.\n\nProbe r03 shows the one-line forms that exist today. if parse(\"abc\") == .Ok(n) -> … else -> … binds n. if parse(\"\") == .Err(e) -> … binds e. Probe r04 puts an arm table on one line with commas and gets E0003; r05 with a semicolon gets E0373.\n\nThe rule under A. The operator goes. A program that branches on a result uses the forms every enum uses: an arm table, a single-arm if with else, or the ?? fallback. ? keeps its meanings in types, ?? and ?(text). ! keeps not, != and the error contract.\n\nThe old form after A. D-TEACH-RECONCILE1=A forbids teaching retired Jet spellings. So the old form gets the same generic parse error as any unknown syntax, and jet fix gains no rewrite for it. The 419 uses in the repository are rewritten once, from the parse tree, in the commit that deletes the form.\n\nThe rewrites, each tested in probes r07 and r08 with the subject printing once per evaluation. An error arm that ignores its error and gives a plain value becomes ??. One that ignores it but leaves, such as ! e -> return 0, becomes ?? return 0. A reshaped success becomes the single-arm if.\n\nHandlers that use the error. When the success arm is the bare value, the handler becomes one ?? line with the ambient err of D-FAIL-BIND1=A: n: parse(t) ?? return \"bad {err}\". Only the rest become two-arm tables.\n\nCensus on dev c460ba91e5 (probes/rb-census-dev.mjs). 419 uses in 155 Jet files and 3 in Markdown: Jetpack 187, tests 188, Examples 27, Compiler 13, Core 2, Tools 2. 284 ignore the error: 116 leave, 168 give a value. 135 use it, and 59 of those keep the success value as it is.\n\nSo 343 uses stay one line, as ?? or a single-arm if. 76 become arm tables, three lines longer each, about 230 lines in all. ?? return already appears on 19,220 lines, so the rewrites use a form readers know.\n\nBeginner path. Learn one branching form, the arm table, and use ?? for a default. Expert path. The same, with single-arm tests when only one case matters, and err inside ??.\n\nWhat remains. 76 handlers stay three lines longer. A one-line arm table would remove that, but it is a new layout for every enum; it is option C.\n\nOther options. B keeps the operator. C deletes it and lets any arm table sit on one line with commas, as Rust's match does. D deletes it and adds a fold method with ok and err functions, as Kotlin's Result has. E is Zig's capture form, if r |n| -> … else |e| -> ….\n\nTheir best cases. B keeps the shortest handler and costs nothing. C helps every enum, not just results. D adds no grammar; Kotlin's fold is inline, so a return inside it leaves the caller. E binds both payloads on one line.\n\nTheir costs. B keeps ? and ! with a second meaning each. C adds a comma layout to every arm table. D, in Jet, makes control flow go through closures, so a return inside one leaves only the closure. E adds a capture syntax beside patterns.",
+      "detail": "This vote chooses whether the result-only operator stays. It does not make ? or ! have literally one meaning: optional types, fallback, diagnostics, negation and error contracts still use their existing forms.\n\nReran r01-r08 on a0.0.43. The operator and arm-table programs both print got 3, failed Empty and size 2. Single-arm tests work. Comma tables fail with E0003 and semicolon tables with E0373. The value probe prints 20 20 20. Rewrite probes agree and print once per subject evaluation.\n\nA removes the result-specific grammar and uses ordinary pattern branches or fallback. Migrate every caller in one cutover. A rewrite must preserve one evaluation, branch laziness, outer return/break/next targets, payload ownership, drop timing and binding scope. Replacing a named error with ambient err must respect nested fallbacks and shadowing. Use the full two-arm table whenever a shorter transformation is not proved equivalent.\n\nThe earlier census uses a regular expression and a 400-character window, not the parser. Its counts estimate migration size; they cannot prove all uses are found or classify every control-flow shape. Exact line-growth claims are withdrawn. The scalar probes prove their examples only, not every move-only resource or nested branch.\n\nB's strongest case is a compact exhaustive handler with explicit payload names and no migration. It already lowers to a carrier split, so deletion is a surface simplification, not proof of a second runtime engine or a speed gain.\n\nC uses the same enum-pattern semantics with compact layout. I8 expressly permits useful spelling and organization differences; two layouts alone do not violate it. Its real cost is comma grammar, parsing ambiguity and formatter rules. It is the strongest ergonomics alternative to A.\n\nD's fold can transform both success and error values. Fallback alone does not cover every value-position fold. Ordinary Jet closure returns remain local unless separately ratified; Kotlin's inline non-local return is not a current Jet capability. E adds payload captures beside existing patterns.\n\nThe earlier operator remains ratified until changed. This proposal adds no teaching diagnostic or persistent retired-syntax parser. Repository migration and any separately ratified migration tooling must follow the current owner rule; this vote does not create another rewrite policy.",
       "options": [
         {
           "key": "A",
           "name": "Delete the operator",
-          "detail": "Results branch like every enum: an arm table, a single-arm if with else, or ??. The repository's 419 uses are rewritten once, keeping their meaning.",
-          "technical": "Reverses D-RESULT-DECON2=B. Per D-TEACH-RECONCILE1=A the old form gets the generic parse error and no jet fix rule. One parse-tree rewrite in the deleting commit: ?? or ?? return when the error is unused, single-arm if when only the success reshapes, ?? with ambient err when the success is the bare value, two-arm table otherwise. Delete ResultHandlers.jet (115 lines) and its formatter and diagnostic rows.",
+          "detail": "Remove the result-only operator and migrate callers to ordinary patterns or fallback, preserving semantics.",
+          "technical": "Reverses D-RESULT-DECON2=B. Remove obsolete parser, formatter and diagnostic support in one cutover. Choose shorter fallback forms only when binding, ownership and control-flow equivalence is established; otherwise use two arms. No new retired-spelling teaching rule.",
           "code": "#Error\nParseError: enum { Empty }\n\nparse: fn(text: String) -> Int ParseError! {\n    if text == \"\" -> return Err(ParseError.Empty)\n    text.len()\n}\n\nrun: fn() {\n    if parse(\"\") == {\n        .Ok(n) -> print(\"got {n}\")\n        .Err(e) -> print(\"failed {e}\")\n    }\n    if parse(\"abc\") == .Ok(n) -> print(\"got {n}\") else -> print(\"failed\")\n    size: parse(\"ab\") ?? 0\n    print(\"size {size}\")\n}\n// Proposed (A), today's output (probes r02, r03): failed Empty, got 3, size 2.\n// A handler that keeps the value and uses the error is one line: n: parse(t) ?? return \"bad {err}\" (probe r08)."
         },
         {
@@ -192756,30 +192756,30 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A leaves one way to branch on any enum, results included, so ? and ! keep one meaning each. Every use has an exact rewrite, and 343 of 419 stay one line.",
+        "why": "A removes result-only syntax while retaining ordinary exhaustive patterns. Some handlers grow; migration equivalence must be checked rather than inferred from a text census.",
         "gains": [
           "One branching form for every enum.",
-          "? and ! keep one meaning each.",
+          "One result-specific use of ? and ! is removed.",
           "A parser form and its rows go."
         ],
         "losses": [
           {
-            "loss": "76 handlers that use the error grow by three lines.",
-            "mitigation": "They become the taught multi-line arm table; the other 59 that use the error become one ?? line with err."
+            "loss": "Some compact two-payload handlers become longer.",
+            "mitigation": "Use fallback only when equivalent; otherwise preserve both payloads and control flow in the ordinary arm table."
           },
           {
             "loss": "The old form gets no teaching message.",
-            "mitigation": "D-TEACH-RECONCILE1=A rules that out; all 419 uses are rewritten in the deleting commit, so none remain to teach."
+            "mitigation": "Migrate all repository callers in the same cutover; keep generic diagnostics rather than a second retired-syntax parser."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B keeps a second meaning for both ? and !."
+            "reason": "B keeps compact exhaustive handlers with named payloads, but retains result-specific syntax beside ordinary enum patterns."
           },
           {
             "key": "C",
-            "reason": "C adds a second layout to every arm table."
+            "reason": "C is I8-compatible layout flexibility, but adds comma grammar and formatter rules; A makes no general arm-table grammar change."
           },
           {
             "key": "D",
@@ -192797,7 +192797,7 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Two claims failed and were fixed: the jet fix migration broke D-TEACH-RECONCILE1=A, and the 135-handler cost ignored the ambient err, which shrinks it to 76. The rewrites are probed to evaluate their subject once."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Reran r01-r08, corrected one-meaning rhetoric, withdrew regex-based migration certainty, and made C's layout and D's value transformations fair."
       },
       "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-RESULT-BRANCH1/probes; outputs land in probes/out43. From the dev worktree, run node on probes/rb-census-dev.mjs.",
       "surface": {
@@ -192821,10 +192821,10 @@
             "gist": "Arm tables, single-arm if and ??.",
             "gains": [
               "One branching form.",
-              "? and ! mean one thing."
+              "Less result-specific punctuation."
             ],
             "losses": [
-              "76 handlers grow three lines."
+              "Some handlers become longer."
             ],
             "proposed": {
               "code": "if parse(t) == {\n    .Ok(n) -> print(\"got {n}\")\n    .Err(e) -> print(\"failed {e}\")\n}\nn: parse(t) ?? return \"bad {err}\""
@@ -192838,7 +192838,7 @@
               "Shortest handler."
             ],
             "losses": [
-              "Two meanings each."
+              "Result-specific syntax remains."
             ],
             "proposed": {
               "code": "parse(t) ? n -> print(\"got {n}\") ! e -> print(\"failed {e}\")"
@@ -192852,7 +192852,7 @@
               "Helps every enum."
             ],
             "losses": [
-              "A second layout."
+              "General comma and formatter rules."
             ],
             "proposed": {
               "code": "if parse(t) == { .Ok(n) -> use(n), .Err(e) -> warn(e) }"
@@ -192889,25 +192889,25 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One branching form for every enum, and ? and ! keep one meaning each.",
+          "why": "Remove result-specific syntax and keep ordinary exhaustive patterns.",
           "gains": [
             "One form.",
-            "343 of 419 uses stay one line."
+            "Short fallbacks where equivalent."
           ],
           "losses": [
             {
-              "loss": "76 handlers longer.",
+              "loss": "Some handlers become longer.",
               "mitigation": "They become the taught arm table."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Two meanings each."
+              "reason": "Result-specific syntax remains."
             },
             {
               "key": "C",
-              "reason": "A second layout."
+              "reason": "Valid layout flexibility, with comma and formatter costs."
             },
             {
               "key": "D",
@@ -192929,10 +192929,10 @@
           "option": "A",
           "loss": "Handlers that use the error grow from one line to four.",
           "attempts": [
-            "When the success arm is the bare value, rewrite to one ?? line with the ambient err of D-FAIL-BIND1=A; 59 of 135 qualify (probe r08 matches the operator).",
-            "When the error is unused, rewrite to ?? or ?? return, never a bare ?? that drops a return; 284 qualify (probe r07)."
+            "Use ?? with ambient err only when payload substitution is hygienic and the success arm is the unchanged value.",
+            "Preserve returns and loop targets explicitly; keep a full arm table for shapes not proved equivalent."
           ],
-          "result": "Reduced from 135 longer handlers to 76, about 230 lines in all."
+          "result": "Some handlers remain longer. Regex census classes are estimates, not a migration proof."
         },
         {
           "option": "A",
@@ -192950,7 +192950,7 @@
             "Rewrite from the parse tree, keeping the subject in one place in every shape.",
             "Probe each shape with a subject that prints: r07 and r08 print once per evaluation and match the operator's output."
           ],
-          "result": "Removed."
+          "result": "Holds for the exercised scalar examples only; move-only payloads, nested bindings and drop timing need cutover tests."
         },
         {
           "option": "C",
@@ -192959,14 +192959,14 @@
             "Let the formatter choose one or many lines by width, so authors never pick.",
             "Limit the one-line form to two arms."
           ],
-          "result": "Reduced, not removed: readers still meet two layouts."
+          "result": "Layout flexibility is allowed by I8. Remaining cost is general separator grammar and deterministic formatting, not a second semantic mechanism."
         },
         {
           "option": "D",
           "loss": "A return inside fold leaves only the closure.",
           "attempts": [
             "Make fold inline with non-local return, as Kotlin does; that is a language feature far larger than this ballot.",
-            "Restrict fold to value position, where no return is needed; then ?? already covers it."
+            "Use fold for value transforms of both branches; ?? covers only the unchanged-success subset."
           ],
           "result": "Not removed."
         }
@@ -200136,6 +200136,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:38:20.454Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-RESULT-BRANCH1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:37:48.428Z",
       "by": "Main",
