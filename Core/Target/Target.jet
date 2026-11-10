@@ -5,19 +5,6 @@
 // denies the effect that needs it: `row` derives that denial row, the one
 // the compiler checks every artifact built for the machine against.
 
-// The operating system a machine runs code under.
-MachineOS: enum {
-    Linux
-    MacOS
-    Windows
-    // A browser page: WebAssembly with the browser's APIs.
-    Web
-    // WebAssembly without a browser.
-    Wasm
-    // No operating system: the program is the machine's only code.
-    Freestanding
-}
-
 // The byte order of a machine's words.
 MachineEndian: enum {
     Little
@@ -36,28 +23,20 @@ MachineLayout: struct {
     atomic_bits: Int
 }
 
-// What a panic does on a machine.
-MachinePanic: enum {
-    // It reports the panic and stops the program.
-    Report
-    // It stops the machine at once, reporting nothing.
-    Abort
-    // Code built for the machine cannot panic.
-    Denied
-}
-
 // The facts of one machine. Each service is the provider that implements it,
-// or None when the machine lacks it.
+// or None when the machine lacks it. The operating system is in the triple,
+// and code reads the built target's as `#build.target.os`.
 MachineFacts: struct {
     triple: String
-    os: MachineOS
     layout: MachineLayout
     // The CPU features every CPU of the machine has, so code built for it
     // uses them without probing.
     cpu_features: [String]{[String]{}}
     // The heap. None means code built for the machine cannot allocate.
     allocator: String?
-    panic: MachinePanic
+    // What reports a panic. None means code built for the machine cannot
+    // panic.
+    panic: String?
     // Where `print` and the standard streams write.
     byte_sink: String?{None}
     wall_clock: String?{None}
@@ -96,7 +75,7 @@ MachineFacts: struct {
             if self.browser == None -> denied.push("!FFI") else -> denied.push("!FFI.C")
         }
         if self.browser == None -> denied.push("!Browser")
-        if self.panic == .Denied -> denied.push("!Panic")
+        if self.panic == None -> denied.push("!Panic")
         if self.allocator == None -> denied.push("!Mem.Alloc")
         denied
     }
@@ -114,11 +93,10 @@ LinuxX64: struct {
     impl Machine {
         facts: MachineFacts{
             triple: "x86_64-unknown-linux-gnu",
-            os: .Linux,
             layout: MachineLayout{pointer_bits: 64, word_bits: 64, cache_line: 64, atomic_bits: 64},
             cpu_features: ["sse2"],
             allocator: "system",
-            panic: .Report,
+            panic: "stderr",
             byte_sink: "stdio",
             wall_clock: "clock_gettime",
             monotonic_clock: "clock_gettime",
@@ -140,11 +118,10 @@ MacOSArm64: struct {
     impl Machine {
         facts: MachineFacts{
             triple: "aarch64-apple-darwin",
-            os: .MacOS,
             layout: MachineLayout{pointer_bits: 64, word_bits: 64, cache_line: 128, atomic_bits: 64},
             cpu_features: ["neon"],
             allocator: "system",
-            panic: .Report,
+            panic: "stderr",
             byte_sink: "stdio",
             wall_clock: "clock_gettime",
             monotonic_clock: "mach_absolute_time",
@@ -166,11 +143,10 @@ WindowsX64: struct {
     impl Machine {
         facts: MachineFacts{
             triple: "x86_64-pc-windows-msvc",
-            os: .Windows,
             layout: MachineLayout{pointer_bits: 64, word_bits: 64, cache_line: 64, atomic_bits: 64},
             cpu_features: ["sse2"],
             allocator: "heap_alloc",
-            panic: .Report,
+            panic: "stderr",
             byte_sink: "console",
             wall_clock: "system_time",
             monotonic_clock: "query_performance_counter",
@@ -195,10 +171,9 @@ Web: struct {
     impl Machine {
         facts: MachineFacts{
             triple: "wasm32-unknown-unknown",
-            os: .Web,
             layout: MachineLayout{pointer_bits: 32, word_bits: 32, cache_line: 64, atomic_bits: 64},
             allocator: "wasm_memory",
-            panic: .Report,
+            panic: "console",
             byte_sink: "console",
             wall_clock: "date",
             monotonic_clock: "performance",
@@ -219,10 +194,9 @@ GPU: struct {
     impl Machine {
         facts: MachineFacts{
             triple: "spirv64-unknown-unknown",
-            os: .Freestanding,
             layout: MachineLayout{pointer_bits: 64, word_bits: 32, cache_line: 128, atomic_bits: 64},
             allocator: None,
-            panic: .Denied,
+            panic: None,
             gpu: "device",
         }
     }
