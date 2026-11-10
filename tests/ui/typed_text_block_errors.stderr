@@ -25,23 +25,23 @@ Error [jet.UnknownType]: There's no type called `Missing`
  Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119
 
-Error [jet.ValueTypeMismatch]: `User` can't be bound in an `SQL{…}` hole
+Error [jet.TraitNotImplemented]: `User` isn't `Printable`
   --> tests/ui/typed_text_block_errors.jet:21:50
     |
  21 |     query: SQL{"select id from users where id = {user}"}
     |                                                  ^^^^
- Why: An SQL hole sends its value to the database as one bound parameter, so it must be a printable value or a `DBValue`
- Fix: Pass one field, such as `{row.id}`, or a `DBValue`
-More: jet-lang.dev/e/E0112
+ Why: `User` would need to implement `Printable` before it can be used here
+ Fix: Write `impl User.Printable { … }` with every required method
+More: jet-lang.dev/e/E0905
 
-Error [jet.ValueTypeMismatch]: `User` can't be escaped into an `HTML{…}` hole
+Error [jet.TraitNotImplemented]: `User` isn't `Printable`
   --> tests/ui/typed_text_block_errors.jet:23:21
     |
  23 |     page: HTML{"<p>{user}</p>"}
     |                     ^^^^
- Why: An HTML hole escapes its value's printed text, or places an `HTML` value as it is
- Fix: Pass a printable field, such as `{page.title}`, or an `HTML` value
-More: jet-lang.dev/e/E0112
+ Why: `User` would need to implement `Printable` before it can be used here
+ Fix: Write `impl User.Printable { … }` with every required method
+More: jet-lang.dev/e/E0905
 
 Error [jet.ValueTypeMismatch]: `render` wants `HTML` for argument 1, but this is `SQL`
   --> tests/ui/typed_text_block_errors.jet:25:18

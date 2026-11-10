@@ -891,7 +891,8 @@ low-byte normalization, independent clones and exact-sized shell deallocation.
 `core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
 connection, scope, pool and lease carriers are Jet structs over the Jet
 SQLite engine (`Core/Db/Engine`), `RowPolicy` and `SQL` are source values, and
-typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
+a typed `SQL{…}` literal is `SQL`'s own `CheckedText` impl: each hole becomes
+one bound `DBValue` and `build` assembles the `?` template.
 
 `core.service` trees, endpoints, workflows, upgrade receipts, deliveries and
 delivery events are plain Core source: `Core/Service/Service.jet` declares

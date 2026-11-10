@@ -250,7 +250,8 @@ __db_error: fn(message: String) -> DBError Never! { DBError{message: message.cop
 __db_closed: fn() -> DBError Never! { __db_error("database connection is closed") }
 
 // Checked SQL: the template text with `?` placeholders plus its bound values.
-// Typed `SQL{"..."}` literals desugar to `__sql_literal`; every hole is a value.
+// `SQL{"… {value} …"}` is a checked text literal whose holes stay values: each
+// becomes one bound DBValue, never query text.
 #Equatable
 SQL: struct {
     text: String
@@ -262,6 +263,29 @@ impl SQL {
     params: fn(self) -> [DBValue] Never! { self.values.copy() }
 }
 impl SQL.Display { display: fn(self) -> String { self.text.copy() } }
+
+impl SQL.CheckedText {
+    Error: Never
+    Hole: DBValue
+
+    // Every SQL text is accepted; its holes are what keeps a query safe.
+    check: fn(_text: String) Never! -[]> { return Ok() }
+
+    // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
+    // variant; anything else binds its display text.
+    encode_hole: fn<T: Printable>(value: T) -[]> DBValue {
+        if T == {
+            DBValue -> value.copy()
+            Int -> DBValue.Int(value)
+            Float -> DBValue.Float(value)
+            Bool -> DBValue.Bool(value)
+            [U8] -> DBValue.Blob(value.copy())
+            else -> DBValue.Text("{value}")
+        }
+    }
+
+    build: fn(parts: [String], holes: [DBValue]) -[]> SQL { __sql_literal(parts, holes) }
+}
 
 __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
     if literals.len() != values.len() + 1 -> panic("typed SQL literal pieces do not match its holes")

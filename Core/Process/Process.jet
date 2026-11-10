@@ -61,17 +61,25 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
     if word != "" -> argv.push(word)
 }
 
-// The checked `Sh{…}` literal: literal text splits on whitespace, each hole's
-// display text is one argv item.
-__sh_literal: fn(literals: [String], holes: [String]) -> Sh Never! {
-    if literals.len() != holes.len() + 1 -> panic("typed Sh literal and hole counts do not match")
-    argv := [String]{}
-    sh_split_into(literals[0], argv)
-    loop index in 0..<holes.len() {
-        argv.push(holes[index].copy())
-        sh_split_into(literals[index + 1], argv)
+// A checked `Sh{…}` literal: literal text splits on whitespace and each
+// hole's display text is one argv item.
+impl Sh.CheckedText {
+    Error: Never
+    Hole: String
+
+    check: fn(_text: String) Never! -[]> { return Ok() }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+    build: fn(parts: [String], holes: [String]) -[]> Sh {
+        argv := [String]{}
+        sh_split_into(parts[0], argv)
+        loop index in 0..<holes.len() {
+            argv.push(holes[index].copy())
+            sh_split_into(parts[index + 1], argv)
+        }
+        Sh{argv: argv}
     }
-    Sh{argv: argv}
 }
 
 

@@ -1857,6 +1857,9 @@ encoded; a Path hole is one encoded component, including `.` and `..`; a
 DateTime head cannot contain holes. Runtime strings keep the existing
 fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
 and D-CORE-PATH1; no compatibility spelling is retained.
+Since D-TEXTHEAD-HOLES1=A and D-HOST-LEAF1=E, `URL`, `Path` and `DateTime`
+are Core `CheckedText` impls: an invalid body is E2712, whose Why is the Core
+check's reason (`URL port cannot contain interpolation`). E0155 is retired.
 
 **D-BOUND-RAW1=A — typed head bodies own escapes** *(ratified 2026-08-13,
 card #1815)*: inside any `Type{"…"}` body, backslash is literal text owned

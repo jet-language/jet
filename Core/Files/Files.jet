@@ -46,14 +46,29 @@ use {
 // symlink and other special entries are never dereferenced.
 
 
+// Why a checked Path literal was rejected.
+#Error
+PathLiteralError: struct { reason: String }
+
 // The checked `Path{…}` literal: each hole's display text is one percent-
 // encoded path component, so its slashes and dot segments never become path
 // grammar.
-__path_literal: fn(literals: [String], holes: [String]) -> Path Never! {
-    if literals.len() != holes.len() + 1 -> panic("typed Path literal and hole counts do not match")
-    text := literals[0].copy()
-    loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{literals[index + 1]}"
-    Path.from(text)
+impl Path.CheckedText {
+    Error: PathLiteralError
+    Hole: String
+
+    check: fn(text: String) PathLiteralError! -[]> {
+        if text.bytes().contains(U8{0}) -> return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+    build: fn(parts: [String], holes: [String]) -[]> Path {
+        text := parts[0].copy()
+        loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{parts[index + 1]}"
+        Path.from(text)
+    }
 }
 
 path_component_encode: fn(component: String) -> String Never! {

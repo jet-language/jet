@@ -9,6 +9,7 @@ use {
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
+        BOUNDARY_TYPED_HEADS,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
         CompilerThreads,
@@ -37,6 +38,7 @@ use {
         compiler_threads_partition,
         compiler_threads_single,
         core_bare_source_module,
+        boundary_head_owner_module,
         core_input_method_modules,
         core_module_export,
         core_module_has_member,
@@ -3341,6 +3343,10 @@ JetDriverCoreIdentifierDemand: struct {
     // `.matches(…)`/`.match(…)` receiver call (String's pattern methods run
     // the `core.regex` engine): core.regex loads.
     regex_source: Bool
+    // The owner module of each boundary typed literal the source spells
+    // (`DateTime{"…"}` is core.time; boundary_head_owner_module): the
+    // literal is checked by that module's CheckedText impl, so it loads.
+    typed_head_modules: [String]{[String]{}}
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
@@ -3436,6 +3442,8 @@ JetDriverCoreDemandNames: struct {
     // `encoding` and `json` for `core.encoding.json`), for the qualified-path
     // demand.
     core_segments: [Int]
+    // Per BOUNDARY_TYPED_HEADS row, the id of its name.
+    typed_heads: [Int]
 }
 
 jet_driver_core_demand_name: fn(tables: TokenTables, text: String) -> Int Never! {
@@ -3469,7 +3477,9 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
             if id >= 0 && !core_segments.contains(id) -> core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    typed_heads := [Int]{}
+    loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads}
 }
 
 jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
@@ -3503,6 +3513,13 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_receiver = true
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
+            if index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE {
+                loop at in 0..<names.typed_heads.len() {
+                    if names.typed_heads[at] != name -> next
+                    owner: boundary_head_owner_module(BOUNDARY_TYPED_HEADS[at]) ?? next
+                    if !demand.typed_head_modules.contains(owner) -> demand.typed_head_modules.push(owner)
+                }
+            }
             if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
             // `Dest.from_<unit>(x)` (or `_rounded`): an explicit conversion
             // between Prelude unit types lowers to its `Core/Math/Math.jet`
@@ -3625,6 +3642,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.option_or_err -> demand.option_or_err = true
         if output.math_receiver -> demand.math_receiver = true
         if output.regex_source -> demand.regex_source = true
+        loop module_name in output.typed_head_modules {
+            if !demand.typed_head_modules.contains(module_name) -> demand.typed_head_modules.push(module_name)
+        }
         if output.format_selector -> demand.format_selector = true
         if output.test_suite -> demand.test_suite = true
         if output.stream_event_time -> demand.stream_event_time = true
@@ -4933,6 +4953,22 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)
+                }
+            }
+        }
+        // A boundary typed literal (`DateTime{"…"}`) is checked by its owner
+        // module's CheckedText impl, even when the caller has no import of
+        // that module.
+        if !is_core {
+            loop module_name in demand.typed_head_modules {
+                if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
+                jet_driver_reach_open(reach, module_name)
+                head_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                if head_index == .Val(index) {
+                    if !queued[index] {
+                        queued[index] = true
+                        pending.push(index)
+                    }
                 }
             }
         }

@@ -2024,11 +2024,22 @@ civil_dyn_datetime: fn(text: String) -> ZonedDateTime? Never! {
     Val(zoned(civil_timestamp(seconds, nanos, second == 60), civil_fixed_zone(offset)))
 }
 
-impl DateTime {
-    // Sema has already validated the complete literal. Ordinary source dispatch
-    // keeps the runtime construction on the same parser as runtime strings.
-    __literal: fn(text: String) -> DateTime Never! {
-        parse_rfc3339(text) ?? panic("a checked DateTime literal became invalid")
+// A checked `DateTime{"…"}` literal is one complete RFC 3339 instant, checked
+// before the program runs by the same parser that reads runtime strings.
+impl DateTime.CheckedText {
+    Error: TimeError
+    Hole: String
+
+    check: fn(text: String) TimeError! -[]> {
+        if text.contains("{{}}") -> return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
+        _: parse_rfc3339(text)
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+    build: fn(parts: [String], _holes: [String]) -[]> DateTime {
+        parse_rfc3339(parts.join("")) ?? panic("a checked DateTime literal became invalid")
     }
 }
 

@@ -92,8 +92,10 @@ vocabulary](vocabulary.md).
   `build: fn(parts: [String], holes: [Hole]) -[]> Owner` keeps its holes as
   values: `Owner{"a {x} b"}` is `Owner.build(["a ", " b"],
   [Owner.encode_hole(x)])`, and `check` accepts the parts joined by `{}`
-  before the program runs, or the literal is E2712. `Hole` without `build`
-  is E0907 (D-TEXTHEAD-HOLES1=A;
+  before the program runs, or the literal is E2712. Such a literal adds no
+  failure route to the function it is in: a failure of `encode_hole` or
+  `build` stops the program at the literal, as a rejected run-time check
+  does. `Hole` without `build` is E0907 (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
