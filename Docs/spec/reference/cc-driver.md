@@ -85,6 +85,14 @@ bounded whitespace, single-quote, double-quote, and backslash parsing. They do
 not perform shell expansion. Nested response files, cycles, file size, and byte
 count each have fixed limits.
 
+Every regular file under the project root is a declared input of the compile,
+except `.git`, `.jet`, `target`, `build`, `CMakeFiles`, an explicit build root,
+and the declared outputs. The project root is `--project-root` when it is given
+and the current directory otherwise. The input set holds at most 100000 files
+and 512 MiB. A larger set stops the run with E2118 before any toolchain is
+fetched; the report names the project root, the size found and the cap. Pass
+`--project-root` naming the source directory to narrow it.
+
 The driver forwards selected compiler flags, dependency targets, and the
 virtual sysroot into the action. Target-changing flags, linker injection,
 host sysroot overrides, and out-of-scope paths fail before an output is

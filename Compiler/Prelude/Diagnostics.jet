@@ -11130,6 +11130,24 @@ FlagNotASetting: struct {
     }
 }
 
+CcProjectInputsTooLarge: struct {
+    command: String
+    size: String
+    root: String
+    cap: String
+
+    impl Diagnostic {
+        code: "E2118"
+        stage: [.Jet]
+        meaning: "`jet cc` or `jet c++` would declare a project input set over its size or file-count cap (#6686)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`jet {self.command}` would declare {self.size} under `{self.root}` as compile inputs, over the {self.cap} cap." }
+        why: fn(self) -> String { "`jet {self.command}` declares every file under the project root as an input of the compile, so a change to any of them reruns it. The project root is `--project-root` when it is given and the current directory otherwise; only `.git`, `.jet`, `target`, `build`, `CMakeFiles` and the build root are left out." }
+        fix: fn(self) -> String { "Run `jet {self.command}` from the directory that holds the sources, or pass `--project-root <dir>` naming it, so the input set holds only the files the compile reads." }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201"
