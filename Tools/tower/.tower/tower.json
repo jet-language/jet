@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98370,
+    "rev": 98373,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65385,11 +65385,11 @@
         {
           "n": 59,
           "text": "(was #1493 c2) Bits.copy() exists and returns an independent value, not a reference alias, proven by a golden on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:47.279Z"
+          "evidence": "On dev e4096a0f3b: Examples/Collections/Iterators/IterToolsAudit.jet calls bits.copy(), adds 8 to the copy and asserts bits.has(8) == false, then prints both lists. Its golden IterToolsAudit.out PASSes on o0, o1 and o2 in the Lander's fR3 fullprof run, so the copy is an independent value, not an alias.",
+          "at": "2026-11-10T01:56:30.317Z"
         },
         {
           "n": 61,
@@ -65769,7 +65769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-09T20:47:48.759Z",
+      "updated": "2026-11-10T01:56:30.317Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -82012,6 +82012,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main) on c6 replaces the earlier rlimit plan: the compiler never changes RLIMIT_STACK, because every child (jet dev's program, jet test binaries, core.process spawns) would inherit it. The runtime gets a process-local worker-stack floor reached through an internal core.sys.__ row (not public API; Host.jet already calls core.sys.__rlimit the same way). Program default: soft RLIMIT_STACK with an 8 MiB minimum. The compiler sets a 192 MiB floor for its own compile. Staged as G1Lead-3-6403c6f1 (runtime plus row, train 3) and c6f2 (Host.jet call plus case rows for run, dev and test children, on the next seed). c6b2, c6b3 and c6b4 are withdrawn."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main) on c6: the compiler raises its own soft RLIMIT_STACK to 192 MiB only for the compile, using the existing core.sys.set_stack_limit, and puts it back before the run step (G1Lead-3-6403c6b3: no public API, no C import, no __thread_stack_floor row). Children started during a compile (jet dev's program) get the user's original soft limit, through an internal X64Launch rlimit record in Loader.jet (G1Lead-3-6403c6b4) with a case row. Every program sees the user's own limit, on every tier."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
@@ -82105,7 +82115,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-09T22:42:08.717Z",
+      "updated": "2026-11-10T01:59:05.914Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -194074,6 +194084,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T01:59:05.914Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T01:56:30.317Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-10T01:55:51.624Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-10T01:48:37.259Z",
       "by": "Main",
