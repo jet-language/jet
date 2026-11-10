@@ -1,5 +1,5 @@
 // BUILD: a port of SQLite 3.45.0 build.c, the routines the parser calls to
-// build the schema: CREATE TABLE (with its implied indexes), DROP TABLE,
+// build the schema: CREATE TABLE (with its implied indexes), CREATE INDEX, DROP TABLE,
 // the column and constraint clauses, and transactions; with attach.c's
 // DbFixer (DBFixer here).
 //
@@ -874,12 +874,11 @@ CreateIndexState: struct {
 
 // sqlite3CreateIndex: the index `name1.name2` on table `tbl` (a one-item
 // SrcList; -1 for the PRIMARY KEY or UNIQUE index of the table being
-// created, `list` -1 for its last column). Outside the schema load only
-// that implied index can be made: a CREATE INDEX statement fails, as this
-// build does not support it.
+// created, `list` -1 for its last column). `start` is the CREATE token of a
+// CREATE INDEX statement (none for an implied index).
 create_index: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Bool, idx_type: Int) Never! -[DB]> {
     s := CreateIndexState{t: -1, list: list, where_expr: where_expr}
-    ix: create_index_object(p, a, s, name1, name2, tbl, on_error, sort_order, if_not_exist, idx_type)
+    ix: create_index_object(p, a, s, name1, name2, tbl, on_error, start, sort_order, if_not_exist, idx_type)
     if ix >= 0 -> conn.free_index(p.db, ix)
     if s.t >= 0 -> replace_indexes_last(p.db, s.t)
     ast.expr_delete(a, s.where_expr)
@@ -915,7 +914,7 @@ replace_indexes_last: fn(db: &conn.Conn, t: Int) Never! {
 
 // The body of sqlite3CreateIndex up to exit_create_index: the index slot
 // left for the caller to free, or -1 when none is (none made, or linked).
-create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, on_error: Int, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Int Never! {
+create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, on_error: Int, start: ast.SQLTok, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Int Never! {
     if cg.n_err(a) > 0 -> return -1
     if a.ctx.parse_mode == ast.PARSE_MODE_DECLARE_VTAB && idx_type != ast.IDXTYPE_PRIMARYKEY -> return -1
     g := p.up
@@ -929,10 +928,6 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
         if r.i_db < 0 -> return -1
         i_db = r.i_db
         name = r.name
-        if !p.db.init.busy {
-            ast.error(a, "CREATE INDEX is not supported in this build")
-            return -1
-        }
         f := fix_init(p, i_db, "index", ast.tok_text(a, name), ast.tok_offset(a, name))
         _: fix_src_list(f, a, tbl)
         tbl_item: ast.src_item(a, tbl, 0)
@@ -1119,9 +1114,26 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
         cg.begin_write_operation(p, a, true, i_db)
         p.db.indexes[ix].tnum = cg.op0(p, opc.OP_NOOP)
         _: cg.op3(p, opc.OP_CREATE_BTREE, i_db, i_mem, btree.BTREE_BLOBKEY)
-        // Only the implied index of CREATE TABLE gets here, so zStmt is NULL
-        // and RefillIndex is not needed: the new table holds no rows.
-        nested_parse(p, a, "INSERT INTO %Q.sqlite_master VALUES('index',%Q,%Q,#%d,%Q);", [base.Mem]{pf.txt(z_db), pf.txt(z_name), pf.txt(tname), base.mem_int(i_mem), base.mem_null()})
+        // The text of a CREATE INDEX statement, from its name to its last
+        // token; an implied index of CREATE TABLE has none.
+        z_stmt := base.mem_null()
+        if start.z >= 0 {
+            last: a.ctx.last_token
+            n := last.z - name.z + last.n
+            if util.sql_byte(a.ctx.sql, name.z + n - 1) == 59 -> n -= 1
+            unique: if on_error == ast.OE_NONE -> "" else -> " UNIQUE"
+            z_stmt = pf.txt("CREATE{unique} INDEX {ast.text(a.ctx.sql[name.z..<(name.z + n)].copy())}".bytes())
+        }
+        nested_parse(p, a, "INSERT INTO %Q.sqlite_master VALUES('index',%Q,%Q,#%d,%Q);", [base.Mem]{pf.txt(z_db), pf.txt(z_name), pf.txt(tname), base.mem_int(i_mem), z_stmt})
+        // A CREATE INDEX statement's table may hold rows: fill the index,
+        // then reload it into the schema from its sqlite_master row.
+        if tbl >= 0 {
+            refill_index(p, a, ix, i_mem)
+            change_cookie(p, i_db)
+            z_where: pf.mprintf("name='%q' AND type='index'".bytes(), [base.Mem]{pf.txt(z_name)}, p.db.limits[ast.LIMIT_LENGTH]) ?? [U8]{}
+            add_parse_schema_op(p, i_db, z_where, 0)
+            _: cg.op2(p, opc.OP_EXPIRE, 0, 1)
+        }
         cg.v_jump_here(p, p.db.indexes[ix].tnum)
     }
     if p.db.init.busy || tbl < 0 {
@@ -1130,6 +1142,55 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
         return -1
     }
     ix
+}
+
+// sqlite3RefillIndex for a new index: every row of its table keyed into a
+// sorter, then written in key order to the index btree whose root page is
+// in register mem_root_page. A UNIQUE index stops at a duplicate key.
+refill_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int, mem_root_page: Int) Never! -[DB]> {
+    t: p.db.indexes[ix].table
+    i_db: conn.schema_to_index(p.db, p.db.indexes[ix].schema)
+    if cg.auth_check(p, a, conn.AUTH_REINDEX, Val(p.db.indexes[ix].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != base.OK -> return
+    i_tab: p.f.n_tab
+    i_idx: i_tab + 1
+    i_sorter: i_tab + 2
+    p.f.n_tab += 3
+    cg.get_vdbe(p)
+    key: cat.key_info_of_index(p, a, ix) ?? { return }
+    _: cg.op4(p, opc.OP_SORTER_OPEN, i_sorter, 0, p.db.indexes[ix].n_key_col, conn.P4.KeyInfo(key.copy()))
+    ex.open_table(p, a, i_tab, i_db, t, opc.OP_OPEN_READ)
+    addr1 := cg.op2(p, opc.OP_REWIND, i_tab, 0)
+    reg_record: cg.get_temp_reg(p)
+    cg.multi_write(p)
+    row_key: wh.generate_index_key(p, a, ix, i_tab, reg_record, false, true, -1, 0)
+    _: cg.op2(p, opc.OP_SORTER_INSERT, i_sorter, reg_record)
+    wh.resolve_part_idx_label(p, row_key.label)
+    _: cg.op2(p, opc.OP_NEXT, i_tab, addr1 + 1)
+    cg.v_jump_here(p, addr1)
+    _: cg.op4(p, opc.OP_OPEN_WRITE, i_idx, mem_root_page, i_db, conn.P4.KeyInfo(key.copy()))
+    cg.v_change_p5(p, conn.OPFLAG_BULKCSR.bit_or(conn.OPFLAG_P2ISREG))
+    addr1 = cg.op2(p, opc.OP_SORTER_SORT, i_sorter, 0)
+    addr2 := 0
+    if p.db.indexes[ix].on_error != ast.OE_NONE {
+        j2: cg.goto(p, 1)
+        addr2 = cg.v_current_addr(p)
+        _: cg.op4_int(p, opc.OP_SORTER_COMPARE, i_sorter, j2, reg_record, p.db.indexes[ix].n_key_col)
+        cg.unique_constraint(p, ast.OE_ABORT, ix)
+        cg.v_jump_here(p, j2)
+    } else {
+        cg.may_abort(p)
+        addr2 = cg.v_current_addr(p)
+    }
+    _: cg.op3(p, opc.OP_SORTER_DATA, i_sorter, reg_record, i_idx)
+    _: cg.op1(p, opc.OP_SEEK_END, i_idx)
+    _: cg.op2(p, opc.OP_IDX_INSERT, i_idx, reg_record)
+    cg.v_change_p5(p, conn.OPFLAG_USESEEKRESULT)
+    cg.release_temp_reg(p, reg_record)
+    _: cg.op2(p, opc.OP_SORTER_NEXT, i_sorter, addr2)
+    cg.v_jump_here(p, addr1)
+    _: cg.op1(p, opc.OP_CLOSE, i_tab)
+    _: cg.op1(p, opc.OP_CLOSE, i_idx)
+    _: cg.op1(p, opc.OP_CLOSE, i_sorter)
 }
 
 // ---------------------------------------------------------------------------

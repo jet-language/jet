@@ -1763,6 +1763,33 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     assert(__driver_shutdown(driver))
 }
 
+#Test("SQLite driver builds an index over existing rows and keeps UNIQUE indexes unique") {
+    driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
+    _: __driver_execute(driver, "CREATE TABLE jobs (queue TEXT NOT NULL, state TEXT NOT NULL, due INTEGER NOT NULL, sequence INTEGER NOT NULL)", [DBValue]{}) ?? panic("SQLite create failed")
+    loop n in 0..<40 {
+        _: __driver_execute(driver, "INSERT INTO jobs VALUES (?, ?, ?, ?)", [DBValue]{.Text("q{n % 3}"), .Text(if n % 2 == 0 -> "ready" else -> "done"), .Int(100 - n), .Int(n)}) ?? panic("SQLite insert failed")
+    }
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS jobs_due ON jobs (queue, state, due, sequence)", [DBValue]{}) ?? panic("SQLite create index failed")
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS jobs_due ON jobs (queue, state, due, sequence)", [DBValue]{}) ?? panic("SQLite repeated create index failed")
+    _: __driver_execute(driver, "INSERT INTO jobs VALUES ('q1', 'ready', 1, 40)", [DBValue]{}) ?? panic("SQLite insert after index failed")
+    // INDEXED BY reads the rows from the index alone: the refill wrote every
+    // existing row and the later insert added its own.
+    due: __driver_query(driver, "SELECT sequence FROM jobs INDEXED BY jobs_due WHERE queue = 'q1' AND state = 'ready' ORDER BY due", [DBValue]{}) ?? panic("SQLite indexed select failed")
+    assert_eq(due.map(row -> row_int(row, "sequence") ?? -1), [Int]{40, 34, 28, 22, 16, 10, 4})
+    schema: __driver_query(driver, "SELECT sql FROM sqlite_master WHERE name = 'jobs_due'", [DBValue]{}) ?? panic("SQLite schema read failed")
+    assert_eq(row_text(schema[0], "sql") ?? "", "CREATE INDEX jobs_due ON jobs (queue, state, due, sequence)")
+    if __driver_execute(driver, "CREATE UNIQUE INDEX jobs_queue ON jobs (queue)", [DBValue]{}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.queue"))
+    }
+    _: __driver_execute(driver, "CREATE UNIQUE INDEX jobs_sequence ON jobs (sequence)", [DBValue]{}) ?? panic("SQLite unique index failed")
+    if __driver_execute(driver, "INSERT INTO jobs VALUES ('q0', 'ready', 5, 3)", [DBValue]{}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.sequence"))
+    }
+    assert(__driver_shutdown(driver))
+}
+
 // Ordinary scope-end Close finalizes the driver's cached statements and then
 // closes its connection when this probe returns; no explicit close here.
 __driver_cache_parity_probe: fn() Never! {

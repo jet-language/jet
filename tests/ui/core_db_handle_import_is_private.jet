@@ -1,9 +1,9 @@
-// #6479: `SqliteDB` is core.db's own handle (its `raw` word is a live sqlite3
-// pointer) and core.db does not export it, so user code can't name it or
-// forge one from a made-up word.
-use core.db.[SqliteDB]
+// #6479: `CachedStatement` is core.db's own handle (its `stmt` word indexes
+// a live prepared statement of the engine) and core.db does not export it,
+// so user code can't name it or forge one from a made-up word.
+use core.db.[CachedStatement]
 
 run: fn() {
-    d: SqliteDB{raw: 1}
+    d: CachedStatement{stmt: 1, sql: ""}
     print("made")
 }
