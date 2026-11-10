@@ -125,6 +125,13 @@ IRBuilder: struct {
     // none): an assignment there keeps its old value where it is false
     // (BuildMask.jet).
     mask: Int{-1}
+    // A function with masked early returns (BuildMask.jet ir_masked_exits):
+    // the Bool variable no masked return has run yet and the variable
+    // holding the value one chose (-1: none), and whether the code being
+    // built may run after one, so its assignments are masked by `live`.
+    live: Int{-1}
+    exit_value: Int{-1}
+    exiting: Bool{false}
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0}

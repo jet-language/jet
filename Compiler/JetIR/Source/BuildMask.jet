@@ -1,6 +1,7 @@
 // Masked branches. Sema masks a branch on a `timing: .Fixed` value when every
-// arm is total (JetSema Taint.jet sema_taint_total_expr): no arm stops, calls,
-// writes memory or leaves early. The span of each such branch is in its
+// arm is total (JetSema Taint.jet sema_taint_total_expr): no arm stops, calls
+// or writes memory, and an arm leaves only by a last `return` (an early
+// return, below). The span of each such branch is in its
 // function's FnBody.masked. The builder builds a masked branch with no jump.
 // Both arms run, each under the Bool that it would have run under
 // (IRBuilder.mask: the branch's test, or its negation, and-ed with the
@@ -13,7 +14,7 @@
 // IRFunction.masked, which `jet inspect decisions` lists
 // (ir_masked_branch_rows).
 
-use jet_foundation.[BodyIfCond, BodyPlace, Span, TBinaryOp, Type]
+use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, FnBody, Span, TBinaryOp, Type]
 
 // Whether the branch at `span` of the function being built is masked.
 ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {
@@ -131,7 +132,8 @@ ir_masked_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: BodyPlace
         result = ir_binary(m, p, b, binary, ir_assign_overflow(binary), b.line, left_ty, current, right, right_ty, span)
         if ir_failed(b) || result < 0 -> return
     }
-    kept: ir_mask_select(m, b, b.mask, result, current, span)
+    now: ir_masked_now(m, b)
+    kept: ir_mask_select(m, b, now, result, current, span)
     if ir_failed(b) -> return
     if binding.indirect >= 0 {
         ir_emit(b.f, IROp.Store, -1, binding.slot, 0, kept, b.line)
@@ -139,4 +141,93 @@ ir_masked_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: BodyPlace
         return
     }
     ir_store(m, p, b, binding.slot, kept)
+}
+
+// Early returns from masked branches. Sema masks an `if` with no else whose
+// arms return (JetSema Taint.jet sema_taint_settle_exits) when everything the
+// return would skip is total too. Such a function keeps two variables from
+// its start: `live` (no masked return has run yet) and the value the first
+// masked return chose. A masked return keeps its value where its arm's Bool
+// and `live` hold, then clears `live` there. The code after it still runs:
+// in every loop of the function (its body may run again after one), every
+// assignment also keeps its old value where `live` is false. Every return
+// of the function gives the chosen value where `live` is false.
+ir_masked_exits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
+    // The checked body the builder reads (ir_body_stmt, ir_masked_branch):
+    // an early return is the last statement of a masked `if`'s arm.
+    if b.row < 0 -> return
+    row: b.row
+    found := false
+    loop statement in p.functions[row].tree.stmts {
+        if statement == .If(_, then_body, _, _, span) {
+            if then_body.len() > 0 && ir_masked_branch(p, b, span) {
+                last: body_stmt(p.functions[row].tree, then_body[then_body.len() - 1])
+                if last == .Return(_, _) -> found = true
+            }
+        }
+    }
+    if !found -> return
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    b.live = ir_new_slot(b, bool_row, IRSlotKind.Local, ir_intern_name(m, "masked.live"))
+    ir_emit(b.f, IROp.Const, b.live, 1, -1, -1, b.line)
+    if b.f.result < 0 -> return
+    kind: m.types[b.f.result].kind
+    if kind != .Word && kind != .Bool -> return ir_fail(b, function.source_span, "a masked branch returns a {ir_kind_name(kind)} value; only a fixed-width integer or a Bool can be masked")
+    b.exit_value = ir_new_slot(b, b.f.result, IRSlotKind.Local, ir_intern_name(m, "masked.result"))
+    ir_emit(b.f, IROp.Const, b.exit_value, 0, -1, -1, b.line)
+}
+
+// Entering a loop in a function with masked returns: its body may run again
+// after one, so its assignments are masked from the start.
+ir_masked_loop: fn(b: &IRBuilder) Never! {
+    if b.live >= 0 -> b.exiting = true
+}
+
+// Whether an assignment here keeps its old value where a Bool fails.
+ir_masking: fn(b: IRBuilder) -> Bool Never! {
+    b.mask >= 0 || (b.live >= 0 && b.exiting)
+}
+
+// The Bool the code being built runs under: the arm's mask and-ed with
+// `live` once a masked return may have run, read where it is used.
+ir_masked_now: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
+    live: b.live
+    mask: b.mask
+    if live < 0 || !b.exiting -> return mask
+    if mask < 0 -> return live
+    both: ir_temp_like(m, b, live)
+    ir_emit(b.f, IROp.BitAnd, both, mask, live, IR_OVERFLOW_WRAP, b.line)
+    both
+}
+
+// `return value` in an arm of a masked branch.
+ir_masked_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span) Never! {
+    live: b.live
+    chosen: b.exit_value
+    if live < 0 -> return ir_fail(b, span, "a masked branch returns")
+    b.exiting = true
+    now: ir_masked_now(m, b)
+    if value == .Val(returned) {
+        if chosen < 0 -> return ir_fail(b, span, "a masked branch returns a value from a function without one")
+        row: b.f.result
+        slot: ir_value_as(m, p, b, returned, row, span)
+        if ir_failed(b) -> return
+        kept: ir_mask_select(m, b, now, slot, chosen, span)
+        if ir_failed(b) -> return
+        ir_emit(b.f, IROp.Copy, chosen, kept, -1, -1, b.line)
+    }
+    gone: ir_temp_like(m, b, live)
+    ir_emit(b.f, IROp.Not, gone, now, -1, -1, b.line)
+    still: ir_temp_like(m, b, live)
+    ir_emit(b.f, IROp.BitAnd, still, live, gone, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Copy, live, still, -1, -1, b.line)
+}
+
+// The value a return of a function with masked returns gives: `slot` while
+// `live`, else the value the masked return chose.
+ir_masked_result: fn(m: &IRModule, b: &IRBuilder, slot: Int, span: Span) -> Int Never! {
+    live: b.live
+    chosen: b.exit_value
+    if live < 0 || chosen < 0 -> return slot
+    ir_mask_select(m, b, live, slot, chosen, span)
 }

@@ -168,6 +168,25 @@ SemaTaintFlowState: struct {
     // now: a value bound or assigned there carries them.
     masked: [Span]{[Span]{}}
     under: [String]{[String]{}}
+    // The branches with an early return the walk of the current body found
+    // (sema_taint_exit_arms), settled at its end (sema_taint_settle_exits):
+    // each branch's span, its test's span and its fixed tag.
+    exits: [Span]{[Span]{}}
+    exit_tests: [Span]{[Span]{}}
+    exit_tags: [String]{[String]{}}
+    // How many reports the walk had made when it reached each exit: a
+    // refused exit's report goes there, in source order.
+    exit_marks: [Int]{[Int]{}}
+    // While the code early returns skip is checked (sema_taint_tail_index):
+    // pairs of a counting loop's variable and the list whose length bounds
+    // it (`""`: none), and pairs of lists a guard proved as long. tail_any
+    // admits every index, for the walk's first look at an exit's arms.
+    tail_any: Bool{false}
+    tail_loops: [String]{[String]{}}
+    tail_same: [String]{[String]{}}
+    // The read list parameters of the body being settled: the only lists
+    // whose `xs[i]` a tail loop proves in bounds.
+    tail_lists: [String]{[String]{}}
 }
 
 // The E0307 reports of `diagnostics`: all that settles switch coverage for
@@ -1095,7 +1114,11 @@ sema_taint_is_str: fn(value: Expr) -> Bool Never! {
 }
 
 sema_taint_e0737: fn(state: &SemaTaintFlowState, tag_value: String, steers: String, span: Span) {
-    state.diagnostics.push(sema_error("E0737", span, "a `{tag_value}` value decides {steers}", "`{tag_value}` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it", "compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub({tag_value})` function first"))
+    state.diagnostics.push(sema_taint_e0737_diagnostic(tag_value, steers, span))
+}
+
+sema_taint_e0737_diagnostic: fn(tag_value: String, steers: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0737", span, "a `{tag_value}` value decides {steers}", "`{tag_value}` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it", "compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub({tag_value})` function first")
 }
 
 sema_taint_e0738: fn(state: &SemaTaintFlowState, tag_value: String, holder: String, span: Span) {
@@ -1184,10 +1207,25 @@ sema_taint_mask_arms: fn(state: &SemaTaintFlowState, subject: Expr, arms: [Switc
     if total {
         if else_body == .Val(body) -> total = sema_taint_total_block(state, body)
     }
+    // An `if` with no else whose arms only fail to be total by returning
+    // at their end is an early exit, settled once its body is walked.
+    plain := !total && sema_taint_is_true(subject)
+    if else_body == .Val(_) -> plain = false
+    exits := false
+    if plain {
+        state.tail_any = true
+        exits = sema_taint_exit_arms(state, arms, first)
+        state.tail_any = false
+    }
     loop index in first..<arms.len() {
         if tests[index] == "" -> next
         branch: if index == 0 -> span else -> arms[index].span
-        sema_taint_mask_branch(state, tests[index], total, branch, expr_span(arms[index].cond))
+        test_span: expr_span(arms[index].cond)
+        if exits {
+            sema_taint_pend_exit(state, tests[index], branch, test_span)
+        } else {
+            sema_taint_mask_branch(state, tests[index], total, branch, test_span)
+        }
     }
     tests
 }
@@ -1304,8 +1342,265 @@ sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never!
             return true
         }
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> return sema_taint_total_expr(state, cond) && sema_taint_total_block(state, then_body) && sema_taint_total_expr(state, then_value) && sema_taint_total_block(state, else_body) && sema_taint_total_expr(state, else_value)
+        // An index is total only in the code an early return skips, at a
+        // counter proved in bounds (sema_taint_tail_index). The walk has no
+        // types yet, so the kind is mostly Unknown here; the proof itself
+        // only admits list parameters.
+        .Index(base, index, _, kind, _) -> {
+            if kind == {
+                .Unknown | .List | .FixedListProof -> return sema_taint_tail_index(state, base, index)
+                else -> return false
+            }
+        }
         else -> return false
     }
+}
+
+// Whether the arms of a statement `if` with no else, from arm `first` on,
+// are total but for a last `return` of a total value, and one of them
+// returns: an early exit sema_taint_settle_exits may mask.
+sema_taint_exit_arms: fn(state: SemaTaintFlowState, arms: [SwitchArm], first: Int) -> Bool Never! {
+    exits := false
+    loop index in first..<arms.len() {
+        if !sema_taint_total_expr(state, arms[index].cond) -> return false
+        count: arms[index].body.len()
+        loop at in 0..<count {
+            statement: arms[index].body[at]
+            returned := false
+            if at == count - 1 {
+                if statement == .Return(value, _) {
+                    if value == .Val(result) {
+                        if !sema_taint_total_expr(state, result) -> return false
+                    }
+                    returned = true
+                }
+            }
+            if returned {
+                exits = true
+            } else if !sema_taint_total_stmt(state, statement) {
+                return false
+            }
+        }
+    }
+    exits
+}
+
+// An early exit's branch (sema_taint_exit_arms), settled at the end of its
+// body's walk; a refusal is reported where the walk reached it.
+sema_taint_pend_exit: fn(state: &SemaTaintFlowState, tag_value: String, span: Span, test_span: Span) {
+    loop pending in state.exits {
+        if pending.start == span.start && pending.end == span.end -> return
+    }
+    state.exits.push(span.copy())
+    state.exit_tests.push(test_span.copy())
+    state.exit_tags.push(tag_value.copy())
+    state.exit_marks.push(state.diagnostics.len())
+}
+
+// A body's early exits are masked when the code they skip can run masked:
+// from the first top-level statement that holds one on, every statement is
+// total, a statement `if` or a counted loop over such code, or a `return` of
+// a total value. There `xs[i]` is total when `i` counts a loop `0..<ys.len()`
+// and `xs` is `ys`, or a guard before proved the two as long (`if xs.len() !=
+// ys.len() -> return …`); `xs` and `ys` are read list parameters (`params`).
+// Otherwise each early exit is E0737.
+sema_taint_settle_exits: fn(state: &SemaTaintFlowState, body: [Stmt], params: [String]) {
+    if state.exits.len() == 0 -> return
+    state.tail_loops = [String]{}
+    state.tail_same = [String]{}
+    state.tail_lists = params.copy()
+    masks: sema_taint_exit_tail(state, body, params)
+    refused := 0
+    loop index in 0..<state.exits.len() {
+        tag_value: state.exit_tags[index].copy()
+        span: state.exits[index].copy()
+        test_span: state.exit_tests[index].copy()
+        if masks {
+            sema_taint_mask_branch(state, tag_value, true, span, test_span)
+        } else {
+            at: state.exit_marks[index] + refused
+            state.diagnostics.insert(at, sema_taint_e0737_diagnostic(tag_value, "an early return that can't be masked (the code it skips calls, can stop, writes memory or loops on its own)", test_span))
+            refused += 1
+        }
+    }
+    state.exits = [Span]{}
+    state.exit_tests = [Span]{}
+    state.exit_tags = [String]{}
+    state.exit_marks = [Int]{}
+    state.tail_loops = [String]{}
+    state.tail_same = [String]{}
+    state.tail_lists = [String]{}
+}
+
+sema_taint_exit_tail: fn(state: &SemaTaintFlowState, body: [Stmt], params: [String]) -> Bool {
+    held := 0
+    started := false
+    loop statement in body {
+        reach: sema_taint_stmt_reach(statement) ?? Span{start: 0, end: 0}
+        inside: sema_taint_exits_in(state, reach)
+        if !started && inside == 0 {
+            sema_taint_note_guard(state, statement, params)
+            next
+        }
+        started = true
+        held += inside
+        if !sema_taint_tail_stmt(state, statement) -> return false
+    }
+    // Every exit lies in a top-level loop or `if` the tail covers.
+    held == state.exits.len()
+}
+
+// The span of a statement that can hold a statement `if`, else None.
+sema_taint_stmt_reach: fn(statement: Stmt) -> Span? Never! {
+    if statement == {
+        .Switch(_, _, _, span) | .For(_, _, _, _, _, span, _, _, _) | .While(_, _, span, _, _) | .Loop(_, span, _, _) | .CountedLoop(_, _, _, _, span, _, _) -> return Val(span)
+        else -> return None
+    }
+}
+
+// How many early exits lie inside `reach`.
+sema_taint_exits_in: fn(state: SemaTaintFlowState, reach: Span) -> Int Never! {
+    if reach.end <= reach.start -> return 0
+    count := 0
+    loop exit in state.exits {
+        if exit.start >= reach.start && exit.end <= reach.end -> count += 1
+    }
+    count
+}
+
+// `if xs.len() != ys.len() -> return …` over two read parameters: from here
+// on the two lists are as long.
+sema_taint_note_guard: fn(state: &SemaTaintFlowState, statement: Stmt, params: [String]) {
+    if statement == .Switch(subject, arms, else_body, _) {
+        if else_body == .Val(_) -> return
+        if !sema_taint_is_true(subject) || arms.len() != 1 || arms[0].body.len() != 1 -> return
+        if arms[0].body[0] == .Return(_, _) {
+            if arms[0].cond == .Binary(op, left, right, _, _) {
+                if op != .Ne -> return
+                first: sema_taint_length_of(left) ?? return
+                second: sema_taint_length_of(right) ?? return
+                if !sema_taint_has(params, first) || !sema_taint_has(params, second) -> return
+                state.tail_same.push(first.copy())
+                state.tail_same.push(second.copy())
+            }
+        }
+    }
+}
+
+// `xs` of `xs.len()`.
+sema_taint_length_of: fn(value: Expr) -> String? Never! {
+    if value == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method != "len" || args.len() != 0 -> return None
+        if receiver == .Ident(name, _, _) -> return Val(name)
+    }
+    None
+}
+
+// Whether a statement of the code an early exit skips can run masked.
+sema_taint_tail_stmt: fn(state: &SemaTaintFlowState, statement: Stmt) -> Bool {
+    if statement == {
+        .Val(binding) -> return binding.pattern == None && !sema_taint_tail_named(state, binding.name) && sema_taint_total_expr(state, binding.init)
+        .Assign(target, op, _, value) -> {
+            if target == .Local(name, _) {
+                if sema_taint_tail_named(state, name) -> return false
+            } else {
+                return false
+            }
+            if op == .Val(operator) {
+                if !sema_taint_total_operator(state, operator, value) -> return false
+            }
+            return sema_taint_total_expr(state, value)
+        }
+        .Return(value, _) -> {
+            if value == .Val(returned) -> return sema_taint_total_expr(state, returned)
+            return true
+        }
+        .Expr(value) -> return sema_taint_total_expr(state, value)
+        .Switch(subject, arms, else_body, _) -> {
+            if !sema_taint_is_true(subject) -> return false
+            loop arm in arms {
+                if !sema_taint_total_expr(state, arm.cond) || !sema_taint_tail_block(state, arm.body) -> return false
+            }
+            if else_body == .Val(body) -> return sema_taint_tail_block(state, body)
+            return true
+        }
+        .For(counter, _, var2, kind, body, _, _, _, _) -> {
+            if var2 == .Val(_) -> return false
+            if sema_taint_tail_named(state, counter) -> return false
+            if kind == .Range(start, end, step, exclusive) {
+                if step == .Val(_) -> return false
+                if !sema_taint_total_expr(state, start) || !sema_taint_total_expr(state, end) -> return false
+                bound := ""
+                if exclusive {
+                    if start == .Int(first, _, _, _, _) {
+                        if first == 0 -> bound = sema_taint_length_of(end) ?? ""
+                    }
+                }
+                held: state.tail_loops.len()
+                state.tail_loops.push(counter.copy())
+                state.tail_loops.push(bound.copy())
+                total: sema_taint_tail_block(state, body)
+                loop state.tail_loops.len() > held -> _ := state.tail_loops.pop()
+                return total
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+sema_taint_tail_block: fn(state: &SemaTaintFlowState, body: [Stmt]) -> Bool {
+    loop statement in body {
+        if !sema_taint_tail_stmt(state, statement) -> return false
+    }
+    true
+}
+
+// Whether `name` counts a loop of the tail or is a list a tail proof reads:
+// rebinding or assigning it would void the proof.
+sema_taint_tail_named: fn(state: SemaTaintFlowState, name: String) -> Bool Never! {
+    sema_taint_has(state.tail_loops, name) || sema_taint_has(state.tail_lists, name)
+}
+
+// Whether a parameter's written type is a list, tagged or not.
+sema_taint_is_list: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .List(_) -> return true
+        .Tagged(_, inner) -> return sema_taint_is_list(inner)
+        else -> return false
+    }
+}
+
+// `xs[i]` in the code an early exit skips: `i` counts the innermost tail
+// loop of that name, below `xs.len()` or the length of a list proved as
+// long.
+sema_taint_tail_index: fn(state: SemaTaintFlowState, base: Expr, index: Expr) -> Bool Never! {
+    if state.tail_any -> return true
+    if base == .Ident(list, _, _) {
+        if !sema_taint_has(state.tail_lists, list) -> return false
+        if index == .Ident(counter, _, _) {
+            at := state.tail_loops.len() - 2
+            loop at >= 0 {
+                if state.tail_loops[at] == counter {
+                    bound: state.tail_loops[at + 1]
+                    if bound == "" -> return false
+                    return bound == list || sema_taint_same_length(state, list, bound)
+                }
+                at -= 2
+            }
+        }
+    }
+    false
+}
+
+sema_taint_same_length: fn(state: SemaTaintFlowState, first: String, second: String) -> Bool Never! {
+    at := 0
+    loop at + 1 < state.tail_same.len() {
+        if state.tail_same[at] == first && state.tail_same[at + 1] == second -> return true
+        if state.tail_same[at] == second && state.tail_same[at + 1] == first -> return true
+        at += 2
+    }
+    false
 }
 
 // The operator checks of the left-leaning chain `expression` heads, innermost
@@ -1963,7 +2258,16 @@ sema_taint_check_function: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlo
     if sema_function_arithmetic_policy(function.markers) == .Val(policy) -> state.wrapping = sema_taint_mode_wraps(Val(policy.mode))
     sema_taint_initial_parameter_bindings(graph, state, function, owner)
     if function.return_type == .Val(ty) -> sema_taint_check_wide_type(state, ty, function.return_type_span ?? function.name_span)
+    state.exits = [Span]{}
+    state.exit_tests = [Span]{}
+    state.exit_tags = [String]{}
+    state.exit_marks = [Int]{}
     sema_taint_check_block(graph, state, function.body)
+    read := [String]{}
+    loop parameter in function.params {
+        if parameter.convention == .Read && sema_taint_is_list(parameter.ty) -> read.push(parameter.name.copy())
+    }
+    sema_taint_settle_exits(state, function.body, read)
     sema_taint_finish_body(graph, state, module_index, found)
 }
 
@@ -1971,7 +2275,12 @@ sema_taint_check_body: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
     state.bindings = [SemaTaintBindingFact]{}
     state.diagnostics = [Diagnostic]{}
     state.wrapping = false
+    state.exits = [Span]{}
+    state.exit_tests = [Span]{}
+    state.exit_tags = [String]{}
+    state.exit_marks = [Int]{}
     sema_taint_check_block(graph, state, body)
+    sema_taint_settle_exits(state, body, [String]{})
     sema_taint_finish_body(graph, state, module_index, found)
 }
 

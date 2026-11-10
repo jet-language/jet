@@ -745,12 +745,28 @@ total arm only binds names, assigns to local names, and reads literals, names
 and fields. It may use operators that cannot stop (bitwise operators,
 comparisons, a shift by a literal, wrapping arithmetic), the bit methods, the
 wrapping methods, `len()` and `is_empty()`, and nested total branches. No
-arm returns, breaks, calls, stops or writes memory. Both arms run. Each local
+arm breaks, calls, stops or writes memory, and an arm returns only as an
+early return (below). Both arms run. Each local
 an arm assigns keeps its old value where the arm's test fails, and an `if`
 value keeps the chosen arm's value. Both are chosen with a masked select and
 no jump, and the result carries the test's tag. Only fixed-width integers and
 `Bool` are selected. `jet inspect decisions` lists each masked branch. A
 branch with an arm that is not total stays E0737 (D-SECRET-CT1).
+
+An early return from a branch on a `.Fixed` value is masked too. This is an
+`if` with no else whose arms are total except for a last `return` of a total
+value. It becomes a secret flag, and the code after it still runs. From that
+return on, and through a loop that holds one, each local assignment keeps its
+old value where the flag is set. Every later return gives the value of the
+first return taken. So `check_fast(expected: #Secret [U8], got: [U8]) ->
+#Secret Bool` reads every byte with no jump on the secret. The code an early
+return skips must be total: total statements, `if`s over total code, counted
+loops `for i in a..<b` with total bounds, and returns of total values. There
+`xs[i]` is total when `i` counts a loop to `xs.len()`. It is also total when
+`i` counts a loop to `ys.len()` and both lists are read parameters that an
+earlier `if xs.len() != ys.len() -> return …` proved the same length. If the
+skipped code is not total (it calls, can stop, writes memory or loops on its
+own), the early return stays E0737. So does an early `break` or `continue`.
 
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
