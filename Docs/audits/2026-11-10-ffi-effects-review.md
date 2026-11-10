@@ -75,3 +75,20 @@ of its functions uses?
 
 - An in-program written row is a claim, enforced only under `.Sandbox`.
 - Grants gain one line per library, and `jet add` writes it.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independently checked evidence | Verdict |
+|---|---|---|
+| Broad allow still refuses C | Reran native/named: both print native-c-ok. Stale comments and the reading surface still said E0749. | Fails; all three corrected. |
+| Narrow ceilings and denials remain conservative | Reran ceiling E0740, deny E0749, declared arrow E0003 and named effect E1221. | Holds on a0.0.43; no implementation of A proved. |
+| An empty declared row makes ceiling's IO-only function pass | A retains FFI.C(lib), so IO alone is insufficient even for pure C. | Fails; removed the promise. |
+| A library is identified by a bare local key | Two packages can use sqlite3 for unrelated dependencies, or two aliases can name one dependency. | Fails; resolve keys to locked dependency identity before coverage. |
+| Every new library needs a separate grant | Bare FFI.C deliberately covers all. | Fails; only narrow grants distinguish additions. |
+| A row can be trusted just by writing it | Read ratified D-FFI-CONTRACT1=A: evidence binds to actual artifacts and reachable native edges; native trust requires its audited boundary. | Fails; one canonical descriptor carries evidence, not a second self-assertion path. |
+| Sandbox always enforces rows; process means protection | Read D-FFI-PLACE1 and Deno's native-code warning. Mediation of every import/resource is needed; process isolation alone does not restrict OS authority. | Holds only within stated threat model and supported operations; no fallback to native placement. |
+| Callback row union solves callbacks | Retained callbacks run later and may enter from foreign threads; cleanup also has effects. | Fails as a complete guarantee; descriptor must cover lifetime, thread entry, later authority and cleanup. |
+
+Read ratified D-EFFECT-ARGS1, D-DECL-TYPES1 and D-EFFTYPE-GRANT1 directly. Deno security and JEP 454 were read independently. The earlier numeric census is not independently remeasured and is not used to rank options.
+
+Agree with repaired A. No new option was needed: B, C and D already separate the two axes fairly. Do not post stale E0749 allow examples, a claim that IO alone admits foreign calls, or proof-by-row and unconditional sandbox-enforcement claims.
