@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E1319 — Jet diagnostic</title>
-<meta name="description" content="`#Short` has no CLI mapping for field `name`">
+<meta name="description" content="`#Arg` has no CLI mapping for field `name`">
 <meta property="og:title" content="E1319 — Jet diagnostic">
-<meta property="og:description" content="`#Short` has no CLI mapping for field `name`">
+<meta property="og:description" content="`#Arg` has no CLI mapping for field `name`">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,43 +25,43 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E1319</h1>
-<p>`#Short` has no CLI mapping for field `name`</p>
+<p>`#Arg` has no CLI mapping for field `name`</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`#Short` has no CLI mapping for field `name`</p>
+<p class="diag-copy what" data-registry-field="what">`#Arg` has no CLI mapping for field `name`</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder&#39;s value-option fallback.</p>
+<p class="diag-copy why" data-registry-field="why">`#Arg` describes a generated command input. It does not apply outside a `#CLI` struct; its `env:` option also cannot map a presence-only `Bool` flag to the builder&#39;s value-option fallback.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field.</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the marker, mark the command-input struct `#CLI`, or move `env:` to a value field.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1319</code>: <code>tests/ui/cli_field_marker_misuse.stderr</code>.</p>
-<pre class="diag">Error [jet.UnmappedCliMarker]: `#Short` has no CLI mapping for field `port`
+<pre class="diag">Error [jet.UnmappedCliMarker]: `#Arg` has no CLI mapping for field `port`
   --&gt; tests/ui/cli_field_marker_misuse.jet:2:6
     |
-  2 |     #Short(&quot;p&quot;) port: Int
-    |      ^^^^^
- Why: `#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.
+  2 |     #Arg(short: &quot;p&quot;) port: Int
+    |      ^^^
+ Why: `#Arg` describes a generated command input, but this struct is not `#CLI`.
  Fix: Remove the marker, or mark the command-input struct `#CLI`
 More: jet-lang.dev/e/E1319
 
-Error [jet.InvalidShortName]: `#Short(&quot;port&quot;)` is not a one-letter option
-  --&gt; tests/ui/cli_field_marker_misuse.jet:7:6
+Error [jet.InvalidShortName]: `#Arg(short: &quot;port&quot;)` is not a one-letter option
+  --&gt; tests/ui/cli_field_marker_misuse.jet:7:17
     |
-  7 |     #Short(&quot;port&quot;) port: Int
-    |      ^^^^^
+  7 |     #Arg(short: &quot;port&quot;) port: Int
+    |                 ^^^^^^
  Why: The shared command parser treats a short option as one ASCII letter.
- Fix: Use one letter, such as `#Short(&quot;p&quot;)`
+ Fix: Use one letter, such as `#Arg(short: &quot;p&quot;)`
 More: jet-lang.dev/e/E1318
 
-Error [jet.UnmappedCliMarker]: `#Env` has no CLI mapping for field `verbose`
-  --&gt; tests/ui/cli_field_marker_misuse.jet:8:6
+Error [jet.UnmappedCliMarker]: `#Arg(env:)` has no CLI mapping for field `verbose`
+  --&gt; tests/ui/cli_field_marker_misuse.jet:8:15
     |
-  8 |     #Env(&quot;VERBOSE&quot;) verbose: Bool
-    |      ^^^
- Why: A `Bool` command field is a presence flag, while `#Env` lowers to a value option.
- Fix: Remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
+  8 |     #Arg(env: &quot;VERBOSE&quot;) verbose: Bool
+    |               ^^^^^^^^^
+ Why: A `Bool` command field is a presence flag, while `env:` lowers to a value option.
+ Fix: Remove `env:`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
 More: jet-lang.dev/e/E1319
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

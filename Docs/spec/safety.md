@@ -1135,7 +1135,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1708,
+      "line": 1711,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6077,21 +6077,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 570,
+      "line": 578,
       "column": 1,
       "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 576,
+      "line": 584,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 644,
+      "line": 652,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6336,63 +6336,63 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3828,
+      "line": 3837,
       "column": 1,
       "reason": "`seed` is a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3830,
+      "line": 3839,
       "column": 5,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3846,
+      "line": 3855,
       "column": 5,
       "reason": "timing runs on test keys and nonces, each used for its run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3869,
+      "line": 3878,
       "column": 1,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3876,
+      "line": 3885,
       "column": 1,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 3915,
+      "line": 3924,
       "column": 5,
       "reason": "timing runs on test keys, each used for its run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4047,
+      "line": 4245,
       "column": 5,
       "reason": "test keys and nonces, each used for this run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4052,
+      "line": 4250,
       "column": 1,
       "reason": "`r` draws test keys and nonces, each used for this run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4081,
+      "line": 4279,
       "column": 5,
       "reason": "test keys and nonces, each used for this run only"
     },
@@ -10278,7 +10278,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2162:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1708:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1711:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 131:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10984,9 +10984,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 570:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/Files/Files.jet | 576:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 644:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 578:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| Core | Core/Files/Files.jet | 584:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 652:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11021,15 +11021,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 3524:5 | "verification of a vector record's public signature" |
 | Core | Core/Net/SSL/TLS.jet | 3537:13 | "the record's private key is used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3553:13 | "the record's public key, message and signature" |
-| Core | Core/Net/SSL/TLS.jet | 3828:1 | "`seed` is a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 3830:5 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 3846:5 | "timing runs on test keys and nonces, each used for its run only" |
-| Core | Core/Net/SSL/TLS.jet | 3869:1 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 3876:1 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 3915:5 | "timing runs on test keys, each used for its run only" |
-| Core | Core/Net/SSL/TLS.jet | 4047:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Net/SSL/TLS.jet | 4052:1 | "`r` draws test keys and nonces, each used for this run only" |
-| Core | Core/Net/SSL/TLS.jet | 4081:5 | "test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 3837:1 | "`seed` is a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3839:5 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3855:5 | "timing runs on test keys and nonces, each used for its run only" |
+| Core | Core/Net/SSL/TLS.jet | 3878:1 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3885:1 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 3924:5 | "timing runs on test keys, each used for its run only" |
+| Core | Core/Net/SSL/TLS.jet | 4245:5 | "test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 4250:1 | "`r` draws test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 4279:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
