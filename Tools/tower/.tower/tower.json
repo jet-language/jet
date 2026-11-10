@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98325,
+    "rev": 98326,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46317,8 +46317,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-09T22:57:26.227Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-10T00:50:07.715Z",
+      "updatedBy": "Main",
       "goals": [
         "G6"
       ],
@@ -190610,6 +190610,253 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T21:01:51.292Z"
+    },
+    {
+      "id": "D-META-SPELL1",
+      "cardId": "c0699zei",
+      "group": "metaprogramming",
+      "title": "#run, #if and #loop replace the comptime word, with every ratified meaning kept",
+      "situation": "Your 2026-11-09 review asks that # mark what is for the compiler and that the comptime word go. This ballot changes spelling only. A respells D-COMPTIME-WORD1's word and the forms ratified in D-PREP-SURFACE2, D-PREP-LOCAL1, D-PREP-BRANCH1, D-PREP-FN1, D-COMPTIME-USE1 and D-CONSTGEN2. It reverses the choice in D-PREP-BRANCH1 and D-PREP-FN1 of a word over their # option. It respells the regions of D-COMPTIME-BLOCK1=A without changing their scope. D-META-PHASE1, D-META-LADDER1, D-META-HASH1 and D-BUILD-TIER1 stay as ratified.",
+      "gist": "Should #run, #if and #loop replace the comptime word in every form, keeping what each form does?",
+      "lesson": "Jet can do work while it compiles: build a table, choose code for one system, or repeat declarations for several types. Today the word comptime asks for that, while # already marks markers, site values and pastes. This vote decides whether those requests use # too.",
+      "explainer": "Words used here. A request asks the compiler to do something while building. A value region computes one value and gives it back. A standing region is a block whose results stay visible after it, as D-COMPTIME-BLOCK1 ratified.\n\nA declaration modifier changes one declaration, such as the hook that turns a number literal into a Rational. A number parameter is a whole number fixed for each generic copy, such as the 4 in Ring<4>.",
+      "story": "Ada already writes #Test, #line and the ratified #phase. When she wants a table built while compiling, she must learn a separate word, comptime, with braces around a single call. She would like one mark for everything the compiler does for her.",
+      "inWild": "// Jai community examples use # directives for early work.\nTABLE :: #run make_table();\n#if OS == .WINDOWS { ... }\n\n// Zig marks an early value with a word.\nconst table = comptime makeTable();",
+      "detail": "What this ballot decides. Only how the existing requests are spelled. Each form keeps the meaning its ratified decision gives it: what runs while building, the budget, the effects allowed, and which names it sees. The staging and Call questions belong to D-META-HASH2 and are not decided here.\n\nToday, on seed a0_042. Probe t01 uses a value, a statement region, two branches, a loop of declarations and a literal hook, and prints six lines. Examples/Metaprogramming/Comptime/ComptimeUse shows the build-only import. The tested new spellings are refused: #run reports E0733 as an unknown tag, and #if and #loop report E0003.\n\nSome ratified forms are not built in any spelling yet. A multi-statement value region is E0391 today (t02). A parenthesized region is also E0391 (ms/s03); the attempted function expression gets E0003 and E0391 (ms/s02). These are building gaps, so they count for no option. The ballot specifies every form as ratified, not as the seed limits it.\n\nThe three kinds of #run under A. Where #run stands decides its kind, as the ratified comptime forms specify. First, a declaration modifier: #run directly before a declaration's name, as in the literal hook, with D-PREP-FN1's legal sites and purity checks. #run use is D-COMPTIME-USE1's build-only import, in both its forms.\n\nSecond, a standing region: #run { } on its own line in a file, module or function body. It follows D-COMPTIME-BLOCK1 to the letter. Its direct immutable results become bindings of the enclosing scope, mutable scratch and nested names stay inside, and file and module helpers are build-only, with E0944 for any escape.\n\nThird, a value region: #run in a value position, meaning the right of a binding, an argument, a list element or an operand. #run { } there has its own scope and gives back its last expression, as D-PREP-SURFACE2 ratified, including blocks with several statements.\n\nThe unbraced operand rule. Without braces, #run takes exactly one operand: a name, a literal, a parenthesized expression, or a call, member, index or constructor chain on one. So TABLE: #run build_squares(5) is legal. Anything larger needs braces or parentheses: #run a + b is an error whose fix offers #run { a + b } or (#run a) + b.\n\nHow the rule treats each case. f(#run g(1), x) computes only g(1). Postfix ! inside the operand makes a failure a build error, under the existing required-evaluation failure contract. A fallback is binary, so #run { load() ?? DEFAULT } and (#run load()) ?? x are the two spellings, and each says what it means.\n\nFunctions and closures. D-COMPTIME-WORD1 says functions are storable, and closures are storable when their captures are. A value region keeps that rule. A lambda expression needs a braced value region. A reference to a standing file/module region's build-only helper still cannot escape, under BLOCK1 and E0944.\n\nWhy a misread boundary cannot change a result silently. A value region cannot see runtime locals: probe ms/s01 shows comptime { build(3) + y }, with y a runtime local, reported as E0107. The operand rule makes the boundary visible anyway. A function that branches on #phase still does what D-META-PHASE1 says for each copy.\n\n#if and #loop. #if takes every form comptime if takes: a condition with a block, else, else #if, and the matching table #if x == { arms }. It keeps D-PREP-BRANCH1's checks: the arm not taken gets name checks only. Probe ms/s07 shows an unknown name there reported as E0107, and ms/s05 shows a type error there accepted.\n\n#loop takes the pattern, in and closed list that comptime loop takes, in the same places. D-META-PHASE1 is unchanged: a #phase read reached from an #if condition is refused with a fix to a plain if, which folds per copy and checks every arm.\n\nNumber parameters. <N: Int> drops the word. Under D-CONSTGEN2's restriction, a parameter whose right side resolves to the core Int, through aliases and by declaration identity, is a number parameter. A trait on the right, as in <T: Comparable>, is a bound. Any other type is an error that says only Int may be a number parameter.\n\nDefaults, inference, identity and the refusal of runtime arguments stay as D-CONSTGEN2 says. A user type named Int is not the core Int, so it cannot make a number parameter by accident. Hover in the editor names the parameter's kind.\n\nThe # family. As D-META-HASH1 ratified: # then a lower-case word is a request or a site value, such as #run, #if, #loop, #line or #phase. # then { is a paste. # then a capital letter is a marker, such as #Test. Inside a fixed-size type such as [Int#N], # keeps its size meaning.\n\nWhat does not change. Automatic early evaluation of immutable values under D-COMPTIME-WORD1 stays; #run requires early evaluation, as comptime does. D-META-LADDER1's #code, Code insertion and Compiler effects stay, and so does D-META-HASH1's hygiene. D-BUILD-TIER1's defaults stay. D-META-PHASE1 keeps #phase, its cases, its crossing checks and the local-try fallback.\n\nRetiring the word. comptime stops being a keyword and becomes an ordinary name, as prep did. Old code that writes comptime gets one registered retirement error with a checked fix. The fix works on parsed nodes, keeps comments and source locations, and renames by declaration identity, never by text.\n\nWhat the fix does, form by form. A value comptime { e } becomes #run e only when e is a single operand with no comment inside; otherwise it becomes #run { e }. A standing comptime { } becomes #run { }. comptime if, comptime loop and comptime use become #if, #loop and #run use. comptime before a declaration becomes #run. <comptime N: Int> becomes <N: Int>.\n\nMigration changes spelling, not binding identity. BLOCK1 already requires a checked scope migration preserving every old reference. The spelling fix must compose with that migration; neither step may silently rebind a name.\n\nA parsed migration inventory, including examples, tests, diagnostics and prose, is required in the cutover. No regex total proves the number of safe edits. No jet fix for this respelling exists yet; it is part of building A.\n\nBeginner path. The first build-time value is TABLE: #run make_table(). The first system choice is #if build.target.os == { … }. Errors keep their codes and print the new spelling.\n\nExpert path. Standing regions, multi-statement value regions and number parameters keep every ratified rule; only the word changes. Templates through #loop and D-META-LADDER1's Code keep their positions.\n\nDownsides of A, and what the design does about them. A reader must know where an unbraced #run ends; the operand rule limits it to one call or name, and anything larger needs braces. A number parameter has no word of its own; the core Int on its right marks it, and hover names it. Both are real reading costs; no reading-cost comparison was measured.\n\nRespelling touches many sites and much prose. The checked fix handles code, and Docs change in the same pass. #run, #if and #loop are three words where comptime was one; all three share the # mark, and #if and #loop match the plain if and loop the reader already knows.\n\nOther options. B keeps the ratified word and its braces. C keeps the word but lets a plain if select arms when its condition is known while building, which changes checking, not only spelling. D marks the one word as #comptime. E uses A's short requests but always braces values and marks number parameters as <#run N: Int>.\n\nOption C in full. A plain if whose condition is known while building selects its arm, like comptime if today. The arm not taken gets name checks only, and its effects leave the effect row. Today a plain if on a constant checks the types of both arms: probe ms/s06 reports a type error in the arm not taken.\n\nSo under C, every existing plain if on a constant loses type checks on its other arm. Whether an arm is type-checked then depends on how its condition is computed. C must also exempt #phase. A condition that reads #phase stays D-META-PHASE1's fold, checking every arm per copy, because a phase-dependent selection of source arms is what that decision forbids.\n\nBoundary cases. Prefix operators, including a negative number or logical not, require braces or a parenthesized operand. Calls and their nested arguments belong to the operand. Binary operators outside that operand require grouping around #run when meant to run later. Value-region scope never becomes standing-region scope just because its contents span several lines.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#run, #if and #loop; plain number parameters",
+          "detail": "#run, #if and #loop replace the word in every form, and a number parameter is written <N: Int>. An unbraced #run takes one call or name; anything larger keeps its braces. Standing regions keep D-COMPTIME-BLOCK1's scope.",
+          "technical": "Respells D-COMPTIME-WORD1, D-PREP-SURFACE2, D-PREP-LOCAL1, D-PREP-BRANCH1, D-PREP-FN1, D-COMPTIME-USE1, D-CONSTGEN2 and D-COMPTIME-BLOCK1's regions, and reverses BRANCH1's and FN1's word choice. Position decides the kind: declaration modifier, standing region or value region. An unbraced #run takes one postfix operand. A number parameter resolves to the core Int by declaration identity. Retire comptime with one registered error and a node-based fix.",
+          "code": "#run use {\n    \"tables\"\n    tables.build_squares\n}\n\nTABLE: #run build_squares(5)\nDEBUG: #run false\n\nPoint: struct { x: Int }\nSize: struct { w: Int }\n#loop T in [Point, Size] {\n    impl T { kind: fn(self) -> String { \"generated\" } }\n}\n\nRing: struct<N: Int> { slots: [Int#N] }\n\nRational: struct { numerator: Int, denominator: Int }\nimpl Rational.Literal.Int {\n    #run from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }\n}\n\nrun: fn() {\n    #if DEBUG { print(\"debug\") } else { print(\"release\") }\n    #run { cols: 4 }\n    print(TABLE)\n    print(cols)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep comptime as ratified",
+          "detail": "Keep the one word comptime for every request, with braces around every value, as ratified. Readers learn one familiar phase word, and there is nothing to respell.",
+          "technical": "No decision changes. Build the ratified forms the seed lacks, such as multi-statement value regions and D-COMPTIME-BLOCK1's standing scope. The word sits beside the # family of D-META-HASH1 for markers, site values and pastes.",
+          "code": "comptime use {\n    \"tables\"\n    tables.build_squares\n}\n\nTABLE: comptime { build_squares(5) }\nDEBUG: comptime { false }\n\nPoint: struct { x: Int }\nSize: struct { w: Int }\ncomptime loop T in [Point, Size] {\n    impl T { kind: fn(self) -> String { \"generated\" } }\n}\n\nRing: struct<comptime N: Int> { slots: [Int#N] }\n\nRational: struct { numerator: Int, denominator: Int }\nimpl Rational.Literal.Int {\n    comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }\n}\n\nrun: fn() {\n    comptime if DEBUG { print(\"debug\") } else { print(\"release\") }\n    comptime { cols: 4 }\n    print(TABLE)\n    print(cols)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the word; a plain if on a known condition selects an arm",
+          "detail": "Keep comptime, drop its value braces, and let a plain if select its arm when the condition is known while building. Branches on constants need no special word.",
+          "technical": "Amends D-PREP-BRANCH1's checking, not only its spelling. A plain if on a build-known condition name-checks the arm not taken and drops its effects. A condition that reads #phase keeps D-META-PHASE1's fold and checks every arm. comptime loop, comptime use and number parameters keep the word.",
+          "code": "comptime use {\n    \"tables\"\n    tables.build_squares\n}\n\nTABLE: comptime build_squares(5)\nDEBUG: comptime false\n\nPoint: struct { x: Int }\nSize: struct { w: Int }\ncomptime loop T in [Point, Size] {\n    impl T { kind: fn(self) -> String { \"generated\" } }\n}\n\nRing: struct<comptime N: Int> { slots: [Int#N] }\n\nRational: struct { numerator: Int, denominator: Int }\nimpl Rational.Literal.Int {\n    comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }\n}\n\nrun: fn() {\n    if DEBUG { print(\"debug\") } else { print(\"release\") }    // known condition: selects an arm\n    comptime { cols: 4 }\n    print(TABLE)\n    print(cols)\n}"
+        },
+        {
+          "key": "D",
+          "name": "#comptime in every form",
+          "detail": "Keep one phase word, marked with #: #comptime before values, branches, loops, imports, declarations and number parameters. One word to learn, inside the # family.",
+          "technical": "Respells the same decisions as A with one word. The value rule matches A's operand rule, so dropping value braces is a separate edit from adding the #.",
+          "code": "#comptime use {\n    \"tables\"\n    tables.build_squares\n}\n\nTABLE: #comptime build_squares(5)\nDEBUG: #comptime false\n\nPoint: struct { x: Int }\nSize: struct { w: Int }\n#comptime loop T in [Point, Size] {\n    impl T { kind: fn(self) -> String { \"generated\" } }\n}\n\nRing: struct<#comptime N: Int> { slots: [Int#N] }\n\nRational: struct { numerator: Int, denominator: Int }\nimpl Rational.Literal.Int {\n    #comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }\n}\n\nrun: fn() {\n    #comptime if DEBUG { print(\"debug\") } else { print(\"release\") }\n    #comptime { cols: 4 }\n    print(TABLE)\n    print(cols)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Short requests, with braced values and marked number parameters",
+          "detail": "A's short requests, but a value is always #run { }, and a number parameter is always <#run N: Int>. Every boundary and every parameter kind is marked.",
+          "technical": "Respells the same decisions as A. No operand rule is needed, because every value region has braces. The number parameter keeps an explicit request instead of resolving the core Int.",
+          "code": "#run use {\n    \"tables\"\n    tables.build_squares\n}\n\nTABLE: #run { build_squares(5) }\nDEBUG: #run { false }\n\nPoint: struct { x: Int }\nSize: struct { w: Int }\n#loop T in [Point, Size] {\n    impl T { kind: fn(self) -> String { \"generated\" } }\n}\n\nRing: struct<#run N: Int> { slots: [Int#N] }\n\nRational: struct { numerator: Int, denominator: Int }\nimpl Rational.Literal.Int {\n    #run from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }\n}\n\nrun: fn() {\n    #if DEBUG { print(\"debug\") } else { print(\"release\") }\n    #run { cols: 4 }\n    print(TABLE)\n    print(cols)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "Community examples use #run and #if. This is precedent from public examples, not a tested claim about the current compiler.",
+          "code": "TABLE :: #run make_table();\n#if OS == .WINDOWS { ... }"
+        },
+        {
+          "lang": "Zig",
+          "note": "The comptime word marks an early value or parameter. An if on a comptime-known condition analyzes only the arm taken.",
+          "code": "const table = comptime makeTable();\nfn Ring(comptime n: usize) type { ... }"
+        },
+        {
+          "lang": "Rust",
+          "note": "A const item or const block computes early; a const generic is written const N: usize.",
+          "code": "const TABLE: [u32; 5] = make_table();\nstruct Ring<const N: usize> { slots: [i32; N] }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives the compiler's requests the one # mark you asked for and keeps every ratified meaning. Its operand rule keeps each unbraced boundary to one call or name.",
+        "gains": [
+          "Explicit evaluation, branch, loop and import requests start with #.",
+          "TABLE: #run make_table() is the shortest form of the most common request.",
+          "No ratified meaning, budget, effect rule or scope changes."
+        ],
+        "losses": [
+          {
+            "loss": "A reader must know where an unbraced #run ends.",
+            "mitigation": "The operand rule allows one call or name; anything larger needs braces or parentheses."
+          },
+          {
+            "loss": "A number parameter has no word of its own.",
+            "mitigation": "Only the core Int can make one, an error names any other type, and hover names the kind."
+          },
+          {
+            "loss": "Code and prose across the tree are respelled.",
+            "mitigation": "A node-based checked fix rewrites code; Docs change in the same pass."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's single word is familiar and needs no respelling, but it keeps a word beside the # family you asked to unify."
+          },
+          {
+            "key": "C",
+            "reason": "C silently drops type checks on the other arm of every plain if on a constant."
+          },
+          {
+            "key": "D",
+            "reason": "D adds the # mark but keeps the long word in every form."
+          },
+          {
+            "key": "E",
+            "reason": "E marks every boundary, but braces a single call and repeats #run on number parameters that Int already marks."
+          }
+        ],
+        "tradeoff": "Three short requests and a parameter marked by its type, in return for one # mark for the compiler."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview5. Review dated 2026-11-09; CLEAN after the repairs in the adjacent REVIEW.md. Proposed syntax is not implemented."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run the spell, meta and meta2 probes in $JET_SCRATCH_ROOT/lanes/BallotReview4/probes. Run the ms probes with $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh ms run; outputs are in probes/ms/out. Run Examples/Metaprogramming/Comptime/ComptimeUse from the dev worktree. Then run Tools/agent/ballots/Validate.jet on this payload. No option is built on the seed.",
+      "surface": {
+        "gist": "Should #run, #if and #loop replace the comptime word in every form, keeping what each form does?",
+        "lesson": "Jet can do work while it compiles: build a table, choose code for one system, or repeat declarations. Today the word comptime asks for that, while # marks markers, site values and pastes. This vote decides whether requests use # too.",
+        "trio": {
+          "current": {
+            "note": "A word for requests; # for the rest.",
+            "code": "TABLE: comptime { make_table() }\ncomptime if DEBUG { ... }\nRing: struct<comptime N: Int> { ... }"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "Public examples use # directives.",
+            "code": "TABLE :: #run make_table();\n#if OS == .WINDOWS { ... }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "#run, #if, #loop",
+            "gist": "Short # requests; an unbraced #run takes one call or name.",
+            "gains": [
+              "One mark for the compiler.",
+              "Shortest common form."
+            ],
+            "losses": [
+              "Unbraced boundaries to learn.",
+              "Code and prose respelled."
+            ],
+            "proposed": {
+              "code": "TABLE: #run make_table()\n#if DEBUG { ... }\n#loop T in [Point, Size] { ... }\nRing: struct<N: Int> { ... }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep comptime",
+            "gist": "One familiar word, as ratified.",
+            "gains": [
+              "Nothing to respell."
+            ],
+            "losses": [
+              "A word beside the # family."
+            ],
+            "proposed": {
+              "code": "TABLE: comptime { make_table() }\ncomptime if DEBUG { ... }\nRing: struct<comptime N: Int> { ... }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Plain if selects",
+            "gist": "A plain if on a known condition picks an arm.",
+            "gains": [
+              "No word on branches."
+            ],
+            "losses": [
+              "The other arm loses type checks."
+            ],
+            "proposed": {
+              "code": "TABLE: comptime make_table()\nif DEBUG { ... }\nRing: struct<comptime N: Int> { ... }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "#comptime",
+            "gist": "One marked word in every form.",
+            "gains": [
+              "One word to learn."
+            ],
+            "losses": [
+              "Long in every form."
+            ],
+            "proposed": {
+              "code": "TABLE: #comptime make_table()\n#comptime if DEBUG { ... }\nRing: struct<#comptime N: Int> { ... }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Braced #run",
+            "gist": "Short requests; values always braced, parameters marked.",
+            "gains": [
+              "Every boundary is marked."
+            ],
+            "losses": [
+              "More braces and marks."
+            ],
+            "proposed": {
+              "code": "TABLE: #run { make_table() }\n#if DEBUG { ... }\nRing: struct<#run N: Int> { ... }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives the compiler's requests the one # mark you asked for and keeps every ratified meaning.",
+          "gains": [
+            "One # mark.",
+            "No meaning changes."
+          ],
+          "losses": [
+            {
+              "loss": "Unbraced boundaries to learn.",
+              "mitigation": "An unbraced #run takes one call or name; larger values need braces."
+            },
+            {
+              "loss": "Code and prose respelled.",
+              "mitigation": "A checked fix rewrites code; Docs change in the same pass."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps a word beside #."
+            },
+            {
+              "key": "C",
+              "reason": "Drops type checks on arms."
+            },
+            {
+              "key": "D",
+              "reason": "Long in every form."
+            },
+            {
+              "key": "E",
+              "reason": "Braces around one call."
+            }
+          ],
+          "tradeoff": "Three short requests, for one # mark."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T00:50:07.715Z"
     }
   ],
   "questions": [
@@ -193734,6 +193981,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T00:50:07.715Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-META-SPELL1",
+      "note": "#run, #if and #loop replace the comptime word, with every ratified meaning kept"
+    },
     {
       "at": "2026-11-10T00:30:46.700Z",
       "by": "Main",
