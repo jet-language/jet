@@ -1,0 +1,32 @@
+// 12 tasks each block their carrier in libc `sleep(1)`, a foreign call no
+// fiber park frees, on four carriers; then one trivial task is spawned and
+// joined. The monitor hands the blocked carriers' work to new ones, so the
+// quick task finishes long before any blocker wakes (#6403 c2).
+use c: c.c
+#Import c.c: module {
+    sleep: fn(seconds: U32) -> U32 = "sleep"
+}
+use time: core.time
+
+BLOCKERS: 12
+
+blocker: fn() -> Int {
+    _left: c.sleep(U32{1})
+    1
+}
+
+quick: fn() -> Int { 1 }
+
+run: fn() {
+    handles := [Task<Int>]{}
+    loop _ in 0..<BLOCKERS -> handles.push(task blocker())
+    time.sleep(100ms)
+    start: time.instant()
+    one: task quick()
+    _ := one.join() ?? -1
+    latency: time.instant() - start
+    done := 0
+    loop handle in handles { done += handle.join() ?? 0 }
+    print("{done} blockers done")
+    print("quick task under 100 ms {(latency.in(.Milliseconds) ?? 1000) < 100}")
+}

@@ -1,0 +1,36 @@
+// 12 tasks each wait on a `sleep 1` child through core.process on four
+// carriers; then one trivial task is spawned and joined. A child wait parks
+// its fiber, so the quick task finishes long before any child exits
+// (#6403 c2).
+package: {
+    name: "blocked_child_wait"
+    authority: { allow: [Exec, IO, Time] }
+}
+
+use {
+    process: core.process
+    time: core.time
+}
+
+BLOCKERS: 12
+
+blocker: fn() -[Exec]> Int {
+    _receipt: process.run_spec(process.cmd(["sleep", "1"])) ?? panic("sleep child failed")
+    1
+}
+
+quick: fn() -> Int { 1 }
+
+run: fn() {
+    handles := [Task<Int>]{}
+    loop _ in 0..<BLOCKERS -> handles.push(task blocker())
+    time.sleep(100ms)
+    start: time.instant()
+    one: task quick()
+    _ := one.join() ?? -1
+    latency: time.instant() - start
+    done := 0
+    loop handle in handles { done += handle.join() ?? 0 }
+    print("{done} blockers done")
+    print("quick task under 100 ms {(latency.in(.Milliseconds) ?? 1000) < 100}")
+}
