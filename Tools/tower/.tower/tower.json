@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98889,
+    "rev": 98890,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76059,7 +76059,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T16:48:58.651Z",
+      "updated": "2026-11-10T16:54:57.542Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -193020,129 +193020,124 @@
       "id": "D-RUN-WHERE1",
       "cardId": "c0oev2ib",
       "group": "language",
-      "title": "Jet reports for any function whether it could run as a parallel kernel and which line stops it, while #Kernel stays the explicit launch point",
-      "situation": "Jet proves that a #Kernel(.parallel) function is safe to run on worker threads: no effects, no races and bounded access. A ratified rule made that marker the explicit boundary, and the proof runs only where the marker is written.\n\nA helper that prints gets one error at the marker, not at the print. No command says whether an unmarked function would pass.",
-      "gist": "Should Jet report for any function whether it could run as a parallel kernel, and why not, while #Kernel stays explicit?",
-      "lesson": "Some functions are safe to run on many cores at once, because they only compute. Jet already checks this when you ask with #Kernel. This vote decides whether Jet can also tell you which plain functions would pass, and what stops the rest.",
-      "explainer": "Words used here. A kernel is a function that runs on many cores or lanes at once. Eligible means it passes Jet's kernel proof. The launch point is where code asks for the parallel run.",
-      "story": "Mia wants to speed up a scoring helper. Under A, jet explain kernel names the one print on line 3 that stops it. She moves the print out and adds #Kernel.",
-      "inWild": "// Mojo marks the parallel boundary and checks it there:\nparallelize[score](n)",
-      "detail": "What this ballot decides. Whether the existing kernel proof is reported for unmarked functions too. The marker stays the only launch point, so D-COMPUTE-KERNEL-SURFACE1=B is kept.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). KernelProof in the AST (JetFoundation Items.jet:804) records six parts: bounds, alias-free, captures, race-free, uniform barriers and control flow. KernelMode has one case, Parallel. #Kernel appears in 20 Jet files. jet explain kernel already exists as a topic that explains the marker. Given k02_print.jet:2 as well, it ignores the location and prints the same topic.\n\nProbe k01 marks a pure helper and prints 42. Probe k02 marks a helper that prints. It gets E1102, ValueNotSendable: sema cannot prove no reachable effects or opaque calls. The error points at the marker on line 2, not at the print.\n\nProbe k03 marks a helper that builds a local list. It gets E1102 at the literal itself, line 3: sema cannot prove an allocation-free body, this literal allocates new collection storage. So the allocation check already names its line; the effects check does not.\n\nHelpers, probed. k04's kernel calls a helper that prints, and k05's calls a pure helper, x * 3. Both get E1102 at the marker. The effects check fails on any call edge and keeps no line (Sema/Kernel.jet:156-160).\n\nSo D-GPU-HELPER-SCOPE1=A, ratified on 2026-09-12 to prove each reachable helper in kernel context, is not built. Today no kernel may call any helper, pure or not.\n\nCPU SIMD is already inferred with no marker. jet inspect decisions on probes/gb reports sum reduction vectorized for a plain loop.\n\nWhat A does. jet explain kernel FILE:LINE runs the same proof on the function at that line; without a location, the topic text stays as today. It prints every check the #Kernel error runs as passed or failed. Those are KernelProof's six parts plus the effects and allocation checks t6c's errors already report.\n\nFor a failed check it names the first line responsible and the effect or operation involved. For k02 it would read: effects, failed, line 3 calls print, which needs IO. Hover shows the same answer as one label. The proof runs only when asked or when #Kernel is written, so builds pay nothing.\n\nBuild work A needs. Effect facts must keep the line of each call or effect, which the check drops today. Until the helper proof of D-GPU-HELPER-SCOPE1=A lands, the report names each call as not yet proved, with its line, instead of one marker error.\n\nThe #Kernel error reuses the same report, so k02 points at the print as k03 already points at its literal. That error gets its own registered code instead of E1102, whose name, ValueNotSendable, is about sendable values.\n\nWhat stays the same. Only #Kernel launches parallel work. D-ACCEL1=A's transforms still apply only to proven #Kernel functions. Once built, D-GPU-HELPER-SCOPE1=A proves each reachable helper in kernel context, and the report shows that helper's lines.\n\nFar, and not part of this vote. GPU and accelerator back ends, and targets that state what they can run, need their own ballots. The report is written so a later target can add its own parts.\n\nRatified decisions. A keeps D-COMPUTE-KERNEL-SURFACE1=B, D-GPU-HELPER-SCOPE1=A and D-ACCEL1=A. It extends D-HONEST-SIG1=A's hover labels with one more inferred fact.\n\nBeginner path. A beginner never sees kernels; the report is one command when a loop is slow. Expert path. Read each check, fix the named line, then add #Kernel.\n\nDownsides of A, and what the design does about them. A plain function's label may change when its body changes. The label is a report, not a promise; only #Kernel makes a promise.\n\nWhat remains. The proof runs again on each query. It is the check #Kernel already runs, on one function and its helpers.\n\nOther options. B keeps the proof on marked functions only. C is the review's full form: eligibility is inferred and any eligible loop may run in parallel with no marker. D only improves the #Kernel error.\n\nTheir best cases. B adds nothing. C removes the marker entirely. D fixes the misleading messages at no new surface. Their costs: B hides why a helper fails until it is marked. C reverses D-COMPUTE-KERNEL-SURFACE1=B and hides the parallel boundary. D still says nothing about unmarked functions.",
+      "title": "Report kernel eligibility on request, while keeping the explicit kernel boundary",
+      "situation": "Jet checks marked kernels, but the current checker stops at its first unproved obligation. A pure ordinary helper call is refused too. The existing explain topic does not inspect a source location. Authors must edit a declaration to try its kernel contract. This ballot chooses whether the same checker should also serve an on-demand preview, without changing launch behavior.",
+      "gist": "Should tools report kernel eligibility before a function is marked?",
+      "lesson": "A kernel must meet stricter rules than an ordinary function. This vote chooses whether tools can explain those rules before the author adds #Kernel. A report does not launch work or promise a speedup.",
+      "explainer": "Eligible means proved in a specified kernel context, not fast or GPU-ready. A missing proof does not establish that a program is unsafe. #Kernel marks a checked declaration; a compute launch requests execution.",
+      "story": "Mia asks why her scoring function cannot be a kernel. The report identifies its print call. She moves logging outside, checks again, and marks the function only after all obligations pass.",
+      "inWild": "// Rust Rayon illustration, not executed here:\nxs.par_iter().map(score).collect::<Vec<_>>()",
+      "detail": "What this decides. A adds an on-demand view of the canonical kernel checker, not a second eligibility engine. #Kernel remains the explicit checked boundary under D-COMPUTE-KERNEL-SURFACE1=B. A report never launches work.\n\nEvidence on a0.0.43. Rerun k01 prints 42 from a direct ordinary call to a marked scalar function; it does not prove parallel execution. k02 reports E1102 at the marker for printing. k03 reports allocation at its list literal. k04 and k05 refuse printing and pure ordinary helpers at their caller's marker. The explain command ignores k02_print.jet:2 and prints its topic.\n\nCode on origin/dev. Compiler/JetSema/Source/Sema/Kernel.jet checks declaration form, parameter and result sendability, effects, and a restricted body. It stops at the first failure. Compiler/JetFoundation/Source/AST/Items.jet defines six KernelProof flags; their existence is not evidence of eight independently available check results. The effects checker receives names, not source locations.\n\nA's exact request is jet explain kernel FILE:LINE. Without a location it remains a topic. A location selects the enclosing function in the checked source snapshot. The report identifies the kernel context and concrete type arguments. A generic function without sufficient arguments reports not proved, never a universal pass. Methods, captures, unsafe boundaries and unresolved calls retain the declaration checker's restrictions.\n\nEach obligation reads passed, failed or not proved. Skipped or context-dependent checks cannot read passed. A failed effect includes its source location and the reachable call chain. Recursive call graphs terminate conservatively. Multiple independent failures may be listed; dependent checks remain not proved. Hover reads the same result.\n\nThe marked diagnostic and the query consume one proof result. A includes the ratified D-GPU-HELPER-SCOPE1=A helper checking, source-bearing effect facts, and a registered kernel-specific diagnostic with snapshots. A must not ship a permanent all-calls-fail substitute for helper checking. A changes neither launch behavior nor D-ACCEL1=A optimization scope. It makes no GPU or performance claim.\n\nCost. Queries need checking and call-graph traversal; hover requests must be bounded, cancellable and cached against source, dependencies, target and instantiation. Ordinary unqueried functions gain no mandatory eligibility pass. Recording locations and producing better marked diagnostics can still cost build time and memory. No zero-cost claim is measured.\n\nB keeps marked-only checks and adds no query surface. Its strongest use is an explicit declaration contract checked by normal builds. D improves marked diagnostics with less tool scope than A; temporarily marking a function remains its manual preview. C authorizes automatic parallelization of eligible unmarked loops, explicitly replacing the marker requirement. C needs the same safety proof, serial behavior including panic ordering, cost gate and opt-outs; eligibility alone cannot authorize a speedup.\n\nBeginner path: ordinary functions need no new syntax. Expert path under A: inspect the exact context, repair failed obligations, then mark and launch explicitly. None of these options adds a foreign-spelling teaching diagnostic or rewrite.",
       "options": [
         {
           "key": "A",
           "name": "Report the fact; keep the marker",
-          "detail": "jet explain kernel and hover report the kernel proof for any function; #Kernel stays the launch point.",
-          "technical": "On-demand run of the existing #Kernel checks on one function and its helpers: KernelProof's six parts plus effects and allocation, each with the first failing line. Effect facts keep their lines; calls are reported as not yet proved until D-GPU-HELPER-SCOPE1=A's helper proof lands. The #Kernel error reuses the report under a new registered code. No build cost; D-ACCEL1=A scope unchanged.",
-          "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")          // the one line that stops parallel use\n    x * 3\n}\n// Proposed (A): jet explain kernel file.jet:1\n//   effects: failed, line 2 calls print, which needs IO\n//   bounds, aliasing, captures, races, control flow: passed\n// Today (probe k02): with #Kernel, E1102 at the marker; without it, nothing."
+          "detail": "Query or hover before marking; launch behavior is unchanged.",
+          "technical": "One checker and proof record serve queries and marked diagnostics. Report passed, failed or not proved with context and call chains. Include ratified reachable-helper checking before shipping.",
+          "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")\n    x * 3\n}\n// Proposed: jet explain kernel file.jet:1\n// effects: failed at line 2\n// Other obligations are not marked passed unless independently proved."
         },
         {
           "key": "B",
           "name": "Proof on marked functions only",
-          "detail": "The proof runs only where #Kernel is written.",
-          "technical": "No change.",
-          "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")          // the one line that stops parallel use\n    x * 3\n}\n// Today (B): no report; adding #Kernel gives E1102 at the marker."
+          "detail": "Keep declaration checking and the current topic; no source-location query.",
+          "technical": "Smallest tool surface. A marked declaration gives build-time enforcement; preview requires editing source. Ratified helper work remains required independently.",
+          "code": "#Kernel(.parallel) scale: fn(x: Int) -> Int {\n    print(\"scaling\")\n    x * 3\n}\n// Current k02: E1102 at the marker."
         },
         {
           "key": "C",
-          "name": "Inferred, no marker",
-          "detail": "Any eligible function or loop may run in parallel without #Kernel.",
-          "technical": "Reverses D-COMPUTE-KERNEL-SURFACE1=B; widens D-ACCEL1=A to unmarked code.",
-          "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")          // the one line that stops parallel use\n    x * 3\n}\n// Proposed (C): without line 2, Jet may run scale's loops on workers."
+          "name": "Inferred parallel execution",
+          "detail": "Eligible unmarked loops may run on workers; no declaration marker is required.",
+          "technical": "Explicitly replaces D-COMPUTE-KERNEL-SURFACE1=B and widens D-ACCEL1=A. Require proof, measured selection, inspectable decisions, opt-outs and identical observable behavior. Removes annotation work, but source no longer identifies every boundary.",
+          "code": "// Proposed policy: eligible unmarked loops may run on workers.\n// Printing still prevents eligibility; removing it is not proof of a speedup."
         },
         {
           "key": "D",
-          "name": "Better kernel errors only",
-          "detail": "The #Kernel error names the failing line; no report for unmarked code.",
-          "technical": "A's report inside the #Kernel error only.",
-          "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")          // the one line that stops parallel use\n    x * 3\n}\n// Proposed (D): with #Kernel, the error points at line 2."
+          "name": "Better marked errors only",
+          "detail": "Improve the marked diagnostic without a query command or hover label.",
+          "technical": "Reuse the same canonical proof and source-bearing failures. Smaller query and cache scope than A. Temporary marking remains the manual preview path.",
+          "code": "#Kernel(.parallel) scale: fn(x: Int) -> Int {\n    print(\"scaling\")\n    x * 3\n}\n// Proposed: kernel-specific diagnostic at line 2."
         }
       ],
       "comparisons": [
         {
-          "lang": "Mojo",
-          "note": "parallelize is an explicit library call in the algorithm module.",
-          "code": "parallelize[score](n)"
-        },
-        {
-          "lang": "Rust",
-          "note": "Rayon's par_iter is explicit; Send and Sync are auto traits the compiler infers.",
-          "code": "xs.par_iter().map(score)"
+          "lang": "Rust Rayon",
+          "note": "par_iter explicitly requests parallel iteration. Send and Sync are inferred auto traits, not kernel-effect or allocation proofs. Illustration not executed here.",
+          "code": "xs.par_iter().map(score).collect::<Vec<_>>()"
         },
         {
           "lang": "Julia",
-          "note": "Threads.@threads marks the loop; avoiding data races is the user's job.",
-          "code": "Threads.@threads for i in 1:n"
+          "note": "Threads.@threads marks a parallel loop. Its manual places data-race freedom on the programmer. Illustration not executed here.",
+          "code": "Threads.@threads for i in 1:n\n    output[i] = score(input[i])\nend"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "The proof Jet already has answers why a function cannot run in parallel, line by line. The launch point stays explicit, and builds pay nothing.",
+        "why": "A exposes the same proof before an author commits to a kernel declaration. It keeps the explicit boundary and avoids a separate eligibility engine.",
         "gains": [
-          "Any function's kernel answer, on request.",
-          "Errors point at the line responsible.",
-          "The launch point stays explicit."
+          "Context-specific answers before marking.",
+          "Source-bearing failures shared with marked diagnostics."
         ],
         "losses": [
           {
-            "loss": "A plain function's label can change with its body.",
-            "mitigation": "The label is a report; only #Kernel makes a promise."
+            "loss": "Queries and source facts cost time and memory.",
+            "mitigation": "Reuse checked facts; cache with complete invalidation and cancel stale hover work."
           },
           {
-            "loss": "Until helpers are proved, any function with a call fails.",
-            "mitigation": "The report names each call line; A's build includes the ratified, unbuilt helper proof."
+            "loss": "Some contexts cannot be proved without concrete arguments.",
+            "mitigation": "Say not proved and identify missing context; never imply unsafe or passed."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B hides why a helper fails until it is marked."
+            "reason": "B is smallest and enforces marked contracts, but preview requires source edits."
           },
           {
             "key": "C",
-            "reason": "C reverses D-COMPUTE-KERNEL-SURFACE1=B and hides the boundary."
+            "reason": "C removes annotation work but changes execution policy and reverses the ratified boundary."
           },
           {
             "key": "D",
-            "reason": "D says nothing about unmarked functions."
+            "reason": "D is a strong smaller tool change, but requires temporary marking for preview."
           }
         ],
-        "tradeoff": "One more inferred label, for kernel answers before the marker."
+        "tradeoff": "An additional tool view and query cost, not a new execution mechanism."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Probes k04 and k05 show that no kernel may call any helper today, so D-GPU-HELPER-SCOPE1=A is unbuilt; A now names that work and the line-keeping effect facts. The story's line number and the peer notes are corrected."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran k01-k05 and explain; corrected launch, proof completeness and zero-cost claims. A is supported only with shared structured proof, honest unknowns and ratified helper checking."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-RUN-WHERE1/probes for k01 to k05, and jet explain kernel k02_print.jet:2. The effects check is in Compiler/JetSema/Source/Sema/Kernel.jet:156-160. The #Kernel count uses git grep -l on dev.",
+      "checkInstructions": "Rerun k01-k05 on a0.0.43 and explain kernel with a source location. These prove scalar execution and diagnostics only, not worker execution or tier parity. Before shipping A, test shared query/marker results, helpers, generics, recursion, cache invalidation and cancellation.",
       "surface": {
-        "gist": "Should Jet report for any function whether it could run as a parallel kernel, and why not, while #Kernel stays explicit?",
-        "lesson": "Some functions are safe to run on many cores at once, because they only compute. Jet already checks this when you ask with #Kernel. This vote decides whether Jet can also tell you which plain functions would pass, and what stops the rest.",
+        "gist": "Should tools report kernel eligibility before a function is marked?",
+        "lesson": "A kernel has stricter rules than an ordinary function. A report explains those rules; it does not launch work or promise speed. #Kernel remains the checked declaration boundary under A.",
         "trio": {
           "current": {
-            "note": "The error points at the marker, not the print.",
-            "code": "#Kernel(.parallel) scale: fn(x: Int) -> Int   // E1102"
+            "note": "k02 fails at the marker; k05 also refuses a pure helper call.",
+            "code": "#Kernel(.parallel) scale: fn(x: Int) -> Int { x * 3 }"
           },
           "wild": {
-            "lang": "Mojo",
-            "note": "An explicit parallel call.",
-            "code": "parallelize[score](n)"
+            "lang": "Rust Rayon",
+            "note": "Explicit parallel iteration; illustration not executed.",
+            "code": "xs.par_iter().map(score).collect::<Vec<_>>()"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "Report and marker",
-            "gist": "Ask any function; launch with #Kernel.",
+            "gist": "Query the shared checker before marking.",
             "gains": [
-              "Answers on request.",
-              "Line-level errors."
+              "Context-specific preview.",
+              "Source-bearing failures."
             ],
             "losses": [
-              "Labels can change."
+              "Query cost and cache invalidation.",
+              "Some contexts remain not proved."
             ],
             "proposed": {
               "code": "jet explain kernel file.jet:1"
@@ -193151,74 +193146,76 @@
           {
             "key": "B",
             "name": "Marked only",
-            "gist": "Proof only under #Kernel.",
+            "gist": "Keep the smallest tool surface.",
             "gains": [
-              "Nothing new."
+              "Build-enforced declaration contract.",
+              "No new query machinery."
             ],
             "losses": [
-              "No answer before marking."
+              "Preview requires editing source."
             ],
             "proposed": {
-              "code": "#Kernel(.parallel)   // E1102"
+              "code": "#Kernel(.parallel)"
             }
           },
           {
             "key": "C",
-            "name": "No marker",
-            "gist": "Eligible code may run in parallel.",
+            "name": "Inferred execution",
+            "gist": "Allow eligible unmarked loops on workers.",
             "gains": [
-              "No marker."
+              "No kernel annotation needed."
             ],
             "losses": [
-              "Hidden boundary."
+              "Reverses the ratified boundary.",
+              "Requires proof and a performance gate."
             ],
             "proposed": {
-              "code": "// no marker"
+              "code": "// Unmarked loops may be selected."
             }
           },
           {
             "key": "D",
             "name": "Errors only",
-            "gist": "Better #Kernel errors.",
+            "gist": "Improve marked failures without queries.",
             "gains": [
-              "Line-level errors."
+              "Smaller tool change.",
+              "Source-bearing failures."
             ],
             "losses": [
-              "No answer before marking."
+              "Preview still requires marking."
             ],
             "proposed": {
-              "code": "// error at line 2"
+              "code": "// Kernel diagnostic at the failing operation."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "The existing proof answers any function line by line, and the launch point stays explicit.",
+          "why": "One checker supplies context-specific preview and marked enforcement without changing execution policy.",
           "gains": [
-            "Answers on request.",
-            "Line-level errors."
+            "Preview before marking."
           ],
           "losses": [
             {
-              "loss": "Labels can change.",
-              "mitigation": "Only #Kernel makes a promise."
+              "loss": "Queries cost time and can lack context.",
+              "mitigation": "Cache checked facts and say not proved when needed."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "No answer before marking."
+              "reason": "Smallest, but no unmarked preview."
             },
             {
               "key": "C",
-              "reason": "Hidden boundary."
+              "reason": "Changes the execution boundary."
             },
             {
               "key": "D",
-              "reason": "No answer before marking."
+              "reason": "Smaller change, but preview requires marking."
             }
           ],
-          "tradeoff": "One more label, for kernel answers before the marker."
+          "tradeoff": "A new tool view, not a new execution mechanism."
         }
       },
       "draft": false,
@@ -193227,64 +193224,52 @@
       "designAway": [
         {
           "option": "A",
-          "loss": "A plain function's label can change with its body.",
+          "loss": "A label can look like a permanent promise.",
           "attempts": [
-            "Make the label a report shown only on request or hover, never a promise.",
-            "Keep #Kernel as the only promise, checked on every build (D-COMPUTE-KERNEL-SURFACE1=B)."
+            "Attach source snapshot, context and instantiation.",
+            "Use not proved for missing context; marked declarations alone provide the enforced promise."
           ],
-          "result": "Reduced: only code that asks sees the label."
+          "result": "Reduced, not eliminated: changes invalidate reports."
         },
         {
           "option": "A",
-          "loss": "No kernel may call a helper today (k04, k05), so most reports would fail at the first call.",
+          "loss": "Current first-failure checks cannot supply every advertised pass.",
           "attempts": [
-            "Build D-GPU-HELPER-SCOPE1=A's ratified helper proof as part of A; k05's pure helper then passes.",
-            "Until then, report each call as not yet proved with its line, so the answer is still line-level."
+            "Share structured proof results with marked checks.",
+            "Distinguish dependent skipped checks and include ratified helper checking."
           ],
-          "result": "Reduced now and removed when the helper proof lands."
-        },
-        {
-          "option": "A",
-          "loss": "The effects error points at the marker (k02, k04).",
-          "attempts": [
-            "Keep the line of each direct effect and call edge in the effect facts the check reads (Kernel.jet:156-160).",
-            "Reuse the allocation check's pattern, which already reports its literal's span (k03)."
-          ],
-          "result": "Removed by A's build work."
+          "result": "Required build work, not current behavior."
         },
         {
           "option": "B",
-          "loss": "A helper's failure is hidden until it is marked.",
+          "loss": "No preview without marking.",
           "attempts": [
-            "Mark it to see the error; the error still points at the marker.",
-            "Read the effects in hover (D-HONEST-SIG1=A); that misses bounds, races and barriers."
+            "Temporarily mark the declaration."
           ],
-          "result": "Not removed."
+          "result": "Manual source edit remains; no query machinery is needed."
         },
         {
           "option": "C",
-          "loss": "The parallel boundary is hidden.",
+          "loss": "Unmarked parallel execution is not visible in source.",
           "attempts": [
-            "Show inferred parallel loops in jet inspect decisions, as SIMD is today.",
-            "Gate it behind D-ACCEL1=A's measured run-time check."
+            "Inspect decisions and retain explicit opt-outs and the measured gate."
           ],
-          "result": "Reduced, not removed; it also reverses D-COMPUTE-KERNEL-SURFACE1=B."
+          "result": "Visibility improves, but the boundary policy still changes."
         },
         {
           "option": "D",
-          "loss": "Nothing is said about unmarked functions.",
+          "loss": "No unmarked query.",
           "attempts": [
-            "Let users add #Kernel temporarily to ask.",
-            "Print the improved error in jet check --explain."
+            "Temporarily mark and use improved diagnostics."
           ],
-          "result": "Not removed."
+          "result": "Manual preview remains, with smaller tool scope."
         }
       ],
       "reports": [
         {
-          "title": "Kernel eligibility report: helper probes, effect-line gap and adversarial review",
+          "title": "Kernel eligibility: probes and different-family review",
           "path": "Docs/audits/2026-11-10-run-where-review.md",
-          "note": "k01-k05 on a0.0.43: a pure helper call fails (D-GPU-HELPER-SCOPE1=A unbuilt), effects error at the marker (Kernel.jet:156-160), explain ignores FILE:LINE today; peers."
+          "note": "k01-k05 and explain rerun; scalar calls do not prove launches, and first-failure checks do not prove every flag."
         },
         {
           "title": "Rust nomicon: Send and Sync",
@@ -200152,6 +200137,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:54:57.542Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-RUN-WHERE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:51:46.429Z",
       "by": "Main",
