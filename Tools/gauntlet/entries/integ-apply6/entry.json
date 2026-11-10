@@ -1,0 +1,90 @@
+{
+  "name": "integ-apply6",
+  "mode": "tool",
+  "description": "Main's integration applier integ-apply6.sh and its Jet twin IntegApply6.jet (#5072 c15): commit the export tree as the base with the main repository's objects at hand, then apply each SUB's patch with a three-way merge, excluding generated files and edits of files an earlier SUB deleted, stopping SUBs stacked on a failed one, resolving the mechanical conflicts (keep ours in a generated region, union of a row table or of pure additions, a line-by-line merge) and leaving every other SUB unapplied; then Main's plain fixups and one run of each generator the applied SUBs named. The fixtures hold the current dev's export (tree), the old dev the SUBs were made on (repo.git), the SUBs (subs), a stand-in jet (seed/jet) whose RuntimeGenerators run exits with a checksum of the tree and the integ files, and a stand-in for Main's linemerge.mjs (scratch/Main).",
+  "tool": {
+    "original": "Tools/agent/orchestrator/integ-apply6.sh",
+    "jet": "Tools/agent/orchestrator/IntegApply6.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": [
+          "tree",
+          ".",
+          "subs/A-1/",
+          "subs/A-2",
+          "subs/B-1",
+          "subs/C-1",
+          "subs/D-1",
+          "subs/E-1",
+          "subs/G-1",
+          "subs/F-1",
+          "subs/H-1",
+          "subs/H-2",
+          "subs/K-1",
+          "subs/L-1",
+          "subs/M-1",
+          "subs/N-1",
+          "subs/P-1",
+          "subs/R-1",
+          "subs/S-1"
+        ],
+        "env": {
+          "JET_STATE_ROOT": ".",
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seed",
+          "JET_DEV_WORKTREE": "repo.git",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "INTEG_POST": "subs/post-ok.patch subs/post-bad.patch"
+        },
+        "expected": "expected/batch.out"
+      },
+      {
+        "args": [
+          "tree",
+          "."
+        ],
+        "env": {
+          "JET_STATE_ROOT": ".",
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seed",
+          "JET_DEV_WORKTREE": "repo.git",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1"
+        },
+        "expected": "expected/no-subs.out"
+      },
+      {
+        "args": [
+          "missing",
+          ".",
+          "subs/A-1"
+        ],
+        "env": {
+          "JET_STATE_ROOT": ".",
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seed",
+          "JET_DEV_WORKTREE": "repo.git",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1"
+        },
+        "exit": 2,
+        "expected": "expected/init-failed.out"
+      },
+      {
+        "args": [],
+        "env": {
+          "JET_STATE_ROOT": ".",
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seed",
+          "JET_DEV_WORKTREE": "repo.git",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_NOSYSTEM": "1"
+        },
+        "exit": 1,
+        "expected": "expected/no-args.out"
+      }
+    ]
+  }
+}
