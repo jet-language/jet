@@ -1794,6 +1794,43 @@ propagates it through calls, and erases it before code generation. An empty set
 is purity; effects are not runtime values, handlers, or monads
 (D-EFF1, D-QUAL1, I3).
 
+### One rule on every rung
+
+Every place that holds code is a *rung* with an effect row: a `#FX` block or
+lambda, a function, a trait, a type, a module (an inline module, a file head,
+and the file where the module is declared), the package and the run. A
+written row is a ceiling (`FS, IO`: at most these) plus denials (`!Net`:
+never this, including through calls). The checker proves that what code
+reaches fits every ceiling above it and meets no denial above it. Rungs
+compose from the outermost inward: the nearest rung is checked first, a
+denial anywhere above always wins, and a row written inside a ceiling may
+only narrow it. Only the package and the run grant; every other rung only
+restricts.
+
+The spellings are one list syntax in two places. A function and a function
+type carry the row in the arrow: `-[FS.Read]> String`, `-[]>` for pure,
+`fn(T) -[Net]> U`, and `-[via f]>` to pass a function parameter's row
+through. Every other rung writes `#FX(...)`: above a module, a struct, an
+enum, a trait or a file's `use` lines, as an `#FX: (...)` line in a body, or
+around a block as `#FX(...) { ... }`. Inside the list, `!E` denies,
+`Mem.Alloc(above: N)` bounds a denial, and `#FX()` is pure. The package
+writes `authority: { allow, deny, grants }`, and the run takes `--allow`,
+`--deny` and `-A`.
+
+A row nobody writes is inferred: a function's from everything its body
+reaches, a type's from its methods, function fields and held types, a
+trait's from its implementations, and a dependency's from its code, recorded
+in the lock. So a program with no rows checks and runs, and an error appears
+only where someone wrote a limit or a grant is exceeded. Each such error has
+one registered code, with its what, why and fix text and a worked example,
+in the [diagnostics registry](../../Compiler/Prelude/Diagnostics.jet)
+(`jet explain E0749`). The examples in
+[`Examples/ErrorsAndEffects/Effects`](../../Examples/ErrorsAndEffects/Effects/)
+show every rung, each with golden output: `Effects.jet` (no rows),
+`Pure.jet` (functions), `EffectHigherOrder.jet` (function types),
+`TraitCap.jet`, `TypeCap.jet`, `ModuleCap.jet`, `FileScope.jet`,
+`LibraryEffect.jet` and `EffectAuthority.jet` (the package).
+
 ### Effect names and declarations
 
 The thirteen grantable roots are `Net`, `FS`, `IO`, `DB`, `Time`, `Rand`,
