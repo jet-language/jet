@@ -75,5 +75,6 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.
 - [ReadOnlyLint](Reflection/ReadOnlyLint.jet) — A read-only lint is a marker whose `expand` row is `-[]>`: it reads the marked type and may warn, but writes no code.
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.
+- [ReflectNested](Reflection/ReflectNested.jet) — `reflect.of(x)` reflects a nested value all the way down: a struct field's `Value` lists that struct's own fields.
 - [ReflectValue](Reflection/ReflectValue.jet) — `reflect.of(x)` — the runtime reflection floor.
 - [UserRuleBody](Reflection/UserRuleBody.jet) — A source rule with a body adds an ordinary method.

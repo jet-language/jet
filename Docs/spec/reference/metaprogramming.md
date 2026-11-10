@@ -242,9 +242,10 @@ run: fn() {
 
 `reflect.of(value)` is legal where value interpolation is legal. Its
 `type_name`, `path`, and `display` operations are always available; `fields()`
-is populated for a struct and is empty for a non-struct value. A generic
-reflection value retains the substituted field type, as the same example
-shows for `Box<Int>`.
+is populated for a struct and is empty for a non-struct value. A struct
+field's `value()` lists that struct's own fields, so `.fields()[i].value()`
+walks a nested value level by level. A generic reflection value retains the
+substituted field type, as the same example shows for `Box<Int>`.
 
 The fact plane is deliberately typed and closed. The feature examples read
 range, dimension, state, effect, sendability, movedness, attribution, origin,

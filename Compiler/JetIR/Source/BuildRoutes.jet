@@ -5227,38 +5227,60 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
     boxed
 }
 
-// `reflect.of(value, type_name, path, (field, field_type_name, field_path)...)`:
-// sema hands the checked names as text after the value. The Value record
-// carries the value's Display text and one Value per stored field (a
-// field's own Value lists no fields).
+// `reflect.of(value, type_name, path, level)`: sema hands the checked names
+// as text after the value, then the value's field tree, one level as a field
+// count followed by each field's name, type name, path and its own level.
+// The Value record carries the value's Display text and one Value per stored
+// field, and a struct field's Value carries its own fields the same way.
 ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() < 3 || (args.len() - 3) % 3 != 0 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
+    if args.len() < 4 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    pointer_row: ir_pointer_row(m)
     value_ty: ir_ty(p, b, args[0])
     value: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
     display: ir_render(m, p, b, value_ty, value, IRRender.Display, span)
     if ir_failed(b) || display < 0 -> return -1
-    count: (args.len() - 3).div_euclid(3)
+    level: ir_reflect_fields(m, p, b, value_ty, value, args, 3, span)
+    if ir_failed(b) || level.fields < 0 -> return -1
+    if level.next != args.len() -> return ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}")
+    type_text: ir_expr(m, p, b, args[1])
+    path_text: ir_expr(m, p, b, args[2])
+    if ir_failed(b) -> return -1
+    result: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, display, level.fields}, result_row)
+    ir_release(m, b, display)
+    ir_release(m, b, type_text)
+    ir_release(m, b, path_text)
+    ir_release(m, b, value)
+    result
+}
+
+// One level of the reflect.of field tree, read from `args` at `at`: the new
+// field list of `value` (of `value_ty`) and the index after the level.
+ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], at: Int, span: Span) -> (fields: Int, next: Int) Never! {
+    if at >= args.len() -> return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: at)
+    count: ir_reflect_count(p, b, args[at])
+    if count < 0 -> return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: at)
+    pointer_row: ir_pointer_row(m)
     capacity: ir_word_const(m, b, count)
     fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
-    loop index in 0..<count {
-        at: 3 + index * 3
-        name: ir_reflect_literal(p, b, args[at])
-        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
-        if value < 0 || ir_kind_of(m, b, value) != .Aggregate -> return ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
-        member: ir_member_of(m, p, b, value, name) ?? return ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
+    next := at + 1
+    loop _ in 0..<count {
+        if next + 2 >= args.len() -> return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: next)
+        name: ir_reflect_literal(p, b, args[next])
+        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
+        if value < 0 || ir_kind_of(m, b, value) != .Aggregate -> return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
+        member: ir_member_of(m, p, b, value, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
         read: ir_member_read(m, b, value, member)
         shown: ir_render(m, p, b, field_ty, read, IRRender.Display, span)
-        if ir_failed(b) || shown < 0 -> return -1
-        field_name: ir_expr(m, p, b, args[at])
-        field_type_name: ir_expr(m, p, b, args[at + 1])
-        field_path: ir_expr(m, p, b, args[at + 2])
-        if ir_failed(b) -> return -1
-        none: ir_word_const(m, b, 0)
-        empty: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{none}, pointer_row)
-        field_value: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{field_type_name, field_path, shown, empty}, pointer_row)
+        if ir_failed(b) || shown < 0 -> return (fields: -1, next: next)
+        field_name: ir_expr(m, p, b, args[next])
+        field_type_name: ir_expr(m, p, b, args[next + 1])
+        field_path: ir_expr(m, p, b, args[next + 2])
+        if ir_failed(b) -> return (fields: -1, next: next)
+        nested: ir_reflect_fields(m, p, b, field_ty, read, args, next + 3, span)
+        if ir_failed(b) || nested.fields < 0 -> return (fields: -1, next: nested.next)
+        next = nested.next
+        field_value: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{field_type_name, field_path, shown, nested.fields}, pointer_row)
         field: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_field", [Int]{field_name, field_value}, pointer_row)
         _: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_push", [Int]{fields, field}, -1)
         ir_release(m, b, shown)
@@ -5266,15 +5288,14 @@ ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [In
         ir_release(m, b, field_type_name)
         ir_release(m, b, field_path)
     }
-    type_text: ir_expr(m, p, b, args[1])
-    path_text: ir_expr(m, p, b, args[2])
-    if ir_failed(b) -> return -1
-    result: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, display, fields}, result_row)
-    ir_release(m, b, display)
-    ir_release(m, b, type_text)
-    ir_release(m, b, path_text)
-    ir_release(m, b, value)
-    result
+    (fields: fields, next: next)
+}
+
+// The field count of one reflect.of level: an Int literal argument node.
+ir_reflect_count: fn(p: IRProgram, b: IRBuilder, node: Int) -> Int Never! {
+    count := -1
+    if ir_body_node(p, b, node).kind == .IntLit(value, _) -> count = value
+    count
 }
 
 // The text of a literal String argument node.
