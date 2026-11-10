@@ -826,7 +826,13 @@ __OpenAPIRoute: struct {
     security: [__OpenAPISecurity]
 }
 
-__openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace"} }
+// The eight OpenAPI 3.1 Path Item operation fields, then `connect`: 3.1 has no
+// field for CONNECT, so its operation goes under OpenAPI 3.2
+// `additionalOperations` (keyed by the method as sent) and that document says
+// 3.2.0.
+__openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace", "connect"} }
+
+__openapi_additional_method: fn(method: Int) -> Bool Never! { __openapi_methods()[method] == "connect" }
 
 __openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
 
@@ -1267,17 +1273,29 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
     }
     if errors.len() > 0 -> return Err(__openapi_fault(errors.join("; ")))
     paths := [String]{}
+    additional_operations := false
     index := 0
     loop index < routes.len() {
         path: routes[index].path.copy()
         methods := [String]{}
+        additional := [String]{}
         loop index < routes.len() && routes[index].path == path {
-            methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
+            name: __openapi_methods()[routes[index].method]
+            if __openapi_additional_method(routes[index].method) {
+                additional.push("{__app_json_string(name.to_upper())}:{__openapi_route_json(routes[index])}")
+            } else {
+                methods.push("{__app_json_string(name)}:{__openapi_route_json(routes[index])}")
+            }
             index += 1
+        }
+        if additional.len() > 0 {
+            methods.push("\"additionalOperations\":{{{additional.join(",")}}}")
+            additional_operations = true
         }
         paths.push("{__app_json_string(path)}:{{{methods.join(",")}}}")
     }
-    Ok("{{\"openapi\":\"3.1.0\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
+    openapi_version: if additional_operations -> "3.2.0" else -> "3.1.0"
+    Ok("{{\"openapi\":\"{openapi_version}\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
 }
 
 // jet_openapi_route_json and jet_openapi_parameter_json.

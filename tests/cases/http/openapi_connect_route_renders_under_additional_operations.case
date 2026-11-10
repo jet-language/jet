@@ -1,0 +1,12 @@
+# OpenAPI 3.1 has no Path Item field for CONNECT: a mux CONNECT route renders under
+# OpenAPI 3.2 `additionalOperations` and that document says 3.2.0; a document
+# without one stays 3.1.0.
+fixture: openapi_connect_route_renders_under_additional_operations.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build openapi_connect.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\ntrue\ntrue\nfalse\ntrue\n"

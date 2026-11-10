@@ -129,13 +129,21 @@ function jet_web_openapi(router) {
     const path = left.path.localeCompare(right.path);
     return path || left.method.localeCompare(right.method);
   });
+  // OpenAPI 3.1 has no Path Item field for CONNECT: its operation goes under
+  // OpenAPI 3.2 `additionalOperations`, keyed by the method as sent, and that
+  // document says 3.2.0 (Core/Web/Web.jet __openapi_document).
   const paths = {};
+  let additional_operations = false;
   for (const entry of entries) {
     if (paths[entry.path] == null) paths[entry.path] = {};
-    if (paths[entry.path][entry.method] != null) {
+    const additional = entry.method === "connect";
+    const owner = additional ? (paths[entry.path].additionalOperations ??= {}) : paths[entry.path];
+    const key = additional ? entry.method.toUpperCase() : entry.method;
+    if (owner[key] != null) {
       jet_web_openapi_contract_fail(`duplicate OpenAPI route ${entry.method.toUpperCase()} ${entry.path}`);
     }
-    paths[entry.path][entry.method] = entry.operation;
+    owner[key] = entry.operation;
+    additional_operations ||= additional;
   }
-  return JSON.stringify({ openapi: "3.1.0", info: { title: "Jet HTTP Router", version: "1" }, paths });
+  return JSON.stringify({ openapi: additional_operations ? "3.2.0" : "3.1.0", info: { title: "Jet HTTP Router", version: "1" }, paths });
 }
