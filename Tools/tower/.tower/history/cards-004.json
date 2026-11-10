@@ -87857,6 +87857,130 @@
       "completedAt": "2026-11-07T03:26:26.911Z",
       "questions": [],
       "retiredAt": "2026-11-10T03:26:54.704Z"
+    },
+    {
+      "id": "c0gaxqxg",
+      "num": 6594,
+      "title": "run-process-witnesses link fails on undefined jet_rt_fault_report",
+      "body": "Found by GoldenRoots3 on dev 41ad578550 and present on the base too: linking the program built by run-process-witnesses.mjs fails with an undefined reference to jet_rt_fault_report. Every runtime symbol a generated program calls must come from the one shared runtime (I9). Find where the reference is emitted without the runtime pack providing it, fix the pack or the route, and prove the witnesses link and run.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06: script porting, the pairing bars and full removal of non-Jet languages are G4 work (#5072), not G1/G2; c5 keeps its original goal."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 refinement: runner ports follow #5072's pairing rule; the .mjs keeps running until the Jet twin wins every bar."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 (#5072): runner ports are Jet, never new .mjs; c1aa7b298c's two .mjs runners convert under #5072 c15."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 runner registration; c3 fixed point and c4 s5 loop are in batch vb5."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c3 and c4 added from TestRot's #6595/#6609 findings (no new card): runtime import ledger drift and 6 s5 witness-loop rot rows."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Finding (Builder5): with the process-wide atexit queue built, main-run worker-fatal still loses every handler. A worker's fatal stop runs in stop domain 2, and Trap.jet trap_exit routes only domain 1 through the root. Every other domain takes trap_defect_exit, a raw exit_group with no main_exit_claim, no cleanup and the report written straight to fd 2. This looks like a regression since 114e150cba. Ruling (Main): a fatal stop in any domain under a live jet_rt_main claims the process exit (single winner), runs main_exit_cleanup, then writes the captured report. Report text and exit code 70 are unchanged; a stop during cleanup aborts; hosts with no live jet_rt_main keep the defect exit. The golden is re-recorded to all four handlers in registration order, then the report, once the fixture's registration order is deterministic. Builder5 owns Trap.jet and Scheduler.jet for this fix."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Ruling (Main) on run-main-fixtures worker-fatal: make the os.atexit queue process-wide. Today it is per-thread TLS (Task.jet task_exit_queue), and main_exit_cleanup drains only the main thread's queue, so a worker's handlers are dropped. core-library.md:1875,2073-2079 and spec.md:1069-1077 define atexit as a process-boundary registration run in registration order, so that's a runtime defect. Same change: core-library-native-contract.md:573-575's thread-exit drop is rewritten; the scheduler fixture asserts survival; a new case covers a handler from a worker that exits normally; the lock covers only append and claim. The LIFO goldens (exit2exit1) are re-recorded as exit1exit2 to match spec registration order."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "run-process-witnesses links and its ProcessRoutes and ProcessExecution witnesses pass",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "899850c3df: run-process-witnesses.mjs writes edition 2026 with authority allow [Exec, IO, Mem.Alloc]; ProcessReceiptFields.jet main->run. With s1 from 86c2809103 plus the fix (chain s1 jet 39a186ffa3, pack1 8ae36b14a8): run-process-witnesses.mjs printed 'plain process native pack witnesses: ok' rc=0; --test ProcessExecution printed 'native process Jet fixture ProcessExecution: ok' rc=0. LaneCheck CHECK OK (jet-lane-check.1502142610204)",
+          "at": "2026-11-06T16:12:32.181Z"
+        },
+        {
+          "n": 2,
+          "text": "Every harness that platform-links jet_runtime_jet.o (run-native-tcp-routes, run-native-codec-file-leaves, run-main-fixtures, run-http-body, run-cabi-driver, run-closure-refs-shared) links the fault-report object the same way and runs",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ad3fabb5f1: fault-report object marks its stack non-executable (fault-report-object.mjs) and the codec --test driver links it. With the s1 runtime: tcp-routes ok; codec-file-leaves default and --test CodecCSV/CodecEnv/CompilerFileLeaves/DynCodec ok; main-fixtures CHECK OK; http-body PASS; cabi-driver 11 pack-linked C-ABI cases passed; closure-refs-shared PASS. LaneCheck CHECK OK (jet-lane-check.1163774306289)",
+          "at": "2026-11-06T16:04:59.819Z"
+        },
+        {
+          "n": 3,
+          "text": "The s1 jet_runtime_jet.o import set matches Compiler/JetRuntime/imports.list: the 13 missing imports (fork, getgroups, getloadavg, initgroups, jet_rt_fault_report, mkfifo, round, signal, sysconf, tcgetattr, tcsetattr, times, utime) are recorded or removed, and the 23 duplicate undefined entries for self-defined symbols are fixed at the object writer, so run-host-fixtures audit and check-object.mjs pass",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "befab59906: Object.jet x64_object_functions_threads binds a runtime call to the object's own export (no UND import for self-defined symbols, fixed in the writer); imports.list ledgers the 13 real imports; check-object.mjs maxBuffer 1<<28. s1 from 899850c3df plus the fix (jet 3d19cb13a4, pack1 c9c9a23b22): nm comparison 'undefined 54 listed 54; unlisted imports: (none); listed, not imported: (none); undefined and defined: (none)'; check-object.mjs 'Jet object: 3207 exports, 54 audited imports' rc=0; run-host-fixtures audit 'host fixtures audit: ok'; process witnesses still pass. LaneCheck CHECK OK (jet-lane-check.1523703108105)",
+          "at": "2026-11-06T16:21:01.545Z"
+        },
+        {
+          "n": 4,
+          "text": "The s5-fixtures generic witness loop passes: MemStorage, NetUnixConnect, RootCleanup, TaskVariantPanic, NetDatagramRoutes and UiNode are fixed, and the 11 witnesses with their own runners (AllocCache included) leave the generic loop",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "5844c406c1, a207b92de8, 1c820a670e, c1aa7b298c (MechD-3). Chain s1 jet 49fca30035e67768 with pack1 313ed0112d266a38, built from a65e28fc65; JetRuntime, JetBackend and Tools/packaging are unchanged from there to HEAD. Ran s5probe.mjs all (the s5-fixtures.mjs:140-150 witness loop with the same owned and dedicated sets plus every runner argv, collect-all): SUMMARY 164/164 PASS (lanes/MechD/run/s5probe.log). The 70 generic witnesses build and match their goldens, MemStorage, NetUnixConnect, NetDatagramRoutes and UiNode included. run-root-cleanup, run-record-variant-panic (TaskVariantPanic), the six run-ui-*-witness runners, run-io-witness, run-execution-fixtures, run-alloc-cache-witness (5 modes) and run-tdigest-witness pass.",
+          "at": "2026-11-07T03:39:21.879Z"
+        },
+        {
+          "n": 5,
+          "text": "The 8 runtime runners still unregistered in s5 (run-alloc-observer-witness, files-walk, host-parallelism, native-codec-file-leaves, native-tcp-routes, process-witnesses, scan-goldens, test-runtime-abi-symbols) are each ported to the current ABI and registered in s5 with a passing run (new runner code in Jet where practical; pairing and porting to Jet belong to #5072 in G4), or deleted for cause with the cause logged",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "9b0d323b89 (MechD-3). All 8 runners are registered in s5 and pass in the same 164/164 run: run-alloc-observer-witness; run-files-walk-fixtures and run-host-parallelism-fixtures in all 5 modes; run-native-codec-file-leaves plain plus CodecCSV, CodecEnv, DynCodec and CompilerFileLeaves; run-native-tcp-routes; run-process-witnesses plain plus ProcessExecution and TerminalProcess; run-scan-goldens; test-runtime-abi-symbols. unmapped.mjs on a dev 85dea10ff4 export reports 59 runners, none missing from s5-fixtures.",
+          "at": "2026-11-07T03:39:22.925Z"
+        },
+        {
+          "n": 6,
+          "text": "The JetRuntime/Tests plain transport (CompilerRegistries.jet:1127-1135; Alloc, Scan, Unicode tests) links one runtime, so no second alloc_init resets GS and SIGSEGVs, and the Collections/Text runtime test fragments compile again (jet_int_pow, text_iter_pull arity).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed at 1141d403b1. MechD-3 proof: chain s1 jet 49fca30035e67768 (pack1 key 313ed0112d266a38, built from a65e28fc65; Compiler/JetRuntime unchanged to HEAD) runs the plain route of Tools/agent/CompilerRegistries.jet:1130-1160 (check-runtime --assemble-only, library over JetRuntime/package.jet without alloc_check_init, PLAIN_DRIVER C host): Alloc, Collections, Scan, Text, Unicode and Secret all PASS with rc 0, expected stdout and empty stderr; no second-runtime SIGSEGV.",
+          "at": "2026-11-07T03:24:39.724Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:13:43.662Z",
+      "updated": "2026-11-07T03:39:28.500Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T03:39:28.500Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T03:46:46.166Z"
     }
   ]
 }

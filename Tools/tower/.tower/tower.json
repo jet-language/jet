@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98441,
+    "rev": 98450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73900,7 +73900,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-09T23:02:06.271Z",
+      "updated": "2026-11-10T03:47:04.509Z",
       "updatedBy": "Main",
       "criteriaLastN": 51
     },
@@ -74967,6 +74967,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Correction to the earlier c28 split log (Main). The owner ruled on 2026-11-06 that there is one provider table holding every source any list names, and that each source must resolve through ref spec, federation and facts, or it is a bug. So the surface gaps are defects that G8Lead2 fixes after G8Lead2-26 (the table and drift check). They are not a ballot, and D-PROVIDER-SET1 is withdrawn. On c24, the ruling that Atomic64, Hardware, Memory and Panic become declared, checked capabilities stands: G8Lead2-25 is pulled and -25r replaces it."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "c28 split (Main, 2026-11-09 23:05). G8Lead2 builds one PROVIDER_ROWS table with today's membership: ProviderKind (14), ProviderFamily (15) and pkg_provider_is_external (17) are derived from it, with a drift test, and each row names the surfaces that own it. Which providers exist on which surface changes product behavior, and goes to a later ballot (D-PROVIDER-SET1). Today ProviderKind has cran, luarocks, ruby, perl and php; ProviderFamily has maven, nuget, conan, vcpkg, homebrew, binary, github and path; external is the union. Options: build RefSpec and federation for every provider, delete the providers one side lacks, or keep the per-surface split with honest errors."
         },
         {
@@ -75261,7 +75266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-10T03:29:07.686Z",
+      "updated": "2026-11-10T03:46:45.948Z",
       "updatedBy": "Main",
       "criteriaLastN": 34
     },
@@ -76665,7 +76670,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T02:36:44.081Z",
+      "updated": "2026-11-10T03:47:06.337Z",
       "updatedBy": "Main",
       "criteriaLastN": 135
     },
@@ -77681,7 +77686,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-09T19:41:03.957Z",
+      "updated": "2026-11-10T03:46:53.621Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -90827,128 +90832,6 @@
       "updated": "2026-11-09T19:02:35.111Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
-    },
-    {
-      "id": "c0gaxqxg",
-      "num": 6594,
-      "title": "run-process-witnesses link fails on undefined jet_rt_fault_report",
-      "body": "Found by GoldenRoots3 on dev 41ad578550 and present on the base too: linking the program built by run-process-witnesses.mjs fails with an undefined reference to jet_rt_fault_report. Every runtime symbol a generated program calls must come from the one shared runtime (I9). Find where the reference is emitted without the runtime pack providing it, fix the pack or the route, and prove the witnesses link and run.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06: script porting, the pairing bars and full removal of non-Jet languages are G4 work (#5072), not G1/G2; c5 keeps its original goal."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06 refinement: runner ports follow #5072's pairing rule; the .mjs keeps running until the Jet twin wins every bar."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06 (#5072): runner ports are Jet, never new .mjs; c1aa7b298c's two .mjs runners convert under #5072 c15."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 runner registration; c3 fixed point and c4 s5 loop are in batch vb5."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "c3 and c4 added from TestRot's #6595/#6609 findings (no new card): runtime import ledger drift and 6 s5 witness-loop rot rows."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Finding (Builder5): with the process-wide atexit queue built, main-run worker-fatal still loses every handler. A worker's fatal stop runs in stop domain 2, and Trap.jet trap_exit routes only domain 1 through the root. Every other domain takes trap_defect_exit, a raw exit_group with no main_exit_claim, no cleanup and the report written straight to fd 2. This looks like a regression since 114e150cba. Ruling (Main): a fatal stop in any domain under a live jet_rt_main claims the process exit (single winner), runs main_exit_cleanup, then writes the captured report. Report text and exit code 70 are unchanged; a stop during cleanup aborts; hosts with no live jet_rt_main keep the defect exit. The golden is re-recorded to all four handlers in registration order, then the report, once the fixture's registration order is deterministic. Builder5 owns Trap.jet and Scheduler.jet for this fix."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Ruling (Main) on run-main-fixtures worker-fatal: make the os.atexit queue process-wide. Today it is per-thread TLS (Task.jet task_exit_queue), and main_exit_cleanup drains only the main thread's queue, so a worker's handlers are dropped. core-library.md:1875,2073-2079 and spec.md:1069-1077 define atexit as a process-boundary registration run in registration order, so that's a runtime defect. Same change: core-library-native-contract.md:573-575's thread-exit drop is rewritten; the scheduler fixture asserts survival; a new case covers a handler from a worker that exits normally; the lock covers only append and claim. The LIFO goldens (exit2exit1) are re-recorded as exit1exit2 to match spec registration order."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "run-process-witnesses links and its ProcessRoutes and ProcessExecution witnesses pass",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "899850c3df: run-process-witnesses.mjs writes edition 2026 with authority allow [Exec, IO, Mem.Alloc]; ProcessReceiptFields.jet main->run. With s1 from 86c2809103 plus the fix (chain s1 jet 39a186ffa3, pack1 8ae36b14a8): run-process-witnesses.mjs printed 'plain process native pack witnesses: ok' rc=0; --test ProcessExecution printed 'native process Jet fixture ProcessExecution: ok' rc=0. LaneCheck CHECK OK (jet-lane-check.1502142610204)",
-          "at": "2026-11-06T16:12:32.181Z"
-        },
-        {
-          "n": 2,
-          "text": "Every harness that platform-links jet_runtime_jet.o (run-native-tcp-routes, run-native-codec-file-leaves, run-main-fixtures, run-http-body, run-cabi-driver, run-closure-refs-shared) links the fault-report object the same way and runs",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ad3fabb5f1: fault-report object marks its stack non-executable (fault-report-object.mjs) and the codec --test driver links it. With the s1 runtime: tcp-routes ok; codec-file-leaves default and --test CodecCSV/CodecEnv/CompilerFileLeaves/DynCodec ok; main-fixtures CHECK OK; http-body PASS; cabi-driver 11 pack-linked C-ABI cases passed; closure-refs-shared PASS. LaneCheck CHECK OK (jet-lane-check.1163774306289)",
-          "at": "2026-11-06T16:04:59.819Z"
-        },
-        {
-          "n": 3,
-          "text": "The s1 jet_runtime_jet.o import set matches Compiler/JetRuntime/imports.list: the 13 missing imports (fork, getgroups, getloadavg, initgroups, jet_rt_fault_report, mkfifo, round, signal, sysconf, tcgetattr, tcsetattr, times, utime) are recorded or removed, and the 23 duplicate undefined entries for self-defined symbols are fixed at the object writer, so run-host-fixtures audit and check-object.mjs pass",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "befab59906: Object.jet x64_object_functions_threads binds a runtime call to the object's own export (no UND import for self-defined symbols, fixed in the writer); imports.list ledgers the 13 real imports; check-object.mjs maxBuffer 1<<28. s1 from 899850c3df plus the fix (jet 3d19cb13a4, pack1 c9c9a23b22): nm comparison 'undefined 54 listed 54; unlisted imports: (none); listed, not imported: (none); undefined and defined: (none)'; check-object.mjs 'Jet object: 3207 exports, 54 audited imports' rc=0; run-host-fixtures audit 'host fixtures audit: ok'; process witnesses still pass. LaneCheck CHECK OK (jet-lane-check.1523703108105)",
-          "at": "2026-11-06T16:21:01.545Z"
-        },
-        {
-          "n": 4,
-          "text": "The s5-fixtures generic witness loop passes: MemStorage, NetUnixConnect, RootCleanup, TaskVariantPanic, NetDatagramRoutes and UiNode are fixed, and the 11 witnesses with their own runners (AllocCache included) leave the generic loop",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "5844c406c1, a207b92de8, 1c820a670e, c1aa7b298c (MechD-3). Chain s1 jet 49fca30035e67768 with pack1 313ed0112d266a38, built from a65e28fc65; JetRuntime, JetBackend and Tools/packaging are unchanged from there to HEAD. Ran s5probe.mjs all (the s5-fixtures.mjs:140-150 witness loop with the same owned and dedicated sets plus every runner argv, collect-all): SUMMARY 164/164 PASS (lanes/MechD/run/s5probe.log). The 70 generic witnesses build and match their goldens, MemStorage, NetUnixConnect, NetDatagramRoutes and UiNode included. run-root-cleanup, run-record-variant-panic (TaskVariantPanic), the six run-ui-*-witness runners, run-io-witness, run-execution-fixtures, run-alloc-cache-witness (5 modes) and run-tdigest-witness pass.",
-          "at": "2026-11-07T03:39:21.879Z"
-        },
-        {
-          "n": 5,
-          "text": "The 8 runtime runners still unregistered in s5 (run-alloc-observer-witness, files-walk, host-parallelism, native-codec-file-leaves, native-tcp-routes, process-witnesses, scan-goldens, test-runtime-abi-symbols) are each ported to the current ABI and registered in s5 with a passing run (new runner code in Jet where practical; pairing and porting to Jet belong to #5072 in G4), or deleted for cause with the cause logged",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "9b0d323b89 (MechD-3). All 8 runners are registered in s5 and pass in the same 164/164 run: run-alloc-observer-witness; run-files-walk-fixtures and run-host-parallelism-fixtures in all 5 modes; run-native-codec-file-leaves plain plus CodecCSV, CodecEnv, DynCodec and CompilerFileLeaves; run-native-tcp-routes; run-process-witnesses plain plus ProcessExecution and TerminalProcess; run-scan-goldens; test-runtime-abi-symbols. unmapped.mjs on a dev 85dea10ff4 export reports 59 runners, none missing from s5-fixtures.",
-          "at": "2026-11-07T03:39:22.925Z"
-        },
-        {
-          "n": 6,
-          "text": "The JetRuntime/Tests plain transport (CompilerRegistries.jet:1127-1135; Alloc, Scan, Unicode tests) links one runtime, so no second alloc_init resets GS and SIGSEGVs, and the Collections/Text runtime test fragments compile again (jet_int_pow, text_iter_pull arity).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed at 1141d403b1. MechD-3 proof: chain s1 jet 49fca30035e67768 (pack1 key 313ed0112d266a38, built from a65e28fc65; Compiler/JetRuntime unchanged to HEAD) runs the plain route of Tools/agent/CompilerRegistries.jet:1130-1160 (check-runtime --assemble-only, library over JetRuntime/package.jet without alloc_check_init, PLAIN_DRIVER C host): Alloc, Collections, Scan, Text, Unicode and Secret all PASS with rc 0, expected stdout and empty stderr; no second-runtime SIGSEGV.",
-          "at": "2026-11-07T03:24:39.724Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T06:13:43.662Z",
-      "updated": "2026-11-07T03:39:28.500Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-07T03:39:28.500Z"
     },
     {
       "id": "c0yy2xbx",
@@ -188097,149 +187980,205 @@
       "id": "D-CORE-LOWER1",
       "cardId": "c0w1wcfc",
       "group": "build",
-      "title": "Which packages lower only the functions a build reaches",
-      "situation": "",
-      "gist": "Should every package skip lowering functions the build never reaches, as Core does today?",
-      "lesson": "Checking source, lowering bodies and emitting machine code are separate costs. Eligible Core modules skip lowering unreached bodies; ordinary user runtime modules lower bodies before later reach pruning. That later step may drop their machine code.",
-      "explainer": "",
-      "story": "Sam's utility package has greet and an unused function. He wants the unused body checked for errors without lowering work it never needs.",
-      "inWild": "Go's linker computes reachability and treats exports and initializers as roots (https://go.dev/src/cmd/link/internal/ld/deadcode.go). That removes code from the binary; it does not prove an earlier pass skipped the body.",
-      "detail": "Exercised jet build --trace: lz4 reports lower items=3; lz5, without never_called, reports 2. lz1/lz2 report 5/4. All four builds succeed; lz1 does not hit the backend fault its comment predicts. lz4 and lz5 both report ir.build items=3, object bytes=3872 and linked bytes=42975. Lower counts therefore do not prove extra machine code or a whole-build speedup.\n\nPipeline.jet:2881-2889 selects prunable Core-source modules and excludes modules with foreign providers or functions; :4171-4181 adds comptime-only and test exclusions. Not every Core module is pruned today. This ballot settles only lowering (c17); where handle layouts come from (c18) is D-CORE-LAYOUT1, and either choice there combines with any choice here.\n\nThe existing dead_code option (stock remove) decides what the image keeps. remove builds only reached functions; keep also builds every non-generic function of the package's own modules, not all dependency bodies or arbitrary generic instances. A and B extend that policy to early lowering, which is proposed, not measured.\n\nProposed roots: executable and exported entrypoints, initializers, selected tests, scheduled jobs, foreign callbacks and adapters, drop and clone functions, trait and callable targets, and generated references. An unknown indirect target keeps its candidates. Roots are computed after expansion and specialization. Every declaration is still checked, so semantic diagnostics in unused code stay errors.\n\nA applies the rule to every package, the entry package included. B applies it to dependencies only; ordinary non-generic entry-package bodies are always lowered, including unused bodies with backend faults. C keeps today's Core eligibility rule and revises c17. Existing comptime/test exclusions and generic specialization rules remain; no option instantiates arbitrary unused generics.\n\nNo timing claim is made. Before delivery: tests for direct, indirect, export, callback and drop roots, keep versus remove, and generated references.",
+      "title": "jet check and jet build lower every function body; jet run and jet dev lower only what they reach",
+      "situation": "You asked for a strict check that finds all errors, reached or not. Main answered that jet check and jet build lower every function of the packages being checked, and report every error in one run, while jet run and jet dev skip unreached bodies. This ballot replaces the posted draft, which proposed reach-based lowering everywhere.\n\nNo ratified decision covers lowering. Card c0w1wcfc's criterion c17 asks that an unreached user function is not lowered; A keeps that for jet run and jet dev and changes it for check and build. It follows the no-warnings rule of #6281 c129, where check and build list everything.",
+      "gist": "Should jet check and jet build lower every function, reached or not, so every error shows in one run?",
+      "lesson": "Lowering turns checked code into the simpler form the machine-code step reads, and it can find errors of its own. Today jet check never lowers, so it cannot report those errors. This vote decides which commands lower every function and which lower only what the program uses.",
+      "explainer": "Words used here. Checking reads source and finds type and name errors. Lowering rewrites each checked function into the compiler's internal form, called IR, and an IR lint checks that form. A reached function is one the program can call from its entry.\n\nA dependency is a package your package uses.",
+      "story": "Sam's package has greet and an unused helper with a fault only lowering finds. jet check says ok. Months later a caller reaches the helper, and the build fails in code nobody has touched.",
+      "inWild": "// Go: go vet and go build compile every function of the package, used or not.\n// Rust: cargo check runs the front end and borrow checker on every function,\n// but not code generation; unused functions still get every check.",
+      "detail": "What this ballot decides. Which commands lower which function bodies. Every command still checks every declaration, and dead_code still decides what the final program keeps. Where handle layouts come from is D-CORE-LAYOUT1, and either outcome there combines with this one.\n\nToday, measured by G6Lead on seed a0_042 with jet --trace, median of 5 runs. jet check runs no lowering at all: its trace has no lower or IR phase (probes s01 and s02). So no fault that only lowering finds can be reported by jet check today, in any package.\n\njet build already lowers the entry package's own bodies whether they are reached or not. Probe s02 shows 654 lowered items under both --dead-code=remove and --dead-code=keep. Unreached Core bodies are pruned by jet_driver_prunable_core_modules in Compiler/JetDriver/Source/Driver/Pipeline.jet, with exclusions for build-time-only and test modules.\n\nThe cost, on the small probe s02, a 17-line program that pulls in Core. jet check takes 467 ms of CPU. Lowering, IR build and IR lint add about 12 ms, 2.5% of the check. Optimization, object writing and linking are not needed to find errors.\n\nThe cost on Compiler/, the largest package. jet check Compiler takes 20.3 s wall, 10.8 s of phase CPU and 5.5 GB peak memory. A dev build lowers 28,955 items; IR build takes about 1.0 to 1.3 s of CPU, and the build peaks at 6.8 GB. So adding lowering and IR lint to jet check Compiler costs about 1.4 s of CPU, about 13%, and about 1.3 GB as built today.\n\nThe rule under A. jet check and jet build lower every function body of the packages being checked, the entry package and workspace members, reached or not. They report every lowering and IR lint error together with every other error, collect-all. jet check stops after IR lint: no optimization, no machine code and no link.\n\nDependencies are lowered by reach in every command, because their own jet check lowered all their bodies when they were published or built. jet run and jet dev lower by reach in every package, which keeps card c0w1wcfc's c17 for the commands where speed matters most.\n\nEngineering away the cost. First, lowering runs in parallel per function, under --threads. Second, each function's IR is linted and then freed before the next, so peak memory grows by the largest function per thread, not by 1.3 GB. Third, lowered bodies are cached by the content of the function and its callees, so a repeated check lowers only what changed.\n\nWith the cache, a warm jet check Compiler after a one-function edit lowers that function and its changed callees. The 13% applies only to a cold check with an empty cache, such as a first clone or CI without a cache. None of these three steps exists yet; they are part of building A.\n\nWhat remains after the engineering. A cold jet check of a very large package pays the parallel lowering time: about 1.4 s of CPU on Compiler/, spread over the compiler threads. jet run and jet dev pay nothing, because they lower by reach.\n\nThe same program under each option is the Greeter package: greet is called, and never_called is not. Under A, jet check Greeter lowers both. jet run run.jet lowers greet only. Under C, nothing lowers never_called until something calls it.\n\nBeginner path. jet check is the command that finds everything; jet run starts fast. A fault in an unused helper appears in jet check's list the day it is written, not the day someone calls the helper.\n\nExpert path. --threads bounds lowering's parallelism. A team auditing its dependency tree runs jet check inside each dependency, or uses B's switch if you choose it. --trace shows lower and ir.lint as separate phases with their cost.\n\nOther options. B is A plus one expert switch, jet check --all-deps, which also lowers every dependency body for a full audit. C is the posted draft: reach-based lowering in every command, check included, so a fault is found only once the body is reached. D keeps today's rule: check never lowers, build lowers own bodies, and only eligible Core modules prune.\n\nB adds a flag whose findings belong to other packages' authors, since their own check already lowers those bodies. C reports a fault late and far from where it was written. D leaves jet check unable to report any lowering fault.",
       "options": [
         {
           "key": "A",
-          "name": "Every package",
-          "detail": "Early lowering follows dead_code for every package: remove lowers only reached bodies, keep lowers every own non-generic body.",
-          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// Proposed A: the dependency's never_called is checked, not lowered.\n// keep adds the entry package's own non-generic bodies, not every dependency.\n// If never_called belonged to the entry package, keep would lower it."
+          "name": "check and build lower everything; run and dev lower by reach",
+          "detail": "jet check and jet build lower every body of the packages being checked and list every error. jet run and jet dev lower only reached bodies. Dependencies lower by reach everywhere, since their own check lowered them.",
+          "technical": "Adds lower and ir.lint to jet check for the packages being checked, stopping before optimization and codegen. Keeps today's own-body lowering in jet build. jet run and jet dev prune by reach in every package (c17). Proposed engineering: per-function parallel lowering, free IR after lint, and a content-keyed lowered-body cache.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check Greeter     lowers greet and never_called; lists every error\n// $ jet run run.jet       lowers greet only\n// Proposed (A), not built: today jet check lowers nothing."
         },
         {
           "key": "B",
-          "name": "Dependencies only",
-          "detail": "Dependencies lower only reached bodies; ordinary non-generic entry-package bodies are lowered even when unused.",
-          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// Proposed B: never_called (a dependency's) is checked, not lowered.\n// An unused function in run.jet's own package is still lowered."
+          "name": "A plus an expert switch for dependencies",
+          "detail": "Everything in A, plus jet check --all-deps, which also lowers every body of every dependency for an audit of the whole tree.",
+          "technical": "A, plus one flag on jet check. The flag lowers each dependency's unreached bodies and reports their errors under the dependency's name.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check --all-deps run.jet   lowers greet and never_called in Greeter too\n// Proposed (B), not built."
         },
         {
           "key": "C",
-          "name": "Core only",
-          "detail": "Keep today's eligibility rules: selected Core modules prune, ordinary user runtime modules lower before later pruning. Revise c17.",
-          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// C: never_called is lowered early; a later step may still omit its machine code."
+          "name": "Reach-based lowering everywhere",
+          "detail": "Every command lowers only reached bodies, in every package. jet check keeps checking every declaration but lowers nothing unreached.",
+          "technical": "The posted draft: dead_code=remove prunes early lowering for every package, with roots for exports, callbacks, drop and trait targets. c17 holds for every command.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet build run.jet     never_called is checked but never lowered\n// Proposed (C), not built."
+        },
+        {
+          "key": "D",
+          "name": "Keep today's rule",
+          "detail": "jet check never lowers. jet build lowers the entry package's own bodies. Only eligible Core modules prune unreached bodies.",
+          "technical": "No change. Pipeline.jet's Core-only pruning and its build-time-only and test exclusions stay; c17 is revised to match.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check Greeter     no lowering phase in the trace\n// Today (D): G6Lead's probes s01 and s02 show this."
         }
       ],
-      "comparisons": [],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "go build and go vet compile every function in the package; the linker drops unreached code from the binary.",
+          "code": "go vet ./...\ngo build ./..."
+        },
+        {
+          "lang": "Rust",
+          "note": "cargo check runs every check except code generation on every function, used or not.",
+          "code": "cargo check   # no codegen\ncargo build   # codegen, unused code warned"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig analyzes only reached functions, so an unused function's errors appear only once it is called.",
+          "code": "fn unused() void { @compileError(\"x\"); }  // no error unless referenced"
+        }
+      ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "One rule for every package, under the dead_code setting that already decides what the image keeps. All checking stays; no speedup is assumed.",
+        "why": "A makes jet check find every error, reached or not, as you asked. jet run and jet dev stay fast, and the cache and parallel lowering keep warm checks cheap.",
         "gains": [
-          "Avoids unneeded early lowering, not all work on unused source.",
-          "Core and user packages follow the same rule."
+          "jet check reports lowering errors in unused code the day it is written.",
+          "jet run and jet dev lower only what they reach, in every package.",
+          "One rule: check and build list everything; run and dev never wait for it."
         ],
         "losses": [
           {
-            "loss": "A backend fault in an unreached body surfaces only once something reaches it.",
-            "mitigation": "dead_code=keep lowers every own non-generic body on purpose; selected tests stay roots."
+            "loss": "A cold check of a very large package costs about 13% more CPU.",
+            "mitigation": "Parallel per-function lowering and a content cache make warm checks lower only changed functions."
+          },
+          {
+            "loss": "Built today, lowering in check would add about 1.3 GB of peak memory on Compiler/.",
+            "mitigation": "Freeing each function's IR after its lint bounds the growth to one function per thread."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B keeps two rules, so the entry package still pays for bodies nobody reaches."
+            "reason": "B's switch reports other packages' errors, which their own check already lowers."
           },
           {
             "key": "C",
-            "reason": "C keeps the Core privilege the card exists to remove."
+            "reason": "C finds a lowering fault only when something calls the body, late and far from its author."
+          },
+          {
+            "key": "D",
+            "reason": "D leaves jet check unable to report any lowering fault."
           }
         ],
-        "tradeoff": "Reach-based lowering for ordinary runtime modules, instead of lowering unused bodies before later pruning."
+        "tradeoff": "Some cold-check CPU, in return for a jet check that finds every error."
       },
       "hybrid": null,
-      "ballotMode": "short",
+      "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "Read $JET_SCRATCH_ROOT/lanes/G6Lead/BALLOT-HANDOFF.md section 1 and summarize the traces with node lanes/G6Lead/ballots/probes/lower/phases.mjs TRACE --phases lower,ir.build,ir.lint. Run jet check --trace on probe s01 with seed a0_042 and confirm no lower phase. Then run Tools/agent/ballots/Validate.jet on this payload.",
       "surface": {
-        "gist": "Should every package skip lowering functions the build never reaches, as Core does today?",
-        "lesson": "Lowering a body and emitting its machine code are different steps. Eligible Core modules skip unreached bodies; ordinary user runtime modules lower before later pruning. Checking is unchanged.",
+        "gist": "Should jet check and jet build lower every function, reached or not, so every error shows in one run?",
+        "lesson": "Lowering turns checked code into the form the machine-code step reads, and it can find errors of its own. Today jet check never lowers. This vote decides which commands lower every function and which lower only what the program uses.",
         "trio": {
           "current": {
-            "note": "A dependency's unused function is still lowered.",
-            "code": "never_called: fn() -> Int { 42 }\n// jet build --trace: lower 3 items; without it, 2"
+            "note": "jet check never lowers.",
+            "code": "$ jet check --trace Greeter\n(no lower or ir phase)\nok"
           },
           "wild": {
             "lang": "Go",
-            "note": "The linker keeps only reachable functions.",
-            "code": "func greet() string { return \"hello\" }\nfunc neverCalled() int { return 42 } // dropped from the binary"
+            "note": "Every function is compiled.",
+            "code": "go vet ./...\ngo build ./..."
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Every package",
-            "gist": "Apply the existing remove/keep reach policy to early lowering in every package.",
+            "name": "Check lowers everything",
+            "gist": "check and build lower every body; run and dev by reach.",
             "gains": [
-              "One rule; no new setting."
+              "Every error in one run.",
+              "run and dev stay fast."
             ],
             "losses": [
-              "Backend faults in unreached bodies surface later."
+              "Cold checks cost about 13% more CPU."
             ],
             "proposed": {
-              "code": "never_called: fn() -> Int { 42 } // checked; not lowered under dead_code=remove"
+              "code": "$ jet check Greeter   # lowers never_called too\n$ jet run run.jet     # lowers greet only"
             }
           },
           {
             "key": "B",
-            "name": "Dependencies only",
-            "gist": "Dependencies prune; ordinary non-generic entry-package bodies still lower.",
+            "name": "Plus a dependency switch",
+            "gist": "A, plus jet check --all-deps.",
             "gains": [
-              "Backend faults in those entry-package bodies surface now."
+              "Full tree audits."
             ],
             "losses": [
-              "Two rules."
+              "Reports others' errors."
             ],
             "proposed": {
-              "code": "never_called: fn() -> Int { 42 } // in a dependency: checked, not lowered"
+              "code": "$ jet check --all-deps run.jet"
             }
           },
           {
             "key": "C",
-            "name": "Core only",
-            "gist": "Keep today's Core-only rule; revise c17.",
+            "name": "Reach everywhere",
+            "gist": "Every command lowers only reached bodies.",
             "gains": [
-              "No change."
+              "Least lowering work."
             ],
             "losses": [
-              "Core stays special."
+              "Faults found late."
             ],
             "proposed": {
-              "code": "never_called: fn() -> Int { 42 } // lowered early, not necessarily emitted"
+              "code": "$ jet build run.jet   # never_called not lowered"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today",
+            "gist": "check never lowers; only Core prunes.",
+            "gains": [
+              "Nothing to build."
+            ],
+            "losses": [
+              "check misses lowering faults."
+            ],
+            "proposed": {
+              "code": "$ jet check Greeter   # no lowering"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One reach rule for every package under the existing dead_code setting, with all checking kept.",
+          "why": "A makes jet check find every error, while jet run and jet dev stay fast.",
           "gains": [
-            "Less needless early lowering; no speedup claimed.",
-            "Same rule as Core."
+            "Every error in one run.",
+            "run and dev stay fast."
           ],
           "losses": [
             {
-              "loss": "Backend faults in unreached bodies surface later.",
-              "mitigation": "dead_code=keep lowers every own non-generic body on purpose."
+              "loss": "Cold checks cost more CPU.",
+              "mitigation": "Parallel lowering and a content cache keep warm checks cheap."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Two rules."
+              "reason": "Others' errors."
             },
             {
               "key": "C",
-              "reason": "Keeps the privilege."
+              "reason": "Faults found late."
+            },
+            {
+              "key": "D",
+              "reason": "check misses faults."
             }
           ],
-          "tradeoff": "Reach-based lowering everywhere."
+          "tradeoff": "Some cold-check CPU, for a check that finds every error."
         }
       },
       "draft": false,
@@ -188494,6 +188433,1592 @@
       "created": "2026-11-10T00:50:07.715Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-10"
+    },
+    {
+      "id": "D-ALLOC-FAIL1",
+      "cardId": "c0ct4a0i",
+      "group": "memory",
+      "title": "One spelling per allocating operation; failure is an error value where the code handles it or its contract names AllocError",
+      "situation": "Today each allocating operation has two spellings. Plain push stops the program when memory runs out, and try_push returns an AllocError. That family was ratified as D-ALLOCFAIL1=A for devices that must recover, and it doubles the API.\n\nYour review proposed one scope where allocation failure is an error value instead. A reverses D-ALLOCFAIL1's twin family and keeps its AllocError type. Keeping the twins is option B.",
+      "gist": "Should the try_ twins go, so a plain allocating call fails as a value wherever the code handles it or declares AllocError?",
+      "lesson": "Adding to a list needs memory, and memory can run out. Most programs should just stop with a report. A device must recover instead. Today Jet has two names for each operation, one per need. This vote decides whether one name can do both.",
+      "explainer": "Words used here. An allocation is a request for memory, such as a list growing. AllocError is Core's error for a refused one. A contract is the part of a signature that names the errors a function can fail with. A handler is ?? or an arm table on a call.",
+      "story": "Rin writes firmware with a fixed memory pool. Today she must remember try_push, try_reserve and try_insert, and a plain push slips in and stops the device. Under A her function names AllocError once, and every push in it reports failure as a value.",
+      "inWild": "// Rust: a twin beside each operation, as Jet has today.\nlet mut rows = Vec::new();\nrows.try_reserve(n)?;   // Err(TryReserveError) instead of an abort",
+      "detail": "What this ballot decides. How code asks for allocation failure as a value. The AllocError type, the hosted stop when nobody asks, and the allocator choice of D-ALLOC-SITE1=A are unchanged.\n\nToday, on seed a0_042. Probe a01 uses try_with_capacity and try_push, and String's try_push, and prints loaded 3 then abc. Probe a06 asks a 40-byte fixed allocator for 7 then 9 bytes with try_alloc and prints 7 -1, the second refused as a value.\n\nProbe a02 writes a handler on a plain push and gets E0405, ?? only works on a fallible value, not Unit. Probe a03 already compiles a function whose contract names AllocError around plain pushes and prints loaded 3; today those pushes would still stop on failure.\n\nProbe a05 puts a #Context(allocator: …) block in value position and gets E0003, because D-ALLOC-SITE1's block value is not built. Probe a07 calls [String].with_capacity from a user file and gets E0107, though the compiler uses it 21 times.\n\nThe rule under A. Each allocating operation has one spelling: push, reserve, insert, with_capacity, new and alloc. A plain call fails as an AllocError value in exactly two places, both visible in the source.\n\nFirst, at a handled call. A ?? or an arm table written on the allocating call itself makes that call fallible, as its try_ twin is today. This is what a device needs at one site.\n\nSecond, in a function whose contract names AllocError. That body is the one scope: every allocating operation in it fails as a value, and the failure propagates by the ordinary rule. A call to another function whose contract names AllocError propagates too.\n\nEverywhere else a failed allocation stops the program with today's report, under D-RESOURCE-LIMIT1=A. Callees whose contracts do not name AllocError keep that stop inside them, so no function changes meaning because of who calls it.\n\nWhy this stays sound. Whether a call can fail is known from its own line and its own function's signature, never from the caller's context. Each function compiles once. Cleanup on the early return is the ordinary error route's, the same as for any other error.\n\nBeginners never see it. Core declares the one conversion from AllocError to Err, so a library function that names AllocError can be called from a plain run. An unhandled one ends the program with the same report as today's stop.\n\nCensus on the seed, code lines with comments skipped. try_ allocation calls: try_alloc 17, try_with_capacity 17, try_push 9, try_new 5 and try_reserve 4, 52 in all. jet fix rewrites each to the plain name with its handler kept, which is the same meaning under A.\n\nWhat A removes. Core's twin family, its docs and its signature rows go. D-FREESTAND-ALLOCAPI1=A's T ! AllocError result now belongs to a handled plain call.\n\nBeginner path. Write push; if memory runs out, the program stops with a report. Expert path. Write ?? on the call that must recover, or name AllocError in a function's contract to make its whole body report failure.\n\nDownsides of A, and what the design does about them. A handler now changes whether a call can fail, which a reader might miss. Hover marks a handled allocating call as fallible here. A ?? on a call that can never fail stays an error, as E0405 is today.\n\nA library function that allocates but does not name AllocError still stops inside, so a device cannot recover through it. That is today's rule for every plain call. The library can name AllocError in its contract without adding a second function, and jet inspect lists the stopping callees.\n\nWhat remains. A function that names AllocError checks each allocation, the check its twins made. Functions that do not name it keep the abort path and pay nothing new.\n\nOther options. B keeps the twins. C is Zig's: every allocating call can fail and the allocator is passed in. D is a dynamic #Context scope: any allocation inside, in any callee, fails as a value. E is Swift's and Go's: allocation failure always stops, and devices use budgets and fixed capacity.\n\nTheir best cases. B is built and explicit. C never hides an allocation. D reaches callees that never planned for it. E is the simplest language. Their costs: B doubles every allocating API. C marks every call. D makes every function carry a failure path, and a callee's ! Never contract would be untrue inside it.\n\nE leaves a device no way to recover from a refused allocation, which D-ALLOCFAIL1 exists to give it.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One spelling; fails where asked",
+          "detail": "A plain allocating call fails as an AllocError value when a handler sits on it or when its function's contract names AllocError. Otherwise it stops as today. The try_ twins go.",
+          "technical": "Reverses D-ALLOCFAIL1=A's twin family; keeps AllocError, its raw entry point and E0402. Fallibility is lexical: handled call or AllocError in the enclosing contract. Core declares AllocError -> Err. jet fix rewrites the 52 try_ calls. Hover and jet inspect show fallible sites and stopping callees.",
+          "code": "use mem: core.mem\n\n// The contract names AllocError, so every allocation in this body is fallible\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)   // a failed push returns Err(AllocError)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {(load(3) ?? [Int]{}).len()}\")\n    s := \"ab\"\n    s.push(\"c\") ?? panic(\"no memory\")   // a handler at the call makes it fallible\n    print(s)\n}\n// Proposed (A): loaded 3, abc. Probe a03 runs load today; probe a02's handled push is E0405."
+        },
+        {
+          "key": "B",
+          "name": "Keep the try_ twins",
+          "detail": "Each allocating operation keeps a try_ form that returns AllocError; the plain form stops.",
+          "technical": "D-ALLOCFAIL1=A as ratified. No change.",
+          "code": "// Today (B), D-ALLOCFAIL1=A: a try_ twin beside each allocating operation\nload: fn(n: Int) -> [Int] {\n    rows := List<Int>.try_with_capacity(n) ?? return [Int]{}\n    loop i in 0..<n {\n        rows.try_push(i) ?? return rows\n    }\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {load(3).len()}\")\n    s := \"ab\"\n    s.try_push(\"c\") ?? panic(\"no memory\")\n    print(s)\n}\n// Probe a01 prints loaded 3, abc."
+        },
+        {
+          "key": "C",
+          "name": "Zig's: every call can fail",
+          "detail": "Every allocating call returns AllocError, is marked at the call, and takes its allocator as an argument.",
+          "technical": "Zig's std.ArrayList with try. Reverses D-ALLOC-SITE1=A's context allocator; every allocating line in Core and user code changes.",
+          "code": "// Zig's way (C): every allocating call can fail, and the caller passes the allocator\nload: fn(a: mem.Allocator, n: Int) -> [Int] mem.AllocError! {\n    rows := [Int].init(a)\n    loop i in 0..<n -> rows.push(i)?\n    rows\n}\n\nrun: fn() {\n    a: mem.heap()\n    print(\"loaded {(load(a, 3) ?? [Int]{}).len()}\")\n    s := String.init(a, \"ab\")\n    s.push(\"c\")? ?? panic(\"no memory\")\n    print(s)\n}\n// Proposed (C), not built: no plain call is infallible; every one is marked."
+        },
+        {
+          "key": "D",
+          "name": "A dynamic scope",
+          "detail": "#Context(alloc_failure: .Error) makes every allocation inside, in any callee, fail as a value at the scope.",
+          "technical": "C++ bad_alloc reach on the error route. Every allocating function needs a failure path; ! Never contracts become untrue inside the scope, and ?? must not swallow it.",
+          "code": "// A dynamic scope (D): any allocation inside, in any callee, fails as a value\nload: fn(n: Int) -> [Int] {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\n\nrun: fn() {\n    rows: #Context(alloc_failure: .Error) -> load(3)   // [Int] ! AllocError\n    print(\"loaded {(rows ?? [Int]{}).len()}\")\n    s := \"ab\"\n    #Context(alloc_failure: .Error) -> s.push(\"c\") ?? panic(\"no memory\")\n    print(s)\n}\n// Proposed (D), not built: C++'s bad_alloc reach, carried on the error route."
+        },
+        {
+          "key": "E",
+          "name": "Always stop",
+          "detail": "Allocation failure always stops the program. The twins go; devices bound memory with budgets and fixed capacity.",
+          "technical": "Swift's and Go's model. Relies on D-STACKBOUND1=A heap budgets and capacity lists; no recovery at the call.",
+          "code": "// Swift and Go (E): allocation failure always stops the program\nload: fn(n: Int) -> [Int] {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {load(3).len()}\")\n    s := \"ab\"\n    s.push(\"c\")\n    print(s)\n}\n// Proposed (E): loaded 3, abc. Devices bound memory with budgets and fixed capacity instead."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Twins: try_reserve beside reserve.",
+          "code": "rows.try_reserve(n)?;"
+        },
+        {
+          "lang": "Zig",
+          "note": "Every allocating call can fail and takes an allocator.",
+          "code": "try list.append(item);"
+        },
+        {
+          "lang": "C++",
+          "note": "A failed new throws bad_alloc through every caller.",
+          "code": "try { v.push_back(x); } catch (std::bad_alloc&) { }"
+        },
+        {
+          "lang": "Go",
+          "note": "Running out of memory always stops the program.",
+          "code": "rows = append(rows, x)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A halves the allocating API and keeps recovery for devices. Whether a call can fail is visible on its own line or in its function's signature, so nothing changes meaning behind a reader's back.",
+        "gains": [
+          "One spelling per allocating operation.",
+          "Devices recover at the call or for a whole function.",
+          "Beginners see no change."
+        ],
+        "losses": [
+          {
+            "loss": "A handler now decides whether a call can fail.",
+            "mitigation": "Hover marks the call fallible; ?? on a call that cannot fail stays an error."
+          },
+          {
+            "loss": "A callee that does not name AllocError still stops inside.",
+            "mitigation": "It can name AllocError without a twin; jet inspect lists stopping callees."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a second spelling of every allocating operation."
+          },
+          {
+            "key": "C",
+            "reason": "C marks every allocating call in every program."
+          },
+          {
+            "key": "D",
+            "reason": "D gives every function a hidden failure path."
+          },
+          {
+            "key": "E",
+            "reason": "E leaves devices no way to recover."
+          }
+        ],
+        "tradeoff": "A handler that changes a call's contract, in return for half the API."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh af run; outputs are in probes/af/out. The census reads git grep -ohE for .try_ allocation calls over Core, Compiler, Jetpack, Tools, Examples and tests. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should the try_ twins go, so a plain allocating call fails as a value wherever the code handles it or declares AllocError?",
+        "lesson": "Adding to a list needs memory, and memory can run out. Most programs should stop with a report; a device must recover. Today Jet has two names per operation, one for each need. This vote decides whether one name can do both.",
+        "trio": {
+          "current": {
+            "note": "A twin per operation.",
+            "code": "rows.push(i)                    // stops on failure\nrows.try_push(i) ?? return rows  // a value"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Every call can fail.",
+            "code": "try list.append(item);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Where asked",
+            "gist": "A handler or an AllocError contract makes it fail as a value.",
+            "gains": [
+              "Half the API.",
+              "Devices recover."
+            ],
+            "losses": [
+              "Handler changes the call."
+            ],
+            "proposed": {
+              "code": "load: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\ns.push(\"c\") ?? panic(\"no memory\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Twins",
+            "gist": "Keep try_ beside each operation.",
+            "gains": [
+              "Built."
+            ],
+            "losses": [
+              "Double API."
+            ],
+            "proposed": {
+              "code": "rows.try_push(i) ?? return rows"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Zig",
+            "gist": "Every allocating call can fail.",
+            "gains": [
+              "Nothing hidden."
+            ],
+            "losses": [
+              "Marks everywhere."
+            ],
+            "proposed": {
+              "code": "rows.push(i)?"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Dynamic scope",
+            "gist": "Any allocation inside fails as a value.",
+            "gains": [
+              "Reaches callees."
+            ],
+            "losses": [
+              "Hidden failure paths."
+            ],
+            "proposed": {
+              "code": "#Context(alloc_failure: .Error) -> load(3)"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Always stop",
+            "gist": "Failure always stops the program.",
+            "gains": [
+              "Simplest."
+            ],
+            "losses": [
+              "No recovery."
+            ],
+            "proposed": {
+              "code": "rows.push(i)   // stops on failure"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Half the API, recovery kept, and a call's failure is visible on its line or signature.",
+          "gains": [
+            "Half the API.",
+            "Devices recover."
+          ],
+          "losses": [
+            {
+              "loss": "Handler changes the call.",
+              "mitigation": "Hover marks it; a needless ?? stays an error."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Double API."
+            },
+            {
+              "key": "C",
+              "reason": "Marks everywhere."
+            },
+            {
+              "key": "D",
+              "reason": "Hidden failure paths."
+            },
+            {
+              "key": "E",
+              "reason": "No recovery."
+            }
+          ],
+          "tradeoff": "A handler that changes a call, for half the API."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:46:53.621Z"
+    },
+    {
+      "id": "D-API-SURFACE1",
+      "cardId": "c0oev2ib",
+      "group": "tooling",
+      "title": "Every jet check compares a package's public surface, effects and errors included, with its committed API file, and publish computes the version",
+      "situation": "Jet infers effects and errors from function bodies, so an edit to a body can change what a package promises. Today the check happens only at jet registry publish: E1218 compares the public API with the registry's copy of the last release. The author picks the version, and the gate checks it.\n\nOn seed a0_042, jet check says nothing when a public function starts reading the clock. jet review reports it, but only when asked.",
+      "gist": "Should every jet check compare a package's public surface with a committed API file, and should publish compute the version?",
+      "lesson": "A library's public functions are a promise to everyone who uses it. In Jet, a change inside a function can quietly change that promise, for example by making it use the network. This vote decides whether every check catches that and whether Jet picks the version number.",
+      "explainer": "Words used here. The public surface is everything another package can call or name. A version bump is how a library signals change: major means breaking, minor means added, patch means fixed. An effect is a power like reading the clock.",
+      "story": "Ana edits a helper that her library's public greeting calls, and it starts reading the clock. Under A, her next jet check shows the changed line in package.api, and publish names the release 2.0.0.",
+      "inWild": "// Elm computes the version from the API diff:\n$ elm bump\nThis is a MAJOR change. Bumping from 1.0.0 to 2.0.0.",
+      "detail": "What this ballot decides. When the public surface is compared, and who picks the version. The surface rows themselves already exist.\n\nToday, on seed a0_042. Sema's PublicApi.jet renders each public item as one row, and a function's row carries its solved effects. jet registry publish diffs those rows against the registry's snapshot of the last release. A breaking change under a minor or patch bump is E1218.\n\nProbe v1 and v2 keep greeting's written signature, and v2's body reads the clock. jet check on v2 prints ok. jet review v1.jet v2.jet prints authority widened, effect greeting, but only when someone runs it.\n\nTwo gaps in the rows. A method's row carries only its written effects, not its solved ones. No row carries an inferred error set or a public marker, so those changes pass the publish gate.\n\nCensus on the seed. The repository has 2,475 package.jet files, 240 of them outside tests and Examples. It has 14 committed .api files, all of them test fixture caches.\n\nWhat A does. Each package with a public item has a package.api file beside package.jet, in the .api row format that publish already writes. jet check renders the surface and compares it with package.api.\n\nA difference is an error that lists each changed row and marks it breaking, added or fixed. jet check --accept-api rewrites package.api, so the change appears in review as a diff of that file.\n\nThe rows grow to the whole promise. Methods carry solved effects like functions. Every function and method row carries its solved error set and its public markers.\n\nComputed versions. jet registry publish compares package.api with the last release's snapshot. Any breaking row makes a major bump, any added row a minor bump, and otherwise a patch. Before 1.0, a breaking row bumps the minor number.\n\nPublish writes the computed version into package.jet, so the author never chooses it. Under D-CORE-HEADER1=A, a root that states one version for its members takes the largest bump among them.\n\nRatified decisions. D-DEVR-CLAIM1=A makes API snapshots receipts and committed ledgers rendered views, byte-compared in CI. package.api is that rendered view. D-LIB-EXPORT1=C already makes the frozen public surface the source of the version check.\n\nD-EFFTYPE-GRANT1=A stops a consumer's upgrade that needs more powers. A is the author-side twin: the author sees the change before publishing it. D-STRUCT-LIFE1=A's #Deprecated keeps an old item alive, so it stays an added row, not a removed one.\n\nBeginner path. A script or app with no public items never sees package.api. A first library gets the file from jet check --accept-api, and the error says to run it. Expert path. The rows are plain text, so a reviewer reads the promise change line by line.\n\nDownsides of A, and what the design does about them. Every surface edit now needs an accept step. The error names the one command, and editor code actions run it.\n\nWhat remains. Some bumps come out larger than an author would choose, for example a major bump for one new error case. That is the promise the rows describe; #Deprecated and added variants keep most changes compatible.\n\nOther options. B keeps today's gate at publish time. C adds the committed file but keeps the chosen version, as Kotlin's API validator and TypeScript's API Extractor do. D computes the version at publish with no committed file, as Elm's bump and cargo-semver-checks do.\n\nTheir best cases. B costs nothing now. C shows every change in review. D removes the version argument. Their costs: B finds a widened effect only at publish. C still lets an author pick a wrong version until publish. D shows nothing during review.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Committed API file and computed version",
+          "detail": "jet check compares the surface with package.api; publish computes the version from the difference.",
+          "technical": "package.api in the existing .api row format; new registered error on mismatch; jet check --accept-api. Rows add solved method effects, solved error sets and public markers. Publish: breaking major, added minor, else patch; before 1.0 breaking bumps minor.",
+          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (A): jet check stops: greeting's row changed, breaking.\n//   fn greeting(name: String) String -[Time]>   (jet inspect rights: inferred Time)\n// jet check --accept-api updates package.api; publish names it 2.0.0.\n// Today (probe v2): jet check prints ok."
+        },
+        {
+          "key": "B",
+          "name": "Keep the publish gate",
+          "detail": "The surface is compared only at publish; the author picks the version.",
+          "technical": "No change: E1218 at publish; jet review on request.",
+          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Today (B): jet check prints ok; jet review prints authority widened;\n// publishing 1.1.0 is E1218."
+        },
+        {
+          "key": "C",
+          "name": "Committed file, chosen version",
+          "detail": "package.api is checked by jet check; the author still writes the version.",
+          "technical": "A's file and rows; publish keeps E1218 against the written version.",
+          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (C): jet check stops as in A; the author writes 2.0.0."
+        },
+        {
+          "key": "D",
+          "name": "Computed version only",
+          "detail": "No committed file; publish computes the version from the registry snapshot.",
+          "technical": "A's rows and bump rule at publish; jet check unchanged.",
+          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (D): jet check prints ok; publish names it 2.0.0."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Elm",
+          "note": "elm bump computes the version from the API diff.",
+          "code": "$ elm bump"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "The API validator compares a committed .api file.",
+          "code": "./gradlew apiCheck"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "API Extractor commits an .api.md report.",
+          "code": "api-extractor run"
+        },
+        {
+          "lang": "Rust",
+          "note": "cargo-semver-checks checks the chosen bump.",
+          "code": "cargo semver-checks"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A catches a widened effect or error at the edit, shows it in review, and ends the version argument. The rows and the snapshot format already exist.",
+        "gains": [
+          "Promise changes show at the edit.",
+          "Effects and errors are part of the promise.",
+          "The version is computed."
+        ],
+        "losses": [
+          {
+            "loss": "Each surface edit needs an accept step.",
+            "mitigation": "The error names jet check --accept-api, and editors offer it as an action."
+          },
+          {
+            "loss": "Some bumps are larger than an author would pick.",
+            "mitigation": "#Deprecated and added variants keep most changes compatible."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B finds a widened effect only at publish."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the version argument."
+          },
+          {
+            "key": "D",
+            "reason": "D shows nothing during review."
+          }
+        ],
+        "tradeoff": "An accept step per surface edit, for promises that never change unseen."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/api run jet check v2.jet, then jet review v1.jet v2.jet. The rows are in Compiler/JetSema/Source/Sema/PublicApi.jet and the gate in Compiler/JetCli/Source/Cli/Publish.jet. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should every jet check compare a package's public surface with a committed API file, and should publish compute the version?",
+        "lesson": "A library's public functions are a promise to everyone who uses it. In Jet, a change inside a function can quietly change that promise, for example by making it use the network. This vote decides whether every check catches that and whether Jet picks the version number.",
+        "trio": {
+          "current": {
+            "note": "The body now reads the clock; check is silent.",
+            "code": "stamp: time.now()   // jet check: ok"
+          },
+          "wild": {
+            "lang": "Elm",
+            "note": "The tool computes the bump.",
+            "code": "$ elm bump   // MAJOR: 1.0.0 -> 2.0.0"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "File and computed",
+            "gist": "Checked every time; version computed.",
+            "gains": [
+              "Seen at the edit.",
+              "No version argument."
+            ],
+            "losses": [
+              "An accept step."
+            ],
+            "proposed": {
+              "code": "jet check --accept-api"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Publish gate",
+            "gist": "Checked at publish only.",
+            "gains": [
+              "Nothing new."
+            ],
+            "losses": [
+              "Found late."
+            ],
+            "proposed": {
+              "code": "jet registry publish   // E1218"
+            }
+          },
+          {
+            "key": "C",
+            "name": "File only",
+            "gist": "Checked every time; version chosen.",
+            "gains": [
+              "Seen in review."
+            ],
+            "losses": [
+              "Version argument stays."
+            ],
+            "proposed": {
+              "code": "version: \"2.0.0\""
+            }
+          },
+          {
+            "key": "D",
+            "name": "Computed only",
+            "gist": "Version computed at publish.",
+            "gains": [
+              "No version argument."
+            ],
+            "losses": [
+              "Unseen in review."
+            ],
+            "proposed": {
+              "code": "jet registry publish   // 2.0.0"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Promise changes show at the edit and in review, and Jet computes the version.",
+          "gains": [
+            "Seen at the edit.",
+            "No version argument."
+          ],
+          "losses": [
+            {
+              "loss": "An accept step.",
+              "mitigation": "The error names the one command."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Found late."
+            },
+            {
+              "key": "C",
+              "reason": "Version argument stays."
+            },
+            {
+              "key": "D",
+              "reason": "Unseen in review."
+            }
+          ],
+          "tradeoff": "An accept step, for promises that never change unseen."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:46:55.494Z"
+    },
+    {
+      "id": "D-CLI-EVAL1",
+      "cardId": "c0oev2ib",
+      "group": "cli",
+      "title": "One-liners move under their own verb, jet eval, with every power of today's jet -e",
+      "situation": "Your 2026-11-09 review suggested that one-liners move off the bare jet command and under their own verb, jet eval. Today there are two half-tools. jet -e reads input and accepts semicolons, but refuses a final if. jet eval prints a final if, but reads no input, refuses semicolons and prints () after print.\n\nA amends D-SCRIPT-ONELINER1=A, which ratified one jet -e flag, and reverses D-CLI-FOLD1=A's fold of eval into jet run --eval. The other five folds and D-CLI-ALIAS1=A's one-spelling rule stay. Keeping the ratified forms is option B.",
+      "gist": "Should one-liners run as jet eval 'code', one verb with every power of today's jet -e, retiring jet -e?",
+      "lesson": "A one-liner is a short program typed straight into the terminal, such as counting the lines of a file. Today Jet has two ways to run one, and each lacks something the other has. This vote decides whether one verb, jet eval, does all of it.",
+      "explainer": "Words used here. A verb is the word after jet, such as run or check. A flag is an option that starts with a dash, such as -e. Standard input, or stdin, is text piped into a command.\n\nThe final value is what the last line of the code works out to, which a one-liner prints for you.",
+      "story": "Ada pipes a log into jet eval to count its lines, and gets 0. She switches to jet -e, which counts 2, then adds an if at the end and gets an error. The help for each says nothing about the other.",
+      "inWild": "# Perl, Ruby and Node: one flag on the main command.\nperl -ne 'print if /error/' app.log\nnode -e 'console.log(1 + 2)'\n\n# Deno: its own verb.\ndeno eval 'console.log(1 + 2)'",
+      "detail": "What this ballot decides. The command that runs code typed on the command line, and what that command can do. The Core names a one-liner uses, such as input, words() and input.csv(T), stay as D-SCRIPT-ONELINER1 ratified them.\n\nToday, on seed a0_042, jet -e. Piping two lines into jet -e 'input.to_list().len()' prints 2. jet -e 'x := 2; x += 1; x * 10' prints 30. jet -e 'if 1 > 0 -> \"yes\" else -> \"no\"' is E0003, because the code becomes a run body where a bare if value is not a statement. jet run -e works the same way.\n\nToday, jet eval. It exists, and its help says Evaluate pure Jet and print the value. jet eval '1 + 2' prints 3, the map example prints [2, 4, 6] on one line, and the final if prints \"yes\" with quotes. --json prints a jet.status/v1 object with the value, and jet eval hello.jet runs the file.\n\nIts gaps: the same piped input gives 0, because eval reads no stdin. The semicolon form is E0373. jet eval 'print(\"hi\")' prints hi and then (), and --pure does not refuse print. In both commands, core.files and other Core modules are E0107 without a use line, which a one-liner has no room for.\n\nOther spellings today. jet run - reads a program from stdin and works. jet hello.jet runs a file. jet '1 + 2' and jet print are E2101 UnknownCommand with exit code 2, so the bare command never ran code.\n\nThe rule under A. jet eval 'code' is the one way to run a one-liner. The code is the body of a run function, checked like a file, with the files and arguments after it. input is the lines of those files or of stdin, as D-SCRIPT-ONELINER1 says.\n\nWhat jet eval gains over both commands today. Semicolons separate statements, as jet -e allows. A final expression of any kind, an if or a match included, is the final value, as jet eval allows. A unit final value prints nothing, so print never adds (). Core modules resolve by full name, core.files, with no use line.\n\nPrinting the final value. A list or a stream prints one item per line, and a string prints without quotes, as D-SCRIPT-ONELINER1 ratified and jet -e does today (probe cli3). So the map example prints 2, 4 and 6 on three lines. --json prints today's jet.status/v1 object with the value.\n\nEffects and --pure. jet eval has jet run's default authority and flags, -A, --allow and --deny, so a one-liner may read and write files and says so in its effects note. --pure refuses any effect, print included, with the effect named. jet eval file.jet stays a short form of jet run file.jet.\n\nWhat is retired. jet -e and jet run -e become teaching errors in D-CLI-ALIAS1's retired-spelling table, each naming jet eval with the same code. jet run - stays, because it reads a whole program, not a one-liner. D-CLI-FOLD1's jet run --eval is never built.\n\nMigration, counted over the seed's git-tracked files. jet -e is mentioned 94 times in 28 files, jet eval 197 times in 54 files, and jet run - 36 times. The retired forms print the new spelling, and docs and tests move in one cutover with no alias period, as D-CLI-ALIAS1 requires.\n\nBeginner path. Type jet eval and the code. It prints the answer, reads whatever is piped in, and says which effects it used. jet help eval lists input, words() and the other one-liner names.\n\nExpert path. jet eval --json returns the value as structured data for scripts. --pure checks that a snippet touches nothing. --allow and --deny bound what a pasted one-liner may do, with the same flags as jet run.\n\nDownsides of A, and what the design does about them. jet eval is five letters longer to type than jet -e. A shell alias covers that for heavy users, and the verb is listed in jet help, where a flag on the bare command is not.\n\nPeople and scripts that type jet -e meet a teaching error. It prints the jet eval form of the same command, and the docs that teach jet -e change in the same cutover.\n\nOther options. B keeps the ratified forms: jet -e on the bare command, plus D-CLI-FOLD1's jet run --eval once built. C is jet run -e only, the Perl, Ruby and Node style of a flag on the run command. D keeps two tools: jet eval for expressions and jet run -e for statements and input.\n\nB and C put a one-liner behind a flag that jet help does not show as a command. D keeps the split that made Ada switch tools, with two sets of rules to remember.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One verb: jet eval, with every power of jet -e",
+          "detail": "jet eval 'code' runs a one-liner: statements and semicolons, input from stdin or files, arguments, and the final value printed. jet -e and jet run -e retire with teaching errors; jet run - stays.",
+          "technical": "Amends D-SCRIPT-ONELINER1=A's spelling; reverses D-CLI-FOLD1=A's eval fold; keeps D-CLI-ALIAS1=A. One handler: the -e body path, plus a final expression of any kind, silent unit, core names without use, and --pure refusing every effect. Two retired-spelling rows.",
+          "code": "$ printf 'a b\\nc d\\n' | jet eval 'input.to_list().len()'\n$ jet eval 'x := 2; x += 1; x * 10'\n$ jet eval 'if 1 > 0 -> \"yes\" else -> \"no\"'\n$ jet eval '[1, 2, 3].map(n -> n * 2)'\n$ jet eval 'core.files.write(\"out.txt\", \"hi\")'\n// 2\n// 30\n// yes\n// 2, 4 and 6 on three lines\n// (writes out.txt; the effects note names FS.Write)\n// Proposed (A), not built. Today jet eval prints 0, E0373, \"yes\", [2, 4, 6] and E0107."
+        },
+        {
+          "key": "B",
+          "name": "Keep the ratified forms: jet -e and jet run --eval",
+          "detail": "jet -e stays the one-liner flag, and D-CLI-FOLD1 moves today's jet eval to jet run --eval. Each keeps its own behavior.",
+          "technical": "No decision changes. The -e gaps, a final if and core names, and the eval gaps, stdin, semicolons and the trailing (), are fixed separately or stay.",
+          "code": "$ printf 'a b\\nc d\\n' | jet -e 'input.to_list().len()'\n$ jet -e 'x := 2; x += 1; x * 10'\n$ jet -e 'if 1 > 0 -> \"yes\" else -> \"no\"'\n$ jet -e '[1, 2, 3].map(n -> n * 2)'\n$ jet -e 'core.files.write(\"out.txt\", \"hi\")'\n// 2\n// 30\n// E0003: a final if is not a statement\n// 2, 4 and 6\n// E0107: nothing named core\n// Today (B): probes cli.sh and cli2.sh show these results."
+        },
+        {
+          "key": "C",
+          "name": "jet run -e only, as Perl, Ruby and Node do",
+          "detail": "One-liners are a flag on the run command: jet run -e 'code'. jet -e and jet eval retire.",
+          "technical": "Amends D-SCRIPT-ONELINER1=A to run's flag and folds eval as D-CLI-FOLD1 did. The same gap fixes as A apply to the one path.",
+          "code": "$ printf 'a b\\nc d\\n' | jet run -e 'input.to_list().len()'\n$ jet run -e 'x := 2; x += 1; x * 10'\n$ jet run -e 'if 1 > 0 -> \"yes\" else -> \"no\"'\n$ jet run -e '[1, 2, 3].map(n -> n * 2)'\n$ jet run -e 'core.files.write(\"out.txt\", \"hi\")'\n// 2, 30, yes, then 2, 4 and 6, then the file is written\n// Proposed (C), not built; jet run -e runs print today."
+        },
+        {
+          "key": "D",
+          "name": "Two tools: jet eval for values, jet run -e for statements",
+          "detail": "jet eval works out one expression and prints it, with no input or effects. jet run -e runs statements, reads input and has effects.",
+          "technical": "Amends D-SCRIPT-ONELINER1=A to run -e and keeps eval as a pure evaluator, reversing D-CLI-FOLD1=A's eval fold. Each tool keeps its own rules.",
+          "code": "$ jet eval 'if 1 > 0 -> \"yes\" else -> \"no\"'\n$ printf 'a b\\nc d\\n' | jet run -e 'input.to_list().len()'\n$ jet run -e 'x := 2; x += 1; x * 10'\n// yes\n// 2\n// 30\n// Proposed (D), not built."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Perl",
+          "note": "One flag on the main command runs code, with -n and -p loops over input.",
+          "code": "perl -ne 'print if /error/' app.log"
+        },
+        {
+          "lang": "Deno",
+          "note": "A separate verb evaluates code, and prints the value with -p.",
+          "code": "deno eval 'console.log(1 + 2)'\ndeno eval -p '1 + 2'"
+        },
+        {
+          "lang": "Node",
+          "note": "-e runs code and -p prints its value.",
+          "code": "node -e 'console.log(1 + 2)'\nnode -p '1 + 2'"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives one-liners one discoverable command that does everything both half-tools do today. It is the verb you suggested, and it already exists to build on.",
+        "gains": [
+          "One command for one-liners, listed in jet help.",
+          "Input, semicolons, any final value and effects all work in one place.",
+          "--pure and --json work for every one-liner."
+        ],
+        "losses": [
+          {
+            "loss": "jet eval is longer to type than jet -e.",
+            "mitigation": "A shell alias covers heavy use, and the verb shows in jet help."
+          },
+          {
+            "loss": "Scripts and docs that type jet -e must change.",
+            "mitigation": "The teaching error prints the jet eval form, and docs move in one cutover."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two half-tools, each missing what the other has."
+          },
+          {
+            "key": "C",
+            "reason": "C hides one-liners behind a run flag that jet help does not list as a command."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps two tools with two sets of rules, the split that confuses users today."
+          }
+        ],
+        "tradeoff": "A longer word to type, in return for one command that does it all."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/ce/cli.sh and cli2.sh; outputs are in probes/ce/out. Count mentions with notes/census.mjs. Then run Tools/agent/ballots/Validate.jet on this payload. Only option B's jet -e and today's partial jet eval are built on the seed.",
+      "surface": {
+        "gist": "Should one-liners run as jet eval 'code', one verb with every power of today's jet -e, retiring jet -e?",
+        "lesson": "A one-liner is a short program typed straight into the terminal. Today Jet has two ways to run one, and each lacks something the other has. This vote decides whether one verb, jet eval, does all of it.",
+        "trio": {
+          "current": {
+            "note": "Two half-tools.",
+            "code": "$ echo x | jet -e 'input.to_list().len()'\n1\n$ echo x | jet eval 'input.to_list().len()'\n0"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Its own verb.",
+            "code": "deno eval 'console.log(1 + 2)'"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "jet eval does it all",
+            "gist": "One verb with every power of jet -e.",
+            "gains": [
+              "One discoverable command.",
+              "Input, semicolons and any final value."
+            ],
+            "losses": [
+              "Longer to type than -e."
+            ],
+            "proposed": {
+              "code": "$ echo x | jet eval 'input.to_list().len()'\n1\n$ jet eval 'x := 2; x += 1; x * 10'\n30"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep jet -e",
+            "gist": "The ratified flag, plus jet run --eval.",
+            "gains": [
+              "Nothing to migrate."
+            ],
+            "losses": [
+              "Two half-tools."
+            ],
+            "proposed": {
+              "code": "$ jet -e 'x := 2; x += 1; x * 10'"
+            }
+          },
+          {
+            "key": "C",
+            "name": "jet run -e",
+            "gist": "A flag on run, as Perl and Node do.",
+            "gains": [
+              "Familiar to Perl and Node users."
+            ],
+            "losses": [
+              "Not listed as a command."
+            ],
+            "proposed": {
+              "code": "$ jet run -e 'x := 2; x += 1; x * 10'"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Two tools",
+            "gist": "eval for values, run -e for statements.",
+            "gains": [
+              "A pure evaluator."
+            ],
+            "losses": [
+              "Two sets of rules."
+            ],
+            "proposed": {
+              "code": "$ jet eval '1 + 2'\n$ jet run -e 'x := 2; x += 1; x * 10'"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives one-liners one discoverable command that does what both half-tools do today.",
+          "gains": [
+            "One command.",
+            "Every one-liner power in one place."
+          ],
+          "losses": [
+            {
+              "loss": "jet -e users must switch.",
+              "mitigation": "The teaching error prints the jet eval form."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two half-tools."
+            },
+            {
+              "key": "C",
+              "reason": "Hidden behind a flag."
+            },
+            {
+              "key": "D",
+              "reason": "Two sets of rules."
+            }
+          ],
+          "tradeoff": "A longer word, for one command that does it all."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:46:57.346Z"
+    },
+    {
+      "id": "D-COMPREHEND1",
+      "cardId": "c0oev2ib",
+      "group": "syntax",
+      "title": "A typed collection head takes a loop and builds that collection directly: Set<String>{loop …}, [String:Int]{loop … -> k: v}",
+      "situation": "A loop with -> builds a list: loop w in words -> w.len(). That was ratified as D-COMPREHENSION1=A, which also says the collector is fixed: a set goes through Set.from, and a map is filled by a second loop.\n\nYour review asked for a comprehension that builds a set or a map directly. A amends D-COMPREHENSION1's fixed-collector clause; keeping it is option B.",
+      "gist": "Should a typed collection head take a loop, so Set<String>{loop …} and [String:Int]{loop … -> k: v} build directly?",
+      "lesson": "A loop with an arrow builds a list of its results. Sometimes you want a set, which drops repeats, or a map from keys to values. Today that takes a conversion or a second loop. This vote decides whether the loop can build them directly.",
+      "explainer": "Words used here. A comprehension is a loop that gives a collection. A typed head is the type written before braces, as in [Int]{1, 2}. A set holds each value once; a map pairs keys with values.",
+      "story": "Mae counts distinct words in a log. In Python she writes {w for w in words}. In Jet today she writes Set.from around the loop, and for a map she writes an empty map and a second loop. Under A she writes the type and the loop.",
+      "inWild": "# Python: set and dict comprehensions build directly.\nuniq = {w for w in words}\nindex = {w: len(w) for w in words}",
+      "detail": "What this ballot decides. Whether a loop can build a set or a map in one expression, and how it is spelled. A bare loop with -> stays a list.\n\nToday, on seed a0_042. Probe c02 does it the ratified way. A loop gives the list [5, 3, 5, 3], Set.from around a loop gives 3 items, and a second loop fills a map of 3 keys. Probe c05 already accepts a typed list head, [Int]{loop … -> w.len()}.\n\nProbe c04 writes Set<String>{loop w in words -> w}. It parses, and fails E0108: this needs Set<String>, but the value is [String]. Probe c01 adds [String:Int]{loop w in words -> w: w.len()}, which gets E0107 because key: value is not a loop body.\n\nProbe c06 shows a terminal: (loop …).to_set() runs and gives 3. to_map does not exist, E0311.\n\nThe rule under A. A typed collection head may hold one loop in place of its items. The loop's results go into that collection in loop order, through the FromIterator protocol of D-ITER-COLLECT1=A, so any user collection works the same way.\n\nA map's loop body yields key: value, the map literal's own item form. A later key replaces an earlier one, as the map assignment loop in c02 does.\n\nWhat stays. A bare loop still gives a list and still ignores the expected type, so D-COMPREHENSION1's rule that context never changes a loop's result holds. The head is written on the same line, so a reader always sees the destination.\n\nCensus on the seed, comment lines skipped. 1,021 lines in 291 Jet files bind or pass a loop with ->, all unchanged. Set.from around a loop appears 3 times and .to_set() 5 times, which jet fix may rewrite to a head; Map.from appears nowhere. No file writes a loop inside a typed head today.\n\nBeginner path. A loop gives a list; write Set<String>{…} around it for a set. Expert path. Any collection that implements FromIterator takes a loop in its head, with no extra method.\n\nDownsides of A, and what the design does about them. A typed head now holds either items or one loop. Mixing them, as [Int]{0, loop …}, is a build error with a fix to concatenate, so a head is never half literal and half loop.\n\nA map loop that repeats a key keeps the last value without a word. That matches map assignment and Python. A program that must refuse repeats uses a loop with an explicit check.\n\nOther options. B keeps today's rule. C is Rust's collect, naming the destination after the loop. D is Python's: braces around a loop make a set, and key: value makes a map. E is Kotlin's to_set and to_map terminals.\n\nTheir best cases. B adds nothing. C works for any destination. D is shortest. E is a plain method. Their costs: B needs a second loop for maps. C puts the type last. D collides with Jet's block braces. E needs pair values and a to_ method per collection.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A typed head takes a loop",
+          "detail": "Set<String>{loop …} and [String:Int]{loop … -> k: v} build that collection directly. A bare loop stays a list.",
+          "technical": "Amends D-COMPREHENSION1=A's fixed-collector clause for written heads only; a bare loop never reads the expected type. Collects through D-ITER-COLLECT1=A FromIterator in loop order; a map body yields key: value, last key wins. Items and a loop never mix in one head.",
+          "code": "run: fn() {\n    words: [\"apple\", \"bob\", \"apple\", \"cat\"]\n    lens: loop w in words -> w.len()                        // still a list\n    uniq: Set<String>{loop w in words -> w}                 // a set, built directly\n    index: [String:Int]{loop w in words -> w: w.len()}      // a map, key: value\n    print(\"{lens} {uniq.len()} {index.len()}\")\n}\n// Proposed (A): [5, 3, 5, 3] 3 3. Today the set line is E0108 and the map line E0107 (probe c01)."
+        },
+        {
+          "key": "B",
+          "name": "Keep today's rule",
+          "detail": "A loop gives a list. Sets go through Set.from or to_set; maps are filled by a second loop.",
+          "technical": "D-COMPREHENSION1=A as ratified. No change.",
+          "code": "run: fn() {\n    words: [\"apple\", \"bob\", \"apple\", \"cat\"]\n    lens: loop w in words -> w.len()\n    uniq: Set.from(loop w in words -> w)\n    index := [String:Int]{}\n    loop w in words {\n        index[w] = w.len()\n    }\n    print(\"{lens} {uniq.len()} {index.len()}\")\n}\n// Today (B), D-COMPREHENSION1=A: probe c02 prints [5, 3, 5, 3], 3, 3."
+        },
+        {
+          "key": "C",
+          "name": "Rust's collect",
+          "detail": "A collect method names the destination after the loop.",
+          "technical": "collect<T>() over FromIterator. Maps take named pairs.",
+          "code": "run: fn() {\n    words: [\"apple\", \"bob\", \"apple\", \"cat\"]\n    lens: loop w in words -> w.len()\n    uniq: (loop w in words -> w).collect<Set<String>>()\n    index: (loop w in words -> (key: w, value: w.len())).collect<[String:Int]>()\n    print(\"{lens} {uniq.len()} {index.len()}\")\n}\n// Proposed (C), not built: Rust's collect, naming the destination after the loop."
+        },
+        {
+          "key": "D",
+          "name": "Python's braces",
+          "detail": "Braces around a loop make a set; a key: value body makes a map. The element types are inferred.",
+          "technical": "Needs a rule that tells a set brace from a block brace, by the loop keyword after it.",
+          "code": "run: fn() {\n    words: [\"apple\", \"bob\", \"apple\", \"cat\"]\n    lens: loop w in words -> w.len()\n    uniq: {loop w in words -> w}                 // braces: a set\n    index: {loop w in words -> w: w.len()}       // braces and key: value: a map\n    print(\"{lens} {uniq.len()} {index.len()}\")\n}\n// Proposed (D), not built: Python's set and dict comprehensions, shape picks the type."
+        },
+        {
+          "key": "E",
+          "name": "Kotlin's terminals",
+          "detail": "The loop's list ends in to_set() or to_map().",
+          "technical": "to_set exists; add to_map over key and value pairs. Each collection needs its own to_ method.",
+          "code": "run: fn() {\n    words: [\"apple\", \"bob\", \"apple\", \"cat\"]\n    lens: loop w in words -> w.len()\n    uniq: (loop w in words -> w).to_set()\n    index: (loop w in words -> (key: w, value: w.len())).to_map()\n    print(\"{lens} {uniq.len()} {index.len()}\")\n}\n// Proposed (E): Kotlin's toSet and toMap terminals. to_set runs today (probe c06); to_map is E0311."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Set and dict comprehensions.",
+          "code": "{w: len(w) for w in words}"
+        },
+        {
+          "lang": "Rust",
+          "note": "collect names the destination.",
+          "code": "let u: HashSet<_> = words.iter().collect();"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Terminal conversions.",
+          "code": "words.toSet()\nwords.associateWith { it.length }"
+        },
+        {
+          "lang": "Haskell",
+          "note": "Lists only; Set.fromList converts.",
+          "code": "Set.fromList [w | w <- words]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A builds sets and maps in one expression with the type in front. A bare loop is unchanged, and the destination is always written.",
+        "gains": [
+          "Sets and maps in one expression.",
+          "Any user collection works the same way.",
+          "Bare loops are unchanged."
+        ],
+        "losses": [
+          {
+            "loss": "A map loop that repeats a key keeps the last value silently.",
+            "mitigation": "That matches map assignment and Python; a strict program checks repeats in an explicit loop."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B needs a second loop for every map."
+          },
+          {
+            "key": "C",
+            "reason": "C puts the destination after the loop."
+          },
+          {
+            "key": "D",
+            "reason": "D collides with block braces."
+          },
+          {
+            "key": "E",
+            "reason": "E needs a to_ method per collection."
+          }
+        ],
+        "tradeoff": "A head that holds items or a loop, for direct sets and maps."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh cp run; outputs are in probes/cp/out. The census reads git grep -cE for loop bindings, Set.from, to_set and Map.from over Core, Compiler, Jetpack, Tools, Examples and tests. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should a typed collection head take a loop, so Set<String>{loop …} and [String:Int]{loop … -> k: v} build directly?",
+        "lesson": "A loop with an arrow builds a list of its results. Sometimes you want a set, which drops repeats, or a map from keys to values. Today that takes a conversion or a second loop. This vote decides whether the loop can build them directly.",
+        "trio": {
+          "current": {
+            "note": "A conversion or a second loop.",
+            "code": "uniq: Set.from(loop w in words -> w)"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Built directly.",
+            "code": "{w: len(w) for w in words}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Typed head",
+            "gist": "The type in front, the loop inside.",
+            "gains": [
+              "One expression.",
+              "Destination written."
+            ],
+            "losses": [
+              "Repeated keys: last wins."
+            ],
+            "proposed": {
+              "code": "uniq: Set<String>{loop w in words -> w}\nindex: [String:Int]{loop w in words -> w: w.len()}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Today",
+            "gist": "Set.from, and a second loop for maps.",
+            "gains": [
+              "Nothing new."
+            ],
+            "losses": [
+              "Two steps for maps."
+            ],
+            "proposed": {
+              "code": "uniq: Set.from(loop w in words -> w)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "collect",
+            "gist": "Rust's collect after the loop.",
+            "gains": [
+              "Any destination."
+            ],
+            "losses": [
+              "Type comes last."
+            ],
+            "proposed": {
+              "code": "(loop w in words -> w).collect<Set<String>>()"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Braces",
+            "gist": "Python's set and dict shapes.",
+            "gains": [
+              "Shortest."
+            ],
+            "losses": [
+              "Clashes with blocks."
+            ],
+            "proposed": {
+              "code": "uniq: {loop w in words -> w}"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Terminals",
+            "gist": "Kotlin's to_set and to_map.",
+            "gains": [
+              "A plain method."
+            ],
+            "losses": [
+              "A method per type."
+            ],
+            "proposed": {
+              "code": "(loop w in words -> w).to_set()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Sets and maps in one expression, with the destination written in front.",
+          "gains": [
+            "One expression.",
+            "Bare loops unchanged."
+          ],
+          "losses": [
+            {
+              "loss": "Repeated keys: last wins.",
+              "mitigation": "Matches map assignment and Python."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two steps for maps."
+            },
+            {
+              "key": "C",
+              "reason": "Type comes last."
+            },
+            {
+              "key": "D",
+              "reason": "Clashes with blocks."
+            },
+            {
+              "key": "E",
+              "reason": "A method per type."
+            }
+          ],
+          "tradeoff": "Heads hold items or a loop, for direct sets and maps."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:46:59.132Z"
+    },
+    {
+      "id": "D-CORE-LAYERS1",
+      "cardId": "c0oev2ib",
+      "group": "library",
+      "title": "Core loads a trait implementation only when a program reaches both its type and its trait, and Core's modules sit in checked layers",
+      "situation": "On seed a0_042, a five-line program that imports core.tasks makes jet check load 62 Core source files: 3.2 MB and 47,088 lines from 12 Core areas. It peaks at 277 MB and takes about a second. With no import, the same check takes 10 ms and 28 MB.\n\nThe chain runs through trait implementations: Time's decode implementation names core.encoding, which names core.files, which names system, process, testing and mem. Your review proposed two rules to cut it.",
+      "gist": "Should Core load an implementation only when both its type and its trait are used, and keep its modules in checked layers?",
+      "lesson": "A program that uses one small part of Jet's core library today pulls in most of the rest. Each part's extras point at other parts. This vote decides two rules: extras load only when used, and lower parts may not lean on higher ones.",
+      "explainer": "Words used here. Core is Jet's built-in library. A trait is a promise of methods, like Decode. An implementation keeps that promise for one type. A layer is a group of Core modules that may use only lower groups.",
+      "story": "Kim's script imports core.tasks to run two jobs at once. Its check takes a second and loads file, crypto and encoding code she never calls. Under A the decode chain to those modules stays unloaded.",
+      "inWild": "// Go keeps its standard library layered with a test, go/build/deps_test.go:\n// \"unicode/utf8 < strconv < fmt < os\" and so on; a forbidden import fails the build.",
+      "detail": "What this ballot decides. Two rules for Core. They change what loads and which imports Core may write; no public API changes.\n\nToday, on seed a0_042. Probe c01 imports core.tasks and starts one task. Its jet check trace shows 62 Core source files from 12 areas: Tasks, Text, Math, Prelude, Time, Encoding, Files, Process, Sys, Testing, Mem and Crypto.\n\nThat is 3.2 MB of source, 277 MB at peak and about a second, on a warm second run too. Probe c02, with no import, loads none and checks in 10 ms at 28 MB.\n\nThe chain. Time.jet line 1723 is ZonedDateTime's decode implementation, and it names core.encoding. Math.jet line 15423 does the same for Decimal. Encoding's Cbor.jet imports core.files, and Files names sys, process, testing and mem.\n\nRule 1, the reach rule. The implementation of a trait for a type is loaded and checked for a program only when the program reaches both the type and the trait. Reaching means naming or calling it, directly or through something else reached.\n\nA generic function that requires the trait reaches it. The implementation stays where it is written, beside its type. Under rule 1, c01 names no decode trait. Unless something it calls does, Time's decode implementation and the encoding chain stay unloaded.\n\nRule 2, layers. Every Core area sits in one of four layers. Layer 0 is the prelude, with mem, rt, reflect, meta and sync. Layer 1 is data: text, math, collections, time, encoding, regex, units, data, compute, crypto, log and event.\n\nLayer 2 is system: sys, files, net, process, tasks, term, watcher, args, perf, testing, plugin, mod, archive, font and vendor. Layer 3 is services: http, db, ui, web, app, auth, service, jobs, game, reactive, tui, devtools, build and compiler.\n\nA module may name its own layer or a lower one. The table lives in Core's package.jet, and jet check on Core reports each upward name as a registered error, with the file, line and the two layers.\n\nCensus on the seed, Core .jet files, comment lines skipped. Under that table, Core has 78 upward references in 16 files across 13 area pairs. Crypto naming files is 31 of them and encoding naming files is 27.\n\nMost upward references are file adapters, such as encoding to or from a file. They move up to the files module, which implements the encoding stream trait for its own reader and writer. Rule 1 then loads them only for programs that use both.\n\nFiles names core.testing for the fault hooks of D-TESTFAULT1=A. Those hooks move down into the prelude layer, beside the effect carrier they guard.\n\nRatified decisions. D-BUILD-COREUNIT1=A checks Core whole once per compiler and target, and a warm run reads back only what its program needs. Rule 1 is what makes that read-back small, so the two fit. D-EFF-CORE-INIT1=A already makes a Core import start nothing.\n\nBeginner path. Nothing to learn: imports work as today, and small programs check faster. Expert path. A Core author sees the layer error when a lower module names a higher one, and jet inspect structure with --core shows what a program loaded and why.\n\nDownsides of A, and what the design does about them. The 78 upward references must move before the check turns on. The check lists every one in a single run, and most are file adapters that move as a group.\n\nWhat remains. A Core author must place a new module in a layer, and some helpers end up one layer lower than their natural home. The table is one reviewed list in package.jet.\n\nOther options. B keeps today's ball and relies on D-BUILD-COREUNIT1=A's cache. C adopts the reach rule only. D adopts the layers only. E splits Core into separate packages with declared dependencies, as Rust's core, alloc and std do.\n\nTheir best cases. B costs nothing now. C gets most of the load cut with no moves. D gets an enforced shape with no loader change. E makes each dependency a package fact. Their costs: B keeps every program reading the ball; C lets the cycles regrow; D still loads unused implementations; E reverses D-BUILD-COREUNIT1=A.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reach rule and checked layers",
+          "detail": "An implementation loads only when its type and its trait are both reached. Core's areas sit in four layers; an upward name is an error.",
+          "technical": "Loader: impl rows are keyed by type and trait module; load when both are reached. Layer table in Core package.jet; jet check on Core reports upward names as a registered error. File adapters move to files; fault hooks move to the prelude layer.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    t: task 1 + 1\n    print(t.join() ?? 0)\n}\n// Proposed (A): loads tasks and what it reaches; the decode chain to encoding,\n// files and crypto stays unloaded.\n// Today (probe c01): 62 Core files, 3.2 MB, 277 MB peak, about one second."
+        },
+        {
+          "key": "B",
+          "name": "Keep today",
+          "detail": "Core stays one connected ball. D-BUILD-COREUNIT1=A's cache hides the cost once it is built.",
+          "technical": "No change.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    t: task 1 + 1\n    print(t.join() ?? 0)\n}\n// Today (B): 62 Core files load for this program (probe c01)."
+        },
+        {
+          "key": "C",
+          "name": "Reach rule only",
+          "detail": "Implementations load only when reached; no layer check.",
+          "technical": "The rule 1 loader change without the table or the error.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    t: task 1 + 1\n    print(t.join() ?? 0)\n}\n// Proposed (C): loads what A loads, until a new upward import adds a chain back."
+        },
+        {
+          "key": "D",
+          "name": "Layers only",
+          "detail": "The layer table and check; implementations still load with their type.",
+          "technical": "The rule 2 table and error without the loader change.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    t: task 1 + 1\n    print(t.join() ?? 0)\n}\n// Proposed (D): time still loads its decode implementation and encoding with it."
+        },
+        {
+          "key": "E",
+          "name": "Separate Core packages",
+          "detail": "Core splits into packages with declared dependencies, as Rust splits core, alloc and std.",
+          "technical": "Reverses D-BUILD-COREUNIT1=A's one Core package.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    t: task 1 + 1\n    print(t.join() ?? 0)\n}\n// Proposed (E): loads the tasks package and its declared dependencies."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "A test enforces the standard library's import layers.",
+          "code": "// go/build/deps_test.go\n\"unicode/utf8 < strconv < fmt\""
+        },
+        {
+          "lang": "Rust",
+          "note": "Three crates: core, alloc, std.",
+          "code": "#![no_std]\nextern crate alloc;"
+        },
+        {
+          "lang": "Swift",
+          "note": "Conformances live with the type and load with it.",
+          "code": "extension Date: Decodable { … }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The reach rule cuts what a program loads, and the layers stop the chain from growing back. Neither changes an import or an API.",
+        "gains": [
+          "Small programs load only what they use.",
+          "Core's shape is checked, not hoped for.",
+          "No user-facing change."
+        ],
+        "losses": [
+          {
+            "loss": "78 upward references must move first.",
+            "mitigation": "One check run lists all of them; most are file adapters that move together."
+          },
+          {
+            "loss": "New Core modules need a layer.",
+            "mitigation": "One reviewed table in package.jet."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps every program reading the ball."
+          },
+          {
+            "key": "C",
+            "reason": "C lets the cycles grow back."
+          },
+          {
+            "key": "D",
+            "reason": "D still loads unused implementations."
+          },
+          {
+            "key": "E",
+            "reason": "E reverses D-BUILD-COREUNIT1=A."
+          }
+        ],
+        "tradeoff": "One move of 78 references and a layer table, for small loads that stay small."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run jet check c01_tasks.jet --trace=c01.trace in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/cl. Count the Core sema.module entries, then repeat for c02_plain.jet. The census is node $JET_SCRATCH_ROOT/lanes/AgreedBallots/notes/layers.mjs. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should Core load an implementation only when both its type and its trait are used, and keep its modules in checked layers?",
+        "lesson": "A program that uses one small part of Jet's core library today pulls in most of the rest. Each part's extras point at other parts. This vote decides two rules: extras load only when used, and lower parts may not lean on higher ones.",
+        "trio": {
+          "current": {
+            "note": "One import loads 62 Core files.",
+            "code": "use tasks: core.tasks   // 3.2 MB, 277 MB, ~1 s"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "A test enforces import layers.",
+            "code": "\"unicode/utf8 < strconv < fmt\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Both rules",
+            "gist": "Load on reach; checked layers.",
+            "gains": [
+              "Small loads.",
+              "Checked shape."
+            ],
+            "losses": [
+              "78 references move first."
+            ],
+            "proposed": {
+              "code": "use tasks: core.tasks   // no encoding, files, crypto"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Today",
+            "gist": "One ball; the cache hides it.",
+            "gains": [
+              "No work now."
+            ],
+            "losses": [
+              "Every program reads the ball."
+            ],
+            "proposed": {
+              "code": "use tasks: core.tasks   // 62 files"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Reach only",
+            "gist": "Load on reach; no layers.",
+            "gains": [
+              "No moves."
+            ],
+            "losses": [
+              "Chains grow back."
+            ],
+            "proposed": {
+              "code": "use tasks: core.tasks   // small, for now"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Layers only",
+            "gist": "Checked layers; eager loading.",
+            "gains": [
+              "Checked shape."
+            ],
+            "losses": [
+              "Unused code still loads."
+            ],
+            "proposed": {
+              "code": "use tasks: core.tasks   // encoding still loads"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Packages",
+            "gist": "Split Core, like Rust's std.",
+            "gains": [
+              "Declared dependencies."
+            ],
+            "losses": [
+              "Reverses D-BUILD-COREUNIT1=A."
+            ],
+            "proposed": {
+              "code": "use tasks: core.tasks   // the tasks package"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Programs load only what they use, and layers keep it that way.",
+          "gains": [
+            "Small loads.",
+            "Checked shape."
+          ],
+          "losses": [
+            {
+              "loss": "78 references move first.",
+              "mitigation": "One check run lists them all."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every program reads the ball."
+            },
+            {
+              "key": "C",
+              "reason": "Chains grow back."
+            },
+            {
+              "key": "D",
+              "reason": "Unused code still loads."
+            },
+            {
+              "key": "E",
+              "reason": "Reverses D-BUILD-COREUNIT1=A."
+            }
+          ],
+          "tradeoff": "One move of 78 references, for small loads that stay small."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:47:00.904Z"
+    },
+    {
+      "id": "D-CORE-LAYOUT1",
+      "cardId": "c0w1wcfc",
+      "group": "build",
+      "title": "Runtime carriers are ordinary declarations, and the compiler's handle table goes",
+      "situation": "Some Core types hold an object the runtime made, such as an open file. Today a compiler table, RuntimeHandles.jet, says how each one copies, compares and prints, found by bare name or a Core path prefix. Card c0w1wcfc's c18 requires that BuildTypes.jet have no such Core prefix test.\n\nD-HOST-LEAF1=E made the runtime an ordinary library. This ballot decides where a carrier's facts come from. It amends the registry clause of D-PRIVATE-NATIVE-CARRIER1=A; keeping the table is options B and D.",
+      "gist": "Should a Core carrier's copy, equality and text come from its own declaration, so the compiler's handle table can go?",
+      "lesson": "Some Core types hold something the runtime made, such as an open file. The compiler must know whether such a value copies, compares and prints. This vote decides whether that knowledge lives in the type's own declaration, under rules every package uses, or in a hidden compiler table.",
+      "explainer": "Words used here. A carrier is a Core type whose value holds a runtime object, such as an open file. A row is one entry in the compiler's table. A derive is a power Jet gives a type from its fields, such as ==.\n\nA refusal mark, such as #!Equatable, turns a derive off for one type.",
+      "story": "Sam names his own type Reader. Today the compiler's table has a bare row named Reader, and only a later check keeps it from Sam's type. Under A no table exists: Sam's Reader has his fields and nothing else.",
+      "inWild": "// Rust: OwnedFd is an ordinary struct; cleanup is a normal Drop impl.\npub struct OwnedFd { fd: RawFd }\nimpl Drop for OwnedFd { fn drop(&mut self) { unsafe { libc::close(self.fd); } } }",
+      "detail": "What this ballot decides. Where a carrier's copy, cleanup, equality and text come from. Lowering is D-CORE-LOWER1; the runtime boundary itself is D-HOST-LEAF1=E, unchanged.\n\nToday, on seed a0_042. RuntimeHandles.jet has 470 rows naming 364 distinct runtime objects. 184 rows are keyed by a Core path, 12 by a double-underscore name, and the other 274 by a bare name, mostly second keys for the same type.\n\nProbe y07 is the same program in today's form. It prints stdin copies compare true, entries compare false, the DirEntry text, and user reader 3 true. The StdinHandle row says it neither copies nor compares, yet the program does both: Core's declaration wins. The table and the declaration already disagree.\n\nEvery capability already has an ordinary form, shown by probes on the seed. Probe y01 copies a struct with private fields and gets an independent copy, and prints a record as Entry { name: n, path: a/n, is_dir: false }. Probe y02 refuses == with #!Equatable, E0312. Probe y06 refuses default text with #!Printable, E0915.\n\nProbe y04 gives a handle a Close impl, moves it, and closes it once, after moved. #!Debug refuses the debug text. #!Copyable is ratified by D-GENERIC-CLOSE-COPY1 but not built: probe y03 gets E0931.\n\nThe rule under A. A carrier is an ordinary struct, in Core or in jet_runtime, and its declaration is the only source of its facts. The compiler reads no table and tests no name or prefix, so c18 is met. A user type named Reader is its own declaration and gets only its own fields.\n\nCopying. A carrier whose state is plain Jet fields copies them, so each copy has its own cursor, as today's clone routines do by copying bytes and position. Under D-COPY-DEFAULT1 that copy is made on first write, which is cheaper than today's eager clone.\n\nSharing and owning. A carrier that shares one runtime object holds it in Shared, which closes it once when the last holder goes. A carrier that owns a descriptor holds a jet_runtime handle type with a Close impl. A struct with a Close part is not copyable, so the one-owner rule follows from the field.\n\nThat closes the copying hole a raw number would open. A descriptor is never a bare Int in a copyable struct: it lives in a typed handle with Close, so a copy cannot alias it. A carrier with no cleanup that must still have one owner uses #!Copyable.\n\nEquality and text. A row with eq false becomes #!Equatable. show false becomes #!Printable, and debug false becomes #!Debug. display true becomes an impl Display. The table's 12 distinct capability combinations all map to these marks, one to one.\n\nPrivacy and identity. D-PRIVATE-NATIVE-CARRIER1's opacity stays: a priv field cannot be read or forged outside its module, E0605. Its registry clause goes. Layout and version come from jet_runtime's precompiled interface, as for any dependency, and the toolchain pins that version.\n\nEvery tier and build time. The same declarations run in the interpreter, the JIT, native builds and build-time evaluation, because HOST-LEAF1 uses one runtime library. A carrier still cannot be stored in a build-time constant; that refusal, E0956, stays.\n\nDelivery proof, part of building A. For each of the 364 runtime objects, a test pins independent copy or sharing, close count on every exit, equality and text, on o0, o1, o2 and at build time. A row is deleted only when its test passes against the declaration.\n\nBeginner path. Nothing to learn: Core's types copy, compare and print as their declarations say, and hover shows it. Expert path. Write a carrier in your own package with the same fields, handles and refusal marks Core uses, and get the same facts.\n\nDownsides of A, and what the design does about them. The cutover touches 364 runtime objects. A generator writes each declaration's marks from its row once, since the combinations map one to one. The bare-name rows are second keys and need no type of their own.\n\nWhat remains. Carriers whose state lives in raw allocations today must move that state into Jet fields or a typed handle, which is porting work per object. #!Copyable must be built before the one-owner carriers without cleanup can move.\n\nOther options. B keeps the table but keys each row by exact declaration, so no name or prefix test remains. C imports C handle types with a new #Handle marker. D keeps today's table and tests, and revises c18. E puts a #Runtime marker on each declaration, which any package may use, and takes the other facts from derives.\n\nTheir best cases. B is the smallest change and keeps every clone routine. C lets any package bind a C handle directly. D needs no work. E keeps the runtime routines while removing the table. B and D keep a second source of truth, the disagreement y07 shows.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Facts from the declaration",
+          "detail": "Each carrier is an ordinary struct. Copying, cleanup, equality and text follow from its fields, Close and refusal marks. The table and every name and prefix test go.",
+          "technical": "Amends D-PRIVATE-NATIVE-CARRIER1=A's registry clause; keeps its E0605 opacity. Descriptors live in jet_runtime handle types with Close; shared objects in Shared. Row flags map to #!Equatable, #!Printable, #!Debug, #!Copyable and impl Display. Layout from the runtime's precompiled interface per HOST-LEAF1. Per-object tests gate each row's deletion.",
+          "code": "// jet_runtime: a typed handle that owns its descriptor\nFileHandle: struct {\n    priv raw: Int\n    impl Close { close: fn(&&self) { close_descriptor(self.raw) } }\n}\n\n// core.files: the declaration is the only source of facts\nDirEntry: struct { name: String, path: String, is_dir: Bool }   // copies, compares, prints\n\nFileReader: struct {\n    path: String\n    priv handle: rt.FileHandle   // holds a Close part, so it has one owner\n}\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (A): prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true, as today. No table row is read."
+        },
+        {
+          "key": "B",
+          "name": "Exact table rows",
+          "detail": "The table stays. Each row names one declaration exactly, and the bare-name rows go. User packages cannot add carriers.",
+          "technical": "Rows keyed by canonical declaration identity; a missing or disagreeing declaration is a build error. Clone, drop, equality and text routines stay the runtime's.",
+          "code": "// Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet\nIRRuntimeHandle{jet_name: \"<corelib>/core.files::DirEntry\", runtime: \"DirEntry\",\n    clone: true, display: false, show: true, debug: false, eq: true},\nIRRuntimeHandle{jet_name: \"<corelib>/core.files::FileReader\", runtime: \"JetFileReader\",\n    clone: false, display: false, show: false, debug: false, eq: false},\n// The 274 bare-name rows are deleted; a row matches one declaration exactly,\n// and a row whose declaration is missing or disagrees is a build error.\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (B): prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true."
+        },
+        {
+          "key": "C",
+          "name": "C handles with #Handle",
+          "detail": "Core imports the runtime's C symbols as handle types. A new #Handle marker names each one's drop, clone, equality and text routines.",
+          "technical": "New marker; build-time code must call foreign routines. Reverses D-HOST-LEAF1=E's Jet-only runtime boundary.",
+          "code": "// core.files\n#Import c.jet_rt: module {\n    #Handle(drop: jet_rt_handle_drop_jet_file_reader)          // no clone: one owner\n    JetFileReader: type\n}\nFileReader: struct { path: String, priv handle: c.jet_rt.JetFileReader }\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (C), not built: #Handle is new, and it reverses D-HOST-LEAF1=E."
+        },
+        {
+          "key": "D",
+          "name": "Today's table and tests",
+          "detail": "Keep the table, found by bare name or Core prefix. Revise c18 to accept it.",
+          "technical": "No change. c18 is revised. Rows and declarations can disagree; the declaration wins where BuildTypes.jet keeps the source shape.",
+          "code": "// Today: RuntimeHandles.jet rows, found by bare name or a <corelib>/ prefix.\nIRRuntimeHandle{jet_name: \"StdinHandle\", runtime: \"JetStdinReader\",\n    clone: false, display: false, show: false, debug: false, eq: false},\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Today (D): probe y07 prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true.\n// The StdinHandle row says no copy and no ==, yet the program copies and compares."
+        },
+        {
+          "key": "E",
+          "name": "A #Runtime marker",
+          "detail": "A #Runtime(\"Name\") marker on a declaration names its runtime object; copying, equality and text come from derives and refusal marks.",
+          "technical": "Replaces table rows with a marker any package may write. The runtime's clone and drop routines stay; the marker binds them by object name.",
+          "code": "// core.files: a marker names the runtime object; facts still come from derives\n#Runtime(\"JetFileReader\")\n#!Copyable\nFileReader: struct { path: String }\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (E), not built. Any package may use #Runtime on a runtime object it can reach."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "OwnedFd is an ordinary struct; Drop closes it and try_clone duplicates it explicitly.",
+          "code": "pub struct OwnedFd { fd: RawFd }\nimpl Drop for OwnedFd { fn drop(&mut self) { /* close */ } }"
+        },
+        {
+          "lang": "Swift",
+          "note": "FileHandle is an ordinary class; its identity is shared by reference.",
+          "code": "let h = FileHandle.standardInput\nlet g = h   // same handle"
+        },
+        {
+          "lang": "Go",
+          "note": "os.File is an ordinary struct holding a private pointer; copying a *File shares it.",
+          "code": "type File struct { *file }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives Core's carriers the rules every package uses, so no name carries privilege. It ends the disagreement between table and declaration. Every capability already has an ordinary form.",
+        "gains": [
+          "No compiler table, name test or prefix test.",
+          "One source of truth: the declaration a reader can see.",
+          "A package can write a carrier with Core's exact rules."
+        ],
+        "losses": [
+          {
+            "loss": "Porting 364 runtime objects whose state lives in raw allocations.",
+            "mitigation": "A generator writes the marks from the rows; per-object tests gate each deletion."
+          },
+          {
+            "loss": "One-owner carriers without cleanup wait for #!Copyable to be built.",
+            "mitigation": "It is already ratified; those rows stay until it lands."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a compiler-only table that can disagree with the declaration."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a marker and reverses D-HOST-LEAF1=E."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the name privilege c18 exists to remove."
+          },
+          {
+            "key": "E",
+            "reason": "E keeps routines the reader cannot see in the declaration."
+          }
+        ],
+        "tradeoff": "A porting job per runtime object, in return for one visible source of truth and no privileged names."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it, and BallotReview3 reviewed an earlier draft. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh ly run; outputs are in probes/ly/out. Count the rows of Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should a Core carrier's copy, equality and text come from its own declaration, so the compiler's handle table can go?",
+        "lesson": "Some Core types hold something the runtime made, such as an open file. The compiler must know whether such a value copies, compares and prints. This vote decides whether that lives in the type's declaration or in a hidden table.",
+        "trio": {
+          "current": {
+            "note": "A table row, found by name.",
+            "code": "IRRuntimeHandle{jet_name: \"StdinHandle\", clone: false, eq: false, ...}\n// yet stdin().copy() == stdin() prints true"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An ordinary struct with Drop.",
+            "code": "pub struct OwnedFd { fd: RawFd }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Declaration",
+            "gist": "Fields, Close and refusal marks give every fact.",
+            "gains": [
+              "No table.",
+              "One source of truth."
+            ],
+            "losses": [
+              "Porting per runtime object."
+            ],
+            "proposed": {
+              "code": "FileReader: struct {\n    path: String\n    priv handle: rt.FileHandle   // Close: one owner\n}\n#!Equatable\nCursor: struct { priv bytes: [U8], priv position: Int }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Exact rows",
+            "gist": "The table stays, keyed by declaration.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "A second source of truth."
+            ],
+            "proposed": {
+              "code": "IRRuntimeHandle{jet_name: \"<corelib>/core.files::FileReader\", ...}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "#Handle",
+            "gist": "Import C handles with a new marker.",
+            "gains": [
+              "Binds C handles."
+            ],
+            "losses": [
+              "Reverses HOST-LEAF1."
+            ],
+            "proposed": {
+              "code": "#Handle(drop: jet_rt_handle_drop_jet_file_reader)\nJetFileReader: type"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today",
+            "gist": "Name and prefix tests stay; c18 revised.",
+            "gains": [
+              "No work."
+            ],
+            "losses": [
+              "Names carry privilege."
+            ],
+            "proposed": {
+              "code": "// BuildTypes.jet keeps its <corelib>/ tests"
+            }
+          },
+          {
+            "key": "E",
+            "name": "#Runtime",
+            "gist": "A marker names the runtime object.",
+            "gains": [
+              "Keeps routines."
+            ],
+            "losses": [
+              "Hidden routines."
+            ],
+            "proposed": {
+              "code": "#Runtime(\"JetFileReader\")\n#!Copyable\nFileReader: struct { path: String }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives Core's carriers the rules every package uses, with one visible source of truth.",
+          "gains": [
+            "No table.",
+            "One source of truth."
+          ],
+          "losses": [
+            {
+              "loss": "Porting per runtime object.",
+              "mitigation": "Marks generated from rows; tests gate each deletion."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second source of truth."
+            },
+            {
+              "key": "C",
+              "reason": "Reverses HOST-LEAF1."
+            },
+            {
+              "key": "D",
+              "reason": "Names carry privilege."
+            },
+            {
+              "key": "E",
+              "reason": "Hidden routines."
+            }
+          ],
+          "tradeoff": "Porting work, for one visible source of truth."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:47:02.695Z"
+    },
+    {
+      "id": "D-DATA-EVOLVE1",
+      "cardId": "c0oev2ib",
+      "group": "language",
+      "title": "One migration block is the only description of a type's history, used for stored data, messages, live reload, database rows and service handoff",
+      "situation": "Jet's migration block already moves old stored data: on seed a0_042, decoding old JSON with name gives display_name. D-LIVE-PERSIST1=A runs the same steps on live state. Two ratified designs describe their own step: D-DB-SCHEMA1=A's declared step for tables and D-SERVICE-UPGRADE1=D's typed migrate function.\n\nNeither of those two is built yet. This ballot decides whether both read the migration block.",
+      "gist": "Should the migration block be the only description of a type's history, including database tables and service handoff?",
+      "lesson": "When a type changes, old copies of it still exist: in files, in messages, in a running program and in a database. This vote decides whether one written migration moves all of them. The alternative is one migration per place.",
+      "explainer": "Words used here. A migration says how an old shape of a type becomes the new one. A service handoff moves a running service's state to its next version. Reversible means the step can be undone.",
+      "story": "Omar renames a field on a published record. Under A, the one migration line updates old files, old messages, his live dev session, the table and the service handoff.",
+      "inWild": "// Protocol Buffers keep one schema history for disk and wire:\nreserved 2; reserved \"name\";",
+      "detail": "What this ballot decides. Whether D-DB-SCHEMA1=A's declared step and D-SERVICE-UPGRADE1=D's migrate function are both the migration block. Disk, wire and live state already share it.\n\nToday, on seed a0_042. Probe d01 declares UserRecord with migration rename name -> display_name. It decodes old JSON with a name field and prints user: Ana, age: 30. That is D-MIGRATE4=A's chain in decode.\n\nCensus on the seed. 15 files hold a migration block. No Examples file uses #Table, and no Jet source names ForwardOnly or DualWrite. So the database and service halves are not built.\n\nWhat must exist first. D-DB-SCHEMA1=A's #Table records and D-SERVICE-UPGRADE1=D's generation handoff. A decides only what they read when they are built.\n\nWhat A does for tables. A #Table record that is also #PublishedSchema takes its schema steps from its migration block. A rename becomes a column rename and an added field with a default becomes a column with that default.\n\nA removal drops the column, and a change via a converter rewrites each row. D-DB-SCHEMA1=A's derived migration is printed from the block and still reviewed.\n\nWhat A does for services. D-SERVICE-UPGRADE1=D's migrate function is generated from the block, and each step gets that decision's class. A rename or an added field with a default is Reversible, with its inverse generated.\n\nA removal, or a change with only a forward converter, is ForwardOnly. A change becomes Reversible when the block also writes a back converter, for example change score: Int -> MemberRank via { .. } back { .. }.\n\nRatified decisions. A keeps D-MIGRATE1 to D-MIGRATE4, D-LIVE-PERSIST1=A, D-BOUND-EVOLVE1=A and D-SELFVER1=A. It fills in D-DB-SCHEMA1=A's declared step and D-SERVICE-UPGRADE1=D's migrate function without changing their outcomes. The back converter is a new clause of the block.\n\nBeginner path. A beginner writes one migration line and every place follows. Expert path. jet inspect schema status, which exists today for saved schema versions, would also list tables and services, and the back converter turns a forward-only step into a reversible one.\n\nDownsides of A, and what the design does about them. A table or service may need a step the block cannot say, such as a backfill from another table. Such steps stay ordinary code that D-DB-SCHEMA1=A already allows, listed after the block's steps.\n\nWhat remains. The block gains one clause, back, used only when a team wants rollback.\n\nOther options. B lets each place keep its own step, as ratified today. C shares the block for tables but keeps the service's own migrate function. D replaces the block with ordinary conversion functions between versioned types.\n\nTheir best cases. B lets each design pick its best form. C covers the common database case with no service coupling. D needs no special syntax. Their costs: B writes one rename up to three times. C still writes it twice for services. D reverses the ratified migration block and makes every old version a type to keep.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One block everywhere",
+          "detail": "Tables and service handoff read the migration block, beside decode and live reload.",
+          "technical": "#Table steps derived from the block; D-SERVICE-UPGRADE1=D's migrate function generated from it, with rename and default-add Reversible, removal and forward-only change ForwardOnly, and a new back converter clause. Needs #Table and generation handoff built first.",
+          "code": "#PublishedSchema UserRecord: struct {\n    display_name: String\n    age: Int\n}\n\nmigration UserRecord {\n    rename name -> display_name\n}\n// Today (probe d01): old JSON with name decodes; prints user: Ana, age: 30.\n// Proposed (A): the same line renames the column and is a Reversible\n// service step, with its inverse generated."
+        },
+        {
+          "key": "B",
+          "name": "Each place its own step",
+          "detail": "Tables and services describe their own steps, as ratified today.",
+          "technical": "No change to the ratified designs.",
+          "code": "#PublishedSchema UserRecord: struct {\n    display_name: String\n    age: Int\n}\n\nmigration UserRecord {\n    rename name -> display_name\n}\n// Proposed (B): also a table step and a service migrate function."
+        },
+        {
+          "key": "C",
+          "name": "Shared with tables only",
+          "detail": "Tables read the block; services keep their own migrate function.",
+          "technical": "A's table half only.",
+          "code": "#PublishedSchema UserRecord: struct {\n    display_name: String\n    age: Int\n}\n\nmigration UserRecord {\n    rename name -> display_name\n}\n// Proposed (C): the table follows; the service writes its own step."
+        },
+        {
+          "key": "D",
+          "name": "Conversion functions",
+          "detail": "Each old version is a type, and a plain function converts it.",
+          "technical": "Reverses the D-MIGRATE ladder's migration block.",
+          "code": "UserRecordV1: struct { name: String, age: Int }\nupgrade: fn(old: UserRecordV1) -> UserRecord {\n    UserRecord{display_name: old.name, age: old.age}\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Protocol Buffers",
+          "note": "One schema history serves disk and wire.",
+          "code": "reserved 2;"
+        },
+        {
+          "lang": "Elixir",
+          "note": "Hot upgrades write a separate code_change callback.",
+          "code": "def code_change(_old, state, _extra)"
+        },
+        {
+          "lang": "Rails",
+          "note": "Table migrations are their own files.",
+          "code": "rename_column :users, :name, :display_name"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One written migration moves every copy of a type. Tables and service handoff are not built yet, so they can read the block at no cost to existing code.",
+        "gains": [
+          "One rename, written once.",
+          "Rollback class read from the block.",
+          "No new syntax beyond back."
+        ],
+        "losses": [
+          {
+            "loss": "Some table steps cannot be said in the block.",
+            "mitigation": "Ordinary steps run after the block's steps, as D-DB-SCHEMA1=A allows."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B writes one rename up to three times."
+          },
+          {
+            "key": "C",
+            "reason": "C still writes service steps twice."
+          },
+          {
+            "key": "D",
+            "reason": "D reverses the ratified migration block."
+          }
+        ],
+        "tradeoff": "One block that every place must read, for a type's history written once."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run jet run d01_decode.jet in $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/de. Then read Examples/Data/Migrations/run.jet for the block's other steps. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should the migration block be the only description of a type's history, including database tables and service handoff?",
+        "lesson": "When a type changes, old copies of it still exist: in files, in messages, in a running program and in a database. This vote decides whether one written migration moves all of them. The alternative is one migration per place.",
+        "trio": {
+          "current": {
+            "note": "Old JSON already decodes through the block.",
+            "code": "migration UserRecord { rename name -> display_name }"
+          },
+          "wild": {
+            "lang": "Rails",
+            "note": "Tables need their own file.",
+            "code": "rename_column :users, :name, :display_name"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One block",
+            "gist": "Every place reads the block.",
+            "gains": [
+              "Written once.",
+              "Rollback class known."
+            ],
+            "losses": [
+              "Some steps need code."
+            ],
+            "proposed": {
+              "code": "rename name -> display_name"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Per place",
+            "gist": "Each place has its own step.",
+            "gains": [
+              "Best form each."
+            ],
+            "losses": [
+              "Written three times."
+            ],
+            "proposed": {
+              "code": "// block, table step, service step"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Tables too",
+            "gist": "Tables share; services do not.",
+            "gains": [
+              "Common case covered."
+            ],
+            "losses": [
+              "Services write twice."
+            ],
+            "proposed": {
+              "code": "// block and service step"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Functions",
+            "gist": "Convert old types with functions.",
+            "gains": [
+              "No special syntax."
+            ],
+            "losses": [
+              "Reverses the block."
+            ],
+            "proposed": {
+              "code": "upgrade: fn(old: UserRecordV1) -> UserRecord"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One written migration moves every copy, and the unbuilt places can simply read it.",
+          "gains": [
+            "Written once.",
+            "Rollback class known."
+          ],
+          "losses": [
+            {
+              "loss": "Some steps need code.",
+              "mitigation": "Ordinary steps run after the block."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Written three times."
+            },
+            {
+              "key": "C",
+              "reason": "Services write twice."
+            },
+            {
+              "key": "D",
+              "reason": "Reverses the block."
+            }
+          ],
+          "tradeoff": "One block for every place, for history written once."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T03:47:06.337Z"
     }
   ],
   "questions": [
@@ -191579,6 +193104,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T03:47:06.337Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DATA-EVOLVE1",
+      "note": "One migration block is the only description of a type's history, used for stored data, messages, live reload, database rows and service handoff"
+    },
+    {
+      "at": "2026-11-10T03:47:04.509Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CORE-LOWER1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-10T03:47:02.695Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-LAYOUT1",
+      "note": "Runtime carriers are ordinary declarations, and the compiler's handle table goes"
+    },
+    {
+      "at": "2026-11-10T03:47:00.904Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-LAYERS1",
+      "note": "Core loads a trait implementation only when a program reaches both its type and its trait, and Core's modules sit in checked layers"
+    },
+    {
+      "at": "2026-11-10T03:46:59.133Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMPREHEND1",
+      "note": "A typed collection head takes a loop and builds that collection directly: Set<String>{loop …}, [String:Int]{loop … -> k: v}"
+    },
+    {
+      "at": "2026-11-10T03:46:57.346Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CLI-EVAL1",
+      "note": "One-liners move under their own verb, jet eval, with every power of today's jet -e"
+    },
+    {
+      "at": "2026-11-10T03:46:55.494Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-API-SURFACE1",
+      "note": "Every jet check compares a package's public surface, effects and errors included, with its committed API file, and publish computes the version"
+    },
+    {
+      "at": "2026-11-10T03:46:53.621Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ALLOC-FAIL1",
+      "note": "One spelling per allocating operation; failure is an error value where the code handles it or its contract names AllocError"
+    },
+    {
+      "at": "2026-11-10T03:46:45.948Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-10T03:36:10.849Z",
       "by": "Main",
