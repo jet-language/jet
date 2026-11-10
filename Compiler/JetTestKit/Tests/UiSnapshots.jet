@@ -292,6 +292,11 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(a11y.argv, ["lint", "--a11y", "tests/ui_lint/a11y.jet"])
     assert_eq(a11y.exit, "nonzero")
     assert_eq(a11y.streams, "rendered")
+    // `@style_cli` runs the opt-in style checks; a lint fixture keeps the lint stream.
+    style: kit_ui_invocation("// @style_cli\n", "tests/ui_lint/impl_placement.jet", true)
+    assert_eq(style.argv, ["check", "--style", "tests/ui_lint/impl_placement.jet"])
+    assert_eq(style.exit, "any")
+    assert_eq(style.streams, "lint")
     files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
 }
 

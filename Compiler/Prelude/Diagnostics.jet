@@ -4832,6 +4832,22 @@ MapGroupRoundTrip: struct {
     }
 }
 
+DetachedImpl: struct {
+    head: String
+    type_name: String
+
+    impl Diagnostic {
+        code: "L0535"
+        severity: .Lint
+        lint_name: "detached_impl"
+        stage: [.Tooling]
+        meaning: "A top-level impl of a struct or enum the same file declares (`jet check --style`)"
+        what: fn(self) -> String { "`impl {self.head}` sits outside the body of `{self.type_name}`" }
+        why: fn(self) -> String { "`{self.type_name}` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else" }
+        fix: fn(self) -> String { "Move it into the body of `{self.type_name}`: its methods as `fn` members, a trait impl as a nested `impl Trait {{ … }}`" }
+    }
+}
+
 SoftPublicUse: struct {
     name: String
 

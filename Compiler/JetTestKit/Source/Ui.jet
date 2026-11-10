@@ -53,6 +53,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet lint --a11y` is the only surface of E2930/E2931 and exits
         // nonzero when it finds one (syntax-decisions.md:3891).
         {name: "a11y_cli", argv: ["lint", "--a11y", "$file"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jet check --style` is the only surface of the opt-in style lints
+        // (impl placement, L0535).
+        {name: "style_cli", argv: ["check", "--style", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
         {name: "command_override_conflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},

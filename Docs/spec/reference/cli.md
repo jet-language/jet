@@ -619,13 +619,13 @@ by `jet Tools/agent/CoreSourceRows.jet` (which also lists the Core assets in
 `jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 
-`jet check Core`, aimed at that toolchain's `Core/` directory, checks the
-whole Core library: one compile imports every public Core module and checks
-every function body, whether a program calls it or not. A lint in Core
-source is not reported, nor one in a codec body the compiler generates for a
-Core type. Any other `jet check` loads and checks only the Core declarations
-its program can name; `JET_KEEP_GOING=1` loads and checks every declaration
-of each Core module the program imports.
+`jet check Core`, aimed at that toolchain's `Core/` directory, checks the whole
+Core library: one compile imports every public Core module and checks every
+function body, whether a program calls it or not. A lint in Core source is not
+reported, nor one in a codec body the compiler generates for a Core type. Any
+other `jet check` loads and checks only the Core declarations its program can
+name; `JET_KEEP_GOING=1` loads and checks every declaration of each Core module
+the program imports. `jet check --style` adds the opt-in style lints (L0535).
 
 Source snapshots enumerate held no-follow directories and read each source or
 foreign cache through one bounded opened file. File identities include the

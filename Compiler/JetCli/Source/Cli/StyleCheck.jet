@@ -1,0 +1,79 @@
+// `jet check --style`: the opt-in style checks, off by default. Impl
+// placement (L0535, #6561) is the first: a struct or enum holds its own
+// impls, so a top-level `impl T` or `impl T.Trait` in the file that declares
+// `T` is flagged unless one of the lint's exception rules applies.
+use {
+    jet_driver.[JetDriverAuthorizedSourceSnapshot]
+    jet_foundation.[Diagnostic, ImplDef, Item, Program, Span, diagnostic_from_registry, diagnostic_with_source_path]
+    jet_parser.[parse_source]
+}
+
+// Why a top-level impl stays outside its type's body. Two exceptions need no
+// rule here: a type declared in another file, module or package (a) has no
+// body in this file, and an error conversion `impl A -> B` (b) parses as its
+// own item, never an impl. The body holds every other impl form, `using`
+// delegation and operator impls included, so no rule names a form the body
+// cannot hold.
+JetCLIImplPlacementRule: enum {
+    // (c) `impl X.Client` or `impl X.Server`: a protocol side.
+    ProtocolSide
+    // (d) `#Target(OS.…)`: an impl for one target.
+    TargetSpecific
+    // (e) an impl a derive writes; a generated source file is never read.
+    Generated
+    // (g) an inherent impl with its own markers, which in the body would
+    // become the type's markers.
+    MarkedInherent
+}
+
+// The impl placement findings of every source file of the entry root the
+// check admitted, each on its own file. A file that does not parse is left to
+// the check's own report.
+jet_cli_style_diagnostics: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Diagnostic] Never! {
+    found := [Diagnostic]{}
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        loop file in root.files {
+            if !file.path.ends_with(".jet") -> next
+            parsed: parse_source(file.source.bytes())
+            if jet_cli_errors(parsed.diagnostics).len() > 0 -> next
+            loop diagnostic in jet_cli_impl_placement_lints(parsed.program) -> found.push(diagnostic_with_source_path(diagnostic, file.path, 0))
+        }
+    }
+    found
+}
+
+// L0535 for each top-level impl of a struct or enum the same program
+// declares that no exception rule keeps outside the body.
+jet_cli_impl_placement_lints: fn(program: Program) -> [Diagnostic] Never! {
+    declared := [String:Bool]{}
+    loop item in program.items {
+        if item == {
+            .Struct(value) -> declared[value.name] = true
+            .Enum(value) -> declared[value.name] = true
+            else -> {}
+        }
+    }
+    found := [Diagnostic]{}
+    loop item in program.items {
+        if item == .Impl(value) {
+            if !declared.has_key(value.type_name) || jet_cli_impl_placement_exception(value) != None -> next
+            head: if value.trait_name == .Val(name) -> "{value.type_name}.{name}" else -> value.type_name.copy()
+            span: Span{start: value.span.start, end: (value.trait_span ?? value.type_span).end}
+            found.push(diagnostic_from_registry("L0535", Val(span), "`impl {head}` sits outside the body of `{value.type_name}`", "`{value.type_name}` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else", "Move it into the body of `{value.type_name}`: its methods as `fn` members, a trait impl as a nested `impl Trait {{ … }}`"))
+        }
+    }
+    found
+}
+
+// The exception rule that keeps `value` outside its type's body, if any.
+jet_cli_impl_placement_exception: fn(value: ImplDef) -> JetCLIImplPlacementRule? Never! {
+    if value.type_name.ends_with(".Client") || value.type_name.ends_with(".Server") -> return Val(JetCLIImplPlacementRule.ProtocolSide)
+    if value.os_target != None -> return Val(JetCLIImplPlacementRule.TargetSpecific)
+    loop marker in value.markers {
+        if marker.name == "Target" -> return Val(JetCLIImplPlacementRule.TargetSpecific)
+    }
+    if value.is_generated_serde -> return Val(JetCLIImplPlacementRule.Generated)
+    if value.trait_name == None && value.markers.len() > 0 -> return Val(JetCLIImplPlacementRule.MarkedInherent)
+    None
+}

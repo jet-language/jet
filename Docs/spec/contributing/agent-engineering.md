@@ -41,6 +41,10 @@ An unused declaration is not automatically dead code. Trace callers, generated
 uses, and approved Tower scope before deleting it. Conversely, a historical
 plan is not a reason to retain machinery that has no caller or contract.
 
+## Keep impls in their type
+
+A struct or enum holds its own impls; `jet check --style` flags a detached one (L0535).
+
 ## Keep verification honest
 
 Use the actual CLI or UI path, not only a helper that resembles it. Canvas
