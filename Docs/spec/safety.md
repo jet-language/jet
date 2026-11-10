@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1411,
+  "total": 1414,
   "counts": {
     "Compiler": 749,
-    "Core": 164,
+    "Core": 167,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -1191,14 +1191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1671,
+      "line": 1700,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2078,
+      "line": 2107,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
@@ -5517,49 +5517,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 646,
+      "line": 648,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1187,
+      "line": 1189,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1214,
+      "line": 1216,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1522,
+      "line": 1524,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1620,
+      "line": 1622,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1629,
+      "line": 1631,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1635,
+      "line": 1637,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -6381,6 +6381,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 3756,
       "column": 5,
       "reason": "timing runs on test keys and nonces, each used for its run only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3801,
+      "column": 5,
+      "reason": "test keys and nonces, each used for this run only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3806,
+      "column": 1,
+      "reason": "`r` draws test keys and nonces, each used for this run only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Net/SSL/TLS.jet",
+      "line": 3835,
+      "column": 5,
+      "reason": "test keys and nonces, each used for this run only"
     },
     {
       "package": "Core",
@@ -10108,13 +10129,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 749 |
-| Core | 164 |
+| Core | 167 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 8 |
 | tests | 432 |
-| **total** | **1411** |
+| **total** | **1414** |
 
 ### Regions
 
@@ -10258,8 +10279,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2347:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2355:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2363:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1671:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2078:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1700:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2107:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10876,13 +10897,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Crypto.jet | 293:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
 | Core | Core/Crypto/Crypto.jet | 298:5 | "vault key import: construct the typed recipient unlock request" |
 | Core | Core/Crypto/Crypto.jet | 303:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 646:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1187:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1214:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1522:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1620:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1629:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1635:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 648:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1189:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1216:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1524:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1622:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1631:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1637:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -11000,6 +11021,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 3738:1 | "`seed` is a timing run's test key, used for that run only" |
 | Core | Core/Net/SSL/TLS.jet | 3740:5 | "a timing run's test key, used for that run only" |
 | Core | Core/Net/SSL/TLS.jet | 3756:5 | "timing runs on test keys and nonces, each used for its run only" |
+| Core | Core/Net/SSL/TLS.jet | 3801:5 | "test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 3806:1 | "`r` draws test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 3835:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
