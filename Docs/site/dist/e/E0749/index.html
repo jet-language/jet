@@ -36,16 +36,17 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/crypto_expert_nonce_effect_prohibition_precedence.stderr</code>.</p>
-<pre class="diag">Error [jet.ProhibitedEffectReached]: `protect` reaches the `IO` effect, which it prohibits with `-[!IO]&gt;`
-  --&gt; tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:9:18
+<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/c_import_reaches_past_allow_row_listing_ffi_c.stderr</code>.</p>
+<pre class="diag">Error [jet.ProhibitedEffectReached]: `c_import_reaches_past_allow_row_listing_ffi_c::run` reaches the `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time` effect, which the package&#39;s `authority: { allow: […] }` row doesn&#39;t list
+  --&gt; tests/ui/c_import_reaches_past_allow_row_listing_ffi_c.jet:12:1
     |
-  9 | protect: fn() -[!IO]&gt; Int {
-    |                  ^^
- Why: A `-[!IO]&gt;` row means the function and every callee it can reach must not use `IO`
- Fix: Remove the call that introduces `IO`, or drop the `-[!IO]&gt;` prohibition
+ 12 | run: fn() {
+    | ^^^
+ Why: A written `allow` row is a ceiling: the package&#39;s code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)
+ Fix: Add `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time` to `authority.allow`, or remove the call that reaches it
+ Note: `c_import_reaches_past_allow_row_listing_ffi_c::run` calls a C binding no descriptor owns; the checker cannot see its body, so the call reaches every effect
  Denial: invocation
- Call chain: protect
+ Call chain: c_import_reaches_past_allow_row_listing_ffi_c::run
 More: jet-lang.dev/e/E0749
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
