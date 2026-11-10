@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98882,
+    "rev": 98883,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76050,7 +76050,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T16:38:20.454Z",
+      "updated": "2026-11-10T16:43:38.857Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -195022,27 +195022,27 @@
       "explainer": "Words used here. A place is another process or machine that can run work. Encodable means a value can be turned into bytes and back. A grant is an effect a place allows.",
       "story": "Sam's app renders thumbnails. Under A, worker.run(render, job) sends each job to a render machine. The build refuses a job that needs files the machine does not grant.",
       "inWild": "// Ray sends a function and its arguments to a cluster worker:\nresult = area.remote(job)",
-      "detail": "What this ballot decides. Whether one task can run at another place, and which rules the build checks. Transport, discovery and identity come from D-SERVICE-IDENTITY1=D and are not reopened.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Probe t01 runs task area(job) and prints area 42, wire {\"width\":6,\"height\":7}. Probe t02 runs a task on Shared<Hits> and prints hits 1. Both run in this process only.\n\nProbe t03 is new. A top-level function with a plain Int argument and result changes a module-level shared holder, and prints bumped 5, hits 5. It passes the draft's four rules, yet its state cannot cross.\n\nWhat must exist first. A Place type in core.tasks backed by D-SERVICE-IDENTITY1=D's typed endpoint capabilities, and a transport for them. Neither exists on dev; Core declares no Place type. A says what the build checks once they do.\n\nWhat A does. place.run(area, job) returns a task handle with the same join and detach as task area(job). Only its failure type is wider, as described below. The build checks five rules before it allows the call.\n\nFirst, the function is top-level, so it has no hidden captures. That excludes today's task { … } block form, as in Examples/Concurrency/FreezeCapture.jet. Second, every argument and the result encode, as Job does in t01. Third, no argument holds Shared, Pool IDs, handles or other process-tied state, so t02's form is refused.\n\nAn argument with an unpaid D-OWES1 duty is refused too, since the duty could not be paid here once the value leaves.\n\nFourth, the function and everything it calls read and write no module state. That covers module variables, module-level shared holders and #Persist values, so t03's bump is refused. Module constants are part of the code and may be read.\n\nThis is checked like the effect row, over the same call graph, and the refusal names the first line that touches module state.\n\nFifth, the function's effect row is covered by the place's grants. The place's type carries those grants, as a typed endpoint capability does under D-SERVICE-IDENTITY1=D. Effects act on the place's own resources: a file written there is the place's file.\n\nSame code. The call carries the identity of the build it came from. A place running a different build refuses the call with PlaceMismatch, so no task runs against code it was not checked with.\n\nFailure is typed, never a hidden retry. TaskFailure is closed: Cancelled, DeadlineBlown and Panicked (CoreEnumPayloadRows.jet:22-24). Probe t05 drops the Panicked arm and gets E0307, so a new case would break every full match, as in t04.\n\nSo a moved task's join fails with PlaceFailure: Task carries the TaskFailure from the place, Lost means unreachable and Mismatch means another build. Local tasks keep TaskFailure unchanged, and join() ?? default reads the same in both forms. That matches D-SERVICE-IDENTITY1=D's typed partition results.\n\nRatified decisions. A keeps D-SERVICE-IDENTITY1=D and D-ACTOR1=A unchanged, and uses the sendability rules tasks already follow. Actors can later place their task the same way.\n\nBeginner path. A beginner keeps writing task f(x); nothing changes. Expert path. Swap task for place.run, and the build lists each of the five rules a function breaks, with its line.\n\nDownsides of A, and what the design does about them. A moved task pays encoding and network time. The handle keeps join and detach, so measuring both forms is a one-word change; only a full failure match adds two arms.\n\nWhat remains. A top-level function rule refuses closures that would be convenient. Captured values become arguments, which the encode rule can then check.\n\nOther options. B keeps tasks local; remote work goes through typed service endpoints. C also moves closures whose captures encode, as Unison does. D places actors, not tasks, as Erlang and Akka do.\n\nTheir best cases. B adds nothing. C is the most convenient. D fits long-lived state. Their costs: B needs a service for every remote job. C hides what crosses the wire inside a closure. D makes one-shot work carry an actor's protocol.",
+      "detail": "This vote chooses remote task placement, not a second discovery or transport system. A must lower to the typed endpoint mechanism ratified by D-SERVICE-IDENTITY1=D.\n\nReran t01-t05 on a0.0.43. Plain jobs and Shared state run locally; a top-level function reaches module state through a helper. The complete TaskFailure match succeeds and the incomplete one is E0307. None of these probes executes a remote task or proves remote grants.\n\nA admits a top-level function with sendable, encodable and decodable inputs and result. Encoding alone is insufficient: reject nested process handles, pointers, Shared state and unpaid ownership duties in either direction. User codecs must not smuggle process identity. Capture-free syntax does not imply state-free behavior.\n\nCheck the complete reachable call graph for module state, including indirect calls, callbacks and foreign edges. Unknown reach is refused unless accepted evidence establishes the same rule. Immutable constants are allowed only when their reachable values are portable. The rule includes library calls; it grants no Core-only exemption. Stateful jobs use explicit endpoint capabilities, not copied hidden state.\n\nA place's typed grant is an upper bound, not perpetual authorization. Recheck authenticated directory generation, freshness, revocation and current authority at dispatch using the existing service law. Effects act on the remote place's resources; moving a file operation changes which file it reaches. This is not transparent location equivalence.\n\nIdentify a job by its checked code closure, target/ABI requirements and wire schema, not a bare source name or host-specific binary hash. A mismatch is refused before user code executes. Unsupported targets and decoder failures are typed failures, not backend errors or silent coercion.\n\nPlaceFailure wraps TaskFailure and preserves service failures, including partition, stale directory and revocation. It also reports mismatch and codec failure. Lost means the outcome may be unknown: work might have executed before the reply was lost. Never automatically retry an invocation. The caller must not infer rollback or exactly-once effects from a failed join.\n\nRemote cancellation is a request until acknowledged. The remote invocation remains bounded by its inherited deadline and server lifetime; local handle loss does not authorize an unbounded orphan. Detach follows the existing task ownership and observation rules. Keep local TaskFailure unchanged, but do not promise source-equivalent exhaustive matches: remote errors are nested and wider.\n\nB can use one typed job-runner endpoint for many request shapes, with a clear operational boundary. C can make captures explicit and inspectable; closure syntax is not inherently unauditable. D fits long-lived state. A is a convenience layer over those endpoints, with the real costs of serialization, remote resource authority, lifecycle management and uncertain outcomes.",
       "options": [
         {
           "key": "A",
           "name": "Move a top-level task",
           "detail": "place.run(f, args) runs a top-level function elsewhere when its inputs, result, module-state use and effects fit.",
-          "technical": "core.tasks Place over D-SERVICE-IDENTITY1=D endpoints. Build checks: top-level function, encodable arguments and result, no process-tied state or unpaid duty. It also checks no module state in the call graph, and an effect row the place's grants cover.\n\nThe call carries its build identity. A moved join fails with PlaceFailure (Task, Lost, Mismatch); TaskFailure and local matches are unchanged.",
-          "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Today (probe t01): task area(job) prints area 42, in this process.\n// Proposed (A): t: render_box.run(area, job); t.join() works the same.\n// A Shared<Hits> argument, or a function that touches module state (probe t03), is refused before the program runs."
+          "technical": "One typed-endpoint adapter, not another transport. Check complete reachable state/effect and value portability, with Encode and Decode in both directions. Revalidate service freshness/revocation at dispatch. Preserve TaskFailure inside PlaceFailure with service, mismatch, codec and uncertain-outcome information; no automatic retry. Bound remote lifetime and cancellation through existing task deadlines.",
+          "code": "Job: struct {\n    width: Int\n    height: Int\n}\narea: fn(job: Job) -> Int { job.width * job.height }\n// Local probe t01 prints area 42.\n// Proposed remote call: t: render_box.run(area, job)\n// t.join() has a wider, nested remote failure type.\n// No remote call was run by these probes."
         },
         {
           "key": "B",
           "name": "Tasks stay local",
           "detail": "Remote work goes through typed service endpoints only.",
           "technical": "No change.",
-          "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Today (B): run area behind a service endpoint and call it."
+          "code": "// B proposal: keep remote jobs behind one typed job-runner endpoint.\n// Several request shapes may share that endpoint and deployment.\n// Local task area(job) remains unchanged."
         },
         {
           "key": "C",
           "name": "Move closures too",
           "detail": "Any closure whose captures encode may move.",
-          "technical": "A's rules, with captures checked instead of a top-level function.",
+          "technical": "A's complete portability and authority checks apply to the closure's code and explicit capture list. Tooling shows the exact wire payload; this can be auditable, not inherently hidden.",
           "code": "Job: struct {\n    width: Int\n    height: Int\n}\n\narea: fn(job: Job) -> Int {\n    job.width * job.height\n}\n// Proposed (C): render_box.run(fn() -> Int { area(job) })"
         },
         {
@@ -195073,7 +195073,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "The task rules Jet already checks, plus encoding and grants, decide what may move. The handle keeps join and detach, so local and remote are one word apart.",
+        "why": "A offers a task-shaped adapter over the existing typed endpoint mechanism. It must preserve service authority and uncertain outcomes rather than promise local-task equivalence.",
         "gains": [
           "Remote work keeps the task handle.",
           "The build checks grants before running.",
@@ -195082,7 +195082,7 @@
         "losses": [
           {
             "loss": "A moved task pays encoding and network time.",
-            "mitigation": "The same handle makes measuring both forms a one-word change."
+            "mitigation": "Keep familiar join/detach operations, but measure matched local and remote workloads; a similar spelling does not reduce transport cost."
           },
           {
             "loss": "Closures cannot move.",
@@ -195090,17 +195090,17 @@
           },
           {
             "loss": "A moved task's join has a wider failure type.",
-            "mitigation": "join() ?? default reads the same; only a full match adds the Lost and Mismatch arms."
+            "mitigation": "Keep local TaskFailure unchanged and show the nested remote error type. Full matches must handle service, task, mismatch, codec and uncertain outcomes."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B needs a service for every remote job."
+            "reason": "B can share one job-runner endpoint across jobs; A removes some request-wrapper boilerplate without replacing that service mechanism."
           },
           {
             "key": "C",
-            "reason": "C hides what crosses the wire."
+            "reason": "Explicit captures can be audited. A uses ordinary arguments and limits its remote-code admission surface."
           },
           {
             "key": "D",
@@ -195114,62 +195114,62 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Adding PlaceLost and PlaceMismatch to the closed TaskFailure would break full matches (probe t05: E0307), so A now gives moved joins their own PlaceFailure. The top-level rule's exclusion of task { … } blocks is now stated."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Reran t01-t05 and corrected Encode-only portability, missing service failures, unknown outcomes, revocation, remote cancellation and unfair service/closure comparisons."
       },
       "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-TASK-MOVE1/probes for t01 to t05. TaskFailure's cases are in Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet:22-24. The case-name count uses git grep -l on dev.",
       "surface": {
-        "gist": "Should a task whose inputs and result encode be able to run at another place, checked against that place's grants?",
-        "lesson": "A task is a piece of work that runs beside the rest of the program. Some work could just as well run on another machine. This vote decides whether Jet lets you send a task there, and what it checks first.",
+        "gist": "Should checked portable tasks run remotely through the existing typed service endpoints?",
+        "lesson": "Sending work to another machine also changes its resources, failure modes and lifetime. A uses task-shaped calls over the service mechanism, with explicit portability and authority checks. Local tasks stay unchanged.",
         "trio": {
           "current": {
-            "note": "Tasks run in this process only.",
-            "code": "t: task area(job)   // area 42"
+            "note": "The exercised tasks run locally only.",
+            "code": "t: task area(job)\nt.join()"
           },
           "wild": {
             "lang": "Ray",
-            "note": "Send the function to a worker.",
+            "note": "Remote functions run on worker processes.",
             "code": "area.remote(job)"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Move a task",
-            "gist": "Top-level task runs elsewhere.",
+            "name": "Top-level tasks",
+            "gist": "Task-shaped calls over typed service endpoints.",
             "gains": [
-              "Same handle.",
-              "Grants checked."
+              "Familiar join and detach."
             ],
             "losses": [
-              "Network cost."
+              "Wider failures and uncertain outcomes.",
+              "Wire and remote lifecycle costs."
             ],
             "proposed": {
-              "code": "t: render_box.run(area, job)"
+              "code": "render_box.run(area, job)"
             }
           },
           {
             "key": "B",
-            "name": "Local only",
-            "gist": "Use a service instead.",
+            "name": "Service jobs",
+            "gist": "Use a shared typed job-runner service.",
             "gains": [
-              "Nothing new."
+              "Explicit operational boundary."
             ],
             "losses": [
-              "A service per job."
+              "Request and response wrappers."
             ],
             "proposed": {
-              "code": "// call a service endpoint"
+              "code": "jobs.call(request)"
             }
           },
           {
             "key": "C",
-            "name": "Closures too",
-            "gist": "Move any encodable closure.",
+            "name": "Explicit closures",
+            "gist": "Check code and written captures for portability.",
             "gains": [
-              "Most convenient."
+              "Convenient explicit captures."
             ],
             "losses": [
-              "Hidden wire data."
+              "Additional remote-code admission surface."
             ],
             "proposed": {
               "code": "render_box.run(fn() -> Int { area(job) })"
@@ -195178,12 +195178,12 @@
           {
             "key": "D",
             "name": "Actors",
-            "gist": "Place actors, not tasks.",
+            "gist": "Place an actor with typed messages.",
             "gains": [
-              "Fits long state."
+              "Fits long-lived state."
             ],
             "losses": [
-              "Protocol for one-shots."
+              "Protocol ceremony for one-shot work."
             ],
             "proposed": {
               "code": "actor.spawn_at(render_box, AreaActor{})"
@@ -195192,32 +195192,31 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Existing task rules plus encoding and grants decide what may move, with the same handle.",
+          "why": "A is a convenience adapter over one service mechanism, not transparent local-task equivalence.",
           "gains": [
-            "Same handle.",
-            "Grants checked."
+            "Task-shaped remote calls."
           ],
           "losses": [
             {
-              "loss": "Network cost.",
-              "mitigation": "Measuring both forms is one word."
+              "loss": "Failure may leave an unknown outcome.",
+              "mitigation": "Report it explicitly; never retry automatically or promise rollback."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A service per job."
+              "reason": "A saves some request-wrapper boilerplate."
             },
             {
               "key": "C",
-              "reason": "Hidden wire data."
+              "reason": "Explicit captures are auditable but expand code admission."
             },
             {
               "key": "D",
-              "reason": "Protocol for one-shots."
+              "reason": "One-shot work needs an actor protocol."
             }
           ],
-          "tradeoff": "Top-level functions only, for checked remote work."
+          "tradeoff": "Convenience with explicit portability, authority and remote-failure limits."
         }
       },
       "draft": false,
@@ -195267,7 +195266,7 @@
             "Use D-SERVICE-IDENTITY1=D endpoints with a generated one-call service.",
             "Use a shared job-runner service with typed requests."
           ],
-          "result": "Reduced, not removed: a service per job shape remains."
+          "result": "A shared job-runner is a strong B design; a separate deployment per job is not required."
         },
         {
           "option": "C",
@@ -195276,7 +195275,7 @@
             "List captured values in the build report.",
             "Require captures to be written, as task &&owned { … } does."
           ],
-          "result": "Reduced; written captures are A's arguments under another spelling."
+          "result": "Explicit captures remove the hidden-payload objection; code identity and portability checking still add a surface cost."
         },
         {
           "option": "D",
@@ -200135,6 +200134,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:43:38.857Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TASK-MOVE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:41:16.659Z",
       "by": "Main",
