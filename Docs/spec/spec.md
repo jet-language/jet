@@ -768,6 +768,12 @@ earlier `if xs.len() != ys.len() -> return …` proved the same length. If the
 skipped code is not total (it calls, can stop, writes memory or loops on its
 own), the early return stays E0737. So does an early `break` or `continue`.
 
+A tag inside a type counts as the value's own. The elements' tag of
+`[#Secret U8]` or `[#Secret U8#4]`, an `Option`'s or `Result`'s payload tag,
+a Map's value tag and a tuple field's tag reach every read out of the value,
+a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
+value secret too: `opt ?? d` on it is E0737.
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`

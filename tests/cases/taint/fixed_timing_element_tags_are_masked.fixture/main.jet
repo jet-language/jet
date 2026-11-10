@@ -1,0 +1,23 @@
+// The ballot's `check_fast`: the tag is on the list's elements. A read
+// `expected[i]` carries it, so the early return on it is masked, not a
+// real branch.
+Key: tag { deny: [Exec], timing: .Fixed }
+
+#Scrub(Key)
+reveal_flag: fn(value: #Key Bool) -> Bool { value }
+
+check_fast: fn(expected: [#Key U8], got: [U8]) -> #Key Bool {
+    if expected.len() != got.len() -> return false
+    loop i in 0..<got.len() {
+        if expected[i] != got[i] -> return false
+    }
+    true
+}
+
+run: fn() {
+    key: [#Key U8]{#Key U8{1}, #Key U8{2}, #Key U8{3}}
+    same: reveal_flag(check_fast(key, [U8]{1, 2, 3}))
+    differ: reveal_flag(check_fast(key, [U8]{1, 9, 3}))
+    short: reveal_flag(check_fast(key, [U8]{1, 2}))
+    print("check {same} {differ} {short}")
+}

@@ -1,0 +1,17 @@
+# A `timing: .Fixed` tag on a list's elements (`[#Key U8]`) reaches every
+# read out of the list: the early return on `expected[i]` is masked and
+# listed by `jet inspect decisions`, and every tier prints the same results.
+fixture: fixed_timing_element_tags_are_masked.fixture
+env: NO_COLOR=1
+step: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "masked check_fast main.jet:12: both arms run" # the byte compare
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fixed_timing_element_tags_are_masked.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fixed_timing_element_tags_are_masked.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fixed_timing_element_tags_are_masked.out

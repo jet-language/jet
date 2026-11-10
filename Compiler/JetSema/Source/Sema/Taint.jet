@@ -243,6 +243,9 @@ sema_taint_type_name: fn(ty: Type) -> String? {
     }
 }
 
+// The tags a value of type `ty` carries: its own and those of every value
+// it holds (a list's, fixed list's or Map's elements, an Option's or
+// Result's payload, a tuple's fields), so a read out of it keeps them.
 sema_taint_type_tags: fn(ty: Type) -> [String] Never! {
     if ty == {
         .Tagged(marker, inner) -> {
@@ -251,6 +254,14 @@ sema_taint_type_tags: fn(ty: Type) -> [String] Never! {
                 .User(name) -> sema_taint_add(tags, name)
                 .Internal(_) -> {}
             }
+            return tags
+        }
+        .List(element) | .Option(element) | .Shared(element) | .FixedList(element, _) -> return sema_taint_type_tags(element)
+        .Map(_, _, value) -> return sema_taint_type_tags(value)
+        .Result(ok, _) -> return sema_taint_type_tags(ok)
+        .Tuple(fields) -> {
+            tags := [String]{}
+            loop field in fields -> sema_taint_union(tags, sema_taint_type_tags(field.ty))
             return tags
         }
         else -> [String]{}
