@@ -23,6 +23,7 @@ use {
         compiler_take_rows,
         compiler_transfer_rows,
         foundation_json_quote,
+        Program,
     ]
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -56,6 +57,14 @@ use {
         jet_driver_dependency_selector,
         jet_driver_version_selector_matches,
         JetDriverScriptDependency,
+        JetDriverScopedImport,
+        jet_driver_app_route_names,
+        jet_driver_core_import_module,
+        jet_driver_file_import_path,
+        jet_driver_inline_package,
+        jet_driver_is_foreign_provider_import,
+        jet_driver_pascal_segment,
+        jet_driver_scoped_imports,
     ]
     jet_eval.[
         JetEvalConfig,
@@ -453,6 +462,121 @@ jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: 
         files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", read.stat), source: source})
     }
     None
+}
+
+// The sources a loose entry reaches (jet_cli_prepare_snapshot), read into
+// `files` in walk order by the walk's placement, link, stat and read rules,
+// so an unrelated link or unreadable file elsewhere under its folder is never
+// opened. A source is reached through a `use "path"` file import, a local
+// `use name` module import or a body-less `name: module`, resolved by the
+// loader's own candidate paths (Loader.jet jet_driver_lookup_file_target,
+// jet_driver_find_module_import_target, jet_driver_code_module_file). False
+// when the folder needs its whole tree after all: the entry or a stock entry
+// carries an inline `package:` block, a module import no candidate path
+// holds may name any file of the tree (the loader's module-name index), or
+// `.routes(from:)` reads a directory's shape.
+jet_cli_reach_sources: fn(root: String, entry: String, files: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> Bool JetCLIReadError! {
+    pending := [String]{entry.copy()}
+    loop stock in JET_CLI_STOCK_ENTRIES {
+        if stock != entry -> pending.push(stock.copy())
+    }
+    held := [String]{}
+    next_index := 0
+    loop next_index < pending.len() {
+        relative: pending[next_index].copy()
+        next_index += 1
+        if held.contains(relative) || jet_cli_outside_walk(root, relative) -> next
+        held.push(relative.copy())
+        path: jet_cli_authority_path(root, relative)
+        stat: cli_files.stat(path) ?? {
+            if err == .NotFound(_) -> next
+            return Err(jet_cli_read_error("cannot inspect `{path}`: {err}"))
+        }
+        if stat.is_symlink -> return Err(jet_cli_read_error("`{path}` is a symbolic link"))
+        if stat.is_dir -> next
+        if !stat.is_file -> return Err(jet_cli_read_error("`{path}` is not a regular file"))
+        limit: jet_cli_source_read_limit(budget, stat.size, path) ?? return Err(err)
+        read: jet_cli_read_rooted_source(root, relative, limit) ?? return Err(jet_cli_read_error("cannot read `{path}`: {err.message}"))
+        if !jet_cli_build_read_same_file(stat, read.stat) -> return Err(jet_cli_read_error("`{path}` changed while it was held"))
+        budget.bytes += read.stat.size
+        budget.files += 1
+        source: String.from_bytes(read.bytes.move()) ?? return Err(jet_cli_read_error("cannot read `{path}`: file is not valid UTF-8"))
+        // A script is a standalone program, never a source another file reaches.
+        if relative != entry && jet_cli_is_script(source) -> next
+        carrier: jet_driver_inline_package(source)
+        if carrier.found || carrier.error != None -> return Ok(false)
+        if jet_cli_parsed_program(source) == .Val(program) {
+            if !jet_cli_reached_paths(root, relative, program, pending) -> return Ok(false)
+        }
+        at := files.len()
+        loop (position, file) in files {
+            if jet_cli_relative_precedes(relative, file.relative_path) {
+                at = position
+                break
+            }
+        }
+        files.insert(at, JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
+    }
+    Ok(true)
+}
+
+// The root-relative paths the source at `relative` reaches, onto `pending`
+// (jet_cli_reach_sources); false when one may name any file of the tree.
+jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pending: &[String]) -[FS]> Bool Never! {
+    if jet_driver_app_route_names(program).len() > 0 -> return false
+    scoped := [JetDriverScopedImport]{}
+    jet_driver_scoped_imports(program.imports, program.items, "", true, scoped)
+    loop row in scoped {
+        declaration: row.declaration
+        // Core, foreign and versioned imports name no file of the folder.
+        if jet_driver_is_foreign_provider_import(declaration) || jet_driver_core_import_module(declaration) != None || declaration.inline_version != None -> next
+        if declaration.kind == {
+            .File(path, _) -> {
+                resolved: jet_driver_file_import_path(relative, path)
+                if resolved.valid -> pending.push(resolved.path)
+            }
+            .Module(name, _) -> {
+                found := false
+                loop candidate in jet_cli_module_candidates(name) {
+                    candidate_path: jet_cli_authority_path(root, candidate)
+                    if cli_files.exists(candidate_path) || cli_files.is_symlink(candidate_path) {
+                        pending.push(candidate)
+                        found = true
+                    }
+                }
+                if !found -> return false
+            }
+            .Unqualified(_, _, _, _, _) -> {}
+        }
+    }
+    loop item in program.items {
+        if item == .CodeModule(definition) && definition.body == None {
+            candidates: [String]{definition.name.copy(), "{definition.name}/module"}
+            loop candidate in candidates {
+                resolved: jet_driver_file_import_path(relative, candidate)
+                if resolved.valid -> pending.push(resolved.path)
+            }
+        }
+    }
+    true
+}
+
+// The root-relative files a local `use name` import may load, in the
+// loader's order (Loader.jet jet_driver_find_module_import_target); none
+// for a name with an unsafe component, which the loader refuses.
+jet_cli_module_candidates: fn(name: String) -> [String] Never! {
+    parts: name.split("::").to_list()
+    module_path := ""
+    pascal_path := ""
+    loop index in 0..<parts.len() {
+        part: parts[index]
+        if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") -> return [String]{}
+        if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
+        pascal: jet_driver_pascal_segment(part)
+        if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else -> pascal_path = pascal
+    }
+    if module_path.len() == 0 -> return [String]{}
+    [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"}
 }
 
 jet_cli_held_project_boundary: fn(directory: cli_files.Directory) -[FS]> Bool JetCLIReadError! {
@@ -1595,8 +1719,9 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 // is a standalone program wherever it lives: its snapshot is the script alone,
 // rooted at its own directory, never the package around it. So is an `alone`
 // entry (`jet check --prelude`: the compiler embeds each Prelude source by
-// itself, never with its directory's other files). An anchor no file holds
-// yet is read from its overlay (an editor's unsaved buffer).
+// itself, never with its directory's other files). A loose entry's snapshot
+// is the entry and the sources it reaches. An anchor no file holds yet is
+// read from its overlay (an editor's unsaved buffer).
 jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
@@ -1606,12 +1731,23 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-    if !script {
+    prefix: if root == "/" -> "/" else -> "{root}/"
+    // A loose entry (no package around it, no unsaved buffer) holds only the
+    // sources it reaches (jet_cli_reach_sources), never its whole folder.
+    loose: !script && overlays.len() == 0 && entry_path.ends_with(".jet") && entry_path.starts_with(prefix) && (jet_cli_parent(entry_path) ?? "") == root && !cli_files.exists(jet_cli_authority_path(root, "package.jet"))
+    reached := false
+    if loose {
+        reached = jet_cli_reach_sources(root, entry_path.slice(prefix.len()..<entry_path.len()), files, budget) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+        if !reached {
+            files = [JetDriverAuthorizedSourceFile]{}
+            budget = JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+        }
+    }
+    if !script && !reached {
         if jet_cli_walk_sources(root, "", 0, files, directories, true, budget) == .Val(problem) {
             return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
         }
     }
-    prefix: if root == "/" -> "/" else -> "{root}/"
     // An explicitly selected entry is a source whatever its suffix (`jet self
     // devtools reduce` and `ice-report` compile the input under its own name),
     // and so is a script, which the walk leaves out; the walk's placement,
