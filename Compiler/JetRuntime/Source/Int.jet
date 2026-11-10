@@ -345,22 +345,59 @@ int_try_add: fn(left: I64, right: I64, output: I64, requested: I64, probed: I64)
     ll: int_len(left)
     rl: int_len(right)
     node: int_new(ll + rl)
-    i := I64{0}
-    loop i < ll {
-        carry := I64{0}
-        j := I64{0}
-        loop j < rl {
-            product: int_limb(left, i) * int_limb(right, j) + int_get(node, i + j) + carry
-            int_set(node, i + j, product % I64{1000000000})
-            carry = product /% I64{1000000000}
-            j += I64{1}
+    out: int_load(wrapping(node + I64{24}))
+    // A boxed operand's limbs are read in place, one pass per limb of the
+    // other operand; an inline operand has at most three limbs.
+    if !int_inline(right) {
+        limbs: int_load(wrapping(int_node(right) + I64{24}))
+        i := I64{0}
+        loop i < ll {
+            int_mul_pass(out, limbs, rl, int_limb(left, i), i)
+            i += I64{1}
         }
-        int_set(node, i + rl, carry)
-        i += I64{1}
+    } else if !int_inline(left) {
+        limbs: int_load(wrapping(int_node(left) + I64{24}))
+        i := I64{0}
+        loop i < rl {
+            int_mul_pass(out, limbs, ll, int_limb(right, i), i)
+            i += I64{1}
+        }
+    } else {
+        i := I64{0}
+        loop i < ll {
+            carry := I64{0}
+            j := I64{0}
+            loop j < rl {
+                product: int_limb(left, i) * int_limb(right, j) + int_get(node, i + j) + carry
+                int_set(node, i + j, product % I64{1000000000})
+                carry = product /% I64{1000000000}
+                j += I64{1}
+            }
+            int_set(node, i + rl, carry)
+            i += I64{1}
+        }
     }
     int_store(wrapping(node + I64{32}), ll + rl)
     if int_negative(left) != int_negative(right) -> int_store(wrapping(node + I64{16}), I64{1})
     int_pack(node)
+}
+
+// Adds `factor` (one limb) times the `length` limbs at `limbs` into the
+// product limbs at `out`, from limb `offset` on. The limb at offset + length
+// is still zero (earlier passes wrote below it), so the carry is stored there.
+int_mul_pass: fn(out: I64, limbs: I64, length: I64, factor: I64, offset: I64) {
+    if (factor == I64{0}) { return }
+    base: wrapping(out + offset * I64{4})
+    carry := I64{0}
+    j := I64{0}
+    loop j < length {
+        slot: wrapping(base + j * I64{4})
+        product: int_u32(wrapping(limbs + j * I64{4})) * factor + int_u32(slot) + carry
+        int_put_u32(slot, product % I64{1000000000})
+        carry = product /% I64{1000000000}
+        j += I64{1}
+    }
+    int_put_u32(wrapping(base + length * I64{4}), carry)
 }
 
 #Export(c) jet_int_owned_from_i64: fn(value: I64) -> I64 {
