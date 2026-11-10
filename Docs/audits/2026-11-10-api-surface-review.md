@@ -73,3 +73,21 @@ Should every `jet check` compare a package's public surface, including effects a
 - A breaking edit needs one accept command. That is the deliberate point.
 - Every library check does one more pass over its public items.
 - Some computed bumps are larger than an author would pick.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independent evidence | Verdict |
+|---|---|---|
+| Check is silent on widened authority | Reran v1/v2 checks, both exit 0. Review reports authority widened, with module-name noise. --locked on check exits 2/E2102. | Holds on a0.0.43. |
+| Methods lack solved effects | Read origin/dev PublicApi.jet:311-330; methods share the function builder. | Fails, as already repaired. |
+| Committed package.api is the promise source | D-DEVR-CLAIM1=A requires canonical receipts and rendered ledgers. A mutable local view is not released evidence. | Holds only with one receipt, fresh-source validation and immutable last-release comparison. Acceptance must not erase unreleased breaks. |
+| One file plus #if covers every target | An unchecked target-specific body can have different inferred effects. | Fails without a recorded supported target/configuration matrix; missing coverage now blocks publish. |
+| Scripts have no public items | The ballot's own sample notes public-by-default items. | Fails; scope is public library outputs, not presence of any public item. |
+| Added variants and all narrowing are nonbreaking | Exhaustive matching can break on added variants; exact-type/reflection contracts need their actual language laws. | Fails as a universal claim; classifier must prove compatibility. |
+| Check/doc timings measure A's overhead | Doc does different work; A is not implemented. | Fails; incremental cost remains unmeasured. No new timing win claimed. |
+| C is merely a version argument | C retains author release planning while enforcing the same minimum. | Fails; strengthened C fairly. |
+| D cannot show changes in review | Source-to-release review reports do not need a committed snapshot. | Fails; D lacks a committed view, not all review visibility. |
+
+Read Elm's version rule, Kotlin apiCheck/apiDump, API Extractor's local/production report flow and cargo-semver-checks independently. These peers do not prove Jet's proposed checker complete. No registry publish was performed; the earlier E1218 statement remains source-level context, not an exercised publish receipt.
+
+Agree with A only after the repaired baseline, scope and coverage requirements. C remains a strong release-planning alternative. Do not post universal compatibility promises, a measured-overhead claim, or a claim that API rows detect behavior they do not encode.
