@@ -405,12 +405,19 @@ BodyHostCall: enum {
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
     // checked literal path or glob, relative to the source file being
-    // compiled. The compiler reads and records it; it never runs at runtime.
+    // compiled, or after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the
+    // toolchain tree. The compiler reads and records it; it never runs at
+    // runtime.
     ComptimeInput(builtin: String, path: String)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
 }
+
+// The prefix of a comptime input named in the toolchain tree the compile takes
+// Core from (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`), not
+// beside the file doing the embedding.
+JET_COMPTIME_TOOLCHAIN_PREFIX: "toolchain:"
 
 BodyCoreClosureKind: enum {
     Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)

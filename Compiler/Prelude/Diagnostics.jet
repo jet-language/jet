@@ -7994,6 +7994,16 @@ InvalidEmbedPath: struct {
     }
 }
 
+ToolchainInputOutsideTree: struct {
+    impl Diagnostic {
+        code: "E0945"
+        meaning: "A `toolchain:` comptime input (`embed_file`, `embed_bytes`, `find`) reads the toolchain tree the compile takes Core from; only the toolchain's own packages may read it, and a compile without that tree (jet's built-in Core) has nothing to read"
+        what: fn(self) -> String { "`toolchain:` comptime input read outside the toolchain tree's own packages" }
+        why: fn(self) -> String { "Only the compiler workspace's members, and the packages they depend on inside the toolchain tree, read that tree; there is no built-in copy of it" }
+        fix: fn(self) -> String { "Read the file beside this one, or build inside the toolchain tree with `JET_TOOLCHAIN_ROOT` set." }
+    }
+}
+
 RetiredTierTwoEffect: struct {
     impl Diagnostic {
         code: "E0958"

@@ -1,13 +1,17 @@
 // Tier-1 comptime inputs: `embed_file("path") -> String`, `embed_bytes("path")
 // -> [U8]` and `find("glob") -> [String]`. Each names its input with a string
 // literal relative to the file doing the embedding, so the compiler can audit
-// and lock exactly which files a build reads. The compiler reads the input when
-// it evaluates the comptime code (the driver's rooted, no-follow read) and
-// records its hash; nothing runs at runtime.
+// and lock exactly which files a build reads; a `toolchain:` literal
+// (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`) names it relative
+// to the toolchain tree the compile takes Core from instead,
+// which the driver admits only for the toolchain's own packages. The compiler
+// reads the input when it evaluates the comptime code (the driver's rooted,
+// no-follow read) and records its hash; nothing runs at runtime.
 use jet_foundation.[
     Call,
     Diagnostic,
     Expr,
+    JET_COMPTIME_TOOLCHAIN_PREFIX,
     StrPart,
     Type,
 ]
@@ -52,7 +56,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
         diagnostics.push(sema_comptime_input_path_error(builtin, "literal", call))
         return failed
     }
-    normalized: path.replace("\\", "/")
+    normalized: path.replace("\\", "/").removeprefix(JET_COMPTIME_TOOLCHAIN_PREFIX)
     if normalized.starts_with("/") {
         diagnostics.push(sema_comptime_input_path_error(builtin, "absolute", call))
         return failed
@@ -63,6 +67,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
             return failed
         }
     }
-    node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: normalized}}, call.name_span)
+    named: if path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) -> "{JET_COMPTIME_TOOLCHAIN_PREFIX}{normalized}" else -> normalized.copy()
+    node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: named}}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

@@ -548,6 +548,13 @@ records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1) and is
 the build identity: editing it makes `jet build` rebuild, not reuse a stored binary, and `jet dev` rerun.
 A Core library file embeds files beside it in the toolchain's Core tree. They
 are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
+A path or glob spelled `toolchain:<path>` resolves against the toolchain tree the
+compile takes Core from (`JET_TOOLCHAIN_ROOT`, else the nearest toolchain checkout),
+held beneath that tree's root, with no built-in copy to fall back on (D-EMBED-TOOLCHAIN1).
+Only the toolchain's own packages read it: the compiler workspace `Compiler/`, its
+members, and the packages their path dependencies reach inside the tree. A file in any
+other package, a file outside the tree, a Core file and a compile against the built-in
+Core are E0945. Its `.jet/lock` row keeps the `toolchain:` name.
 
 When a ratified feature has a staged diagnostic, unsupported syntax receives that
 registered error and its milestone rather than a generic syntax failure. A spelling

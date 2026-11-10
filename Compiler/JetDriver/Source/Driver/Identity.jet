@@ -333,6 +333,32 @@ JetDriverCompileRequest: struct {
     // The `--set name=value` writers, the command-line layer of that fold
     // (BuildFactChain.jet).
     setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    // The toolchain tree `toolchain:` comptime inputs read: the tree this
+    // compile takes Core from, and the reader of which packages may read it
+    // (JetDriverToolchainTree). None: jet compiles against its built-in Core,
+    // and every `toolchain:` read refuses (E0945).
+    toolchain_tree: Shared<JetDriverToolchainTree>?{None}
+}
+
+// The toolchain tree of a compile's `toolchain:` comptime inputs:
+// `root`, its physical path, which every read is held
+// beneath (no-follow), and the package directories admitted to read it, the
+// toolchain's own packages. `reader` names them on the first `toolchain:`
+// read, which keeps them in `packages`, so a compile that reads none never
+// walks the toolchain's manifests. A file reads the tree when the package it
+// is in (its nearest package directory) is one of them.
+JetDriverToolchainTree: struct {
+    root: String
+    reader: JetDriverToolchainPackageReader
+    packages: [String]?
+}
+
+// The host's census of the toolchain's own packages under `root` (the
+// physical directory of each), and the package directory of a physical file:
+// the nearest directory above it, below `root`, holding a package.jet.
+JetDriverToolchainPackageReader: trait {
+    packages: fn(self, root: String) -[FS.Read]> [String]
+    package_of: fn(self, root: String, file: String) -[FS.Read]> String?
 }
 
 JetDriverGatePolicy: struct {

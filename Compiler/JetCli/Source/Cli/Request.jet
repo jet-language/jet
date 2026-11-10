@@ -46,6 +46,8 @@ use {
         JetDriverComptimeInputLog,
         JetDriverComptimeInputRecord,
         JetDriverHostFacts,
+        JetDriverToolchainPackageReader,
+        JetDriverToolchainTree,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_report_problems,
@@ -1091,6 +1093,62 @@ impl JetCLIBuiltinCoreSourceReader.JetDriverCoreSourceReader {
     }
 }
 
+// The toolchain tree of `input`'s compile (jet_cli_toolchain_root, the tree
+// its Core rows come from) for `toolchain:` comptime inputs, by its physical
+// path; None without one, so those reads refuse: a built-in Core has no tree.
+jet_cli_toolchain_tree: fn(input: String) -[FS, Env]> Shared<JetDriverToolchainTree>? Never! {
+    if jet_cli_toolchain_root(input) == .Found(toolchain) {
+        root: cli_files.realpath(toolchain) ?? return None
+        return Val(shared JetDriverToolchainTree{root: root, reader: JetCLIToolchainPackages{}, packages: None})
+    }
+    None
+}
+
+// The toolchain's own packages, the ones that read its tree with
+// `toolchain:` comptime inputs: the compiler workspace
+// (`<root>/Compiler`), each member its package.jet declares, and every
+// package their path dependencies reach inside the tree, each by its physical
+// directory. A package outside the tree, and one inside it that nothing in the
+// compiler workspace depends on (a vendored copy nested in the checkout), is
+// not one of them.
+JetCLIToolchainPackages: struct {}
+
+impl JetCLIToolchainPackages.JetDriverToolchainPackageReader {
+    packages: fn(self, root: String) -[FS.Read]> [String] {
+        found := [String]{}
+        workspace: cli_files.canonicalize(jet_cli_entry_join(root, "Compiler")) ?? return found
+        found.push(workspace.copy())
+        workspace_manifest: jet_cli_entry_join(workspace, JET_CLI_PACKAGE_FILE)
+        loop member in jet_cli_manifest_facts(cli_files.read(workspace_manifest) ?? "", workspace_manifest).members {
+            directory: cli_files.canonicalize(jet_cli_entry_join(workspace, member.path)) ?? next
+            if directory.starts_with("{root}/") && !found.contains(directory) -> found.push(directory)
+        }
+        index := 0
+        loop index < found.len() {
+            directory: found[index].copy()
+            index += 1
+            manifest_path: jet_cli_entry_join(directory, JET_CLI_PACKAGE_FILE)
+            raw: cli_files.read(manifest_path) ?? next
+            manifest: pkg_manifest_parse(manifest_path, raw) ?? next
+            loop name in manifest.dependencies.keys() {
+                if manifest.dependencies[name] == .Path(path) {
+                    target: cli_files.canonicalize(jet_cli_entry_join(directory, path)) ?? next
+                    if target.starts_with("{root}/") && !found.contains(target) -> found.push(target)
+                }
+            }
+        }
+        found
+    }
+    package_of: fn(self, root: String, file: String) -[FS.Read]> String? {
+        directory := cli_files.dirname(file)
+        loop directory.starts_with("{root}/") {
+            if cli_files.canonicalize(jet_cli_entry_join(directory, JET_CLI_PACKAGE_FILE)) == .Ok(_) -> return Val(directory)
+            directory = cli_files.dirname(directory)
+        }
+        None
+    }
+}
+
 // The driver request for `snapshot` on this host: the Core rows, the
 // canonical effect source, the host facts, the lock's build stamp and build
 // contributions, and at most `threads` compiler threads (`None` admits
@@ -1124,6 +1182,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
         build_stamp: stamp,
         build_contributions: contributions,
+        toolchain_tree: jet_cli_toolchain_tree(snapshot.entry_path),
     }
 }
 
