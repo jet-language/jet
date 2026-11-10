@@ -3595,6 +3595,15 @@ ct_bytes: fn(r: &CtRand, n: Int) -> [U8] Never! {
     out
 }
 
+// The same xorshift as a premaster's random source, for timings that must
+// not carry an HMAC_DRBG's own spread.
+impl CtRand.RNG {
+    fill: fn(&self, out: &[U8]) -> Bool Never! {
+        loop i in 0..<out.len() -> out[i] = U8{ct_next(self).bit_and(U64{255})}
+        true
+    }
+}
+
 ct_abs: fn(x: Float) -> Float Never! { if x < (Float{0}) -> Float{0} - x else -> x }
 
 /// Welch's t between the random class's and the fixed class's timings, over
@@ -4011,6 +4020,88 @@ ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
         servers.push(ssl)
     }
     ct_dudect("TLS 1.2 RSA premaster, padding", 1000, 1, [U8]{0}, (x) -> Int.from_u8(ct_rsa_kx_premaster(servers[Int.from_u8(x[0]) %% 32], rng)[2]))
+}
+
+/// The block a server's private operation gives for a ClientKeyExchange
+/// of `kind` (as ct_rsa_kx_sealed), `len` bytes: 0 a good one (0, 2, a
+/// nonzero padding, 0, version 3.3, 46 drawn bytes); 1 a first byte of 1;
+/// 2 no zero after the padding; 3 a 47-byte message; 4 version 3.2.
+ct_rsa_kx_block: fn(r: &CtRand, len: Int, kind: Int) -> [U8] {
+    block := ct_bytes(r, len)
+    loop i in 0..<len -> block[i] = block[i].bit_or(U8{1})
+    block[0] = if kind == 1 -> U8{1} else -> U8{0}
+    block[1] = U8{2}
+    message: if kind == 3 -> 47 else -> 48
+    if kind != 2 {
+        block[len - message - 1] = U8{0}
+        block[len - message] = U8{3}
+        block[len - message + 1] = if kind == 4 -> U8{2} else -> U8{3}
+    }
+    block
+}
+
+/// What the server does with a block after its private operation: the
+/// unpadding to 48 bytes with its verdict (rsa.__v15_fixed_of_block), then
+/// the premaster's choice (srv12.__ssl_srv12_take_premaster). Gives a byte
+/// of the premaster taken.
+ct_rsa_kx_after_private: fn<R: RNG>(ssl: &ssldefs.SSLContext, block: [U8], rng: &R) -> Int {
+    buf := block.copy()
+    fixed := rsa.__v15_fixed_of_block(buf, 48)
+    srv12.__ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
+    Int.from_u8(ssl.handshake.premaster[2])
+}
+
+/// The blocks a timing after the private operation takes in turn: 16 good
+/// and 16 bad, of each kind in turn.
+CtKxBlocks: struct {
+    good: [[U8]]
+    bad: [[U8]]
+    turn: Int
+}
+
+/// One timed run: the input (255, 255), the fixed class's, takes the next
+/// good block, any other the next bad one, in the same turn.
+ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8], rng: &CtRand) -> Int {
+    k: blocks.turn %% 16
+    blocks.turn = blocks.turn + 1
+    if x[0] == (U8{255}) && x[1] == (U8{255}) -> return ct_rsa_kx_after_private(ssl, blocks.good[k], rng)
+    ct_rsa_kx_after_private(ssl, blocks.bad[k], rng)
+}
+
+// The same server timed from its private operation's output on: the
+// modular exponentiation takes as long on every ciphertext, and its spread
+// from run to run (a millisecond and more) hides a difference of a
+// microsecond, so the run above finds only a gross leak. Here the fixed
+// class gets good blocks and the random class bad ones of each kind; a
+// good block's premaster is the client's, a bad one's a new random one,
+// drawn from the xorshift so that an HMAC_DRBG's own spread stays out of
+// the timing. Before the fix, when the decryption's verdict was a Result
+// and the unpadding counted in Int words, this gave t = -25.4, -20.2 and
+// -17.1; now it gives -1.5, -2.1 and -3.0. The bound is 4.5.
+#Test("dudect: after its private operation a TLS 1.2 server takes as long on a good RSA premaster block as on each kind of bad one") {
+    r := CtRand{s: U64{61}}
+    rng := vec_rng()
+    key := ct_rsa_key()
+    sealed: ct_rsa_kx_sealed(key, rng, r, 0)
+    ssl := ct_rsa_kx_server(key, sealed)
+    blocks := CtKxBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0}
+    loop i in 0..<16 {
+        blocks.good.push(ct_rsa_kx_block(r, key.len, 0))
+        blocks.bad.push(ct_rsa_kx_block(r, key.len, 1 + i %% 4))
+    }
+    loop i in 0..<16 {
+        good: blocks.good[i].copy()
+        kept: ct_rsa_kx_after_private(ssl, good, rng)
+        assert_eq(kept, Int.from_u8(good[key.len - 46]))
+        assert_eq(ssl.handshake.premaster, ssldefs.ssl_bytes_of(good, key.len - 48, 48))
+        _ := ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
+        first: ssl.handshake.premaster.copy()
+        _ := ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
+        assert(ssl.handshake.premaster != first)
+    }
+    fast := CtRand{s: U64{97}}
+    t: ct_measure("TLS 1.2 RSA premaster after the private operation", 20000, 1, [U8]{255, 255}, (x) -> ct_rsa_kx_block_turn(blocks, ssl, x, fast))
+    if ct_abs(t) >= (Float{9} / Float{2}) -> panic("TLS 1.2 RSA premaster after the private operation: Welch's t is {t} between good and bad padding; the bound is 4.5")
 }
 
 // ---------------------------------------------------------------------------

@@ -1036,6 +1036,13 @@ ssl_srv12_parse_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, end:
         }
         .Err(_) -> {}
     }
+    __ssl_srv12_take_premaster(ssl, peer_pms, failed, pms_offset, rng) ?? return Err(err)
+}
+
+// The part of ssl_srv12_parse_encrypted_pms after the decryption: the
+// client's 48 bytes, or a random premaster in their place when `failed` or
+// another version, into premaster at pms_offset; peer_pms is wiped.
+__ssl_srv12_take_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, peer_pms: &[U8], failed: ctime.CtCond, pms_offset: Int, rng: &R) ssldefs.SSLError! {
     ver := ssldefs.ssl_zeros(2)
     sslmsg.ssl_write_version(ver, 0, ssl.conf.transport, ssl.spool[ssl.session_negotiate].tls_version)
     diff := failed

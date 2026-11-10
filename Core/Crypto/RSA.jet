@@ -995,6 +995,15 @@ rsa_rsaes_pkcs1_v15_decrypt_fixed: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: 
     if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
     if ilen < 16 || ilen > MPI_MAX_SIZE || len < 1 || len > ilen - 11 -> return Err(.BadInput(None))
     buf := rsa_private(ctx, rng, input) ?? return Err(err)
+    Ok(__v15_fixed_of_block(buf, len))
+}
+
+/// The part of rsa_rsaes_pkcs1_v15_decrypt_fixed after the private
+/// operation: the EME-PKCS1-v1_5 block `buf` (wiped here) to a message of
+/// exactly `len` bytes, with the verdict in `bad`. The private operation's
+/// own time is the same for every block, so a timing of this part alone
+/// sees the padding's verdict without the modular exponentiation's noise.
+__v15_fixed_of_block: fn(buf: &[U8], len: Int) -> V15Fixed Never! {
     decoded := rsaes_pkcs1_v15_unpadding(buf, len)
     core.crypto.wipe(buf)
     // The unpadding keeps len bytes: the message, when it is that long and
@@ -1002,7 +1011,7 @@ rsa_rsaes_pkcs1_v15_decrypt_fixed: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: 
     // or a shorter message, moved to the front.
     bad: ctime.bool_or(ctime.bool_or(decoded.bad, decoded.too_large), ctime.uint_ne(decoded.olen, U64{len}))
     ctime.zeroize_if(bad, decoded.out, 0, len)
-    Ok(V15Fixed{out: decoded.out, bad: bad})
+    V15Fixed{out: decoded.out, bad: bad}
 }
 
 /// The decryption result and problem of mbedtls_rsa_decrypt_decompose_ret.
