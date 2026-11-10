@@ -364,6 +364,9 @@ SemaComptimeItemRequest: struct {
     reachable_function_keys: [String]
     // The item expression's own call sites (a soft item's purity reads them).
     call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    // The item expression's first call with a host effect, as a refused
+    // comptime effect names it (sema_effect_comptime_call_name).
+    effect_call: String?{None}
 }
 
 SemaComptimeItemValue: struct {
@@ -8018,6 +8021,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, context.call_facts),
             call_facts: if source.soft || source.startup -> context.call_facts else -> [SemaCallSiteFact]{},
+            effect_call: sema_effect_comptime_call_name(context.call_facts),
         }
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
     }

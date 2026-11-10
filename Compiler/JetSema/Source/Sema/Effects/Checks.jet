@@ -548,6 +548,25 @@ sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, diagnostics: &[
     true
 }
 
+// The call a compile-time value's refused host effect is named by (E3410,
+// E3411): the first of its call sites `facts` whose callee's effect row
+// carries an effect. A Core function is its whole path (`core.files.read()`),
+// any other callee its bare name; None when no call carries one.
+sema_effect_comptime_call_name: fn(facts: [SemaCallSiteFact]) -> String? Never! {
+    loop fact in facts {
+        callee: fact.callee ?? next
+        row: fact.facts.effect_bound ?? next
+        loop entry in row {
+            if entry.name.starts_with("!") -> next
+            leaf: sema_effect_symbol_leaf(callee.key)
+            owner: sema_effect_symbol_module(callee.key) ?? return Val("{leaf}()")
+            if !owner.starts_with("<corelib>/") -> return Val("{leaf}()")
+            return Val("{owner.slice(10..<owner.len())}.{leaf}()")
+        }
+    }
+    None
+}
+
 // Rust `memory_control_multiplier`: one execution, or None inside a loop.
 sema_effect_memory_executions: fn(node: SemaEffectNode, span: Span) -> Int? {
     loop loop_span in node.loop_spans {

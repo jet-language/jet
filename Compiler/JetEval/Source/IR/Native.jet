@@ -164,6 +164,8 @@ JetEvalIRState: struct {
     // marks Impure.enter and Impure.leave, IRProgram.invocation): a system
     // call refused inside one is refused as `impure` refuses it.
     impure_sites: Int{0}
+    // config.effect_call: the call a refused system call is named by.
+    effect_call: String?{None}
     span: Span
     failure: JetEvalError?
     internal_problem: JetEvalInternalProblem?
@@ -545,7 +547,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     s := JetEvalIRState{
         child: X64ComptimeChild{}, pages: [[U8]]{}, page_rows: [Int:Int]{},
         budget: if program.runtime_execution -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
-        stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, impure: config.impure, impure_gate: config.impure_gate, span: span,
+        stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, impure: config.impure, impure_gate: config.impure_gate, effect_call: config.effect_call, span: span,
         failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
         compiler: if config.compiler_query_host == .Val(host) -> Val(host.clone_compiler_host()) else -> None,
@@ -772,6 +774,8 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
 // comptime evaluation refuses it as the effect it is: ambient time and
 // randomness are E3403, any other effect is observable outside the program,
 // so folding it would bake one build-time result into every run (E3410).
+// The refusal names the item's effectful call (s.effect_call) when sema found
+// one, else the system call's effect class.
 jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
     if s.runtime_execution && !s.eval_entry && s.impure_sites == 0 {
         jet_eval_ir_unsupported(s, "system call {number}")
@@ -785,7 +789,7 @@ jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
         jet_eval_ir_problem(s, if report == "" -> "the comptime child aborted" else -> "the comptime child aborted: {report}")
         return
     }
-    what: if number == {
+    class: if number == {
         1 | 20 -> if first == 1 -> "standard output" else -> "system call {number}"
         257 | 2 -> "opening a file"
         0 -> "reading a file"
@@ -796,6 +800,7 @@ jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
         318 -> "OS randomness"
         else -> "system call {number}"
     }
+    what: s.effect_call ?? class
     jet_eval_ir_effect_refused(s, what, number == 228 || number == 318)
 }
 
