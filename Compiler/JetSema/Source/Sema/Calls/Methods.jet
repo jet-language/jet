@@ -986,10 +986,13 @@ sema_app_or_rejected: fn(input: Expr, call: String, name: String, span: Span) ->
     Expr.OrFallback{value: input, fallback: OrFallback.Return{value: Val(Expr.Ok{value: rejected, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
 }
 
+// The parameter of the adapter lambda over an App handler.
+SEMA_APP_ADAPTER_PARAM: "__jet_app_call"
+
 // The adapter over the named handler `name`. `None` after an E2810 when the
 // handler's inputs cannot come from an App call.
 sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistrationFunction, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Expr? {
-    call: "__jet_app_call"
+    call: SEMA_APP_ADAPTER_PARAM
     params: function.declaration.params
     boundary: method == "pending" || method == "not_found" || method == "error"
     server: method == "action" || method == "form" || method == "data"

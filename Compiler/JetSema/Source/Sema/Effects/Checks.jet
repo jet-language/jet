@@ -2052,6 +2052,11 @@ sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: Nam
 // appended to `nodes` for the walk and removed again.
 sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
     row: sema_effect_callback_row(ty) ?? return
+    // The adapter the compiler writes around an App handler
+    // (sema_app_handler_adapter) is no function value the program passes:
+    // the function registering the handler already carries the handler's
+    // effects, so the App's internal handler slot holds it to no row.
+    if lambda.source_params.len() == 1 && lambda.source_params[0] == SEMA_APP_ADAPTER_PARAM -> return
     // copy: the lambda node starts from its owner's facts and spans; the
     // owner node stays in the graph.
     lambda_node := nodes[node_index].copy()
