@@ -1,12 +1,14 @@
 #!/usr/bin/env jet
 // Frame-time cases (#6701): runs the cases that hold wall time to a fixed
 // limit, such as ui_backend/wayland_windows_hold_a_one_millisecond_frame,
-// on the kernel's isolated CPUs. Those cases require JET_TIMING_QUIET=1
+// on quiet CPUs. Those cases require JET_TIMING_QUIET=1
 // (Docs/spec/reference/environment.md) and skip everywhere else. This runner
-// sets it only when /sys/devices/system/cpu/isolated names CPUs, and pins the
-// whole run to them; with none it refuses and exits 2.
+// sets it and pins the whole run to the kernel's isolated CPUs
+// (/sys/devices/system/cpu/isolated) or, when the kernel isolates none, to
+// the CPUs `--cpu LIST` names (as `2-5,8`); with neither it refuses and
+// exits 2.
 // Usage (from the repository root):
-//   jet Tools/perf/frame-time/Main.jet [--jet PATH] [--filter FILTER]
+//   jet Tools/perf/frame-time/Main.jet [--jet PATH] [--filter FILTER] [--cpu LIST]
 // Defaults: the `jet` on PATH, and the filter
 // ui_backend/wayland_windows_hold_a_one_millisecond_frame.
 use {
@@ -31,7 +33,7 @@ parse_cpus: fn(text: String) -> [Int] Never! {
 }
 
 usage: fn() -[IO]> Int Never! {
-    term.eprint("usage: jet Tools/perf/frame-time/Main.jet [--jet PATH] [--filter FILTER]")
+    term.eprint("usage: jet Tools/perf/frame-time/Main.jet [--jet PATH] [--filter FILTER] [--cpu LIST]")
     64
 }
 
@@ -39,6 +41,7 @@ frame_time: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
     jet := process.which("jet") ?? "jet"
     filter := DEFAULT_FILTER.copy()
+    chosen := [Int]{}
     at := 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
@@ -46,15 +49,19 @@ frame_time: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
             jet = args[at + 1].copy()
         } else if args[at] == "--filter" {
             filter = args[at + 1].copy()
+        } else if args[at] == "--cpu" {
+            chosen = parse_cpus(args[at + 1])
+            if chosen.len() == 0 -> return usage()
         } else {
             return usage()
         }
         at += 2
     }
     isolated: files.read(ISOLATED) ?? ""
-    cpus: parse_cpus(isolated.trim())
+    cpus := parse_cpus(isolated.trim())
+    if cpus.len() == 0 -> cpus = chosen
     if cpus.len() == 0 {
-        term.eprint("no isolated CPUs ({ISOLATED} is empty): boot with isolcpus= to time frames")
+        term.eprint("no isolated CPUs ({ISOLATED} is empty) and no --cpu LIST: boot with isolcpus= or name idle CPUs to time frames")
         return 2
     }
     ran: process.cmd([String]{jet, "test", "Compiler", "--profile", "cases", "--filter={filter}"}).env("JET_TIMING_QUIET", "1").cpu_affinity(cpus).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
