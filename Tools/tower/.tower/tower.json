@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98746,
+    "rev": 98747,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56725,11 +56725,11 @@
         {
           "n": 21,
           "text": "Found 2026-11-09 by the first tool port (Tools/perf/jetc-trace Summarize.jet against summarize.mjs, one 410041-byte trace, 7 runs): the Jet twin takes 124.0 ms against 54.3 ms although a hello program starts faster on jet (15.9 ms against 37.4 ms). The time is in per-line Dyn parsing and string building in loops. The general Core or codegen path is fixed so the twin's wall time is below the original's, and the gain is proven on a second program that uses the feature differently.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:54:14.774Z"
+          "evidence": "The general fixes (PerfLead-c24 exact decimal formatting, c0e6345125; PerfLead-c21 v2 Int multiply and Dyn path, a8ed223e7f) landed on dev 1e1492c924 (train t8c), measured with the t8c-built compiler. Twin Tools/perf/jetc-trace Summarize.jet (Dyn twin at a8ed223e7f) against summarize.mjs on the same 410041-byte trace, hyperfine -N, pinned to one CPU, 3 interleaved rounds of 30 runs. Jet t8c had wall median 56.67 ms, min 49.50 ms and mean CPU 53.58 ms; node had 63.84, 49.75 and 57.27 ms. Jet is below the original on median, min and CPU (Jet/node median 0.89), and task-clock was 48.79 ms against node 53.20 ms. Jet instructions:u went from 535.8M to 428.9M (-19.9%). Second program, Second.jet: wall median 14930.9 to 6505.7 ms (-56.4%) and 225.33G to 102.38G instructions:u (-54.6%), with the oracle digest matching. Outputs are identical to the node twin. Caveat: loadavg was 64-80 throughout (a release cut was running), so the interleaved, pinned rounds share the load; receipts are in $JET_SCRATCH_ROOT/lanes/PerfLead/out/c21-t8c/ (twin-r*.json, second-r*.json, counters.txt, load.txt).",
+          "at": "2026-11-10T13:14:31.930Z"
         },
         {
           "n": 22,
@@ -56769,7 +56769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T12:37:41.994Z",
+      "updated": "2026-11-10T13:14:31.930Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -198044,6 +198044,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T13:14:31.930Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#21"
+    },
     {
       "at": "2026-11-10T12:58:15.616Z",
       "by": "Main",
