@@ -91246,6 +91246,59 @@
       "completedAt": "2026-11-07T12:30:36.499Z",
       "questions": [],
       "retiredAt": "2026-11-10T12:30:52.822Z"
+    },
+    {
+      "id": "c02188uw",
+      "num": 6671,
+      "title": "Use after a consuming close passes jet check: close(owner) then owner.path on a TempFile is not UseAfterMove",
+      "body": "Found by MechD-3 (320598c665 follow-up). In tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_provider_owner.case, close(owner) consumes the checked provider owner, yet a later owner.path on the TempFile passes jet check. Sema must report UseAfterMove (I1: memory-safe and type-safe by default). Separately, jet check on that case's after_close_reader program ran for more than 2 minutes in MechD-3's manual run and was killed: a hang in check is a defect of its own.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check reports UseAfterMove at owner.path after close(owner) in file_manual_close_consumes_the_checked_provider_owner, which then passes; its KF line is removed. A UI snapshot covers a use after a consuming close.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "0faeee0254: jet check reports UseAfterMove at owner.path after close(owner). tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_provider_owner passes, and its known-failing line is removed; ui/close_temp_file_then_read_path snapshots the error.",
+          "at": "2026-11-07T12:29:54.265Z"
+        },
+        {
+          "n": 2,
+          "text": "jet check on the case's after_close_reader program finishes, with a result, in under 10 s; a regression row pins the hang.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "0faeee0254: in tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_provider_owner.case, the step 'jet check after_close_reader/main.jet' carries limit: time=10, and the temp and writer checks carry the same limit. The case passes in a kit run in 9.4 s. A cold check of a fresh copy on tmpfs takes 0.53 s, a warm one 0.02 s, and JET_TRACE_FILE shows the compile done by 0.35 s. The slow in-tree times (49-84 s under lane load) are durable receipt fsyncs, not a check hang; that is now #6629.",
+          "at": "2026-11-07T12:38:38.896Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:28:11.595Z",
+      "updated": "2026-11-07T12:38:40.642Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-07T12:38:40.642Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T12:39:19.843Z"
     }
   ]
 }
