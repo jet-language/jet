@@ -1331,8 +1331,15 @@ sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index:
         fallibility: TFailureCarrier.Infallible}, span)
 }
 
+// Checked Core source: a `<corelib>/` file of a `core.*` module. The
+// compiler-private leaves that any Core module may call share this one rule.
+sema_call_core_checked_source: fn(environment: SemaScopeEnvironment) -> Bool Never! {
+    environment.source_file.starts_with("<corelib>/") && environment.module_name.starts_with("core.")
+}
+
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
+    // Outside checked Core source, only the plugin boundary inserts the wire.
+    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" && !sema_call_core_checked_source(environment) {
         diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
         return None
     }
@@ -1343,7 +1350,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         return None
     }
     if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
-        if !environment.source_file.starts_with("<corelib>/") || !environment.module_name.starts_with("core.") {
+        if !sema_call_core_checked_source(environment) {
             diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
             return None
         }
