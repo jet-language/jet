@@ -1131,7 +1131,17 @@ __engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) 
 
 // ---- handshake and I/O --------------------------------------------------------
 
+// A failed handshake frees the engine and wipes the buffers before its error
+// goes back, as close does.
 __handshake: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+    if __handshake_steps(tls, server_name, end_ns) == .Err(error) {
+        __release(tls)
+        return Err(error)
+    }
+    Ok()
+}
+
+__handshake_steps: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
     loop {
         status := 0
         if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) {
@@ -1404,6 +1414,38 @@ __test_released: fn(tls: __TLSState) -> Bool Never! {
         __release(client)
         assert(__test_released(client))
     }
+}
+
+#Test("A refused TLS handshake frees the engine and wipes the buffers on both ends") {
+    cert: String.from_bytes(core.files.read_bytes("tests/fixtures/tls/localhost.cert.pem") ?? panic("{err}")) ?? ""
+    key: String.from_bytes(core.files.read_bytes("tests/fixtures/tls/localhost.key.pem") ?? panic("{err}")) ?? ""
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+    addr: net.listener_local_socket_addr(listener) ?? panic("listen address: {err}")
+    client_tcp := net.tcp_connect_addr(addr) ?? panic("connect: {err}")
+    server_tcp := net.tcp_accept(listener) ?? panic("accept: {err}")
+    client_context := __context_new(ssldefs.SSL_IS_CLIENT) ?? panic("client context: {err}")
+    client_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+    client_context.conf.max_tls_version = ssldefs.SSL_VERSION_TLS1_2
+    server_context := __server_context(cert, key) ?? panic("server context: {err}")
+    server_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+    server_context.conf.min_tls_version = ssldefs.SSL_VERSION_TLS1_3
+    client := __open(client_context, client_tcp, "") ?? panic("client: {__ssl_text(err)}")
+    server := __open(server_context, server_tcp, "") ?? panic("server: {__ssl_text(err)}")
+    // The TLS 1.2-only ClientHello reaches the TLS 1.3-only server in memory;
+    // the server refuses it, and its alert reaches the client over the socket.
+    assert_eq(__test_step(client), C_WANT_READ)
+    __test_pump(client, server)
+    end_ns: core.time.__clock_mono_ns() + 10000000000
+    server_refused := false
+    if __handshake(server, "", end_ns) == .Err(_) -> server_refused = true
+    assert(server_refused)
+    assert(__test_handshake_freed(server.ssl))
+    assert(__test_released(server))
+    client_refused := false
+    if __handshake(client, "", end_ns) == .Err(_) -> client_refused = true
+    assert(client_refused)
+    assert(__test_handshake_freed(client.ssl))
+    assert(__test_released(client))
 }
 
 // Buffers decrypted bytes for `ready`; true once a read would not block.
