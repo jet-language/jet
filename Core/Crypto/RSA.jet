@@ -524,6 +524,10 @@ apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: &RSAContext) -> bn.Mpi bn.MpiError! {
     pl: ctx.p.p.len()
     ql: ctx.q.p.len()
     bn.mont_r2(ctx.rp, ctx.p)
+    // The output is allocated before any secret limb exists, so its
+    // allocation failure leaves nothing behind.
+    nl: ctx.n.p.len()
+    out := bn.zeros(nl)
     mm: bn.core_montmul_init(ctx.p.p)
     t := cipher.words(2 * pl + 1)
     tq_p := cipher.words(pl)
@@ -541,8 +545,6 @@ apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: &RSAContext) -> bn.Mpi bn.MpiError! {
     tq_w := bn.limbs_of(tq, wl)
     sum := cipher.words(wl)
     _: bn.core_add(sum, wide, tq_w, wl)
-    nl: ctx.n.p.len()
-    out := bn.zeros(nl)
     loop i in 0..<(if wl < nl -> wl else -> nl) -> out.p[i] = sum[i]
     cipher.wipe_words(t)
     cipher.wipe_words(tq_p)
@@ -662,9 +664,9 @@ private_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAErro
     prepare_blinding(ctx, rng)
     bn.mont_r2(ctx.rn, ctx.n)
     mm: bn.core_montmul_init(ctx.n.p)
+    t := bn.zeros(nl)
     work := cipher.words(2 * nl + 1)
     vi := bn.limbs_of(ctx.vi, nl)
-    t := bn.zeros(nl)
     bn.core_mul_mod(t.p, t0, vi, ctx.n.p, nl, mm, ctx.rn.p, work)
     cipher.wipe_words(vi)
     cipher.wipe_words(work)
@@ -696,13 +698,13 @@ blind_exponent: fn<R: RNG>(p: bn.Mpi, d: bn.Mpi, rng: &R) -> bn.Mpi RSAError! {
     pl: p.p.len()
     r: bn.fill_random(EXPONENT_BLINDING, rng)
     rl: r.p.len()
+    wl: pl + rl
+    out := bn.zeros(wl)
     p1 := cipher.words(pl)
     _: bn.core_sub_int(p1, p.p, U64{1}, pl)
-    wl: pl + rl
     prod := cipher.words(wl)
     bn.core_mul(prod, p1, pl, r.p, rl)
     dw := bn.limbs_of(d, wl)
-    out := bn.zeros(wl)
     _: bn.core_add(out.p, prod, dw, wl)
     cipher.wipe_words(p1)
     cipher.wipe_words(prod)
@@ -793,7 +795,10 @@ rsa_rsaes_oaep_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, label: [U8], input
     db_part := cipher.bytes_of(out, hlen + 1, olen - hlen - 1)
     mgf_mask(out, 1, hlen, db_part, md)
     core.crypto.wipe(db_part)
-    sealed: rsa_public(ctx, out)
+    sealed: rsa_public(ctx, out) ?? {
+        core.crypto.wipe(out)
+        return Err(err)
+    }
     core.crypto.wipe(out)
     Ok(sealed)
 }
@@ -820,7 +825,10 @@ rsa_rsaes_pkcs1_v15_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) 
         out[2 + i] = one[0]
     }
     put_bytes(out, olen - ilen, input)
-    sealed: rsa_public(ctx, out)
+    sealed: rsa_public(ctx, out) ?? {
+        core.crypto.wipe(out)
+        return Err(err)
+    }
     core.crypto.wipe(out)
     Ok(sealed)
 }
@@ -1026,7 +1034,11 @@ pss_sign_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8],
     sig[0] = sig[0].bit_and(U8{0xFF >> (olen * 8 - msb)})
     p += hlen
     sig[p] = U8{0xBC}
-    signed: rsa_private(ctx, rng, sig)
+    signed: rsa_private(ctx, rng, sig) ?? {
+        core.crypto.wipe(sig)
+        core.crypto.wipe(salt)
+        return Err(err)
+    }
     core.crypto.wipe(sig)
     core.crypto.wipe(salt)
     Ok(signed)

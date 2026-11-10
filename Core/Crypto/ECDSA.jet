@@ -86,11 +86,11 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
     if !ecp.privkey_valid(grp, d) -> return Err(.InvalidKey)
     nl: grp.n.p.len()
     mm: bn.core_montmul_init(grp.n.p)
+    e: derive_mpi(grp, hash)
     rr := bn.mpi()
     bn.mont_r2(rr, grp.n) ?? return Err(.Mpi(err))
     work := cipher.words(2 * nl + 1)
     dl := bn.limbs_of(d, nl)
-    e: derive_mpi(grp, hash)
     sign_tries := 0
     loop {
         if sign_tries > 10 -> return Err(sign_failed(dl, work, .RandomFailed))
@@ -105,14 +105,16 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
         loop {
             if key_tries > 10 -> return Err(sign_failed(dl, work, wiped(k.p, .RandomFailed)))
             key_tries += 1
-            k = ecp.gen_privkey(grp, rng)
-            pt: if shared_rng -> ecp.ecp_mul(grp, k, grp.g, rng) else -> ecp.ecp_mul(grp, k, grp.g, blind)
+            // A nonce whose r came out zero is wiped before the next draw.
+            cipher.wipe_words(k.p)
+            k = ecp.gen_privkey(grp, rng) ?? return Err(sign_failed(dl, work, err))
+            pt: nonce_point(grp, k, rng, blind, shared_rng) ?? return Err(sign_failed(dl, work, wiped(k.p, err)))
             r = bn.mod_ct(pt.x, grp.n, rr) ?? return Err(sign_failed(dl, work, wiped(k.p, .Mpi(err))))
             if signature_part_nonzero(r) -> break
         }
         // Step 5: e from the hash, and the draw t that blinds the inverse.
         // Step 6: s = t (e + r d) / (k t) mod N.
-        t := if shared_rng -> ecp.gen_privkey(grp, rng) else -> ecp.gen_privkey(grp, blind)
+        t := blinding_draw(grp, rng, blind, shared_rng) ?? return Err(sign_failed(dl, work, wiped(k.p, err)))
         tl := bn.limbs_of(t, nl)
         kl := bn.limbs_of(k, nl)
         bn.core_mul_mod(kt.p, kl, tl, grp.n.p, nl, mm, rr.p, work)
@@ -135,6 +137,19 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
             return Ok(ECDSASignature{r: r, s: s})
         }
     }
+}
+
+/// k G, its randomization drawn from rng, or from blind unless `shared_rng`.
+nonce_point: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, k: bn.Mpi, rng: &R, blind: &B, shared_rng: Bool) -> ecp.Point ecp.EcpError! {
+    if shared_rng -> return ecp.ecp_mul(grp, k, grp.g, rng)
+    ecp.ecp_mul(grp, k, grp.g, blind)
+}
+
+/// The draw t that blinds the inverse: from rng, or from blind unless
+/// `shared_rng`.
+blinding_draw: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, rng: &R, blind: &B, shared_rng: Bool) -> bn.Mpi ecp.EcpError! {
+    if shared_rng -> return ecp.gen_privkey(grp, rng)
+    ecp.gen_privkey(grp, blind)
 }
 
 /// `err`, once the signing loop's private key limbs and Montgomery scratch
@@ -324,4 +339,43 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
     ecp.jac_set_zero(f, r)
     _: ecp.jac_add_affine(f, w, t, r, gx, gy, spare, true)
     assert(ecp.fe_eq(f, r.x, gx) && ecp.fe_eq(f, r.y, gy) && ecp.fe_eq(f, r.z, f.one))
+}
+
+/// A generator of `left` draws from `inner`, then failures.
+FailingAfter: struct {
+    left: Int
+    inner: drbg.HMACDrbg
+}
+
+impl FailingAfter.RNG {
+    fill: fn(&self, out: &[U8]) -> Bool Never! {
+        if self.left == 0 -> return false
+        self.left -= 1
+        self.inner.fill(out)
+    }
+}
+
+#Test("Signing returns an error when the generator fails at each of its draws, and signs once it has them all") {
+    grp: ecp.group_load(.Secp256r1) ?? panic("load")
+    d: bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("d")
+    hash: hashes.hash(.SHA256, "sample".bytes())
+    failures := 0
+    left := 0
+    loop {
+        seed := drbg.hmac_drbg_new(.SHA256)
+        drbg.hmac_drbg_seed_buf(seed, "failing draws".bytes())
+        rng := FailingAfter{left: left, inner: seed}
+        if ecdsa_sign(grp, d, hash, rng) == .Ok(sig) {
+            q: ecp.ecp_mul(grp, d, grp.g, rng.inner) ?? panic("q")
+            ecdsa_verify(grp, hash, q, sig.r, sig.s) ?? panic("verify")
+            break
+        }
+        failures += 1
+        left += 1
+        if left > 32 -> panic("signing never succeeded")
+    }
+    // The nonce k, the randomization of k G and the blinding draw t each
+    // fail in turn before the first signature: the paths that return
+    // sign_failed with the key limbs wiped.
+    assert(failures >= 3)
 }

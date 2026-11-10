@@ -518,8 +518,12 @@ update_cbc: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) C
     n := len
     if ctx.unprocessed_len != 0 {
         loop i in 0..<room -> ctx.unprocessed[ctx.unprocessed_len + i] = src[at + i]
-        blk: cipher.bytes_of(ctx.unprocessed, 0, bs)
-        cbc_run(ctx, blk, 0, bs, out)
+        blk := cipher.bytes_of(ctx.unprocessed, 0, bs)
+        cbc_run(ctx, blk, 0, bs, out) ?? {
+            core.crypto.wipe(blk)
+            return Err(err)
+        }
+        core.crypto.wipe(blk)
         ctx.unprocessed_len = 0
         at += room
         n -= room
@@ -649,11 +653,19 @@ finish_cbc: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
     }
     blk := cipher.bytes_of(ctx.unprocessed, 0, bs)
     if !decrypt {
-        cbc_run(ctx, blk, 0, bs, out)
+        cbc_run(ctx, blk, 0, bs, out) ?? {
+            core.crypto.wipe(blk)
+            return Err(err)
+        }
+        core.crypto.wipe(blk)
         return Ok(true)
     }
     plain := [U8]{}
-    cbc_run(ctx, blk, 0, bs, plain)
+    cbc_run(ctx, blk, 0, bs, plain) ?? {
+        core.crypto.wipe(blk)
+        core.crypto.wipe(plain)
+        return Err(err)
+    }
     core.crypto.wipe(blk)
     check: cipher.cbc_get_padding(pad, plain, 0, bs)
     data_len: padding_len(check)
@@ -749,13 +761,21 @@ cipher_check_tag: fn(ctx: &CipherContext, expected: [U8]) CipherLayerError! {
 }
 
 /// set_iv, reset, update and finish in one call (mbedtls_cipher_crypt):
-/// the whole output, or InvalidPadding, returning nothing.
+/// the whole output, or InvalidPadding, returning nothing: a failure wipes
+/// what was produced.
 cipher_crypt: fn(ctx: &CipherContext, iv: [U8], input: [U8]) -> [U8] CipherLayerError! {
     cipher_set_iv(ctx, iv)
     cipher_reset(ctx)
     out := [U8]{}
-    cipher_update(ctx, input, 0, input.len(), out)
-    if !cipher_finish_padded(ctx, out) {
+    cipher_update(ctx, input, 0, input.len(), out) ?? {
+        core.crypto.wipe(out)
+        return Err(err)
+    }
+    padded: cipher_finish_padded(ctx, out) ?? {
+        core.crypto.wipe(out)
+        return Err(err)
+    }
+    if !padded {
         core.crypto.wipe(out)
         return Err(.InvalidPadding)
     }

@@ -421,7 +421,10 @@ ssl_tls13_key_schedule_stage_early: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLErro
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     psk := [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) -> psk = ssl_tls13_export_handshake_psk(ssl) ?? return Err(err)
-    early: ssl_tls13_evolve_secret(cs.mac, None, psk)
+    early: ssl_tls13_evolve_secret(cs.mac, None, psk) ?? {
+        ssldefs.ssl_wipe(psk)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(psk)
     ssl.handshake.tls13_early_secret = early
 }
@@ -496,7 +499,10 @@ ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng
         if !ssltls.ssl_tls13_named_group_is_ecdhe(g) && !ssltls.ssl_tls13_named_group_is_ffdh(g) -> return Err(.FeatureUnavailable)
         shared_secret = ssl_tls13_xxdh_agree(ssl, rng) ?? return Err(err)
     }
-    hs: ssl_tls13_evolve_secret(cs.mac, Val(ssl.handshake.tls13_early_secret), shared_secret)
+    hs: ssl_tls13_evolve_secret(cs.mac, Val(ssl.handshake.tls13_early_secret), shared_secret) ?? {
+        ssldefs.ssl_wipe(shared_secret)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(shared_secret)
     ssl.handshake.tls13_handshake_secret = hs
 }
@@ -622,7 +628,10 @@ ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SS
 ssl_tls13_exporter: fn(md: hashes.Md, secret: [U8], label: [U8], context_value: [U8], out_len: Int) -> [U8] ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
     hkdf_secret := ssl_tls13_derive_secret(md, secret, label, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hash_len) ?? return Err(err)
-    out: ssl_tls13_derive_secret(md, hkdf_secret, "exporter".bytes(), context_value, SSL_TLS1_3_CONTEXT_UNHASHED, out_len)
+    out: ssl_tls13_derive_secret(md, hkdf_secret, "exporter".bytes(), context_value, SSL_TLS1_3_CONTEXT_UNHASHED, out_len) ?? {
+        ssldefs.ssl_wipe(hkdf_secret)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(hkdf_secret)
     out
 }

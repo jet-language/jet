@@ -416,17 +416,26 @@ core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int
 
 /// n_bytes random bytes read as a big-endian number into x's `x_limbs`
 /// limbs. The byte order is the one RFC 6979 section 3.3 expects of a
-/// deterministic ECDSA nonce.
+/// deterministic ECDSA nonce. A failed draw leaves neither its bytes nor
+/// a partial x behind.
 core_fill_random: fn<R: RNG>(x: &[U64], x_limbs: Int, n_bytes: Int, rng: &R) MpiError! {
     if x_limbs < (n_bytes + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BadInput)
     buf := cipher.zero_bytes(n_bytes)
-    if !rng.fill(buf) -> return Err(.Random)
-    core_read_be(x, x_limbs, buf) ?? return Err(err)
+    if !rng.fill(buf) {
+        core.crypto.wipe(buf)
+        return Err(.Random)
+    }
+    core_read_be(x, x_limbs, buf) ?? {
+        core.crypto.wipe(buf)
+        cipher.wipe_words(x)
+        return Err(err)
+    }
     core.crypto.wipe(buf)
 }
 
 /// A uniform draw min <= x < n over `limbs` limbs, by rejection: the leftmost
-/// bitlen(n) bits of each fill, as RFC 6979 section 3.3 does.
+/// bitlen(n) bits of each fill, as RFC 6979 section 3.3 does. A failure
+/// leaves no rejected draw in x.
 core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiError! {
     n_bits: core_bitlen(n, limbs)
     n_bytes: (n_bits + 7) /% 8
@@ -434,10 +443,16 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
     // many more to keep the failure probability negligible.
     count := if n_bytes > 4 -> 30 else -> 250
     loop {
-        core_fill_random(x, limbs, n_bytes, rng) ?? return Err(err)
+        core_fill_random(x, limbs, n_bytes, rng) ?? {
+            cipher.wipe_words(x)
+            return Err(err)
+        }
         core_shift_r(x, limbs, 8 * n_bytes - n_bits)
         count -= 1
-        if count == 0 -> return Err(.NotAcceptable)
+        if count == 0 {
+            cipher.wipe_words(x)
+            return Err(.NotAcceptable)
+        }
         if draw_in_range(x, min, n, limbs) -> return
     }
 }
@@ -1809,4 +1824,34 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
     assert(cmp_int(i, 3) == 0)
     assert(div_int(from_int(1), 0) == .Err(.DivisionByZero))
     assert(gcd_modinv_odd(from_int(3), from_int(1), true) == .Err(.BadInput))
+}
+
+/// A generator of `left` draws of 0xFF bytes, then failures: below a
+/// small bound every draw is rejected.
+FailingDraws: struct {
+    left: Int
+}
+
+impl FailingDraws.RNG {
+    fill: fn(&self, out: &[U8]) -> Bool Never! {
+        if self.left == 0 -> return false
+        self.left -= 1
+        loop i in 0..<out.len() -> out[i] = U8{0xFF}
+        true
+    }
+}
+
+#Test("A failed or exhausted random draw leaves no rejected draw in its output") {
+    n: [U64]{U64{5}}
+    lefts: [Int]{0, 3, 1000}
+    loop left in lefts {
+        x := [U64]{U64{0x5A5A5A5A5A5A5A5A}}
+        rng := FailingDraws{left: left}
+        if left == 1000 {
+            assert(core_random(x, U64{1}, n, 1, rng) == .Err(.NotAcceptable))
+        } else {
+            assert(core_random(x, U64{1}, n, 1, rng) == .Err(.Random))
+        }
+        assert(x[0] == (U64{0}))
+    }
 }

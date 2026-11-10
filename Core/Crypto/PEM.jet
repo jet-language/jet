@@ -311,13 +311,19 @@ decrypt: fn(alg: PEMCipher, iv: &[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! 
     }
     key := pbkdf1(keylen, iv, pwd)
     if alg == .DESCBC {
-        k: des.des_setkey_dec(key)
+        k: des.des_setkey_dec(key) ?? {
+            core.crypto.wipe(key)
+            return Err(.DES(err))
+        }
         core.crypto.wipe(key)
         out: des.des_crypt_cbc(k, .Decrypt, iv, body)
         return Ok(out)
     }
     if alg == .DESEDE3CBC {
-        k: des.des3_set3key_dec(key)
+        k: des.des3_set3key_dec(key) ?? {
+            core.crypto.wipe(key)
+            return Err(.DES(err))
+        }
         core.crypto.wipe(key)
         out: des.des_crypt_cbc(k, .Decrypt, iv, body)
         return Ok(out)

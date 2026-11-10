@@ -1519,10 +1519,11 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets
     d: (grp.nbits + wnd - 1) /% wnd
     w := fe_work(n)
     t := fe_tmp(n)
-    rec: comb_recode_scalar(grp, m, d, wnd)
+    rec := comb_recode_scalar(grp, m, d, wnd)
     r := jac_new(n)
+    ran := 0
     if {
-        p_eq_g && grp.t_size == ts -> meets += comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind)
+        p_eq_g && grp.t_size == ts -> ran = comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind) ?? return Err(comb_failed(r, t, w, rec.k, err))
         else -> {
             // The table of the public point P, built with its own scratch.
             pw := fe_work(n)
@@ -1532,17 +1533,32 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets
             fe_from_mpi(f, pw, px, pt.x)
             fe_from_mpi(f, pw, py, pt.y)
             table := comb_precompute(f, pw, ptmp, px, py, wnd, d)
-            meets += comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind)
+            ran = comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind) ?? {
+                cipher.wipe_words(table)
+                return Err(comb_failed(r, t, w, rec.k, err))
+            }
             cipher.wipe_words(table)
         }
     }
+    meets += ran
     fe_cond_neg(f, w, r.y, rec.parity)
     jac_normalize(f, w, t, r)
     out: jac_to_point(f, w, r)
     jac_wipe(r)
     fe_tmp_wipe(t)
     fe_work_wipe(w)
+    cipher.wipe_words(rec.k)
     Ok(out)
+}
+
+/// `err`, once a failed comb's running point, scratch and recoded scalar
+/// digits are wiped.
+comb_failed: fn(r: &JacPoint, t: &FeTmp, w: &FeWork, k: &[U64], err: &&EcpError) -> EcpError Never! {
+    jac_wipe(r)
+    fe_tmp_wipe(t)
+    fe_work_wipe(w)
+    cipher.wipe_words(k)
+    err
 }
 
 // ---------------------------------------------------------------------------
