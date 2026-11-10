@@ -4165,7 +4165,7 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
 // evaluated: `.Preparation` in comptime code, `.Build` in `fn build`, and
 // `.Runtime` anywhere else, so every tier reads the same constant.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if name == "$caller" {
+    if name == "$caller" || name == "#caller" {
         row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
@@ -4184,7 +4184,7 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
 
 // The site roots, which no binding shadows.
 sema_site_root_name: fn(name: String) -> Bool Never! {
-    name == "$here" || name == "$caller" || name == "#line" || name == "#file" || name == "#phase"
+    name == "$here" || name == "$caller" || name == "#here" || name == "#caller" || name == "#line" || name == "#file" || name == "#phase"
 }
 
 sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
