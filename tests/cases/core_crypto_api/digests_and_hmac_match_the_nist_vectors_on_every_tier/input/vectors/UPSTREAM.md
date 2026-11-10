@@ -1,8 +1,7 @@
 # Vector sources
 
 Only the vectors `run.jet` runs are kept. NIST CAVP vectors are works of the
-United States government, not subject to copyright; RFC test vectors are
-quoted under the IETF Trust's code-component terms.
+United States government, not subject to copyright.
 
 ## NIST CAVP
 
@@ -34,12 +33,9 @@ HMAC-SHA-256, section) of `HMAC.rsp` (SHA-256
 `cf27b6ad24fc3d72f8d18f8cee8a2b366302395cc50f5d9e607fbce4e98001eb`), byte for
 byte; core.crypto exports HMAC with SHA-256 only.
 
-## RFCs
-
-`rfc/kdf.txt` restates, one vector per line:
-
-- RFC 5869 Appendix A, test cases 1-3 (HKDF with SHA-256).
-- RFC 7914 section 11, both PBKDF2-HMAC-SHA-256 vectors.
+## Not committed
 
 Wycheproof and Mbed TLS suite data are not committed to the repository
-(#6694); tests that use Wycheproof fetch it at test time, pinned by SHA-256.
+(#6694). The Wycheproof HKDF-SHA-256 and PBKDF2-HMAC-SHA-256 vectors for
+core.crypto's public KDFs run in Core/Net/SSL/TLS.jet's vector tests, which
+fetch them at test time pinned by SHA-256 (tests/vectors/UPSTREAM.md).

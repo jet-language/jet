@@ -1,7 +1,8 @@
 package: { name: "run", authority: { allow: [FS.Read] } }
 
-// Runs the NIST CAVP and RFC vectors that the public digest, HMAC, HKDF and
-// PBKDF2 functions cover (vectors/UPSTREAM.md).
+// Runs the NIST CAVP vectors that the public digest and HMAC functions cover
+// (vectors/UPSTREAM.md). HKDF and PBKDF2 have no CAVP vectors; their
+// Wycheproof vectors run in Core/Net/SSL/TLS.jet's vector tests.
 use {
     crypto: core.crypto
     core.encoding
@@ -105,47 +106,8 @@ run_hmac: fn() {
     print("nist HMAC_L32 pass={t.pass} fail={t.fail}")
 }
 
-// A hex field of kdf.txt; "-" is empty.
-kdf_hex: fn(text: String) -> [U8] {
-    if text == "-" -> return [U8]{}
-    unhex(text)
-}
-
-// RFC 5869 (HKDF-SHA-256) and RFC 7914 (PBKDF2-HMAC-SHA-256). HKDF output is
-// a Secret: it is compared, never read back.
-run_rfc: fn() {
-    path: "vectors/rfc/kdf.txt"
-    text: files.read(path) ?? panic("read {path}")
-    hkdf := Counts{pass: 0, fail: 0}
-    pbkdf2 := Counts{pass: 0, fail: 0}
-    loop line in text.lines() {
-        if line.starts_with("#") || line.trim() == "" -> next
-        f: line.split(" ").to_list()
-        if f[0] == "hkdf_sha256" {
-            okm: kdf_hex(f[4])
-            ok: if crypto.hkdf_sha256(kdf_hex(f[1]), kdf_hex(f[2]), kdf_hex(f[3]), okm.len()) == {
-                .Ok(secret) -> crypto.constant_time_equal(secret, crypto.Secret.from_bytes(okm))
-                .Err(_) -> false
-            }
-            tally(hkdf, ok, line)
-        } else if f[0] == "pbkdf2_hmac_sha256" {
-            dk: kdf_hex(f[4])
-            ok: if crypto.pbkdf2_hmac(kdf_hex(f[1]), kdf_hex(f[2]), int_field(f[3]), dk.len()) == {
-                .Ok(key) -> key == dk
-                .Err(_) -> false
-            }
-            tally(pbkdf2, ok, line)
-        } else {
-            panic("unknown kdf.txt line {line}")
-        }
-    }
-    print("rfc5869 hkdf_sha256 pass={hkdf.pass} fail={hkdf.fail}")
-    print("rfc7914 pbkdf2_hmac_sha256 pass={pbkdf2.pass} fail={pbkdf2.fail}")
-}
-
 run: fn() {
     algorithms: [String]{"SHA1", "SHA224", "SHA256", "SHA384", "SHA512", "SHA3_224", "SHA3_256", "SHA3_384", "SHA3_512"}
     loop algorithm in algorithms -> run_digest(algorithm)
     run_hmac()
-    run_rfc()
 }

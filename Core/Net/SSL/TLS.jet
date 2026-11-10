@@ -40,6 +40,14 @@ use {
     cli13: __core_net_ssl_cli13
     srv13: __core_net_ssl_srv13
     keys13: __core_net_ssl_keys13
+    // The test vectors only.
+    aead: __core_crypto_aead
+    drbg: __core_crypto_drbg
+    ecdsa: __core_crypto_ecdsa
+    rsa: __core_crypto_rsa
+    pkparse: __core_crypto_pkparse
+    core.encoding.[Dyn]
+    core.crypto.[Secret]
 }
 
 // ---------------------------------------------------------------------------
@@ -2521,4 +2529,941 @@ ssl_export_keying_material: fn(ssl: ssldefs.SSLContext, key_len: Int, label: [U8
         return keys13.ssl_tls13_exporter(hash_alg, secret, label, context ?? [U8]{}, key_len)
     }
     Err(.BadProtocolVersion)
+}
+
+// ---------------------------------------------------------------------------
+// The published test vectors of every algorithm Core's TLS and crypto
+// callers use (#6694).
+//
+// NIST CAVP vectors (public domain) are committed under tests/vectors/nist,
+// trimmed to the parameters Core's TLS enables; tests/vectors/UPSTREAM.md
+// names their sources. Wycheproof vectors (Apache-2.0) are not committed:
+// each test fetches the files it needs from the pinned Wycheproof commit over
+// Core's own HTTPS client, checks each against its SHA-256 pin and caches it
+// under $XDG_CACHE_HOME/jet/vectors/wycheproof/<commit>, or ~/.cache when
+// XDG_CACHE_HOME is unset. A cached file whose digest differs is fetched
+// again; a fetched file whose digest differs fails the test.
+//
+// The tests read tests/vectors/nist relative to the working directory, so
+// they run from the repository root: `jet test Core/Net/SSL/TLS.jet`.
+// ---------------------------------------------------------------------------
+
+/// The Wycheproof commit the pins below name.
+VEC_WYCHEPROOF_COMMIT: "d17cc89fa5c8f4f4d378b5385ebf75da5d0926c9"
+
+/// The committed NIST CAVP files, relative to the repository root.
+VEC_NIST_DIR: "tests/vectors/nist"
+
+/// The SHA-256 of Wycheproof file `name` (testvectors_v1/<name>_test.json)
+/// at VEC_WYCHEPROOF_COMMIT; empty for a file without a pin.
+vec_wycheproof_pin: fn(name: String) -> String Never! {
+    if name == {
+        "aes_gcm" -> "985e5ecc172e181eaf49e89508b9470dcf478002eb7e8559c707eb42dc97dfe7"
+        "chacha20_poly1305" -> "fe61d25f90e1bde4461d00eafe61049e5f29bd999f36b766df9cda90906ad53d"
+        "x25519" -> "35c3f5231cf25cc640b524d403461deee9e49441d5d915a3a25b2c8ff5adbe7d"
+        "ecdh_secp256r1_ecpoint" -> "648f16d077caf2400d02331ca51f44744c72c799830c8d0595d0b18b6dd9f886"
+        "ecdh_secp384r1_ecpoint" -> "ffa7835fe1de359dff762c8f1272b98acebd5578e2f855d969051ff956c6dca3"
+        "ecdsa_secp256r1_sha256" -> "182db4f3e230f6f9fa9f800d2a614dede30284b8e8438bbfe1171905402e9332"
+        "ecdsa_secp384r1_sha384" -> "8a5b3ae1760975143414811f13588c24d951d9d8c904195087ba327591dfe9cc"
+        "rsa_signature_2048_sha256" -> "94a917b01ff50fb874cfc05bf29b4af44868d944a6558201cf18380da93fb393"
+        "rsa_signature_2048_sha384" -> "c571c105d261c0ff588a2888a529f152563fb3b77894b7620d4e4f8f934f2c1d"
+        "rsa_signature_2048_sha512" -> "16ea24b039905d054bdb6004f5fd179374e150b7b6d73a7ba654b6d00eab12ef"
+        "rsa_signature_3072_sha256" -> "0f5f18cabfaad3e2792e82f7e9882f8999049b456714de924b8a5e202f61ca43"
+        "rsa_signature_3072_sha384" -> "73499ee649d8fb703b3f0f455fa36f7682fde677c590a736958ebce05ab27dae"
+        "rsa_signature_4096_sha256" -> "957aca128e30bd02c8982f8ca482d6521d16683f4bbc3f193cdfd4c8f04bc667"
+        "rsa_signature_4096_sha384" -> "bc26f16b9fc9a90628864d3d1111ef48a4bd00b9d4870bfab88ff326e309e073"
+        "rsa_signature_4096_sha512" -> "9d6e67b1eb0d7040db411835238efd20e9302399a258bdff82de3f38e0f2855a"
+        "rsa_pss_2048_sha256_mgf1_32" -> "7f6efafc160f4816b96cbf1c12188a31051d7e3f001e27505d9edb5f2a0e325c"
+        "rsa_pss_3072_sha256_mgf1_32" -> "cca48433e6d1accb57f65b3396c4f4dd93c776467101c3f0948e74c283fd4749"
+        "rsa_pss_4096_sha256_mgf1_32" -> "e627cbf5139a01e0a446c4fe15911f6268224fdd3ef4a1eb714b3942b5686410"
+        "rsa_pss_2048_sha384_mgf1_48" -> "66d464778b0b2f683a1d1a20e94f77e9472b8cc393b45f423fa08a48e677063c"
+        "rsa_pss_4096_sha384_mgf1_48" -> "d632649a7630f7c267eda576714ca11cf0ff068d6622f576b8701f923c112577"
+        "rsa_pss_4096_sha512_mgf1_64" -> "c93ceaa56a190c9fd4707441c5c6a75839f108202d88aec891697f9623042547"
+        "hmac_sha256" -> "2d201cfa61d1bf95e6f5d07d96634b4a348b31e8eaa277ad7c8d09677b7a743f"
+        "hmac_sha384" -> "28b9776e979dd755d852ca471043ea6cedce8b15f7a28abdf6ea9efd982b43c0"
+        "hkdf_sha256" -> "bb2b462a38b251cb52a2aede706d6d4b62b26864f4e80c95497507ddb07c5f1e"
+        "hkdf_sha384" -> "69ff6ea3657bb9c1b8cdffbbb4e7832353d08fd15c0d9997b03f7a6b180e3678"
+        "rsa_pkcs1_2048_sig_gen" -> "587b3d27d3429f2118cb02818da4d08eb3f36f50c747939eb550fae4337ccbf0"
+        "rsa_pkcs1_3072_sig_gen" -> "45153219d486fd135d35aa968a957a0c015c7829e8dc59bea5f87e6c30912677"
+        "rsa_pkcs1_4096_sig_gen" -> "f13eadbec6c45291cb33e6b2fa0a0c2b862d0bd2eaec29f930d3b78067cd48c7"
+        "pbkdf2_hmacsha256" -> "1bf37af2cefe40c829ee9ecebb3505bb6424be8824bc97aa3e1c2076e860d192"
+        "xchacha20_poly1305" -> "a79de072571b90eb40c3a63ce0c7f75dcb4b62323c8870228e1f61dcc61d63a9"
+        "ed25519" -> "ea80ffebac085e21cb9d3e903e7fa2b448d96702da5b31f061d0b83b430b74b3"
+        else -> ""
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tallies
+// ---------------------------------------------------------------------------
+
+/// The outcome of one vector file: records that agree, records that do not
+/// (each named in `failures`), and invalid Wycheproof signatures accepted
+/// because the DER reader takes BER lengths and INTEGERs without their sign
+/// byte, as the C reader does.
+VecTally: struct {
+    what: String
+    pass: Int
+    fail: Int
+    lenient: Int
+    failures: [String]
+}
+
+vec_tally: fn(what: String) -> VecTally Never! { VecTally{what: what, pass: 0, fail: 0, lenient: 0, failures: [String]{}} }
+
+vec_check: fn(t: &VecTally, ok: Bool, record: String) Never! {
+    if ok {
+        t.pass += 1
+        return
+    }
+    t.fail += 1
+    if t.failures.len() < 8 -> t.failures.push(record.copy())
+}
+
+/// `got` holds exactly `want`.
+vec_is: fn(got: [U8]?, want: [U8]) -> Bool Never! {
+    g: got ?? return false
+    g == want
+}
+
+/// Every record of `t` agreed, and there was at least one.
+vec_assert: fn(t: VecTally) {
+    if t.fail > 0 || t.pass == 0 {
+        detail := ""
+        loop f in t.failures -> detail = "{detail}\n  {f}"
+        panic("{t.what}: {t.pass} agree, {t.fail} disagree{detail}")
+    }
+}
+
+/// The bytes of hex `text`. CAVP files drop a leading zero nibble, as in
+/// `e = 7485b`, so an odd-length value takes one back.
+vec_hex: fn(text: String) -> [U8] {
+    digits: text.trim()
+    even: if digits.len() %% 2 == 1 -> "0{digits}" else -> digits
+    core.encoding.hex_to_bytes(even) ?? panic("bad hex `{text}`")
+}
+
+vec_concat: fn(a: [U8], b: [U8]) -> [U8] Never! {
+    out := a.copy()
+    loop x in b -> out.push(x)
+    out
+}
+
+vec_md_named: fn(name: String) -> hashes.Md? Never! {
+    if name == {
+        "SHA-256" | "SHA256" -> Val(hashes.Md.SHA256)
+        "SHA-384" | "SHA384" -> Val(hashes.Md.SHA384)
+        "SHA-512" | "SHA512" -> Val(hashes.Md.SHA512)
+        else -> None
+    }
+}
+
+/// A deterministic generator for the blinding the ECDH and RSA operations ask
+/// for; the vectors' results do not depend on it.
+vec_rng: fn() -> drbg.HMACDrbg Never! {
+    g := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(g, "Jet test vector blinding".bytes())
+    g
+}
+
+// ---------------------------------------------------------------------------
+// NIST CAVP response files
+// ---------------------------------------------------------------------------
+
+/// One blank-line-separated paragraph of a response file: the bracketed
+/// header lines of its section, joined, and its lines in order.
+VecRecord: struct {
+    section: String
+    names: [String]
+    values: [String]
+}
+
+/// The paragraphs of tests/vectors/nist/`file` that hold fields.
+vec_nist: fn(file: String) -[FS.Read]> [VecRecord] {
+    path: "{VEC_NIST_DIR}/{file}"
+    text: core.files.read(path) ?? panic("{path}: {err}; the vector tests run from the repository root")
+    out := [VecRecord]{}
+    section := ""
+    in_header := false
+    names := [String]{}
+    values := [String]{}
+    loop raw in text.lines() {
+        line: raw.trim()
+        if line.starts_with("#") -> next
+        if line.starts_with("[") {
+            if !in_header -> section = ""
+            in_header = true
+            section = "{section}{line}"
+            next
+        }
+        in_header = false
+        if line.is_empty() {
+            if names.len() > 0 -> out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+            names = [String]{}
+            values = [String]{}
+            next
+        }
+        // `Name = value`, the value possibly empty.
+        if line.split_once("=") == {
+            .Val(parts) -> {
+                names.push(parts.before.trim())
+                values.push(parts.after.trim())
+            }
+            None -> {
+                // A bare marker line, FAIL in the GCM decryption files.
+                names.push(line.copy())
+                values.push("")
+            }
+        }
+    }
+    if names.len() > 0 -> out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+    out
+}
+
+vec_has: fn(r: VecRecord, name: String) -> Bool Never! { r.names.contains(name) }
+
+/// The `nth` value named `name` in r (fields repeat in the DRBG files).
+vec_field_nth: fn(r: VecRecord, name: String, nth: Int) -> String {
+    seen := 0
+    loop i in 0..<r.names.len() {
+        if r.names[i] == name {
+            if seen == nth -> return r.values[i].copy()
+            seen += 1
+        }
+    }
+    panic("record has no field {name} #{nth}")
+}
+
+vec_field: fn(r: VecRecord, name: String) -> String { vec_field_nth(r, name, 0) }
+
+vec_bytes: fn(r: VecRecord, name: String) -> [U8] { vec_hex(vec_field(r, name)) }
+
+vec_label: fn(file: String, r: VecRecord, n: Int) -> String Never! { "{file} {r.section} record {n}" }
+
+// ---------------------------------------------------------------------------
+// Wycheproof files
+// ---------------------------------------------------------------------------
+
+vec_cache_dir: fn() -[Env]> String {
+    xdg: core.sys.get("XDG_CACHE_HOME") ?? ""
+    root: if !xdg.is_empty() -> xdg else -> "{core.sys.home_dir() ?? panic("no home directory for the vector cache")}/.cache"
+    "{root}/jet/vectors/wycheproof/{VEC_WYCHEPROOF_COMMIT}"
+}
+
+vec_sha256_hex: fn(bytes: [U8]) -> String Never! { core.encoding.bytes_to_hex(hashes.hash(.SHA256, bytes)) }
+
+/// The parsed Wycheproof file testvectors_v1/`name`_test.json, from the
+/// cache when its digest matches the pin, else fetched and cached.
+vec_wycheproof: fn(name: String) -[FS, Env, Net, Time.Wait]> Dyn {
+    pin: vec_wycheproof_pin(name)
+    if pin.is_empty() -> panic("Wycheproof file {name} has no SHA-256 pin")
+    dir: vec_cache_dir()
+    path: "{dir}/{name}_test.json"
+    bytes := [U8]{}
+    if core.files.exists(path) {
+        cached: core.files.read_bytes(path) ?? panic("{path}: {err}")
+        if vec_sha256_hex(cached) == pin -> bytes = cached.copy()
+    }
+    if bytes.is_empty() {
+        url: "https://raw.githubusercontent.com/C2SP/wycheproof/{VEC_WYCHEPROOF_COMMIT}/testvectors_v1/{name}_test.json"
+        response: core.http.get(url) ?? panic("Fetching {url}: {err}")
+        if response.status != 200 -> panic("Fetching {url}: HTTP {response.status}")
+        body: response.body.bytes(64000000) ?? panic("Fetching {url}: {err}")
+        got: vec_sha256_hex(body)
+        if got != pin -> panic("{url} has SHA-256 {got}, not the pinned {pin}")
+        core.files.create_dir_all(dir) ?? panic("{dir}: {err}")
+        core.files.write_atomic(path, body) ?? panic("{path}: {err}")
+        bytes = body.copy()
+    }
+    text: String.from_bytes(bytes) ?? panic("{name}: not UTF-8")
+    core.encoding.json.parse(text) ?? panic("{name}: {err}")
+}
+
+vec_text: fn(d: Dyn, key: String) -> String {
+    if d[key] == {
+        .Text(s) -> s.copy()
+        else -> panic("Wycheproof field {key} is missing")
+    }
+}
+
+vec_int: fn(d: Dyn, key: String) -> Int {
+    if d[key] == {
+        .Int(n) -> n
+        .Number(s) -> Int.parse(s) ?? panic("Wycheproof field {key}: {s}")
+        .Float(x) -> Int.from_float(x) ?? panic("Wycheproof field {key}: {x}")
+        else -> panic("Wycheproof field {key} is missing")
+    }
+}
+
+vec_items: fn(d: Dyn, key: String) -> [Dyn] {
+    if d[key] == {
+        .Array(items) -> items.copy()
+        else -> panic("Wycheproof field {key} is missing")
+    }
+}
+
+vec_flags: fn(d: Dyn) -> [String] {
+    out := [String]{}
+    loop f in vec_items(d, "flags") {
+        if f == .Text(s) -> out.push(s.copy())
+    }
+    out
+}
+
+vec_wy_hex: fn(d: Dyn, key: String) -> [U8] { vec_hex(vec_text(d, key)) }
+
+/// Tally Wycheproof case `c`: a valid case must be accepted, an invalid one
+/// refused, an acceptable one either. `lenient_der` counts invalid DER
+/// signatures with BER lengths or unsigned INTEGERs apart when accepted.
+vec_wy_verdict: fn(t: &VecTally, file: String, c: Dyn, accepted: Bool, lenient_der: Bool) {
+    result: vec_text(c, "result")
+    ok: if result == {
+        "valid" -> accepted
+        "invalid" -> !accepted
+        else -> true
+    }
+    if ok {
+        t.pass += 1
+        return
+    }
+    flags: vec_flags(c)
+    comment: vec_text(c, "comment")
+    if lenient_der && result == "invalid" && (flags.contains("BerEncodedSignature") || flags.contains("MissingZero") || comment == "prepending 0's to r" || comment == "prepending 0's to s") {
+        t.lenient += 1
+        return
+    }
+    vec_check(t, false, "{file} tcId {vec_int(c, "tcId")} ({result}: {comment})")
+}
+
+// ---------------------------------------------------------------------------
+// AEAD: AES-GCM and ChaCha20-Poly1305
+// ---------------------------------------------------------------------------
+
+vec_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+    k: aead.gcm_key(cipher.aes_key(key, false) ?? return None)
+    aead.gcm_encrypt(k, iv, aad, plain, 16) ?? return None
+}
+
+vec_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+    k: aead.gcm_key(cipher.aes_key(key, false) ?? return None)
+    aead.gcm_decrypt(k, iv, aad, sealed, 16) ?? return None
+}
+
+#Test("NIST CAVP GCM vectors seal and open with AES-128 and AES-256, 96-bit IVs and 128-bit tags") {
+    loop file in ([String]{"gcmEncryptExtIV128.rsp", "gcmEncryptExtIV256.rsp"}) {
+        t := vec_tally(file)
+        records: vec_nist(file)
+        loop n in 0..<records.len() {
+            r: records[n]
+            if !vec_has(r, "Key") -> next
+            sealed: vec_concat(vec_bytes(r, "CT"), vec_bytes(r, "Tag"))
+            got: vec_gcm_seal(vec_bytes(r, "Key"), vec_bytes(r, "IV"), vec_bytes(r, "AAD"), vec_bytes(r, "PT"))
+            vec_check(t, vec_is(got, sealed), vec_label(file, r, n))
+        }
+        vec_assert(t)
+    }
+    loop file in ([String]{"gcmDecrypt128.rsp", "gcmDecrypt256.rsp"}) {
+        t := vec_tally(file)
+        records: vec_nist(file)
+        loop n in 0..<records.len() {
+            r: records[n]
+            if !vec_has(r, "Key") -> next
+            sealed: vec_concat(vec_bytes(r, "CT"), vec_bytes(r, "Tag"))
+            got: vec_gcm_open(vec_bytes(r, "Key"), vec_bytes(r, "IV"), vec_bytes(r, "AAD"), sealed)
+            ok: if vec_has(r, "FAIL") -> got == None else -> vec_is(got, vec_bytes(r, "PT"))
+            vec_check(t, ok, vec_label(file, r, n))
+        }
+        vec_assert(t)
+    }
+}
+
+#Test("Wycheproof AES-GCM vectors with the key, IV and tag sizes TLS uses seal and open") {
+    file: "aes_gcm"
+    t := vec_tally(file)
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        key_size: vec_int(g, "keySize")
+        if (key_size != 128 && key_size != 256) || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
+        loop c in vec_items(g, "tests") {
+            key: vec_wy_hex(c, "key")
+            iv: vec_wy_hex(c, "iv")
+            aad: vec_wy_hex(c, "aad")
+            msg: vec_wy_hex(c, "msg")
+            sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
+            opened: vec_gcm_open(key, iv, aad, sealed)
+            accepted := vec_is(opened, msg)
+            if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_gcm_seal(key, iv, aad, msg), sealed)
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+}
+
+#Test("Wycheproof ChaCha20-Poly1305 vectors with 96-bit nonces seal and open") {
+    file: "chacha20_poly1305"
+    t := vec_tally(file)
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        if vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
+        loop c in vec_items(g, "tests") {
+            key: vec_wy_hex(c, "key")
+            iv: vec_wy_hex(c, "iv")
+            aad: vec_wy_hex(c, "aad")
+            msg: vec_wy_hex(c, "msg")
+            sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
+            accepted := vec_is(vec_chacha_open(key, iv, aad, sealed), msg)
+            if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_chacha_seal(key, iv, aad, msg), sealed)
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+}
+
+vec_chacha_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+    aead.chachapoly_encrypt(key, nonce, aad, plain) ?? return None
+}
+
+vec_chacha_open: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+    aead.chachapoly_decrypt(key, nonce, aad, sealed) ?? return None
+}
+
+// ---------------------------------------------------------------------------
+// Key agreement: X25519 and ECDH over P-256 and P-384
+// ---------------------------------------------------------------------------
+
+/// The shared secret of private key `private` and peer point `public` on
+/// curve `id`, in its wire form: little-endian for X25519, big-endian
+/// field-size bytes otherwise.
+vec_ecdh: fn(id: ecp.GroupID, private: [U8], public: [U8]) -> [U8]? {
+    key := ecp.keypair_new()
+    ecp.read_key(id, key, private) ?? return None
+    q: ecp.point_read_binary(key.grp, public) ?? return None
+    rng := vec_rng()
+    z: ecdh.ecdh_compute_shared(key.grp, q, key.d, rng) ?? return None
+    size: (key.grp.pbits + 7) >> 3
+    if ecp.group_type(key.grp) == .Montgomery -> return Val(bn.write_binary_le(z, size) ?? return None)
+    Val(bn.write_binary(z, size) ?? return None)
+}
+
+/// A big-endian scalar at exactly `size` bytes: Wycheproof's private keys
+/// carry a sign byte or drop leading zeros.
+vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
+    x: bn.read_binary(bytes) ?? return None
+    Val(bn.write_binary(x, size) ?? return None)
+}
+
+#Test("NIST CAVP ECC CDH primitive vectors agree on P-256 and P-384") {
+    file: "ECC_CDH_Primitive.txt"
+    t := vec_tally(file)
+    records: vec_nist(file)
+    loop n in 0..<records.len() {
+        r: records[n]
+        if !vec_has(r, "dIUT") -> next
+        id: if {
+            r.section.contains("P-256") -> ecp.GroupID.Secp256r1
+            r.section.contains("P-384") -> ecp.GroupID.Secp384r1
+            else -> panic("{file}: section {r.section}")
+        }
+        public := [U8]{0x04}
+        loop b in vec_bytes(r, "QCAVSx") -> public.push(b)
+        loop b in vec_bytes(r, "QCAVSy") -> public.push(b)
+        got: vec_ecdh(id, vec_bytes(r, "dIUT"), public)
+        vec_check(t, got == Val(vec_bytes(r, "ZIUT")), vec_label(file, r, n))
+    }
+    vec_assert(t)
+}
+
+#Test("Wycheproof X25519 vectors agree, and low-order points give no secret") {
+    file: "x25519"
+    t := vec_tally(file)
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        if vec_text(g, "curve") != "curve25519" -> next
+        loop c in vec_items(g, "tests") {
+            got: vec_ecdh(.Curve25519, vec_wy_hex(c, "private"), vec_wy_hex(c, "public"))
+            // The all-zero secret of a low-order point is refused, as RFC
+            // 7748 section 6.1 lets a TLS peer check.
+            zero: cipher.zero_bytes(32)
+            accepted: vec_is(got, vec_wy_hex(c, "shared")) && !vec_is(got, zero)
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+}
+
+#Test("Wycheproof ECDH vectors on uncompressed P-256 and P-384 points agree, and bad points are refused") {
+    loop file in ([String]{"ecdh_secp256r1_ecpoint", "ecdh_secp384r1_ecpoint"}) {
+        t := vec_tally(file)
+        id: if file.contains("256") -> ecp.GroupID.Secp256r1 else -> ecp.GroupID.Secp384r1
+        size: if id == .Secp256r1 -> 32 else -> 48
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            loop c in vec_items(g, "tests") {
+                private: vec_scalar(vec_wy_hex(c, "private"), size)
+                got: if private == {
+                    .Val(d) -> vec_ecdh(id, d, vec_wy_hex(c, "public"))
+                    None -> None
+                }
+                vec_wy_verdict(t, file, c, got == Val(vec_wy_hex(c, "shared")), false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Signatures: ECDSA and RSA
+// ---------------------------------------------------------------------------
+
+#Test("NIST CAVP ECDSA SigVer vectors verify on P-256 with SHA-256 and P-384 with SHA-384") {
+    file: "ECDSA_SigVer.rsp"
+    t := vec_tally(file)
+    records: vec_nist(file)
+    loop n in 0..<records.len() {
+        r: records[n]
+        if !vec_has(r, "Msg") -> next
+        p384: r.section == "[P-384,SHA-384]"
+        if !p384 && r.section != "[P-256,SHA-256]" -> panic("{file}: section {r.section}")
+        id: if p384 -> ecp.GroupID.Secp384r1 else -> ecp.GroupID.Secp256r1
+        md: if p384 -> hashes.Md.SHA384 else -> hashes.Md.SHA256
+        grp: ecp.group_load(id) ?? panic("group {id}")
+        public := [U8]{0x04}
+        loop b in vec_bytes(r, "Qx") -> public.push(b)
+        loop b in vec_bytes(r, "Qy") -> public.push(b)
+        hash: hashes.hash(md, vec_bytes(r, "Msg"))
+        accepted: vec_ecdsa_raw(grp, public, hash, vec_bytes(r, "R"), vec_bytes(r, "S"))
+        vec_check(t, accepted == vec_field(r, "Result").starts_with("P"), vec_label(file, r, n))
+    }
+    vec_assert(t)
+}
+
+/// Verify the raw signature (r, s) of `hash` under the uncompressed point
+/// `public` on `grp`.
+vec_ecdsa_raw: fn(grp: ecp.EcpGroup, public: [U8], hash: [U8], r: [U8], s: [U8]) -> Bool {
+    q: ecp.point_read_binary(grp, public) ?? return false
+    sig_r: bn.read_binary(r) ?? return false
+    sig_s: bn.read_binary(s) ?? return false
+    ecdsa.ecdsa_verify(grp, hash, q, sig_r, sig_s) ?? return false
+    true
+}
+
+/// Verify `sig` over `msg` with the SubjectPublicKeyInfo `der` through the
+/// PK layer, as a TLS peer's CertificateVerify is checked. `pss` carries the
+/// salt length for RSASSA-PSS, or is None for PKCS#1 v1.5 and ECDSA.
+vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> Bool {
+    ctx := pkparse.pk_parse_public_key(der) ?? return false
+    hash: hashes.hash(md, msg)
+    if pss == {
+        .Val(salt) -> pk.pk_verify_ext(.RSASSAPSS, Val(pk.PSSOptions{mgf1_hash_id: Val(md), expected_salt_len: salt}), ctx, Val(md), hash, sig) ?? return false
+        None -> pk.pk_verify(ctx, Val(md), hash, sig) ?? return false
+    }
+    true
+}
+
+#Test("Wycheproof ECDSA vectors verify DER signatures on P-256 with SHA-256 and P-384 with SHA-384") {
+    loop file in ([String]{"ecdsa_secp256r1_sha256", "ecdsa_secp384r1_sha384"}) {
+        t := vec_tally(file)
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
+            der: vec_wy_hex(g, "publicKeyDer")
+            loop c in vec_items(g, "tests") {
+                accepted: vec_pk_verify(der, md, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig"), None)
+                vec_wy_verdict(t, file, c, accepted, true)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+#Test("Wycheproof RSA PKCS#1 v1.5 vectors verify at 2048, 3072 and 4096 bits with SHA-256, SHA-384 and SHA-512") {
+    files: [String]{
+        "rsa_signature_2048_sha256", "rsa_signature_2048_sha384", "rsa_signature_2048_sha512",
+        "rsa_signature_3072_sha256", "rsa_signature_3072_sha384",
+        "rsa_signature_4096_sha256", "rsa_signature_4096_sha384", "rsa_signature_4096_sha512",
+    }
+    loop file in files {
+        t := vec_tally(file)
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
+            der: vec_wy_hex(g, "publicKeyDer")
+            loop c in vec_items(g, "tests") {
+                accepted: vec_pk_verify(der, md, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig"), None)
+                vec_wy_verdict(t, file, c, accepted, false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+#Test("Wycheproof RSASSA-PSS vectors verify with MGF1 over the signing hash and a salt of its length") {
+    files: [String]{
+        "rsa_pss_2048_sha256_mgf1_32", "rsa_pss_3072_sha256_mgf1_32", "rsa_pss_4096_sha256_mgf1_32",
+        "rsa_pss_2048_sha384_mgf1_48", "rsa_pss_4096_sha384_mgf1_48", "rsa_pss_4096_sha512_mgf1_64",
+    }
+    loop file in files {
+        t := vec_tally(file)
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
+            if vec_md_named(vec_text(g, "mgfSha")) != Val(md) -> panic("{file}: MGF1 hash {vec_text(g, "mgfSha")}")
+            der: vec_wy_hex(g, "publicKeyDer")
+            salt: vec_int(g, "sLen")
+            loop c in vec_items(g, "tests") {
+                accepted: vec_pk_verify(der, md, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig"), Val(salt))
+                vec_wy_verdict(t, file, c, accepted, false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+/// The PKCS#1 v1.5 signature of `msg` under the PKCS#8 private key `der`,
+/// made through the PK layer as a TLS server signs, is `want`.
+vec_pk_signs: fn(der: [U8], md: hashes.Md, msg: [U8], want: [U8]) -> Bool {
+    rng := vec_rng()
+    ctx := pkparse.pk_parse_key(der, None, rng) ?? return false
+    sig: pk.pk_sign(ctx, Val(md), hashes.hash(md, msg), 1024, rng) ?? return false
+    sig == want
+}
+
+#Test("Wycheproof RSA PKCS#1 v1.5 signing vectors sign at 2048, 3072 and 4096 bits with SHA-256, SHA-384 and SHA-512") {
+    loop file in ([String]{"rsa_pkcs1_2048_sig_gen", "rsa_pkcs1_3072_sig_gen", "rsa_pkcs1_4096_sig_gen"}) {
+        t := vec_tally(file)
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            // SHA-1 and SHA-224 are not among the signature schemes Core's TLS offers.
+            md: vec_md_named(vec_text(g, "sha")) ?? next
+            der: vec_wy_hex(g, "privateKeyPkcs8")
+            loop c in vec_items(g, "tests") {
+                vec_wy_verdict(t, file, c, vec_pk_signs(der, md, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig")), false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+/// An RSA public key with modulus `n` and exponent `e`, completed; None when
+/// the parts do not form a key.
+vec_rsa_key: fn(n: [U8], e: [U8]) -> rsa.RSAContext? {
+    ctx := rsa.rsa_new()
+    rsa.rsa_import_raw(ctx, .N, n) ?? return None
+    rsa.rsa_import_raw(ctx, .E, e) ?? return None
+    rsa.rsa_complete(ctx) ?? return None
+    Val(ctx)
+}
+
+/// (n, e) accepts `sig` over `hash`: PKCS#1 v1.5, or RSASSA-PSS with MGF1
+/// over `md` and a salt of `pss` bytes.
+vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss: Int?) -> Bool {
+    ctx := vec_rsa_key(n, e) ?? return false
+    if pss == {
+        .Val(salt) -> {
+            rsa.rsa_set_padding(ctx, .PKCSV21, Val(md))
+            rsa.rsa_rsassa_pss_verify_ext(ctx, Val(md), hash, Val(md), salt, sig) ?? return false
+        }
+        None -> rsa.rsa_pkcs1_verify(ctx, Val(md), hash, sig) ?? return false
+    }
+    true
+}
+
+#Test("NIST CAVP RSA PKCS#1 v1.5 SigGen and SigVer and RSASSA-PSS SigVer vectors verify at 2048 and 3072 bits") {
+    // SigGen15 gives (n, e) and the deterministic signature of each message,
+    // which must verify.
+    gen_file: "RSA_SigGen15.rsp"
+    gen := vec_tally(gen_file)
+    gen_records: vec_nist(gen_file)
+    n_hex := ""
+    e_hex := ""
+    loop i in 0..<gen_records.len() {
+        r: gen_records[i]
+        if vec_has(r, "n") -> n_hex = vec_field(r, "n")
+        if vec_has(r, "e") -> e_hex = vec_field(r, "e")
+        if !vec_has(r, "SHAAlg") -> next
+        md: vec_md_named(vec_field(r, "SHAAlg")) ?? next
+        verified: vec_rsa_verifies(vec_hex(n_hex), vec_hex(e_hex), md, hashes.hash(md, vec_bytes(r, "Msg")), vec_bytes(r, "S"), None)
+        vec_check(gen, verified, vec_label(gen_file, r, i))
+    }
+    vec_assert(gen)
+    // SigVer15 and SigVerPSS: n heads each modulus section; e, the message
+    // and the expected verdict are per record.
+    loop file in ([String]{"RSA_SigVer15.rsp", "RSA_SigVerPSS.rsp"}) {
+        t := vec_tally(file)
+        records: vec_nist(file)
+        pss: file.contains("PSS")
+        n_hex = ""
+        loop i in 0..<records.len() {
+            r: records[i]
+            if vec_has(r, "n") -> n_hex = vec_field(r, "n")
+            if !vec_has(r, "SHAAlg") -> next
+            md: vec_md_named(vec_field(r, "SHAAlg")) ?? next
+            hash: hashes.hash(md, vec_bytes(r, "Msg"))
+            sig: vec_bytes(r, "S")
+            salt: if !pss -> None else if vec_field(r, "SaltVal") == "00" -> Val(0) else -> Val(vec_field(r, "SaltVal").len() >> 1)
+            accepted: vec_rsa_verifies(vec_hex(n_hex), vec_bytes(r, "e"), md, hash, sig, salt)
+            vec_check(t, accepted == vec_field(r, "Result").starts_with("P"), vec_label(file, r, i))
+        }
+        vec_assert(t)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MACs, key derivation and the generator
+// ---------------------------------------------------------------------------
+
+#Test("Wycheproof HMAC-SHA-256 and HMAC-SHA-384 vectors agree, truncated tags included") {
+    loop file in ([String]{"hmac_sha256", "hmac_sha384"}) {
+        t := vec_tally(file)
+        md: if file == "hmac_sha256" -> hashes.Md.SHA256 else -> hashes.Md.SHA384
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            tag_bytes: vec_int(g, "tagSize") >> 3
+            loop c in vec_items(g, "tests") {
+                mac: hashes.hmac(md, vec_wy_hex(c, "key"), vec_wy_hex(c, "msg"))
+                want: vec_wy_hex(c, "tag")
+                accepted := want.len() == tag_bytes && tag_bytes <= mac.len()
+                if accepted -> loop i in 0..<tag_bytes -> accepted = accepted && mac[i] == want[i]
+                vec_wy_verdict(t, file, c, accepted, false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+#Test("Wycheproof HKDF-SHA-256 and HKDF-SHA-384 vectors agree, and oversized outputs are refused") {
+    loop file in ([String]{"hkdf_sha256", "hkdf_sha384"}) {
+        t := vec_tally(file)
+        md: if file == "hkdf_sha256" -> hashes.Md.SHA256 else -> hashes.Md.SHA384
+        loop g in vec_items(vec_wycheproof(file), "testGroups") {
+            loop c in vec_items(g, "tests") {
+                got: hashes.hkdf(md, vec_wy_hex(c, "salt"), vec_wy_hex(c, "ikm"), vec_wy_hex(c, "info"), vec_int(c, "size"))
+                vec_wy_verdict(t, file, c, vec_is(got, vec_wy_hex(c, "okm")), false)
+            }
+        }
+        vec_assert(t)
+    }
+}
+
+#Test("Wycheproof HKDF-SHA-256 and PBKDF2-HMAC-SHA-256 vectors agree through core.crypto's public KDFs") {
+    hkdf_file: "hkdf_sha256"
+    t := vec_tally("core.crypto.hkdf_sha256")
+    loop g in vec_items(vec_wycheproof(hkdf_file), "testGroups") {
+        loop c in vec_items(g, "tests") {
+            accepted: vec_hkdf_public(c)
+            vec_wy_verdict(t, hkdf_file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+    pbkdf2_file: "pbkdf2_hmacsha256"
+    p := vec_tally("core.crypto.pbkdf2_hmac")
+    loop g in vec_items(vec_wycheproof(pbkdf2_file), "testGroups") {
+        loop c in vec_items(g, "tests") {
+            accepted: vec_pbkdf2_public(c)
+            vec_wy_verdict(p, pbkdf2_file, c, accepted, false)
+        }
+    }
+    vec_assert(p)
+}
+
+vec_hkdf_public: fn(c: Dyn) -> Bool {
+    out: core.crypto.hkdf_sha256(vec_wy_hex(c, "ikm"), vec_wy_hex(c, "salt"), vec_wy_hex(c, "info"), vec_int(c, "size")) ?? return false
+    core.crypto.constant_time_equal(out, Secret.from_bytes(vec_wy_hex(c, "okm")))
+}
+
+vec_pbkdf2_public: fn(c: Dyn) -> Bool {
+    dk: core.crypto.pbkdf2_hmac(vec_wy_hex(c, "password"), vec_wy_hex(c, "salt"), vec_int(c, "iterationCount"), vec_int(c, "dkLen")) ?? return false
+    dk == vec_wy_hex(c, "dk")
+}
+
+#Test("NIST CAVP TLS 1.2 PRF vectors derive the master secret and key block with SHA-256 and SHA-384") {
+    file: "TLS_PRF.rsp"
+    t := vec_tally(file)
+    records: vec_nist(file)
+    loop n in 0..<records.len() {
+        r: records[n]
+        md: if {
+            r.section.starts_with("[TLS 1.2, SHA-256]") -> hashes.Md.SHA256
+            r.section.starts_with("[TLS 1.2, SHA-384]") -> hashes.Md.SHA384
+            // TLS 1.0/1.1 and the SHA-512 PRF are not enabled in Core's TLS.
+            else -> next
+        }
+        if !vec_has(r, "pre_master_secret") -> next
+        want_master: vec_bytes(r, "master_secret")
+        want_block: vec_bytes(r, "key_block")
+        master: ssl_tls_prf_generic(md, vec_bytes(r, "pre_master_secret"), "master secret".bytes(), vec_concat(vec_bytes(r, "clientHello_random"), vec_bytes(r, "serverHello_random")), want_master.len())
+        block: ssl_tls_prf_generic(md, master, "key expansion".bytes(), vec_concat(vec_bytes(r, "server_random"), vec_bytes(r, "client_random")), want_block.len())
+        vec_check(t, master == want_master && block == want_block, vec_label(file, r, n))
+    }
+    vec_assert(t)
+}
+
+#Test("NIST CAVP HMAC_DRBG SHA-256 vectors without prediction resistance return the expected bits") {
+    file: "HMAC_DRBG_SHA256.rsp"
+    t := vec_tally(file)
+    records: vec_nist(file)
+    loop n in 0..<records.len() {
+        r: records[n]
+        if !vec_has(r, "EntropyInput") -> next
+        g := drbg.hmac_drbg_new(.SHA256)
+        seed := vec_concat(vec_bytes(r, "EntropyInput"), vec_bytes(r, "Nonce"))
+        loop b in vec_bytes(r, "PersonalizationString") -> seed.push(b)
+        drbg.hmac_drbg_seed_buf(g, seed)
+        want: vec_bytes(r, "ReturnedBits")
+        none := drbg.NoEntropy{}
+        first: drbg.hmac_drbg_random_with_add(g, none, want.len(), vec_hex(vec_field_nth(r, "AdditionalInput", 0))) ?? panic("first generate")
+        second: drbg.hmac_drbg_random_with_add(g, none, want.len(), vec_hex(vec_field_nth(r, "AdditionalInput", 1))) ?? panic("second generate")
+        vec_check(t, first.len() == want.len() && second == want, vec_label(file, r, n))
+    }
+    vec_assert(t)
+}
+
+// ---------------------------------------------------------------------------
+// core.crypto's own primitives: the AES-256-GCM, XChaCha20-Poly1305, X25519
+// and Ed25519 of core.crypto.expert (Core/Crypto/Expert.jet and
+// ExpertCt.jet), which core.crypto's envelopes, seal and signatures call
+// ---------------------------------------------------------------------------
+
+#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+    out := [U8]{}
+    #Unsafe("a vector record's key and nonce, used for that record only") {
+        out = core.crypto.expert.aes256gcm_seal(key, iv, plain, aad) ?? return None
+    }
+    Val(out)
+}
+
+#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+    out := [U8]{}
+    #Unsafe("a vector record's key and nonce, used for that record only") {
+        out = core.crypto.expert.aes256gcm_open(key, iv, sealed, aad) ?? return None
+    }
+    Val(out)
+}
+
+#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_xchacha_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+    out := [U8]{}
+    #Unsafe("a vector record's key and nonce, used for that record only") {
+        out = core.crypto.expert.xchacha20poly1305_seal(key, iv, plain, aad) ?? return None
+    }
+    Val(out)
+}
+
+#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+    out := [U8]{}
+    #Unsafe("a vector record's key and nonce, used for that record only") {
+        out = core.crypto.expert.xchacha20poly1305_open(key, iv, sealed, aad) ?? return None
+    }
+    Val(out)
+}
+
+#Test("NIST CAVP GCM AES-256 vectors seal and open through core.crypto.expert") {
+    #Unsafe("each record's key and IV are used for that record only") {
+        file: "gcmEncryptExtIV256.rsp"
+        t := vec_tally("{file} (expert)")
+        records: vec_nist(file)
+        loop n in 0..<records.len() {
+            r: records[n]
+            if !vec_has(r, "Key") -> next
+            sealed: vec_concat(vec_bytes(r, "CT"), vec_bytes(r, "Tag"))
+            got: vec_expert_gcm_seal(vec_bytes(r, "Key"), vec_bytes(r, "IV"), vec_bytes(r, "AAD"), vec_bytes(r, "PT"))
+            vec_check(t, vec_is(got, sealed), vec_label(file, r, n))
+        }
+        vec_assert(t)
+        open_file: "gcmDecrypt256.rsp"
+        u := vec_tally("{open_file} (expert)")
+        opened: vec_nist(open_file)
+        loop n in 0..<opened.len() {
+            r: opened[n]
+            if !vec_has(r, "Key") -> next
+            sealed: vec_concat(vec_bytes(r, "CT"), vec_bytes(r, "Tag"))
+            got: vec_expert_gcm_open(vec_bytes(r, "Key"), vec_bytes(r, "IV"), vec_bytes(r, "AAD"), sealed)
+            ok: if vec_has(r, "FAIL") -> got == None else -> vec_is(got, vec_bytes(r, "PT"))
+            vec_check(u, ok, vec_label(open_file, r, n))
+        }
+        vec_assert(u)
+    }
+}
+
+#Test("Wycheproof AES-256-GCM vectors with 96-bit IVs and 128-bit tags seal and open through core.crypto.expert") {
+    file: "aes_gcm"
+    t := vec_tally("{file} (expert)")
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        if vec_int(g, "keySize") != 256 || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
+        loop c in vec_items(g, "tests") {
+            key: vec_wy_hex(c, "key")
+            iv: vec_wy_hex(c, "iv")
+            aad: vec_wy_hex(c, "aad")
+            msg: vec_wy_hex(c, "msg")
+            sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
+            accepted := false
+            #Unsafe("the record's key and IV are used for that record only") {
+                accepted = vec_is(vec_expert_gcm_open(key, iv, aad, sealed), msg)
+                if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_expert_gcm_seal(key, iv, aad, msg), sealed)
+            }
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+}
+
+#Test("Wycheproof XChaCha20-Poly1305 vectors with 192-bit nonces seal and open through core.crypto.expert") {
+    file: "xchacha20_poly1305"
+    t := vec_tally(file)
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        if vec_int(g, "ivSize") != 192 || vec_int(g, "tagSize") != 128 -> next
+        loop c in vec_items(g, "tests") {
+            key: vec_wy_hex(c, "key")
+            iv: vec_wy_hex(c, "iv")
+            aad: vec_wy_hex(c, "aad")
+            msg: vec_wy_hex(c, "msg")
+            sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
+            accepted := false
+            #Unsafe("the record's key and nonce are used for that record only") {
+                accepted = vec_is(vec_expert_xchacha_open(key, iv, aad, sealed), msg)
+                if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_expert_xchacha_seal(key, iv, aad, msg), sealed)
+            }
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
+}
+
+#Unsafe("`private` is a vector record's key, used for that record only") vec_expert_x25519: fn(private: [U8], public: [U8]) -> [U8]? {
+    out := [U8]{}
+    #Unsafe("a vector record's private key, used for that record only") {
+        shared: core.crypto.expert.x25519_raw(private, public) ?? return None
+        out = core.crypto.expert.secret_bytes(shared)
+    }
+    Val(out)
+}
+
+#Unsafe("the arguments are a vector record's public key, message and signature") vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
+    accepted := false
+    #Unsafe("verification of a vector record's public signature") {
+        accepted = core.crypto.expert.ed25519_verify_strict(public, msg, sig) ?? return false
+    }
+    accepted
+}
+
+#Test("Wycheproof X25519 vectors agree through core.crypto.expert, and low-order points give no secret") {
+    file: "x25519"
+    t := vec_tally("{file} (expert)")
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        if vec_text(g, "curve") != "curve25519" -> next
+        loop c in vec_items(g, "tests") {
+            agreed := false
+            #Unsafe("the record's private key is used for that record only") {
+                agreed = vec_is(vec_expert_x25519(vec_wy_hex(c, "private"), vec_wy_hex(c, "public")), vec_wy_hex(c, "shared"))
+            }
+            vec_wy_verdict(t, file, c, agreed, false)
+        }
+    }
+    vec_assert(t)
+}
+
+#Test("Wycheproof Ed25519 vectors verify strictly through core.crypto.expert") {
+    file: "ed25519"
+    t := vec_tally(file)
+    loop g in vec_items(vec_wycheproof(file), "testGroups") {
+        public: vec_wy_hex(g["publicKey"], "pk")
+        loop c in vec_items(g, "tests") {
+            accepted := false
+            #Unsafe("the record's public key, message and signature") {
+                accepted = vec_expert_ed25519_verifies(public, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig"))
+            }
+            vec_wy_verdict(t, file, c, accepted, false)
+        }
+    }
+    vec_assert(t)
 }
