@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98792,
+    "rev": 98793,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75951,7 +75951,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T15:43:12.255Z",
+      "updated": "2026-11-10T15:46:16.900Z",
       "updatedBy": "Main",
       "criteriaLastN": 171
     },
@@ -192292,15 +192292,15 @@
       "gist": "Should Jet report for any function whether it could run as a parallel kernel, and why not, while #Kernel stays explicit?",
       "lesson": "Some functions are safe to run on many cores at once, because they only compute. Jet already checks this when you ask with #Kernel. This vote decides whether Jet can also tell you which plain functions would pass, and what stops the rest.",
       "explainer": "Words used here. A kernel is a function that runs on many cores or lanes at once. Eligible means it passes Jet's kernel proof. The launch point is where code asks for the parallel run.",
-      "story": "Mia wants to speed up a scoring helper. Under A, jet explain kernel names the one print on line 2 that stops it. She moves the print out and adds #Kernel.",
+      "story": "Mia wants to speed up a scoring helper. Under A, jet explain kernel names the one print on line 3 that stops it. She moves the print out and adds #Kernel.",
       "inWild": "// Mojo marks the parallel boundary and checks it there:\nparallelize[score](n)",
-      "detail": "What this ballot decides. Whether the existing kernel proof is reported for unmarked functions too. The marker stays the only launch point, so D-COMPUTE-KERNEL-SURFACE1=B is kept.\n\nToday, on the t6c compiler (dev 76955986d0). KernelProof in the AST (JetFoundation Items.jet:804) records six parts: bounds, alias-free, captures, race-free, uniform barriers and control flow. KernelMode has one case, Parallel. #Kernel appears in 20 Jet files. jet explain kernel already exists as a topic that explains the marker.\n\nProbe k01 marks a pure helper and prints 42. Probe k02 marks a helper that prints. It gets E1102, ValueNotSendable: sema cannot prove no reachable effects or opaque calls. The error points at the marker on line 2, not at the print.\n\nProbe k03 marks a helper that builds a local list. On t6c it gets E1102 at the literal itself, line 3: sema cannot prove an allocation-free body, this literal allocates new collection storage. So the allocation check already names its line; the effects check does not.\n\nCPU SIMD is already inferred with no marker. jet inspect decisions on probes/gb reports sum reduction vectorized for a plain loop.\n\nWhat A does. jet explain kernel FILE:LINE runs the same proof on the function at that line; without a location, the topic text stays as today. It prints every check the #Kernel error runs as passed or failed. Those are KernelProof's six parts plus the effects and allocation checks t6c's errors already report.\n\nFor a failed check it names the first line responsible and the effect or operation involved. For k02 it would read: effects, failed, line 3 calls print, which needs IO. Hover shows the same answer as one label. The proof runs only when asked or when #Kernel is written, so builds pay nothing.\n\nThe #Kernel error reuses the same report, so k02 points at the print as k03 already points at its literal. That error gets its own registered code instead of E1102, whose name, ValueNotSendable, is about sendable values.\n\nWhat stays the same. Only #Kernel launches parallel work. D-ACCEL1=A's transforms still apply only to proven #Kernel functions. D-GPU-HELPER-SCOPE1=A still proves each reachable helper in kernel context, and the report shows that helper's lines.\n\nFar, and not part of this vote. GPU and accelerator back ends, and targets that state what they can run, need their own ballots. The report is written so a later target can add its own parts.\n\nRatified decisions. A keeps D-COMPUTE-KERNEL-SURFACE1=B, D-GPU-HELPER-SCOPE1=A and D-ACCEL1=A. It extends D-HONEST-SIG1=A's hover labels with one more inferred fact.\n\nBeginner path. A beginner never sees kernels; the report is one command when a loop is slow. Expert path. Read each check, fix the named line, then add #Kernel.\n\nDownsides of A, and what the design does about them. A plain function's label may change when its body changes. The label is a report, not a promise; only #Kernel makes a promise.\n\nWhat remains. The proof runs again on each query. It is the check #Kernel already runs, on one function and its helpers.\n\nOther options. B keeps the proof on marked functions only. C is the review's full form: eligibility is inferred and any eligible loop may run in parallel with no marker. D only improves the #Kernel error.\n\nTheir best cases. B adds nothing. C removes the marker entirely. D fixes the misleading messages at no new surface. Their costs: B hides why a helper fails until it is marked. C reverses D-COMPUTE-KERNEL-SURFACE1=B and hides the parallel boundary. D still says nothing about unmarked functions.",
+      "detail": "What this ballot decides. Whether the existing kernel proof is reported for unmarked functions too. The marker stays the only launch point, so D-COMPUTE-KERNEL-SURFACE1=B is kept.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). KernelProof in the AST (JetFoundation Items.jet:804) records six parts: bounds, alias-free, captures, race-free, uniform barriers and control flow. KernelMode has one case, Parallel. #Kernel appears in 20 Jet files. jet explain kernel already exists as a topic that explains the marker. Given k02_print.jet:2 as well, it ignores the location and prints the same topic.\n\nProbe k01 marks a pure helper and prints 42. Probe k02 marks a helper that prints. It gets E1102, ValueNotSendable: sema cannot prove no reachable effects or opaque calls. The error points at the marker on line 2, not at the print.\n\nProbe k03 marks a helper that builds a local list. It gets E1102 at the literal itself, line 3: sema cannot prove an allocation-free body, this literal allocates new collection storage. So the allocation check already names its line; the effects check does not.\n\nHelpers, probed. k04's kernel calls a helper that prints, and k05's calls a pure helper, x * 3. Both get E1102 at the marker. The effects check fails on any call edge and keeps no line (Sema/Kernel.jet:156-160).\n\nSo D-GPU-HELPER-SCOPE1=A, ratified on 2026-09-12 to prove each reachable helper in kernel context, is not built. Today no kernel may call any helper, pure or not.\n\nCPU SIMD is already inferred with no marker. jet inspect decisions on probes/gb reports sum reduction vectorized for a plain loop.\n\nWhat A does. jet explain kernel FILE:LINE runs the same proof on the function at that line; without a location, the topic text stays as today. It prints every check the #Kernel error runs as passed or failed. Those are KernelProof's six parts plus the effects and allocation checks t6c's errors already report.\n\nFor a failed check it names the first line responsible and the effect or operation involved. For k02 it would read: effects, failed, line 3 calls print, which needs IO. Hover shows the same answer as one label. The proof runs only when asked or when #Kernel is written, so builds pay nothing.\n\nBuild work A needs. Effect facts must keep the line of each call or effect, which the check drops today. Until the helper proof of D-GPU-HELPER-SCOPE1=A lands, the report names each call as not yet proved, with its line, instead of one marker error.\n\nThe #Kernel error reuses the same report, so k02 points at the print as k03 already points at its literal. That error gets its own registered code instead of E1102, whose name, ValueNotSendable, is about sendable values.\n\nWhat stays the same. Only #Kernel launches parallel work. D-ACCEL1=A's transforms still apply only to proven #Kernel functions. Once built, D-GPU-HELPER-SCOPE1=A proves each reachable helper in kernel context, and the report shows that helper's lines.\n\nFar, and not part of this vote. GPU and accelerator back ends, and targets that state what they can run, need their own ballots. The report is written so a later target can add its own parts.\n\nRatified decisions. A keeps D-COMPUTE-KERNEL-SURFACE1=B, D-GPU-HELPER-SCOPE1=A and D-ACCEL1=A. It extends D-HONEST-SIG1=A's hover labels with one more inferred fact.\n\nBeginner path. A beginner never sees kernels; the report is one command when a loop is slow. Expert path. Read each check, fix the named line, then add #Kernel.\n\nDownsides of A, and what the design does about them. A plain function's label may change when its body changes. The label is a report, not a promise; only #Kernel makes a promise.\n\nWhat remains. The proof runs again on each query. It is the check #Kernel already runs, on one function and its helpers.\n\nOther options. B keeps the proof on marked functions only. C is the review's full form: eligibility is inferred and any eligible loop may run in parallel with no marker. D only improves the #Kernel error.\n\nTheir best cases. B adds nothing. C removes the marker entirely. D fixes the misleading messages at no new surface. Their costs: B hides why a helper fails until it is marked. C reverses D-COMPUTE-KERNEL-SURFACE1=B and hides the parallel boundary. D still says nothing about unmarked functions.",
       "options": [
         {
           "key": "A",
           "name": "Report the fact; keep the marker",
           "detail": "jet explain kernel and hover report the kernel proof for any function; #Kernel stays the launch point.",
-          "technical": "On-demand run of the existing #Kernel checks on one function and its helpers: KernelProof's six parts plus effects and allocation, each with the first failing line. The #Kernel error reuses the report under a new registered code. No build cost; D-ACCEL1=A scope unchanged.",
+          "technical": "On-demand run of the existing #Kernel checks on one function and its helpers: KernelProof's six parts plus effects and allocation, each with the first failing line. Effect facts keep their lines; calls are reported as not yet proved until D-GPU-HELPER-SCOPE1=A's helper proof lands. The #Kernel error reuses the report under a new registered code. No build cost; D-ACCEL1=A scope unchanged.",
           "code": "scale: fn(x: Int) -> Int {\n    print(\"scaling\")          // the one line that stops parallel use\n    x * 3\n}\n// Proposed (A): jet explain kernel file.jet:1\n//   effects: failed, line 2 calls print, which needs IO\n//   bounds, aliasing, captures, races, control flow: passed\n// Today (probe k02): with #Kernel, E1102 at the marker; without it, nothing."
         },
         {
@@ -192328,17 +192328,17 @@
       "comparisons": [
         {
           "lang": "Mojo",
-          "note": "The parallel call is explicit and checked there.",
+          "note": "parallelize is an explicit library call in the algorithm module.",
           "code": "parallelize[score](n)"
         },
         {
           "lang": "Rust",
-          "note": "Rayon's par_iter is explicit; Send and Sync are inferred.",
+          "note": "Rayon's par_iter is explicit; Send and Sync are auto traits the compiler infers.",
           "code": "xs.par_iter().map(score)"
         },
         {
           "lang": "Julia",
-          "note": "A macro marks the parallel loop.",
+          "note": "Threads.@threads marks the loop; avoiding data races is the user's job.",
           "code": "Threads.@threads for i in 1:n"
         }
       ],
@@ -192355,6 +192355,10 @@
           {
             "loss": "A plain function's label can change with its body.",
             "mitigation": "The label is a report; only #Kernel makes a promise."
+          },
+          {
+            "loss": "Until helpers are proved, any function with a call fails.",
+            "mitigation": "The report names each call line; A's build includes the ratified, unbuilt helper proof."
           }
         ],
         "whyNot": [
@@ -192378,9 +192382,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Probes k04 and k05 show that no kernel may call any helper today, so D-GPU-HELPER-SCOPE1=A is unbuilt; A now names that work and the line-keeping effect facts. The story's line number and the peer notes are corrected."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0), run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/rw run; outputs for k01, k02 and k03 are in probes/rw/out6. KernelProof is in Compiler/JetFoundation/Source/AST/Items.jet. The #Kernel count is git grep -l on dev. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-RUN-WHERE1/probes for k01 to k05, and jet explain kernel k02_print.jet:2. The effects check is in Compiler/JetSema/Source/Sema/Kernel.jet:156-160. The #Kernel count uses git grep -l on dev.",
       "surface": {
         "gist": "Should Jet report for any function whether it could run as a parallel kernel, and why not, while #Kernel stays explicit?",
         "lesson": "Some functions are safe to run on many cores at once, because they only compute. Jet already checks this when you ask with #Kernel. This vote decides whether Jet can also tell you which plain functions would pass, and what stops the rest.",
@@ -192486,7 +192490,82 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:47:56.093Z"
+      "created": "2026-11-10T03:47:56.093Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "A plain function's label can change with its body.",
+          "attempts": [
+            "Make the label a report shown only on request or hover, never a promise.",
+            "Keep #Kernel as the only promise, checked on every build (D-COMPUTE-KERNEL-SURFACE1=B)."
+          ],
+          "result": "Reduced: only code that asks sees the label."
+        },
+        {
+          "option": "A",
+          "loss": "No kernel may call a helper today (k04, k05), so most reports would fail at the first call.",
+          "attempts": [
+            "Build D-GPU-HELPER-SCOPE1=A's ratified helper proof as part of A; k05's pure helper then passes.",
+            "Until then, report each call as not yet proved with its line, so the answer is still line-level."
+          ],
+          "result": "Reduced now and removed when the helper proof lands."
+        },
+        {
+          "option": "A",
+          "loss": "The effects error points at the marker (k02, k04).",
+          "attempts": [
+            "Keep the line of each direct effect and call edge in the effect facts the check reads (Kernel.jet:156-160).",
+            "Reuse the allocation check's pattern, which already reports its literal's span (k03)."
+          ],
+          "result": "Removed by A's build work."
+        },
+        {
+          "option": "B",
+          "loss": "A helper's failure is hidden until it is marked.",
+          "attempts": [
+            "Mark it to see the error; the error still points at the marker.",
+            "Read the effects in hover (D-HONEST-SIG1=A); that misses bounds, races and barriers."
+          ],
+          "result": "Not removed."
+        },
+        {
+          "option": "C",
+          "loss": "The parallel boundary is hidden.",
+          "attempts": [
+            "Show inferred parallel loops in jet inspect decisions, as SIMD is today.",
+            "Gate it behind D-ACCEL1=A's measured run-time check."
+          ],
+          "result": "Reduced, not removed; it also reverses D-COMPUTE-KERNEL-SURFACE1=B."
+        },
+        {
+          "option": "D",
+          "loss": "Nothing is said about unmarked functions.",
+          "attempts": [
+            "Let users add #Kernel temporarily to ask.",
+            "Print the improved error in jet check --explain."
+          ],
+          "result": "Not removed."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Kernel eligibility report: helper probes, effect-line gap and adversarial review",
+          "path": "Docs/audits/2026-11-10-run-where-review.md",
+          "note": "k01-k05 on a0.0.43: a pure helper call fails (D-GPU-HELPER-SCOPE1=A unbuilt), effects error at the marker (Kernel.jet:156-160), explain ignores FILE:LINE today; peers."
+        },
+        {
+          "title": "Rust nomicon: Send and Sync",
+          "url": "https://doc.rust-lang.org/nomicon/send-and-sync.html"
+        },
+        {
+          "title": "Julia manual: multi-threading and data races",
+          "url": "https://docs.julialang.org/en/v1/manual/multi-threading/"
+        },
+        {
+          "title": "Mojo standard library: algorithm.functional",
+          "url": "https://docs.modular.com/mojo/stdlib/algorithm/functional/"
+        }
+      ]
     },
     {
       "id": "D-SECRET-CT1",
@@ -199018,6 +199097,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:46:16.900Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-RUN-WHERE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:43:12.256Z",
       "by": "Main",
