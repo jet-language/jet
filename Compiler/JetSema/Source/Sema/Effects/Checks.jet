@@ -861,7 +861,17 @@ sema_effect_node_call_api: fn(decls: DeclTable, kind: NodeKind) -> String Never!
 // Diagnostics and explicit audit gates
 // ────────────────────────────────────────────────────────────────────────────
 
+// E0119. A name that matches a registered effect but for letter case (`io`,
+// `fs.read`) is that effect miswritten, so the fix names its registered
+// PascalCase spelling and its suggested edit writes it.
 sema_effect_unknown: fn(name: String, span: Span) -> Diagnostic {
+    wanted: name.lower()
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name.lower() == wanted {
+            diagnostic: sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`", "write it `{row.name}`, the effect's registered spelling")
+            return diagnostic_with_source_derived_suggestion(diagnostic, span, row.name)
+        }
+    }
     sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`", "use one of the known effect names, or remove it from the list")
 }
 
@@ -960,8 +970,9 @@ sema_effect_bound_diagnostic: fn(node: SemaEffectNode, over: [String]) -> Diagno
 }
 
 // `e0749` / `e0749_panic`: a reached Panic names the reachable function where
-// the stop enters the call graph.
-sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], panic_site: String) -> Diagnostic {
+// the stop enters the call graph, and the call chain to it
+// (sema_effect_panic_steps).
+sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], panic_steps: [String]) -> Diagnostic {
     reached_list: sema_effect_show(reached)
     declared: sema_effect_show(node.prohibited)
     span: node.prohibition_span ?? node.name_span
@@ -969,8 +980,9 @@ sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], p
         if sema_effect_root(effect_name) == "Panic" -> break true
     } ?? false
     if reaches_panic {
+        panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error("E0749", span, "`{node.name}` can stop, but Panic is denied here", "`{panic_site}` can stop; `{node.name}` and every reachable callee must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{declared}]>` prohibition")
-        return diagnostic_with_rights(diagnostic, "invocation", [String]{node.name, panic_site}, [String]{}, None)
+        return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, panic_steps), [String]{}, None)
     }
     diagnostic: sema_error("E0749", span, "`{node.name}` reaches the `{reached_list}` effect, which it prohibits with `-[!{declared}]>`", "a `-[!{declared}]>` row means the function and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop the `-[!{declared}]>` prohibition")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
@@ -978,15 +990,17 @@ sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], p
 
 // A package `authority.deny` row reached by one of the package's functions.
 // A denied Panic names the reachable function where the stop enters the call
-// graph (`panic_site`) and the three exits, the same as a `-[!Panic]>` row.
-sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_site: String) -> Diagnostic {
+// graph and the chain to it (`panic_steps`) and the three exits, the same as
+// a `-[!Panic]>` row.
+sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String]) -> Diagnostic {
     reached_list: sema_effect_show(reached)
     reaches_panic: loop effect_name in reached {
         if sema_effect_root(effect_name) == "Panic" -> break true
     } ?? false
     if reaches_panic {
+        panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error("E0749", node.name_span, "`{node.name}` can stop, but the package denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `{denied}` from `authority.deny`")
-        return diagnostic_with_rights(diagnostic, "invocation", [String]{node.name, panic_site}, [String]{}, None)
+        return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, panic_steps), [String]{}, None)
     }
     diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which the package denies with `authority: {{ deny: [{denied}] }}`", "a package `deny` row means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop `{denied}` from `authority.deny`")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
@@ -1073,12 +1087,9 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
             if declared.len() > 0 -> diagnostics.push(sema_effect_module_row_denied_diagnostic(node, declared, effect_name, cap))
             next
         }
-        panic_site := "the reachable call graph"
-        if sema_effect_root(effect_name) == "Panic" {
-            seen := (loop _ in nodes -> false)
-            if sema_effect_panic_site(nodes, node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
-        }
-        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_site, cap), notes, reached))
+        panic_steps := [String]{}
+        if sema_effect_root(effect_name) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_by_key, node_index)
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_steps, cap), notes, reached))
     }
     if ceiling.len() == 0 -> return
     over: sema_effect_uncovered(solved, ceiling)
@@ -1153,15 +1164,16 @@ sema_effect_module_cap_report: fn(diagnostic: Diagnostic, chain: [String], cap: 
     diagnostic_with_rights(labeled, "invocation", chain, [String]{"{cap.cap.scope} {cap.cap.owner}"}, None)
 }
 
-sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_site: String, cap: SemaEffectModuleCap) -> Diagnostic {
+sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], cap: SemaEffectModuleCap) -> Diagnostic {
     name: sema_inline_member_source_name(node.name)
     scope: cap.cap.scope
     owner: cap.cap.owner
     members: sema_effect_cap_members(cap)
     where: sema_effect_module_cap_where(cap)
     if sema_effect_root(denied) == "Panic" {
+        panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` can stop, but {scope} `{owner}` denies Panic", "`{panic_site}` can stop; the {scope}'s `#FX(!Panic)` cap means {members} and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the {scope}'s `#FX(…)` cap")
-        return sema_effect_module_cap_report(diagnostic, [String]{name, panic_site}, cap)
+        return sema_effect_module_cap_report(diagnostic, sema_effect_panic_chain(name, panic_steps), cap)
     }
     reached_list: sema_effect_show(reached)
     diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` reaches the `{reached_list}` effect, which {scope} `{owner}` denies", "the {scope}'s `#FX(…)` cap denies `{denied}` to {members} and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, {sema_effect_cap_move(name, cap)}or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
@@ -1420,24 +1432,56 @@ sema_effect_chain_name: fn(function: FnBody) -> String Never! {
     }
 }
 
-// Rust `check_effect_boundaries` `panic_site`: the first function reached
-// depth-first that stops (a maximal row, a direct Panic, or a stop sentinel).
-sema_effect_panic_site: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> Int? Never! {
-    if seen[index] -> return None
+// Rust `check_effect_boundaries` `panic_site`, with the path to it: the
+// functions from `index` to the first one reached depth-first that stops (a
+// maximal row, a direct Panic, or a stop sentinel), both ends included, so a
+// function that stops itself is its own one-step path. Empty when none stops.
+sema_effect_panic_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
     seen[index] = true
-    if nodes[index].maximal -> return Val(index)
+    if nodes[index].maximal -> return [Int]{index}
     loop effect_name in nodes[index].direct {
-        if sema_effect_root(effect_name) == "Panic" -> return Val(index)
+        if sema_effect_root(effect_name) == "Panic" -> return [Int]{index}
     }
     loop edge in nodes[index].call_edges {
-        if edge == "__jet_panic__" -> return Val(index)
+        if edge == "__jet_panic__" -> return [Int]{index}
     }
     loop edge in nodes[index].call_edges {
         target: sema_effect_node_index(node_by_key, edge) ?? next
-        site: sema_effect_panic_site(nodes, node_by_key, target, seen) ?? next
-        return Val(site)
+        rest: sema_effect_panic_path(nodes, node_by_key, target, seen)
+        if rest.len() == 0 -> next
+        path := [Int]{index}
+        loop step in rest -> path.push(step)
+        return path
     }
-    None
+    [Int]{}
+}
+
+// The steps of a reached Panic's call chain after function `node_index`: the
+// chain names along sema_effect_panic_path past its first, so a function that
+// stops itself has none. "the reachable call graph" when no stop is found.
+sema_effect_panic_steps: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int) -> [String] Never! {
+    seen := (loop _ in nodes -> false)
+    path: sema_effect_panic_path(nodes, node_by_key, node_index, seen)
+    if path.len() == 0 -> return [String]{"the reachable call graph"}
+    steps := [String]{}
+    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    steps
+}
+
+// The function a denied Panic names as the one that stops: the last step, or
+// the denied function itself when it stops directly.
+sema_effect_panic_site_name: fn(node: SemaEffectNode, panic_steps: [String]) -> String Never! {
+    if panic_steps.len() == 0 -> return node.chain_name
+    panic_steps[panic_steps.len() - 1]
+}
+
+// A denied Panic's call chain: `first` (the denied function as its report
+// names it), then the steps to the function that stops.
+sema_effect_panic_chain: fn(first: String, panic_steps: [String]) -> [String] Never! {
+    chain := [String]{first}
+    loop step in panic_steps -> chain.push(step.copy())
+    chain
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3319,7 +3363,7 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], node_by_key: NameR
 
 // A pure body's reached effects go to `pure_reached`; E3401 is reported once
 // the solved rows are stamped, so it can name the call that reaches them.
-sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
@@ -3377,7 +3421,7 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
     }
     prohibited: sema_effect_covered(solved, node.prohibited)
     if prohibited.len() > 0 {
-        diagnostics.push(sema_effect_with_instance_notes(sema_effect_prohibited_diagnostic(node, prohibited, panic_site), notes, prohibited))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_prohibited_diagnostic(node, prohibited, panic_steps), notes, prohibited))
         valid = false
     }
     if node.is_replayable {
@@ -3578,13 +3622,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
                 dispatch = Val(sema_effect_locate_dispatch(found, inputs))
             }
         }
-        panic_site := "the reachable call graph"
-        if nodes[node_index].prohibited.len() > 0 {
-            seen := (loop _ in nodes -> false)
-            if sema_effect_panic_site(nodes, calls.node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
-        }
+        panic_steps := [String]{}
+        if nodes[node_index].prohibited.len() > 0 -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
         notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
-        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, notes, pure_reached, function_diagnostics) {
+        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_steps, notes, pure_reached, function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
@@ -3647,13 +3688,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
             reached: sema_effect_covered(solved[node_index], [String]{denied})
             if reached.len() == 0 -> next
-            panic_site := "the reachable call graph"
-            if sema_effect_root(denied) == "Panic" {
-                seen := (loop _ in nodes -> false)
-                if sema_effect_panic_site(nodes, calls.node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
-            }
+            panic_steps := [String]{}
+            if sema_effect_root(denied) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
             denial_diagnostics := [Diagnostic]{}
-            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_site), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
+            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
     }

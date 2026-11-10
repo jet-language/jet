@@ -1,0 +1,16 @@
+# An effect written in the wrong letter case is E0119, whose fix names the
+# registered PascalCase spelling and whose suggested edit writes it; a name
+# that is no effect in any case keeps the plain fix and no edit.
+fixture: unknown_effect_case_suggests_registered_spelling.fixture
+step: jet check cased.jet
+exit: nonzero
+stderr: ~ "Fix: Write it `IO`, the effect's registered spelling" # the root in its registered spelling
+stderr: ~ "Fix: Write it `FS.Read`, the effect's registered spelling" # the leaf in its registered spelling
+step: jet check --json cased.jet
+exit: nonzero
+stdout: ~ "\"new_text\":\"IO\"" # the suggested edit writes the root
+stdout: ~ "\"new_text\":\"FS.Read\"" # the suggested edit writes the leaf
+step: jet check --json unknown.jet
+exit: nonzero
+stdout: ~ "Use one of the known effect names, or remove it from the list" # no registered effect matches
+stdout: !~ "\"new_text\"" # and no edit is guessed
