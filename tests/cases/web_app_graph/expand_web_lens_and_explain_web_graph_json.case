@@ -13,11 +13,11 @@ stdout.strip_whitespace: ~ "\"hydration\":\"dev-overlay\"" # original predicate
 stdout.strip_whitespace: ~ "\"render\":\"csr\"" # original predicate
 step: jet inspect expand --facts web app.jet
 exit: 0
-stdout: ~ "  /greet [client] -> greet" # `ui.button` is browser-owned
+stdout: ~ "  /greet [client] -> greet" # `ui.mount` paints through the browser scene
 stdout: ~ "  / [static] -> home" # the server-rendered route beside it stays static
 step: jet explain --web-graph app.jet --json
 exit: 0
 json: stdout doc $.web_app.routes[?path="/greet"][0].render_facts.mode = "client"
-json: stdout doc $.web_app.routes[?path="/greet"][0].render_facts.effects = ["Browser"]
+json: stdout doc $.web_app.routes[?path="/greet"][0].render_facts.effects has "Browser" # mounting also reaches the backend's lock (Mem, Time.Wait) and Panic
 json: stdout doc $.web_app.routes[?path="/"][0].render_facts.mode = "static"
 json: stdout doc $.web_app.routes[?path="/"][0].render_facts.effects = []
