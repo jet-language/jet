@@ -639,6 +639,29 @@ sema_contract_interval: fn(expr: TExpr, environment: SemaScopeEnvironment, progr
     }
 }
 
+// Each end of an index interval stays within 2^40, so a sum or difference of
+// two of them fits in Int.
+SEMA_CONTRACT_INDEX_LIMIT: 1099511627776
+
+// The static interval of a fixed-list index read off its parts:
+// an Int literal, a `distinct Int(lo..hi)` value or its `.raw()`, and `+` or
+// `-` of two such intervals (`faces[roll.raw() - 1]`). None when any part has
+// no interval, so the index keeps its runtime check.
+sema_contract_index_interval: fn(expr: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TIntegerRange? {
+    range := TIntegerRange?{None}
+    if expr.kind == .Binary(op, _, _, left, right) {
+        if op != .Add && op != .Sub -> return None
+        lhs: sema_contract_index_interval(left, environment, program) ?? return None
+        rhs: sema_contract_index_interval(right, environment, program) ?? return None
+        range = if op == .Add -> Val(TIntegerRange{lo: lhs.lo + rhs.lo, hi: lhs.hi + rhs.hi}) else -> Val(TIntegerRange{lo: lhs.lo - rhs.hi, hi: lhs.hi - rhs.lo})
+    } else {
+        range = sema_contract_interval(expr, environment, program)
+    }
+    found: range ?? return None
+    if found.lo < -SEMA_CONTRACT_INDEX_LIMIT || found.hi > SEMA_CONTRACT_INDEX_LIMIT -> return None
+    Val(found)
+}
+
 sema_contract_interval_comparison: fn(op: TBinaryOp, left: TIntegerRange, right: TIntegerRange) -> Bool Never! {
     if op == {
         .Eq -> left.lo == left.hi && left.lo == right.lo && left.hi == right.hi

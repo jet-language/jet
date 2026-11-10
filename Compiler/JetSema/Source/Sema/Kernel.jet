@@ -153,8 +153,18 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
 
 // The effect and body obligations of a pending kernel, with its solved
 // effect facts: no declared, direct, called or opaque effects, then the body.
+// A Panic stop alone (an index, a slice, a `panic` call) always
+// comes with a body failure at its own site ("statically proved bounds", a
+// call), so that failure is the report rather than the effect row.
 sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: &[Diagnostic]) -> Bool {
-    if pending.declared_effects || direct.len() > 0 || call_edges.len() > 0 || maximal {
+    effect_edges := call_edges.len()
+    if pending.body_failure != None {
+        effect_edges = 0
+        loop edge in call_edges {
+            if edge != "__jet_panic__" -> effect_edges += 1
+        }
+    }
+    if pending.declared_effects || direct.len() > 0 || effect_edges > 0 || maximal {
         diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))
         return false
     }

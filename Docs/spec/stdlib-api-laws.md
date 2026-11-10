@@ -115,7 +115,9 @@ Core source can retain an existing `Shared<T>` owner with
 `__thread_shared(init)`, or `__attempt_shared(init)`. These are reserved
 Core-only operations, not public constructors. The same-module initializer
 must be a direct, non-generic, zero-argument, infallible module function
-returning `Shared<T>`; its inferred transitive effects may contain only `Mem`.
+returning `Shared<T>`; its inferred transitive effects may contain only `Mem`
+and the deny-only `Panic` stop row (D-NOPANIC1), which an unproved index or
+an explicit `panic` contributes.
 Every use of one initializer must select the same lifetime.
 
 Sema publishes that checked identity and lifetime. Lowering creates one typed

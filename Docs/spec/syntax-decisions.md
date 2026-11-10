@@ -3993,7 +3993,11 @@ compiler-extension API (D-DX5-HOOK1) and not PATH `jet-*` helpers (D-DX5).
 `target:` (bare-metal ⇒ no-std).
 **D-OOBPROOF1**: bounds-check elision is proof-carrying: a fixed-list index
 whose interval fact fits `0..N-1` lowers without the runtime bounds helper;
-other dynamic indexes keep the check.
+other dynamic indexes keep the check. The interval may be derived: an
+`Int` range fact shifted by `+`/`-` constants (`faces[roll.raw() - 1]` for
+`Die: distinct Int(1..6)` into `[String#6]`) is proved by the same fact, and
+`jet prove --lens solver` reports it as a `fixed_index_bounds` obligation.
+An index that keeps its check is a stop for D-NOPANIC1 (#6281 c154).
 
 **D-DX5-HOOK1=A — compiler-extension v1 boundary** *(ratified 2026-07-14,
 card #549)*: the optional formal compiler-extension API's first hook is a
@@ -7969,6 +7973,10 @@ when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
 The diagnostic names the panic site and gives the three exits: return a
 fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
+*Shipped (#6281 c154)*: a checked List, Range or Map index and a slice are
+stops, so `-[!Panic]>` refuses one that no fact proves (E0749); a fixed-list
+index proved by D-OOBPROOF1 is not a stop. The Core `Shared` publication
+check counts this row as no effect.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
   vocabulary only as a deny-only row: no positive signature, `#FX`, or grant

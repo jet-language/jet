@@ -792,6 +792,10 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
     distinct_range: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, environment, program) else -> None
     index_bounds := tree_expr_known_bounds(inferred_index)
     if index_bounds == None && distinct_range == .Val(range) -> index_bounds = Val(TIntegerBounds{lo: range.lo, hi: range.hi})
+    // An index with no bounds of its own reads its interval off
+    // its parts (`faces[roll.raw() - 1]` over a `distinct Int(1..6)`); one that
+    // fits the list proves the read, and any other keeps the runtime check.
+    derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, environment, program) else -> None
     named_mismatch: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
     // copy: the named position keeps its own type for the report below.
     named_ty: inferred_index.ty.copy()
@@ -888,6 +892,10 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
                 }
                 else -> {
                     resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
+                    if derived_range == .Val(range) && range.lo >= 0 && range.hi < length {
+                        resolved_kind = IndexKind.FixedListProof
+                        context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: range.lo, hi: range.hi, len: length})
+                    }
                 }
             }
             result_ty = Val(element)

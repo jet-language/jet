@@ -3590,9 +3590,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             lifetime: fact.shared_lifetime ?? next
             initializer: fact.callee ?? panic("Core publication obligation has no initializer")
             target: sema_effect_node_index(calls.node_by_key, initializer.key) ?? panic("Core publication initializer has no solved effect row")
+            // `Panic` is the deny-only stop row, not an effect
+            // the published value can carry, so it does not make it impure.
             impure := false
             loop effect_name in solved[target] {
-                if effect_name != "Mem" {
+                if effect_name != "Mem" && sema_effect_root(effect_name) != "Panic" {
                     impure = true
                     break
                 }
@@ -4273,13 +4275,21 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
 }
 
 // A stop (`panic`, `assert`, a `Never` value, `value ?? panic(message)`)
-// puts `Panic` in the row of the node it is charged to.
+// puts `Panic` in the row of the node it is charged to. So does an index the
+// checker did not prove: a list or map read, a range index or
+// a slice keeps its runtime bounds or key check, which stops on a miss. A
+// fixed-list index proved by its interval (FixedListProof) can't stop, and a
+// user `Index` impl's own row arrives through its call.
 sema_effect_record_stop: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
     if node.kind == {
         .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         .OrFallback(_, fallback, _) -> {
             if fallback == .Panic(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         }
+        .Index(_, _, kind, _, _, _) -> {
+            if kind == .List || kind == .Range || kind == .Map -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
+        }
+        .Slice(_, _, _, _, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         else -> {}
     }
 }
