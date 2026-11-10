@@ -115,6 +115,7 @@ CollectionArg: enum {
     Integer
     Text
     IntegerList
+    Range
     RemoveBy
     ElementList
     KeyList
@@ -458,7 +459,9 @@ COLLECTION_OPERATIONS: comptime { [CollectionOperationRow]{
     {receivers: CollectionReceivers.List, name: "pop", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Pop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.List, name: "reverse", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Reverse}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.List, name: "__swap", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SwapList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
-    {receivers: CollectionReceivers.List, name: "__fill", minimum_arity: 3, maximum_arity: 3, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer, CollectionArg.ElementList}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ListFill}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    {receivers: CollectionReceivers.List, name: "__fill", minimum_arity: 3, maximum_arity: 3, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer, CollectionArg.ElementList}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ListFillClamped}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    {receivers: CollectionReceivers.List, name: "fill", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Range, CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ListFill}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    {receivers: CollectionReceivers.List, name: "fill_repeat", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Range, CollectionArg.ElementList}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ListFillRepeat}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.List, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.List, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetList}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.List, name: "index_of", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
@@ -786,6 +789,7 @@ sema_collection_method_argument_type: fn(contract: SemaCollectionMethodContract,
         .Key -> Val(key)
         .Integer -> Val(Type.Int)
         .IntegerList -> Val(Type.List{element: Type.Int})
+        .Range -> Val(Type.Named{name: "Range"})
         .Text -> Val(Type.String)
         .RemoveBy -> Val(Type.Named{name: "RemoveBy"})
         .ElementList -> Val(Type.List{element: element})

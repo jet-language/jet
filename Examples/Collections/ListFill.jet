@@ -1,0 +1,38 @@
+// `xs.fill(range, value)` sets a span of a list to one value, and `xs.fill_repeat(range, pattern)` tiles a pattern across it.
+// Both write in place and never clamp: the range must lie inside the list.
+Pixel: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    row := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    row.fill(0..<4, 255)
+    print(row)
+
+    // One RGBA pixel repeated across three pixels; the last two bytes are
+    // a partial pattern.
+    row.fill_repeat(4..<14, [U8]{10, 20, 30, 40})
+    print(row)
+
+    // An inclusive range, and a Range held in a binding.
+    counts := [Int]{1, 2, 3, 4, 5, 6}
+    counts.fill(1..2, 0)
+    middle: 3..<6
+    counts.fill_repeat(middle, [Int]{7, 8})
+    print(counts)
+
+    // An empty range writes nothing.
+    counts.fill(6..<6, 99)
+    print(counts)
+
+    // Elements that own storage take a copy each.
+    names := [String]{"a", "b", "c", "d", "e"}
+    names.fill(0..<2, "x")
+    names.fill_repeat(2..<5, [String]{"p", "q"})
+    print(names)
+
+    points := [Pixel]{Pixel{x: 0, y: 0}, Pixel{x: 0, y: 0}, Pixel{x: 0, y: 0}}
+    points.fill(1..<3, Pixel{x: 4, y: 5})
+    print("{points[0].x},{points[0].y} {points[1].x},{points[1].y} {points[2].x},{points[2].y}")
+}

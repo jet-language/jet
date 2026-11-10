@@ -100,6 +100,55 @@ coll_copy: fn(source: I64, target: I64, size: I64) {
     }
 }
 
+// List fill for native lowering (JetIR BuildRoutes.jet ir_list_fill_span):
+// `total` bytes at `target` become the `period` bytes at `source` repeated,
+// so a total that is not a whole number of periods ends with a partial one.
+// The source lies outside the target bytes. A period of 1, 2, 4 or 8 bytes
+// is one repeated word, stored with `rep stosq` and the tail's bytes. Any
+// other period is copied once, the filled prefix doubles onto itself up to
+// a chunk of at least RT_FILL_CHUNK bytes (a whole number of periods, so
+// every copy starts on a period), and that chunk repeats over the rest.
+RT_FILL_CHUNK: I64{16384}
+
+#Export(c) jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
+    if (total <= I64{0} || period <= I64{0}) -> return
+    #Unsafe("native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes") {
+        if (I64{8} % period == I64{0}) {
+            word := I64{0}
+            lane := I64{0}
+            loop lane < (I64{8}) {
+                byte: os_load_u8(wrapping(source + lane % period))
+                word = word.bit_or(byte << (lane << I64{3}))
+                lane += I64{1}
+            }
+            words: total >> I64{3}
+            if (words > I64{0}) -> os_fill_words_i64(target, word, words)
+            // Every word starts on a period, so the tail is the word's low bytes.
+            at := words << I64{3}
+            shift := I64{0}
+            loop at < total {
+                os_store_u8(wrapping(target + at), (word >> shift).bit_and(I64{255}))
+                at += I64{1}
+                shift += I64{8}
+            }
+            return
+        }
+        filled := if (period < total) -> period else -> total
+        os_copy_ascending_i64(target, source, filled)
+        loop filled < total && filled < RT_FILL_CHUNK {
+            moved: if (filled < total - filled) -> filled else -> total - filled
+            os_copy_ascending_i64(wrapping(target + filled), target, moved)
+            filled += moved
+        }
+        chunk: filled
+        loop filled < total {
+            moved: if (chunk < total - filled) -> chunk else -> total - filled
+            os_copy_ascending_i64(wrapping(target + filled), target, moved)
+            filled += moved
+        }
+    }
+}
+
 // C's memory functions, under their C names, for the C a program links
 // beside the runtime (vendored and user C, and the code a C compiler writes
 // for struct copies): the runtime pack carries no libc copy of them (#6693).

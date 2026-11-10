@@ -467,7 +467,7 @@ records the shipped surface without adding aliases:
 
 | Type | Constructors | Description |
 | --- | --- | --- |
-| `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `copy`, and `equal`. |
+| `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `fill`, `fill_repeat`, `copy`, and `equal`. |
 | `[K:V]` | `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | Ordered `keys`, `values`, `get`, `has_key`, `add`, `add_new`, `remove`, `pop`, `merge`, `copy`, `equal`, `map`, `filter`, `flat_map`, `fold`, `intersection`, `slice`, `top_n`, and reducers. |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`(w: String) -> w.len()`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
@@ -489,6 +489,25 @@ counts; `top_n(n)` orders by descending count and ascending key for ties.
 `para_map` preserves source order, and `para_map(f, limit: n)` bounds workers
 for that call.
 
+`xs.fill(range, value)` sets every element of `xs[range]` to `value`, in
+place, as Rust's `slice.fill` and C++'s `std::fill` do.
+`xs.fill_repeat(range, pattern)` repeats the list `pattern` across the same
+span: element `range.start + i` becomes `pattern[i % pattern.len()]`, so a
+four-byte RGBA pixel or a gradient row tiles a pixel row. A span that is not a
+whole number of patterns ends with a partial pattern. Neither method clamps:
+a range outside `0..xs.len()` stops with the bounds fault that `xs[range]`
+gives, and an empty `pattern` stops with the bounds fault of `pattern[0]`,
+even over an empty range. Both write plain data such as `[U8]` as block
+stores, not a loop of element stores: a pattern of 1, 2, 4 or 8 bytes as one
+repeated word, any other as block copies.
+
+```jet
+pixels := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+pixels.fill(0..<2, 255)
+pixels.fill_repeat(2..<10, [U8]{1, 2, 3})
+print(pixels) // [255, 255, 1, 2, 3, 1, 2, 3, 1, 2]
+```
+
 Set closure operations use the same collection kernels as other containers.
 Mapping a Set does not promise to preserve uniqueness; use `.to_set()` when
 the result must be deduplicated. `values` is the lazy alias of `to_list`,
@@ -506,8 +525,9 @@ family includes `map`, `filter`, `take`, `skip`, `step_by`, `dedup`,
 `skip_while`, `flat_map`, `filter_map`, `scan`, `cycle`, `repeat`,
 `drop_last`, and `shuffle`. `cycle(n)` is bounded and produces exactly `n`
 items; `repeat(n)` repeats the source `n` times. A zero-argument infinite cycle
-is not a Core API. `fill`, `cycle_n`, and `duplicate` are declined or mapped
-to the existing names under D-ITER-DECLINE1.
+is not a Core API. An `Iter<T>` `fill` adapter, `cycle_n`, and `duplicate`
+are declined or mapped to the existing names under D-ITER-DECLINE1; the list
+method `fill` above writes in place.
 
 `next()` is the one partial pull (D-ITER-RESUME1, which amends
 D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
@@ -733,6 +753,8 @@ runs each of these cases.
 | `[T]` | `remove(item, [RemoveBy])` | exclusive, in place | Mutate | None | current |
 | `[T]` | `pop()` | exclusive, in place | Mutate | None | current |
 | `[T]` | `reverse()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `fill(Range, item)` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `fill_repeat(Range, [item])` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `clear()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `get(Int)` | borrows | Lookup | None | current |
 | `[T]` | `index_of(item)` | borrows | Lookup | None | current |

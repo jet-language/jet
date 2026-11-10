@@ -1541,6 +1541,23 @@ os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64)
     """
 }
 
+// The word store for the runtime's fill (Collections.jet jet_rt_mem_fill):
+// stores `word` into `count` 8-byte words from `target` upward.
+#[Unsafe("the caller owns count writable words starting at target"), FFI(asm)]
+os_fill_words_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    push {target}
+    push {word}
+    push {count}
+    pop rcx
+    pop rax
+    pop rdi
+    cld
+    rep stosq
+    ; clobbers rax, rcx, rdi
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 os_load_u8: fn(address: I64) -> I64 {
     """

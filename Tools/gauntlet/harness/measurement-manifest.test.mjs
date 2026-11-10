@@ -693,11 +693,11 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.ok(manifest.integrated_gate.required_metrics_by_mode["web-app"].includes("artifact_bytes"));
   assert.deepEqual(manifest.performance_surface_pairs.pair_measurement, {
     inputs: { iterations: 100000, range: "0..<100000", expected_sum: 4999950000 },
-    tier: "interpreter",
-    target: "jet run --interpret",
+    tier: "native",
+    target: "jet build --optimize=full",
     artifact_binding: "one_artifact_sha256",
     environment_binding: "one_host_toolchain_affinity_identity",
-    sampling: "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+    sampling: "balanced_seeded_fisher_yates; one build per arm, fresh process and fresh empty directory per sample",
     output_validation: "exact_utf8_stdout_bytes",
   });
   assert.deepEqual(manifest.report_contract.tier_policy_by_mode, {

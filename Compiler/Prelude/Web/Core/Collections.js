@@ -134,10 +134,43 @@ function jet_list_swap(xs, first, second) {
   return null;
 }
 
+// `xs.fill(range, value)` and `xs.fill_repeat(range, pattern)`: a range
+// outside 0..len stops with the bounds fault of `xs[range]`, and
+// xs[range.start + i] = pattern[i % pattern.length]; `fill`'s pattern is its
+// one value. An empty `fill_repeat` pattern stops as reading `pattern[0]`
+// does, and a span that is not a whole number of patterns ends with a
+// partial one.
+function jet_list_fill_span(xs, range, pattern) {
+  const file = "<core.prelude>";
+  const last = Number(jet_error_wasm_with_inputs(
+    [{ slot: JET_ERROR_WASM_FILE_SLOT, value: file, label: "file" }],
+    (wasm, handles) => wasm.jet_rt_slice_end(
+      BigInt(range.start), BigInt(range.end), range.exclusive ? 1 : 0,
+      BigInt(xs.length), handles[0].pointer, handles[0].length, 0n,
+    ),
+  ));
+  const period = pattern.length;
+  let next = 0;
+  for (let at = Number(range.start); at < last; at++) {
+    xs[at] = pattern[next];
+    next = next + 1 === period ? 0 : next + 1;
+  }
+  return null;
+}
+
+function jet_list_fill(xs, range, value) {
+  return jet_list_fill_span(xs, range, [value]);
+}
+
+function jet_list_fill_repeat(xs, range, pattern) {
+  jet_list_get(pattern, 0, "<core.prelude>", 0);
+  return jet_list_fill_span(xs, range, pattern);
+}
+
 // `xs.__fill(start, end, pattern)`: both bounds clamp into 0..len (as
 // slice does) and xs[start + i] = pattern[i % pattern.length]; an empty
 // window or pattern writes nothing.
-function jet_list_fill(xs, start, end, pattern) {
+function jet_list_fill_clamped(xs, start, end, pattern) {
   const period = pattern.length;
   if (period === 0) return null;
   const length = xs.length;

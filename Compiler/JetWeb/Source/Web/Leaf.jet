@@ -182,6 +182,41 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
             web_wrap(e)
             web_memory_copy(e)
         }
+        // count words from target, each the word: an i64.store loop over
+        // the leaf's own address and count copies (t0, t1).
+        "os_fill_words_i64" -> {
+            at: e.t0
+            left: e.t1
+            web_get(e, args[0])
+            web_set(e, at)
+            web_get(e, args[2])
+            web_set(e, left)
+            web_op(e, 0x02)
+            web_op(e, WEB_VOID)
+            web_op(e, 0x03)
+            web_op(e, WEB_VOID)
+            // Leave once no word is left.
+            web_get(e, left)
+            web_i64(e, 0)
+            web_op(e, 0x57)
+            web_op(e, 0x0d)
+            web_op(e, 1)
+            web_at(e, at)
+            web_get(e, args[1])
+            web_mem(e, 0x37, 0)
+            web_get(e, at)
+            web_i64(e, 8)
+            web_op(e, 0x7c)
+            web_set(e, at)
+            web_get(e, left)
+            web_i64(e, 1)
+            web_op(e, 0x7d)
+            web_set(e, left)
+            web_op(e, 0x0c)
+            web_op(e, 0)
+            web_end(e)
+            web_end(e)
+        }
         // The reduce leaves (JetIR OptReduce.jet) decline every run here
         // (2^62, never an inline Int), so the Loop after the call runs every pass.
         "rt_int_sum" | "rt_count_bytes" | "rt_count_ints" | "rt_count_words" | "rt_count_widened" | "rt_fill_1" | "rt_fill_2" | "rt_fill_4" | "rt_fill_8" | "rt_fill_ints" -> web_i64(e, 4611686018427387904)

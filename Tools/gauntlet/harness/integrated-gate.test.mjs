@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluateGate } from "./integrated-gate.mjs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { evaluateGate, evaluatePerformanceSurfacePairs } from "./integrated-gate.mjs";
 import { projectStatus } from "./status.mjs";
-import { EXPECTED_OUTPUT, METRIC, TARGET, TRIALS, WARMUPS } from "./performance-surface.mjs";
+import { EXPECTED_OUTPUT, METRIC, TARGET, TIER, TRIALS, WARMUPS, measurePair } from "./performance-surface.mjs";
 
 const NOW = "2026-09-20T12:00:00.000Z";
 const NOW_MS = Date.parse(NOW);
@@ -30,7 +34,7 @@ function performanceSurfaceSpec() {
     evidence: {
       file: EVIDENCE_FILE,
       path: "rows",
-      tier: "interpreter",
+      tier: TIER,
       metric: METRIC,
       target: TARGET,
       output_oracle: EXPECTED_OUTPUT,
@@ -304,4 +308,77 @@ test("the conformance check reads the Tools/hardening manifest and fails on an u
   const foreign = gateInputs();
   foreign.conformanceManifest.schema = "core-conformance";
   assert.equal(gate(foreign).checks.conformance.status, "fail");
+});
+
+// A strict receipt for one manifest pair, measured through the real harness
+// with a synthetic arm runner (surface 10-12 ms, plain 20-22 ms).
+function pairReceipt(spec, mutate = (sample) => sample) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "integrated-gate-pair-"));
+  try {
+    const artifact = path.join(dir, "jet");
+    writeFileSync(artifact, "fixture");
+    const identity = {
+      artifact: { path: artifact, sha256: createHash("sha256").update("fixture").digest("hex") },
+      revision: COMMIT,
+      toolchain: { rustc: "rustc 1.0.0", node: "v22.0.0" },
+      host: { hostname: "fixture", cpu_affinity: "0" },
+    };
+    let calls = 0;
+    const runArm = ({ source, label, context }) => {
+      calls += 1;
+      const stdout = spec.expected_output;
+      return mutate({
+        label,
+        source_file: "main.jet",
+        source_sha256: createHash("sha256").update(source).digest("hex"),
+        pair_context_sha256: context.context_sha256,
+        artifact_sha256: context.artifact_sha256,
+        environment_sha256: context.environment_sha256,
+        tier: context.tier,
+        target: context.target,
+        input_range: context.inputs.range,
+        output_oracle: context.output_validation.oracle,
+        wall_time_ms: (source === spec.surface_source ? 10 : 20) + (calls % 3),
+        status: 0,
+        exit_code: 0,
+        signal: null,
+        timed_out: false,
+        error_code: null,
+        stdout,
+        stderr: "",
+        stdout_bytes_base64: Buffer.from(stdout, "utf8").toString("base64"),
+        stderr_bytes_base64: "",
+        output_verified: true,
+        output_matches: true,
+        contaminated: false,
+        directory_entries: [],
+      });
+    };
+    const buildArm = ({ source, label }) => ({ root: null, executable: path.join(dir, `${label}-main`), executable_sha256: "b".repeat(64), source_sha256: createHash("sha256").update(source).digest("hex"), status: 0, signal: null, error_code: null, stderr: "" });
+    return measurePair({ pair: spec, identity, artifactPath: artifact, scratchRoot: dir, buildArm, runArm }).receipt;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("a pair with its own evidence_file is judged strictly from that receipt", () => {
+  const manifestPairs = JSON.parse(readFileSync(new URL("../measurement-manifest.json", import.meta.url), "utf8")).performance_surface_pairs.pairs;
+  const row = manifestPairs.find((pair) => pair.id === "list_fill_vs_index_loop");
+  const receipt = pairReceipt(row);
+  const measured = receipt.pairs[0];
+  const spec = performanceSurfaceSpec();
+  spec.pairs = [{ ...row, measured: { surface_wall_time_ms: measured.surface_wall_time_ms, plain_wall_time_ms: measured.plain_wall_time_ms, ratio: measured.ratio }, verdict: "win" }];
+  const own = (value) => new Map([[row.id, { receipt: value, file: row.evidence_file }]]);
+  const passed = evaluatePerformanceSurfacePairs(spec, null, { pairEvidence: own(receipt) });
+  assert.deepEqual(passed.findings, []);
+  assert.equal(passed.pairs[0].verdict, "win");
+  assert.equal(passed.pairs[0].evidence_file, row.evidence_file);
+  const missing = evaluatePerformanceSurfacePairs(spec, null, {});
+  assert.ok(missing.findings.some((finding) => finding.kind === "missing-evidence" && finding.evidence_file === row.evidence_file));
+  const forged = pairReceipt(row, (sample) => ({ ...sample, source_sha256: "e".repeat(64) }));
+  const failed = evaluatePerformanceSurfacePairs(spec, null, { pairEvidence: own(forged) });
+  assert.ok(failed.findings.some((finding) => finding.kind === "identity-mismatch" && finding.evidence_file === row.evidence_file));
+  const shared = performanceSurfaceSpec();
+  shared.pairs = [{ ...spec.pairs[0], evidence_file: EVIDENCE_FILE }];
+  assert.ok(evaluatePerformanceSurfacePairs(shared, null, {}).findings.some((finding) => finding.kind === "malformed-input" && /evidence_file must name its own receipt/.test(finding.cause)));
 });

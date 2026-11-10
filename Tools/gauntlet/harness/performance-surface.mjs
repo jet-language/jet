@@ -42,8 +42,11 @@ export const PLAIN_PROGRAM = `gauntlet:performance-surface:${PAIR_ID}:plain`;
 export const ITERATIONS = 100000;
 export const INPUT_RANGE = "0..<100000";
 export const EXPECTED_SUM = 4999950000;
-export const EXPECTED_OUTPUT = `performance-surface:${PAIR_ID}:${EXPECTED_SUM}`;
-export const TARGET = "jet run --interpret";
+export const EXPECTED_OUTPUT = `performance-surface:${PAIR_ID}:${EXPECTED_SUM}\n`;
+// Every pair is timed on native executables at the shipping optimization
+// level: each arm is built once, then run as a fresh process per sample.
+export const TIER = "native";
+export const TARGET = "jet build --optimize=full";
 export const METRIC = "wall_time_ms";
 export const WARMUPS = 10;
 export const TRIALS = 100;
@@ -83,17 +86,64 @@ export const PLAIN_SOURCE = [
 ].join("\n");
 
 const WORKLOAD = "100000-element integer reduction with identical final stdout";
-const SETUP = "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact";
+const SETUP = "one jet build --optimize=full per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory";
 const ORDER_LABELS = Object.freeze(["surface_first", "plain_first"]);
 export const PAIR_MEASUREMENT = Object.freeze({
   inputs: Object.freeze({ iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM }),
-  tier: "interpreter",
+  tier: TIER,
   target: TARGET,
   artifact_binding: "one_artifact_sha256",
   environment_binding: "one_host_toolchain_affinity_identity",
-  sampling: "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+  sampling: "balanced_seeded_fisher_yates; one build per arm, fresh process and fresh empty directory per sample",
   output_validation: "exact_utf8_stdout_bytes",
 });
+
+// One measured pair: its labels, programs, sources, inputs and output
+// oracle. The compound pair's are fixed here; any other pair's come from its
+// manifest row (performance_surface_pairs.pairs), measured with `--pair <id>`
+// into the row's own evidence_file under the same sampling contract.
+export const COMPOUND_PAIR = Object.freeze({
+  id: PAIR_ID,
+  surface: SURFACE_LABEL,
+  plain: PLAIN_LABEL,
+  workload: WORKLOAD,
+  surface_program: SURFACE_PROGRAM,
+  plain_program: PLAIN_PROGRAM,
+  surface_source: SURFACE_SOURCE,
+  plain_source: PLAIN_SOURCE,
+  input_range: INPUT_RANGE,
+  expected_output: EXPECTED_OUTPUT,
+  inputs: PAIR_MEASUREMENT.inputs,
+});
+
+export function pairDefinition(pairSpec = null) {
+  if (!isObject(pairSpec) || pairSpec.id === PAIR_ID) return COMPOUND_PAIR;
+  return {
+    id: pairSpec.id,
+    surface: pairSpec.surface,
+    plain: pairSpec.plain,
+    workload: pairSpec.workload,
+    surface_program: pairSpec.surface_program,
+    plain_program: pairSpec.plain_program,
+    surface_source: pairSpec.surface_source,
+    plain_source: pairSpec.plain_source,
+    input_range: pairSpec.input_range,
+    expected_output: pairSpec.expected_output,
+    inputs: pairSpec.inputs,
+  };
+}
+
+// The manifest row of a pair measured from its own row: every identity the
+// receipt is held to must be there.
+function definitionIssues(definition) {
+  const issues = [];
+  for (const field of ["id", "surface", "plain", "workload", "surface_program", "plain_program", "surface_source", "plain_source", "input_range", "expected_output"]) {
+    if (!nonEmpty(definition?.[field])) issues.push(`manifest pair ${definition?.id ?? "missing"} is missing ${field}`);
+  }
+  if (!isObject(definition?.inputs)) issues.push(`manifest pair ${definition?.id ?? "missing"} is missing inputs`);
+  if (definition?.surface_source === definition?.plain_source) issues.push(`manifest pair ${definition?.id ?? "missing"} uses one source for both spellings`);
+  return issues;
+}
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -126,10 +176,10 @@ function environmentDigest(identity) {
   }));
 }
 
-function makeMeasurementContext(identity, warmupOrders, trialOrders) {
+function makeMeasurementContext(identity, warmupOrders, trialOrders, definition = COMPOUND_PAIR) {
   const context = {
-    inputs: { iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM },
-    tier: PAIR_MEASUREMENT.tier,
+    inputs: { ...definition.inputs },
+    tier: TIER,
     target: TARGET,
     metric: METRIC,
     artifact_sha256: identity?.artifact?.sha256 ?? null,
@@ -143,12 +193,13 @@ function makeMeasurementContext(identity, warmupOrders, trialOrders) {
       warmup_orders: warmupOrders,
       trial_orders: trialOrders,
       fresh_process_per_arm: true,
-      fresh_source_file_per_arm: true,
+      one_build_per_arm: true,
+      fresh_directory_per_sample: true,
     },
     output_validation: {
       encoding: "utf8",
       exact: true,
-      oracle: EXPECTED_OUTPUT,
+      oracle: definition.expected_output,
     },
   };
   return { ...context, context_sha256: measurementContextDigest(context) };
@@ -331,35 +382,36 @@ function armSample(row, arm) {
 function pairIdentityIssues(receipt, row, pairSpec = null) {
   const issues = [];
   const expect = pairSpec ?? {};
+  const pair = pairDefinition(pairSpec);
   if (receipt?.schema !== PERFORMANCE_SURFACE_SCHEMA || receipt?.version !== PERFORMANCE_SURFACE_VERSION) {
     issues.push({ kind: "stale-identity", cause: "receipt schema/version is not the current performance-surface contract" });
   }
-  if (row?.id !== PAIR_ID || (expect.id && expect.id !== PAIR_ID)) {
-    issues.push({ kind: "stale-identity", cause: `pair id must be ${PAIR_ID}` });
+  if (row?.id !== pair.id || (expect.id && expect.id !== pair.id)) {
+    issues.push({ kind: "stale-identity", cause: `pair id must be ${pair.id}` });
   }
-  if (row?.canonical !== SURFACE_LABEL || row?.surface !== SURFACE_LABEL || (expect.surface && expect.surface !== SURFACE_LABEL)) {
-    issues.push({ kind: "identity-mismatch", cause: "surface spelling identity differs from compound assignment" });
+  if (row?.canonical !== pair.surface || row?.surface !== pair.surface || (expect.surface && expect.surface !== pair.surface)) {
+    issues.push({ kind: "identity-mismatch", cause: `surface spelling identity differs from ${pair.surface}` });
   }
-  if (row?.alternate !== PLAIN_LABEL || row?.plain !== PLAIN_LABEL || (expect.plain && expect.plain !== PLAIN_LABEL)) {
-    issues.push({ kind: "identity-mismatch", cause: "plain spelling identity differs from binary expression followed by assignment" });
+  if (row?.alternate !== pair.plain || row?.plain !== pair.plain || (expect.plain && expect.plain !== pair.plain)) {
+    issues.push({ kind: "identity-mismatch", cause: `plain spelling identity differs from ${pair.plain}` });
   }
-  if (row?.surface_program !== SURFACE_PROGRAM || row?.plain_program !== PLAIN_PROGRAM) {
+  if (row?.surface_program !== pair.surface_program || row?.plain_program !== pair.plain_program) {
     issues.push({ kind: "identity-mismatch", cause: "surface/plain program identities do not match the pair" });
   }
-  if (row?.surface_source !== SURFACE_SOURCE || row?.plain_source !== PLAIN_SOURCE) {
+  if (row?.surface_source !== pair.surface_source || row?.plain_source !== pair.plain_source) {
     issues.push({ kind: "stale-identity", cause: "source spelling is stale or differs from the ratified pair" });
   }
-  if (row?.surface_source_sha256 !== sha256(SURFACE_SOURCE) || row?.plain_source_sha256 !== sha256(PLAIN_SOURCE)) {
+  if (row?.surface_source_sha256 !== sha256(pair.surface_source ?? "") || row?.plain_source_sha256 !== sha256(pair.plain_source ?? "")) {
     issues.push({ kind: "stale-identity", cause: "source digest does not match the ratified pair" });
   }
-  if (receipt?.target !== TARGET || receipt?.metric !== METRIC || receipt?.tier !== PAIR_MEASUREMENT.tier) {
-    issues.push({ kind: "identity-mismatch", cause: "receipt target, tier, or metric differs from jet run --interpret / wall_time_ms" });
+  if (receipt?.target !== TARGET || receipt?.metric !== METRIC || receipt?.tier !== TIER) {
+    issues.push({ kind: "identity-mismatch", cause: `receipt target, tier, or metric differs from ${TARGET} (${TIER}) / ${METRIC}` });
   }
-  if (receipt?.input?.range !== INPUT_RANGE || receipt?.input?.iterations !== ITERATIONS || receipt?.input?.expected_sum !== EXPECTED_SUM) {
-    issues.push({ kind: "stale-identity", cause: "workload range or integer reduction identity differs from 0..<100000" });
+  if (receipt?.input?.range !== pair.input_range || canonical(receipt?.input) !== canonical(pair.inputs)) {
+    issues.push({ kind: "stale-identity", cause: `workload inputs differ from the pair's ${pair.input_range}` });
   }
-  if (receipt?.output_oracle !== EXPECTED_OUTPUT || row?.expected_output !== EXPECTED_OUTPUT) {
-    issues.push({ kind: "wrong-output", cause: "output oracle is not the exact compound-assignment pair oracle" });
+  if (receipt?.output_oracle !== pair.expected_output || row?.expected_output !== pair.expected_output) {
+    issues.push({ kind: "wrong-output", cause: `output oracle is not the exact ${pair.id} pair oracle` });
   }
   if (receipt?.warmups !== WARMUPS || receipt?.trials !== TRIALS) {
     issues.push({ kind: "stale-identity", cause: `receipt must contain exactly ${WARMUPS} warmups and ${TRIALS} trial pairs` });
@@ -400,10 +452,9 @@ function sampleIssues(sample, expectedOutput, location) {
     if (sample?.error_code) issues.push({ kind: "process-failure", cause: `${location} failed with ${sample.error_code}` });
   }
   if (!sampleOutputMatches(sample, expectedOutput)) issues.push({ kind: "wrong-output", cause: `${location} stdout does not exactly match the output oracle` });
-  if (sample?.contaminated === true) issues.push({ kind: "contamination", cause: `${location} source directory contains generated or unexpected files` });
-  if (Array.isArray(sample?.directory_entries) &&
-      (sample.directory_entries.length !== 1 || sample.directory_entries[0] !== "main.jet")) {
-    issues.push({ kind: "contamination", cause: `${location} source directory contains unexpected entries` });
+  if (sample?.contaminated === true) issues.push({ kind: "contamination", cause: `${location} run directory contains generated or unexpected files` });
+  if (Array.isArray(sample?.directory_entries) && sample.directory_entries.length !== 0) {
+    issues.push({ kind: "contamination", cause: `${location} run directory contains unexpected entries` });
   }
   return issues;
 }
@@ -411,7 +462,7 @@ function sampleIssues(sample, expectedOutput, location) {
 function confidenceFrom(row, receipt) {
   return row?.confidence ?? row?.bootstrap ?? receipt?.confidence ?? receipt?.bootstrap ?? null;
 }
-function measurementContextIssues(receipt, row) {
+function measurementContextIssues(receipt, row, pair = COMPOUND_PAIR) {
   const issues = [];
   const context = receipt?.measurement_context;
   const add = (kind, cause) => issues.push({ kind, cause });
@@ -427,8 +478,8 @@ function measurementContextIssues(receipt, row) {
   if (context.context_sha256 !== measurementContextDigest(context)) {
     add("stale-identity", "shared pair measurement context digest is stale");
   }
-  if (canonical(context.inputs) !== canonical(PAIR_MEASUREMENT.inputs) ||
-      context.tier !== PAIR_MEASUREMENT.tier ||
+  if (canonical(context.inputs) !== canonical(pair.inputs) ||
+      context.tier !== TIER ||
       context.target !== TARGET ||
       context.metric !== METRIC ||
       context.artifact_sha256 !== (receipt?.artifact_sha256 ?? null) ||
@@ -443,7 +494,8 @@ function measurementContextIssues(receipt, row) {
       sampling.warmup_seed !== ORDER_SEED ||
       sampling.trial_seed !== ORDER_SEED + 1 ||
       sampling.fresh_process_per_arm !== true ||
-      sampling.fresh_source_file_per_arm !== true ||
+      sampling.one_build_per_arm !== true ||
+      sampling.fresh_directory_per_sample !== true ||
       !Array.isArray(sampling.warmup_orders) ||
       !Array.isArray(sampling.trial_orders)) {
     add("missing-sample", "shared pair sampling contract is missing or stale");
@@ -456,7 +508,7 @@ function measurementContextIssues(receipt, row) {
     }
   }
   const output = context.output_validation;
-  if (!isObject(output) || output.encoding !== "utf8" || output.exact !== true || output.oracle !== EXPECTED_OUTPUT) {
+  if (!isObject(output) || output.encoding !== "utf8" || output.exact !== true || output.oracle !== pair.expected_output) {
     add("wrong-output", "shared pair output validation is not exact UTF-8 stdout against the oracle");
   }
   if (row?.measurement_context_sha256 !== context.context_sha256 ||
@@ -474,7 +526,7 @@ function measurementContextIssues(receipt, row) {
   return issues;
 }
 
-function sampleBindingIssues(sample, source, context, location) {
+function sampleBindingIssues(sample, source, context, location, pair = COMPOUND_PAIR) {
   const issues = [];
   const add = (kind, cause) => issues.push({ kind, cause });
   if (!isObject(sample)) return [{ kind: "unpaired-row", cause: `${location} arm is missing` }];
@@ -486,8 +538,8 @@ function sampleBindingIssues(sample, source, context, location) {
       sample.environment_sha256 !== context?.environment_sha256 ||
       sample.tier !== context?.tier ||
       sample.target !== context?.target ||
-      sample.input_range !== INPUT_RANGE ||
-      sample.output_oracle !== EXPECTED_OUTPUT) {
+      sample.input_range !== pair.input_range ||
+      sample.output_oracle !== pair.expected_output) {
     add("identity-mismatch", `${location} does not share the pair input, tier, artifact, environment, or output identity`);
   }
   return issues;
@@ -495,14 +547,15 @@ function sampleBindingIssues(sample, source, context, location) {
 
 export function validatePerformanceSurfaceReceipt(receipt, options = {}) {
   const findings = [];
-  const add = (kind, cause) => findings.push({ kind, cell: PAIR_ID, metric: METRIC, cause });
-  const rows = Array.isArray(receipt?.pairs) ? receipt.pairs : [];
   const pairSpec = options.pairSpec ?? options.pair ?? null;
-  const row = rows.find((candidate) => candidate?.id === (pairSpec?.id ?? PAIR_ID)) ?? rows[0] ?? null;
+  const pair = pairDefinition(pairSpec);
+  const add = (kind, cause) => findings.push({ kind, cell: pair.id, metric: METRIC, cause });
+  const rows = Array.isArray(receipt?.pairs) ? receipt.pairs : [];
+  const row = rows.find((candidate) => candidate?.id === pair.id) ?? rows[0] ?? null;
   if (rows.length !== 1) add("unpaired-row", "receipt must contain exactly one configured performance surface pair");
   for (const issue of pairIdentityIssues(receipt, row, pairSpec)) add(issue.kind, issue.cause);
   for (const issue of identityCompletenessIssues(receipt, row)) add(issue.kind, issue.cause);
-  for (const issue of measurementContextIssues(receipt, row)) add(issue.kind, issue.cause);
+  for (const issue of measurementContextIssues(receipt, row, pair)) add(issue.kind, issue.cause);
   for (const issue of (Array.isArray(receipt?.preflight_issues) ? receipt.preflight_issues : [])) {
     add("unavailable", `measurement preflight failed: ${issue}`);
   }
@@ -540,10 +593,10 @@ export function validatePerformanceSurfaceReceipt(receipt, options = {}) {
     }
     const surfaceSample = armSample(warmup, "surface");
     const plainSample = armSample(warmup, "plain");
-    for (const issue of sampleIssues(surfaceSample, EXPECTED_OUTPUT, `warmup ${index} surface`)) add(issue.kind, issue.cause);
-    for (const issue of sampleIssues(plainSample, EXPECTED_OUTPUT, `warmup ${index} plain`)) add(issue.kind, issue.cause);
-    for (const issue of sampleBindingIssues(surfaceSample, SURFACE_SOURCE, context, `warmup ${index} surface`)) add(issue.kind, issue.cause);
-    for (const issue of sampleBindingIssues(plainSample, PLAIN_SOURCE, context, `warmup ${index} plain`)) add(issue.kind, issue.cause);
+    for (const issue of sampleIssues(surfaceSample, pair.expected_output, `warmup ${index} surface`)) add(issue.kind, issue.cause);
+    for (const issue of sampleIssues(plainSample, pair.expected_output, `warmup ${index} plain`)) add(issue.kind, issue.cause);
+    for (const issue of sampleBindingIssues(surfaceSample, pair.surface_source, context, `warmup ${index} surface`, pair)) add(issue.kind, issue.cause);
+    for (const issue of sampleBindingIssues(plainSample, pair.plain_source, context, `warmup ${index} plain`, pair)) add(issue.kind, issue.cause);
   }
 
   const trialRows = pairRowsFromReceipt(receipt, row);
@@ -581,10 +634,10 @@ export function validatePerformanceSurfaceReceipt(receipt, options = {}) {
     const plainTime = sampleTime(plainSample);
     if (finite(surfaceTime)) surfaceSamples.push(surfaceTime);
     if (finite(plainTime)) plainSamples.push(plainTime);
-    for (const issue of sampleIssues(surfaceSample, EXPECTED_OUTPUT, `trial ${index} surface`)) add(issue.kind, issue.cause);
-    for (const issue of sampleIssues(plainSample, EXPECTED_OUTPUT, `trial ${index} plain`)) add(issue.kind, issue.cause);
-    for (const issue of sampleBindingIssues(surfaceSample, SURFACE_SOURCE, context, `trial ${index} surface`)) add(issue.kind, issue.cause);
-    for (const issue of sampleBindingIssues(plainSample, PLAIN_SOURCE, context, `trial ${index} plain`)) add(issue.kind, issue.cause);
+    for (const issue of sampleIssues(surfaceSample, pair.expected_output, `trial ${index} surface`)) add(issue.kind, issue.cause);
+    for (const issue of sampleIssues(plainSample, pair.expected_output, `trial ${index} plain`)) add(issue.kind, issue.cause);
+    for (const issue of sampleBindingIssues(surfaceSample, pair.surface_source, context, `trial ${index} surface`, pair)) add(issue.kind, issue.cause);
+    for (const issue of sampleBindingIssues(plainSample, pair.plain_source, context, `trial ${index} plain`, pair)) add(issue.kind, issue.cause);
     if (finite(surfaceTime) && finite(plainTime) && (!finite(trial.ratio) || !closeEnough(trial.ratio, surfaceTime / plainTime))) {
       add("wrong-ratio", `trial ${index} ratio is not surface/plain`);
     }
@@ -702,7 +755,7 @@ export function validateManifestPair(pairSpec, evidenceSpec = null, measurementS
   if (evidenceSpec?.output_oracle !== EXPECTED_OUTPUT) issues.push("manifest output oracle is stale");
   if (!isObject(measurementSpec) ||
       canonical(measurementSpec.inputs) !== canonical(PAIR_MEASUREMENT.inputs) ||
-      measurementSpec.tier !== PAIR_MEASUREMENT.tier ||
+      measurementSpec.tier !== TIER ||
       measurementSpec.target !== PAIR_MEASUREMENT.target ||
       measurementSpec.artifact_binding !== PAIR_MEASUREMENT.artifact_binding ||
       measurementSpec.environment_binding !== PAIR_MEASUREMENT.environment_binding ||
@@ -778,25 +831,55 @@ export function collectIdentity(options = {}) {
   };
 }
 
-function runArm({ binary, source, expectedOutput, scratchRoot, label, timeoutMs = DEFAULT_TIMEOUT_MS, context = null }) {
+// Builds one arm once: its source as main.jet in a fresh directory, compiled
+// with TARGET into that directory's bin/. `executable` is null when the build
+// fails; the build's status and stderr say why.
+function buildArm({ binary, source, scratchRoot, label, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const buildRoot = mkdtempSync(path.join(scratchRoot, `build-${label}-`));
+  writeFileSync(path.join(buildRoot, "main.jet"), source, "utf8");
+  const outputDir = path.join(buildRoot, "bin");
+  const result = spawnSync(binary, ["build", "--optimize=full", "--quiet", `--output-dir=${outputDir}`, "main.jet"], {
+    cwd: buildRoot,
+    env: { ...process.env, JET_TEST_SCRATCH_DIR: scratchRoot },
+    timeout: timeoutMs,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const candidate = path.join(outputDir, "main");
+  const built = result.status === 0 && existsSync(candidate);
+  return {
+    root: buildRoot,
+    executable: built ? candidate : null,
+    executable_sha256: built ? sha256(readFileSync(candidate)) : null,
+    source_sha256: sha256(source),
+    status: result.status ?? null,
+    signal: result.signal ?? null,
+    error_code: result.error?.code ?? null,
+    stderr: result.stderr ?? "",
+  };
+}
+
+// One sample: the arm's built executable as a fresh process in a fresh empty
+// directory, timed from spawn to exit.
+function runArm({ executable, source, expectedOutput, scratchRoot, label, timeoutMs = DEFAULT_TIMEOUT_MS, context = null }) {
   let runRoot = null;
-  const started = performance.now();
   let result = null;
   let error = null;
+  let elapsed = 0;
   try {
     runRoot = mkdtempSync(path.join(scratchRoot, `${label}-`));
-    writeFileSync(path.join(runRoot, "main.jet"), source, "utf8");
-    result = spawnSync(binary, ["run", "--interpret", "main.jet"], {
+    const started = performance.now();
+    result = spawnSync(executable, [], {
       cwd: runRoot,
       env: { ...process.env, JET_TEST_SCRATCH_DIR: scratchRoot },
       timeout: timeoutMs,
       encoding: null,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    elapsed = performance.now() - started;
   } catch (caught) {
     error = caught;
   }
-  const elapsed = performance.now() - started;
   const stdoutBuffer = Buffer.isBuffer(result?.stdout) ? result.stdout : Buffer.from(result?.stdout ?? "");
   const stderrBuffer = Buffer.isBuffer(result?.stderr) ? result.stderr : Buffer.from(result?.stderr ?? "");
   const status = result?.status ?? null;
@@ -807,7 +890,7 @@ function runArm({ binary, source, expectedOutput, scratchRoot, label, timeoutMs 
   if (runRoot) {
     try { directoryEntries = readdirSync(runRoot); } catch { directoryEntries = []; }
   }
-  const contaminated = directoryEntries.some((entry) => entry !== "main.jet");
+  const contaminated = directoryEntries.length !== 0;
   const outputMatches = status === 0 && signal == null && !timedOut && stdoutBuffer.equals(Buffer.from(expectedOutput, "utf8"));
   const valid = outputMatches && !error && status === 0 && signal == null && !timedOut && !contaminated;
   const sample = {
@@ -817,7 +900,7 @@ function runArm({ binary, source, expectedOutput, scratchRoot, label, timeoutMs 
     pair_context_sha256: context?.context_sha256 ?? null,
     artifact_sha256: context?.artifact_sha256 ?? null,
     environment_sha256: context?.environment_sha256 ?? null,
-    tier: context?.tier ?? PAIR_MEASUREMENT.tier,
+    tier: context?.tier ?? TIER,
     target: context?.target ?? TARGET,
     input_range: context?.inputs?.range ?? INPUT_RANGE,
     output_oracle: context?.output_validation?.oracle ?? expectedOutput,
@@ -851,7 +934,7 @@ function emptySample(label, source, context = null) {
     pair_context_sha256: context?.context_sha256 ?? null,
     artifact_sha256: context?.artifact_sha256 ?? null,
     environment_sha256: context?.environment_sha256 ?? null,
-    tier: context?.tier ?? PAIR_MEASUREMENT.tier,
+    tier: context?.tier ?? TIER,
     target: context?.target ?? TARGET,
     input_range: context?.inputs?.range ?? INPUT_RANGE,
     output_oracle: context?.output_validation?.oracle ?? EXPECTED_OUTPUT,
@@ -891,17 +974,18 @@ function makeTrial(index, order, surface, plain) {
   };
 }
 
-function measurementPairRow({ identity, sources, context, warmupOrders, warmupRows, trialOrders, trialRows, statistics, preflightIssues }) {
+function measurementPairRow({ pair = COMPOUND_PAIR, identity, sources, context, warmupOrders, warmupRows, trialOrders, trialRows, statistics, preflightIssues }) {
+  const oracle = pair.expected_output;
   const surfaceWarmup = warmupRows.map((row) => sampleTime(row.surface));
   const plainWarmup = warmupRows.map((row) => sampleTime(row.plain));
   const surfaceTrials = trialRows.map((row) => row.surface_wall_time_ms);
   const plainTrials = trialRows.map((row) => row.plain_wall_time_ms);
   const allSamples = [...warmupRows, ...trialRows];
   const allOutputsMatch = allSamples.every((row) =>
-    sampleOutputMatches(row.surface, EXPECTED_OUTPUT) && sampleOutputMatches(row.plain, EXPECTED_OUTPUT));
+    sampleOutputMatches(row.surface, oracle) && sampleOutputMatches(row.plain, oracle));
   const allSamplesValid = allSamples.every((row) =>
-    sampleIssues(row.surface, EXPECTED_OUTPUT, "surface").length === 0 &&
-    sampleIssues(row.plain, EXPECTED_OUTPUT, "plain").length === 0);
+    sampleIssues(row.surface, oracle, "surface").length === 0 &&
+    sampleIssues(row.plain, oracle, "plain").length === 0);
   const confidence = statistics?.bootstrap ?? null;
   const ratio = statistics?.ratio ?? null;
   const verdict = classifyVerdict(ratio, confidence);
@@ -912,15 +996,15 @@ function measurementPairRow({ identity, sources, context, warmupOrders, warmupRo
     surfaceTrials.every((value) => finite(value) && value > 0) &&
     plainTrials.every((value) => finite(value) && value > 0);
   return {
-    id: PAIR_ID,
-    canonical: SURFACE_LABEL,
-    alternate: PLAIN_LABEL,
-    surface: SURFACE_LABEL,
-    plain: PLAIN_LABEL,
-    workload: WORKLOAD,
-    surface_program: SURFACE_PROGRAM,
-    plain_program: PLAIN_PROGRAM,
-    expected_output: EXPECTED_OUTPUT,
+    id: pair.id,
+    canonical: pair.surface,
+    alternate: pair.plain,
+    surface: pair.surface,
+    plain: pair.plain,
+    workload: pair.workload,
+    surface_program: pair.surface_program,
+    plain_program: pair.plain_program,
+    expected_output: oracle,
     surface_source: sources.surface,
     plain_source: sources.plain,
     surface_source_sha256: sha256(sources.surface),
@@ -931,12 +1015,12 @@ function measurementPairRow({ identity, sources, context, warmupOrders, warmupRo
     measurement_context: context,
     measurement_context_sha256: context?.context_sha256 ?? null,
     environment_sha256: context?.environment_sha256 ?? null,
-    tier: context?.tier ?? PAIR_MEASUREMENT.tier,
+    tier: context?.tier ?? TIER,
     target: context?.target ?? TARGET,
-    input_range: context?.inputs?.range ?? INPUT_RANGE,
+    input_range: context?.inputs?.range ?? pair.input_range,
     timing_status: validTiming && allSamplesValid && allOutputsMatch && preflightIssues.length === 0 ? "measured" : "unavailable",
-    surface_output_matches: allSamples.every((row) => sampleOutputMatches(row.surface, EXPECTED_OUTPUT)),
-    plain_output_matches: allSamples.every((row) => sampleOutputMatches(row.plain, EXPECTED_OUTPUT)),
+    surface_output_matches: allSamples.every((row) => sampleOutputMatches(row.surface, oracle)),
+    plain_output_matches: allSamples.every((row) => sampleOutputMatches(row.plain, oracle)),
     warmup_orders: warmupOrders,
     trial_orders: trialOrders,
     warmups: warmupRows,
@@ -972,15 +1056,19 @@ export function measurePair(options = {}) {
   const artifactPath = path.resolve(options.artifactPath ?? defaultJetBinary());
   const scratchRoot = path.resolve(options.scratchRoot ?? process.env.JET_TEST_SCRATCH_DIR ?? path.join(os.homedir(), ".cache", "jet-dev", "perf-surface-pair"), "performance-surface");
   mkdirSync(scratchRoot, { recursive: true });
-  const sources = { surface: SURFACE_SOURCE, plain: PLAIN_SOURCE };
+  // options.pair is a manifest pair row; without one this measures the compound pair.
+  const pair = pairDefinition(options.pair ?? null);
+  const sources = { surface: pair.surface_source, plain: pair.plain_source };
   const identity = options.identity ?? collectIdentity({ artifactPath });
-  const manifestIssues = options.manifest
-    ? validateManifestPair(
-      options.manifest.performance_surface_pairs?.pairs?.find((pair) => pair.id === PAIR_ID),
-      options.manifest.performance_surface_pairs?.evidence,
-      options.manifest.performance_surface_pairs?.pair_measurement,
-    )
-    : [];
+  const manifestIssues = pair !== COMPOUND_PAIR
+    ? definitionIssues(pair)
+    : options.manifest
+      ? validateManifestPair(
+        options.manifest.performance_surface_pairs?.pairs?.find((candidate) => candidate.id === PAIR_ID),
+        options.manifest.performance_surface_pairs?.evidence,
+        options.manifest.performance_surface_pairs?.pair_measurement,
+      )
+      : [];
   const preflightIssues = [...manifestIssues];
   if (!identity.artifact) preflightIssues.push("compiler artifact is missing");
   if (!identity.revision) preflightIssues.push("compiler revision is missing");
@@ -988,45 +1076,61 @@ export function measurePair(options = {}) {
   if (!identity.host?.cpu_affinity) preflightIssues.push("CPU affinity is missing");
   const warmupOrders = options.warmupOrders ?? balancedOrder(WARMUPS, ORDER_SEED);
   const trialOrders = options.trialOrders ?? balancedOrder(TRIALS, ORDER_SEED + 1);
-  const context = makeMeasurementContext(identity, warmupOrders, trialOrders);
-  const executable = identity.artifact?.path ? path.resolve(root, identity.artifact.path) : artifactPath;
+  const context = makeMeasurementContext(identity, warmupOrders, trialOrders, pair);
+  const compiler = identity.artifact?.path ? path.resolve(root, identity.artifact.path) : artifactPath;
   const run = options.runArm ?? runArm;
-  const canRun = preflightIssues.length === 0 && existsSync(executable);
+  const build = options.buildArm ?? buildArm;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Each arm is built once with the measured compiler before any sample runs.
+  const builds = {};
+  if (preflightIssues.length === 0 && existsSync(compiler)) {
+    for (const arm of ["surface", "plain"]) {
+      builds[arm] = build({ binary: compiler, source: sources[arm], scratchRoot, label: arm, timeoutMs });
+      if (!builds[arm].executable) {
+        const reason = String(builds[arm].stderr ?? "").trim().split("\n")[0] || `status ${builds[arm].status}`;
+        preflightIssues.push(`${arm} arm did not build: ${reason}`);
+      }
+    }
+  }
+  const canRun = preflightIssues.length === 0 && Boolean(builds.surface?.executable) && Boolean(builds.plain?.executable);
   const warmupRows = [];
   const trialRows = [];
-  const invoke = (source, label) => canRun
+  const invoke = (arm, label) => canRun
     ? run({
-      binary: executable,
-      source,
-      expectedOutput: EXPECTED_OUTPUT,
+      executable: builds[arm].executable,
+      source: sources[arm],
+      expectedOutput: pair.expected_output,
       scratchRoot,
       label,
-      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      timeoutMs,
       context,
     })
-    : emptySample(label, source, context);
+    : emptySample(label, sources[arm], context);
   try {
     if (canRun) {
       // Keep the warmups balanced and in the same deterministic arm order contract as trials.
       for (let index = 0; index < WARMUPS; index += 1) {
         const order = warmupOrders[index];
-        const surface = order === "surface_first" ? invoke(sources.surface, `warmup-${index}-surface`) : null;
-        const plain = order === "surface_first" ? invoke(sources.plain, `warmup-${index}-plain`) : null;
-        const plainFirst = order === "plain_first" ? invoke(sources.plain, `warmup-${index}-plain`) : null;
-        const surfaceSecond = order === "plain_first" ? invoke(sources.surface, `warmup-${index}-surface`) : null;
+        const surface = order === "surface_first" ? invoke("surface", `warmup-${index}-surface`) : null;
+        const plain = order === "surface_first" ? invoke("plain", `warmup-${index}-plain`) : null;
+        const plainFirst = order === "plain_first" ? invoke("plain", `warmup-${index}-plain`) : null;
+        const surfaceSecond = order === "plain_first" ? invoke("surface", `warmup-${index}-surface`) : null;
         warmupRows.push({ index, order, surface: surface ?? surfaceSecond, plain: plain ?? plainFirst });
       }
       for (let index = 0; index < TRIALS; index += 1) {
         const order = trialOrders[index];
-        const surface = order === "surface_first" ? invoke(sources.surface, `trial-${index}-surface`) : null;
-        const plain = order === "surface_first" ? invoke(sources.plain, `trial-${index}-plain`) : null;
-        const plainFirst = order === "plain_first" ? invoke(sources.plain, `trial-${index}-plain`) : null;
-        const surfaceSecond = order === "plain_first" ? invoke(sources.surface, `trial-${index}-surface`) : null;
+        const surface = order === "surface_first" ? invoke("surface", `trial-${index}-surface`) : null;
+        const plain = order === "surface_first" ? invoke("plain", `trial-${index}-plain`) : null;
+        const plainFirst = order === "plain_first" ? invoke("plain", `trial-${index}-plain`) : null;
+        const surfaceSecond = order === "plain_first" ? invoke("surface", `trial-${index}-surface`) : null;
         trialRows.push(makeTrial(index, order, surface ?? surfaceSecond, plain ?? plainFirst));
       }
     }
   } catch (error) {
     preflightIssues.push(`measurement runner failed: ${error.message}`);
+  }
+  for (const built of Object.values(builds)) {
+    if (built?.root) rmSync(built.root, { recursive: true, force: true });
   }
   if (!canRun) {
     for (let index = 0; index < WARMUPS; index += 1) {
@@ -1060,7 +1164,8 @@ export function measurePair(options = {}) {
   } else if (identity.artifact.sha256 !== artifactAfter.sha256) {
     preflightIssues.push("compiler artifact changed during measurement");
   }
-  const pair = measurementPairRow({
+  const row = measurementPairRow({
+    pair,
     identity,
     sources,
     context,
@@ -1079,7 +1184,7 @@ export function measurePair(options = {}) {
     generated_command: options.generatedCommand ?? `Tools/agent/JetEnv.jet node Tools/gauntlet/harness/performance-surface.mjs`,
     generated_at: generatedAt,
     target: TARGET,
-    tier: PAIR_MEASUREMENT.tier,
+    tier: TIER,
     artifact: identity.artifact?.path ?? "jet",
     artifact_sha256: identity.artifact?.sha256 ?? null,
     artifact_md5: identity.artifact?.md5 ?? null,
@@ -1092,12 +1197,20 @@ export function measurePair(options = {}) {
     host: identity.host ?? null,
     environment_sha256: context.environment_sha256,
     measurement_context: context,
-    input: { iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM },
+    input: { ...pair.inputs },
     setup: SETUP,
+    builds: Object.fromEntries(Object.entries(builds).map(([arm, built]) => [arm, {
+      source_sha256: built.source_sha256,
+      executable_sha256: built.executable_sha256,
+      status: built.status,
+      signal: built.signal,
+      error_code: built.error_code,
+      stderr: built.stderr,
+    }])),
     warmups: WARMUPS,
     trials: TRIALS,
     metric: METRIC,
-    output_oracle: EXPECTED_OUTPUT,
+    output_oracle: pair.expected_output,
     order: {
       strategy: "balanced_seeded_fisher_yates",
       labels: ORDER_LABELS,
@@ -1118,20 +1231,20 @@ export function measurePair(options = {}) {
       lower_rank: BOOTSTRAP_LOWER_RANK,
       upper_rank: BOOTSTRAP_UPPER_RANK,
     },
-    source_digests: { surface_sha256: sha256(SURFACE_SOURCE), plain_sha256: sha256(PLAIN_SOURCE) },
+    source_digests: { surface_sha256: sha256(pair.surface_source), plain_sha256: sha256(pair.plain_source) },
     historical_receipts: options.historicalReceipts ?? [],
     prior_canonical_receipt: options.priorCanonicalReceipt ?? null,
-    pairs: [pair],
-    status: pair.verdict === "win" && preflightIssues.length === 0 ? "pass" : "fail",
-    verdict: pair.verdict,
-    verdict_reason: verdictReason(pair.verdict, pair.confidence),
+    pairs: [row],
+    status: row.verdict === "win" && preflightIssues.length === 0 ? "pass" : "fail",
+    verdict: row.verdict,
+    verdict_reason: verdictReason(row.verdict, row.confidence),
     preflight_issues: preflightIssues,
   };
   const validation = validatePerformanceSurfaceReceipt(receipt, {
-    pairSpec: options.manifest?.performance_surface_pairs?.pairs?.find((candidate) => candidate.id === PAIR_ID),
+    pairSpec: options.pair ?? options.manifest?.performance_surface_pairs?.pairs?.find((candidate) => candidate.id === PAIR_ID),
   });
   receipt.validation = { status: validation.status, valid: validation.valid, findings: validation.findings };
-  return { receipt, validation, pair, warmupOrders, trialOrders };
+  return { receipt, validation, pair: row, warmupOrders, trialOrders };
 }
 
 function compactTimestamp(iso) {
@@ -1148,7 +1261,14 @@ function uniquePath(candidate) {
   }
 }
 
-function prepareHistory({ canonicalPath, generatedAt, repo }) {
+// A receipt's timestamped copies sit beside its canonical file under the
+// canonical file's own stem.
+function receiptSnapshotPath(canonicalPath, generatedAt) {
+  const stem = path.basename(canonicalPath, path.extname(canonicalPath));
+  return path.join(path.dirname(canonicalPath), `${stem}-${compactTimestamp(generatedAt)}.json`);
+}
+
+function prepareHistory({ canonicalPath, generatedAt, repo, defaultLinks = HISTORICAL_RECEIPTS }) {
   const history = [];
   let prior = null;
   let issue = null;
@@ -1156,15 +1276,15 @@ function prepareHistory({ canonicalPath, generatedAt, repo }) {
     try {
       const bytes = readFileSync(canonicalPath);
       prior = JSON.parse(bytes.toString("utf8"));
-      const snapshot = uniquePath(path.join(repo, "Tools", "gauntlet", `performance-surface-evidence-${compactTimestamp(generatedAt)}.json`));
+      const snapshot = uniquePath(receiptSnapshotPath(canonicalPath, generatedAt));
       writeFileSync(snapshot, bytes, { flag: "wx" });
       history.push(path.relative(repo, snapshot).split(path.sep).join("/"));
     } catch (error) {
       issue = `prior canonical receipt could not be preserved: ${error.message}`;
     }
   }
-  const priorLinks = Array.isArray(prior?.historical_receipts) ? prior.historical_receipts : HISTORICAL_RECEIPTS;
-  for (const link of [...priorLinks, ...HISTORICAL_RECEIPTS]) {
+  const priorLinks = Array.isArray(prior?.historical_receipts) ? prior.historical_receipts : defaultLinks;
+  for (const link of [...priorLinks, ...defaultLinks]) {
     if (!history.includes(link)) history.push(link);
   }
   const digests = {};
@@ -1199,6 +1319,8 @@ function parseArgs(argv) {
     if (canonicalPath !== null) { options.canonicalPath = canonicalPath; continue; }
     const timeout = take("--timeout-ms");
     if (timeout !== null) { options.timeoutMs = Number(timeout); continue; }
+    const pairId = take("--pair");
+    if (pairId !== null) { options.pairId = pairId; continue; }
     throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -1206,8 +1328,9 @@ function parseArgs(argv) {
 
 const HELP = `Usage: node Tools/gauntlet/harness/performance-surface.mjs [options]
 
-Measure the exact compound_assign_vs_binary_assign interpreter pair.
-Options: --artifact PATH, --scratch PATH, --output PATH, --canonical PATH, --timeout-ms N`;
+Measure the exact compound_assign_vs_binary_assign pair on native executables, or with
+--pair ID the manifest pair ID into its own evidence_file.
+Options: --artifact PATH, --scratch PATH, --output PATH, --canonical PATH, --timeout-ms N, --pair ID`;
 
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
@@ -1216,16 +1339,23 @@ export async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   const root = path.resolve(options.repoDir ?? repoDir);
-  const canonicalPath = path.resolve(options.canonicalPath ?? path.join(root, "Tools/gauntlet/performance-surface-evidence.json"));
-  const generatedAt = new Date().toISOString();
-  const history = prepareHistory({ canonicalPath, generatedAt, repo: root });
   const manifestPath = path.join(root, "Tools/gauntlet/measurement-manifest.json");
   let manifest = null;
   try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { /* validation records missing manifest identity */ }
+  const pairs = manifest?.performance_surface_pairs?.pairs ?? [];
+  const pairSpec = options.pairId && options.pairId !== PAIR_ID ? pairs.find((pair) => pair.id === options.pairId) : null;
+  if (options.pairId && options.pairId !== PAIR_ID && !nonEmpty(pairSpec?.evidence_file)) {
+    throw new Error(`manifest pair ${options.pairId} is missing or names no evidence_file`);
+  }
+  const canonicalPath = path.resolve(options.canonicalPath ?? path.join(root, pairSpec?.evidence_file ?? "Tools/gauntlet/performance-surface-evidence.json"));
+  const generatedAt = new Date().toISOString();
+  const history = prepareHistory({ canonicalPath, generatedAt, repo: root, defaultLinks: pairSpec ? [] : HISTORICAL_RECEIPTS });
+  const validationSpec = pairSpec ?? pairs.find((pair) => pair.id === PAIR_ID);
   const result = measurePair({
     ...options,
     repoDir: root,
     manifest,
+    pair: pairSpec,
     generatedAt,
     historicalReceipts: history.historicalReceipts,
     priorCanonicalReceipt: history.priorCanonicalReceipt,
@@ -1235,12 +1365,12 @@ export async function main(argv = process.argv.slice(2)) {
   result.receipt.historical_receipts = history.historicalReceipts;
   result.receipt.historical_receipt_sha256 = history.historicalReceiptSha256;
   result.receipt.prior_canonical_receipt = history.priorCanonicalReceipt;
-  result.receipt.validation = validatePerformanceSurfaceReceipt(result.receipt, { pairSpec: manifest?.performance_surface_pairs?.pairs?.find((pair) => pair.id === PAIR_ID) });
-  const outputPath = path.resolve(options.outputPath ?? path.join(root, "Tools", "gauntlet", `performance-surface-evidence-${compactTimestamp(generatedAt)}.json`));
+  result.receipt.validation = validatePerformanceSurfaceReceipt(result.receipt, { pairSpec: validationSpec });
+  const outputPath = path.resolve(options.outputPath ?? receiptSnapshotPath(canonicalPath, generatedAt));
   const text = `${JSON.stringify(result.receipt, null, 2)}\n`;
   writeFileSync(uniquePath(outputPath), text, "utf8");
   writeFileSync(canonicalPath, text, "utf8");
-  process.stdout.write(`performance surface measured: ${PAIR_ID} verdict=${result.receipt.verdict} validation=${result.receipt.validation.status}\n`);
+  process.stdout.write(`performance surface measured: ${result.pair.id} verdict=${result.receipt.verdict} validation=${result.receipt.validation.status}\n`);
   return result.receipt.validation.valid ? 0 : 1;
 }
 
