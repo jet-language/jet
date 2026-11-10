@@ -63,7 +63,7 @@ ir_timing_flows: fn(f: IRFunction, fixed: [Bool], at: Int) -> Bool Never! {
     if f.op[at] == {
         .Copy | .Move | .Neg | .Not | .Convert | .Sqrt | .IntBig | .Offset | .Load -> ir_timing_at(fixed, f.a[at])
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> ir_timing_at(fixed, f.a[at]) || ir_timing_at(fixed, f.b[at])
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Drop | .Close | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .StreamStore -> false
     }
 }
 
@@ -100,11 +100,11 @@ ir_timing_x64_row: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
         .Not -> "NOT, XOR"
         .Convert -> if m.types[f.slot_type[f.dst[at]]].kind == {
             .Word | .Bool | .Char -> "MOV, MOVZX, MOVSX, AND"
-            else -> ""
+            .Unit | .Int | .Float | .Float32 | .String | .Pointer | .Aggregate -> ""
         }
         .Call | .CallRuntime | .CallIndirect | .Return -> "MOV"
         .Drop -> if m.types[f.slot_type[f.a[at]]].drop == "" -> "none" else -> ""
-        else -> ""
+        .Nop | .Const | .ConstText | .ConstBigInt | .Close | .Div | .Rem | .FloorDiv | .Mod | .Concat | .FunctionAddress | .DataAddress | .Load | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ""
     }
 }
 

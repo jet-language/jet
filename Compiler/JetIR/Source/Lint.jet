@@ -771,7 +771,7 @@ ir_lint_fixed: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding
             .Load | .Store | .StreamStore | .Offset -> if a -> "is an address" else -> ""
             .CopyBytes -> if a || b -> "is an address" else -> ""
             .CallIndirect -> if a -> "is a call target" else -> ""
-            else -> ""
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Return | .Unreachable | .Sqrt | .IntBig -> ""
         }
         if what != "" -> out.push(ir_lint_at(f, at, pass, IR_LINT_FIXED, "a fixed value {what}"))
     }
