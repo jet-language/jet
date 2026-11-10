@@ -45,6 +45,7 @@ use {
     drbg: __core_crypto_drbg
     ecdsa: __core_crypto_ecdsa
     rsa: __core_crypto_rsa
+    pem: __core_crypto_pem
     pkparse: __core_crypto_pkparse
     core.encoding.[Dyn]
     core.crypto.[Secret]
@@ -3466,4 +3467,302 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
         }
     }
     vec_assert(t)
+}
+
+// ---------------------------------------------------------------------------
+// Constant time: dudect timing tests
+// ---------------------------------------------------------------------------
+//
+// dudect (Reparaz, Balasch and Verbauwhede, "Dude, is my code constant
+// time?", DATE 2017, https://eprint.iacr.org/2016/1123): a primitive runs on
+// two classes of secret input, one fixed value and fresh random values, and
+// the class of each run is drawn at random, so drift and noise fall on both
+// classes alike. When the time does not depend on the secret, Welch's t
+// between the two classes' timings stays under 10, dudect's threshold for a
+// leak, over all runs and under each crop of the slow tail. Every input is
+// made before the clock starts, and each run reads its own copy, so both
+// classes find memory in the same state.
+
+/// xorshift64 (Marsaglia 2003) picks the classes and makes the random inputs:
+/// they must not correlate with the timings, and need not be unpredictable.
+CtRand: struct {
+    s: U64
+}
+
+#Arithmetic(.Wrapping)
+ct_next: fn(r: &CtRand) -> U64 Never! {
+    x := r.s.copy()
+    x = x.bit_xor(x << 13)
+    x = x.bit_xor(x >> 7)
+    x = x.bit_xor(x << 17)
+    r.s = x.copy()
+    x
+}
+
+ct_bytes: fn(r: &CtRand, n: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<n -> out.push(U8{ct_next(r).bit_and(U64{255})})
+    out
+}
+
+ct_abs: fn(x: Float) -> Float Never! { if x < (Float{0}) -> Float{0} - x else -> x }
+
+/// Welch's t between the random class's and the fixed class's timings, over
+/// the runs that took at most `limit` nanoseconds.
+ct_welch: fn(times: [Int], random: [Bool], limit: Int) -> Float Never! {
+    n := [Int]{0, 0}
+    sum := [Float]{Float{0}, Float{0}}
+    loop i in 0..<times.len() {
+        if times[i] > limit -> next
+        c: if random[i] -> 1 else -> 0
+        n[c] = n[c] + 1
+        sum[c] = sum[c] + Float{times[i]}
+    }
+    if n[0] < 2 || n[1] < 2 -> return Float{0}
+    mean: [Float]{sum[0] / Float{n[0]}, sum[1] / Float{n[1]}}
+    sq := [Float]{Float{0}, Float{0}}
+    loop i in 0..<times.len() {
+        if times[i] > limit -> next
+        c: if random[i] -> 1 else -> 0
+        d: Float{times[i]} - mean[c]
+        sq[c] = sq[c] + d * d
+    }
+    spread: sq[0] / Float{n[0] - 1} / Float{n[0]} + sq[1] / Float{n[1] - 1} / Float{n[1]}
+    if spread <= (Float{0}) -> return Float{0}
+    (mean[1] - mean[0]) / core.math.sqrt(spread)
+}
+
+/// Times `samples` runs of `batch` calls of `op`, each run on a copy of
+/// `fixed` or on random bytes of its length, picked at random, and returns the
+/// t of largest size over all runs and the 50th, 75th, 90th, 95th and 99th
+/// percentile crops.
+ct_measure: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
+    r := CtRand{s: U64{88172645463325252}}
+    inputs := [[U8]]{}
+    random := [Bool]{}
+    loop _ in 0..<samples {
+        pick: ct_next(r).bit_and(U64{1}) == U64{1}
+        random.push(pick)
+        if pick {
+            inputs.push(ct_bytes(r, fixed.len()))
+        } else {
+            inputs.push(fixed.copy())
+        }
+    }
+    sink := 0
+    loop i in 0..<32 -> sink = sink.bit_xor(op(inputs[i %% samples]))
+    times := [Int]{}
+    loop i in 0..<samples {
+        x: inputs[i]
+        watch: core.time.start()
+        loop _ in 0..<batch -> sink = sink.bit_xor(op(x))
+        times.push(core.time.elapsed(watch).ns)
+    }
+    sorted := times.copy()
+    sorted.sort()
+    worst := ct_welch(times, random, sorted[samples - 1])
+    loop pct in ([Int]{50, 75, 90, 95, 99}) {
+        t: ct_welch(times, random, sorted[((samples - 1) * pct) /% 100])
+        if ct_abs(t) > ct_abs(worst) -> worst = t
+    }
+    print("dudect {what}: t {worst} over {samples} runs of {batch} (median run {sorted[samples /% 2]} ns, result {sink})")
+    worst
+}
+
+/// `ct_measure`, failing when the t reaches 10 in size.
+ct_dudect: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
+    t: ct_measure(what, samples, batch, fixed, op)
+    if ct_abs(t) >= (Float{10}) -> panic("{what}: Welch's t is {t} between fixed and random secrets over {samples} runs; dudect's leak threshold is 10")
+    t
+}
+
+/// `bytes` with the last byte's low bit flipped: a tag that differs from
+/// `bytes` at the end only, where a random one differs at the start.
+ct_last_flipped: fn(bytes: [U8]) -> [U8] Never! {
+    out := bytes.copy()
+    out[out.len() - 1] = out[out.len() - 1].bit_xor(U8{1})
+    out
+}
+
+ct_take: fn(bytes: [U8], from: Int, count: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop i in from..<from + count -> out.push(bytes[i])
+    out
+}
+
+/// The length of an opened message; 0 for a refused one.
+ct_opened: fn(got: [U8]?) -> Int Never! {
+    g: got ?? return 0
+    g.len()
+}
+
+/// A comparison that stops at the first differing byte: the leak the
+/// harness must find.
+ct_early_exit: fn(a: [U8], b: [U8]) -> Int Never! {
+    loop i in 0..<a.len() {
+        if a[i] != b[i] -> return i + 1
+    }
+    0
+}
+
+#Test("dudect finds the leak in a comparison that stops at the first differing byte") {
+    r := CtRand{s: U64{3}}
+    mac: ct_bytes(r, 32)
+    t: ct_measure("early-exit compare (the leak dudect must find)", 20000, 64, ct_last_flipped(mac), (x) -> ct_early_exit(mac, x))
+    if ct_abs(t) < (Float{10}) -> panic("dudect missed an early-exit compare: t {t}")
+}
+
+#Test("dudect: ctime.memcmp and core.crypto.constant_time_equal_bytes take as long wherever two tags differ") {
+    r := CtRand{s: U64{5}}
+    mac: ct_bytes(r, 32)
+    fixed: ct_last_flipped(mac)
+    other: mac.copy()
+    ct_dudect("ctime.memcmp", 20000, 64, fixed, (x) -> ctime.memcmp(mac, 0, x, 0, 32))
+    ct_dudect("core.crypto.constant_time_equal_bytes", 20000, 64, fixed, (x) -> if core.crypto.constant_time_equal_bytes(other, x) -> 1 else -> 0)
+}
+
+ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
+    k: cipher.aes_key(key, false) ?? return 0
+    out := ct_take(block, 0, 16)
+    cipher.encrypt_block(k, block, 0, out, 0)
+    Int.from_u8(out[0])
+}
+
+#Test("dudect: AES key expansion and block encryption take as long on fixed and random keys") {
+    r := CtRand{s: U64{7}}
+    block: ct_bytes(r, 16)
+    other: block.copy()
+    ct_dudect("AES-128 key and block", 5000, 4, ct_bytes(r, 16), (x) -> ct_aes(x, block))
+    ct_dudect("AES-256 key and block", 5000, 4, ct_bytes(r, 32), (x) -> ct_aes(x, other))
+}
+
+#Test("dudect: AES-GCM and ChaCha20-Poly1305 refuse a forged tag in the same time wherever it differs") {
+    r := CtRand{s: U64{11}}
+    key: ct_bytes(r, 32)
+    iv: ct_bytes(r, 12)
+    aad: ct_bytes(r, 13)
+    plain: ct_bytes(r, 64)
+    gcm: vec_gcm_seal(key, iv, aad, plain) ?? panic("GCM seal failed")
+    chacha: vec_chacha_seal(key, iv, aad, plain) ?? panic("ChaCha20-Poly1305 seal failed")
+    gcm_body: ct_take(gcm, 0, 64)
+    chacha_body: ct_take(chacha, 0, 64)
+    k2: key.copy()
+    iv2: iv.copy()
+    aad2: aad.copy()
+    ct_dudect("AES-256-GCM open", 4000, 2, ct_last_flipped(ct_take(gcm, 64, 16)), (x) -> ct_opened(vec_gcm_open(key, iv, aad, vec_concat(gcm_body, x))))
+    ct_dudect("ChaCha20-Poly1305 open", 4000, 2, ct_last_flipped(ct_take(chacha, 64, 16)), (x) -> ct_opened(vec_chacha_open(k2, iv2, aad2, vec_concat(chacha_body, x))))
+}
+
+#Test("dudect: HMAC-SHA-256 and HMAC-SHA-384 take as long on fixed and random keys") {
+    r := CtRand{s: U64{13}}
+    data: ct_bytes(r, 64)
+    other: data.copy()
+    ct_dudect("HMAC-SHA-256", 4000, 4, ct_bytes(r, 32), (x) -> Int.from_u8(hashes.hmac(hashes.Md.SHA256, x, data)[0]))
+    ct_dudect("HMAC-SHA-384", 4000, 4, ct_bytes(r, 48), (x) -> Int.from_u8(hashes.hmac(hashes.Md.SHA384, x, other)[0]))
+}
+
+/// A private key for curve `id` from `bytes`: the top bit cleared, so it is
+/// below the group order, and the low bit set, so it is not zero.
+ct_scalar: fn(bytes: [U8]) -> [U8] Never! {
+    out := bytes.copy()
+    out[0] = out[0].bit_and(U8{0x7f})
+    out[out.len() - 1] = out[out.len() - 1].bit_or(U8{1})
+    out
+}
+
+/// The uncompressed generator of curve `id`, the peer point of the ECDH runs.
+ct_generator: fn(id: ecp.GroupID, size: Int) -> [U8] {
+    grp: ecp.group_load(id) ?? panic("no group {id}")
+    ecp.point_write_binary(grp, grp.g, .Uncompressed, 1 + 2 * size) ?? panic("no generator for {id}")
+}
+
+#Test("dudect: X25519, P-256 and P-384 ECDH take as long on fixed and random private keys") {
+    r := CtRand{s: U64{17}}
+    base := [U8]{9}
+    loop _ in 1..<32 -> base.push(U8{0})
+    ct_dudect("X25519 ECDH", 600, 1, ct_bytes(r, 32), (x) -> ct_opened(vec_ecdh(.Curve25519, x, base)))
+    p256: ct_generator(.Secp256r1, 32)
+    ct_dudect("P-256 ECDH", 400, 1, ct_scalar(ct_bytes(r, 32)), (x) -> ct_opened(vec_ecdh(.Secp256r1, ct_scalar(x), p256)))
+    p384: ct_generator(.Secp384r1, 48)
+    ct_dudect("P-384 ECDH", 200, 1, ct_scalar(ct_bytes(r, 48)), (x) -> ct_opened(vec_ecdh(.Secp384r1, ct_scalar(x), p384)))
+}
+
+ct_ecdsa_sign: fn(id: ecp.GroupID, key: [U8], hash: [U8]) -> Int {
+    grp: ecp.group_load(id) ?? return 0
+    d: bn.read_binary(ct_scalar(key)) ?? return 0
+    rng := vec_rng()
+    sig: ecdsa.ecdsa_sign(grp, d, hash, rng) ?? return 0
+    ct_opened(Val(bn.write_binary(sig.s, key.len()) ?? return 0))
+}
+
+#Test("dudect: ECDSA signing on P-256 and P-384 takes as long on fixed and random private keys") {
+    r := CtRand{s: U64{19}}
+    h256: ct_bytes(r, 32)
+    ct_dudect("P-256 ECDSA sign", 400, 1, ct_bytes(r, 32), (x) -> ct_ecdsa_sign(.Secp256r1, x, h256))
+    h384: ct_bytes(r, 48)
+    ct_dudect("P-384 ECDSA sign", 200, 1, ct_bytes(r, 48), (x) -> ct_ecdsa_sign(.Secp384r1, x, h384))
+}
+
+ct_rsa_sign: fn(der: [U8], hash: [U8]) -> Int {
+    rng := vec_rng()
+    ctx := pkparse.pk_parse_key(der, None, rng) ?? return 0
+    sig: pk.pk_sign(ctx, Val(hashes.Md.SHA256), hash, 1024, rng) ?? return 0
+    sig.len()
+}
+
+#Test("dudect: RSA-2048 PKCS#1 v1.5 signing takes as long on fixed and random hashes") {
+    groups: vec_items(vec_wycheproof("rsa_pkcs1_2048_sig_gen"), "testGroups")
+    der: vec_wy_hex(groups[0], "privateKeyPkcs8")
+    r := CtRand{s: U64{23}}
+    ct_dudect("RSA-2048 sign", 200, 1, ct_bytes(r, 32), (x) -> ct_rsa_sign(der, x))
+}
+
+/// `bytes` as base64 text, one digit per byte.
+ct_base64_text: fn(bytes: [U8]) -> [U8] Never! {
+    digits: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
+    out := [U8]{}
+    loop b in bytes -> out.push(digits[Int.from_u8(b.bit_and(U8{63}))])
+    out
+}
+
+ct_base64_decoded: fn(bytes: [U8]) -> Int Never! {
+    out: pem.base64_decode(ct_base64_text(bytes)) ?? return 0
+    out.len()
+}
+
+#Test("dudect: PEM's base64 decoding of key text takes as long on fixed and random digits") {
+    r := CtRand{s: U64{29}}
+    ct_dudect("PEM base64 decode", 5000, 8, ct_bytes(r, 64), (x) -> ct_base64_decoded(x))
+}
+
+#Unsafe("`seed` is a timing run's test key, used for that run only") vec_expert_ed25519_sign: fn(seed: [U8], msg: [U8]) -> Int {
+    n := 0
+    #Unsafe("a timing run's test key, used for that run only") {
+        sig: core.crypto.expert.ed25519_sign(seed, msg) ?? return 0
+        n = sig.bytes.len()
+    }
+    n
+}
+
+#Test("dudect: core.crypto.expert's X25519, Ed25519 signing and AEAD tag checks take as long on fixed and random secrets") {
+    r := CtRand{s: U64{31}}
+    base := [U8]{9}
+    loop _ in 1..<32 -> base.push(U8{0})
+    msg: ct_bytes(r, 64)
+    key: ct_bytes(r, 32)
+    iv: ct_bytes(r, 12)
+    xiv: ct_bytes(r, 24)
+    aad: ct_bytes(r, 13)
+    #Unsafe("timing runs on test keys and nonces, each used for its run only") {
+        gcm: vec_expert_gcm_seal(key, iv, aad, msg) ?? panic("expert GCM seal failed")
+        xchacha: vec_expert_xchacha_seal(key, xiv, aad, msg) ?? panic("expert XChaCha20-Poly1305 seal failed")
+        gcm_body: ct_take(gcm, 0, 64)
+        xchacha_body: ct_take(xchacha, 0, 64)
+        k2: key.copy()
+        aad2: aad.copy()
+        ct_dudect("expert X25519", 600, 1, ct_bytes(r, 32), (x) -> ct_opened(vec_expert_x25519(x, base)))
+        ct_dudect("expert Ed25519 sign", 400, 1, ct_bytes(r, 32), (x) -> vec_expert_ed25519_sign(x, msg))
+        ct_dudect("expert AES-256-GCM open", 4000, 2, ct_last_flipped(ct_take(gcm, 64, 16)), (x) -> ct_opened(vec_expert_gcm_open(key, iv, aad, vec_concat(gcm_body, x))))
+        ct_dudect("expert XChaCha20-Poly1305 open", 4000, 2, ct_last_flipped(ct_take(xchacha, 64, 16)), (x) -> ct_opened(vec_expert_xchacha_open(k2, xiv, aad2, vec_concat(xchacha_body, x))))
+    }
 }
