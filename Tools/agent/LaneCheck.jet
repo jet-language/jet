@@ -38,7 +38,8 @@
 // its own `jet check`. Any other Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
-// or a drifted compiler slice, the unsafe-region ratchet in --check mode
+// or a drifted compiler slice (its Jet tool runs under $JET too, not the seed),
+// the unsafe-region ratchet in --check mode
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, the vocabulary
 // rows in --check mode, which refuse a package Source/Vocabulary.jet that
@@ -103,7 +104,7 @@ run: fn() {
         process.exit(1)
     }
     jet: env_or("JET", process.which("jet") ?? "jet")
-    assembly: process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
+    assembly: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
@@ -120,6 +121,30 @@ assembly_refused: fn(output: String) -[Exec, IO]> Never {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
     process.exit(1)
+}
+
+// An environment setting of a child run.
+Setting: struct {
+    name: String
+    value: String
+}
+
+// The Jetpack assembly check's environment. Its Jet tool
+// (Tools/agent/CompilerPackages.jet `sources`) runs under JET_BIN, else the
+// current seed, against this checkout's Core; the seed's Core part table
+// predates every part Core gained since it (#6694 c18: Core/Crypto's
+// `__core_crypto_md` is no core module to it). So the tool runs under the jet
+// being checked, as Compiler/test.jet and Jetpack/Bootstrap/Check.jet run it.
+assembly_env: fn(jet: String) -> [Setting] {
+    [Setting]{Setting{name: "JETPACK_WORKER", value: "lanecheck"}, Setting{name: "JET_BIN", value: jet}}
+}
+
+assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
+    spec := process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo)
+    loop setting in assembly_env(jet) {
+        spec = spec.env(setting.name, setting.value)
+    }
+    spec
 }
 
 // The unsafe-region ratchet with $JET, else the `jet` on PATH; it never writes.
@@ -1059,4 +1084,12 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(memory_bytes("G"), -1)
     assert_eq(memory_bytes("0G"), -1)
     assert_eq(memory_bytes("20GB"), -1)
+}
+
+#Test("the Jetpack assembly check runs its Jet tool under the checked jet, not the seed") {
+    tool := ""
+    loop setting in assembly_env("/opt/jet/bin/jet") {
+        if setting.name == "JET_BIN" -> tool = setting.value
+    }
+    assert_eq(tool, "/opt/jet/bin/jet")
 }
