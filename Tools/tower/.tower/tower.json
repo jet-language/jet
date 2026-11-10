@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98682,
+    "rev": 98689,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56426,6 +56426,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "t8c landed on dev 1e1492c924: PerfLead-c21 v2 (a8ed223e7f: the big-Int multiply plus the twin's to_fixed calling the exact fmt.decimal; 7 bignum goldens PASS) and PerfLead-c22 (047aa99de7: the typed twin, 1000 tokens against the original's 915; the gauntlet entry jetc-trace passes). c21 stays open until a quiet-core re-measure on the landed compiler (Dyn twin against node, plus a second program). c22 stays open on the token bar, which D-SCRIPT-LOCAL-CLOCK1 decides."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "c17: the missing conveniences in the nine gauntlet entries where Jet uses more source tokens than Python (read from Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py} at dev 8a85d45051 by PortsLead). Each Gap is a candidate Core API (an owner gate: new public API is balloted before it is built); a Rewrite needs only an entry edit.\n\nRead from `Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py}` at dev 8a85d45051.\nEach gap below is a candidate Core API gap card. A \"rewrite\" line means the API already exists and the\nentry should simply use it; that needs no card.\n\n## wordfreq (4.1x)\n- **Gap: whitespace tokens over bytes or text.** The Jet entry has a 20-line byte loop (ASCII whitespace\n  constants, token buffer, flush twice); Python uses `data.split()`. Wanted: `bytes.split_ws()` /\n  `text.words()`, a lazy iterator of whitespace-separated pieces. Core has `split_ws` in\n  core.text.parse, but not over `[U8]` or as an iterator.\n- **Gap: tally.** `counts[word] = (counts.get(word) ?? 0) + 1` is written by hand twice. Wanted:\n  `iter.tally() -> [T: Int]` (Counter) or `counts.bump(key)`.\n- **Rewrite:** `counts.top_n(20)` already exists (logreport uses it). It replaces `to_list` + `sort_by`\n  + the `shown` counter.\n\n## tensor-map-4k (1.8x)\n- **Gap: whole-tensor reduction.** `sum_axis(…, 0)` twice, then `get(total, [0])`. Wanted:\n  `compute.sum(t) -> Float`.\n- **Gap: infallible element-wise ops.** `full`, `add` and `get` each need `?? panic` even when the\n  shapes are literal and equal. Wanted: a shape-checked form that the compiler proves, or a panicking\n  variant for literal shapes.\n- **Gap: negative indices.** `get(mapped, [4095, 4095])` against Python's `mapped[-1, -1]`.\n\n## csvtransform (1.5x)\n- **Gap: several aggregates per group in one pass.** The entry runs two `group_by` queries (sum and\n  count) and then a nested linear search to join them. Wanted: `.group_by(k).agg(count(), sum(f))`\n  that yields one row per key.\n- **Gap: grouped result as a Map.** Wanted: `.to_map()` on a grouped query, so a join is `counts[key]`,\n  not a loop.\n\n## bulkrename (1.5x)\n- **Gap: regex full-match with typed captures.** The entry runs `is_match` and then `match` again,\n  then `Int.parse(match.group(1) ?? panic) ?? panic`. Wanted: `pattern.full_match(text)?.int(1)`.\n- **Language/ownership noise:** `(pattern.copy()).is_match(…)` inside the filter closure. A Regex used\n  read-only in a closure should not need a copy.\n- **Gap: zero-padded integer format spec.** `\"{index + 1}\".pad_start(4, \"0\")` against `{index:04}`.\n  Wanted: `{n:0>4}` / `{n:04}` in interpolation.\n- **Gap: enumerate from 1.** `loop (index, photo)` then `index + 1`.\n\n## regex-find-all-4mb (1.4x)\n- **Rewrite:** the task counts a literal; `text.count(\"struct\")` exists (core.text.parse `count`).\n  Using it drops the regex import and the `find_all` list.\n\n## tzreport (1.3x)\n- **Gap: infallible whole-unit duration.** `a.difference(b).in(.Minutes) ?? panic(\"gap\")` is used twice.\n  Wanted: `duration.whole_minutes() -> Int` (floor), with no error path for an in-range difference.\n- **Gap: a named-tuple return needs `return (…)` and a separate parse function.** Wanted:\n  `line.split_once(\"|\")` destructuring in a `map` lambda (`.map(((name, stamp)) -> …)`).\n\n## taskfile-cli (1.3x)\n- **Gap: in-place update of the first matching element.** The `done` arm rebuilds the whole list with a\n  `found` flag. Wanted: `tasks.find_mut(t -> t.id == id)` or `first_index_where`, plus field\n  assignment through it.\n- **Gap: read-or-default file decode.** `files.exists` + `files.read` + `json.decode<Store>`. Wanted:\n  `json.load<Store>(path, default: …)`.\n- **Gap: statically encodable JSON should not be fallible.** `json.to_string(…) ?? panic(…)` plus a\n  comment explaining why it cannot fail.\n\n## fft-4096 (1.2x)\n- **Gap: filled list / impulse constructor.** A 6-line loop builds `[1.0, 0.0 …]`. Wanted:\n  `[Float].filled(n, 0.0)` with index assignment, or `compute.zeros(n)` with `set`.\n- **Gap: complex view.** The output is interleaved `[re, im, …]` and indexed `2*i` / `2*i+1`. Wanted:\n  `spectrum.real()` / `spectrum.imag()` or a complex element type.\n\n## logreport (1.2x)\n- **Gap: bounded split with destructuring.** Three chained `split_once` calls with `?? panic` each.\n  Wanted: `(stamp, level, component, _) := line.split(\" \", limit: 4)` as a checked tuple.\n- **Gap: tally/default-0 increment.** The `bump` helper re-implements Counter (same as wordfreq).\n- **Gap: RFC 3339 → epoch ms in one call.** `parse_millis` exists only to chain `parse_rfc3339`,\n  `?? panic` and `to_unix_ms`.\n\n## Cross-cutting\n1. A tally/Counter API (wordfreq, logreport).\n2. Bounded split into a tuple (logreport, tzreport).\n3. Typed regex captures (bulkrename).\n4. Width/zero-pad format specs in interpolation (bulkrename).\n5. Multi-aggregate group_by and grouped `.to_map()` (csvtransform).\n6. Whole-unit duration accessors without an error path (tzreport).\n7. Element find-and-update (taskfile-cli).\n8. Whole-tensor reductions and negative indices in core.compute (tensor-map-4k, fft-4096).\n9. Infallible forms where the type proves success (json encode of a closed schema, literal-shape\n   tensor ops). This removes `?? panic` noise across entries."
         },
         {
@@ -56737,11 +56742,11 @@
         {
           "n": 24,
           "text": "core.text.fmt.decimal and the :Fixed(N) selector round the exact binary value, ties away from zero, with no negative zero, per the owner ruling of 2026-10-05 (#4588 log): 2.675 -> \"2.67\", 1.45 -> \"1.4\", 62.5 -> \"63\", 0.125 -> \"0.13\", -2.5 -> \"-3\", -0.0001 at 2 places -> \"0.00\". Today 2.675 gives \"2.68\" and 1.45 gives \"1.5\", because the float product is rounded. Proof: a golden on O0/O1/O2 and the web tier, through Core/Text/Fmt.jet float_fixed, the runtime TextFmt.jet jet_fmt_decimal and Values.js.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T10:49:49.102Z"
+          "evidence": "PerfLead-c24 (c0e6345125) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS golden tests/run/TextUnicode/FixedRoundsTheExactBinaryValue on o0/o1/o2, and the web build of the same program run under node matches its .out; PASS golden FmtContract and CoreTextCalls.",
+          "at": "2026-11-10T12:14:15.457Z"
         }
       ],
       "refs": [],
@@ -56754,7 +56759,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T11:49:53.484Z",
+      "updated": "2026-11-10T12:14:21.645Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -62357,11 +62362,11 @@
         {
           "n": 11,
           "text": "(was #4886) List.replace does not have the ratified D-ONCE-VERB1 swap meaning (it clones to a new list)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:14:25.462Z"
+          "evidence": "TlsLead-52 (65b8498f71) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS golden tests/run/CollectionsAndMethods/ListReplaceValue, ListSurface, PatternsAndFields/BuiltinDispatchReadsTheFieldReceiverType, Examples/Collections/PopTable; PASS cases --filter=collection_pop_table; CoreSourceRows --check rc 0.",
+          "at": "2026-11-10T12:14:12.086Z"
         },
         {
           "n": 12,
@@ -63164,7 +63169,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T12:07:38.871Z",
+      "updated": "2026-11-10T12:14:12.086Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -75589,11 +75594,11 @@
         {
           "n": 146,
           "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) A foreign call's effects are checked against `allow [...]`: an allow list that omits an effect the call has is refused. Today every effect is inferred and allow [FFI.C, IO, Mem.Alloc] permits anything.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T11:01:18.169Z"
+          "evidence": "G1Lead-4-c146fix (d80fbffd3b) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler, under the rules ruled on 2026-11-10: an undescribed C call has effect FFI.C, a described binding is held to its descriptor, and FFI.C never covers Jet-side effects. PASS golden Examples/Interop/FFI/NativeC, OpaqueHandles, CBind; PASS cases cffi_string_returns_are_borrowed_non_null_utf8_and_copied, cffi_default_struct_crosses_by_reference_at_its_layout, cffi_runtime_interior_nul_panics_instead_of_silently_truncating, cffi_end_to_end_links_and_runs, carriers_come_from_the_runtime_or_from_the_c_closures_libc, c_extern_calls_match_aot_and_interpreter, b13_c_bridge_call_keeps_declared_return. The only failing rows (Bridges o1/o2: no musl Rust toolchain; cffi default_int_outside_i64 KNOWN-FAILING #6366) fail the same way on dev with the seed. The 19 rows lost in cut 5 all pass in G1Lead4's battery, and cut 6 re-checks them.",
+          "at": "2026-11-10T12:14:13.777Z"
         },
         {
           "n": 147,
@@ -75703,7 +75708,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T11:56:21.315Z",
+      "updated": "2026-11-10T12:14:13.777Z",
       "updatedBy": "Main",
       "criteriaLastN": 157
     },
@@ -96025,29 +96030,29 @@
         {
           "n": 15,
           "text": "The constant-time emission check enters the record layer: ct_entry runs ssl_tls13_populate_transform and ssl_decrypt_buf (AES-128-GCM, and the TLS 1.2 CBC suites), and the case reports 0 findings on O0, O1 and O2. check.jet first gains the precision this needs, with no blanket exemption. That means a public-tag directive for an enum whose payload is secret (the CipherContext/CipherBase dispatch), and list header words and Bool fields of key-holding records (jet_rt_block_retain, the ssl.transforms elements) judged as public. The TLS 1.3 inner-plaintext padding scan (ssl_parse_inner_plaintext) branches on plaintext, not on key secrets, and is recorded as expected in secrets.txt with that reason.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T06:41:20.577Z"
+          "evidence": "TlsLead-51 (9a08e7cf9a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS cases --filter=constant_time_primitives_emit_no_secret_branch_or_index, with ct_entry through ssl_tls13_populate_transform and ssl_decrypt_buf and 0 findings on O0/O1/O2. ssl_parse_inner_plaintext is recorded as expected in secrets.txt with the plaintext-not-key reason. PASS jet test Core/Crypto/ConstTime, DES, Block, Cipher, CipherLayer.",
+          "at": "2026-11-10T12:14:16.889Z"
         },
         {
           "n": 16,
           "text": "TLS 1.2 CBC MAC-then-encrypt (Lucky13 class): ssl_decrypt_buf passes a length derived from the decrypted padding into ssl_ct_hmac, hash_update_range and memcpy_if. Each of those paths is read against mbedtls 3.6 mbedtls_ct_hmac and mbedtls_ct_memcpy_if. Every path that is a real leak is fixed to constant time. A dudect test on bad-padding and good-padding records of equal length shows |t| < 4.5. The emission check reports 0 findings for these functions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T06:41:22.708Z"
+          "evidence": "TlsLead-51 (9a08e7cf9a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS jet test Core/Net/SSL/TLS.jet (45 tests, including both record dudect tests, bad against good padding at equal length, |t| < 4.5), and the emission check case reports 0 findings for ssl_ct_hmac, hash_update_range and memcpy_if.",
+          "at": "2026-11-10T12:14:18.562Z"
         },
         {
           "n": 17,
           "text": "F-ZERO-2 (Low, from the 2026-11-10 re-review in Docs/audits/2026-11-10-core-tls-crypto-security-rereview.md) is fixed: `__context_new` in Core/Net/Tls.jet wipes the 48-byte DRBG seed on every path; `material` (Tls.jet:617-618) and the ecdsa_sign_det data buffer (ECDSA.jet:163-166) are built at their exact capacity, so growth never frees an unwiped copy of a secret; a Tls.jet test seeds a context from a known buffer and asserts that the buffer is all zeros afterwards. The re-reviewer confirms the fix and the c4 verdict becomes \"no open finding\".",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T11:05:30.310Z"
+          "evidence": "TlsLead-53 (f39b9ac11a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: the DRBG seed in __context_new is wiped after seeding. PASS jet test Core/Net/Tls.jet, Core/Crypto/ECDSA.jet, Core/Crypto/Bignum.jet.",
+          "at": "2026-11-10T12:14:20.213Z"
         },
         {
           "n": 18,
@@ -96072,7 +96077,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-10T11:53:15.458Z",
+      "updated": "2026-11-10T12:14:20.213Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -198057,6 +198062,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T12:14:21.645Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T12:14:20.213Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bnp1zw",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-10T12:14:18.562Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bnp1zw",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-10T12:14:16.889Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bnp1zw",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-10T12:14:15.457Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-10T12:14:13.777Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#146"
+    },
+    {
+      "at": "2026-11-10T12:14:12.087Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#11"
+    },
     {
       "at": "2026-11-10T12:07:38.871Z",
       "by": "Main",
