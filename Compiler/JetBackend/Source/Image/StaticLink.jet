@@ -37,8 +37,9 @@
 //    when its C closure has absolute 32-bit relocations (non-PIC code, which
 //    links only below 2 GiB), at LINK_RUN_LOW_BASE.
 // 5. Relocation, with the static-executable relaxations: TLS
-//    general/local-dynamic to local-exec, initial-exec to local-exec, and
-//    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
+//    general/local-dynamic (`__tls_get_addr` calls or TLS descriptors) to
+//    local-exec, initial-exec to local-exec, and GOT loads/calls to direct
+//    `lea`/`call`/`jmp` when the instruction allows.
 // 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
 //    of the directly linked objects (none without `debug_info`), a `.symtab`
 //    and section headers. A split link (x64_link_executable_split) writes
@@ -135,6 +136,8 @@ LINK_R_GOTOFF64: 25
 LINK_R_GOTPC32: 26
 LINK_R_SIZE32: 32
 LINK_R_SIZE64: 33
+LINK_R_GOTPC32_TLSDESC: 34
+LINK_R_TLSDESC_CALL: 35
 LINK_R_GOTPCRELX: 41
 LINK_R_REX_GOTPCRELX: 42
 
@@ -1390,7 +1393,7 @@ link_linker_names: fn() -> [String] Never! {
     [String]{
         "__jet_init_array_start", "__jet_init_array_end", "__init_array_start", "__init_array_end",
         "__fini_array_start", "__fini_array_end", "__preinit_array_start", "__preinit_array_end",
-        "__EH_FRAME_BEGIN__", "_GLOBAL_OFFSET_TABLE_", "__ehdr_start", "__executable_start",
+        "__EH_FRAME_BEGIN__", "_GLOBAL_OFFSET_TABLE_", "_TLS_MODULE_BASE_", "__ehdr_start", "__executable_start",
         "_etext", "etext", "_edata", "edata", "__bss_start", "_end", "end",
     }
 }
@@ -1857,6 +1860,9 @@ link_define_names: fn(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
             "__preinit_array_end" -> l.preinit_end
             "__EH_FRAME_BEGIN__" -> c.eh_start
             "_GLOBAL_OFFSET_TABLE_" -> c.got_start
+            // A local-dynamic TLS descriptor's base: the thread pointer, so its
+            // local-exec offset is 0 and each `x@dtpoff` (link_apply) is x's.
+            "_TLS_MODULE_BASE_" -> c.tls_start + link_align(c.tls_end - c.tls_start, c.tls_align)
             "__ehdr_start" | "__executable_start" -> c.base
             "_etext" | "etext" -> l.text_end
             "_edata" | "edata" | "__bss_start" -> l.bss_start
@@ -2017,6 +2023,33 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
     }
     if kind == LINK_R_DTPOFF64 || kind == LINK_R_TPOFF64 {
         link_put64(out, pos, link_tpoff(c, target) + addend)
+        return false
+    }
+    if kind == LINK_R_GOTPC32_TLSDESC {
+        // lea reg, [rip + x@tlsdesc] -> mov reg, x@tpoff
+        if off < 3 {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
+            return false
+        }
+        rex: Int.from_u8(out[pos - 3])
+        modrm: Int.from_u8(out[pos - 1])
+        if (rex != 0x48 && rex != 0x4c) || Int.from_u8(out[pos - 2]) != 0x8d || (modrm.bit_and(0xc7)) != 0x05 {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
+            return false
+        }
+        out[pos - 3] = U8{if rex == 0x4c -> 0x49 else -> 0x48}
+        out[pos - 2] = U8{0xc7}
+        out[pos - 1] = U8{(0xc0).bit_or(((modrm >> 3).bit_and(7)))}
+        link_put32(out, pos, link_tpoff(c, target) + addend + 4)
+        return false
+    }
+    if kind == LINK_R_TLSDESC_CALL {
+        // call [rax] (x@tlscall) -> a two-byte nop: rax already holds x@tpoff.
+        if !link_byte_is(out, pos, [Int]{0xff, 0x10}) {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor call"))
+            return false
+        }
+        link_put_bytes(out, pos, [Int]{0x66, 0x90})
         return false
     }
     if kind == LINK_R_GOTTPOFF {
