@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98749,
+    "rev": 98750,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75609,11 +75609,11 @@
         {
           "n": 146,
           "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) A foreign call's effects are checked against `allow [...]`: an allow list that omits an effect the call has is refused. Today every effect is inferred and allow [FFI.C, IO, Mem.Alloc] permits anything.",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "G1Lead-4-c146fix (d80fbffd3b) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler, under the rules ruled on 2026-11-10: an undescribed C call has effect FFI.C, a described binding is held to its descriptor, and FFI.C never covers Jet-side effects. PASS golden Examples/Interop/FFI/NativeC, OpaqueHandles, CBind; PASS cases cffi_string_returns_are_borrowed_non_null_utf8_and_copied, cffi_default_struct_crosses_by_reference_at_its_layout, cffi_runtime_interior_nul_panics_instead_of_silently_truncating, cffi_end_to_end_links_and_runs, carriers_come_from_the_runtime_or_from_the_c_closures_libc, c_extern_calls_match_aot_and_interpreter, b13_c_bridge_call_keeps_declared_return. The only failing rows (Bridges o1/o2: no musl Rust toolchain; cffi default_int_outside_i64 KNOWN-FAILING #6366) fail the same way on dev with the seed. The 19 rows lost in cut 5 all pass in G1Lead4's battery, and cut 6 re-checks them.",
-          "at": "2026-11-10T12:14:13.777Z"
+          "evidence": "",
+          "at": "2026-11-10T13:24:19.569Z"
         },
         {
           "n": 147,
@@ -75723,7 +75723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T12:58:15.616Z",
+      "updated": "2026-11-10T13:24:19.569Z",
       "updatedBy": "Main",
       "criteriaLastN": 157
     },
@@ -198045,6 +198045,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T13:24:19.569Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0oev2ib",
+      "note": "#146: G6LeadD found 7 cases failing on clean dev (t6c and later, after G1Lead-4-c146fix landed), all exit 1 with jet.ProhibitedEffectReached \"main::run reaches the Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time effect\" and the note \"calls a C binding no descriptor owns; the checker cannot see its body, so the call reaches every effect\". That contradicts the 2026-11-10 ruling (an undescribed C call has effect FFI.C only). The cases are cffi_end_to_end_links_and_runs, cffi_default_struct_crosses_by_reference_at_its_layout, cffi_string_returns_are_borrowed_non_null_utf8_and_copied, cffi_runtime_interior_nul_panics_instead_of_silently_truncating, run_interpret/c_extern_calls_match_aot_and_interpreter, ice_regressions/b13_c_bridge_call_keeps_declared_return, and task_control_tiers/carriers_come_from_the_runtime_or_from_the_c_closures_libc. c146 is met again when every C-binding path follows the ruling and those 7 pass."
+    },
     {
       "at": "2026-11-10T13:22:31.371Z",
       "by": "Main",
