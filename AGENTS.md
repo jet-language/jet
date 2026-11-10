@@ -100,12 +100,15 @@ the same output. The pair is a gauntlet entry: an entry under
 the parity cases with their expected output. The repository keeps running the
 original until the Jet twin wins every port bar (#5072: identical output,
 faster in wall time and peak memory, no more source tokens, and no harder to
-reason about); then the repository switches to the Jet twin and keeps the
-original only as the entry's reference. `Tools/agent/ScriptPairing.jet
+reason about, scored on a fixed checklist in the entry's `review.json`); then
+the repository switches to the Jet twin and keeps the original only as the
+entry's reference in the entry's directory. `Tools/gauntlet/PortBars.jet`
+judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
 --check`, which every lane check runs, refuses a change that adds a script in
-another language without its pair; browser-executed JavaScript, Nix files,
-and test and example subjects are exempt. `--census` lists every script in
-another language in the checkout and its pair.
+another language without its pair, or that switches an entry before it wins
+every bar; browser-executed JavaScript, Nix files, and test and example
+subjects are exempt. `--census` lists every script in another language in the
+checkout and its pair.
 
 ## Greenfield cutover
 

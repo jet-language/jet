@@ -31,12 +31,20 @@
 // The tool entries are the one home of which Jet program replaces which
 // script; the census is computed from the tree on demand and never stored.
 //
+// A tool entry switches over when its original moves into the entry's own
+// directory, kept there only as the reference its twin is judged against.
+// The original keeps running until its entry wins every port bar
+// (JUDGE, Tools/gauntlet/PortBars.jet), so `--check` runs that judge on each
+// switched entry the change touches (a file in the entry or its Jet twin)
+// and refuses the change while the entry loses a bar.
+//
 // Usage (from the repository root):
 //   jet Tools/agent/ScriptPairing.jet --check [--base REV]
 //     the guard: every script added since REV (default HEAD), staged,
-//     unstaged or untracked, is paired or exempt, and every tool entry is
-//     complete. Exits 0 when clean, 65 naming each refusal, 64 when it
-//     cannot run.
+//     unstaged or untracked, is paired or exempt, every tool entry is
+//     complete, and every switched entry the change touches passes the
+//     port-bar judge. Exits 0 when clean, 65 naming each refusal, 64 when
+//     it cannot run.
 //   jet Tools/agent/ScriptPairing.jet --census
 //     every script in another language in the checkout, one
 //     `path<TAB>class<TAB>pair` row each (class: browser, subject, paired or
@@ -57,6 +65,8 @@ SCRIPT_EXTENSIONS: [String]{".mjs", ".js", ".cjs", ".ts", ".sh", ".bash", ".py"}
 // `#!` interpreters that are Nix, which the rule exempts.
 NIX_INTERPRETERS: [String]{"nix", "nix-shell"}
 PAIRING_RULE: "write its Jet twin and a gauntlet entry (Tools/gauntlet/entries/<name>/entry.json, \"mode\": \"tool\") that names it as `tool.original`, the twin as `tool.jet`, its fixtures and its `tool.cases` with expected output, in the same change (AGENTS.md, Tooling in other languages)"
+// The port-bar judge a switched entry must pass.
+JUDGE: "Tools/gauntlet/PortBars.jet"
 
 #Error
 PairingError: struct {
@@ -352,6 +362,54 @@ added_files: fn(repo: String, base: String) -[Exec, Time.Wait]> [String] Pairing
     Ok(out)
 }
 
+// Every file changed since `base`, staged, unstaged or untracked; a rename
+// is both of its paths.
+changed_files: fn(repo: String, base: String) -[Exec, Time.Wait]> [String] PairingError! {
+    changed: git_lines(repo, [String]{"diff", "--name-only", "--no-renames", base, "--"}) ?? return Err(err)
+    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}) ?? return Err(err)
+    out := changed.copy()
+    loop path in untracked {
+        if !out.contains(path) -> out.push(path.copy())
+    }
+    out.sort()
+    Ok(out)
+}
+
+// The tool entries `changed` touches whose original sits in the entry's own
+// directory: the entries that switched over to their Jet twin.
+switched_entries: fn(entries: Entries, changed: [String]) -> [String] Never! {
+    out := [String]{}
+    loop known in entries.pairings {
+        dir: "{ENTRIES_ROOT}/{known.pair.entry}/"
+        if known.path.ends_with("/") || !known.path.starts_with(dir) || out.contains(known.pair.entry) -> next
+        if changed.any(path -> path.starts_with(dir) || path == known.pair.twin) -> out.push(known.pair.entry.copy())
+    }
+    out
+}
+
+// The refusal for each of `names` that loses a port bar, with the bars it
+// loses as JUDGE reports them.
+judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [String] Never! {
+    jet: process.env_get("JET") ?? "jet"
+    out := [String]{}
+    loop name in names {
+        command: "{JUDGE} --entry {name}"
+        receipt: process.cmd([String]{jet.copy(), files.join(repo, JUDGE), "--repo", repo.copy(), "--entry", name.copy()}).cwd(repo).output_limit(268435456).run() ?? {
+            out.push("tool entry `{ENTRIES_ROOT}/{name}` switches to its Jet twin, but `{command}` cannot start: {err}")
+            next
+        }
+        if receipt.code == 0 && receipt.signal == None -> next
+        lost := [String]{}
+        loop line in receipt.output.lines() {
+            cells: line.split("\t").to_list()
+            if cells.len() == 4 && cells[0] == name && cells[1] != "verdict" && cells[2] == "FAIL" -> lost.push("{cells[1]}: {cells[3]}")
+        }
+        why: if lost.len() > 0 -> lost.join("; ") else -> "it exited {receipt.code}: {receipt.errors.trim()}"
+        out.push("tool entry `{ENTRIES_ROOT}/{name}` switches to its Jet twin before it wins every port bar (`{command}`): {why}; the original keeps running until it does")
+    }
+    out
+}
+
 // Every file of the checkout, tracked or untracked and not ignored.
 checkout_files: fn(repo: String) -[Exec, Time.Wait]> [String] PairingError! {
     listed: git_lines(repo, [String]{"ls-files", "--cached", "--others", "--exclude-standard"}) ?? return Err(err)
@@ -425,7 +483,10 @@ run: fn() {
     base: if args.len() == 3 && args[1] == "--base" -> args[2].copy() else -> "HEAD"
     if args.len() != 1 && args.len() != 3 -> usage()
     added: added_files(repo, base) ?? return cannot_run(err.message)
-    refused: refusals(repo, added, read_entries(repo))
+    changed: changed_files(repo, base) ?? return cannot_run(err.message)
+    entries: read_entries(repo)
+    refused := refusals(repo, added, entries)
+    refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
     if refused.len() == 0 {
         print("script pairing: ok ({added.len()} added file(s))")
         return
@@ -527,4 +588,17 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert(refused[0].starts_with("Tools/count/count.py: a script in another language with no gauntlet pair; "))
     assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist")
     files.remove_all(dir) ?? ()
+}
+
+#Test("a tool entry whose original moved into its own directory has switched over, and a change to it asks the port-bar judge") {
+    twin: Pair{entry: "count", twin: "Tools/count/Count.jet"}
+    entries: Entries{pairings: [Pairing]{
+        Pairing{path: "{ENTRIES_ROOT}/count/count.py", pair: twin},
+        Pairing{path: "{ENTRIES_ROOT}/count/fixtures/", pair: twin},
+        Pairing{path: "Tools/sum/sum.py", pair: Pair{entry: "sum", twin: "Tools/sum/Sum.jet"}},
+    }, problems: [String]{}, incomplete: [Pairing]{}}
+    assert_eq(switched_entries(entries, [String]{"README.md", "Tools/count/count.py"}), [String]{})
+    assert_eq(switched_entries(entries, [String]{"{ENTRIES_ROOT}/count/count.py", "Tools/count/count.py"}), [String]{"count"})
+    assert_eq(switched_entries(entries, [String]{"Tools/count/Count.jet"}), [String]{"count"})
+    assert_eq(switched_entries(entries, [String]{"Tools/sum/Sum.jet", "{ENTRIES_ROOT}/sum/entry.json"}), [String]{})
 }
