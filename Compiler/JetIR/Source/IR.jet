@@ -257,6 +257,9 @@ IRFunction: struct {
     // The counted loops of this body sema's loop proof covers, as built
     // (ir_range_loop).
     loop_proofs: [IRLoopProof]{[IRLoopProof]{}}
+    // The source line of each masked branch of this body, as built
+    // (BuildMask.jet).
+    masked: [Int]{[Int]{}}
     // Code that runs at most once and off the program's work (Opt.jet
     // ir_opt_mark_cold): optimized for size.
     cold: Bool{false}
@@ -308,6 +311,17 @@ ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
             facts: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
             rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
         }
+    }
+    rows
+}
+
+// One row per masked branch of `m`'s functions (`jet inspect decisions`,
+// taken before the optimizer inlines any): a branch on a `timing: .Fixed`
+// value whose arms both run, the result chosen with a masked select.
+ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
+    rows := [String]{}
+    loop function in m.functions {
+        loop line in function.masked -> rows.push("masked {function.name} {function.source_file}:{line}: both arms run, the result is a masked select")
     }
     rows
 }

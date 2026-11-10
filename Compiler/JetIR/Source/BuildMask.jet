@@ -1,0 +1,142 @@
+// Masked branches. Sema masks a branch on a `timing: .Fixed` value when every
+// arm is total (JetSema Taint.jet sema_taint_total_expr): no arm stops, calls,
+// writes memory or leaves early. The span of each such branch is in its
+// function's FnBody.masked. The builder builds a masked branch with no jump.
+// Both arms run, each under the Bool that it would have run under
+// (IRBuilder.mask: the branch's test, or its negation, and-ed with the
+// enclosing mask). An assignment in an arm keeps the variable's old value
+// where that Bool fails, and an `if` value keeps the selected arm's value.
+// Each selection is `other ^ ((chosen ^ other) & mask)`: a Bool is its own
+// mask, and a fixed-width word's mask is `0 - (test & 1)`, all ones or zero.
+// Only fixed-width integers and Bool are selected. Sema's totality admits
+// nothing else that could flow out of an arm. Each masked branch is a row of
+// IRFunction.masked, which `jet inspect decisions` lists
+// (ir_masked_branch_rows).
+
+use jet_foundation.[BodyIfCond, BodyPlace, Span, TBinaryOp, Type]
+
+// Whether the branch at `span` of the function being built is masked.
+ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {
+    if b.row < 0 -> return false
+    loop masked in p.functions[b.row].masked {
+        if masked.start == span.start && masked.end == span.end -> return true
+    }
+    false
+}
+
+// The Bool an arm of a masked branch runs under: `test` (`!test` when
+// `negate`) and-ed with the enclosing mask.
+ir_mask_arm: fn(m: &IRModule, b: &IRBuilder, test: Int, negate: Bool) -> Int Never! {
+    value := test
+    if negate {
+        value = ir_temp_like(m, b, test)
+        ir_emit(b.f, IROp.Not, value, test, -1, -1, b.line)
+    }
+    if b.mask < 0 -> return value
+    both: ir_temp_like(m, b, test)
+    ir_emit(b.f, IROp.BitAnd, both, value, b.mask, IR_OVERFLOW_WRAP, b.line)
+    both
+}
+
+// `chosen` where the Bool `test` holds, else `other`, with no jump. The two
+// share one type row.
+ir_mask_select: fn(m: &IRModule, b: &IRBuilder, test: Int, chosen: Int, other: Int, span: Span) -> Int Never! {
+    kind: ir_kind_of(m, b, other)
+    if kind != .Word && kind != .Bool -> return ir_fail_slot(b, span, "a masked branch selects a {ir_kind_name(kind)} value; only a fixed-width integer or a Bool can be masked")
+    if b.f.slot_type[chosen] != b.f.slot_type[other] -> return ir_fail_slot(b, span, "a masked branch selects between two types")
+    mask := test
+    if kind == .Word {
+        bit: ir_copy_word(m, b, test, b.f.slot_type[other])
+        one: ir_const_like(m, b, other, 1)
+        low: ir_temp_like(m, b, other)
+        ir_emit(b.f, IROp.BitAnd, low, bit, one, IR_OVERFLOW_WRAP, b.line)
+        zero: ir_const_like(m, b, other, 0)
+        mask = ir_temp_like(m, b, other)
+        ir_emit(b.f, IROp.Sub, mask, zero, low, IR_OVERFLOW_WRAP, b.line)
+    }
+    differ: ir_temp_like(m, b, other)
+    ir_emit(b.f, IROp.BitXor, differ, chosen, other, IR_OVERFLOW_WRAP, b.line)
+    kept: ir_temp_like(m, b, other)
+    ir_emit(b.f, IROp.BitAnd, kept, differ, mask, IR_OVERFLOW_WRAP, b.line)
+    result: ir_temp_like(m, b, other)
+    ir_emit(b.f, IROp.BitXor, result, other, kept, IR_OVERFLOW_WRAP, b.line)
+    result
+}
+
+// The test of a masked branch: a plain Bool. Sema masks no pattern test.
+ir_mask_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCond, span: Span) -> Int Never! {
+    if condition == .Plain(value) {
+        b.f.masked.push(ir_source_line_of(p, b.f.source_file, span.start) ?? b.line)
+        return ir_expr(m, p, b, value)
+    }
+    ir_fail_slot(b, span, "a masked branch tests a pattern")
+}
+
+// A masked statement `if`: each arm's statements under its Bool.
+ir_masked_if: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCond, then_body: [Int], else_body: [Int]?, span: Span) Never! {
+    test: ir_mask_test(m, p, b, condition, span)
+    if ir_failed(b) -> return
+    outer: b.mask
+    b.mask = ir_mask_arm(m, b, test, false)
+    ir_scope_open(b)
+    ir_stmts(m, p, b, then_body)
+    ir_scope_close(m, b)
+    b.mask = outer
+    if else_body == .Val(otherwise) {
+        b.mask = ir_mask_arm(m, b, test, true)
+        ir_scope_open(b)
+        ir_stmts(m, p, b, otherwise)
+        ir_scope_close(m, b)
+        b.mask = outer
+    }
+}
+
+// A masked `if` value: both arms' values, then the selected one.
+ir_masked_if_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int, ty: Type, span: Span) -> Int Never! {
+    test: ir_mask_test(m, p, b, condition, span)
+    if ir_failed(b) -> return -1
+    unit: ir_unit_type(ty) || ir_never_type(ty)
+    chosen := -1
+    other := -1
+    if !unit {
+        row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+        chosen = ir_temp(m, b, row)
+        other = ir_temp(m, b, row)
+    }
+    outer: b.mask
+    b.mask = ir_mask_arm(m, b, test, false)
+    ir_branch_value(m, p, b, then_body, then_value, chosen)
+    b.mask = outer
+    b.mask = ir_mask_arm(m, b, test, true)
+    ir_branch_value(m, p, b, else_body, else_value, other)
+    b.mask = outer
+    if unit || ir_failed(b) -> return -1
+    ir_mask_select(m, b, test, chosen, other, span)
+}
+
+// `x = v` (or `x op= v`) in an arm of a masked branch: `x` keeps its old
+// value where the arm's Bool fails.
+ir_masked_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: BodyPlace, op: TBinaryOp?, value: Int, span: Span) Never! {
+    binding: if place == {
+        .Local(local) -> ir_lookup_local(b, local) ?? { return ir_fail(b, span, "assignment to unknown local {local.name}") }
+        .Expr(_) -> { return ir_fail(b, span, "a masked branch writes a place that is not a variable") }
+    }
+    current: ir_read_binding(m, b, binding)
+    right: ir_expr(m, p, b, value)
+    if ir_failed(b) -> return
+    result := right
+    if op == .Val(binary) {
+        left_ty: m.types[b.f.slot_type[current]].ty
+        right_ty: ir_ty(p, b, value)
+        result = ir_binary(m, p, b, binary, ir_assign_overflow(binary), b.line, left_ty, current, right, right_ty, span)
+        if ir_failed(b) || result < 0 -> return
+    }
+    kept: ir_mask_select(m, b, b.mask, result, current, span)
+    if ir_failed(b) -> return
+    if binding.indirect >= 0 {
+        ir_emit(b.f, IROp.Store, -1, binding.slot, 0, kept, b.line)
+        b.fresh[kept] = false
+        return
+    }
+    ir_store(m, p, b, binding.slot, kept)
+}

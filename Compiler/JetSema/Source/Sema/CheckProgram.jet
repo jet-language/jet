@@ -9615,6 +9615,7 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
             found := [Diagnostic]{}
             sema_taint_check_module(owned, state, module_index, found)
             sema_taint_join_reports(reports, existing_diagnostics, found)
+            sema_mark_masked_branches(modules[module_index].functions, state.masked)
         }
         loop module_index in 0..<owned.modules.len() {
             context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
@@ -9631,7 +9632,11 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     sema_finalize_walk_fill(shared_state, owned, modules, catalog, coverage)
     queue: shared SemaFinalizeCoreQueue{next: 0}
     walked := [[Diagnostic]]{}
-    loop _ in 0..<taint_weights.len() -> walked.push([Diagnostic]{})
+    masked := [[Span]]{}
+    loop _ in 0..<taint_weights.len() {
+        walked.push([Diagnostic]{})
+        masked.push([Span]{})
+    }
     results := [SemaCoreCollected]{}
     assembled := [SemaCoreModuleUsageResult?]{}
     contexts := [SemaCoreModuleContext?]{}
@@ -9640,9 +9645,10 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
         assembled.push(None)
         contexts.push(None)
     }
-    sema_finalize_walkers(shared_state, queue, 0, workers, walked, results, assembled, contexts)
+    sema_finalize_walkers(shared_state, queue, 0, workers, walked, masked, results, assembled, contexts)
     returned := sema_finalize_walk_take(shared_state, modules)
     loop found in walked -> sema_taint_join_reports(reports, existing_diagnostics, found)
+    loop module_index in 0..<masked.len() -> sema_mark_masked_branches(modules[module_index].functions, masked[module_index])
     // Each module in order: a module walked whole by one job was assembled
     // on its thread; any other module's item ranges are joined in job order
     // (jobs are in module and item order, so a module's jobs are
@@ -9675,6 +9681,17 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
         cores.push(whole.move() ?? panic("a Core usage module left no usage"))
     }
     returned
+}
+
+// Each masked branch of a module (Taint.jet sema_taint_mask_branch) joins
+// FnBody.masked of every function whose source holds it.
+sema_mark_masked_branches: fn(functions: &[FnBody], masked: [Span]) Never! {
+    loop span in masked {
+        loop index in 0..<functions.len() {
+            source: functions[index].source_span
+            if span.start >= source.start && span.end <= source.end -> functions[index].masked.push(span.copy())
+        }
+    }
 }
 
 // One module's consecutive item range, walked for Core usage on one thread.
@@ -9762,17 +9779,19 @@ sema_finalize_walk_take: fn(shared_state: Shared<SemaFinalizeWalkShared>, module
 }
 
 // Runs walking threads `from..<workers`, one task each, and moves each taint
-// module's reports a thread returned into its module's slot of `walked` and
-// every Core job row into its slot of `results`, `assembled` and `contexts`.
-sema_finalize_walkers: fn(shared_state: Shared<SemaFinalizeWalkShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, walked: &[[Diagnostic]], results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?], contexts: &[SemaCoreModuleContext?]) {
+// module's reports and masked branches a thread returned into its module's
+// slot of `walked` and `masked` and every Core job row into its slot of
+// `results`, `assembled` and `contexts`.
+sema_finalize_walkers: fn(shared_state: Shared<SemaFinalizeWalkShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, walked: &[[Diagnostic]], masked: &[[Span]], results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?], contexts: &[SemaCoreModuleContext?]) {
     if from >= workers -> return
     task.group sema_finalize_walk_threads {
         head: task sema_finalize_walk_claimed(shared_state, queue)
-        sema_finalize_walkers(shared_state, queue, from + 1, workers, walked, results, assembled, contexts)
+        sema_finalize_walkers(shared_state, queue, from + 1, workers, walked, masked, results, assembled, contexts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.taint.len() > 0 {
             done := claimed.taint.pop() ?? break
             walked[done.module_index] = done.found.move()
+            masked[done.module_index] = done.masked.move()
         }
         loop claimed.core.len() > 0 {
             done := claimed.core.pop() ?? break
@@ -9809,7 +9828,7 @@ sema_finalize_walk_claimed: fn(shared_state: Shared<SemaFinalizeWalkShared>, que
             found := [Diagnostic]{}
             // Passed straight through: a local binding of a guarded row would copy it.
             sema_taint_check_module(inputs.value.graphs[0], state, module_index, found)
-            claimed.taint.push(SemaTaintWalked{module_index: module_index, found: found.move()})
+            claimed.taint.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy()})
             next
         }
         job: rank - taint_count

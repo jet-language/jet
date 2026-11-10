@@ -1346,6 +1346,10 @@ covers (`loop <function> <file>:<line>`): the proved extent and element type,
 the aliasing, early-exit, effect and cross-iteration verdicts, how many list
 accesses sema proved in bounds and how many of them the build lowered with no
 bounds check. Each loop lowers one scalar round per index.
+It lists each masked branch (`masked <function> <file>:<line>`). A masked
+branch is a branch on a `timing: .Fixed` value whose arms sema proved total.
+Both arms run, and a masked select keeps the chosen arm's results, so no jump
+depends on the value.
 Last it names the program's `main:`. A program gets `program-owned` when none
 of its stop edges cleans up anything a process exit could observe. Each edge
 only writes and frees memory (its drops' routines too), enters and leaves a
@@ -1379,8 +1383,9 @@ Text and JSON output share the same validated snapshot, including published
 rendered values and sorted shape identities. No process memory is read.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
-fields, the unbuilt functions and the loop proofs (`loop_proofs`) as text
-rows, and the program's main (`main`) as text.
+fields, the unbuilt functions, the loop proofs (`loop_proofs`) and the masked
+branches (`masked_branches`) as text rows, and the program's main (`main`) as
+text.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,

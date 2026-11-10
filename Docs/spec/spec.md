@@ -738,6 +738,18 @@ size, an indirect call target, a `?` or a `??` (E0737); must not be held in an
 list's or a string's length is public whatever its contents carry
 (D-SECRET-CT1).
 
+A branch on a `.Fixed` value whose arms are total is masked, not refused. A
+total arm only binds names, assigns to local names, and reads literals, names
+and fields. It may use operators that cannot stop (bitwise operators,
+comparisons, a shift by a literal, wrapping arithmetic), the bit methods, the
+wrapping methods, `len()` and `is_empty()`, and nested total branches. No
+arm returns, breaks, calls, stops or writes memory. Both arms run. Each local
+an arm assigns keeps its old value where the arm's test fails, and an `if`
+value keeps the chosen arm's value. Both are chosen with a masked select and
+no jump, and the result carries the test's tag. Only fixed-width integers and
+`Bool` are selected. `jet inspect decisions` lists each masked branch. A
+branch with an arm that is not total stays E0737 (D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`

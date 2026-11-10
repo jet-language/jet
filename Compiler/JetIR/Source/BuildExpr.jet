@@ -459,6 +459,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 _: b.map_stores.pop()
                 return
             }
+            if b.mask >= 0 -> return ir_masked_assign(m, p, b, place, op, value, span)
             if place == .Expr(target_place) {
                 return ir_assign_place(m, p, b, target_place, op, value, span)
             }
@@ -565,6 +566,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
         }
         .Return(value, span) -> {
             ir_stmt_line(p, b, span)
+            if b.mask >= 0 -> return ir_fail(b, span, "a masked branch returns")
             ir_return(m, p, b, value, span)
         }
         .If(condition, then_body, else_body, _, span) -> {
@@ -580,6 +582,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 ir_scope_close(m, b)
                 return
             }
+            if ir_masked_branch(p, b, span) -> return ir_masked_if(m, p, b, condition, then_body, else_body, span)
             ir_scope_open(b)
             named: b.bindings.len()
             test: ir_condition(m, p, b, condition, span)
@@ -635,8 +638,14 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if source == .Val(collection) -> return ir_range_value_loop(m, p, b, label, variable, collection, step, body, span)
             ir_range_loop(m, p, b, label, variable, start, end, step, exclusive, body, vectorization, span)
         }
-        .Break(label, span) -> ir_loop_jump_stmt(m, p, b, label, true, span)
-        .Continue(label, span) -> ir_loop_jump_stmt(m, p, b, label, false, span)
+        .Break(label, span) -> {
+            if b.mask >= 0 -> return ir_fail(b, span, "a masked branch breaks")
+            ir_loop_jump_stmt(m, p, b, label, true, span)
+        }
+        .Continue(label, span) -> {
+            if b.mask >= 0 -> return ir_fail(b, span, "a masked branch continues")
+            ir_loop_jump_stmt(m, p, b, label, false, span)
+        }
         .Inline(body, _) | .Region(body, _) -> ir_stmts(m, p, b, body)
         .Contract(contract) -> ir_contract(m, p, b, contract)
         .ContractScope(pre, body, post, result, span) -> ir_contract_scope(m, p, b, pre, body, post, result, span)
@@ -1629,6 +1638,7 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
                 if kept >= 0 -> b.fresh[kept] = ir_has_drop(m, b, kept)
                 return kept
             }
+            if ir_masked_branch(p, b, span) -> return ir_masked_if_value(m, p, b, cond, then_body, then_value, else_body, else_value, expression_ty, span)
             ir_scope_open(b)
             named: b.bindings.len()
             test: ir_condition(m, p, b, cond, span)

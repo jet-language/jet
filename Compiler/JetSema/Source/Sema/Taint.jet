@@ -162,6 +162,11 @@ SemaTaintFlowState: struct {
     // scope), or at the one operator of a `wrapping(...)` or
     // `saturating(...)` call: `+`, `-` and `*` there do not stop (E0739).
     wrapping: Bool{false}
+    // The masked branches found so far (sema_taint_mask_branch), and the
+    // fixed tags of the masked branch tests enclosing the statement walked
+    // now: a value bound or assigned there carries them.
+    masked: [Span]{[Span]{}}
+    under: [String]{[String]{}}
 }
 
 // The E0307 reports of `diagnostics`: all that settles switch coverage for
@@ -993,9 +998,12 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
             return tags
         }
         .PatternTest(subject, _, _, _) -> return sema_taint_tags_of(state, subject)
-        .If(_, _, then_value, _, else_value, _, _) -> {
+        // Which arm's value it is depends on the test: a fixed test's tag
+        // reaches the value (a masked branch, sema_taint_mask_branch).
+        .If(cond, _, then_value, _, else_value, _, _) -> {
             tags := sema_taint_tags_of(state, then_value)
             sema_taint_union(tags, sema_taint_tags_of(state, else_value))
+            if sema_taint_fixed_in(state, cond) == .Val(tag_value) -> sema_taint_add(tags, tag_value)
             return tags
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> return sema_taint_tags_of(state, addr)
@@ -1129,6 +1137,153 @@ sema_taint_check_operator: fn(state: &SemaTaintFlowState, op: BinOp, left: Strin
             sema_taint_e0739(state, tag_value, "checked `+`, `-` or `*`", span)
         }
         else -> {}
+    }
+}
+
+// Masked branches. A branch on a fixed value whose arms are total runs both
+// arms, and the IR keeps the chosen arm's results with a masked select
+// (JetIR BuildMask.jet). Total means that no arm stops, calls, writes
+// memory or leaves early. Such a branch steers no time and no address, so
+// it is no E0737, and its span goes to `state.masked`, which reaches the
+// function's FnBody.masked. A total arm binds names and assigns to local
+// names. It reads literals, names and fields, and uses only operators that
+// cannot stop, the bit methods, the wrapping methods, `len()`, `is_empty()`
+// and nested total branches.
+sema_taint_mask_branch: fn(state: &SemaTaintFlowState, tag_value: String, total: Bool, span: Span, test_span: Span) {
+    if !total {
+        sema_taint_e0737(state, tag_value, "a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)", test_span)
+        return
+    }
+    loop masked in state.masked {
+        if masked.start == span.start && masked.end == span.end -> return
+    }
+    state.masked.push(span.copy())
+}
+
+// The fixed tag of each arm test of a switch ("" for a public one). In a
+// statement `if` (a switch on `true`) each fixed test's branch is masked
+// when every arm from the first fixed test on, its test and the else body
+// are total. The branch of arm 0 is the switch's span and that of a later
+// arm is the arm's own span, as the checked `if` chain gives them. Any other
+// switch on a fixed arm value is E0737.
+sema_taint_mask_arms: fn(state: &SemaTaintFlowState, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> [String] {
+    tests := [String]{}
+    first := -1
+    loop index in 0..<arms.len() {
+        test: sema_taint_fixed_in(state, arms[index].cond) ?? ""
+        if test != "" && first < 0 -> first = index
+        tests.push(test.copy())
+    }
+    if first < 0 -> return tests
+    total := sema_taint_is_true(subject)
+    loop index in first..<arms.len() {
+        if !total -> break
+        total = sema_taint_total_expr(state, arms[index].cond) && sema_taint_total_block(state, arms[index].body)
+    }
+    if total {
+        if else_body == .Val(body) -> total = sema_taint_total_block(state, body)
+    }
+    loop index in first..<arms.len() {
+        if tests[index] == "" -> next
+        branch: if index == 0 -> span else -> arms[index].span
+        sema_taint_mask_branch(state, tests[index], total, branch, expr_span(arms[index].cond))
+    }
+    tests
+}
+
+sema_taint_total_block: fn(state: SemaTaintFlowState, body: [Stmt]) -> Bool Never! {
+    loop statement in body {
+        if !sema_taint_total_stmt(state, statement) -> return false
+    }
+    true
+}
+
+sema_taint_total_stmt: fn(state: SemaTaintFlowState, statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Val(binding) -> return binding.pattern == None && sema_taint_total_expr(state, binding.init)
+        .Assign(target, op, _, value) -> {
+            if target == {
+                .Local(_, _) -> {}
+                else -> return false
+            }
+            if op == .Val(operator) {
+                if !sema_taint_total_operator(state, operator, value) -> return false
+            }
+            return sema_taint_total_expr(state, value)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            if !sema_taint_is_true(subject) -> return false
+            loop arm in arms {
+                if !sema_taint_total_expr(state, arm.cond) || !sema_taint_total_block(state, arm.body) -> return false
+            }
+            if else_body == .Val(body) -> return sema_taint_total_block(state, body)
+            return true
+        }
+        .Expr(value) -> {
+            if value == .If(_, _, _, _, _, _, _) -> return sema_taint_total_expr(state, value)
+            return false
+        }
+        else -> return false
+    }
+}
+
+sema_taint_is_true: fn(value: Expr) -> Bool Never! {
+    if value == .Bool(flag, _, _) -> return flag
+    false
+}
+
+// Whether operator `op` with right operand `right` cannot stop and does not
+// branch. `+`, `-` and `*` stop on overflow unless they wrap; a division, a
+// remainder, a power and a shift by an amount that is not a literal can
+// stop; `&&` and `||` branch.
+sema_taint_total_operator: fn(state: SemaTaintFlowState, op: BinOp, right: Expr) -> Bool Never! {
+    if op == {
+        .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> return true
+        .Add | .Sub | .Mul -> return state.wrapping
+        .Shl | .Shr -> return right == .Int(_, _, _, _, _)
+        else -> return false
+    }
+}
+
+SEMA_TAINT_TOTAL_METHODS: [String]{"bit_and", "bit_or", "bit_xor", "bit_not", "wrapping_add", "wrapping_sub", "wrapping_mul", "len", "is_empty"}
+
+sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .Ident(_, _, _) -> return true
+        .TypedLit(_, body, _, _) -> {
+            if body == .Value(inner) -> return inner == .Int(_, _, _, _, _) || inner == .Bool(_, _, _)
+            return false
+        }
+        .Paren(inner, _, _) -> return sema_taint_total_expr(state, inner)
+        .Field(base, _, _, _) -> return sema_taint_total_expr(state, base)
+        .Tainted(inner, _, _, _) -> return sema_taint_total_expr(state, inner)
+        .Unary(op, operand, _, _) -> return op == .Not && sema_taint_total_expr(state, operand)
+        .Binary(op, left, right, _, _) -> return sema_taint_total_operator(state, op, right) && sema_taint_total_expr(state, left) && sema_taint_total_expr(state, right)
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands {
+                if !sema_taint_total_expr(state, operand) -> return false
+            }
+            return true
+        }
+        // `wrapping(a + b)`: its one operator wraps; the operands' own
+        // operators stay checked.
+        .Call(call, _) -> {
+            if call.name != "wrapping" || call.args.len() != 1 -> return false
+            if call.args[0].expr == .Binary(op, left, right, _, _) {
+                if op != .Add && op != .Sub && op != .Mul -> return false
+                return sema_taint_total_expr(state, left) && sema_taint_total_expr(state, right)
+            }
+            return false
+        }
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if !sema_taint_has(SEMA_TAINT_TOTAL_METHODS, method) || !sema_taint_total_expr(state, receiver) -> return false
+            loop argument in args {
+                if !sema_taint_total_expr(state, argument.expr) -> return false
+            }
+            return true
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> return sema_taint_total_expr(state, cond) && sema_taint_total_block(state, then_body) && sema_taint_total_expr(state, then_value) && sema_taint_total_block(state, else_body) && sema_taint_total_expr(state, else_value)
+        else -> return false
     }
 }
 
@@ -1384,9 +1539,14 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             }
         }
         .PatternTest(subject, _, _, _) -> sema_taint_check_expr(graph, state, subject)
-        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
-            sema_taint_check_steer(state, cond, "a branch")
+        .If(cond, then_body, then_value, else_body, else_value, span, _) -> {
+            test := sema_taint_fixed_in(state, cond) ?? ""
+            if test != "" {
+                total: sema_taint_total_expr(state, expression)
+                sema_taint_mask_branch(state, test, total, span, expr_span(cond))
+            }
             sema_taint_check_expr(graph, state, cond)
+            if test != "" -> state.under.push(test.copy())
             before := sema_taint_snapshot(state)
             sema_taint_check_block(graph, state, then_body)
             sema_taint_check_expr(graph, state, then_value)
@@ -1395,6 +1555,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_check_block(graph, state, else_body)
             sema_taint_check_expr(graph, state, else_value)
             else_path := sema_taint_snapshot(state)
+            if test != "" -> _ := state.under.pop()
             sema_taint_merge_paths(state, before, [SemaTaintSnapshot]{then_path, else_path})
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_taint_check_expr(graph, state, addr)
@@ -1435,6 +1596,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         .Val(binding) -> {
             sema_taint_check_expr(graph, state, binding.init)
             tags := sema_taint_tags_of(state, binding.init)
+            sema_taint_union(tags, state.under)
             type_name := String?{None}
             if binding.ty == {
                 .Val(ty) -> {
@@ -1467,6 +1629,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             if target == {
                 .Local(name, _) -> {
                     tags := sema_taint_tags_of(state, value)
+                    sema_taint_union(tags, state.under)
                     if op != None -> sema_taint_union(tags, sema_taint_get_binding(state, name).tags)
                     old := sema_taint_get_binding(state, name)
                     sema_taint_set_binding(state.bindings, name, tags, old.type_name)
@@ -1525,22 +1688,25 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> {
             sema_taint_check_steer(state, subject, "a switch")
             sema_taint_check_expr(graph, state, subject)
+            // A statement `if` is a switch on `true` whose arm conditions
+            // are the branches; an arm value compared with the subject
+            // decides the branch as well.
+            tests: sema_taint_mask_arms(state, subject, arms, else_body, span)
+            under: state.under.len()
             before := sema_taint_snapshot(state)
             paths := [SemaTaintSnapshot]{}
-            loop arm in arms {
+            loop index in 0..<arms.len() {
                 state.bindings = sema_taint_copy_bindings(before.bindings)
-                // A statement `if` is a switch on `true` whose arm conditions
-                // are the branches; an arm value compared with the subject
-                // decides the branch as well.
-                sema_taint_check_steer(state, arm.cond, "a branch")
-                sema_taint_check_expr(graph, state, arm.cond)
-                sema_taint_check_block(graph, state, arm.body)
+                sema_taint_check_expr(graph, state, arms[index].cond)
+                if tests[index] != "" -> state.under.push(tests[index].copy())
+                sema_taint_check_block(graph, state, arms[index].body)
                 paths.push(sema_taint_snapshot(state))
             }
             if else_body == {
                 .Val(body) -> paths.push(sema_taint_walk_path(graph, state, before, body))
                 .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> paths.push(before.copy())
             }
+            loop state.under.len() > under -> _ := state.under.pop()
             sema_taint_merge_paths(state, before, paths)
         }
         .CountedLoop(init, cond, step, body, _, _, _) -> {
@@ -1795,8 +1961,10 @@ sema_taint_finish_body: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSt
 }
 
 // The bodies of module `module_index`, walked in item order; their reports
-// join `found` in that order.
+// join `found` in that order, and `state.masked` holds the module's masked
+// branches.
 sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, found: &[Diagnostic]) {
+    state.masked = [Span]{}
     state.module_identity = graph.modules[module_index].module_identity
     state.imports = sema_taint_collect_imports(graph, state.module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, state.module_identity)
@@ -1860,10 +2028,11 @@ sema_taint_prepare: fn(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
     prepared
 }
 
-// One walked module's reports (sema_finalize_walks).
+// One walked module's reports and masked branches (sema_finalize_walks).
 SemaTaintWalked: struct {
     module_index: Int
     found: [Diagnostic]
+    masked: [Span]
 }
 
 sema_taint_has_diagnostic: fn(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {

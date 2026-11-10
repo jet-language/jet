@@ -1,0 +1,25 @@
+# A branch on a `timing: .Fixed` value whose arms are total is masked: both
+# arms run and a masked select keeps the chosen arm's results, so no jump
+# depends on the value. `jet inspect decisions` lists each masked branch, and
+# every tier prints the same results: an `if` value, assignments in a
+# statement `if`, a Bool, nested branches, an `else if` chain and a byte.
+fixture: fixed_timing_total_branches_are_masked.fixture
+env: NO_COLOR=1
+step: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "masked pick main.jet:15: both arms run" # an `if` value
+stdout: ~ "masked order main.jet:21: both arms run" # two assignments
+stdout: ~ "masked same main.jet:30: both arms run" # a Bool assignment, no else
+stdout: ~ "masked grade main.jet:36: both arms run" # the outer branch
+stdout: ~ "masked grade main.jet:37: both arms run" # nested in the first arm
+stdout: ~ "masked grade main.jet:38: both arms run" # the `else if` arm
+stdout: ~ "masked small main.jet:45: both arms run" # a U8 value
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fixed_timing_total_branches_are_masked.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fixed_timing_total_branches_are_masked.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fixed_timing_total_branches_are_masked.out
