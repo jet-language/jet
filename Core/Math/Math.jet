@@ -13,8 +13,12 @@ use {
     ambient_random: core.math.random
     core.prelude.[min, max, clamp]
 }
-abs: fn(n: Int) -> Int Never! {
-    if n < 0 -> return -n
+// One `abs` for every Numeric type: Int, every sized integer, a `#Numeric`
+// distinct type, or a struct that implements Numeric. `n - n` is the type's
+// zero. A Float, F32 or I64 argument takes the sign-bit builtin instead.
+abs: fn<T: Numeric>(n: T) -> T Never! {
+    zero: n - n
+    if n < zero -> return zero - n
     n
 }
 

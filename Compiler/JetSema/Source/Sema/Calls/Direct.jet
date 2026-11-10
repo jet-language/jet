@@ -1474,6 +1474,43 @@ sema_call_variadic_slot_bounds_met: fn(target: SemaCallDirectTarget, callee: Str
     true
 }
 
+// A value that is never a number (text, a Bool, a list, ...) passed for a
+// `Numeric`-bound type parameter is E0112 at that argument, naming the callee
+// and the argument as a fixed number parameter does, not E0905 at the callee
+// asking for an `impl` the type can't have.
+sema_call_numeric_slot_arguments_met: fn(target: SemaCallDirectTarget, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    loop index in 0..<args.len() {
+        slot: if index < binding.slots.len() -> binding.slots[index] else -> -1
+        if slot < 0 || slot >= params.len() -> next
+        required: sema_call_argument_parameter_type(params[slot], args[index]) ?? next
+        if required == .Named(slot_type) {
+            numeric := false
+            loop parameter in target.generic_params {
+                if parameter.name != slot_type -> next
+                loop bound in parameter.bounds {
+                    if bound == "Numeric" -> numeric = true
+                }
+            }
+            if !numeric -> next
+            probe_diagnostics := [Diagnostic]{}
+            checked: sema_probe_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? next
+            if !sema_type_never_numeric(checked.ty) -> next
+            diagnostics.push(sema_error("E0112", expr_span(args[index].expr), "`{sema_call_reflection_leaf_name(callee)}` wants a number (a `Numeric` type such as Int) for argument {index + 1}, but this is {sema_type_show(checked.ty)}", "every argument must match its parameter's type", "use a number here, such as Int (a whole number)"))
+            return false
+        }
+    }
+    true
+}
+
+// Built-in types no `#Numeric` marker or `impl Numeric` can make a number.
+sema_type_never_numeric: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) -> true
+        .Tagged(_, inner) -> sema_type_never_numeric(inner)
+        .Int | .Float | .Named(_) | .Measure(_) | .Apply(_, _) | .Quantity(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Shared(_) | .Union(_) -> false
+    }
+}
+
 sema_call_lambda_params_written: fn(expr: Expr) -> Bool Never! {
     if expr == .Lambda(lambda, _) {
         loop param in lambda.params {
@@ -1628,6 +1665,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
             }
         }
         if !sema_call_variadic_slot_bounds_met(candidate, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) -> return None
+        if !sema_call_numeric_slot_arguments_met(candidate, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) -> return None
         inference_diagnostics := [Diagnostic]{}
         inferred: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, scopes, call.name_span, inference_diagnostics) ?? {
             // An argument still waiting on a compile-time value has no type

@@ -1,0 +1,13 @@
+# #6281 c42: `#Numeric` marker types implement Numeric, a struct implements it with `impl Numeric`, and the
+# Numeric trait drives generic math: user `fn<T: Numeric>` bodies, the prelude max/min/clamp and one
+# generic math.abs, on O0, O1 and O2.
+fixture: numeric_trait_drives_generic_math/input
+step: jet run run.jet
+exit: 0 # O0 runs every generic call
+stdout: = "6.0\n8\n14\n1.5\n7\n7\n3.0\n2\n5\n4\n4\n9\n4\n7\n1.5\n2.5\n" # double, total, max/min/clamp, then math.abs over Int, U8, Count, Money, Meters and Float
+step o1: jet run --optimize=basic run.jet
+exit: 0 # O1 runs the same program
+stdout: = "6.0\n8\n14\n1.5\n7\n7\n3.0\n2\n5\n4\n4\n9\n4\n7\n1.5\n2.5\n" # same results at O1
+step o2: jet run --optimize=full run.jet
+exit: 0 # O2 runs the same program
+stdout: = "6.0\n8\n14\n1.5\n7\n7\n3.0\n2\n5\n4\n4\n9\n4\n7\n1.5\n2.5\n" # same results at O2
