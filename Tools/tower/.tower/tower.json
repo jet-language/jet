@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98890,
+    "rev": 98891,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55001,7 +55001,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:07.706Z",
-      "updated": "2026-11-10T16:28:19.464Z",
+      "updated": "2026-11-10T17:02:10.624Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -184126,283 +184126,295 @@
       "id": "D-PRIM-ANY1",
       "cardId": "c02y3vkg",
       "group": "types",
-      "title": "An explicit Any box that keeps any owned value, with checked reads and no hidden duties",
-      "situation": "Sometimes one table must hold values of many types, such as a plugin's settings, an open file, a callback and an order that must be committed. Jet has enums for known sets of types and a data tree for encodable values. It has no box that keeps an arbitrary value as itself and gives it back checked.\n\nThe owner asked for such a box with its earlier costs removed: the type record it pointed to, the extra pointer hop and the allocation. This repair builds the box on the trait values Jet already compiles, stores small payloads inline, and keeps duties and tags through boxing. It reverses the spec's line that Jet has no general Any.",
-      "gist": "Should Jet add an explicit Any box that keeps any owned value, read back through checked patterns or take?",
-      "lesson": "Sometimes one table must hold values of different types, such as a plugin's settings, an open file and a callback. Jet covers closed sets with enums and encodable data with Dyn, but has no box that keeps an arbitrary value as itself. This vote decides whether to add one, and what it may hold.",
-      "explainer": "Words used here. A box holds one value and remembers its type. A type pattern reads a box only when its type matches. A payload is the value inside a box.\n\nA descriptor is the small record a box points to: the payload's type identity, size, alignment and cleanup. A duty is a method a value must finish with, such as commit or rollback, under D-OWES1.",
-      "story": "Lin writes a plugin host. Each plugin keeps settings, an open log file and a save callback in one map, and may leave an order that must be committed or rolled back. Today she writes an enum per plugin, which the host cannot know in advance, or encodes everything into Dyn, which cannot hold a file.",
-      "inWild": "// Rust: a heap box with a checked downcast that hands the box back on a mismatch.\nlet b: Box<dyn Any> = Box::new(14);\nmatch b.downcast::<i32>() { Ok(n) => println!(\"{n}\"), Err(b) => keep(b) }\n\n// Swift: values sit inline only when size and alignment fit.\nlet x: Any = 14\nif let n = x as? Int { print(n) }",
-      "detail": "What this ballot decides. Whether Jet gets an Any box, and the complete rules for what it holds, how it is read, how its duties end, and what it costs. Type identity values are D-PRIM-TYPEKEY2's question; this ballot works with either outcome.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). [Any]{3, \"three\"} is E0112 (p01), the same code an unknown name gets (p11). Dyn trees decode a Theme and refuse 14 as text (p02, p13). A list of trait values dispatches area() and prints 10 (p03). A closed enum matches without else (p05). The enum-style .Square(sq) pattern on a trait value reports E0305 and E0107 (p10), and copying one is E0211 (p14).\n\nOne mechanism. Under A, Any is the empty trait, which every type has, and an Any value is a trait value of it. It reuses the key word, dispatch and drop glue Jet already builds for trait values. Every trait value gains type patterns and take. Under A, Square(sq) is a checked type pattern on a trait value. p10 tests the different enum-style .Square(sq) syntax; it is not a census of all downcast routes.\n\nExplicit construction. Any(value) is the only way to make an Any; nothing converts to it on its own. Other traits keep their implicit conversion, because a trait bound limits what converts. Any has no bound, so implicit conversion would accept every wrong argument.\n\nOne construction form across open ballots. The open shared-cell ballot builds a cell as Shared{value}, the brace form conversions already use, such as Int{b.len}. If it passes, this box is built the same way, Any{value} and Any.Owes{value}, and jet fix writes it. Type patterns such as Theme(theme) keep parentheses.\n\nWhat the box may hold. An owned value whose type is known where the box is made: data, resources such as files, functions and closures, and values with D-OWES1 duties. A value holding a loan is refused, as storing a loan in a field is today. The facts that matter stay in the box's static type.\n\nTwo static facts pick the carrier form: whether the payload may cross a task, and whether it owes a duty. So there are four forms: Any, Any.Send, Any.Owes and Any.Send.Owes. A form widens implicitly to one that drops Send or adds Owes, such as Any to Any.Owes. Nothing narrows except through take.\n\nSo [String: Any.Owes] holds the settings, the file, the callback and the Order of the story in one map. The price is that the whole map then owes a duty. It must be drained on every success path, as the program below does.\n\nReading by pattern. In if box == { Theme(theme) -> … else -> … }, theme is a read-only loan of the payload for the length of its arm, and the box stays where it was. The set of types is open, so else is required. To change a payload, take it out, change it and box it again.\n\nTaking the payload. box.take<T>() consumes the box and returns the T, or a TakeMismatch<C>, where C is the box's own carrier type, such as Any or Any.Owes[DB]. The mismatch holds the original box unchanged in its box field, with the expected and found type paths. It owes a duty exactly when C does, by D-LIN-CONTAINER1's rule for a Result that holds one.\n\nFor a plain Any, take<Int>() ?? return drops the mismatch and its box, which runs the payload's cleanup. For an Any.Owes, the same line is D-OWES1's unfinished-value error: return here is a success exit, and ?? would drop a duty. The fix finishes err.box inside the ?? block, by fail() or by storing it, or propagates the error with ?.\n\nPropagating with ? hands the mismatch to the caller inside the error, so on_fail does not run, as D-OWES1 says for a value already handed on. The caller's error contract names TakeMismatch<C>, and the caller owes the box. Converting that error into another type, or returning it from run, first needs the box finished.\n\nCopying. A box is never copied, as trait values are not today (p14). When the payload's type is copyable, a pattern arm can copy the borrowed payload; otherwise take it.\n\nCleanup. Dropping a box runs its payload's cleanup, selected by the key word, exactly once. The same rules already close a FileReader held in a List payload (#4792). That includes success, error, panic and cancellation exits. The Prelude Close trait is close: fn(&&self) Never!, with no effect row (Traits.jet:198-201), so dropping any box needs no effect.\n\nDuties. Any.Owes is declared in Core as #MustFinish(take, fail, on_fail: fail), so D-OWES1's checker applies unchanged. A successful take<T>() hands the typed duty to the caller. fail() runs the payload's on_fail, or only its cleanup when the payload owes nothing. An error exit runs fail() automatically; a success exit with an unfinished box is D-OWES1's E0140-family error.\n\nA failing on_fail follows D-OWES1 exactly. On an automatic error exit, its error is attached as a note to the error already leaving, and the box counts as finished. An explicit fail() returns that error, as an OnFailError holding the payload's error and type path; the box counts as finished either way. The carrier names on_fail's effects, as in Any.Owes[DB].\n\nDuty types without on_fail. D-OWES1 lets such a type exist when every error exit finishes it by hand. A box can do that once, where it is made: Any.Owes(order, on_fail: rollback). The named method must be one of the type's listed finishing methods and take only &&self. Without that argument, boxing such a type is refused, with this fix.\n\nDuties in containers. D-OWES1 and D-LIN-CONTAINER1 already make a map, list, Option, Result or tuple of a duty owe it; Any.Owes reuses that checker and adds no second rule. Writing over an occupied key is refused, because it would drop a duty; insert_new and swap hand the old box back. A drain loop hands each box over, and on an error exit each remaining box runs fail().\n\nFunctions. A function's type identity is its full signature, as D-PRIM-TYPEKEY1 and D-META-REFLECT2 require: parameters with their & and && marks, result, error contract and effect row. A pattern must name that exact type, so calling a function taken from a box is checked like any other call, effects included.\n\nClosures and authority. Boxing a closure moves it with its captures. A capture holding a loan is refused, and a capture that cannot cross a task keeps the box out of the Send forms. A capture's cleanup runs when the box drops. The box adds no authority: a captured capability stays exactly what it was, and calling needs the stored effect row where the call is made.\n\nTags. A box made from a tagged value is tagged on its contents: Any(token), with token a #Credential String, has type #Credential Any. An untagged map refuses it with the ordinary tag error, so a box never launders a tag. A pattern names the tagged type, #Credential String(text), and its binding keeps the tag. D-TAG-MARKER1's denials and D-SECRETEDGE1's sinks apply unchanged.\n\nThe payload's type is public unless the box was made inside a branch on a secrecy tag. Then the control tag covers the type as well, and a type test on the box is a branch on that tag. The a0.0.43 checker does not yet tag a branch by its condition: probe c01 passes check.\n\nThat gap is general, not the box's. Today the same branch already leaks through the value it chooses, so boxing adds no new leak. The box's rule starts working when branch tagging lands, which D-SECRET-CT1 needs too.\n\nUnder a fixed-time tag, D-SECRET-CT1's rules apply to the box. Type tests and take on a #Secret Any compare its public type and bind #Secret T. Making such a box inside a Secret branch is refused, because dropping it would call cleanup chosen by a secret; the same rule covers enums whose cleanup depends on the variant. #Secret Int and #Secret Float payloads are refused, as everywhere.\n\nProtected storage. Under D-MEM-WIPE1, a sensitive payload is never inline in ordinary memory; it lives in protected storage, wiped when the box drops, on every exit. That covers storage Jet owns: scalars, structs, fixed arrays, and the list and string buffers the payload owns. A payload holding a foreign handle is refused under a sensitive tag, as D-MEM-WIPE1 refuses it in a typed field.\n\nRepresentation today, on dev. A trait value is a counted heap box: the payload type's key in the first word, then the payload (JetIR BuildTraits.jet:1-27). The key is 56 bits of the SHA-256 of the type's canonical identity; two types sharing a key stop the build. Method calls and drops select the payload's code by that key.\n\nRepresentation under A. An Any box is four words, held by value: that same key word, then a three-word, pointer-aligned buffer. A payload that fits three words and pointer alignment, and is not sensitive, sits in the buffer. Any other payload takes one side allocation, owned by the box and freed once. A zero-sized payload uses no buffer bytes.\n\nNo carrier cutover. Other trait values keep today's layout, so no existing dispatch, cleanup or storage caller changes. The backend gains one layout beside today's, sharing its key word, dispatch and drop glue. Moving other traits to the inline layout is a separate change, made only on a measured win.\n\nNo descriptor. A type pattern or take compares the key word with the named type's key: one load and one compare, with no record to follow. A buffer payload is read in place. The key word already selects cleanup and trait methods, and for the Owes forms it selects on_fail the same way.\n\nKeys come from canonical identity, not from type info, so they are kept under every D-REFLECT-TYPEINFO1 setting, including none. The identity is the one D-PRIM-TYPEKEY2's key uses. Side storage follows D-ALLOC-SITE1 and D-CONTEXT1, and the region and escape checker covers the payload's whole graph. Allocations the payload owns itself, such as a String's bytes, are unchanged.\n\nErasing an erased value. Any(x) on a trait value, such as a Shape, boxes that trait value as its payload, so Shape(s) matches and Square(sq) does not; erasure never flattens. Any(x) on a value that is already one of the four forms is an error whose fix is widening, so a box never holds a box by accident.\n\nCode lifetime. A box's key selects cleanup and on_fail code in the package that made it, so a live box counts as a reference to that package. D-PRIM-TYPEKEY2's option A defines this loader count for type info and function values; under its other options this ballot defines the same count. Keys of separately built packages are compared at load, and a collision refuses the load.\n\nCosts that remain. A check is one word compare. A large, over-aligned or sensitive payload takes one allocation and one pointer load per read. Dropping branches on the key to the payload's cleanup, as dropping a trait value does today. Today's box, measured on a0.0.43. One million small Square and Rect values, built and summed as trait values, take 0.119 s median over five runs. As a closed enum they take 0.110 s. Peak memory is 78.6 MB for both.\n\nSo the heap box costs about 9 ns per value on this shape, which bounds what the inline buffer saves there. The owner asked for the allocation removed, so A keeps the buffer.\n\nType identity. Under TYPEKEY1 or TYPEKEY2 B/F, box.key() gives the payload's reflect.TypeKey. Under TYPEKEY2 A, box.type returns Type; under E, it returns reflect.Type. C/D omit this public projection because they reject runtime key values. Checked extraction still uses internal canonical identity, not display text. Remove obsolete projections in the chosen cutover.\n\nBeginner path. Use an enum when the set of types is known; it is exhaustive (p05). Use Any(value) for an open set, read with if box == { T(x) -> … else -> … }, and take<T>() to move the value out.\n\nExpert path. Any.Send and Any.Send.Owes cross tasks, and the Owes forms carry a duty finished by take or fail(). A duty type without on_fail names its error finish where it is boxed. Patterns on any trait value, inline storage for small Any payloads, and the build report's list of boxed types are available.\n\nDownsides of A, and what the design does about them. Each box is four words, and a large, over-aligned or sensitive payload takes one side allocation. Small payloads stay inline, and a handle such as a pool ID fits inline too, though a handle brings its own lifetime rules. The backend carries a second carrier layout, which shares today's key, dispatch and drop glue.\n\nThere are four carrier forms, from two facts: crossing tasks and owing a duty. Forms widen toward Any.Owes, and every error names the fact that needs a wider form. A map that holds one duty owes as a whole, so it must be drained on every success path. Payloads with loans cannot be boxed; generics and typed fields cover those.\n\nMigration. There are no existing Any callers (p01). Existing trait values keep their layout and gain type patterns and take, so no caller changes. The spec's line that Jet has no general Any becomes one saying Jet has no implicit top type, and Examples/Types/NoAnyAlternatives.jet gains an Any section for open sets.\n\nOther options. B keeps today's tools: enums for known sets, trait interfaces for open behavior sets, Dyn for encodable data, and typed fields for duties. C is a built-in top type with implicit conversion, separate from trait values. D is a library box for plain owned data only. E is A's design with implicit conversion to the Any trait. F is A's design with explicit erasure for every trait.\n\nC and E can have exactly A's ownership, duty and tag rules. Their difference from A is that a wrong argument of any type converts to Any silently, and C adds a second erasure mechanism beside trait values. F removes implicit conversion for every trait, so every existing trait-value use, such as p03's list of shapes, must be rewritten.\n\nThe payload type projection is read-only. Under D-FIELD-READONLY1, box.type or box.key() is a computed getter over the private key word; assignments, write loans and destructive takes of it are refused. Matching and taking never edit the recorded identity to make a check succeed.\n\nWhat remains open. This is a proposed contract, not a built one, and no probe exercises it. The Any.Owes checker is D-OWES1's, extended to erased carriers, so its strength is that extension's. The secrecy rule for boxes made in a tagged branch waits on branch tagging, which no build has yet.",
+      "title": "An explicit Any carrier with checked recovery, preserved duties and visible costs",
+      "situation": "A plugin host may need to retain settings, an open file, a callback and a transaction without knowing every concrete type in advance. Enums cover known sets; trait interfaces cover open behavior; Dyn covers encodable data. The missing choice is arbitrary checked concrete-type recovery. An Any carrier could add that, but erasure must not hide cleanup effects, finishing duties, secrecy or allocator lifetime. Small inline storage removes only the carrier allocation, not allocations owned by its payload.",
+      "gist": "Should Jet add explicit Any construction and checked recovery through trait erasure?",
+      "lesson": "Any retains a value whose concrete type is not known to its reader. A checked pattern borrows the matching payload; take moves it out or returns the original box. This is a proposed feature, not a current working API.",
+      "explainer": "A carrier owns a hidden payload and remembers its exact type. A duty names how a value must finish. Erasure may hide the concrete type, but cannot hide duties, effects or safety facts.",
+      "story": "Lin can already give unknown plugins a shared trait interface. She wants an additional registry where a consumer that knows a concrete type can recover that exact value safely, including a transaction it must finish.",
+      "inWild": "// Rust illustration, not executed here:\nlet b: Box<dyn Any> = Box::new(14_i32);\nmatch b.downcast::<i32>() { Ok(n) => println!(\"{n}\"), Err(b) => drop(b) }",
+      "detail": "Scope. Add checked concrete recovery for open owned payloads. Ratified D-PRIM-TYPEKEY2=A fixes public identity: type_of(box) names the carrier; box.type names its payload. Remove obsolete TypeKey projections in the cutover.\n\nCurrent a0.0.43 evidence. Independent p01 and p11 report E0112 for Any and an unknown name. p02 and p13 decode Dyn; p03 prints 10 through trait dispatch. p05 matches a closed enum. p10 rejects its particular trait pattern; p14 rejects copying that trait value. These are not a census of every recovery route.\n\nConstruction. Any{value} uses the existing typed-literal form. There is no conditional constructor alias tied to another open vote. Any is an automatically implemented empty trait over eligible owned types. Ordinary trait conversions stay implicit. Explicit Any construction makes erasure visible but cannot establish caller intent.\n\nOne semantic mechanism. All trait carriers share identity, patterns, extraction, ownership and cleanup rules. Internal layouts may differ. Origin/dev BuildTraits discovers implementers through method-bearing entries; empty automatic traits therefore need concrete payload registration at every erasure site, including generic and methodless types. Existing code is insufficient unchanged.\n\nPayloads. Accept owned data, files, functions, closures and duties. Reject transitive loans or unrepresentable safety contracts. Preserve tags, protected storage, region provenance and authority. Construction failure must leave ownership defined and clean partial side storage once.\n\nForms. Any, Any.Send, Any.Owes and Any.Send.Owes distinguish sendability and finishing duties. Widening may drop Send or add Owes, never the reverse. Owes also carries normalized cleanup and on_fail effect rows, such as Any.Owes[IO]. Other carriers retain cleanup effects too. Four form names are not the complete static contract.\n\nReading. T(value) compares exact canonical identity and lends a read-only payload for its arm. Else is required for an open set. Matching neither converts nor grants authority. The loan prevents moving or mutating the carrier and cannot outlive it.\n\nTaking. take<T>() consumes a uniquely owned carrier. Success hands T and its duty to the caller. TakeMismatch<C> retains the original carrier C, duty and effects unchanged. Internal sharing never permits moving from another owner. Passing the mismatch onward transfers its duty; dropping or converting it first requires settlement.\n\nFinishing. D-OWES1=A and D-LIN-CONTAINER1=A remain canonical. Success paths cannot discard an unfinished carrier or overwrite an occupied duty slot. A drain settles each element. Error propagation, panic unwinding and cancellation invoke on_fail only for still-owned values. Abort, kill and power loss are excluded.\n\nAny.Owes lists take and fail as finishing operations, with fail as on_fail. A failed take transfers the duty into its mismatch, not into oblivion. fail invokes the payload's finishing action and cleanup once, retaining inferred effects. Payloads without on_fail must name a consuming finishing method at construction. Cleanup errors follow OWES; attached notes cannot disclose tagged values.\n\nFunctions retain full canonical callable identity, effects and authority requirements. Closures transfer owned captures; non-sendable captures exclude Send. Live payloads and pattern loans keep executable cleanup and on_fail code resident. Unload retires new lookups without invalidating them.\n\nSecrecy. Tags cover contents and secret-selected identity. c01 compiles, but run never calls its leak function: this proves checker acceptance, not observed disclosure. Required branch tagging, fixed-time identity tests and secret-dependent dispatch restrictions must precede tagged delivery. A general checker gap is not permission for another laundering path.\n\nProtection. Sensitive bytes never enter the ordinary inline buffer. D-MEM-WIPE1 covers construction, moves, extraction, spills, registers, swap, crash contexts and nested owned buffers. Refuse unsupported protections before reading secrets; wiping side storage only at drop is insufficient.\n\nA's representation is one target word for the canonical key and three pointer-aligned buffer words. Fitting nonsensitive payloads sit inline; others use side storage. Payload-owned buffers may still allocate. Static identity comparison need not traverse a descriptor. Open-package cleanup still needs admitted dispatch or generated code. Ratified Type metadata remains; no global descriptor-removal claim follows.\n\nIdentity follows canonical type equality and build/load collision admission, never display paths. A keeps existing trait layouts while sharing semantics. G instead migrates all trait carriers to inline representation in one cutover. G removes the permanent layout split but may enlarge dense arrays and calling conventions. Neither is a measured layout win.\n\nBoth layouts require aligned, zero-size, large, nested-erased and loaded payload proof. Boxing an ordinary trait carrier retains it as payload. Any-on-Any uses widening, not accidental nesting. Region checks cover the entire owned graph.\n\nMeasurement. Fresh builds of the existing trait and enum subjects print 9500005. Five alternating process executions gave medians about 0.0766 s and 0.0682 s. Representation, dispatch and cleanup all differ. The delta neither isolates allocation nor bounds inline savings. No independent peak-memory result or Any speedup is claimed.\n\nMigration. Audit trait construction, extraction, cleanup, registries, examples and package interfaces. p01 is not a repository census. Remove obsolete projections and spellings together; no teaching diagnostic or jet fix rewrite for retired forms is added.\n\nBeginner path: enums for known types, traits for known behavior, Any for concrete recovery. Expert path: explicit sendability, duty, effect, identity, package lifetime and allocator contracts.",
       "options": [
         {
           "key": "A",
-          "name": "Explicit Any on the shared trait-value carrier",
-          "detail": "Any(value) boxes any owned value, including files, functions and duties; a type pattern borrows it back, and take<T>() moves it out or hands the box back. The Send forms cross tasks and the Owes forms carry a duty, so one [String: Any.Owes] map holds the whole plugin. Small payloads sit inline, with no record to follow.",
-          "technical": "Any is the empty trait. An Any box is four words: today's trait key word and a three-word buffer, with side storage for large, over-aligned or sensitive payloads. Other trait values keep today's heap box; every trait value gains type patterns and take. Construction is explicit for Any only. Cleanup follows S63. Any.Owes is #MustFinish(take, fail, on_fail: fail) under D-OWES1, and a mismatch keeps its duty in TakeMismatch<C>. Tags are static on the carrier, and sensitive payloads use D-MEM-WIPE1 storage.",
-          "code": "Theme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin := [String: Any.Owes]{}\n    plugin[\"theme\"] = Any(Theme{dark: true})    // Any widens to Any.Owes\n    plugin[\"font_size\"] = Any(14)\n    plugin[\"log\"] = Any(log)\n    plugin[\"save\"] = Any(save)\n    plugin[\"order\"] = Any.Owes(Order{id: 7})\n    if plugin[\"theme\"] == {\n        Theme(theme) -> print(theme.dark)\n        else -> print(\"no theme\")\n    }\n    if plugin[\"save\"] == {\n        fn(String) -[FS.Write]> Int IOError!(write) -> print(write(\"saved\") ?? 0)\n        else -> print(\"no saver\")\n    }\n    if plugin[\"font_size\"] == {\n        Int(size) -> print(size)\n        else -> print(\"no size\")\n    }\n    loop (name, box) in plugin.move() {    // the map owes, so it is drained\n        if box.take<Order>() == {\n            .Ok(order) -> order.commit()\n            .Err(miss) -> miss.box.fail() ?? print(\"{name}: on_fail failed\")\n        }\n    }\n}   // each box was finished in the drain; the log closed with its box\n// Proposed (A), not built."
+          "name": "Explicit Any through trait erasure",
+          "detail": "Any{value} retains eligible owned payloads, including resources and duties. Checked patterns borrow; take returns the payload or original carrier.",
+          "technical": "One trait-erasure semantics, with an inline Any representation beside existing trait layouts. Preserve sendability, duty, tags, effects and provenance statically; use canonical Type identity.",
+          "code": "// Proposed; not built. Same plugin registry includes settings, log, save and order.\nplugin := [String: Any.Owes[IO]]{}\nplugin[\"theme\"] = Any{Theme{dark: true}}\nplugin[\"log\"] = Any{log}\nplugin[\"save\"] = Any{save}\nplugin[\"order\"] = Any.Owes[IO]{order}\nloop (name, box) in plugin.move() {\n    if box.take<Order>() == {\n        .Ok(value) -> value.commit()\n        .Err(miss) -> miss.box.fail() ?? print(\"{name} failed\")\n    }\n}"
         },
         {
           "key": "B",
-          "name": "Today's tools: enums, Dyn and typed fields",
-          "detail": "No general box. A host writes an enum for each set of types it knows, which holds files and functions and is exhaustive. Encodable data goes into Dyn, and duties stay typed. This is strongest when the set is known.",
-          "technical": "No decision changes. Enum payloads keep their types, cleanup and duties, and an else over a closed enum is an error, so each arm is listed. An open plugin set can use a trait interface today. That preserves plugin state and operations but does not provide arbitrary checked concrete-type recovery.",
-          "code": "Theme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nPlugin: enum {\n    Look(Theme)\n    FontSize(Int)\n    Log(FileReader)\n    Save(fn(String) -[FS.Write]> Int IOError!)\n    Pending(Order)\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin := [String: Plugin]{}\n    plugin[\"theme\"] = .Look(Theme{dark: true})\n    plugin[\"font_size\"] = .FontSize(14)\n    plugin[\"log\"] = .Log(log)\n    plugin[\"save\"] = .Save(save)\n    plugin[\"order\"] = .Pending(Order{id: 7})\n    if plugin[\"theme\"] == {\n        .Look(theme) -> print(theme.dark)\n        .FontSize(_) -> print(\"no theme\")\n        .Log(_) -> print(\"no theme\")\n        .Save(_) -> print(\"no theme\")\n        .Pending(_) -> print(\"no theme\")\n    }\n    if plugin[\"save\"] == {\n        .Save(write) -> print(write(\"saved\") ?? 0)\n        .Look(_) -> print(\"no saver\")\n        .FontSize(_) -> print(\"no saver\")\n        .Log(_) -> print(\"no saver\")\n        .Pending(_) -> print(\"no saver\")\n    }\n    if plugin[\"font_size\"] == {\n        .FontSize(size) -> print(size)\n        .Look(_) -> print(\"no size\")\n        .Log(_) -> print(\"no size\")\n        .Save(_) -> print(\"no size\")\n        .Pending(_) -> print(\"no size\")\n    }\n    loop (name, entry) in plugin.move() {    // the map owes the Order, so it is drained\n        if entry == {\n            .Pending(order) -> order.commit()\n            .Look(_) -> {}\n            .FontSize(_) -> {}\n            .Log(_) -> {}    // the log closes here\n            .Save(_) -> {}\n        }\n    }\n}\n// Enum payloads and exhaustive matches run today (p05); this program is not probed."
+          "name": "Enums, Dyn and plugin interfaces",
+          "detail": "No Any. Known concrete sets use enums; unknown plugins expose a shared trait interface. Resources and duties remain typed.",
+          "technical": "Supports open plugin behavior without arbitrary concrete recovery. Closed enums retain exhaustive checking. It may be the better abstraction when consumers need operations rather than hidden concrete values.",
+          "code": "// Same plugin work, organized behind a behavior interface or typed fields:\nPlugin: struct {\n    settings: [String: Dyn]\n    log: FileReader\n    save: fn(String) -[FS.Write]> Int IOError!\n    order: Order\n}\n// Proposed duty-aware integration; the current probes establish only its data/trait pieces."
         },
         {
           "key": "C",
-          "name": "A built-in top type with implicit conversion",
-          "detail": "Any is a built-in top type, and every value converts to it where an Any is expected. Reads, takes, duties and tags can follow exactly A's rules.",
-          "technical": "A second erasure mechanism beside trait values, with its own carrier and checks. Implicit conversion means a wrong argument of any type compiles where Any is expected; checked reads stay safe.",
-          "code": "Theme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin := [String: Any.Owes]{}\n    plugin[\"theme\"] = Theme{dark: true}    // converts to the map's Any.Owes without a call\n    plugin[\"font_size\"] = 14\n    plugin[\"log\"] = log\n    plugin[\"save\"] = save\n    plugin[\"order\"] = Order{id: 7}\n    if plugin[\"theme\"] == {\n        Theme(theme) -> print(theme.dark)\n        else -> print(\"no theme\")\n    }\n    if plugin[\"save\"] == {\n        fn(String) -[FS.Write]> Int IOError!(write) -> print(write(\"saved\") ?? 0)\n        else -> print(\"no saver\")\n    }\n    if plugin[\"font_size\"] == {\n        Int(size) -> print(size)\n        else -> print(\"no size\")\n    }\n    loop (name, box) in plugin.move() {    // the map owes, so it is drained\n        if box.take<Order>() == {\n            .Ok(order) -> order.commit()\n            .Err(miss) -> miss.box.fail() ?? print(\"{name}: on_fail failed\")\n        }\n    }\n}   // each box was finished in the drain; the log closed with its box\n// Proposed (C): a built-in top type beside trait values, not built."
+          "name": "Built-in top type with implicit conversion",
+          "detail": "Any is a top type; assignment to it erases without a constructor.",
+          "technical": "Keep A's safety contracts. A top-type surface need not duplicate the runtime: lower it to the same erasure mechanism. It broadens implicit conversions and changes the type model; it is not inherently a memory-safety failure.",
+          "code": "// Proposed, same plugin values:\nplugin[\"theme\"] = Theme{dark: true}\nplugin[\"log\"] = log\nplugin[\"save\"] = save\nplugin[\"order\"] = order"
         },
         {
           "key": "D",
-          "name": "A library box for plain owned data only",
-          "detail": "reflect.Any holds plain owned data: get<T>() borrows a matching view, and take<T>() consumes it or hands it back. Files, functions and duties are refused at construction and stay in typed fields.",
-          "technical": "This is the open Tower text of D-PRIM-ANY1. Its narrower scope needs no named duty rule, only ordinary owned-data cleanup. It still shares the trait-value key word, and it does not meet the plugin story.",
-          "code": "use reflect: core.reflect\n\nTheme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nPlugin: struct {\n    settings: [String: reflect.Any]\n    log: FileReader\n    save: fn(String) -[FS.Write]> Int IOError!\n    order: Order\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin: Plugin{\n        settings: [String: reflect.Any]{},\n        log: log,\n        save: save,\n        order: Order{id: 7},\n    }\n    plugin.settings[\"theme\"] = reflect.Any{Theme{dark: true}}\n    plugin.settings[\"font_size\"] = reflect.Any{14}\n    if plugin.settings[\"theme\"].get<Theme>() == .Val(view) -> print(view[0].dark)\n    print(plugin.save(\"saved\") ?? 0)\n    if plugin.settings[\"font_size\"].get<Int>() == .Val(view) -> print(view[0])\n    plugin.order.commit()    // files, functions and duties stay typed\n}   // the log closes here, with the struct\n// Proposed (D): plain owned data only, not built."
+          "name": "Plain-data library box; resources stay typed",
+          "detail": "reflect.Any retains owned plain data only. The plugin still keeps files, callbacks and duties in typed fields or its interface.",
+          "technical": "Narrower erased payload set and smaller duty surface. It meets the same plugin workload through mixed storage, but does not provide arbitrary concrete recovery for its resources.",
+          "code": "// Proposed:\nsettings[\"theme\"] = reflect.Any{Theme{dark: true}}\nplugin.order.commit()\n// log and save remain typed fields, not erased payloads."
         },
         {
           "key": "E",
-          "name": "Any as the empty trait, with implicit conversion",
-          "detail": "A's design on the shared carrier, but values convert to Any wherever it is written, as they convert to any trait today. One mechanism, and the least source change.",
-          "technical": "Same carrier, patterns, duties and tags as A. The only difference is implicit conversion, which accepts a wrong argument of any type where Any is expected.",
-          "code": "Theme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin := [String: Any.Owes]{}\n    plugin[\"theme\"] = Theme{dark: true}    // converts as any trait value does\n    plugin[\"font_size\"] = 14\n    plugin[\"log\"] = log\n    plugin[\"save\"] = save\n    plugin[\"order\"] = Order{id: 7}\n    if plugin[\"theme\"] == {\n        Theme(theme) -> print(theme.dark)\n        else -> print(\"no theme\")\n    }\n    if plugin[\"save\"] == {\n        fn(String) -[FS.Write]> Int IOError!(write) -> print(write(\"saved\") ?? 0)\n        else -> print(\"no saver\")\n    }\n    if plugin[\"font_size\"] == {\n        Int(size) -> print(size)\n        else -> print(\"no size\")\n    }\n    loop (name, box) in plugin.move() {    // the map owes, so it is drained\n        if box.take<Order>() == {\n            .Ok(order) -> order.commit()\n            .Err(miss) -> miss.box.fail() ?? print(\"{name}: on_fail failed\")\n        }\n    }\n}   // each box was finished in the drain; the log closed with its box\n// Proposed (E): Any is the empty trait, with implicit conversion, not built."
+          "name": "Implicit Any trait conversion",
+          "detail": "A's empty-trait model, with the same implicit erasure convention as other traits.",
+          "technical": "One conversion convention and less construction ceremony. Callers may erase a value unintentionally where Any is expected; A makes that step visible but cannot prevent a deliberately wrong payload either.",
+          "code": "// Proposed, same plugin values and A's read/drain rules:\nplugin[\"theme\"] = Theme{dark: true}\nplugin[\"log\"] = log\nplugin[\"save\"] = save\nplugin[\"order\"] = order"
         },
         {
           "key": "F",
           "name": "Explicit erasure for every trait",
-          "detail": "A's design, but every trait erasure is written erase<Trait>(value), so no value ever changes type silently. One explicit rule for all traits.",
-          "technical": "Amends the trait-conversion rule everywhere. Every implicit trait use, such as p03's [Shape]{Square{side: 2}}, migrates to erase<Shape>(…). Same duty and tag rules as A.",
-          "code": "Theme: struct { dark: Bool }\n\n#MustFinish(commit, rollback, on_fail: rollback)\nOrder: struct {\n    id: Int\n    commit: fn(&&self) { print(\"commit {self.id}\") }\n    rollback: fn(&&self) { print(\"rollback {self.id}\") }\n}\n\nsave: fn(text: String) -[FS.Write]> Int IOError! {\n    files.write(\"out.txt\", text)!\n    Ok(text.len())\n}\n\nrun: fn() {\n    log: files.open(\"log.txt\") ?? return\n    plugin := [String: Any.Owes]{}\n    plugin[\"theme\"] = erase<Any>(Theme{dark: true})    // every trait erasure is written\n    plugin[\"font_size\"] = erase<Any>(14)\n    plugin[\"log\"] = erase<Any>(log)\n    plugin[\"save\"] = erase<Any>(save)\n    plugin[\"order\"] = erase<Any.Owes>(Order{id: 7})\n    if plugin[\"theme\"] == {\n        Theme(theme) -> print(theme.dark)\n        else -> print(\"no theme\")\n    }\n    if plugin[\"save\"] == {\n        fn(String) -[FS.Write]> Int IOError!(write) -> print(write(\"saved\") ?? 0)\n        else -> print(\"no saver\")\n    }\n    if plugin[\"font_size\"] == {\n        Int(size) -> print(size)\n        else -> print(\"no size\")\n    }\n    loop (name, box) in plugin.move() {    // the map owes, so it is drained\n        if box.take<Order>() == {\n            .Ok(order) -> order.commit()\n            .Err(miss) -> miss.box.fail() ?? print(\"{name}: on_fail failed\")\n        }\n    }\n}   // each box was finished in the drain; the log closed with its box\n// Proposed (F): every trait erasure is explicit, so [Shape]{Square{side: 2}} becomes erase<Shape>(…)."
+          "detail": "erase<Trait>(value) is the sole conversion form for all trait carriers.",
+          "technical": "One explicit conversion convention, sharing A's safety and representation rules. Migrate implicit construction sites, not every read or trait use. No retired-spelling rewrite service is added.",
+          "code": "// Proposed:\nplugin[\"log\"] = erase<Any>(log)\nplugin[\"save\"] = erase<Any>(save)\nplugin[\"order\"] = erase<Any.Owes[IO]>(order)\n// Existing [Shape]{Square{side: 2}} construction also becomes explicit."
+        },
+        {
+          "key": "G",
+          "name": "Explicit Any with one inline trait representation",
+          "detail": "A's public behavior; all trait carriers use the inline representation in one coordinated cutover.",
+          "technical": "Removes A's permanent representation split without a second erasure meaning. Changes trait value size, calling conventions and storage consumers; may regress workloads dominated by large payloads or dense trait arrays. Requires matched measurements before a performance claim.",
+          "code": "// Same proposed plugin program as A:\nplugin[\"log\"] = Any{log}\nplugin[\"save\"] = Any{save}\nplugin[\"order\"] = Any.Owes[IO]{order}\n// Other trait values migrate internally to the same inline representation."
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Box<dyn Any> allocates; downcast hands the box back on a mismatch; Any needs T: 'static, so only non-'static borrows are excluded. Source: doc.rust-lang.org/std/any.",
-          "code": "match b.downcast::<i32>() {\n    Ok(n) => println!(\"{n}\"),\n    Err(b) => keep(b),\n}"
+          "note": "Any permits checked borrowed recovery; Box<dyn Any> permits owned downcast and returns the box on mismatch. Non-static references are excluded. Documentation checked; illustration not executed.",
+          "code": "b.downcast::<i32>()"
         },
         {
           "lang": "Swift",
-          "note": "An existential holds a value inline when its size and alignment fit a three-pointer buffer. Source: swift docs/ABI/TypeLayout.rst.",
-          "code": "let x: Any = 14\nif let n = x as? Int { print(n) }"
+          "note": "Opaque existentials use a three-pointer buffer plus metadata and witness tables; size and alignment decide inline storage. This supports the storage idea, not descriptor elimination. Illustration not executed.",
+          "code": "let x: Any = 14"
         },
         {
           "lang": "Go",
-          "note": "any converts implicitly; a type switch needs no exhaustiveness; the value is garbage collected.",
+          "note": "any aliases the empty interface. Type switches need no default and conversion is implicit; garbage collection does not settle Jet-style finishing duties. Illustration not executed.",
           "code": "var x any = 14\nswitch v := x.(type) { case int: fmt.Println(v) }"
-        },
-        {
-          "lang": "Haskell",
-          "note": "Dynamic pairs a value with its type representation; fromDynamic gives Nothing on a mismatch.",
-          "code": "case fromDynamic d :: Maybe Int of\n  Just n -> print n\n  Nothing -> putStrLn \"not an int\""
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A keeps any owned value as itself, including files, functions and duties, through the one trait-value mechanism. Reads use checked patterns or take, and nothing converts to Any silently.",
+        "why": "A supplies checked concrete recovery while making broad erasure explicit. It can share trait semantics without forcing every existing trait representation to grow.",
         "gains": [
-          "One map can hold settings, an open file, a callback and an owed Order, as the plugin story needs.",
-          "A small payload needs no allocation and no record to follow, and every trait value gains type patterns and take.",
-          "Duties, tags and protected storage survive boxing by static rules, not by printing limits."
+          "Concrete recovery for open owned payload sets.",
+          "Explicit erasure and inline fitting payloads."
         ],
         "losses": [
           {
-            "loss": "Each box is four words, and large, over-aligned or sensitive payloads take one side allocation.",
-            "mitigation": "Small payloads stay inline, and a pool ID fits inline, though a handle brings its own lifetime rules."
+            "loss": "Two internal representations and side allocations remain.",
+            "mitigation": "Share ownership and identity semantics; compare G's unified layout on matched programs."
           },
           {
-            "loss": "The backend carries a second carrier layout beside today's trait-value box. This cost stays.",
-            "mitigation": "It shares today's key word, dispatch and drop glue, and no existing trait value or caller changes. Measured: today's box costs about 9 ns per small value against an enum."
+            "loss": "Duty and cleanup effect contracts enlarge carrier types.",
+            "mitigation": "Use the existing effect and duty checkers, including mismatch and container propagation."
           },
           {
-            "loss": "Four carrier forms, from two facts: crossing tasks and owing a duty.",
-            "mitigation": "Forms widen toward Any.Owes, and each error names the fact that needs a wider form."
-          },
-          {
-            "loss": "Payloads holding loans cannot be boxed, and a map holding one duty must be drained on every success path.",
-            "mitigation": "Generics and typed fields cover loans; the drain is one loop that finishes each box by take or fail()."
+            "loss": "Tagged safety and open-package cleanup require substantial unbuilt work.",
+            "mitigation": "Require those proofs before shipping; no general-gap exemption."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B supports unknown plugins through an agreed trait interface; it lacks arbitrary concrete-type recovery, not open plugin storage itself."
+            "reason": "B is often the better interface, but does not offer arbitrary concrete recovery."
           },
           {
             "key": "C",
-            "reason": "C accepts any wrong argument where Any is written, and adds a second erasure mechanism beside trait values."
+            "reason": "A avoids broad implicit top-type conversion; C may still share one runtime."
           },
           {
             "key": "D",
-            "reason": "D refuses files, functions and duties, so the plugin story needs typed fields, the Order among them, beside the box."
+            "reason": "D solves the workload with typed resources, but not erased resource recovery."
           },
           {
             "key": "E",
-            "reason": "E shares A's mechanism, but any wrong argument converts to Any silently."
+            "reason": "E is more uniform and shorter; A makes broad erasure visible."
           },
           {
             "key": "F",
-            "reason": "F makes every trait erasure explicit, which rewrites existing implicit trait-value construction sites. F makes erasure and its cost visible, even when the trait bound already checks behavior."
+            "reason": "F is uniform and explicit, but changes all implicit trait construction sites."
+          },
+          {
+            "key": "G",
+            "reason": "G removes the layout split but may enlarge all trait carriers; no measurements establish the better layout."
           }
         ],
-        "tradeoff": "Four words per box, four carrier forms and a second carrier layout in the backend, which stays, in return for one box that keeps any owned value with its duties and tags."
+        "tradeoff": "Checked open recovery adds static contracts, representation work and real storage costs; it is not a descriptor-free or measured speedup claim."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Cleanup no longer goes through a descriptor that A removes; it uses the key word. The unmeasured cost claim is replaced by a measurement of today's box against an enum."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran p01-p14 and c01, rebuilt and timed the existing representations, and executed effectful Close. Fixed purity, secrecy, identity, cost and option-framing errors; added unified-layout G."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-PRIM-ANY1/probes for p01 to p14 and c01. Build probes/cost/trait_box.jet and enum_box.jet with jet build, then time five runs each. Today's trait-value layout is in Compiler/JetIR/Source/BuildTraits.jet:1-27; Close is in Compiler/Prelude/Traits.jet:198-201.",
+      "checkInstructions": "Independent logs are probes/review7-*.run.txt and review7-measure.txt. Existing trait/enum timings do not measure Any or isolate allocation. Before shipping, prove methodless/generic registration, all exits, mismatch duties, effects, identity collisions, plugins, protected moves, allocator escape and tier parity.",
       "surface": {
-        "gist": "Should Jet add an explicit Any box that keeps any owned value, read back through checked patterns or take?",
-        "lesson": "Sometimes one table must hold values of different types, such as a plugin's settings, an open file and a callback. Jet has enums for known sets and Dyn for encodable data, but no box that keeps any value as itself. This vote decides whether to add one.",
+        "gist": "Should Jet add explicit Any construction and checked recovery through trait erasure?",
+        "lesson": "Any adds concrete recovery for open owned payload sets. Trait interfaces already support open plugin behavior. The proposal must preserve duties, cleanup effects, secrecy and allocator lifetimes.",
         "trio": {
           "current": {
-            "note": "Today: an enum per known set.",
-            "code": "Plugin: enum {\n    Look(Theme)\n    Log(FileReader)\n}"
+            "note": "Trait dispatch works; the proposed concrete recovery does not exist in these probes.",
+            "code": "// p03 prints 10 through a Shape trait value."
           },
           "wild": {
-            "lang": "Rust",
-            "note": "A box with a checked downcast.",
-            "code": "let b: Box<dyn Any> = Box::new(14);\nif let Some(n) = b.downcast_ref::<i32>() { println!(\"{n}\") }"
+            "lang": "Swift",
+            "note": "Inline buffer plus metadata; documentation checked, illustration not executed.",
+            "code": "let x: Any = 14"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "Explicit Any",
-            "gist": "Any(value) keeps any owned value; checked patterns read it.",
+            "gist": "Explicit construction; checked recovery.",
             "gains": [
-              "Files, functions and duties.",
-              "Small payloads inline."
+              "Open concrete recovery.",
+              "Fitting nonsensitive payloads inline."
             ],
             "losses": [
-              "Four words per box, four forms.",
-              "A second carrier layout, which stays.",
-              "A map with a duty must be drained."
+              "Two internal layouts.",
+              "Duty and effect contracts."
             ],
             "proposed": {
-              "code": "plugin := [String: Any.Owes]{}\nplugin[\"log\"] = Any(log)\nplugin[\"order\"] = Any.Owes(Order{id: 7})\nif plugin[\"theme\"] == {\n    Theme(theme) -> print(theme.dark)\n    else -> print(\"no theme\")\n}\nloop (name, box) in plugin.move() {\n    if box.take<Order>() == {\n        .Ok(order) -> order.commit()\n        .Err(miss) -> miss.box.fail() ?? print(\"{name} failed\")\n    }\n}"
+              "code": "plugin[\"log\"] = Any{log}"
             }
           },
           {
             "key": "B",
-            "name": "Today's tools",
-            "gist": "An enum per known set; Dyn for data.",
+            "name": "Existing abstractions",
+            "gist": "Enums, Dyn and plugin interfaces.",
             "gains": [
-              "Exhaustive and built."
+              "Typed resources and open behavior."
             ],
             "losses": [
-              "No checked recovery of an unknown type."
+              "No arbitrary concrete recovery."
             ],
             "proposed": {
-              "code": "plugin[\"log\"] = .Log(log)\nplugin[\"order\"] = .Pending(Order{id: 7})"
+              "code": "// Plugin interface or typed fields retain log, save and order."
             }
           },
           {
             "key": "C",
-            "name": "Built-in top type",
-            "gist": "Everything converts to Any silently.",
+            "name": "Top type",
+            "gist": "Implicit conversion into a built-in Any.",
             "gains": [
-              "No construction call."
+              "Less ceremony; shared runtime possible."
             ],
             "losses": [
-              "Wrong arguments compile.",
-              "A second mechanism."
+              "Broader implicit conversion."
             ],
             "proposed": {
-              "code": "plugin[\"log\"] = log\nplugin[\"order\"] = Order{id: 7}"
+              "code": "plugin[\"log\"] = log"
             }
           },
           {
             "key": "D",
-            "name": "Plain-data box",
-            "gist": "A library box that refuses resources and functions.",
+            "name": "Data box",
+            "gist": "Erase data; keep resources typed.",
             "gains": [
-              "Small rule set."
+              "Smaller erased contract."
             ],
             "losses": [
-              "Files and callbacks stay typed."
+              "Mixed storage."
             ],
             "proposed": {
-              "code": "settings[\"theme\"] = reflect.Any{Theme{dark: true}}\nplugin.order.commit()"
+              "code": "settings[\"theme\"] = reflect.Any{theme}"
             }
           },
           {
             "key": "E",
             "name": "Implicit Any trait",
-            "gist": "A's design with implicit conversion.",
+            "gist": "Uniform implicit trait conversion.",
             "gains": [
-              "Least source change."
+              "No special conversion exception."
             ],
             "losses": [
-              "Wrong arguments compile."
+              "Erasure intent less visible."
             ],
             "proposed": {
-              "code": "plugin[\"log\"] = log\nplugin[\"order\"] = Order{id: 7}"
+              "code": "plugin[\"log\"] = log"
             }
           },
           {
             "key": "F",
-            "name": "Explicit erasure",
-            "gist": "erase<Trait>(value) for every trait.",
+            "name": "Explicit every trait",
+            "gist": "One explicit erasure convention.",
             "gains": [
-              "One explicit rule."
+              "Uniform visible erasure."
             ],
             "losses": [
-              "Every trait use rewritten."
+              "Migrate implicit construction sites."
             ],
             "proposed": {
-              "code": "plugin[\"log\"] = erase<Any>(log)\nplugin[\"order\"] = erase<Any.Owes>(Order{id: 7})"
+              "code": "plugin[\"log\"] = erase<Any>(log)"
+            }
+          },
+          {
+            "key": "G",
+            "name": "Unified inline traits",
+            "gist": "A's behavior with one trait representation.",
+            "gains": [
+              "No permanent layout split."
+            ],
+            "losses": [
+              "Broader layout change; possible size regressions."
+            ],
+            "proposed": {
+              "code": "plugin[\"log\"] = Any{log}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A keeps any owned value as itself, with its duties and tags, through the one trait-value mechanism, and nothing converts silently.",
+          "why": "Explicit concrete recovery can share trait semantics without enlarging every trait representation.",
           "gains": [
-            "One map for the plugin story.",
-            "Small payloads inline, with no record."
+            "Checked recovery and visible erasure."
           ],
           "losses": [
             {
-              "loss": "Four words per box; a second backend layout stays.",
-              "mitigation": "Small payloads stay inline; the new layout shares today's key, dispatch and drop glue."
-            },
-            {
-              "loss": "Four carrier forms.",
-              "mitigation": "Forms widen toward Any.Owes; errors name the needed form."
+              "loss": "Storage and static-contract costs remain.",
+              "mitigation": "Compare G; preserve all safety facts before delivery."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "No checked recovery of an unknown type."
+              "reason": "Strong interface alternative, without arbitrary recovery."
             },
             {
               "key": "C",
-              "reason": "Silent conversion."
+              "reason": "Broader implicit conversion."
             },
             {
               "key": "D",
-              "reason": "Refuses files and callbacks."
+              "reason": "Resources stay typed."
             },
             {
               "key": "E",
-              "reason": "Silent conversion."
+              "reason": "Uniform, but erasure intent is implicit."
             },
             {
               "key": "F",
-              "reason": "Rewrites every trait use."
+              "reason": "Migrate implicit construction sites."
+            },
+            {
+              "key": "G",
+              "reason": "Layout effects are unmeasured."
             }
           ],
-          "tradeoff": "Four words per box and a second carrier layout, which stays, for one box that keeps any owned value."
+          "tradeoff": "A adds real contracts and representation costs, not a proven speedup."
         }
       },
       "draft": false,
@@ -184411,111 +184423,96 @@
       "designAway": [
         {
           "option": "A",
-          "loss": "The backend carries a second carrier layout beside today's trait-value box.",
+          "loss": "Hidden finishing or cleanup effects.",
           "attempts": [
-            "Build Any on today's counted box, with no second layout. One million small trait values take 0.119 s against 0.110 s as an enum, with equal peak memory, but each box still allocates.",
-            "Move every trait value to the inline layout at once; that is the coordinated carrier cutover the earlier draft hid."
+            "Carry normalized effect rows with erased cleanup and on_fail.",
+            "Retain duty in failed take results and containers."
           ],
-          "result": "Kept: the owner asked for the allocation removed. The first attempt is the measured fallback if the second layout is refused."
+          "result": "Required build work; omitted effect syntax is not purity."
         },
         {
           "option": "A",
-          "loss": "Each box is four words, and large, over-aligned or sensitive payloads take one side allocation.",
+          "loss": "Secrecy can flow through chosen payload identity.",
           "attempts": [
-            "Use a two-word buffer; then a String or a pool ID with its generation no longer fits inline.",
-            "Keep three words, the size Swift's existential buffer uses, so common small payloads stay inline."
+            "Track control-flow tags into identity, patterns and dispatch.",
+            "Require ratified fixed-time and storage protection before tagged delivery."
           ],
-          "result": "Reduced to large payloads only."
+          "result": "Required, not excused because the current checker has a general gap."
         },
         {
           "option": "A",
-          "loss": "Four carrier forms, from two facts: crossing tasks and owing a duty.",
+          "loss": "A second internal layout persists.",
           "attempts": [
-            "Use one form that always owes and always crosses; then plain values gain a duty and non-sendable ones are refused.",
-            "Widen implicitly toward Any.Owes, and name the missing fact in each error."
+            "Use existing heap representation, keeping carrier allocations.",
+            "G migrates all trait carriers to inline storage."
           ],
-          "result": "Reduced: authors write Any and widen only when the compiler says why."
-        },
-        {
-          "option": "A",
-          "loss": "A map holding one duty must be drained on every success path.",
-          "attempts": [
-            "Exempt containers of Any.Owes; that would drop duties silently.",
-            "Reuse D-OWES1 and D-LIN-CONTAINER1's container rule, so error exits run fail() on each remaining box."
-          ],
-          "result": "Reduced to success paths, as for any container of a duty today."
-        },
-        {
-          "option": "A",
-          "loss": "The secrecy rule for boxes made in a tagged branch waits on branch tagging (probe c01 passes).",
-          "attempts": [
-            "Refuse every box made inside any branch on a tagged value; that refuses ordinary code.",
-            "Show the gap is general: the branch already leaks through the value it chooses, so the box adds nothing new."
-          ],
-          "result": "Not removed; it lands with branch tagging, which D-SECRET-CT1 needs too."
+          "result": "Not irremovable; G trades it for a broader layout cutover."
         },
         {
           "option": "B",
-          "loss": "No checked recovery of an unknown type.",
+          "loss": "No arbitrary concrete recovery.",
           "attempts": [
-            "Agree a trait interface with every plugin; that covers behavior, not concrete types.",
-            "Encode into Dyn (p02, p13); files and callbacks cannot be encoded."
+            "Expose a behavior interface and typed resource fields."
           ],
-          "result": "Not removed."
+          "result": "Meets plugin behavior needs, not concrete recovery."
         },
         {
           "option": "C",
-          "loss": "A wrong argument of any type converts to Any silently.",
+          "loss": "Implicit top conversion can erase unintended values.",
           "attempts": [
-            "Warn on implicit conversion to Any.",
-            "Require Any only in field types."
+            "Keep checked recovery and explicit parameter types."
           ],
-          "result": "Reduced, not removed; a second erasure mechanism also stays."
+          "result": "Safe recovery does not detect intent; runtime duplication is unnecessary."
         },
         {
           "option": "D",
-          "loss": "Files, functions and duties are refused.",
+          "loss": "Resources cannot be recovered from its data box.",
           "attempts": [
-            "Keep them in typed fields beside the box.",
-            "Box an ID into a typed table instead of the value."
+            "Keep resources typed beside settings."
           ],
-          "result": "Not removed: the plugin story needs both."
+          "result": "The workload still works, with mixed storage."
         },
         {
           "option": "E",
-          "loss": "A wrong argument converts to Any silently.",
+          "loss": "Broad erasure can be implicit.",
           "attempts": [
-            "Lint implicit Any conversions.",
-            "Limit implicit conversion to literal sites."
+            "Use a uniform trait conversion rule."
           ],
-          "result": "Reduced, not removed."
+          "result": "Less ceremony, but intent is less visible."
         },
         {
           "option": "F",
-          "loss": "Every implicit trait use, such as p03's list, must be rewritten.",
+          "loss": "Implicit trait construction sites migrate.",
           "attempts": [
-            "Have jet fix insert erase<Shape>(…) at each site.",
-            "Keep implicit erasure where the expected type names the trait."
+            "One coordinated source cutover without compatibility aliases."
           ],
-          "result": "The second attempt turns F back into A."
+          "result": "Real migration cost remains; reads need not change."
+        },
+        {
+          "option": "G",
+          "loss": "Every trait carrier may become larger.",
+          "attempts": [
+            "Measure dense arrays and large payloads as well as small values."
+          ],
+          "result": "Unmeasured layout tradeoff; not a guaranteed win."
         }
       ],
       "reports": [
         {
-          "title": "Any box: probes, trait-box cost measurement and adversarial review",
+          "title": "Any: independent probes, measurement limits and different-family review",
           "path": "Docs/audits/2026-11-10-prim-any-review.md",
-          "note": "p01-p14 and c01 on a0.0.43; 1M small trait values 0.119 s vs 0.110 s as an enum, equal peak memory; cleanup no longer names a descriptor; Rust, Swift and Go sources."
+          "note": "p01-p14 and c01 rerun; effectful Close executes; trait/enum timing does not isolate allocation or predict Any speed."
         },
         {
-          "title": "Rust std::any (downcast hands the box back)",
+          "title": "Rust std::any",
           "url": "https://doc.rust-lang.org/std/any/index.html"
         },
         {
-          "title": "Swift ABI: type layout and existential containers",
+          "title": "Swift ABI: existential containers",
           "url": "https://github.com/swiftlang/swift/blob/main/docs/ABI/TypeLayout.rst"
         },
         {
-          "title": "Go specification: type switches",
+          "title": "Go type switches",
           "url": "https://go.dev/ref/spec#Type_switches"
         }
       ]
@@ -200137,6 +200134,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:02:10.624Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PRIM-ANY1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:54:57.542Z",
       "by": "Main",
