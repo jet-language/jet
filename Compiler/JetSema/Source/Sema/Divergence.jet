@@ -248,7 +248,7 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScop
         .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> sema_divergence_switch(graph, scope, subject, arms, else_body, span)
         .Unsafe(_, audit, body, _) | .Impure(_, audit, body, _) -> sema_divergence_then(sema_divergence_optional(graph, scope, audit), sema_divergence_body(graph, scope, body))
         .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> sema_divergence_body(graph, scope, body)
-        .TaskGroup(_, _, limit, body, _) -> sema_divergence_then(sema_divergence_optional(graph, scope, limit), sema_divergence_body(graph, scope, body))
+        .TaskGroup(_, _, args, body, _) -> sema_divergence_then(sema_divergence_then(sema_divergence_optional(graph, scope, args.limit), sema_divergence_optional(graph, scope, args.stack)), sema_divergence_body(graph, scope, body))
         .ComptimeIf(_, _, then_body, else_body, _, selected_then) -> {
             if selected_then == {
                 .Val(selected) -> {

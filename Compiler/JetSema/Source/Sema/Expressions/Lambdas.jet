@@ -422,8 +422,13 @@ sema_expression_lambda_statement_use_outer: fn(statement: Stmt, frame: Int, para
         .Switched(_, body, _) -> sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
         .Region(_, _, body, _) -> sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
         .Policy(_, body, _) -> sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
-        .TaskGroup(_, _, limit, body, _) -> {
-            if limit != None && sema_expression_lambda_uses_outer(limit, frame, params, scopes) -> return true
+        .TaskGroup(_, _, args, body, _) -> {
+            if args.limit == .Val(limit) {
+                if sema_expression_lambda_uses_outer(limit, frame, params, scopes) -> return true
+            }
+            if args.stack == .Val(stack) {
+                if sema_expression_lambda_uses_outer(stack, frame, params, scopes) -> return true
+            }
             sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
         }
         .Layout(_, _, body, _) -> sema_expression_lambda_statements_use_outer(body, frame, params, scopes)
@@ -1255,8 +1260,9 @@ sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: I
                 sema_expression_lambda_collect_tree_expr(condition, frame, scopes, keys)
                 sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
             }
-            .TaskGroup(_, limit, body, _) -> {
-                sema_expression_lambda_collect_tree_optional_expr(limit, frame, scopes, keys)
+            .TaskGroup(_, args, body, _) -> {
+                sema_expression_lambda_collect_tree_optional_expr(args.limit, frame, scopes, keys)
+                sema_expression_lambda_collect_tree_optional_expr(args.stack, frame, scopes, keys)
                 sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
             }
             .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
@@ -1565,10 +1571,10 @@ sema_expression_lambda_rewrite_loop_label: fn(statements: &[Stmt], old_label: St
                 sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
                 statements[index] = Stmt.Policy{declarations: declarations, body: updated_body, span: span}
             }
-            .TaskGroup(name, name_span, limit, body, span) -> {
+            .TaskGroup(name, name_span, args, body, span) -> {
                 updated_body := body
                 sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.TaskGroup{name: name, name_span: name_span, limit: limit, body: updated_body, span: span}
+                statements[index] = Stmt.TaskGroup{name: name, name_span: name_span, args: args, body: updated_body, span: span}
             }
             .Layout(name, name_span, body, span) -> {
                 updated_body := body
@@ -2520,10 +2526,10 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
                 sema_expression_lambda_lift_block(updated, carrier)
                 statements[index] = TStmt.Loop{label: label, body: updated, span: span}
             }
-            .TaskGroup(group, limit, body, span) -> {
+            .TaskGroup(group, args, body, span) -> {
                 updated := body
                 sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated, span: span}
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated, span: span}
             }
             .If(condition, then_body, else_body, else_is_elseif, span) -> {
                 updated_then := then_body

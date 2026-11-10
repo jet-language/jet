@@ -391,8 +391,9 @@ sema_comptime_use_stmt: fn(statement: Stmt, scan: &SemaComptimeUseScan) {
             if step == .Val(value) -> sema_comptime_use_stmt(value, scan)
             sema_comptime_use_body(body, scan)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            if limit == .Val(value) -> sema_comptime_use_expr(value, scan)
+        .TaskGroup(_, _, args, body, _) -> {
+            if args.limit == .Val(value) -> sema_comptime_use_expr(value, scan)
+            if args.stack == .Val(value) -> sema_comptime_use_expr(value, scan)
             sema_comptime_use_body(body, scan)
         }
         .ContextBlock(fields, body, _) -> {

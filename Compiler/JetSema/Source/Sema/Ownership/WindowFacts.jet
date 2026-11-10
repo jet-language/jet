@@ -319,8 +319,9 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
             sema_window_scan_optional(audit, param, scan)
             sema_window_scan_body(body, param, scan)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            sema_window_scan_optional(limit, param, scan)
+        .TaskGroup(_, _, args, body, _) -> {
+            sema_window_scan_optional(args.limit, param, scan)
+            sema_window_scan_optional(args.stack, param, scan)
             sema_window_scan_body(body, param, scan)
         }
         .AssumeDet(_, reason, body, _) -> {

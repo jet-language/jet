@@ -33,6 +33,7 @@ use {
         TLetWrapper,
         TLocal,
         TOptionProbe,
+        TaskGroupArgs,
         Type,
         TypeTupleField,
         UnOp,
@@ -310,10 +311,15 @@ sema_taskgroup_receiver_ok: fn(receiver: Expr, span: Span, scopes: SemaScopeTabl
     false
 }
 
-sema_taskgroup_check_statement: fn(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
+// The largest stack a task group may ask for: the runtime caps every worker
+// and fiber stack at 8 GiB (Thread.jet THREAD_STACK_MAXIMUM).
+SEMA_TASKGROUP_STACK_MAXIMUM: 8589934592
+
+sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGroupArgs, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
     checked_limit := TExpr?{None}
+    checked_stack := TExpr?{None}
     valid := true
-    if limit == .Val(expression) {
+    if args.limit == .Val(expression) {
         checked: sema_check_expression(expression, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if checked == {
             .Val(value) -> {
@@ -322,6 +328,22 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, limit: Expr?, 
                     valid = false
                 }
                 checked_limit = Val(value)
+            }
+            else -> {
+                valid = false
+            }
+        }
+    }
+    if args.stack == .Val(expression) {
+        if !sema_taskgroup_check_stack_literal(expression, environment, program, scopes, diagnostics) -> valid = false
+        checked: sema_check_expression(expression, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        if checked == {
+            .Val(value) -> {
+                if !sema_expr_is_integer(value.ty) {
+                    diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group stack must be an integer", "the stack is the least number of bytes each task of the group runs on", "use an Int byte count, e.g. `stack: 256 * 1024 * 1024`"))
+                    valid = false
+                }
+                checked_stack = Val(value)
             }
             else -> {
                 valid = false
@@ -352,7 +374,24 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, limit: Expr?, 
     sema_single_use_leave_scope(scopes, state, diagnostics)
     if !nested.complete || !valid -> return None
     group_local := checked_symbol_local(name, name_span, id, Type.Named{name: "Group"})
-    TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
+    TStmt.TaskGroup{group: group_local, args: TTaskGroupArgs{limit: checked_limit, stack: checked_stack}, body: nested.value, span: span}
+}
+
+// A `stack:` the target cannot supply is a build error: a web target has no
+// per-task stack to size, and a native target supplies 1 byte to 8 GiB. A
+// count only known when the group opens is capped by the runtime instead.
+sema_taskgroup_check_stack_literal: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    machine: sema_hardware_target_machine(environment, program)
+    if machine == .Val(target) {
+        if target.name == "wasm.browser" {
+            diagnostics.push(sema_error("E-WEB-UNSUPPORTED", expr_span(expression), "the web target `{target.name}` cannot give a task group its own stack size", "browser tasks run on the host's one JavaScript stack, which a program cannot size", "drop `stack:` from this task group, or build it for a native target"))
+            return false
+        }
+    }
+    bytes: sema_expr_lint_int_constant(expression, scopes) ?? return true
+    if bytes >= 1 && bytes <= SEMA_TASKGROUP_STACK_MAXIMUM -> return true
+    diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group stack of {bytes} bytes is outside what this target supplies", "a native task stack is 1 byte to 8 GiB (8589934592 bytes)", "ask for 1 to 8589934592 bytes, e.g. `stack: 256 * 1024 * 1024`"))
+    false
 }
 
 // The check is inside a `task.group` body the current body owns, not in a

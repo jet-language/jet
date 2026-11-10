@@ -207,6 +207,12 @@ TIfCond: enum {
     IfLet(pattern: TPattern, subj: TExpr)
 }
 
+// A checked `task.group g(limit: n, stack: bytes)`'s arguments.
+TTaskGroupArgs: struct {
+    limit: TExpr?
+    stack: TExpr?
+}
+
 TContract: struct {
     kind: TContractKind
     condition: TExpr
@@ -232,7 +238,7 @@ TStmt: enum {
     Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ExprStmt(value: TExpr, span: Span)
     Return(value: TExpr?, span: Span)
-    TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
+    TaskGroup(group: TLocal, args: TTaskGroupArgs, body: [TStmt], span: Span)
     DeferClose(close: TExpr, resource: SymbolID, span: Span)
     If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
     Loop(label: String?, body: [TStmt], span: Span)
@@ -957,8 +963,9 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if value == Val(nested) -> visit(nested)
         }
         .ExprStmt(value, _) -> visit(value)
-        .TaskGroup(_, limit, body, _) -> {
-            if limit == Val(nested) -> visit(nested)
+        .TaskGroup(_, args, body, _) -> {
+            if args.limit == Val(nested) -> visit(nested)
+            if args.stack == Val(nested) -> visit(nested)
             tree_each_stmt_list_child(body, visit)
         }
         .DeferClose(close, _, _) -> visit(close)

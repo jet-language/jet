@@ -1295,8 +1295,9 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             }
             sema_taint_check_block(graph, state, body)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            if limit == {
+        .TaskGroup(_, _, args, body, _) -> {
+            if args.stack == .Val(value) -> sema_taint_check_expr(graph, state, value)
+            if args.limit == {
                 .Val(value) -> sema_taint_check_expr(graph, state, value)
                 .None -> {}
             }

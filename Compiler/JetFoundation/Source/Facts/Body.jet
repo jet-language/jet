@@ -182,6 +182,12 @@ BodyContract: struct {
     site: TContractSite
 }
 
+// `task.group g(limit: n, stack: bytes)`'s argument node ids.
+BodyTaskGroupArgs: struct {
+    limit: Int?
+    stack: Int?
+}
+
 StmtKind: enum {
     Contract(contract: BodyContract)
     ContractScope(pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span)
@@ -196,7 +202,7 @@ StmtKind: enum {
     Range(label: String?, variable: TLocal, source: Int?, start: Int, end: Int, step: Int?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
     ExprStmt(value: Int, span: Span)
     Return(value: Int?, span: Span)
-    TaskGroup(group: TLocal, limit: Int?, body: [Int], span: Span)
+    TaskGroup(group: TLocal, args: BodyTaskGroupArgs, body: [Int], span: Span)
     DeferClose(close: Int, resource: SymbolID, span: Span)
     If(condition: BodyIfCond, then_body: [Int], else_body: [Int]?, else_is_elseif: Bool, span: Span)
     Loop(label: String?, body: [Int], span: Span)
@@ -1022,7 +1028,10 @@ body_each_stmt_child: fn(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.A
             }
         }
         .TaskGroup(_, f1, f2, _) -> {
-            if f1 == .Val(inner) {
+            if f1.limit == .Val(inner) {
+                visit(inner)
+            }
+            if f1.stack == .Val(inner) {
                 visit(inner)
             }
             loop item in f2 {

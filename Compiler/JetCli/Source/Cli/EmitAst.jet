@@ -367,9 +367,10 @@ jet_cli_emit_ast_stmt: fn(statement: Stmt) -> JetCLIEmitNode Never! {
         .Switched(marker, body, _) -> jet_cli_emit_ast_body("switched", "switched #{marker.name}", body)
         .Region(name, _, body, _) -> jet_cli_emit_ast_body("region", "region {name}", body)
         .Policy(declarations, body, _) -> jet_cli_emit_ast_body("policy", "policy ({declarations.len()} declarations)", body)
-        .TaskGroup(name, _, limit, body, _) -> {
+        .TaskGroup(name, _, args, body, _) -> {
             children := [JetCLIEmitNode]{}
-            if limit == .Val(value) -> children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+            if args.limit == .Val(value) -> children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+            if args.stack == .Val(value) -> children.push(jet_cli_emit_node("stack", "stack", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
             loop inner in body -> children.push(jet_cli_emit_ast_stmt(inner))
             jet_cli_emit_node("task-group", "task group {name}", children)
         }

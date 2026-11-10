@@ -37,6 +37,7 @@ use jet_foundation.[
     BodyScopeMemberKind,
     BodyStrPart,
     BodyStructFieldValue,
+    BodyTaskGroupArgs,
     BodyTree,
     BodyUnitRounding,
     Call,
@@ -420,7 +421,7 @@ body_flat_stmt_kind: fn(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
         .Range(f_label, f_variable, f_source, f_start, f_end, f_step, f_exclusive, f_vectorization, f_body, f_span) -> StmtKind.Range{label: f_label, variable: f_variable, source: body_flat_opt_expr(f_source, flat), start: body_flat_expr(f_start, flat), end: body_flat_expr(f_end, flat), step: body_flat_opt_expr(f_step, flat), exclusive: f_exclusive, vectorization: f_vectorization, body: body_flat_list_stmt(f_body, flat), span: f_span}
         .ExprStmt(f_value, f_span) -> StmtKind.ExprStmt{value: body_flat_expr(f_value, flat), span: f_span}
         .Return(f_value, f_span) -> StmtKind.Return{value: body_flat_opt_expr(f_value, flat), span: f_span}
-        .TaskGroup(f_group, f_limit, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, limit: body_flat_opt_expr(f_limit, flat), body: body_flat_list_stmt(f_body, flat), span: f_span}
+        .TaskGroup(f_group, f_args, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, args: BodyTaskGroupArgs{limit: body_flat_opt_expr(f_args.limit, flat), stack: body_flat_opt_expr(f_args.stack, flat)}, body: body_flat_list_stmt(f_body, flat), span: f_span}
         .DeferClose(f_close, f_resource, f_span) -> StmtKind.DeferClose{close: body_flat_expr(f_close, flat), resource: f_resource, span: f_span}
         .If(f_condition, f_then_body, f_else_body, f_else_is_elseif, f_span) -> StmtKind.If{condition: body_flat_if_cond(f_condition, flat), then_body: body_flat_list_stmt(f_then_body, flat), else_body: body_flat_opt_list_stmt(f_else_body, flat), else_is_elseif: f_else_is_elseif, span: f_span}
         .Loop(f_label, f_body, f_span) -> StmtKind.Loop{label: f_label, body: body_flat_list_stmt(f_body, flat), span: f_span}
@@ -1272,7 +1273,7 @@ body_copy_stmt_kind: fn(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
         .Range(f_label, f_variable, f_source, f_start, f_end, f_step, f_exclusive, f_vectorization, f_body, f_span) -> StmtKind.Range{label: f_label, variable: f_variable, source: body_copy_opt_expr(f_source, flat), start: body_copy_expr(f_start, flat), end: body_copy_expr(f_end, flat), step: body_copy_opt_expr(f_step, flat), exclusive: f_exclusive, vectorization: f_vectorization, body: body_copy_list_stmt(f_body, flat), span: f_span}
         .ExprStmt(f_value, f_span) -> StmtKind.ExprStmt{value: body_copy_expr(f_value, flat), span: f_span}
         .Return(f_value, f_span) -> StmtKind.Return{value: body_copy_opt_expr(f_value, flat), span: f_span}
-        .TaskGroup(f_group, f_limit, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, limit: body_copy_opt_expr(f_limit, flat), body: body_copy_list_stmt(f_body, flat), span: f_span}
+        .TaskGroup(f_group, f_args, f_body, f_span) -> StmtKind.TaskGroup{group: f_group, args: BodyTaskGroupArgs{limit: body_copy_opt_expr(f_args.limit, flat), stack: body_copy_opt_expr(f_args.stack, flat)}, body: body_copy_list_stmt(f_body, flat), span: f_span}
         .DeferClose(f_close, f_resource, f_span) -> StmtKind.DeferClose{close: body_copy_expr(f_close, flat), resource: f_resource, span: f_span}
         .If(f_condition, f_then_body, f_else_body, f_else_is_elseif, f_span) -> StmtKind.If{condition: body_copy_if_cond(f_condition, flat), then_body: body_copy_list_stmt(f_then_body, flat), else_body: body_copy_opt_list_stmt(f_else_body, flat), else_is_elseif: f_else_is_elseif, span: f_span}
         .Loop(f_label, f_body, f_span) -> StmtKind.Loop{label: f_label, body: body_copy_list_stmt(f_body, flat), span: f_span}

@@ -61,6 +61,7 @@ use {
         StrPart,
         StructDef,
         SwitchArm,
+        TaskGroupArgs,
         TraitImplBlock,
         TupleField,
         Type,
@@ -1252,7 +1253,7 @@ sema_derive_expand_stmt: fn(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt
         .Switched(marker, body, span) -> Stmt.Switched{marker: marker.copy(), body: sema_derive_expand_stmts(expansion, body), span: span}
         .Region(name, name_span, body, span) -> Stmt.Region{name: name, name_span: name_span, body: sema_derive_expand_stmts(expansion, body), span: span}
         .Policy(declarations, body, span) -> Stmt.Policy{declarations: declarations, body: sema_derive_expand_stmts(expansion, body), span: span}
-        .TaskGroup(name, name_span, limit, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, limit: sema_derive_expand_optional_expr(expansion, limit), body: sema_derive_expand_stmts(expansion, body), span: span}
+        .TaskGroup(name, name_span, args, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, args: TaskGroupArgs{limit: sema_derive_expand_optional_expr(expansion, args.limit), stack: sema_derive_expand_optional_expr(expansion, args.stack)}, body: sema_derive_expand_stmts(expansion, body), span: span}
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_derive_expand_stmts(expansion, body), span: span}
         // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
         .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_derive_expand_stmts(expansion, body), span: span}

@@ -355,8 +355,10 @@ sema_contract_result_ident_in_stmt: fn(value: Stmt) -> Span? {
             if found != None -> return found
             sema_contract_result_ident_in_statements(body)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            found := sema_contract_result_ident_in_optional_expr(limit)
+        .TaskGroup(_, _, args, body, _) -> {
+            found := sema_contract_result_ident_in_optional_expr(args.limit)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_optional_expr(args.stack)
             if found != None -> return found
             sema_contract_result_ident_in_statements(body)
         }

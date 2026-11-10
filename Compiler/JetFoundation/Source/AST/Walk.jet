@@ -235,8 +235,9 @@ ast_visit_statement: fn(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
             if step == .Val(value) -> ast_visit_statement(value, visitor, nested_expression)
             ast_visit_body(body, visitor, nested_expression)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            if limit == .Val(value) -> ast_visit_expr(value, visitor)
+        .TaskGroup(_, _, args, body, _) -> {
+            if args.limit == .Val(value) -> ast_visit_expr(value, visitor)
+            if args.stack == .Val(value) -> ast_visit_expr(value, visitor)
             ast_visit_body(body, visitor, nested_expression)
         }
         .ContextBlock(fields, body, _) -> {

@@ -730,7 +730,7 @@ texts:
     .asciz "\n"
     .asciz "  --> \2:\3 in \1\n"
     .asciz "\7|\n\3 | \6\n\7| ^\n"
-    .asciz " Why: The call stack kept growing without reaching a safe return \xe2\x80\x94 with Jet file, line, and source context\n Fix: End the recursion or make progress toward a base case.\nMore: jet-lang.dev/e/E3012\n"
+    .asciz " Why: The call stack kept growing without reaching a safe return \xe2\x80\x94 with Jet file, line, and source context\n Fix: End the recursion or make progress toward a base case, or give deep work more stack with `task.group deep(stack: bytes)`.\nMore: jet-lang.dev/e/E3012\n"
     .asciz "Fault [SIGSEGV]: invalid memory access at address \5"
     .asciz "Fault [SIGBUS]: bus error at address \5"
     .asciz "Fault [SIGILL]: illegal instruction"

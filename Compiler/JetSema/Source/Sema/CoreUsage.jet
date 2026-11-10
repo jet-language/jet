@@ -1225,9 +1225,10 @@ sema_core_collect_stmts: fn(statements: [Stmt], imports: [SemaCoreImport], regis
                 sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)
                 if step != None -> sema_core_collect_stmts([Stmt]{step}, imports, registered, used, spans, callbacks)
             }
-            .TaskGroup(_, _, limit, body, span) -> {
+            .TaskGroup(_, _, args, body, span) -> {
                 sema_core_note_usage(used, spans, "core.concurrency::task", Val(span))
-                if limit != None -> sema_core_collect_expr(limit, imports, registered, used, spans, callbacks)
+                if args.limit == .Val(limit) -> sema_core_collect_expr(limit, imports, registered, used, spans, callbacks)
+                if args.stack == .Val(stack) -> sema_core_collect_expr(stack, imports, registered, used, spans, callbacks)
                 sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)
             }
             .Shield(body, span) -> {

@@ -80,6 +80,7 @@ use {
         StructDef,
         SwitchArm,
         SymbolKind,
+        TaskGroupArgs,
         TraitConstDecl,
         TraitDef,
         TraitImplBlock,
@@ -1198,7 +1199,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         .Switched(marker, body, span) -> Stmt.Switched{marker: marker.copy(), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Region(name, name_span, body, span) -> Stmt.Region{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Policy(declarations, body, span) -> Stmt.Policy{declarations: declarations, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
-        .TaskGroup(name, name_span, limit, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, limit: sema_inline_rewrite_optional_expr(rewrite, limit), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
+        .TaskGroup(name, name_span, args, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, args: TaskGroupArgs{limit: sema_inline_rewrite_optional_expr(rewrite, args.limit), stack: sema_inline_rewrite_optional_expr(rewrite, args.stack)}, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
         .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_inline_rewrite_stmts(rewrite, body), span: span}

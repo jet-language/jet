@@ -430,44 +430,38 @@ thread_rlimit_soft: fn(resource: I64) -> I64 {
     soft
 }
 
-// Rust scheduler worker stack: CompilerStack::COMPILER_STACK_SIZE = 192 MiB.
-// A larger soft RLIMIT_STACK (the native compiler stages run under prlimit,
-// since O0 frames are larger than Rust's) also sizes every runtime thread, so
-// work moved onto a scheduler worker gets the main thread's recursion budget.
-// RLIM_INFINITY, failures and a comptime child (no host probe) keep 192 MiB; capped at 8 GiB.
+// A runtime thread's stack, and a fiber's that asks for no more: the soft
+// RLIMIT_STACK, the size the main thread got, so work moved onto a scheduler
+// worker or a fiber keeps the main thread's recursion budget. It is at least
+// THREAD_STACK_DEFAULT (192 MiB, which RLIM_INFINITY, failures and a comptime
+// child, with no host probe, also take: the compiler's stages run on
+// scheduler workers) and at most THREAD_STACK_MAXIMUM. Nothing writes the
+// rlimit, so a child process inherits the user's. A task group that needs
+// more asks for it (`task.group g(stack: bytes)`, Fiber.jet
+// fiber_stack_class).
+thread_stack_bytes: fn() -> I64 {
+    soft: thread_rlimit_soft(I64{3})
+    thread_stack_capped(if (soft < THREAD_STACK_DEFAULT) -> THREAD_STACK_DEFAULT else if (soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft)
+}
+
 // Under a finite RLIMIT_AS (a memory_limit, a capped check) no stack takes
 // more than a THREAD_STACK_SPACE_SHARE-th of the address space (at least
 // THREAD_STACK_FLOOR), so the carriers' and fibers' stacks leave the heap its
 // room, which one RLIMIT_STACK-sized stack per thread and fiber would not.
-// A floor set through jet_rt_thread_stack_floor_set raises the size before
-// that cap.
-thread_stack_bytes: fn() -> I64 {
-    soft: thread_rlimit_soft(I64{3})
-    bytes := if (soft <= I64{201326592}) -> I64{201326592} else if (soft > I64{8589934592}) -> I64{8589934592} else -> soft
-    if bytes < thread_stack_minimum -> bytes = thread_stack_minimum
+thread_stack_capped: fn(bytes: I64) -> I64 {
+    capped := bytes
     space: thread_rlimit_soft(I64{9})
     if (space > I64{0}) {
         share: (space / THREAD_STACK_SPACE_SHARE).bit_and(I64{-4096})
-        if share < bytes -> bytes = if share > THREAD_STACK_FLOOR -> share else -> THREAD_STACK_FLOOR
+        if share < capped -> capped = if share > THREAD_STACK_FLOOR -> share else -> THREAD_STACK_FLOOR
     }
-    bytes
+    capped
 }
 
-// The least stack a runtime thread takes, 0 to 8 GiB; 0 until
-// jet_rt_thread_stack_floor_set sets it.
-thread_stack_minimum := I64{0}
-
-// core.sys.__thread_stack_floor(bytes): every runtime thread started after
-// this call (carriers, fibers' threads, Core threads) takes at least `bytes`
-// of stack, clamped to 0..8 GiB, still under the RLIMIT_AS share cap. The
-// compiler sets its own stages' floor this way before it starts any task.
-#Export(c) jet_rt_thread_stack_floor_set: fn(bytes: I64) {
-    floor: if (bytes < I64{0}) -> I64{0} else if (bytes > I64{8589934592}) -> I64{8589934592} else -> bytes
-    #Unsafe("one aligned word, set before the threads it sizes start; thread_spawn reads it once per thread") {
-        thread_stack_minimum = floor
-    }
-}
-
+// The least default stack.
+THREAD_STACK_DEFAULT: I64{201326592}
+// The most any stack takes, default or asked for: 8 GiB.
+THREAD_STACK_MAXIMUM: I64{8589934592}
 // The smallest stack thread_spawn falls back to.
 THREAD_STACK_FLOOR: I64{1048576}
 // Under a finite RLIMIT_AS a stack takes at most a hundredth of it: 204 MiB

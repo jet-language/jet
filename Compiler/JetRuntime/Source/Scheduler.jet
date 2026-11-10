@@ -743,16 +743,17 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler232: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler240: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
-// blocked208 monitorArmed216 monitor224.
+// blocked208 monitorArmed216 monitor224 sizedPools232.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
 // The FIFO holds submitted task states (linked through their reserved word
 // @88); ready holds fibers to resume (Fiber.jet). live counts tasks taken and
 // not finished, parked their parked fibers, fibers the fiber stacks mapped,
-// pooled (pool, linked through Fiber next@48) the idle ones and fiberSpace
+// pooled (pool, linked through Fiber next@48, and the sizedPools lists of
+// larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
 // carriers is a word list (scheduler_words) of Carrier64 records {argument0
 // handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56}, changed only under
@@ -782,7 +783,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // finds no idle carrier; monitor is its thread handle (0: not started, -1:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
-SCHEDULER_ROOT_BYTES: I64{232}
+SCHEDULER_ROOT_BYTES: I64{240}
 SCHEDULER_CARRIER_BYTES: I64{64}
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
 SCHEDULER_STAT_BYTES: I64{512}
@@ -1313,7 +1314,7 @@ scheduler_carrier_idle: fn(root: I64) {
         sync_store(runs, wrapping(sync_load(runs) + I64{1}))
         if (task != I64{0}) {
             jet_rt_observe_pool(I64{-1}, I64{-1})
-            fiber = fiber_take(root)
+            fiber = fiber_take(root, scheduler_job_stack(task))
             if (fiber == I64{0}) {
                 // No stack could be mapped, or the fiber stacks' space is
                 // spent: the job runs on the carrier, whose waits then block it.
@@ -1361,6 +1362,12 @@ scheduler_carrier_retire: fn(root: I64, record: I64) {
 // positive reference count.
 scheduler_run_job: fn(job: I64) {
     if (sync_load(job) == PARALLEL_JOB) -> parallel_job_run(job) else -> task_run(job)
+}
+
+// The stack size a job's fiber takes (Fiber.jet fiber_stack_class): a
+// parallel worker's stack136, a task state's stack96.
+scheduler_job_stack: fn(job: I64) -> I64 {
+    if (sync_load(job) == PARALLEL_JOB) -> sync_load(wrapping(job + I64{136})) else -> sync_load(wrapping(job + I64{96}))
 }
 
 // Fiber counts for tests: parked@0, carriers started@8, fiber stacks@16.

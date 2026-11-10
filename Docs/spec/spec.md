@@ -3155,7 +3155,16 @@ retain source order. `race` and `any` remain positional.
 
 `task.group name { ... }` creates a lexical group. `task.group name(limit: n)
 { ... }` limits active children; a limit below one is clamped to one before
-admission. The group owns and joins every child created in its body. A `Group`
+admission. `task.group name(stack: bytes) { ... }` gives each child at least
+`bytes` of stack, and the groups and tasks a child opens inherit it unless
+they name their own; every other task gets the system's stack size (the soft
+`RLIMIT_STACK`), at least 192 MiB. The runtime caps a request at 8 GiB, and
+under a finite address-space limit at a hundredth of it; a constant `stack:`
+outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
+**E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both
+arguments may be given, in either order, at most once each
+(D-THREAD-STACK1=A). The group owns and joins every child created in its
+body. A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet

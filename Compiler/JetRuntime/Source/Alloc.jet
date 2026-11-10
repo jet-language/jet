@@ -255,15 +255,18 @@ alloc_arena_root: fn(index: I64) -> I64 {
     }
 }
 
-// The calling thread's arena. Thread stacks are disjoint mappings of at least
-// 192 MiB (Thread.jet thread_stack_bytes), so threads running at the same time
-// sit in different 128 MiB stack bands; the band's hash picks one of the 32
-// arenas. Any arena is correct for any thread: the choice only spreads lock
-// traffic, and a block always returns to the arena of its slab.
+// The calling thread's arena. Thread and fiber stacks are disjoint mappings
+// of at least 8 MiB (Thread.jet thread_stack_bytes, THREAD_STACK_DEFAULT; a
+// stack cut under a finite RLIMIT_AS may be smaller), so tasks running at the
+// same time sit in different 8 MiB stack bands; the band's hash picks one of
+// the 32 arenas. A deeper stack spans several bands, and its thread moves
+// between their arenas as it recurses. Any arena is correct for any thread:
+// the choice only spreads lock traffic, and a block always returns to the
+// arena of its slab.
 alloc_arena: fn() -> I64 {
     band := I64{0}
     #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
-        band = os_stack_address_i64() >> I64{27}
+        band = os_stack_address_i64() >> I64{23}
     }
     alloc_arena_root((wrapping(band * I64{-7046029254386353131}) >> I64{59}).bit_and(I64{31}))
 }

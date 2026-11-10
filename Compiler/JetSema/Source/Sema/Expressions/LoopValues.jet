@@ -198,10 +198,10 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
             }
-            .TaskGroup(group, limit, body, span) -> {
+            .TaskGroup(group, args, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
-                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated_body, span: span}
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
             }
             .Layout(handle, label, body, span) -> {
                 updated_body := body
@@ -385,10 +385,10 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
             }
-            .TaskGroup(group, limit, body, span) -> {
+            .TaskGroup(group, args, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
-                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated_body, span: span}
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
             }
             .Layout(handle, label, body, span) -> {
                 updated_body := body

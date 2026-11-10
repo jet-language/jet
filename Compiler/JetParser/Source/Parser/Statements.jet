@@ -28,6 +28,7 @@ use {
         Stmt,
         StrPart,
         SwitchArm,
+        TaskGroupArgs,
         TupleField,
         Type,
         TypedLitBody,
@@ -568,8 +569,8 @@ parser_scope_member_ahead: fn(state: &JetParserState) -> Bool Never! {
     }
 }
 
-// Rust `stmt` `task.group g { … }` or
-// `task.group g(limit: n) { … }` opens a structured task scope.
+// Rust `stmt` `task.group g { … }`, or with arguments,
+// `task.group g(limit: n, stack: bytes) { … }`, opens a structured task scope.
 parser_task_group_ahead: fn(state: &JetParserState) -> Bool Never! {
     if parser_value_at(state, 0) != "task" || parser_kind_at(state, 1) != TOKEN_DOT -> return false
     selector: parser_lookahead(state, 2)
@@ -578,26 +579,36 @@ parser_task_group_ahead: fn(state: &JetParserState) -> Bool Never! {
     opener == TOKEN_LBRACE || opener == TOKEN_LPAREN
 }
 
+// The arguments are `limit:` (the most children running at once) and
+// `stack:` (the least stack, in bytes, each child runs on), each at most
+// once, in either order.
 parser_parse_task_group: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
     parser_expect(state, TOKEN_DOT, "after `task`")
     parser_expect_name(state, "for the `group` selector")
     name: parser_expect_name(state, "for the task group name")
-    limit := Expr?{None}
+    args := TaskGroupArgs{}
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
-        label: parser_expect_name(state, "for the group limit label")
-        label_name: parser_value(state, label)
-        if label_name != "limit" {
-            parser_add_error_code(state, "E0003", label.span, "task-group parameter `{label_name}` is not supported", "the group parameter names the maximum number of active children", "write `limit: n`")
+        loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
+            at: state.position
+            label: parser_expect_name(state, "for a task-group argument label")
+            label_name: parser_value(state, label)
+            parser_expect(state, TOKEN_COLON, "after `{label_name}`")
+            value: parser_parse_expression(state, 1, 0)
+            if {
+                label_name == "limit" && args.limit == None -> args.limit = Val(value.expr)
+                label_name == "stack" && args.stack == None -> args.stack = Val(value.expr)
+                label_name == "limit" || label_name == "stack" -> parser_add_error_code(state, "E0003", label.span, "task-group argument `{label_name}` is given twice", "each task-group argument is given at most once", "keep one `{label_name}:`")
+                else -> parser_add_error_code(state, "E0003", label.span, "task-group parameter `{label_name}` is not supported", "a task group takes `limit:`, the most children running at once, and `stack:`, the least stack in bytes each child runs on", "write `limit: n` or `stack: bytes`")
+            }
+            if parser_current_kind(state) == TOKEN_RPAREN || state.position == at -> break
+            parser_expect(state, TOKEN_COMMA, "between task-group arguments")
         }
-        parser_expect(state, TOKEN_COLON, "after `limit`")
-        value: parser_parse_expression(state, 1, 0)
-        limit = Val(value.expr)
-        parser_expect(state, TOKEN_RPAREN, "after the task-group limit")
+        parser_expect(state, TOKEN_RPAREN, "after the task-group arguments")
     }
     body: parser_parse_block(state)
-    Stmt.TaskGroup{name: parser_value(state, name), name_span: name.span, limit: limit, body: body.statements, span: parser_cover(start.span, body.span)}
+    Stmt.TaskGroup{name: parser_value(state, name), name_span: name.span, args: args, body: body.statements, span: parser_cover(start.span, body.span)}
 }
 
 parser_parse_scope_member: fn(state: &JetParserState) -> Stmt {

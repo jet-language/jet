@@ -870,12 +870,20 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
         // `#Region(r) { … }`.
         .Region(_, _, body, _) -> jfmt_fmt_body(f, body)
         .Policy(_, body, _) -> jfmt_fmt_body(f, body)
-        // `task.group g(limit: n) { … }`.
-        .TaskGroup(name, _, limit, body, _) -> {
+        // `task.group g(limit: n, stack: bytes) { … }`.
+        .TaskGroup(name, _, args, body, _) -> {
             jfmt_write(f, "task.group {name}")
-            if limit == .Val(value) {
-                jfmt_write(f, "(limit: ")
-                jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+            if args.limit != None || args.stack != None {
+                jfmt_write(f, "(")
+                if args.limit == .Val(value) {
+                    jfmt_write(f, "limit: ")
+                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                }
+                if args.stack == .Val(value) {
+                    if args.limit != None -> jfmt_write(f, ", ")
+                    jfmt_write(f, "stack: ")
+                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                }
                 jfmt_write(f, ")")
             }
             jfmt_write(f, " {{")

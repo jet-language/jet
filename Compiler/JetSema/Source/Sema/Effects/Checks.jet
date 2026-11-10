@@ -2734,8 +2734,9 @@ sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: Se
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
             .ExprStmt(value, _) | .DeferClose(value, _, _) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, value, audited, diagnostics)
-            .TaskGroup(_, limit, body, _) -> {
-                if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, limit_value, audited, diagnostics)
+            .TaskGroup(_, args, body, _) -> {
+                if args.limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, limit_value, audited, diagnostics)
+                if args.stack == .Val(stack_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, stack_value, audited, diagnostics)
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
             .If(condition, then_body, else_body, _, _) -> {
@@ -4439,8 +4440,9 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
             if value == .Val(returned) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, returned)
         }
         .ExprStmt(value, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
-        .TaskGroup(_, limit, body, _) -> {
-            if limit == .Val(limit_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, limit_value)
+        .TaskGroup(_, args, body, _) -> {
+            if args.limit == .Val(limit_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, limit_value)
+            if args.stack == .Val(stack_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, stack_value)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         }
         .DeferClose(close, _, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, close)
