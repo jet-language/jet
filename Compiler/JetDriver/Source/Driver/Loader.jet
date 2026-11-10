@@ -3406,7 +3406,7 @@ jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand N
 // name table (name_find; a spelling the source never uses has no id, -1,
 // which no token carries), so the scan compares ids, never Strings. Each
 // bare module row has its name's id and, for `URL`, the id of `url` too;
-// `$here` builds a `SourceLocation`, so it is that row's alias.
+// `#here` builds a `SourceLocation`, so its word `here` is that row's alias.
 // The fields are not spelled `or_err`, `abs`, `pow` or `regex`: this scan
 // runs on the compiler's own source too, and `names.abs` would be an `abs`
 // receiver demand of the self-compile.
@@ -3450,7 +3450,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
         bare.push(jet_driver_core_demand_name(tables, row.name))
         alias := -1
         if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
-        if row.name == "SourceLocation" -> alias = jet_driver_core_demand_name(tables, "$here")
+        if row.name == "SourceLocation" -> alias = jet_driver_core_demand_name(tables, "here")
         if row.name == "Phase" -> alias = jet_driver_core_demand_name(tables, "phase")
         bare_alias.push(alias)
     }

@@ -4158,14 +4158,14 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
     Val(sema_node(context, Type.Result{ok: result, err: Type.Named{name: "Expired"}}, NodeKind.Unit, method_span))
 }
 
-// `$here` is the `SourceLocation` of where it is written, and `#line` and
-// `#file` are its line and file. `$caller` reaches
-// here only outside a parameter default (call sites and declarations replace
-// it there), which is E2427. `#phase` is the `Phase` of where it is
-// evaluated: `.Preparation` in comptime code, `.Build` in `fn build`, and
-// `.Runtime` anywhere else, so every tier reads the same constant.
+// `#here` is the `SourceLocation` of where it is written (`#here.line`,
+// `#here.file`). `#caller` reaches here only outside a parameter default
+// (call sites and declarations replace it there), which is E2427. `#phase` is
+// the `Phase` of where it is evaluated: `.Preparation` in comptime code,
+// `.Build` in `fn build`, and `.Runtime` anywhere else, so every tier reads
+// the same constant.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if name == "$caller" || name == "#caller" {
+    if name == "#caller" {
         row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
@@ -4174,17 +4174,21 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
         phase: if scopes.comptime_execution_depth > 0 -> "Preparation" else if (scopes.location_function ?? environment.function_name) == "build" -> "Build" else -> "Runtime"
         return sema_check_expression(Expr.EnumLit{type_name: "Phase", variant: phase, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    if name == "#line" || name == "#file" {
-        location: sema_expression_panic_location(environment, program, scopes, span)
-        value: if name == "#line" -> Expr.Int{value: location.line, span: span, width: None, raw: None, id: AST_NODE_GENERATED} else -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: location.file}}, span: span, id: AST_NODE_GENERATED}
-        return sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
     sema_check_expression(sema_site_location_expr("SourceLocation", environment, program, scopes, span), expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// A `#here` parameter default is E2428: it would name the declaration, and
+// the place of each call is `#caller`.
+sema_site_here_default_check: fn(expr: Expr, diagnostics: &[Diagnostic]) {
+    if expr == .Ident(name, span, _) && name == "#here" {
+        row: diagnostic_registry_row("E2428") ?? panic("E2428 must have a registry row")
+        diagnostics.push(sema_error("E2428", span, row.what, row.why, row.fix))
+    }
 }
 
 // The site roots, which no binding shadows.
 sema_site_root_name: fn(name: String) -> Bool Never! {
-    name == "$here" || name == "$caller" || name == "#here" || name == "#caller" || name == "#line" || name == "#file" || name == "#phase"
+    name == "#here" || name == "#caller" || name == "#phase"
 }
 
 sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

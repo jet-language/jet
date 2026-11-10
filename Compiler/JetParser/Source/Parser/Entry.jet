@@ -1316,18 +1316,12 @@ parser_constant_name: fn(name: String) -> Bool Never! {
     has_upper
 }
 
-// The `$` site locations; sema decides where `$caller` is legal. The other
-// subjectless facts are the compiler values `#build`, `#phase`, `#program`,
-// `#package`, `#line` and `#file`.
-parser_fact_root: fn(name: String) -> Bool Never! {
-    name == "$here" || name == "$caller"
-}
-
-// At `#`: `#build`, `#phase`, `#program`, `#package`, `#line` or `#file`
-// written as one word, which is no marker path (`#file.Name`).
+// At `#`: the compiler values `#build`, `#phase` and `#program` and the site
+// values `#package`, `#here` and `#caller` written as one word, which is no
+// marker path (`#here.Name`); sema decides where `#caller` is legal.
 parser_site_value_ahead: fn(state: &JetParserState) -> Bool Never! {
     word: parser_value_at(state, 1)
-    if word != "build" && word != "phase" && word != "program" && word != "package" && word != "line" && word != "file" && word != "here" && word != "caller" -> return false
+    if word != "build" && word != "phase" && word != "program" && word != "package" && word != "here" && word != "caller" -> return false
     if parser_lookahead(state, 0).span.end != parser_lookahead(state, 1).span.start -> return false
     if parser_kind_at(state, 2) == TOKEN_DOT && parser_kind_at(state, 3) == TOKEN_IDENT {
         next: parser_value_at(state, 3)
@@ -1336,10 +1330,9 @@ parser_site_value_ahead: fn(state: &JetParserState) -> Bool Never! {
     true
 }
 
-// Rust `Parser::unknown_fact_root` a `$`
-// word in ordinary expression position that is no fact root. An ALL_CAPS
-// `$NAME` is the config-only environment read any other
-// `$word` is not a compiler fact. Both report the whole word. Fatal, as Rust
+// Rust `Parser::unknown_fact_root`: a `$` word in ordinary expression
+// position. An ALL_CAPS `$NAME` is the config-only environment read; any
+// other `$word` is no name. Both report the whole word. Fatal, as Rust
 // returns it as the expression's `Err`.
 parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: Span) {
     body: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
@@ -1347,7 +1340,7 @@ parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: 
         parser_add_error(state, span, "`$NAME` is an environment read for config surfaces only", "Jet reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
         return
     }
-    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks only the site locations `$here` and `$caller`", "drop the `$` from a plain name, or read a fact through its subject, such as `T.reflect().fields`")
+    parser_add_error(state, span, "`{name}` is not a name", "Jet program source has no `$` words; only config surfaces read `$NAME` from the environment", "write the name without the `$`")
 }
 
 // After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.

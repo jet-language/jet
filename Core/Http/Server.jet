@@ -194,13 +194,13 @@ impl HTTPMux {
     // wrote that contract complete, and `web.openapi(mux)` checks it against
     // the route when it renders, so registration parses no JSON. `at` is the
     // place of the registering call, so a refused route names its line.
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{$caller}) Never! -[Net]> {
+    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
         __route_add(self, method, pattern, __handler(handler), contract, at)
     }
 
     // A route whose pattern is a run-time value: its contract
     // (`"pattern":""`) gets its path inputs from the pattern registered.
-    __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{$caller}) Never! -[Net]> {
+    __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
         parsed: __route_parse(pattern)
         if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
         checked: __route_contract(method, pattern, parsed.segments, contract, at)

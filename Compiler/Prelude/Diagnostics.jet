@@ -12066,9 +12066,19 @@ CallerSiteMisplaced: struct {
     impl Diagnostic {
         code: "E2427"
         detail: true
-        what: fn(self) -> String { "`$caller` is legal only as a parameter default or inside an #Expand macro." }
-        why: fn(self) -> String { "`$caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
-        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{$caller}}` and read `at`, or write `$here` for this line." }
+        what: fn(self) -> String { "`#caller` is legal only as a parameter default or inside an #Expand macro." }
+        why: fn(self) -> String { "`#caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
+        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{#caller}}` and read `at`, or write `#here` for this line." }
+    }
+}
+
+HereSiteDefault: struct {
+    impl Diagnostic {
+        code: "E2428"
+        detail: true
+        what: fn(self) -> String { "A `#here` parameter default names the declaration, not the call." }
+        why: fn(self) -> String { "`#here` is the place where it is written, so every call that leaves the parameter out would get the default's own line." }
+        fix: fn(self) -> String { "Write the default as `#caller` to get the place of each call." }
     }
 }
 

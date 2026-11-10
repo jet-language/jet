@@ -30,17 +30,15 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "comptime fn", meaning: "build-time literal-hook method" },
     { spelling: "comptime use {{ … }} / comptime use alias: path", meaning: "build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime {{ … }}` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration" },
-    { spelling: "$", meaning: "site location `$here`, `$caller`" },
+    { spelling: "$", meaning: "config-surface environment read `$NAME`; program source has no `$` words" },
     { spelling: "#{{name}}", meaning: "template paste: `#{{method}}: fn`, `self.#{{field}}`, `.#{{left}}` splice a derive or marker template binding" },
     { spelling: "x.reflect().fact", meaning: "compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin`" },
     { spelling: FACT_ROOT_BUILD, meaning: "compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`" },
     { spelling: "#package", meaning: "package site value: `#package.name`, `.version`" },
-    { spelling: "#line", meaning: "the `Int` source line where it is written" },
-    { spelling: "#file", meaning: "the `String` source file where it is written" },
     { spelling: FACT_ROOT_PHASE, meaning: "compiler evaluation-site `Phase` value" },
     { spelling: FACT_ROOT_PROGRAM, meaning: "compiler authorized checked-program fact value" },
-    { spelling: FACT_ROOT_HERE, meaning: "the `SourceLocation` (file, line, column, function, module) where it is written" },
-    { spelling: FACT_ROOT_CALLER, meaning: "the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{{$caller}}` or inside an #Expand macro" },
+    { spelling: FACT_ROOT_HERE, meaning: "site value: the `SourceLocation` (file, line, column, function, module) where it is written, as in `#here.line` and `#here.file`" },
+    { spelling: FACT_ROOT_CALLER, meaning: "the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{{#caller}}` or inside an #Expand macro" },
     { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)" },
     { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)" },
     { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items" },
@@ -74,7 +72,7 @@ LEXICAL_LEDGER: [LexicalEntry]{
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.
-/// `#build`, `#phase`, `#program`, `#package`, `$here` and `$caller` are the fact roots; type, function,
+/// `#build`, `#phase`, `#program`, `#package`, `#here` and `#caller` are the fact roots; type, function,
 /// method, closure and value facts are `$` members of their subject
 /// (`T.reflect().fields`).
 META_QUERY_SOURCE: "@SOURCE"

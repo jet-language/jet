@@ -477,7 +477,7 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 
 // Mux registration lowers to the mux's own source methods; the checked
 // arguments carry their conventions. A parameter the registration leaves out
-// takes its declared default, which is `$caller` (the `at: SourceLocation` of
+// takes its declared default, which is `#caller` (the `at: SourceLocation` of
 // `HTTPMux.__route`): the place of this call, as at any call.
 sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: &&[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if program.registration_graph == .Val(graph) {
@@ -488,7 +488,7 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
         loop index in filled.len()..<params.len() {
             reference: params[index].default_ref ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no default")
             declared: sema_registration_resolve_default(graph, reference) ?? panic("HTTPMux.{method} parameter `{params[index].name}` lost its default")
-            if !sema_site_is_caller(declared) -> panic("HTTPMux.{method} parameter `{params[index].name}` has a default other than `$caller`")
+            if !sema_site_is_caller(declared) -> panic("HTTPMux.{method} parameter `{params[index].name}` has a default other than `#caller`")
             declared_ty: params[index].ty ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no type")
             location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))

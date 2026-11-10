@@ -43,7 +43,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [PrepFn](Comptime/PrepFn.jet) — `comptime fn` marks a literal hook, a method that runs while building to turn a written number into a value.
 - [PrepLoop](Comptime/PrepLoop.jet) — `comptime loop` repeats declarations while building.
 - [RungSpellings](Comptime/RungSpellings.jet)
-- [SiteValues](Comptime/SiteValues.jet) — `#line` and `#file` are the line and file where they are written; `#build` and `#phase` are compiler values, so a local named `build` or `phase` is an ordinary binding beside them.
+- [SiteValues](Comptime/SiteValues.jet) — `#here` is the `SourceLocation` where it is written, so `#here.line` and `#here.file` are its line and file; `#build` and `#phase` are compiler values, so a local named `build` or `phase` is an ordinary binding beside them.
 - [StartupConstants](Comptime/StartupConstants.jet)
 - [StartupTrap](Comptime/StartupTrap.jet) — A constant whose build-time try stops (here a `panic`) is not a build error: the program computes it at startup instead, and the same stop then ends the…
 - [StaticConstant](Comptime/StaticConstant.jet) — `#Static` gives a compile-time constant a stable address.
@@ -68,7 +68,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 
 ## Reflection
 
-- [CallerLocation](Reflection/CallerLocation.jet) — Code-site facts (D-JAI-SITE1): a parameter whose default is `$caller` receives the place of each call that leaves it out, and `$here` is the place where it is written.
+- [CallerLocation](Reflection/CallerLocation.jet) — Code-site facts (D-JAI-SITE1): a parameter whose default is `#caller` receives the place of each call that leaves it out, and `#here` is the place where it is written.
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.

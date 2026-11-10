@@ -60,28 +60,28 @@ LogLevel: enum {
     Fatal
 }
 
-debug: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Debug, message, [LogField]{}, at.module) }
+debug: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Debug, message, [LogField]{}, at.module) }
 
-info: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Info, message, [LogField]{}, at.module) }
+info: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Info, message, [LogField]{}, at.module) }
 
-warn: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Warn, message, [LogField]{}, at.module) }
+warn: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Warn, message, [LogField]{}, at.module) }
 
-error: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Error, message, [LogField]{}, at.module) }
+error: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Error, message, [LogField]{}, at.module) }
 
 /// Emit a message at a caller-selected level.
-log: fn(level: LogLevel, message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(level, message, [LogField]{}, at.module) }
+log: fn(level: LogLevel, message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(level, message, [LogField]{}, at.module) }
 
-critical: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Critical, message, [LogField]{}, at.module) }
+critical: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Critical, message, [LogField]{}, at.module) }
 
-fatal: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Fatal, message, [LogField]{}, at.module) }
+fatal: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Fatal, message, [LogField]{}, at.module) }
 
-debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Debug, message, fields, at.module) }
+debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Debug, message, fields, at.module) }
 
-info_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Info, message, fields, at.module) }
+info_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Info, message, fields, at.module) }
 
-warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Warn, message, fields, at.module) }
+warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Warn, message, fields, at.module) }
 
-error_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Error, message, fields, at.module) }
+error_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Error, message, fields, at.module) }
 
 field: fn(key: String, value: String) -> LogField Never! {
     LogField{key: key, value: value, kind: "string", redacted: false}
@@ -152,7 +152,7 @@ otlp_file: fn(path: String) Never! -[Log, FS]> {
 /// it; "" is every module. The code's levels rank above the package's `log:`
 /// field and below JET_LOG and `--log`: when either names the same path, its
 /// level stays, and this call logs one `warn` note that says so.
-set_level: fn(level: LogLevel, path: String{""}, at: SourceLocation{$caller}) Never! -[Log]> {
+set_level: fn(level: LogLevel, path: String{""}, at: SourceLocation{#caller}) Never! -[Log]> {
     code_level(level_rank(level), path, at)
 }
 
@@ -207,7 +207,7 @@ disable: fn() Never! -[Log]> { core.log.__disabled_store(true) }
 flush: fn() Never! -[Log]> { core.log.__flush() }
 
 /// Whether a record at `level` from the calling module would be written.
-enabled: fn(level: LogLevel, at: SourceLocation{$caller}) -[Log]> Bool Never! {
+enabled: fn(level: LogLevel, at: SourceLocation{#caller}) -[Log]> Bool Never! {
     enabled_for(level_rank(level), at.module)
 }
 
@@ -584,7 +584,7 @@ format: fn(target: Formatter, event: LogRecord) -> String Never! {
     render_json(event)
 }
 
-handle: fn(target: Handler, event: LogRecord, at: SourceLocation{$caller}) Never! -[Log]> {
+handle: fn(target: Handler, event: LogRecord, at: SourceLocation{#caller}) Never! -[Log]> {
     if level_rank(event.level) < level_rank(target.minimum) -> return
     formatter: Formatter{mode: canon_mode(target.mode)}
     if formatter.mode == "text" {

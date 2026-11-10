@@ -77,8 +77,9 @@ declaration from the binding's text, `self.#{field}` reads the member a loop
 value names, `.#{left}` matches the variant it names, and a bare `#{count}`
 or a string hole `{count}` reads the binding's build-time value. A compiler
 fact reads through the subject, `field.reflect().name`, inside a template as
-anywhere else. A paste outside a derive or marker template is E0003, and a
-`$` word other than the site locations `$here` and `$caller` is E0003.
+anywhere else. A paste outside a derive or marker template is E0003, and so
+is any `$` word in program source (the site values are `#here` and
+`#caller`, D-SITE-CALLER1=A).
 
 ## Effect tiers and reproducibility
 

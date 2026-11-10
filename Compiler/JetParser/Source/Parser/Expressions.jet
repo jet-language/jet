@@ -934,8 +934,8 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
             span: span,
         }
     }
-    // `#package`, `#line` and `#file`: the site values, one name written
-    // against the `#`. A marker path `#file.Name` stays a marker.
+    // `#package`, `#here` and `#caller`: the site values, one name written
+    // against the `#`. A marker path `#here.Name` stays a marker.
     if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) {
         parser_bump(state)
         name_token: parser_bump(state)
@@ -970,11 +970,10 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
             span: span,
         }
     }
-    // The lexer reads `$NAME` as one
-    // identifier. Only a config surface reads it as an environment read; in
-    // ordinary source, a template included, a `$` word must be a site
-    // location (`$here`, `$caller`).
-    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads && !parser_fact_root(word) {
+    // The lexer reads `$NAME` as one identifier. Only a config surface reads
+    // it as an environment read; in ordinary source, a template included, a
+    // `$` word is no name.
+    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads {
         parser_bump(state)
         parser_report_unknown_fact_root(state, word, token.span)
         return ParsedExpr{expr: Expr.Ident{name: word, span: token.span, id: parser_node_id(state)}, span: token.span}

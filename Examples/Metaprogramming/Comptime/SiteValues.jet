@@ -1,6 +1,6 @@
-// `#line` and `#file` are the line and file where they are written. `#build`
-// and `#phase` are compiler values, so a local named `build` or `phase` is an
-// ordinary binding beside them.
+// `#here` is the `SourceLocation` where it is written (`#here.line`,
+// `#here.file`). `#build` and `#phase` are compiler values, so a local named
+// `build` or `phase` is an ordinary binding beside them.
 Settings: struct {
     profile: String
 }
@@ -9,12 +9,12 @@ Box: struct {
     settings: Settings
 }
 
-where: fn() -> Int { #line }
+where: fn() -> Int { #here.line }
 
 run: fn() {
     print(where())
-    print(#line)
-    print(#file.ends_with("SiteValues.jet"))
+    print(#here.line)
+    print(#here.file.ends_with("SiteValues.jet"))
     comptime if #build.target.os == {
         .Linux -> { print("built for Linux") }
         else -> { print("built for another OS") }

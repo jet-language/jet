@@ -120,14 +120,13 @@ SIGIL_FENCE_CLOSE: ":>"
 /// `#Track name: expr` / `#Track name := expr`.
 MARKER_TRACK: "Track"
 
-/// The site-location sigil: `$here` and `$caller`. A program reads a
-/// compiler fact through its subject (`T.reflect().layout`,
-/// `f.reflect().effects`, `value.reflect().origin`); the subjectless facts are
-/// the compiler values `#build`, `#phase`, `#program` and `#package`. A derive
-/// or marker template pastes a binding as `#{name}`
-/// (`#{method}: fn`, `self.#{field}`, `.#{left}`). The mark belongs to the
-/// name, and programs never declare a `$` name. Config surfaces read the same
-/// token as a `$NAME` environment read
+/// The `$` of a config-surface `$NAME` environment read. Program source has
+/// no `$` words: the site values are `#package`, `#here` and `#caller`, a
+/// program reads a compiler fact through its subject (`T.reflect().layout`,
+/// `f.reflect().effects`, `value.reflect().origin`), the other subjectless
+/// facts are the compiler values `#build`, `#phase` and `#program`, and a
+/// derive or marker template pastes a binding as `#{name}` (`#{method}: fn`,
+/// `self.#{field}`, `.#{left}`).
 COMPTIME_MARK: "$"
 
 /// The subjectless fact roots: compiler values, which no binding shadows.
@@ -139,14 +138,14 @@ FACT_ROOT_PHASE: "#phase"
 
 FACT_ROOT_PROGRAM: "#program"
 
-/// The `SourceLocation` (file, line, column, function, module) where `$here` is
+/// The `SourceLocation` (file, line, column, function, module) where `#here` is
 /// written.
-FACT_ROOT_HERE: "$here"
+FACT_ROOT_HERE: "#here"
 
 /// The `SourceLocation` of the call. Legal only as a parameter
-/// default (`at: SourceLocation{$caller}`) or inside an #Expand macro; a
+/// default (`at: SourceLocation{#caller}`) or inside an #Expand macro; a
 /// wrapper forwards it by declaring the same default and passing `at`.
-FACT_ROOT_CALLER: "$caller"
+FACT_ROOT_CALLER: "#caller"
 
 /// (ratified 2026-07-09): statement switch-off attribute.
 /// `#Off <stmt>` parses and type-checks the statement, then emits no code;

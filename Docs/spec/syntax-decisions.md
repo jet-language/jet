@@ -40,17 +40,15 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `comptime fn` | build-time literal-hook method |
 | `comptime use { … } / comptime use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime { … }` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
 | `<comptime N: Int>` | compile-time number parameter declaration |
-| `$` | site location `$here`, `$caller` |
+| `$` | config-surface environment read `$NAME`; program source has no `$` words |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
 | `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features` |
 | `#package` | package site value: `#package.name`, `.version` |
-| `#line` | the `Int` source line where it is written |
-| `#file` | the `String` source file where it is written |
 | `#phase` | compiler evaluation-site `Phase` value |
 | `#program` | compiler authorized checked-program fact value |
-| `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
-| `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
+| `#here` | site value: the `SourceLocation` (file, line, column, function, module) where it is written, as in `#here.line` and `#here.file` |
+| `#caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{#caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
@@ -2467,7 +2465,8 @@ sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
 `[T#N]` and package selectors `pkg#1.2.3`. The caller-location value this entry
-once spelled `#Caller()` is the fact root `$caller` (D-JAI-SITE1=A).
+once spelled `#Caller()` is the site value `#caller` (D-JAI-SITE1=A, respelled
+by D-SITE-CALLER1=A).
 Later rulings assign `$name` to known-value splice (D-NAME-SPLICE1=B), `<: … :>`
 to statement expansion (D-FENCE2=A), and `T.reflect().layout` to the compiler-known
 layout projection (D-COMPILER-NS1=A); the `@` and older `$` spellings are retired.
@@ -3804,6 +3803,10 @@ declaring the same default and passing `at` on. `$caller` anywhere else is
 E2427, which names the two legal places. Like every location, both never fail.
 Option A's member facts `x.$known` and `call.$callee` are ratified and not yet
 built.
+*Respelled by D-SITE-CALLER1=A (ratified 2026-11-10, #4276):* the two roots
+are the site values `#here` and `#caller`; D-META-HASH1=A's `#line` and
+`#file` are the fields `#here.line` and `#here.file`. A `#here` parameter
+default is E2428, whose fix is `#caller`.
 
 
 ### Low-level tier
