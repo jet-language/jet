@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# A stand-in for jet. `check` and `build` write the keep-going report the
+# case's STANDIN_* variables ask for and exit with their rc; `build` also makes
+# the compiler it builds (a copy of this file) and, with STANDIN_BUILD_PACK=1,
+# the runtime pack beside it; `test tests/guards` prints a guard row each.
+# The seed answers to STANDIN_CHECK_* and STANDIN_BUILD_*, the compiler it
+# built to STANDIN_SELF_* (Compiler/JetCli) and STANDIN_CORE_* (Core).
+set -u
+verb=$1
+target=${!#}
+case "$0" in */.jet/build/jet) who=built ;; *) who=seed ;; esac
+# rows N KIND: the report's header and N rows of KIND, the row j of a key
+# repeated (j % 4) + 1 times, so the counts differ and tie.
+rows() {
+  printf 'kind\tlocation\tcode\tmessage\n' > "$JET_KEEP_GOING_REPORT"
+  local left=$1 j=0 k
+  while [ "$left" -gt 0 ]; do
+    for ((k = 0; k <= j % 4 && left > 0; k++)); do
+      printf '%s\tCompiler/JetCli/Source/Cli/F%d.jet:%d:4\tE%04d\t%s %d\n' "$2" "$j" "$((k + 1))" "$((900 + j))" \
+        "$( [ $((j % 5)) = 0 ] && printf 'a message long enough to cross the two hundred byte cut of every census line, %.0s' 1 2 3 || printf 'cannot lower call' )" "$j" >> "$JET_KEEP_GOING_REPORT"
+      left=$((left - 1))
+    done
+    j=$((j + 1))
+  done
+}
+case "$who $verb $target" in
+  "seed check Compiler/JetCli")
+    [ "${STANDIN_OLDER_TREE:-0}" = 1 ] && rm -f Compiler/Toolchain/RuntimePack.jet
+    rows "${STANDIN_CHECK_ROWS:-0}" sema
+    echo "checked $target"
+    exit "${STANDIN_CHECK_RC:-0}" ;;
+  "seed build Compiler")
+    rows "${STANDIN_BUILD_ROWS:-0}" lower
+    mkdir -p Compiler/JetCli/.jet/build && cp "$0" Compiler/JetCli/.jet/build/jet
+    if [ "${STANDIN_BUILD_PACK:-0}" = 1 ]; then
+      mkdir -p Compiler/JetCli/.jet/build/jet-runtime && : > Compiler/JetCli/.jet/build/jet-runtime/native.key
+    fi
+    if [ "${STANDIN_BUILD_RC:-0}" != 0 ]; then
+      for i in 1 2 3 4 5 6 7 8 9 10; do echo "error: lowering Compiler/JetCli/Source/Cli/F$i.jet stopped at call $i of the build pass"; done >&2
+    fi
+    exit "${STANDIN_BUILD_RC:-0}" ;;
+  "seed test tests/guards")
+    echo "PASS closed_lists_are_generated"
+    for name in ${STANDIN_GUARDS_FAIL:-}; do echo "FAIL $name"; done
+    echo "PASS no_machine_paths"
+    [ -z "${STANDIN_GUARDS_FAIL:-}" ] ;;
+  "built check Compiler/JetCli")
+    rows "${STANDIN_SELF_ROWS:-0}" comptime
+    exit "${STANDIN_SELF_RC:-0}" ;;
+  "built check Core")
+    rows "${STANDIN_CORE_ROWS:-0}" sema
+    exit "${STANDIN_CORE_RC:-0}" ;;
+  *) echo "jet stand-in: $who $* is not a census pass" >&2; exit 64 ;;
+esac

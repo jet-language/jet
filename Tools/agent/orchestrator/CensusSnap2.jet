@@ -1,0 +1,400 @@
+#!/usr/bin/env jet
+// CensusSnap2.jet <file>...: collect-all census of a SNAPSHOT: HEAD of the
+// dev worktree plus the named worktree files (the orchestrator's own
+// uncommitted edits), so other lanes' uncommitted work in the shared tree
+// never enters it. Output: $JET_SCRATCH_ROOT/discovery/r14p/census.
+// Passes, all in package form in the snapshot:
+//   1. `jet check Compiler/JetCli` on the seed, with keep-going.
+//   2. `jet build Compiler` with keep-going, so optimize, lowering, object
+//      and link rows are caught before a commit lands.
+//   3. tests/guards on the seed, failing only on a problem guards-known.txt
+//      does not list (CENSUS_GUARDS=0 skips).
+//   4. The runtime pack beside the compiler just built.
+//   5. The self-check of Compiler/JetCli and of Core with that compiler
+//      (CENSUS_SELFCHECK=0 skips).
+//   6. The hosted Jetpack build, when a named file is under Jetpack/
+//      (CENSUS_JETPACK=0 skips).
+// CENSUS_TREE names a prepared tree used as is, with CENSUS_OUT for its
+// reports; CENSUS_BUILD=0 stops after the check; CENSUS_JET_DIR names another
+// compiler install (default: the seed). Exit: 0 clean; 1 rows or failure; 2
+// setup failure.
+//
+// The Jet twin of census-snap2.sh (gauntlet tool entry census-snap2): the dev
+// worktree is $JET_DEV_WORKTREE, the seed $JET_SEED, the lock is in
+// $JET_RUN_ROOT, and jetenv.sh, census-errors.mjs, guards-gate.mjs,
+// guards-known.txt, runtime-pack-check.sh and jpwrap.sh are Main's, in
+// $JET_STATE_ROOT/scratch/Main, as Tools/agent/roots.sh sets them. As the
+// original does after its `cd`, a relative path names a file in the snapshot
+// from the check on.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+// The stack every check and build pass runs with.
+STACK_LIMIT: [String]{"prlimit", "--stack=1073741824:1073741824", "--"}
+
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> fallback.copy() else -> value
+}
+
+// What the machine's jet/env file sets `name` to (the default of its
+// `${NAME:-default}` form), None when it sets nothing.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
+    defaulted: "${{{name}:-"
+    found := ""
+    seen := false
+    loop line in text.lines() {
+        parts: line.trim().removeprefix("export ").partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        if value.starts_with(defaulted) && value.ends_with("}}") -> value = value.removeprefix(defaulted).removesuffix("}}")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+// A root as Tools/agent/roots.sh sets it: the environment, else the jet/env
+// file, else `fallback`.
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    found: env_or(name, "")
+    if found != "" -> return found
+    env_file_value(name) ?? fallback.copy()
+}
+
+state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+
+scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
+
+seed_dir: fn() -[Env, FS]> String Never! {
+    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
+    root("JET_SEED", "{seeds}/current")
+}
+
+// `text` without its trailing newlines, as `$(...)` gives it.
+chomp: fn(text: String) -> String Never! {
+    out := text.copy()
+    loop out.ends_with("\n") -> out = out.removesuffix("\n")
+    out
+}
+
+// The lines awk reads from `text`: a last line without its newline counts.
+records: fn(text: String) -> [String] Never! {
+    out := text.split("\n").to_list()
+    if out.len() > 0 && out[out.len() - 1] == "" -> _ := out.pop()
+    out
+}
+
+// `readlink -f path`: the path with every symlink resolved; a last part that
+// does not exist stays as it is.
+readlink_f: fn(path: String) -[FS, Env]> String Never! {
+    whole: files.canonicalize(path) ?? {
+        parent: files.canonicalize(if files.dirname(path) == "" -> "." else -> files.dirname(path)) ?? return path.copy()
+        return "{parent}/{files.basename(path)}"
+    }
+    whole
+}
+
+// `ln -sfn target link`: a directory `link` (not a symlink) takes the link
+// inside it.
+link_sfn: fn(target: String, link: String) Never! -[FS, IO]> {
+    at: if files.is_dir(link) && !files.is_symlink(link) -> "{link}/{files.basename(target)}" else -> link.copy()
+    if files.lexists(at) -> files.remove(at) ?? ()
+    files.symlink(target, at) ?? term.eprint("ln: failed to create symbolic link '{at}': {err}")
+}
+
+// Writes `bytes` to stdout now, before any child writes to it.
+emit: fn(bytes: [U8]) Never! -[IO]> {
+    out := term.stdout()
+    out.write_bytes(bytes) ?? ()
+    out.flush() ?? ()
+}
+
+say: fn(line: String) Never! -[IO]> { emit("{line}\n".bytes()) }
+
+// The first `limit` lines of `text`, each cut to its first 200 bytes
+// (`awk 'NR<=limit' | cut -c1-200`).
+emit_head: fn(lines: [String], limit: Int) Never! -[IO]> {
+    out := [U8]{}
+    loop line in lines.slice(0, if lines.len() < limit -> lines.len() else -> limit) {
+        raw: line.bytes()
+        out.extend(raw.slice(0, if raw.len() < 200 -> raw.len() else -> 200))
+        out.push(U8{10})
+    }
+    if out.len() > 0 -> emit(out)
+}
+
+// The exit status the shell gives a finished child: 124 for one `timeout`
+// stopped, 128 + N for signal N.
+status: fn(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+// Seconds as `timeout` reads its DURATION (a number with an s, m, h or d
+// suffix), None when it reads none.
+duration_seconds: fn(text: String) -> Int? Never! {
+    scale := 1
+    digits := text.copy()
+    if {
+        text.ends_with("s") -> digits = text.removesuffix("s")
+        text.ends_with("m") -> {
+            digits = text.removesuffix("m")
+            scale = 60
+        }
+        text.ends_with("h") -> {
+            digits = text.removesuffix("h")
+            scale = 3600
+        }
+        text.ends_with("d") -> {
+            digits = text.removesuffix("d")
+            scale = 86400
+        }
+    }
+    if digits == "" -> return None
+    value := 0
+    loop byte in digits.bytes() {
+        code: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        value = value * 10 + code - 48
+    }
+    Val(value * scale)
+}
+
+// One pass: `spec` with its stdout in `out` and its stderr in `errors` (None:
+// in `out` too, as `> out 2>&1` puts it); the shell's exit status. As in the
+// shell, a file that can't be opened fails the pass (1) before it runs.
+pass: fn(spec: ProcessSpec, out: String, errors: String?) -[Exec, FS, IO, Time.Wait]> Int Never! {
+    files.write(out, "") ?? {
+        term.eprint("census: {out}: {err}")
+        return 1
+    }
+    if errors == .Val(path) {
+        files.write(path, "") ?? {
+            term.eprint("census: {path}: {err}")
+            return 1
+        }
+    }
+    full := spec.stdin(.Inherit).stdout(.Capture).output_limit(1073741824)
+    full = if errors == None -> full.stderr(.Stdout) else -> full.stderr(.Capture)
+    receipt: full.run() ?? {
+        term.eprint("census: {err}")
+        return 127
+    }
+    files.write(out, receipt.output) ?? term.eprint("census: {out}: {err}")
+    if errors == .Val(path) -> files.write(path, receipt.errors) ?? term.eprint("census: {path}: {err}")
+    status(receipt)
+}
+
+// Ends the run with `code`, `message` on stderr.
+quit: fn(message: String, code: Int) -[Exec, IO]> Never {
+    term.eprint(message)
+    process.exit(code)
+}
+
+// `bash jetenv.sh tree jet args...` after `prefix`, on CPUs 16-27, with
+// `vars` set.
+jetenv: fn(g: String, tree: String, jet: String, args: [String], vars: [String: String], prefix: [String]) -[Exec]> ProcessSpec Never! {
+    argv := prefix.copy()
+    argv.extend([String]{"bash", "{g}/jetenv.sh", tree.copy(), jet.copy()})
+    argv.extend(args.copy())
+    spec := process.cmd(argv).cpu_affinity(loop cpu in 16..<28 -> cpu)
+    loop (name, value) in vars -> spec = spec.env(name, value)
+    spec
+}
+
+// The rows of a keep-going report (`awk 'NR>1' TSV | wc -l`).
+row_count: fn(tsv: String) -[FS]> Int Never! {
+    count: records(files.read(tsv) ?? return 0).len()
+    if count > 1 -> count - 1 else -> 0
+}
+
+// What census-errors.mjs says about a keep-going report, its first `limit`
+// lines.
+census_errors: fn(g: String, tsv: String, tree: String, limit: Int) Never! -[Exec, IO, Time.Wait]> {
+    receipt: process.cmd([String]{"node", "{g}/census-errors.mjs", tsv.copy(), tree.copy()}).stdin(.Inherit).stdout(.Capture).stderr(.Stdout).output_limit(1073741824).run() ?? {
+        say("census: node: {err}")
+        return
+    }
+    emit_head(records(receipt.output), limit)
+}
+
+// The build report's rows by kind, file and code, most frequent first
+// (`sort | uniq -c | sort -rn | cut -c1-200 | head -10`; equal counts in
+// reverse byte order).
+emit_build_rows: fn(tsv: String) Never! -[FS, IO]> {
+    text: files.read(tsv) ?? return
+    rows: records(text)
+    keys := [String]{}
+    loop line in rows.slice(if rows.len() > 0 -> 1 else -> 0, rows.len()) {
+        fields: line.split("\t").to_list()
+        third: if fields.len() > 2 -> fields[2].copy() else -> ""
+        fourth: if fields.len() > 3 -> fields[3].copy() else -> ""
+        keys.push("{fields[0]}\t{third}\t{fourth}")
+    }
+    keys.sort()
+    counted := [String]{}
+    at := 0
+    loop at < keys.len() {
+        end := at + 1
+        loop end < keys.len() && keys[end] == keys[at] -> end += 1
+        count: "{end - at}"
+        counted.push("{" ".repeat(if count.len() < 7 -> 7 - count.len() else -> 0)}{count} {keys[at]}")
+        at = end
+    }
+    // The counts are padded to one width, so byte order is count order.
+    counted.sort()
+    emit_head(loop back in 0..<counted.len() -> counted[counted.len() - 1 - back], 10)
+}
+
+// The runtime pass: the pack the build wrote beside the compiler just built,
+// else the packager's.
+runtime: fn(g: String, tree: String, self_jet: String, out: String, id: String) Never! -[Exec, FS, IO, Time.Wait]> {
+    built: "{tree}/Compiler/JetCli/.jet/build/jet-runtime"
+    beside: "{files.dirname(readlink_f(self_jet))}/jet-runtime"
+    if files.is_file("{tree}/Compiler/Toolchain/RuntimePack.jet") {
+        if !files.exists(beside) && files.is_dir(built) -> link_sfn(built, beside)
+        if files.is_file("{beside}/native.key") -> return say("runtime rc=0 (jet build Compiler)")
+        say("runtime rc=1 (no jet-runtime/native.key beside {self_jet})")
+        process.exit(1)
+    }
+    receipt: process.cmd([String]{"bash", "{g}/runtime-pack-check.sh", self_jet.copy(), tree.copy(), "{out}/runtime", id.copy()}).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? quit("census: bash: {err}", 1)
+    if status(receipt) != 0 -> process.exit(1)
+    link_sfn("{out}/runtime/out", beside)
+}
+
+// The hosted Jetpack pass with the compiler just built.
+jetpack: fn(g: String, tree: String, self_jet: String, out: String, id: String) Never! -[Env, Exec, FS, IO, Time.Wait]> {
+    home: "{out}/tmp.jetpack.{sys.pid()}"
+    files.create_dir_all(home) ?? ()
+    log: "{out}/jetpack.log"
+    spec: process.cmd([String]{"bash", "{g}/jpwrap.sh", "check", "--hosted"}).cwd(tree)
+        .env("HOME", home).env("JET_HOME", "{home}/.jet").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id)
+        .env("JET_TOOLCHAIN_ROOT", tree).env("JETPACK_WORKER", "precommit").env("JET_STATE_ROOT", "{out}/jetpack-state")
+        .timeout(time.duration_seconds(1200))
+    _ := pass(spec, log, None)
+    files.remove_all(home) ?? ()
+    text: files.read(log) ?? ""
+    if text.contains("JETPACK HOSTED OK") -> return say("jetpack rc=0")
+    say("jetpack rc=1 (see {log})")
+    emit_head(records(text).filter(line -> line.starts_with("Error") || line.starts_with("  -->")), 20)
+    process.exit(1)
+}
+
+// The snapshot: HEAD of the worktree, then each named worktree file over it;
+// a named file the worktree no longer has is a deletion.
+snapshot: fn(worktree: String, tree: String, named: [String]) Never! -[Exec, FS, IO, Time.Wait]> {
+    files.remove_all(tree) ?? ()
+    files.create_dir_all(tree) ?? ()
+    exported: process.pipeline([ProcessSpec]{
+        process.cmd([String]{"git", "archive", "HEAD"}).cwd(worktree),
+        process.cmd([String]{"tar", "-x", "-C", tree.copy()}).cwd(worktree),
+    }) ?? {
+        say("EXPORT FAILED")
+        quit("census: {worktree}: {err}", 2)
+    }
+    if exported.errors != "" -> term.eprint(chomp(exported.errors))
+    if !exported.success {
+        say("EXPORT FAILED")
+        process.exit(2)
+    }
+    loop path in named {
+        if {
+            files.exists("{worktree}/{path}") -> {
+                files.create_dir_all("{tree}/{files.dirname(path)}") ?? ()
+                files.copy("{worktree}/{path}", "{tree}/{path}") ?? term.eprint("cp: {worktree}/{path}: {err}")
+            }
+            else -> files.remove("{tree}/{path}") ?? ()
+        }
+    }
+}
+
+run: fn() {
+    named: process.args()
+    g: "{state_root()}/scratch/Main"
+    run_root: root("JET_RUN_ROOT", "{scratch_root()}/run")
+    files.create_dir_all(run_root) ?? ()
+    // Its own lock AND its own directories: precommit censuses never queue behind lanes' long checks, and
+    // never share r14 with Tools/agent/land/census-snap.sh (vbatch's launch census).
+    _held: files.lock("{run_root}/precommit-census.lock") ?? quit("census: {run_root}/precommit-census.lock: {err}", 2)
+    worktree: root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
+    prepared: env_or("CENSUS_TREE", "")
+    tree: env_or("CENSUS_TREE", "{scratch_root()}/discovery/r14p/snap")
+    out: env_or("CENSUS_OUT", "{scratch_root()}/discovery/r14p/census")
+    compiler: env_or("CENSUS_JET_DIR", readlink_f(seed_dir()))
+    id: env_or("CENSUS_JET_IDENTITY", chomp(files.read("{compiler}/IDENTITY") ?? {
+        term.eprint("cat: {compiler}/IDENTITY: {err}")
+        ""
+    }))
+    files.remove_all(out) ?? ()
+    files.create_dir_all(out) ?? ()
+    if prepared == "" -> snapshot(worktree, tree, named)
+    files.chdir(tree) ?? quit("census: cd {tree}: {err}", 2)
+    check_vars: [String: String]{"JET_COMPILER_IDENTITY": id.copy(), "JET_TOOLCHAIN_ROOT": env_or("CENSUS_TOOLCHAIN_ROOT", tree), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{out}/check-keep-going.tsv"}
+    check_rc: pass(jetenv(g, tree, "{compiler}/jet", [String]{"check", "--threads", "12", "Compiler/JetCli"}, check_vars, STACK_LIMIT), "{out}/check.out", Val("{out}/check.err"))
+    say("check rc={check_rc}")
+    // The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
+    census_errors(g, "{out}/check-keep-going.tsv", tree, 21)
+    if check_rc != 0 -> process.exit(1)
+    if env_or("CENSUS_BUILD", "1") == "0" -> process.exit(0)
+    files.remove_all("Compiler/JetCli/.jet/build") ?? ()
+    build_vars: [String: String]{"JET_COMPILER_IDENTITY": id.copy(), "JET_TOOLCHAIN_ROOT": env_or("CENSUS_BUILD_ROOT", tree), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{out}/build-keep-going.tsv"}
+    build_rc: pass(jetenv(g, tree, "{compiler}/jet", [String]{"build", "--threads", "12", "Compiler"}, build_vars, STACK_LIMIT).timeout(time.duration_seconds(1800)), "{out}/build.out", Val("{out}/build.err"))
+    rows: row_count("{out}/build-keep-going.tsv")
+    say("build rc={build_rc} rows={rows}")
+    emit_build_rows("{out}/build-keep-going.tsv")
+    if build_rc != 0 || rows != 0 {
+        report: files.read_bytes("{out}/build.err") ?? [U8]{}
+        emit(report.slice(0, if report.len() < 600 -> report.len() else -> 600))
+        process.exit(1)
+    }
+    // Guards pass: tests/guards on the seed, failing only on a guard row or closed-list problem not in
+    // guards-known.txt.
+    if env_or("CENSUS_GUARDS", "1") == "1" {
+        limit: env_or("CENSUS_GUARDS_TIMEOUT", "2400")
+        guards_vars: [String: String]{"JET_COMPILER_IDENTITY": id.copy(), "JET_TOOLCHAIN_ROOT": tree.copy()}
+        guards: jetenv(g, tree, "{compiler}/jet", [String]{"test", "tests/guards"}, guards_vars, [String]{})
+        // `timeout 0` runs the command with no limit.
+        if duration_seconds(limit) == {
+            .Val(seconds) -> _ := pass(if seconds > 0 -> guards.timeout(time.duration_seconds(seconds)) else -> guards, "{out}/guards.out", None)
+            .None -> {
+                term.eprint("timeout: invalid time interval '{limit}'")
+                files.write("{out}/guards.out", "") ?? ()
+            }
+        }
+        gate: process.cmd([String]{"node", "{g}/guards-gate.mjs", "{out}/guards.out", "{g}/guards-known.txt"}).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+            say("guards rc=127")
+            quit("census: node: {err}", 1)
+        }
+        say("guards rc={status(gate)}")
+        if status(gate) != 0 -> process.exit(1)
+    }
+    // The compiler `jet build Compiler` just built (JetCli's executable target `jet`).
+    self_jet: "{tree}/Compiler/JetCli/.jet/build/jet"
+    runtime(g, tree, self_jet, out, id)
+    // Self-check pass: the compiler just built checks the compiler packages, then every Core body, with
+    // keep-going, as chain s2 does.
+    if env_or("CENSUS_SELFCHECK", "1") == "1" {
+        packages: [String]{"Compiler/JetCli", "Core"}
+        loop package in packages {
+            name: if package == "Core" -> "selfcheck-core" else -> "selfcheck"
+            vars: [String: String]{"JET_COMPILER_IDENTITY": id.copy(), "JET_TOOLCHAIN_ROOT": tree.copy(), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{out}/{name}-keep-going.tsv"}
+            rc: pass(jetenv(g, tree, self_jet, [String]{"check", "--threads", "12", package.copy()}, vars, STACK_LIMIT).timeout(time.duration_seconds(1200)), "{out}/{name}.out", Val("{out}/{name}.err"))
+            count: row_count("{out}/{name}-keep-going.tsv")
+            say("{name} rc={rc} rows={count}")
+            census_errors(g, "{out}/{name}-keep-going.tsv", tree, 11)
+            if rc != 0 || count != 0 -> process.exit(1)
+        }
+    }
+    // Hosted Jetpack pass, when a named file is under Jetpack/: the compiler census alone never compiles Jetpack.
+    if named.any(path -> path.starts_with("Jetpack/")) && env_or("CENSUS_JETPACK", "1") == "1" -> jetpack(g, tree, self_jet, out, id)
+    process.exit(0)
+}
