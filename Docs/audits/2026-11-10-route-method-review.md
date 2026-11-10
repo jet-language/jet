@@ -144,3 +144,22 @@ mux.any("/cache/:key", (request: HTTPRequest) -> {
 
 A passes after three fixes (claims 4, 5 and 6). B fails on a crash and a doubled spelling, C on a second grammar,
 D on lost 405 and Allow answers. Building A also closes defect 1. Defects 2-4 need cards whatever the vote.
+
+## Different-family review (GPT, 2026-11-10)
+
+This section supersedes conflicting conclusions above. A is a proposed design, not an implemented success.
+
+| Claim | Attack and independently checked evidence | Verdict |
+|---|---|---|
+| Custom methods already work | Reran all nine r01-r07 programs on a0.0.43. r01 receives PURGE and returns 405; it does not serve a registered custom handler. r02-r04 refuse the attempted APIs. | Holds within stated limits: receive and reject, not register and serve. |
+| Case-insensitive standard-name rejection is safe | RFC 9110 section 9.1 says method names are case-sensitive. New `review6-case.jet` runs and prints `lowercase:405` beside a GET route. Rejecting `get` would exclude a distinct legal method. | Fails. Refuse only exact standard names and preserve exact case through all route metadata. |
+| Existing lowering can be reused unchanged | Read origin/dev HttpRouting and Server. The standard-verb contract builder uppercases its input. That must not touch extension tokens. | Fails. Share registration, but preserve case in contract, duplicate key, dispatch, Allow and operation ID. |
+| B is worse because Method.custom crashes | Reran r06: exit 101, unlowered Method.custom. A is also unbuilt; a repairable implementation defect cannot rank proposed APIs. | Fails. B now describes one typed registration API with full per-verb cutover, not two APIs. |
+| C necessarily duplicates standard routes | A method-and-path API can replace per-verb registration. Go pattern.go validates that shape; the path subgrammar remains Jet's. | Fails. C now specifies a clean cutover. |
+| OpenAPI covers arbitrary methods | Read OpenAPI 3.2 Path Item: additionalOperations preserves capitalization and excludes methods with fixed fields. Reran r05/r05b/r05c: CONNECT document exits 101, registration succeeds, ordinary document succeeds. | Holds only as a required implementation change, with downstream 3.1-tool cost. |
+| Catch-all preserves complete route metadata | Axum method_routing.rs:510-517 calls skip_allow_header. A user handler can manually build 405/Allow, but the router cannot infer its accepted methods. | Holds within stated limits; D needs metadata or manual duplication. |
+| Module constants work for static paths | Reran r07: E2805 despite its constant advice. | Fails today; fix is shared, not A-exclusive. |
+
+Peer sources read independently: Go pattern.go, ASP.NET MapMethods, Axum method_filter.rs and method_routing.rs, Express application.js, RFC 9110 and OpenAPI 3.2. Earlier census counts were not repeated and are not used to rank options. The claim that missing Trace/Connect markers violates a criterion about call forms is withdrawn; that criterion alone proves no marker defect.
+
+Recommendation: agree with A only after these repairs. B is a strong coherent alternative, not ruled out by I8 or today's crash. Do not post the earlier case-folding rule, the assertion that r01 serves a custom route, or the crash-based ranking.
