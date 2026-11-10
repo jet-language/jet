@@ -622,7 +622,7 @@ jet_cli_unknown_flag: fn(head: String, command: String, color: Bool) -> JetCLIPl
     what: "`{head}` isn't a flag jet understands"
     why: "flags before `--` belong to jet; everything after `--` is forwarded to your program"
     if build_option_level_spelling(head) == .Val(spelling) -> return jet_cli_fail("E2102", what, why, "write `{spelling}`: jet picks the optimization level with `--optimize`", color, JET_DRIVER_EXIT_USAGE)
-    program: command == "run" || command == "test"
+    program: command == "run" || command == "dev" || command == "test"
     fix := ""
     if jet_cli_closest_flag(head) == .Val(close) {
         if {
@@ -1653,15 +1653,17 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
     JetCLIPlan.NativeSource{file: file, level: level, run: command == "run", program_args: program_args, color: color}
 }
 
-// The jet flags `jet run` honors (`--observe`, `-e` and `--sha256` are a run's
-// alone: `jet dev`, which checks its own flags, refuses them as scoped to
-// `run`). `-e` is honored before a run's target (jet_cli_eval_flag_at) and
-// refused after it; `--sha256` pins a URL target's first fetch and is refused
-// on a local one. Any other registered flag on a run is refused until its port
-// lands, never ignored; an unregistered one, a single-dash word too, was
-// already refused by E2102 (jet_cli_check_flags), on `jet run` and on the
-// `jet <file>` shorthand alike.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256"}
+// The jet flags `jet run` and `jet dev` honor (`--observe`, `--sha256` and
+// `-e` are a run's alone and `--port` is a dev's alone: the other command
+// refuses them as scoped to the one that owns them). `--sha256` pins a URL
+// target's first fetch and is refused on a local path; a bare `--port` is
+// refused for its missing value. `-e` is honored before a run's target
+// (jet_cli_eval_flag_at) and refused after it. Any other registered flag on
+// a run is refused until its port lands, never ignored; an unregistered one,
+// a single-dash word too, is refused by E2102: on `jet run` and the
+// `jet <file>` shorthand by jet_cli_check_flags, on `jet dev` by
+// jet_cli_run_entry.
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port"}
 
 // `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
 // core.log level filter the program starts with, above JET_LOG
@@ -1709,8 +1711,15 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
             if argument == "--sha256" -> return jet_cli_fail("E2104", "`--sha256` needs its value", jet_cli_why("E2104"), "write `--sha256=<64 hex digits>` before the URL", color, JET_DRIVER_EXIT_USAGE)
             return jet_cli_fail("E2104", "`--sha256` pins the first fetch of a URL, and `{if args.len() > 1 -> args[1] else -> "."}` is a local path", jet_cli_why("E2104"), "drop `--sha256`; a local file runs as it is on disk", color, JET_DRIVER_EXIT_USAGE)
         }
-        if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
+        if watch && head == "--port" {
+            if argument == "--port" -> return jet_cli_fail("E2104", "`--port` needs its value", jet_cli_why("E2104"), "write `--port=8080`, or leave it out to let the preview listener choose a port", color, JET_DRIVER_EXIT_USAGE)
+            next
+        }
+        if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None -> next
         command: if watch -> "dev" else -> "run"
+        // `jet run` and the `jet <file>` shorthand refused an unknown flag
+        // already (jet_cli_check_flags); `jet dev` checks its own here.
+        if !jet_cli_is_known_flag(head) -> return jet_cli_unknown_flag(head, command, color)
         return jet_cli_not_ported("{command} {head}", color)
     }
     // `dispatch_nixpkgs_run`: `jet run <package>@nixpkgs`.
