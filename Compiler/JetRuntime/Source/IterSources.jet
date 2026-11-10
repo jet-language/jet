@@ -36,12 +36,13 @@ iter_source_pull: fn(node: I64, output: I64) -> Bool {
     true
 }
 
+// A borrowed file or stdin reader stays lazy, as an owned one does: the line
+// stream cannot leave its loop (E2502), so the kept handle outlives every
+// pull, and each pull reads one line from it (iterator sources stay lazy).
+// The Rust original drained a borrowed reader into a List at
+// init, which held the whole input in memory before the body ran once.
 iter_line_source: fn(adapter: I64, by_value: I64, meta: I64) -> I64 {
-    node: iter_source_node(adapter, by_value, meta, false)
-    // The Rust original drains a borrowed reader at init; owned sources stay
-    // lazy. iter_collect_node cleans partials on stop.
-    if (by_value == I64{0}) { return iter_collect_node(node) }
-    node
+    iter_source_node(adapter, by_value, meta, false)
 }
 
 #Export(c) jet_rt_native_iter_file_lines: fn(source: I64, by_value: I64, meta: I64) -> I64 {
