@@ -1,0 +1,28 @@
+// D-MOVE-SIGIL1=A (#6586 c10): `fn(&&T)` takes its argument. A function that
+// takes its parameter fills only a slot that takes it too, and a call through
+// the value takes the argument, so a later use is E0209.
+Words: struct {
+    names: [String]
+}
+
+Slots: struct {
+    read_only: fn(Words) -> Int
+    taking: fn(&&Words) -> Int
+}
+
+count: fn(words: &&Words) -> Int {
+    kept: words
+    kept.names.len()
+}
+
+twice: fn(f: fn(&&Words) -> Int, words: &&Words) -> Int {
+    first: f(words)
+    first + f(words)
+}
+
+run: fn() {
+    slots: Slots{read_only: count, taking: count}
+    words: Words{names: ["ada"]}
+    print(slots.taking(words))
+    print(words.names.len())
+}

@@ -3,8 +3,13 @@
 // parser locations.
 use {
     jet_foundation.[
+        AccessConvention,
+        CallablePolicy,
+        CallablePolicyChain,
         CallContractRow,
         EffectRowEntry,
+        FunctionCallMetadata,
+        FunctionDefaultRef,
         Measure,
         MeasureRule,
         ParamZone,
@@ -20,6 +25,7 @@ use {
         foundation_named_type,
     ]
     jet_lexer.[
+        TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -441,6 +447,8 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
     params := [Type]{}
     names := [String]{}
     zones := [ParamZone]{}
+    conventions := [AccessConvention]{}
+    marked := false
     zone := ParamZone.Either
     saw_slash := false
     saw_star := false
@@ -475,9 +483,18 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
                         parser_bump(state)
                         name = parser_value(state, token)
                     }
+                    // A parameter type marks a taken input `&&`, as a declared
+                    // parameter does: `fn(&&Map)` takes its argument.
+                    convention := AccessConvention.Read
+                    if parser_current_kind(state) == TOKEN_AND_AND {
+                        parser_bump(state)
+                        convention = AccessConvention.Move
+                        marked = true
+                    }
                     params.push(parser_parse_type(state, depth + 1).ty)
                     names.push(name)
                     zones.push(zone.copy())
+                    conventions.push(convention)
                 }
             }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
@@ -550,7 +567,19 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
         if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(state))
     }
     end = parser_lookahead(state, -1).span
-    ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
+    // Only a marked parameter needs call metadata; its names repeat the contract's labels so
+    // the mark adds no label a plain function type lacks.
+    call_metadata := FunctionCallMetadata?{None}
+    if marked {
+        call_metadata = Val(FunctionCallMetadata{
+            names: loop index in 0..<zones.len() -> if zones[index] == ParamZone.LabelOnly -> names[index] else -> "",
+            defaults: loop _ in params -> FunctionDefaultRef?{None},
+            variadic: loop _ in params -> false,
+            conventions: conventions,
+            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
+        })
+    }
+    ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view}
     ParsedType{ty: ty, span: parser_cover(start, end)}
 }
 

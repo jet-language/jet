@@ -94,6 +94,7 @@ use jet_foundation.[
     TextEdit,
     UnOp,
     diagnostic_with_edit,
+    diagnostic_with_label,
     diagnostic_with_edit_grade,
     checked_persistent_local,
 ]
@@ -451,6 +452,266 @@ sema_stmt_single_byte_literal: fn(arg: CallArg) -> Int? Never! {
         }
     }
     None
+}
+
+// An untyped `[]` (E0501) or bare `None` (E0308) binding
+// reads ahead in its block for the first later use that implies its type: a
+// push or insert argument, a map index store, an assignment, a return, or a
+// typed call argument. The report names that line and type, labels the use,
+// and carries a Safe edit that writes the typed start. With no implying use
+// the report stays as the literal check wrote it.
+SemaEmptyStartUse: struct {
+    ty: Type
+    span: Span
+    what: String
+}
+
+// "list" for `[]`, "map" for an empty map literal, "none" for bare `None`.
+sema_stmt_empty_start_kind: fn(init: Expr) -> String Never! {
+    if sema_registration_cli_without_parens(init) == {
+        .ListLit(elements, _, _) -> if elements.len() == 0 -> "list" else -> ""
+        .MapLit(entries, _, _) -> if entries.len() == 0 -> "map" else -> ""
+        .Absent(_, _) -> "none"
+        .EnumLit(owner, variant, _, args, _, _, _) -> if owner == "" && variant == "None" && args.len() == 0 -> "none" else -> ""
+        else -> ""
+    }
+}
+
+// The name a use reads: a plain, parenthesized or marked identifier.
+sema_stmt_empty_start_name: fn(expression: Expr) -> String Never! {
+    if sema_registration_cli_without_parens(expression) == {
+        .Ident(name, _, _) -> name
+        .Place(value, _, _, _) -> sema_stmt_empty_start_name(value)
+        else -> ""
+    }
+}
+
+// The type a use's value shows without checking it: a literal's, or an
+// earlier binding's declared type.
+sema_stmt_empty_start_value_type: fn(value: Expr, scopes: SemaScopeTable) -> Type? {
+    if sema_registration_cli_without_parens(value) == {
+        .Str(_, _, _) -> Val(Type.String)
+        .Int(_, _, width, _, _) -> if width == None -> Val(Type.Int) else -> None
+        .Float(_, _, is_f32, _, _) -> if is_f32 -> None else -> Val(Type.Float)
+        .Bool(_, _, _) -> Val(Type.Bool)
+        .Present(inner, _, _) -> {
+            payload: sema_stmt_empty_start_value_type(inner, scopes) ?? return None
+            Val(Type.Option{inner: payload})
+        }
+        .EnumLit(owner, variant, _, args, _, _, _) -> {
+            if owner != "" || variant != "Val" || args.len() != 1 -> return None
+            if args[0] == .Positional(inner) {
+                payload: sema_stmt_empty_start_value_type(inner, scopes) ?? return None
+                return Val(Type.Option{inner: payload})
+            }
+            None
+        }
+        .Ident(name, _, _) -> {
+            index: sema_scope_resolve_index(scopes, name) ?? return None
+            scopes.bindings[index].symbol.ty
+        }
+        else -> None
+    }
+}
+
+// "a `[String]`" / "an `Int`": `ty` named with its article.
+sema_stmt_empty_start_a: fn(ty: Type) -> String Never! {
+    text: type_name(ty)
+    if text.starts_with("A") || text.starts_with("E") || text.starts_with("I") || text.starts_with("O") || text.starts_with("U") -> return "an `{text}`"
+    "a `{text}`"
+}
+
+// The success type a `return` or value tail gives: origin tags and the
+// failure contract (`T E!`) don't count.
+sema_stmt_empty_start_success: fn(tagged: Type) -> Type Never! {
+    ty: sema_expr_unwrap_tag(tagged)
+    if ty == .Result(ok, _) -> return sema_expr_unwrap_tag(ok)
+    ty
+}
+
+// A whole-value use (assignment, return, call argument) of type `ty`: the
+// binding's type when it fits the start's shape. Origin tags don't count.
+sema_stmt_empty_start_whole: fn(tagged: Type, kind: String, span: Span, what: String) -> SemaEmptyStartUse? Never! {
+    ty: sema_expr_unwrap_tag(tagged)
+    if kind == "none" {
+        if ty == .Option(_) -> return Val(SemaEmptyStartUse{ty: ty, span: span, what: what})
+        return Val(SemaEmptyStartUse{ty: Type.Option{inner: ty}, span: span, what: what})
+    }
+    if ty == {
+        .List(_) -> if kind == "list" -> Val(SemaEmptyStartUse{ty: ty, span: span, what: what}) else -> None
+        .Map(_, _, _) -> Val(SemaEmptyStartUse{ty: ty, span: span, what: what})
+        else -> None
+    }
+}
+
+// The parameter type at `position` of the function `callee` names in scope.
+sema_stmt_empty_start_param_type: fn(callee: String, position: Int, scopes: SemaScopeTable) -> Type? {
+    index: sema_scope_resolve_index(scopes, callee) ?? return None
+    if scopes.bindings[index].symbol.ty == .Val(callee_ty) {
+        if callee_ty == .Fn(params, _, _, _, _, _) {
+            if position < params.len() -> return Val(params[position])
+        }
+    }
+    None
+}
+
+// The first implying use of `name` in `statements` from `start`, looking into
+// nested loop, switch and if bodies, binding values and call arguments; a
+// later binding of the same name ends the search. `tail_span` is the value
+// tail's span when `statements` is the block whose value `return_type` types.
+sema_stmt_empty_start_use: fn(statements: [Stmt], start: Int, name: String, kind: String, return_type: Type?, tail_span: Span?, scopes: SemaScopeTable) -> SemaEmptyStartUse? {
+    loop index in start..<statements.len() {
+        if tail_span == .Val(tail_at) && index + 1 == statements.len() && statements[index] == .Expr(tail) {
+            if sema_stmt_empty_start_name(tail) == name && tail_at.start == expr_span(tail).start {
+                ty: sema_stmt_empty_start_success(return_type ?? return None)
+                return sema_stmt_empty_start_whole(ty, kind, expr_span(tail), "gives `{name}` as the block's `{type_name(ty)}` value")
+            }
+        }
+        found: sema_stmt_empty_start_use_in(statements[index], name, kind, return_type, scopes)
+        if found != None -> return found
+        if statements[index] == .Val(binding) && binding.name == name -> return None
+    }
+    None
+}
+
+sema_stmt_empty_start_use_in: fn(statement: Stmt, name: String, kind: String, return_type: Type?, scopes: SemaScopeTable) -> SemaEmptyStartUse? {
+    if statement == {
+        .Expr(expr) -> sema_stmt_empty_start_expr_use(expr, name, kind, return_type, scopes)
+        .Val(binding) -> sema_stmt_empty_start_expr_use(binding.init, name, kind, return_type, scopes)
+        .Assign(target, op, _, value) -> {
+            if op != None -> return None
+            if target == {
+                .Local(target_name, _) -> {
+                    if target_name != name -> return sema_stmt_empty_start_expr_use(value, name, kind, return_type, scopes)
+                    ty: sema_stmt_empty_start_value_type(value, scopes) ?? return None
+                    sema_stmt_empty_start_whole(ty, kind, expr_span(value), "assigns `{name}` {sema_stmt_empty_start_a(ty)}")
+                }
+                .Index(base, key, span, _) -> {
+                    if kind == "none" || sema_stmt_empty_start_name(base) != name -> return None
+                    key_ty: sema_stmt_empty_start_value_type(key, scopes) ?? return None
+                    value_ty: sema_stmt_empty_start_value_type(value, scopes) ?? return None
+                    Val(SemaEmptyStartUse{ty: Type.Map{key: key_ty, key_span: None, value: value_ty}, span: span, what: "stores {sema_stmt_empty_start_a(value_ty)} under {sema_stmt_empty_start_a(key_ty)} key in `{name}`"})
+                }
+                .Field(_, _, _) -> None
+            }
+        }
+        .Return(value, _) -> {
+            returned: value ?? return None
+            if sema_stmt_empty_start_name(returned) != name -> return sema_stmt_empty_start_expr_use(returned, name, kind, return_type, scopes)
+            ty: sema_stmt_empty_start_success(return_type ?? return None)
+            sema_stmt_empty_start_whole(ty, kind, expr_span(returned), "returns `{name}` as the function's `{type_name(ty)}`")
+        }
+        .While(_, body, _, _, _) -> sema_stmt_empty_start_use(body, 0, name, kind, return_type, None, scopes)
+        .For(_, _, _, _, body, _, _, _, _) -> sema_stmt_empty_start_use(body, 0, name, kind, return_type, None, scopes)
+        .Loop(body, _, _, _) -> sema_stmt_empty_start_use(body, 0, name, kind, return_type, None, scopes)
+        .CountedLoop(_, _, _, body, _, _, _) -> sema_stmt_empty_start_use(body, 0, name, kind, return_type, None, scopes)
+        .Switch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                found: sema_stmt_empty_start_use(arm.body, 0, name, kind, return_type, None, scopes)
+                if found != None -> return found
+            }
+            if else_body == .Val(body) -> return sema_stmt_empty_start_use(body, 0, name, kind, return_type, None, scopes)
+            None
+        }
+        else -> None
+    }
+}
+
+// The first implying use of `name` inside call arguments `args`.
+sema_stmt_empty_start_args_use: fn(args: [CallArg], name: String, kind: String, return_type: Type?, scopes: SemaScopeTable) -> SemaEmptyStartUse? {
+    loop arg in args {
+        found: sema_stmt_empty_start_expr_use(arg.expr, name, kind, return_type, scopes)
+        if found != None -> return found
+    }
+    None
+}
+
+sema_stmt_empty_start_expr_use: fn(expr: Expr, name: String, kind: String, return_type: Type?, scopes: SemaScopeTable) -> SemaEmptyStartUse? {
+    if expr == {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if sema_stmt_empty_start_name(receiver) != name -> return sema_stmt_empty_start_args_use(args, name, kind, return_type, scopes)
+            if kind == "none" -> return None
+            if method == "push" && args.len() == 1 && kind == "list" {
+                element: sema_stmt_empty_start_value_type(args[0].expr, scopes) ?? return None
+                return Val(SemaEmptyStartUse{ty: Type.List{element: element}, span: args[0].span, what: "pushes {sema_stmt_empty_start_a(element)} onto `{name}`"})
+            }
+            if (method == "insert" || method == "add") && args.len() == 2 {
+                key: sema_stmt_empty_start_value_type(args[0].expr, scopes) ?? return None
+                value: sema_stmt_empty_start_value_type(args[1].expr, scopes) ?? return None
+                // `List.insert(index, value)` and `Map.add(key, value)`.
+                if method == "insert" {
+                    if kind != "list" || key != .Int -> return None
+                    return Val(SemaEmptyStartUse{ty: Type.List{element: value}, span: args[1].span, what: "inserts {sema_stmt_empty_start_a(value)} into `{name}`"})
+                }
+                return Val(SemaEmptyStartUse{ty: Type.Map{key: key, key_span: None, value: value}, span: args[1].span, what: "adds {sema_stmt_empty_start_a(value)} under {sema_stmt_empty_start_a(key)} key to `{name}`"})
+            }
+            None
+        }
+        .Call(call, _) -> {
+            labeled := false
+            loop (position, arg) in call.args {
+                if arg.label != None || arg.spread -> labeled = true
+                if sema_stmt_empty_start_name(arg.expr) == name {
+                    if labeled -> return None
+                    param: sema_stmt_empty_start_param_type(call.name, position, scopes) ?? return None
+                    return sema_stmt_empty_start_whole(param, kind, arg.span, "passes `{name}` to `{call.name}` as {sema_stmt_empty_start_a(param)}")
+                }
+                found: sema_stmt_empty_start_expr_use(arg.expr, name, kind, return_type, scopes)
+                if found != None -> return found
+            }
+            None
+        }
+        .Place(value, _, _, _) -> sema_stmt_empty_start_expr_use(value, name, kind, return_type, scopes)
+        .Try(value, _, _, _, _) -> sema_stmt_empty_start_expr_use(value, name, kind, return_type, scopes)
+        .OrFallback(value, _, _, _, _) -> sema_stmt_empty_start_expr_use(value, name, kind, return_type, scopes)
+        .If(_, then_body, _, else_body, _, _, _) -> {
+            found: sema_stmt_empty_start_use(then_body, 0, name, kind, return_type, None, scopes)
+            if found != None -> return found
+            sema_stmt_empty_start_use(else_body, 0, name, kind, return_type, None, scopes)
+        }
+        else -> None
+    }
+}
+
+// The typed start a use implies, as source: `[String]{}`, `[String:Int]{}`,
+// `Int?{None}`.
+sema_stmt_empty_start_text: fn(ty: Type) -> String Never! {
+    if ty == {
+        .List(element) -> "[{type_name(element)}]{{}}"
+        .Map(key, _, value) -> "[{type_name(key)}:{type_name(value)}]{{}}"
+        .Option(inner) -> "{type_name(inner)}?{{None}}"
+        else -> type_name(ty)
+    }
+}
+
+// Rewrites the literal check's report for the untyped `binding` at
+// `statements[index]` when a later use implies its type.
+sema_stmt_empty_start_report: fn(binding: Binding, statements: [Stmt], index: Int, return_type: Type?, tail_span: Span?, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if binding.ty != None || binding.pattern != None || binding.name == "" -> return
+    kind: sema_stmt_empty_start_kind(binding.init)
+    if kind == "" -> return
+    code: if kind == "none" -> "E0308" else -> "E0501"
+    site: expr_span(binding.init)
+    reported := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == code && (diagnostic.span ?? Span{start: -1, end: -1}) == site -> reported = true
+    }
+    if !reported -> return
+    found: sema_stmt_empty_start_use(statements, index + 1, binding.name, kind, return_type, tail_span, scopes) ?? return
+    written: sema_stmt_empty_start_text(found.ty)
+    what := "an empty list needs a type"
+    if kind == "map" -> what = "an empty map needs a type"
+    if kind == "none" -> what = "bare `None` needs a known optional type here"
+    use_text := "a later line"
+    if sema_source_line_at(environment.source_segments, found.span) == .Val(line) -> use_text = "line {line}"
+    diagnostic: sema_error(code, site, what, "{use_text} {found.what}, so `{binding.name}` is `{type_name(found.ty)}`", "write `{written}`; `jet fix` writes it")
+    labeled: diagnostic_with_label(diagnostic, found.span, "this use makes `{binding.name}` {sema_stmt_empty_start_a(found.ty)}")
+    rewritten: diagnostic_with_edit_grade(labeled, TextEdit{span: site, new_text: written}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+    // The literal check can run more than once over one binding; every copy
+    // of its report becomes the rewritten one.
+    loop position in 0..<diagnostics.len() {
+        if diagnostics[position].code == code && (diagnostics[position].span ?? Span{start: -1, end: -1}) == site -> diagnostics[position] = rewritten.copy()
+    }
 }
 
 // L0522 (check_stdlib_walk_filter): a loop over `fs.walk(root).list()` whose
@@ -7945,9 +8206,14 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                             }
                         }
                         output.push(value)
+                        // A bare `None` start can check as a value after its E0308.
+                        sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)
                         if !binding.mutable && binding.pattern == None && sema_shared_cycle_cell_init(binding.init) -> sema_scope_mark_fresh_cell(scopes, binding.name, binding.init)
                     }
-                    .None -> complete = false
+                    .None -> {
+                        sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)
+                        complete = false
+                    }
                 }
             }
             .Assign(target, op, op_span, expr) -> {

@@ -4,6 +4,7 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
+        AccessConvention,
         BinMatchPart,
         BinOp,
         ByteTextPart,
@@ -809,7 +810,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                 jfmt_fmt_error_contract(f, err)
             }
         }
-        .Fn(params, ret, effect_bound, param_contract, _, return_view_provenance) -> {
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             jfmt_write(f, "fn(")
             // Reprint the declared call contract — labels and
             // the `/` and `*` zone separators.
@@ -841,6 +842,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                         jfmt_write(f, contract[entry.index].label)
                         jfmt_write(f, ": ")
                     }
+                    if call_metadata == .Val(metadata) && entry.index < metadata.conventions.len() && metadata.conventions[entry.index] == AccessConvention.Move -> jfmt_write(f, "&&")
                     jfmt_fmt_type(f, params[entry.index])
                 }
                 jfmt_comma_after(f, multiline, span.end)

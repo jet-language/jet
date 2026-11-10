@@ -207,14 +207,14 @@ sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environmen
 
 sema_expression_absent: fn(span: Span, expected: Type?, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required: expected ?? {
-        diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
+        diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, `T?{{None}}`, or use `None` where a `T?` is already expected"))
         return None
     }
     normalized: sema_expr_unwrap_tag(required)
     if normalized == {
         .Option(_) -> Val(sema_node(context, normalized, NodeKind.Absent, span))
         else -> {
-            diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
+            diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, `T?{{None}}`, or use `None` where a `T?` is already expected"))
             None
         }
     }

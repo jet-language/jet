@@ -545,7 +545,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     checked: checked_elements ?? return None
     if result_ty == None {
         if checked.parts.len() == 0 {
-            diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal, such as `[Int]{{}}`"))
+            diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal: `[T]{{}}` for a list of `T`"))
             return None
         }
         result_ty = Val(Type.List{element: checked.element_types[0]})
@@ -597,7 +597,7 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
     }
     if entries.len() == 0 {
         if result_ty == None {
-            diagnostics.push(sema_error("E0501", span, "an empty map needs a type", "write `[]` only where the map type is already known from around it", "name the key and value types on the literal: `[String:Int].{{}}`"))
+            diagnostics.push(sema_error("E0501", span, "an empty map needs a type", "write `[]` only where the map type is already known from around it", "name the key and value types on the literal: `[K:V]{{}}` for a map from `K` to `V`"))
             return None
         }
         ty: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}

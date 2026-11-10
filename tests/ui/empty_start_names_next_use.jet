@@ -1,0 +1,69 @@
+// D-INFER-LEVEL1=A (#6325 c4): an untyped `[]` or bare `None` start names the
+// type the first later use implies, and a Safe edit writes it there.
+names_from_push: fn() {
+    names := []
+    names.push("Ada")
+    print(names.len())
+}
+
+counts_from_index_store: fn() {
+    counts := []
+    counts["ada"] = 1
+    print(counts.len())
+}
+
+scores_from_add: fn() {
+    scores := []
+    loop round in 0..<3 {
+        previous := scores.add("round {round}", 2)
+        print(previous ?? 0)
+    }
+    print(scores.len())
+}
+
+slots_from_insert: fn() {
+    slots := []
+    slots.insert(0, "first")
+    print(slots.len())
+}
+
+best_from_assignment: fn() {
+    best := None
+    best = Val(3)
+    print(best ?? 0)
+}
+
+ids_from_early_return: fn(stop: Bool) -> [Int] {
+    ids := []
+    if stop -> return ids
+    [1]
+}
+
+ids_from_tail: fn() -> [Int] {
+    ids := []
+    ids
+}
+
+total: fn(values: [Float]) -> Int { values.len() }
+
+values_from_call: fn() {
+    values := []
+    print(total(values))
+}
+
+sizes_from_binding: fn() {
+    sizes := []
+    size: total(sizes)
+    print(size)
+}
+
+level_from_plain_value: fn() {
+    level := None
+    level = 2
+    print(level ?? 0)
+}
+
+names_without_a_typed_use: fn() {
+    names := []
+    print(names.len())
+}

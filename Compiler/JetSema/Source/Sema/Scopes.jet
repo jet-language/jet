@@ -2531,17 +2531,17 @@ sema_scope_nominal_function_type_params: fn(graph: SemaRegistrationGraph, module
     [TypeParam]{}
 }
 
-// The first `&` or `&&` parameter when sema_scope_declaration_site(environment,
-// program, id) is a function, else none. Such a function is direct-call-only:
-// a function type has read parameters only.
-sema_scope_declaration_function_marked_param: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
+// The parameters when sema_scope_declaration_site(environment, program, id)
+// is a function, else none. A function with a `&` or `&&` parameter is a
+// value only where a function type marks the same parameters.
+sema_scope_declaration_function_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [Param]? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) {
-        if environment.declarations[index].item == .Func(func) -> return sema_scope_first_marked_param(func.params)
+        if environment.declarations[index].item == .Func(func) -> return Val(func.params.copy())
         return None
     }
     if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) -> return sema_scope_first_marked_param(graph.modules[module_index].functions[row].declaration.params)
+        if site == .Function(module_index, row) -> return Val(graph.modules[module_index].functions[row].declaration.params.copy())
     }
     None
 }

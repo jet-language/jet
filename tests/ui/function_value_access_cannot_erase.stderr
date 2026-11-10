@@ -3,7 +3,7 @@ Error [jet.MarkedFunctionValue]: `edit` can't be used as a function value becaus
     |
  10 |     edit_callback: edit
     |                    ^^^^
- Why: A function type gives each parameter plain read access, so a value of `edit` would drop the `&` its parameter declares
+ Why: A function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of `edit` would drop the `&` its parameter declares
  Fix: Call `edit` directly, or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227
 
@@ -12,6 +12,6 @@ Error [jet.MarkedFunctionValue]: `consume` can't be used as a function value bec
     |
  11 |     consume_callback: consume
     |                       ^^^^^^^
- Why: A function type gives each parameter plain read access, so a value of `consume` would drop the `&&` its parameter declares
- Fix: Call `consume` directly, or pass a lambda that makes that call
+ Why: A function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of `consume` would drop the `&&` its parameter declares
+ Fix: Call `consume` directly, take the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227

@@ -1609,7 +1609,14 @@ content-addressed definitions (D-CADEFS1, frozen).
 ### Collections
 
 **S37 — List literal**: `[a, b, c]`; empty `[]` needs a context type
-(**S78**: `[]` infers from expected type; explicit `[]: [T]` always accepted).
+(**S78**: `[]` infers from the expected type; `[T]{}` names the type on the value).
+**D-INFER-LEVEL1=A**: with no expected type, an untyped `names := []` (E0501) or
+`best := None` (E0308) is not inferred from later lines. The report reads ahead in
+the same function for the first use that implies the type (a push or insert
+argument, a map add or index store, an assignment, a return, or a typed call
+argument), names that line and type, and carries a Safe edit that writes
+`[String]{}`, `[String:Int]{}` or `Int?{None}` where the value starts. With no such
+use the report gives the general advice.
 
 **S38 / D-EMPTYLIT1 — Map literal**: `["key": value, …]`. **D-EMPTYLIT1**
 *(ratified 2026-07-04)*: `[]` is the ONE empty-collection spelling for both

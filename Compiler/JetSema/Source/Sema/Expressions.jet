@@ -4362,7 +4362,7 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
         result = sema_expr_expected(value, expected, environment, program, diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
-        if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, environment, program, diagnostics) -> return None
+        if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, expected, environment, program, diagnostics) -> return None
         value_ty: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name, expected) else -> ty
         value: sema_node(context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, diagnostics)
@@ -4370,13 +4370,22 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
     result
 }
 
-// E0227: a named function with a `&` or `&&` parameter stays direct-call-only.
-// A function type gives every parameter read access, so its value would drop
+// E0227: a named function with a `&` or `&&` parameter is a value only where
+// the expected function type marks the same parameters (`fn(&&Map)`). A plain
+// function type gives every parameter read access, so its value would drop
 // the write or take its parameter declares.
-sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    param: sema_scope_declaration_function_marked_param(environment, program, id) ?? return false
+sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    params: sema_scope_declaration_function_params(environment, program, id) ?? return false
+    param: sema_scope_first_marked_param(params) ?? return false
+    if expected == .Val(required) && required == .Fn(_, _, _, _, metadata, _) && metadata == .Val(slot) && slot.conventions.len() == params.len() {
+        same: loop index in 0..<params.len() {
+            if slot.conventions[index] != params[index].convention -> break false
+        } ?? true
+        if same -> return false
+    }
     mark: if param.convention == AccessConvention.Write -> "&" else -> "&&"
-    diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access, so a value of `{name}` would drop the `{mark}` its parameter declares", "call `{name}` directly, or pass a lambda that makes that call"))
+    fix: if mark == "&&" -> "call `{name}` directly, take the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call" else -> "call `{name}` directly, or pass a lambda that makes that call"
+    diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of `{name}` would drop the `{mark}` its parameter declares", fix))
     true
 }
 
