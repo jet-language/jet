@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98779,
+    "rev": 98783,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74165,6 +74165,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-10T05:00:46.197Z"
+        },
+        {
+          "n": 36,
+          "text": "web.openapi on a mux with a CONNECT route reports \"unsupported OpenAPI HTTP method\" as a registered user-facing error or emits the operation. It never exits 101 with the message hidden (Core/Web/Web.jet:1104, Compiler/JetRuntime/Source/RouteWeb.jet:3-15). Found by the D-ROUTE-METHOD1 probe r05.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T15:24:24.753Z"
+        },
+        {
+          "n": 37,
+          "text": "`http.Method.custom(token)` compiles and runs at O0, O1 and O2 without a backend ICE (today ir.build fails with unlowered IR, probe r06). Its case passes and leaves the known-failing list.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T15:24:25.688Z"
+        },
+        {
+          "n": 38,
+          "text": "E2805 and the router agree on paths: either a module String constant is accepted as a router path, as the E2805 fix text promises, or the fix text is corrected. A UI snapshot proves the result (probe r07).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T15:24:26.633Z"
         }
       ],
       "refs": [],
@@ -74175,9 +74202,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-10T12:18:39.723Z",
+      "updated": "2026-11-10T15:24:26.633Z",
       "updatedBy": "Main",
-      "criteriaLastN": 35
+      "criteriaLastN": 38
     },
     {
       "id": "c0rqt0kq",
@@ -195205,6 +195232,316 @@
       "created": "2026-11-10T12:54:09.738Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-10"
+    },
+    {
+      "id": "D-ROUTE-METHOD1",
+      "cardId": "c0scf8mn",
+      "group": "library",
+      "title": "Public routes for a custom HTTP method: mux.custom(token, path, handler) and #Server.Custom(token, path)",
+      "situation": "HTTP lets a server accept methods beyond the nine standard ones, such as PURGE for caches or PROPFIND for WebDAV. Jet's server already reads such a request and answers 405 with an Allow list. But public code cannot register a route for one.\n\nEach standard method has its own call, like mux.get, plus a struct marker like #Server.Get. The one call that takes a method value is mux.__route, and the compiler refuses that name in user code. So card #6206 cannot meet its rule that a custom-method route checks and serves.\n\nWe recommend A: mux.custom(\"PURGE\", path, handler) and #Server.Custom(\"PURGE\", path), named for the Custom case of the Method enum. The compiler checks the token while building.",
+      "gist": "Should a custom HTTP method get its own route call, mux.custom(token, path, handler), named for the Method enum's Custom case?",
+      "lesson": "A web server answers requests by method, such as GET or POST. HTTP also allows other methods, such as PURGE. Jet's server can already receive them, but your code has no public way to route one. This vote picks how you write that route.",
+      "explainer": "Words used here. A method is the verb at the start of an HTTP request, such as GET. A custom method is any other valid token, such as PURGE; HTTP calls it an extension method. A mux is Jet's route table; a router is the same table with fully checked contracts. A marker such as #Server.Get tags a struct method as a route. A token is the HTTP word grammar: letters, digits and a few symbols, with no spaces.",
+      "story": "Sam runs a cache in front of an API. The CDN sends PURGE /cache/:key to drop one entry. Under A, Sam writes mux.custom(\"PURGE\", \"/cache/:key\", purge) next to mux.get. A typo with a space fails the build, and the route shows in the Allow header and the OpenAPI document.",
+      "inWild": "// ASP.NET Core: one call takes a list of method strings.\napp.MapMethods(\"/cache/{key}\", new[] { \"PURGE\" }, Purge);\n// Go 1.22+: the method is part of the pattern string.\nmux.HandleFunc(\"PURGE /cache/{key}\", purge)",
+      "detail": "What this ballot decides. The public way to register a route for an HTTP extension method on a mux, a router and a mounted struct. The route table, dispatch and the nine standard verbs stay as they are.\n\nToday, measured with the a0.0.43 compiler (dev c460ba91e5). A PURGE request to a mux with GET and DELETE routes answers 405 with Allow: DELETE, GET, HEAD, OPTIONS (probe r01). So parsing and dispatch already handle any method. Calling mux.__route is E0067, a reserved name (r02). mux.purge is E0102 (r03). #Server.Custom is E0927, not a known rule (r04).\n\nWhere the verbs come from. The compiler derives the route verbs from the cases of core.http's Method enum and skips Custom (HttpRouting.jet:877-888). Each verb call lowers to the private __route with the method text (HttpRouting.jet:1137-1150). Dispatch compares the stored method string with the request's (Server.jet:696).\n\nWhat A adds. mux.custom, router.custom and a #Server.Custom marker struct beside the seven in Server.jet:27-75. The verb table stays derived: Custom becomes the one verb with a leading token argument.\n\nBuild-time checks for A. A literal or named constant token must be an RFC 9110 token, and must not equal a standard method name in any letter case. The error for custom(\"get\") names mux.get as the fix. A mux may also take a run-time token, checked when it registers, the way mux paths already work (Server.jet:203-208). A router needs a literal or constant, as its paths do.\n\nThe OpenAPI document. web.openapi knows eight methods and stamps version 3.1.0 (Web.jet:829, 1280). OpenAPI 3.1 has no slot for an extension method. OpenAPI 3.2 adds additionalOperations, a map keyed by the exact method. A renders extension methods there and stamps 3.2.0 only when a document has one.\n\nA defect found. A mux with a public mux.connect route makes web.openapi stop with an internal error that hides its message (probe r05). The same mux registers fine without the document (r05b). CONNECT is not an OpenAPI 3.1 method. A's additionalOperations rendering fixes it too.\n\nA second defect. http.Method.custom(\"PURGE\"), a public constructor, crashes the backend with ir.build unlowered (probe r06). Option B depends on it.\n\nA third defect. E2805 tells a router author to use a literal or compile-time String constant, but a module constant path is refused (probe r07). A's token check must accept constants, and the path check gets the same fix.\n\nRepository counts. 148 verb calls on mux or router values, 111 of them get. 34 route markers. One mux.trace and one mux.connect, both in the verb-cases test. There is no marker for Trace or Connect.\n\nPeers. Go's ServeMux puts any valid token in the pattern, as in \"PURGE /cache/{key}\". ASP.NET's MapMethods takes a list of method strings. Express defines app.purge for each method in Node's list, plus app.all. Axum's MethodFilter has ten fixed methods and refuses others; only any serves them, and it sends no Allow header.\n\nOther options. B adds mux.route(method, path, handler) taking a Method value. C puts the method in the path string. D adds a catch-all route whose handler checks the method itself.",
+      "options": [
+        {
+          "key": "A",
+          "name": "custom verb named for the Custom case",
+          "detail": "mux.custom(token, path, handler), router.custom and #Server.Custom(token, path); the token is checked while building.",
+          "technical": "sema_http_route_verbs keeps deriving verbs from Method and adds custom with a leading token argument; lowers to __route(token, ...). Literal or constant tokens must be RFC 9110 tokens and not a standard name in any case. Mux takes a run-time token checked at registration (E2805), as mux paths do. web.openapi renders extension methods under OpenAPI 3.2 additionalOperations, stamping 3.2.0 only then.",
+          "code": "mux.get(\"/cache/:key\", (key: String) -> Ok(server.response(200, \"hit {key}\")))\nmux.custom(\"PURGE\", \"/cache/:key\", (key: String) -> Ok(server.response(200, \"purged {key}\")))\n\nRoutes: struct {\n    #Server.Custom(\"PURGE\", \"/cache/:key\")\n    purge: fn(self, key: String) -> HTTPResponse HTTPError! { Ok(server.response(200, \"purged {key}\")) }\n}"
+        },
+        {
+          "key": "B",
+          "name": "route taking a Method value",
+          "detail": "mux.route(method, path, handler), with method an http.Method such as .Custom(\"PURGE\").",
+          "technical": "New route call whose first argument is a Method value; a marker #Server.Route(.Custom(\"PURGE\"), path). Standard methods are refused there, or GET gains a second spelling. Depends on http.Method.custom, which crashes the backend today (probe r06).",
+          "code": "mux.get(\"/cache/:key\", (key: String) -> Ok(server.response(200, \"hit {key}\")))\nmux.route(.Custom(\"PURGE\"), \"/cache/:key\", (key: String) -> Ok(server.response(200, \"purged {key}\")))\n\nRoutes: struct {\n    #Server.Route(.Custom(\"PURGE\"), \"/cache/:key\")\n    purge: fn(self, key: String) -> HTTPResponse HTTPError! { Ok(server.response(200, \"purged {key}\")) }\n}"
+        },
+        {
+          "key": "C",
+          "name": "method inside the pattern",
+          "detail": "mux.handle(\"PURGE /cache/:key\", handler), as Go's ServeMux does.",
+          "technical": "A new pattern grammar with an optional leading method token. GET /x and mux.get(\"/x\") become two spellings unless the method form refuses standard names.",
+          "code": "mux.get(\"/cache/:key\", (key: String) -> Ok(server.response(200, \"hit {key}\")))\nmux.handle(\"PURGE /cache/:key\", (key: String) -> Ok(server.response(200, \"purged {key}\")))"
+        },
+        {
+          "key": "D",
+          "name": "catch-all route",
+          "detail": "mux.any(path, handler); the handler checks request.method itself.",
+          "technical": "Like Axum's any: the route matches every method, so the mux cannot answer 405 or list Allow for it, and the document cannot name the method.",
+          "code": "mux.get(\"/cache/:key\", (key: String) -> Ok(server.response(200, \"hit {key}\")))\nmux.any(\"/cache/:key\", (request: HTTPRequest) -> {\n    if request.method != \"PURGE\" -> return Ok(server.response(405, \"no\"))\n    Ok(server.response(200, \"purged\"))\n})"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "ServeMux patterns may start with any valid method token.",
+          "code": "mux.HandleFunc(\"PURGE /cache/{key}\", purge)"
+        },
+        {
+          "lang": "C# (ASP.NET Core)",
+          "note": "MapMethods takes a list of method strings.",
+          "code": "app.MapMethods(\"/cache/{key}\", new[] { \"PURGE\" }, Purge);"
+        },
+        {
+          "lang": "JavaScript (Express)",
+          "note": "One method per name in Node's method list, plus app.all.",
+          "code": "app.purge(\"/cache/:key\", purge)"
+        },
+        {
+          "lang": "Rust (Axum)",
+          "note": "MethodFilter has ten fixed methods; others need any, which sends no Allow header.",
+          "code": ".route(\"/cache/{key}\", any(purge))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One call per Method case, the Custom case included, so a custom route reads like every other route. The token is checked while building, and the route joins Allow and the OpenAPI document.",
+        "gains": [
+          "A custom-method route checks and serves, closing #6206 c35.",
+          "One spelling per method: the verb list stays derived from the Method enum.",
+          "405 answers, Allow lists and OpenAPI include the custom route."
+        ],
+        "losses": [
+          {
+            "loss": "The method is a string argument, not a typed value.",
+            "mitigation": "The build checks the token's grammar and refuses standard names; named constants, which E2805 already promises, give it one spelling."
+          },
+          {
+            "loss": "OpenAPI 3.1 has no slot for an extension method.",
+            "mitigation": "Such routes render under OpenAPI 3.2's additionalOperations, and only documents with one carry the 3.2.0 stamp."
+          },
+          {
+            "loss": "One more call on mux and router, and one more marker.",
+            "mitigation": "Both come from the Method enum's Custom case, like the other verbs, so no second list exists."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives GET a second spelling or refuses it, and depends on Method.custom, which crashes today."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a second pattern grammar and a second way to write every standard route."
+          },
+          {
+            "key": "D",
+            "reason": "D loses 405, Allow and the document entry, and moves dispatch into the handler."
+          }
+        ],
+        "tradeoff": "A string token checked while building, for one route call per Method case."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Twelve claims were attacked with probes on a0.0.43; three failed and were fixed: the OpenAPI slot, the run-time token and constant tokens. The pass also found three defects, in web.openapi on CONNECT, Method.custom and E2805's constant advice."
+      },
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on the D-ROUTE-METHOD1/probes directory beside it. Run census.sh from the dev worktree.",
+      "surface": {
+        "gist": "Should a custom HTTP method get its own route call, mux.custom(token, path, handler)?",
+        "lesson": "A web server answers requests by method, such as GET or POST. HTTP also allows other methods, such as PURGE. Jet's server can already receive them, but your code has no public way to route one. This vote picks how you write that route.",
+        "trio": {
+          "current": {
+            "note": "Only standard methods have a public route call.",
+            "code": "mux.purge(\"/cache/:key\", purge) // E0102"
+          },
+          "wild": {
+            "lang": "C#",
+            "note": "ASP.NET takes method strings.",
+            "code": "app.MapMethods(\"/c/{k}\", new[] { \"PURGE\" }, Purge);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "custom verb",
+            "gist": "A call named for the Custom case.",
+            "gains": [
+              "One call per method case.",
+              "Token checked while building."
+            ],
+            "losses": [
+              "The method is a string."
+            ],
+            "proposed": {
+              "code": "mux.custom(\"PURGE\", \"/cache/:key\", purge)\n#Server.Custom(\"PURGE\", \"/cache/:key\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "route(Method)",
+            "gist": "A route call taking a Method value.",
+            "gains": [
+              "The method is typed."
+            ],
+            "losses": [
+              "GET gains a second spelling.",
+              "Method.custom crashes today."
+            ],
+            "proposed": {
+              "code": "mux.route(.Custom(\"PURGE\"), \"/cache/:key\", purge)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "in the pattern",
+            "gist": "The method leads the path string.",
+            "gains": [
+              "Matches Go."
+            ],
+            "losses": [
+              "A second pattern grammar."
+            ],
+            "proposed": {
+              "code": "mux.handle(\"PURGE /cache/:key\", purge)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "catch-all",
+            "gist": "Match every method; check in the handler.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "No 405, Allow or document entry."
+            ],
+            "proposed": {
+              "code": "mux.any(\"/cache/:key\", purge)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A custom route reads like every other route, and the build checks its token.",
+          "gains": [
+            "Closes #6206 c35.",
+            "Allow and OpenAPI include it."
+          ],
+          "losses": [
+            {
+              "loss": "The method is a string.",
+              "mitigation": "The build checks it and refuses standard names."
+            },
+            {
+              "loss": "OpenAPI 3.1 has no slot.",
+              "mitigation": "It renders under 3.2 additionalOperations."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two spellings for GET."
+            },
+            {
+              "key": "C",
+              "reason": "A second pattern grammar."
+            },
+            {
+              "key": "D",
+              "reason": "Loses 405 and Allow."
+            }
+          ],
+          "tradeoff": "A checked string token, for one call per method case."
+        }
+      },
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "The method is a string argument, not a typed value.",
+          "attempts": [
+            "Check literal and constant tokens while building: RFC 9110 token grammar, and no standard name in any case, with mux.get as the fix.",
+            "Accept a named compile-time String constant as the token. E2805's fix text already promises this, but a constant path is refused today (probe r07); A fixes both."
+          ],
+          "result": "Reduced. A misspelled but valid token, such as PRUGE, still builds; a constant makes it one place to fix."
+        },
+        {
+          "option": "A",
+          "loss": "OpenAPI 3.1 has no slot for an extension method.",
+          "attempts": [
+            "Render the route under OpenAPI 3.2 additionalOperations, keyed by the exact token.",
+            "Stamp 3.2.0 only when a document holds such a route, so every current document stays 3.1.0; CONNECT moves there too."
+          ],
+          "result": "Reduced. A tool that reads only 3.1 may reject a document that has a custom route."
+        },
+        {
+          "option": "A",
+          "loss": "One more call on mux and router, and one more marker.",
+          "attempts": [
+            "Derive custom from the Method enum's Custom case, as the nine verbs are derived.",
+            "Lower it to the same private __route, so dispatch, Allow and duplicate checks are unchanged."
+          ],
+          "result": "Reduced to one marker struct and one verb row; no second method list."
+        },
+        {
+          "option": "A",
+          "loss": "A run-time token on a mux is checked only when it registers.",
+          "attempts": [
+            "Check it at registration with E2805 and the calling line, as run-time mux paths are.",
+            "Keep routers literal-only, as their paths are, so checked contracts never see an unchecked token."
+          ],
+          "result": "Kept for mux values only, the same rule mux paths follow today."
+        },
+        {
+          "option": "B",
+          "loss": "GET gains a second spelling.",
+          "attempts": [
+            "Refuse standard cases in route, which leaves A's behavior with a heavier spelling.",
+            "Lint route(.Get) toward mux.get, which still allows two spellings."
+          ],
+          "result": "Not removed without becoming A."
+        },
+        {
+          "option": "D",
+          "loss": "No 405, Allow or document entry.",
+          "attempts": [
+            "Let the handler declare the methods it serves, which recreates A's token list.",
+            "Answer OPTIONS from the handler, which moves routing into user code."
+          ],
+          "result": "Not removed."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Custom HTTP method routes: probes, census, peers and adversarial review",
+          "path": "Docs/audits/2026-11-10-route-method-review.md",
+          "note": "Probes on a0.0.43 (PURGE answers 405 today; __route, purge and #Server.Custom refused; web.openapi stops on CONNECT; Method.custom crashes), route census, peer sources, design-away."
+        },
+        {
+          "title": "Go net/http pattern syntax and validMethod",
+          "url": "https://github.com/golang/go/blob/master/src/net/http/pattern.go"
+        },
+        {
+          "title": "ASP.NET Core MapMethods",
+          "url": "https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.builder.endpointroutebuilderextensions.mapmethods"
+        },
+        {
+          "title": "Axum MethodFilter (ten fixed methods; TryFrom refuses others)",
+          "url": "https://github.com/tokio-rs/axum/blob/main/axum/src/routing/method_filter.rs"
+        },
+        {
+          "title": "Express app.METHOD and app.all",
+          "url": "https://github.com/expressjs/express/blob/master/lib/application.js"
+        },
+        {
+          "title": "OpenAPI 3.2.0 Path Item additionalOperations",
+          "url": "https://spec.openapis.org/oas/v3.2.0.html#path-item-object"
+        },
+        {
+          "title": "RFC 9110 section 9.1: methods are case-sensitive tokens",
+          "url": "https://www.rfc-editor.org/rfc/rfc9110#section-9.1"
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T15:24:07.694Z"
     }
   ],
   "questions": [
@@ -198277,6 +198614,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:24:26.633Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0scf8mn",
+      "note": "#38 E2805 and the router agree on paths: either a module String "
+    },
+    {
+      "at": "2026-11-10T15:24:25.688Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0scf8mn",
+      "note": "#37 `http.Method.custom(token)` compiles and runs at O0, O1 and "
+    },
+    {
+      "at": "2026-11-10T15:24:24.753Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0scf8mn",
+      "note": "#36 web.openapi on a mux with a CONNECT route reports \"unsupport"
+    },
+    {
+      "at": "2026-11-10T15:24:07.694Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ROUTE-METHOD1",
+      "note": "Public routes for a custom HTTP method: mux.custom(token, path, handler) and #Server.Custom(token, path)"
+    },
     {
       "at": "2026-11-10T15:23:09.652Z",
       "by": "Main",
