@@ -123,6 +123,12 @@ int_set: fn(node: I64, index: I64, limb: I64) {
     int_put_u32(wrapping(int_load(wrapping(node + I64{24})) + index * I64{4}), limb)
 }
 
+// Limb `index` of a workspace node `length` limbs long; zero past its end.
+int_rest_limb: fn(node: I64, length: I64, index: I64) -> I64 {
+    if index >= length -> return I64{0}
+    int_get(node, index)
+}
+
 int_free_node: fn(node: I64) {
     cap: int_load(wrapping(node + I64{40}))
     if (cap != I64{0}) { jet_rt_free(int_load(wrapping(node + I64{24})), cap * I64{4}, I64{4}) }
@@ -566,6 +572,19 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
     quotient: if want_quotient -> int_new(ll) else -> I64{0}
     rest: int_new(rl + I64{1})
     product: int_new(rl + I64{1})
+    // Each quotient limb is bounded from the leading limbs, so the search
+    // for it takes a few probes instead of thirty. With D the divisor and
+    // B = 1e9, top = floor(D / (10^s * B^(rl-2))) is the divisor's top two
+    // limbs cut to nine digits (s from 1 to 9); a one-limb divisor is exact.
+    top := int_limb(right, rl - I64{1})
+    scale := I64{1}
+    if (rl > I64{1}) {
+        top = top * I64{1000000000} + int_limb(right, rl - I64{2})
+        loop top >= (I64{1000000000}) {
+            top = top /% I64{10}
+            scale *= I64{10}
+        }
+    }
     at := ll
     loop at > (I64{0}) {
         at -= I64{1}
@@ -578,8 +597,23 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
         int_set(rest, I64{0}, int_limb(left, at))
         int_store(wrapping(rest + I64{32}), length + I64{1})
         int_normalize(rest)
+        // With n = floor(R / (10^s * B^(rl-2))) for the rest R, which is
+        // below D * B, top <= D / (10^s * B^(rl-2)) < top + 1 gives
+        // floor(n / (top + 1)) <= q <= floor((n + 1) / top) for the limb q,
+        // and n < 1e18. A one-limb divisor's q is floor(R / top) itself.
+        rest_len: int_load(wrapping(rest + I64{32}))
         lo := I64{0}
         hi := I64{999999999}
+        if (rl == I64{1}) {
+            lo = (int_rest_limb(rest, rest_len, I64{1}) * I64{1000000000} + int_rest_limb(rest, rest_len, I64{0})) /% top
+            hi = lo
+        } else {
+            high: int_rest_limb(rest, rest_len, rl) * I64{1000000000} + int_rest_limb(rest, rest_len, rl - I64{1})
+            n: high * (I64{1000000000} /% scale) + int_rest_limb(rest, rest_len, rl - I64{2}) /% scale
+            lo = n /% (top + I64{1})
+            bound: (n + I64{1}) /% top
+            if (bound < hi) { hi = bound }
+        }
         loop lo < hi {
             mid: lo + (hi - lo + I64{1}) /% I64{2}
             int_mul_small_into(product, right, mid)
