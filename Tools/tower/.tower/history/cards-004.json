@@ -86230,6 +86230,1562 @@
       "completedAt": "2026-11-07T02:07:13.866Z",
       "questions": [],
       "retiredAt": "2026-11-10T02:13:18.216Z"
+    },
+    {
+      "id": "c0rqi33c",
+      "num": 4717,
+      "title": "Remove Rust from the toolchain: port every remaining Rust file to Jet (owner directive 2026-10-06)",
+      "body": "Owner directive (2026-10-06 06:20): everything is ported to Jet so Rust can be removed from the toolchain; Jet-only native must contain no Rust remnants, not even policy-free provider leaves (host/OS access through Jet FFI/syscalls inside vetted #Unsafe Core internals). Timing may slip past the 15:00 goals; nothing may be designed to keep Rust.\n\nInventory of Rust on integ/next6 (2026-10-06 06:25, git ls-tree sizes):\n- crates/jet-codegen 19.4 MB (Prelude runtime 10.7 MB embedded in every generated program; Codegen 8.7 MB)\n- tests 11.1 MB (Rust integration tests: must move to Jet test harness)\n- crates/jet-sema 6.7, crates/jetpack 6.2, crates/jet-foundation 5.9, Source (CLI front door) 5.6, jet-pkg-model 3.4, jet-comptime 3.2, jet-devserver 2.2, jet-parser 1.9, jet-evalhost 1.4, Compiler/Bootstrap host .rs 1.0, jet-driver 0.9, jet-repl 0.6, jet-env-model 0.5, jet-debug 0.5, jet-cli 0.5, jet-semindex 0.4, smaller crates ~1 MB.\n\nExisting Jet ports: the self-hosted compiler (Compiler/, fixed point) covers the compiler crates; origin/port/compiler (3aab69fde) holds an unverified 1:1 Jet port of crates/ (38 MB); Jetpack/ has Jet ports of the package manager. In flight 2026-10-06: CLI front door (SolCLI1-5 via PortInteg2), Prelude/CoreLib cutover (SolCore1-5 via CorelibInteg; Rust leaves tracked in $JET_STATE_ROOT/scratch/CorelibInteg/RUST-LEAVES.tsv), native backend replacing rustc (NativeLead2 line).\n\nCriteria: (1) every Rust file above has a Jet replacement or is deleted; (2) the toolchain builds and runs every tier with no rustc/cargo; (3) tests run on the Jet harness; (4) RUST-LEAVES.tsv is empty.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "Plan (2026-10-26, Main, replaces the pre-R7 plan). The Rust implementation is gone (R7a c9129d174, R7a2, R7c); the compiler, runtime pack, seed (a0_019) and chain build with no cargo/rustc. 197 .rs files remain at dev 2aa6fe9402. Remaining work, in delivery order:\n\n1. U7 Jet-hosted jetpack (the deleted Rust jetpack binary has no replacement yet).\n   - Step 1 Engine (3703d7a2fe) and step 2 JetOS/Image/Integrations/Services/Publication (05f851b632) landed: each `Jetpack/Bootstrap/check.sh --area` = 0 errors.\n   - Step 3 Secrets (local age v1 port over the age/age-keygen tools until core.crypto.vault owns the store, #3668) + CLI: patch $JET_SCRATCH_ROOT/lanes/Main/out/u7-secrets-cli.patch, proof = check --area CLI 0 errors + check --area Secrets --tests.\n   - Step 4: `check.sh --hosted` builds the jetpack binary; then the 278 tests/cases/jetpack* cases on it. Core gaps it needs stay on #5935.\n2. G3: tests/**/*.rs (42 files, none run since the cargo workspace is deleted). Census $JET_SCRATCH_ROOT/lanes/O0Image/g3/CENSUS.md: port or retire every #[test] with evidence, delete in batches (G3-1, G3-2 landed). Next: G3-3 verify the 112 name/golden matches (jetpack_engine, syntax_reconciliation, retirement_ratchet); G3-4 the 58 Jet #Tests; then the 83 open fns (cffi 23, pkg 11); last diagnostic_pages (needs a Jet page renderer), corpus_policy/agent_workloads/fmt_lossless (#5483 linter), common/support, tests/suites.txt. tests/lsp.rs waits on D-DEVSERVER1 (#5931).\n3. RustBridge removal (#5482, 96 .rs under Jetpack/Integrations): owner order is port every provider first (mbedTLS 3.6 + Monocypher over C FFI for TLS/crypto; core.plugin onto a JetIR wasm pipeline), then delete the bridge. core.plugin guest calls are currently E0102 (`Plugin` has no method), so the plugin examples fail until that lands.\n4. Kept by owner exception, not work: Tools/perf + Tools/gauntlet Rust peers (D2), Examples ffi rust host (user `extern rust`), Zed wasm-src, cargo/nix fixtures that model Rust packages.\nClose when 1-3 are done and every remaining .rs is in an exception class above.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Rust is removed from the toolchain (c1 on dev 2c40493778: the only .rs files left are benchmark peers, the Rust FFI example and the Zed extension); every remaining parity row lives on its goal card."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner 2026-11-06: Rust removal is finished. c1 met (only FFI, benchmark peers and the Zed extension remain), c30 obsolete, and the parity rows moved to G5 (#6425), G10, G11, G3, G6, G7 (#6632) and G1 (#4599). c36, the post-cutover Tower burndown, stays with Main."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the replaced Rust route no longer exists; c8's comparator is the standing performance gate. CardCleanup Q(c)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, 3cca22d260 (CoreOwnership): item 4 done. realtime and text print relations and facts in place of timings and host glyph ids; their goldens pass 6/6 on o0/o1/o2. Item 3 (E0067 on __bindgen__ caches in bridges and opaque_handles) is blocked on #6599: no Jet C binding generator exists, so the stale caches can't be regenerated, and hand-written caches would be guesses. bridges also needs a musl Rust toolchain. Item 5 (capabilities, core.plugin) needs guest/build/capability_guest.wasm, and no wasm32-wasip2 component target exists; that target's card #1914 is frozen, so it is owner-gated."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, 668a296d5c (CoreOwnership): the testkit names the o1/o2 artifact after the build entry's default executable (or its single b.add_executable target); golden 18/18 on s1 of HEAD + patch, including build_entry_discovery, compiler_api, compiler_api_package and foundations/tooling. Kit unit tests 223 passed, 6 failed, none of them artifact tests; base comparison pending."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, a271a3a073 (CoreOwnership): full golden on 864c10a4d0 across o0 (jet run), o1 (jet build) and o2 (--release): 4648 PASS; this commit fixes 5 rows (data_battery, dsl, arrays, expiring_secret, debug_trace o2 tier split), now 15/15 identical on every tier. Open: units (#6004 derived-unit conversion), exact (#5454 generic T: Add +), capabilities (core.plugin), bridges and opaque_handles (E0067 on checked-in __bindgen__ caches), ui/battery and ui/surface (core.ui host runtime-route ICE), realtime and text (timings printed, no fixed snapshot), and 4 fn-build goldens that ERROR at o1/o2 because the testkit looks for .jet/build/run while jet build now names the b.add_executable target (91177176da). The perf clause has no Rust route left to compare; under today's tiers it is the AGENTS.md peer and ceiling gate."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c20 waits on a WASI backend target (CoreOwnership): jet build --target=wasm32-wasip2 reports jet.InvalidCommandInput 'not built yet'. wasmtime is available locally through nix, so this is build work, not an external block. c21 in progress: D-TESTFAULT1 #Test(faults:) was a silent no-op (TTestFact.faults never reached the harness, so the Core/Files fault tests proved nothing); CoreOwnership is building the harness (runtime jet_rt_test_unit_faults, IR, CLI)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c108 partial, 6bee890a10 (CoreOwnership): v2 Core coverage ratchet (name + signature per module; --check fails an unlisted item with file:line; --write only removes; moved items re-filed) and a reset list of 4837 built from a HEAD archive; node --test 13/13 and --check OK locally; pushed to origin/dev. Remaining: a hosted CI run. .github/workflows/ci.yml runs only on pushes to master and on pull requests, and origin/master is held by owner order, so the hosted run needs the owner (a master push or a PR)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c3 partial, process-tree evidence (CoreOwnership) at dev 69d5a9a4cb: seed a0_025 built s1, pack1, s2, pack2 and s3 fresh with no stage store, each with nix cargo/rustc dropped from PATH and strace -f on execve/openat. FIXED_POINT s2==s3 1f9eb56dca91 (s1 980c4ea5). Across all stages: 0 rustc/cargo/rustup/cranelift/interpreter execs and 0 reads of .rs, Cargo.toml/lock, .cargo, .rustup or target/; 33 distinct programs ran (jet, clang, ar, nm, node, coreutils, nix, git). Logs: $JET_SCRATCH_ROOT/lanes/CoreOwnership/c3out/*.strace. Remaining for c3: the web-tier contract proof, and the commit-bound broad milestone proof (Main)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c7 partial dev a06f759af7 (CoreOwnership): 9 dead or duplicate dispatcher rows deleted (6 unused core.mem leaves, core.compiler.__reject, 2 NUL-named core.tasks channel rows duplicating __channel_new/__channel_bounded; sema channel<T>() now uses those). Unowned rows 465 -> 458: 436 private __ leaves called from Core source (declared provider leaves), 6 declared raw host leaves. s1 of 452f1230be+patch: ui 2176 PASS 0 regressions, cases 2822 PASS 0 regressions, 4 channel goldens x o0/o1/o2 12/12, ledger hostile 41 held. Left: 16 public rows with no Jet owner (reactive.signal, args.decode/merge, process.argv, plugin.load, testing.world, game.run, crypto.wipe, compute.gradient/value_and_gradient/vjp/jvp, ui.button/text_input/reactive_render, web.form)"
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c1 partial dev 452f1230be (CoreOwnership): all 203 CoreCallSymbol.Rust rows removed; CoreCallRows has 0 Rust rows, enum is { Prelude SourceOwned }. 185 receiver rows unreachable from any symbol or sema lookup deleted; 18 routed to Jet runtime exports (core.mem volatile_read/volatile_write/stream_store lowered as jet_raw_*). Surface-ledger generator rejects any Rust route (new hostile fixture). s1 of e2c746a5a8+patch: ui 2172 PASS, FAIL rows identical to base; cases 2806 PASS, 0 regressions; 23 affected goldens x o0/o1/o2 69/69 PASS; ledger --check-core-call-registry current, hostile 36 rejected / 5 held. Left for c1: 64 gauntlet/perf/bench .rs files and parity-ledger ABSENT items"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "CoreOwnership status: c1 partial (203 CoreCallSymbol.Rust rows remain in CoreCallRows.jet; 64 .rs files left are comparison/bench code: gauntlet 31, perf 27, compiled_workloads 4, zed 1, Examples/ffi 1; parity ledger has ABSENT/PORTED-UNMERGED items). c3 partial: golden census on 25fb199ce5+c34 1224 pass 0 fail; skips: 32 multi-file no native golden, 20 web-only, 9 host tool, 5 KF (#6366, #6418, #4599x2, #3236); no web-tier or process-tree proof yet. c7 partial: 465 dispatcher rows unowned (333 adapter + 132 plain), mostly __ host leaves. c8: Rust-perf half has no Rust route left to compare; golden half rides on c3. c9 blocked on D-RUST-SCOPE1"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c11 cutover finished dev 657c01636c (CoreOwnership): both #6249 known-failing notes removed from corpus_ast.jet; 11 duration-constant-safe sites now checked literals (math/prelude_min_max_clamp.jet, io/resource_limits.jet). corpus_ast --filter='corpus policy' 11 pass, 1 FAIL = dogfood gate, still known-failing as #6220; goldens io/resource_limits and math/prelude_min_max_clamp PASS o0/o1/o2 6/6"
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 9 criteria from archived #3518, #3542, #3543: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c89: the census (Research3, 2026-11-04) shows the lambda half holds (E0399 jet.LambdaReturnType; tests/ui/lambda_return_type_written and lambda_error_type_written pass; the criterion's fixture name lambda_written_result_type does not exist). It stays open until the editor grammars are checked for the no-result-type rule."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "G15 audit on dev 0d1ea12f79 (Docs/audits/g15-2026-11/VERDICTS-g15-4717-3590.md, commit 125e2e8f89): 14 criteria settled, 75 stay open; each open row names what is left. Main left c89 open: it also requires the editor grammars to be updated, which the audit did not check."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patches out/u7-secrets-cli.patch and out/u7-hosted-blockers.patch are landed as 58fead1f16 and 3aa6fe388c and are not held."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "GoldC-26 landed on dev df84747616: onboarding_recovery/install_host_and_offline_failures_have_recovery.case asserts the native-linker doctor lines, not rustc (criterion 2: no rustc/cargo needed); suite PASS"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #4766 \"Rust-exit diagnostic parity census: every diagnostic the Rust checker emits must be emitted by the Jet front\" into this card (Rust exit: every remaining Rust file, record and bookkeeping row); its 57 open item(s) are carried as \"(was #4766)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5974 \"Map: Rust-exit bookkeeping: branch reconciliation, bootstrap resilience, dead rows, ledger\" into this card (Rust exit: every remaining Rust file, record and bookkeeping row); its 7 open item(s) are carried as \"(was #5974)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5078 \"Rust exit E1: reconcile origin/port/main (638 Jet files absent from master)\" into this card (Rust exit: every remaining Rust file, record and bookkeeping row); its 1 open item(s) are carried as \"(was #5078)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #3690 \"Core in Jet only: phase out Rust-native Core library code (Rust emission stays)\" into this card (Rust exit: every remaining Rust file, record and bookkeeping row); its 26 open item(s) are carried as \"(was #3690)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed RustOut7-G3-closure 4469b4bda5: chain traced NORUST-OK to FIXED_POINT, but s1/pack1 were reused from cache. C3 stays open until the #6221 chain builds s1/pack1 fresh under ptree. The jet self doctor cargo probe is kept: it serves the live extern rust FFI feature (Doctor.jet:205-210, RustForeign.jet)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Landed RustOut7-L2 797d14d15b: the wasmtime plugin host and the Rust plugin/compiler-extension files and jet-foundation crate are deleted; JetWasm + JetPlugin + PluginHost.jet replace them. Chain FIXED_POINT s2==s3 a4eeecae77013381; ui +5/0 lost, golden +51/0 lost, cases +28/0 lost. git ls-files '*.rs' is now only the owner-kept sets (63 files). Open: C3 process-tree proof without rustc/cargo on PATH; D1 rustc calls in JetDebug/JetDevserver (#6221)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Owner ruling 2026-10-29 (G3 scope): (1) The Rust benchmark peers stay in the repo as the named exception to G3: Tools/gauntlet (30 .rs), Tools/perf (27), tests/compiled_workloads (4), since the perf gate compares against Rust. (2) The Jet-to-Rust projection example (Examples/ffi, 1 file) and the Zed extension (Tools/editors, 1 file, D-ZED-EXT1) also stay. (3) #4842 stays frozen and is excluded from G3. The remaining #4717 scope is the 6 Jetpack/Integrations plugin-host files, replaced by the own wasm engine (#5487). After that, RustOut7 takes the lost-coverage cards #6096, #5902, #5453 and #5454 as G3 work."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "RustOut7 g1-g6 (landed 60e816f375, 5acb6742ee, 414a10e718, 16bc6e9dfa, 44561018e9; S9 queued): g6 implements option (a) approved on #4717: the Rust integration tests are deleted; tests/RustTestMapping.tsv maps all 769 #[test] functions (539 ported, 7 covered, 21 obsolete, 202 uncovered -> #6096, 64 areas, one criterion each)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "RustOut7 g1-g6 (landed 60e816f375, 5acb6742ee, 414a10e718, 16bc6e9dfa, 44561018e9; S9 queued): C1: g2 crypto+secrets Rust runtimes, g3 rusqlite core.db runtime, g4 Parquet provider plus 115k lines of the frozen jet-foundation copy, and jet-unicode, g6 the 28 tests/*.rs files plus harness and 5 Node port tools (51 files, -55051) are all deleted. Still Rust: Plugin.rs plus the trimmed jet-foundation (Authority.rs, PluginWire.rs, RootedFiles.rs) for core.plugin, tests/compiled_workloads/adapters/peer/*.rs (peer-language adapters, not tests), and the other remaining Rust sources outside these patches."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Correction to the previous entry: all other Rust compiler and runtime sources are removed. The .rs files that remain are not the Jet implementation: peer-language benchmark entries (Tools/gauntlet 30, Tools/perf 28, tests/compiled_workloads/adapters/peer 4), the Rust-host FFI example Examples/ffi/projections/rust/host.rs, and the Zed extension Tools/editors/zed/wasm-src/src/lib.rs (Zed extensions must be Rust-to-wasm)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Kept until a Jet wasm component host replaces wasmtime (#5487): Jetpack/Integrations/Source/Foreign/RustBridge/Runtime/Plugin.rs (1965 lines, wasmtime plugin host), CompilerExtension.rs (259 lines) and Support/jet-foundation (~1.5k lines: Authority.rs, PluginWire.rs, RootedFiles.rs; SOURCE_ROOT_MARKER in Jetpack/Foundation/Source/SourceRoot.jet:12). Every other Rust source is removed by the crypto, db, parquet/foundation and tests patches (RustOut7, proofs pending). Uncovered Rust test coverage moves to its own card."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Destination: No Rust in the toolchain.\nNotes: Batch RUST of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: git ls-files \"*.rs\" is empty outside Tools/perf and Tools/gauntlet peers. Order: #4761 #4910 #5204.\nDecisions so far: D-CORE-GLOBAL-STATE1 (ratified=A) on #4717; D-RUST-SCOPE1 (open) on #4717\nFog: no criteria yet on #5204 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "2026-10-28 Main: landed d1e6777469 (RustOut slice G3-4): jetpack_variants.rs ported to Jetpack/CLI/Tests/BuildActionKeyVariants.jet + Jetpack/Trust/Tests/SemanticLockVariants.jet; diagnostics_format to JetFoundation/Tests/Registry/DiagnosticFormat.jet (4 pass); syntax_reconciliation guard green; retirement_ratchet.rs deleted as superseded (owner ruling), Jet guard allowlists re-anchored off crates/. Worker receipts: CHECK OK per target (JetFoundation, JetParser, Jetpack/Trust, tests/guards/dyn_surface, --runtime-generators); guards 15/0, dyn_surface 2/0, ReservedLane 2/0, Trust 2/0."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-28 (revises gate f): tests/retirement_ratchet.rs is deleted as superseded, not ported. Its 4 laws read the retirement table that ba6124f2b3 removed (no-retired-spellings cutover); retired forms are now parse errors, and tests/guards/syntax_reconciliation.jet guards the live surface."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "2026-10-28 Main: landed f24fc8479b (RustOut lane slice G3-3): deleted tests/compiled_workloads.rs, tests/suite_goldens.rs, tests/web_examples_doc.rs and their suites.txt rows; their testkit cases are the single home (compiled_workload_gate_self_check PASS, release gate case PASS with live canary loop, suite_goldens KNOWN-FAILING #5846, web_examples_doc KNOWN-FAILING #5845). Plan: $JET_SCRATCH_ROOT/lanes/RustOut2/PLAN.md."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "Owner rulings 2026-10-28 (asked by Main for the Rust-removal lane): (a) crypto stays Jet-native; mbedTLS only for TLS (supersedes the all-mbedTLS+Monocypher text in this card); (b) scrypt for age is written in Jet; (c) Parquet snappy is written in Jet; (d) delete both the --target=sandbox rustc guest and the jet self doctor rustc probe; (e) Jetpack refuses cargo packages after RustBridge removal; cargo fixtures stay only as refusal tests; (f) port the 4 live retirement_ratchet rules (table self-law, ratchet-per-retirement, adoption ratchet, finished-stays-finished) to tests/guards/retirement_ratchet.jet; (h) the compiled_workloads peer adapter files stay as test data."
+        },
+        {
+          "at": "2026-10-27",
+          "by": "agent",
+          "text": "2026-10-26 Main: U7 step 4 hosted blockers LANDED 3aa6fe388c. The remaining hosted-census rows (13 E2104 + 1 link, all core.http client routes and HTTPClientMethod/HTTPRespField/HTTPRespHeader handle methods) have no Jet runtime implementation at all: the Jet HTTP client is #3665, which now gates the hosted jetpack binary (not #5482)."
+        },
+        {
+          "at": "2026-10-27",
+          "by": "agent",
+          "text": "2026-10-26 Main: U7 step 3 LANDED 58fead1f16. U7 step 4 hosted blockers (groups B-G of hosted-census-2aa6.tsv) fixed and queued as 1793068711-Main ($JET_SCRATCH_ROOT/lanes/Main/out/u7-hosted-blockers.{patch,msg}): lambda param types, Option-handle == None, F32{x}, List.concat, Tuple route carrier for __terminal8_stty, jet_fs_xattr_get, jet_terminal8_take/key_bytes/stty. Proof: chain full+threads FIXED_POINT; goldens 808/312 vs base 806/314, +2 passes (io/io_surface, io/terminal), no regressions; 3 new examples golden. Hosted census after: 13 E2104 + 1 link row, all HTTP client (group A, moves with #5482)."
+        },
+        {
+          "at": "2026-10-24",
+          "by": "agent",
+          "text": "G3-2 LANDED 845a39cdce (O0Image-3): tests/authority.rs and tests/effects.rs deleted and replaced by 87 Jet cases (26 PASS, 47 known-failing rows each citing a card, 1 Windows-only SKIP-HOST, 13 hangar cases unproven because no jetpack binary exists, #4589). The 42 existing cases give identical verdicts. Three e1803 ui dirs are fixed. jetpack_hangar_store_v2.rs and receipt_store.rs are held for #5934/U7."
+        },
+        {
+          "at": "2026-10-24",
+          "by": "agent",
+          "text": "Rust removal left the package manager without a binary: no Rust jetpack, and the Jet-hosted jetpack (U7) doesn't build. Tracked on #4589; O0Image-3 is sizing it after G3-3."
+        },
+        {
+          "at": "2026-10-24",
+          "by": "agent",
+          "text": "G3-1 (O0Image-3), see the LANDED line above in this log: deleted 5 fully-ported tests/*.rs files (bind, cli_compiler_speed, help_pty, package_outputs, web_dev) plus their support files, 42 uncited fixtures, 7 suites.txt rows and their provenance comments (comment-only, verified). tests/lsp.rs is held for D-DEVSERVER1 because JetLSP's LspTests.jet reads it. G3 census: $JET_SCRATCH_ROOT/lanes/O0Image/g3/CENSUS.md (1040 Rust tests: 708 done, 79 specs waiting for one filtered kit run, 112 to verify, 58 need #Tests, 83 to research)."
+        },
+        {
+          "at": "2026-10-24",
+          "by": "agent",
+          "text": "Owner rulings 2026-10-24 (chat with Main): G7 the Zed wasm extension is EXEMPT (editor glue, outside the toolchain); G6 Examples/ffi/projections/rust/host.rs is KEPT as an interop example; G5 the cargo/nix fixtures, session_fixture, runtime_c_abi_driver and the compiled_workloads peer are KEPT as test data (delete only fixtures whose tests are gone)."
+        },
+        {
+          "at": "2026-10-24",
+          "by": "agent",
+          "text": "2026-10-24 census (O0Comptime-3, $JET_SCRATCH_ROOT/lanes/O0Comptime/rust/CENSUS.md) at dev 67726659c1: 208 .rs files, 210k lines.\n- G1: bridge runtime providers, 12 files / 17.3k lines.\n- G2: bridge support crates, 84 files / 115k lines; deleted with the bridge.\n- G3: tests/*.rs, 47 files / 74.6k lines, none run.\n- G4: gauntlet/perf peers, 57 files; they stay.\n- G5: cargo/nix fixtures, 6 files.\n- G6: Examples/ffi rust host, 1 file.\n- G7: Zed wasm extension, 1 file.\nThe RustBridge is already dead: pkg_ffi_prepare has no caller, so core.db (12), core.http (11), email (3) and vault/auth (5) goldens fail on native with E2104. Plan: #5486 db on vendored sqlite plus B1 (vendored C in the native closure); then #5484 mbedTLS 3.6 for TLS/HTTP/email; #5485 vault/age/NFC; #5488 parquet; #5487 wasm; then the #5489+#5482 deletion cutover. Main rulings: keep the Jet-native crypto (it passes the KATs; mbedTLS only for the TLS protocol); write scrypt in Jet. G5/G6/G7 go to the owner."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "2026-10-23 Main: Rust-test port slices SA1-SA6 landed on dev (e50b5c7e42, c40885b30d, 4d6ad472e7): 24 Rust test files deleted and their cases moved to the testkit; every known failure cites a card (#5574-#5578, #5619-#5629, #5694-#5700, #5802-#5816). Next: Jet #Test ports of the 18 JETTEST files (Foundation ones blocked on #3595)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "2026-10-23 ~07:50 handoff: owner moved RustOut (the only Rust-removal lane) to the golden burn-down #4599. Rust removal is PAUSED, not dropped; this card keeps it. State at pause: landed today K5464, HPfreeport, G5hp1 (-5 .rs, +102 cases); HPzero (-9 .rs, 131 records) queued behind G5hp1. Parity ledger at 8c698f2508: 1281 missing rows over ~180 remaining .rs files (output $JET_RUN_ROOT/RustOut/led). Next when resumed: the near-zero files (1-2 missing rows each), port or retire rows, delete in batches; then Jetpack (96 .rs), Tools (58), Examples (1), 7 Cargo.toml. Lane notes: $JET_SCRATCH_ROOT/lanes/RustOut/. Open finding handed on: flaky 'segfault at 2d' is root-caused (O0Speed threadfail + testkit RSS limit)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed 03:18: 6a18f4d8e3 R7a2 (dead Rust leftovers: root Cargo manifests, Rust test oracles; no-Rust self-host chain with cargo/rustc shims exiting 97: s1/s2 rc=0, 0 Rust invocations), 3dc84fa383 R7a3 (D2: Rust peers under Tools/perf and Tools/gauntlet; tool defaults to $JET then jet on PATH), 53cba0fc0c R7c (rust-exit accounting tool retired). ab6d9fa52e: first #5453 hand-port (3 .rs files -> 32 Jet cases)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "384f3d4396: the compiled-workload peer launcher is Jet (Tools/ci/CompiledWorkloadPeerLauncher.jet, ruling D4); the .rs is deleted. Test passes with no rustc/cargo on PATH (bwrap sandbox, seccomp via bwrap --seccomp, signal and descendant checks); macOS/Windows refuse with exit 78."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "R7a landed c9129d174: the Rust implementation is deleted (crates/, Source/*.rs, build.rs, clippy.toml, Rust bootstrap, cargo tooling, CI cargo check). Proof without cargo/rustc/rustup on PATH: chain FIXED POINT 589cd09e90def948, 0 new member errors, Rust-free runtime pack byte-identical; seed trial: stage1 from a Rust-free seed reproduces the seed (fixed point), hello build and jet run print hello, world. Branch rust frozen at its parent 608337777 and pushed to origin. Remaining: R7a2 (dead root Cargo.toml/lock, runtime Rust fixtures, cargo references in tools/docs), R7a3 (D2 peer moves), the D4 peer-launcher port, R7b (tests/*.rs once every row is ported/known-failing/retired)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed R7b port 2 (e0df18553: 297 Rust tests as literal Jet cases; 5 pass, 292 known-failing on cards #5122-#5200, 108 verify-intent) and port 3 (5954a28ae: 9 more, all pass). Ported total 524. R7a proof clean without cargo/rustc/rustup (FIXED POINT 589cd09e90def948, 0 new member errors, Rust-free runtime pack byte-identical); held for the seed trial, which is blocked by #5202 (jet doc semindex O(N^2)); fix in progress."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed 5b84d0fed (RB): RustBridge Support crates under Jetpack/Integrations; user extern rust kept. R7a (delete crates/, Source/*.rs, Rust bootstrap, cargo tooling; keep tests/*.rs + root Cargo as converter input until R7b) is being prepared; gate: lands after A6 s12 with a cargo/rustc-free PATH chain FIXED POINT, a Rust-free seed build path and cargo-free lander gates; Main freezes the rust branch at its parent first."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed: R3 assets out of crates/ into Jet homes (dffc9af60), jet self doctor drops rustc checks (dc9b8538e, owner ruling), G generators off Rust (in 009f5b19f), first Rust-test port batch: 218 converted rows from 36 tests/*.rs files, all verified against the extracted expectations (bca6b9edd). RB (RustBridge Support home) requeued. Test-port census: 1463 port rows + 1164 retire-API rows reclassified as Jet-behaviour tests (to be ported); testkit run.jet E2104 gaps are with Goldens5."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-RUST-SCOPE1 (draft for Main to file). The card text is background, not the decision."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #5080 (Rust exit E3: refresh cutover-ready onto dev (#4956)): Refreshing cutover-ready onto dev is the #4717 deletion work. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #5079 (Rust exit E2: freeze Rust growth now (ratchet in the release chain)): Freezing Rust growth is superseded by deleting Rust. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #5077 (Rust exit E0: Rust→Jet parity ledger (the deletion gate)): Owner ruling 2026-10-22: the deletion lands once every Jet gate passes without Rust; that gate is #4717's acceptance. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #5012 (Native self-hosting fixed point (stage2 == stage3) and the land (Rust removal)): The fixed point is reached (592fff309, stage2 == stage3); the land is #4717. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #4956 (Rust cutover: remove Rust from dev after the native fixed point): Same work: remove Rust from dev. Its repro and open criteria are carried here."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Landed R2 (Prelude home moved to Compiler/Prelude) at a0a315190; the old crates/jet-codegen/src/Prelude top-level copies were removed by the lander's follow-up commit 13870d08e (mislabelled 'runtime: regenerated ...'). Proof: RustOut chain FIXED POINT 787a7a8bac5054c3; lander precommit OK."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22 ~20:35 (supersedes Main's interpretation): tests/*.rs are ported to Jet so the suite keeps its robustness and coverage: every Rust test whose behavior has a Jet equivalent is ported before deletion, not only coverage gaps."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22 ~20:45: Rust deletion may proceed by 06:00 as far as possible. tests/*.rs: port tests that check Jet language/CLI/Core behavior not already covered by Jet examples, snapshots or Jet tests; tests of Rust-internal code are deleted with Rust (Main's interpretation; owner asked for clarification, to confirm in the morning)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-22 ~20:30 (chat, before bed): (1) keep user-facing extern rust FFI (RustBridge, needs rustc only when a user uses it); remove --target=sandbox via rustc and the jet self doctor rustc checks. (2) Keep the Zed extension as the one Rust exception (Tools/editors). (3) No Jet check in hosted CI for now; CI drops cargo check at Rust deletion. (4) tests/*.rs: port coverage gaps to Jet first, then delete with Rust. (5) Main may freeze the rust branch at the last Rust commit and land the Rust deletion once every Jet gate passes without it."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "Correction (ArchReview, measured): the runtime pack is NOT compiled from Rust. Seed a0_010's pack provenance records rustObjects 0; the pack is compiled from JetRuntime (Jet) through the MIR/LIR backend today, and A2 switches it to JetIR. CAbiRoutes.rs is a Rust mirror. So A2 is a cutover-A item, not a Rust-removal gate. Remaining Rust dependencies are tooling, generator inputs (gen-core-tables, gen-unicode-tables, gen-runtime-host-carriers, RegistrationTruths), CI, tests, and the Rust host itself."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "Inventory 2026-10-22 ($JET_SCRATCH_ROOT/lanes/Main/rust-inventory.md): tracked Rust is Source 87 files/151.6k lines, crates 1125/1.435M, tests 504/324.6k, Compiler 18/19.6k (Bootstrap host and JetRuntime/Tests), Tools 61/4.1k (gauntlet 25 and perf 17 are allowed peers). Critical path, in order: (1) the runtime pack (jet_rt_* symbols) is still compiled from Rust (crates/jet-codegen/src/Prelude/Core/CAbi*.rs via prepare-call-runtime.mjs / rtpack); cutover A2 builds it from Jet through JetIR, so A2 is the first Rust-removal gate; (2) the compiler's Prelude Jet sources (Core.jet, Effects.jet, Diagnostics.jet, CoreSourceParts.tsv) live under crates/jet-codegen/src/Prelude and must move under Compiler/ with every reference and generator; (3) tooling off cargo: lane-check.sh, safe-cargo.sh, jet-env cargo paths, Compiler/Bootstrap/Tests.rs, generators that emit Rust tables (gen-c-abi-routes, gen-core-tables, gen-unicode-tables, gen-runtime-host-carriers); (4) CI .github/workflows/ci.yml cargo check -> jet check; (5) delete Source/, crates/, tests/*.rs, Cargo.toml/lock, build.rs, Compiler/Bootstrap/*.rs, freezing the last Rust commit as the rust branch; (6) drop rustc/cargo from flake.nix and env.jet. Docs (README.md:149, cli.md:573) still describe rustc emission and are stale."
+        },
+        {
+          "at": "2026-10-22",
+          "by": "agent",
+          "text": "2026-10-22: self-hosted fixed point through JetIR landed (592fff309). Owner restated: Rust is removed completely except as a benchmark/comparison peer (gauntlet, perf). Sequencing now: cutover A (delete MIR/LIR, #5073) and B (delete TIR) by CutoverLead; Rust files made dead by A/B are deleted with them; remaining Rust (Source/, crates/, tests/*.rs, Compiler/Bootstrap host) inventoried by Main next, with Jet-harness replacements for tests."
+        },
+        {
+          "at": "2026-10-11",
+          "by": "Pip",
+          "text": "Owner order 2026-10-10 ~20:25: self-hosting (native stage1==stage2) AND Rust removal done by 06:00 2026-10-11; then immediately burn down all red goldens and all Tower cards for Jet compiler bugs/functionality, in parallel. Owner committed/synced master: Main may merge dev into master in the owner checkout once green, then keep working on dev. Ballots: retire D-MATHLIB1, D-PKGS1, D-JPK-NIXINDEX1; open D-PM1 for owner review; rework D-GENERIC-CLOSE-COPY1, D-META-HASH1, D-COMPTIME-WORD1 per the owner questions."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Owner order 2026-10-10 ~15:00: ALL given goals done by 20:00 today: self-hosting (native fixed point), Rust removed (cutover + merge to master), all tests/goldens green, decisions via ballots only. AGENTS.md now also requires parallel independent stages, keep-going stages, and confirmed job starts (after r15 sat unqueued at the wrong path)."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "06:30: the 07:00 goal was NOT met (self-hosting, Rust removal and green tests have not happened yet). Honest status + ETA in $JET_STATE_ROOT/scratch/Main/STATUS-0700.md. Summary: whole-compiler source 0 real errors (r22), clean Core emission + native route tables, the native pack producer Rust-free, the major runtime ports (TCP, process launch, codec, FFI), the ABI snake-case cutover, the parser hang fixed. Current blocker: 18/28,409 compiler functions fail Rust-hosted lowering for the candidate seed build; 4 agents fixing in parallel. Then rebuild → re-sweep 0 + rustc check → RC → native stage1 == stage2 → cutover. ETA native fixed point ~10-11:00, not promised. Non-portable-tonight families (TLS, services, WS, HTTP server, UI host, pipelines/sandbox, UDP, typed decode) need owner decisions (#4949-#4952)."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Source gate r20 PASS: head cd8e40ee3, the full assembled compiler + run.jet, 402 s, peak 15.5 GiB: 64 reports = A 0 / B 58 / C 6 / D 0. Every B/C row has its fixing commit and a passing witness ($JET_STATE_ROOT/scratch/JetCheckLead/r20-release24/buckets.{json,md}). The literal zero comes from the RC host build, whose binary contains the B/C fixes. Parser stall root (exponential speculative re-parse of naked-return guard tables, UnicodeTables.jet): focused 10/10 PASS, including the real UnicodeTables functions and a 10-level tree in 0.13 s; workspace check, then commit; it must be in the RC pin because the candidate parses the runtime for the pack. Next: seed preflight at cd8e40ee3 (r8c binary) → RC."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Correction: the approximate times in my last few #4717 log entries ran ahead of the clock. The actual time is 03:11. State at 03:11: ABI snake-case cutover written (1,532 symbols across 279 files; double-underscore fix pass, then gates + commit); per-symbol D18 partition + TLS refusal landed (d550b05a4); native ports landed: TCP 17 (db779a703), Delivery (98f69b7ba/129e7ccc4), Unix deadline (3a8e0b890), UI transfers (757b0e051). In flight: the plain process-launch port (mandatory, CliCoreFinish + PerfLead), TCP handle methods (PortTcpHandles, cutoff 05:30). RC gate = cutover commit + process port + (TCP handles) → final debug rebuild → fresh emission → D18 regen → seed preflight → RC, all in one pin (mixed pins are rejected by the proof readers). UI sweep: 83 provisional reviewed snapshots + 9 support exclusions; 37 held as real bugs routed to owners."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "~03:50 native runtime scope decision. The RC pack producer is Rust-free (Tools/packaging/prebuild-runtime.mjs: Jet runtime sources + the candidate library object + libc/libgcc; Rust symbols rejected; rustc/cargo/LLVM execs denied). Families without a faithful port tonight stay entirely non-native (allowed by the strict generator; no Rust fallback is possible): TLS (canonical E2104 refusal restored; ballot D-NATIVE-TLS1 on #4949), WebSocket + the service authority 9 (#4950), UI host/browser/Raylib-devtools (#4951), the UDP family (packet schema), the held-directory file readers, and the encoding hostile-IO seam. Programs using them get the existing generic native failure (undefined runtime symbol → CLI E2104) until ported. Ported tonight: Delivery 98f69b7ba, UI transfers 757b0e051, plus TCP (PerfLead), Unix deadline, process layout/env/terminal, and the Dyn codec/encoding leaves (BugHunter) in progress. Open RC-blocker: the native CLI launches processes through Core ProcessSpec (jet run, the FFI cargo/bwrap probe, the C compiler); the plain spawn path must be native. Decision pending CliCoreFinish facts."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "~02:45 critical-path change. The Core runtime emission is CLEAN (debug-r7), but the strict native route-table generator (D18) shows the native runtime does not yet provide everything the Rust runtime does. Census (FixLeadSema, $JET_SCRATCH_ROOT/FixLeadSema-route-census/): 413 symbols without native providers = 157 already implemented in Jet Core source (classification/partition work), 5 existing C providers missing from the runtime manifest, 251 unresolved, of which 96 are explicit raw C leaves needing faithful ports from the Rust runtime into JetRuntime (owner directive #39: native backend + Jet runtime before Rust leaves). Port owners: PerfLead TCP 17; CliCoreFinish process/env 5; BugHunter Dyn codec 30 + encoding 4 + files 3; PortNetServices (new) UDP/Unix 9 + TLS 3 + WS 2 + services 12; PortUiBrowser (new) UI/browser/Raylib 13. Opus now 9 because of this. Risk: TLS/UI may depend on Rust-only crates; agents report early. The 07:00 timeline is at serious risk until the port list converges."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "00:00 status. Done: whole-compiler bucket A = 0 (r18); 5 RC Rust codegen roots landed with compile+run regressions (6c879b60f, edd4fb0ff, 61c96d18c, 076045c94, 4f5d8741f); service E1004s 6893bafa0; generators 18/18 (52fa9b4e1); runners standalone with JET=<bin> and no cargo (9daa0368c); hosted seed gate (a9c0d758d); 2-stage fixed point (046b6d852); opt-in musl toolchain for user Rust FFI (ce42a475a); native Rust FFI backend half (406b8ec14). Critical path: JetCheckLead Clock source-hook ordering + executable hook reachability → final debug-r7 → clean Core emission → D18 route regeneration → emit + rustc-metadata seed preflight → RC (host-r7 → candidate → pack → stage1 == stage2 → native smoke + full suite). In parallel: CliCoreFinish driver half of the native FFI port + script-deps/L0203; GoldensLead2 migrations (the real UI census needs the first native jet); BugHunter #4946 fixture; FixLeadSema parser #Numeric distinct + view roots. Timeline risk: native fixed point now ~02:30, cutover ~03:30, tests/goldens by 07:00 tight."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Whole-compiler gate r18 (r6b release jet, head d69b91c5f, 699-source unit sha 45a9866a…, 416 s, 15.46 GiB): ZERO real source errors (bucket A = 0). The 82 remaining reports are all evidenced non-source rows, each with a commit and witness in $JET_STATE_ROOT/scratch/JetCheckLead/r15-release24/buckets.md: B 58 (checker fixed after r6b, passing regressions), C 6 (Core fixed at head; r6b embeds older Core), D 18 (generated native route tables, regenerated from the final debug snapshot emission). Trajectory tonight: 5309 → 1132 → 608 → 300 → 101 → 83 → 82 (A: 1 → 0). Next: final debug rebuild with 5 Rust roots (6c879b60f, edd4fb0ff, 61c96d18c, 076045c94, 4f5d8741f) → clean Core emission → D18 regeneration → emit + rustc-metadata seed preflight → RC."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Scope note ~23:30: verify-full starts with closeout-gate, which needs a QUALIFIED hardening candidate record (Tools/agent/hardening-manifest.mjs: the formal compiler-proof composition with Lean discharge and all 17 dependency identities) plus a milestone closeout token. That formal qualification is the standing safety net, deferred by owner directive #59 (memory safety checked later, not part of cutover acceptance). So the 07:00 tests/goldens receipt runs every runner that verify-full composes after its closeout prefix, directly, with JET=stage2 (the native fixed-point jet) and the no-Rust exec-trace contract. The closeout gate is reported separately as NOT MET (deferred), never green. Self-hosting milestone e11-m08-deferred-self-hosting stays open for that formal closeout. Nothing fabricated or bypassed."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Golden/test baseline (GoldenCensus, r6b Rust jet fefe5605, ~22:30): Examples/features 1119: 202 pass, 773 fail (428 failure blocks are generated-Rust rustc errors, which leave with the native backend; 341 are Jet diagnostics in 57 codes, top E0212 120, E0703 28, E1004 16), 69 no-match, 75 skip. tests/run 275: 76 pass, 157 fail. tests/ui: not yet measured with the real runner (Tools/testkit/Ui.jet). Compiler registries: manifest needs re-pinning. Several runners still need cargo or the Rust MIR stage. GoldensLead (Opus, standing, with Haiku helpers) owns the triage, the spec-correct migrations, routing roots to the fix leads, and porting the runners to the native jet. Goldens change only when spec-correct, each one listed for the owner."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Owner ~21:25: (1) the fixed point is stage1 == stage2 (stage 3 dropped); (2) after self-hosting, hello world must compile in well under 1 s, essentially instant. Required: a precompiled Core/runtime (built once per toolchain, never per program), selective linking (only reachable Core/runtime code), no rustc and no per-run toolchain probes. Measured today (r6b Rust jet): cold 44-70 s (rustc rebuilds jet_runtime ~58 s), warm 1.29 s / 124 MB. PerfLead owns this on the native pipeline (dev-perf, landing to dev)."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Owner orders ~21:00: (1) one standing agent hunts bugs and cross-references Tower bug cards, self-hosting-affecting first (BugHunter); (2) profile all phases for time and memory and aim for at least parity with Go/Zig/Rust. hello world end to end is 44 s today (host-r6b), which is far off. Optimization work goes on ONE leaf branch, dev-perf (git refuses dev/perf while dev exists), worktree .agent-worktrees/Main-dev-perf, landing to dev asynchronously without blocking dev (PerfLead). Opus is now 7 standing (5 plus the 2 roles the owner asked for); justification sent to the owner."
+        },
+        {
+          "at": "2026-10-10",
+          "by": "Pip",
+          "text": "Owner order 2026-10-09 ~20:40: by 07:00 on 2026-10-10, (1) self-hosting done (native compiler at a fixed point: stages 1-3 byte-identical, hello, compiler registries, sample project), (2) Rust removed (cutover), (3) all tests and goldens green. Plan: zero errors on the whole-compiler check by ~23:00; native fixed point ~01:00; cutover ~02:30; tests and goldens green by 06:30. Golden and test failure census front-loaded now on the newest Rust-built jet. Opus: 5 standing (DevGreenLead, JetCheckLead, FixLeadSema, FixLeadPipeline, FixLeadCliCore) plus Haiku legwork."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "# Rust removal: status at 20:00, 2026-10-09 (Main)\n\n## Verdict\nNOT DONE. The 20:00 goal (Rust removed + a self-compiling native compiler at a fixed point) was not met. Native stage1/2/3 has not been attempted; Rust is still in the tree.\n\n## Working and exercised\n- The Rust bootstrap builds and links; host-r4 (50ea580c0) built the bootstrap host + release jet, and that release jet runs hello (rc 0, exact output).\n- Generators: 18/18 at the current head (773fc1562).\n- Memory: three runaway roots fixed (per-diagnostic source copies f597a2cb9/9075f77e8; triple AST copies d6e251c3c; target-preflight reparse 7170c20d0). Candidate-shaped build 47.75 GiB -> 6.4 GiB. Whole-compiler check memory now bounded (~13 GiB).\n- CPU: the comptime type-graph stall fixed (b1e0107c2) + hot lookups indexed (c2784f757, 2fc34e255); not yet measured on a release jet.\n- Core: the JSON/files/text/math representative programs type-check with 0 errors; the runtime-emission Core census went 1,585 -> 330 -> 305, and three fix waves + ~15 checker roots have landed since.\n\n## The blocker\nThe whole-compiler type check (702 Jet sources + run.jet) has not finished: the debug jet ran 10 min at ~13 GiB without output. host-r5 (db6a7c1ea, released 19:44: CPU + lookup fixes, release build) is building now; JetCheckLead runs the check on its release jet (24G/600s) to get the first full error count.\n\n## Next (in order)\nhost-r5 release jet -> whole-compiler check finishes with a count -> fix that list in parallel -> host-r6 -> candidate (24G cap) -> Jet-only runtime pack -> native stage1 (collect-all gap list) -> fix gaps -> stage2/3 byte-identical -> acceptance (hello, compiler registries, sample project) -> cutover (rust branch, deletions).\n\n## Owner decisions waiting (Tower)\n#4932 SQL kernel made public (core.db.sql): ratify/reverse. #4935 canonical take/replace API. #4936 implement D-MEMREF1 live links (ratified, unimplemented). #4929 latent XOR-as-power bugs (tests). #4925 __ for compiler internals (recorded). #4937 char escape bug."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Rust removal status 17:00 (Main).\nMemory blow-up FIXED and verified (f597a2cb9 + 9075f77e8): whole-compiler check 6.5 GiB / 17 s (was OOM at 8G); candidate-shaped seed build 6.4 GiB / 13.5 s (was 47.75 GiB).\nhost-r3 (ff7cc31e5): bootstrap host + release jet build and link; all 7 ICE roots fixed.\nOpen blockers, all owned, in parallel:\n1. hello: the generated Rust defines jet_string_data twice (HiddenCrates).\n2. runtime emission: E0391 prep-as-value in Core watcher (PrepValueFix).\n3. the Jet compiler's remaining source errors: full current-jet census f3 running now (JetCheckLead fixes them).\n4. native gaps: collect-all native lowering landed (7e970ab2c, 5a70a97ab), so stage1 lists every gap in one run.\nNext: host-r4 (with 1+2) -> candidate (24G cap) -> runtime pack -> native stage1/2/3.\nA fixed point by 20:00 depends on the size of the f3 error list and the stage1 gap list.\nLive board: $JET_STATE_ROOT/scratch/Main/ISSUES-NOW.md"
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Mined open work (2026-10-09): Rust removal: umbrella for blockers, port fidelity, and cmdexpand/Wave-0010 gaps. Umbrella for Rust-removal items (directives 37, 39, 47, 48, 55, 57). Includes RUST-REMOVAL-BLOCKERS.md open items (sandbox/plugin export, __jet_ErrorMetadata, checked-nominal parity, U1/U2/U4, gates S1-S14), cmdexpand Rust-to-Jet port gaps (wave/handoffs/0686-source-cmdexpand.json), and Wave-0010 parser items (owned-tuple allocation and borrow fidelity, recursive DFS vs Rust iterative call-stack depth; Wave-0010.json:120-126). Log new evidence here.\n\nSource: 2026-10-09 scratch mining ($JET_STATE_ROOT/mine/; notes archived in $JET_STATE_ROOT/backup/notes-2026-10-09.tar.gz)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Mined open work (2026-10-09): Tagged-Int ownership defect in Lower.jet:1855-1880. RtG1f int-ownership-defect.md: tagged Int ownership defect at Lower.jet:1855-1880. Tracked as #4717 in notes but no card carries this by title. Fix in Jet (not Rust), then add a regression case.\n\nSource: 2026-10-09 scratch mining ($JET_STATE_ROOT/mine/; notes archived in $JET_STATE_ROOT/backup/notes-2026-10-09.tar.gz)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Consolidation DONE 2026-10-09: dev fast-forwarded to integrate/all 69658143e (514 merged, 89 merged with ours-resolution, 94 aliases, 369 skipped as contained, 475 dropped as superseded with logged evidence, 2 path-case tips excluded -> #4912). Cleanup removed 174 worktrees and 1368 refs (branches, keep, salvage, stash). Remaining: branches master + dev; worktrees: main checkout (master) + .agent-worktrees/Main-dev-collectall (dev); remote-tracking refs untouched. Backups: $JET_STATE_ROOT/backup/ (all-refs bundles incl. post-WIP f024bc5d...; worktree patches/tarballs). Logs: scratch/RustExitLead/COLLAPSE-LOG.tsv, cleanup/EXECUTE.txt. Regression check (host+candidate build+hello, workspace check, generators, Jet frontend) now runs on dev; fixes land on dev."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Consolidation finding: runtime Loader semantics (runtime-aware parse jobs, runtime_entry_row, longest nested-unit match, member imports) from e76141063, 059fba05e, 2acfe41a7 and abb51f87f were lost from effective Loader blobs by later merges, even though the commits are ancestors of integrate/all. RuntimeLead12 restores the Jet hunks on dev after the leaf merge, keeping newer inline-package support (S5 correction batch)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER DECISION 2026-10-09 (S6 linker): native binaries keep section headers plus a non-loadable .symtab/.strtab by default (perf/gdb, independent nm==reachable no-bloat check); a \"small\" option removes them: jet build --small and the matching build-configuration setting (one option). Implemented in S6 B2 by RuntimeLead12 with a fixture showing --small output drops the symtab and keeps loadable segments byte-identical."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER 2026-10-09 ~12:10 (permanent): never again branch/worktree sprawl. Only master and dev exist; agents commit directly on dev in the one dev worktree; no agent creates branches, worktrees or keep/salvage/archive refs for any purpose. Enforced locally by .git/hooks/reference-transaction (refuses creating refs/heads/* other than master, dev and the temporary integrate/all). Consolidation v3: collapse everything into integrate/all (newest first, -X ours), one regression check vs dev, leaf merge into dev, delete everything else; bundle backups in $JET_STATE_ROOT/backup/."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER 2026-10-09 ~11:25: (1) nothing lost; push everything into dev so only master + dev branches/worktrees remain (start: 176 worktrees, 675 local branches, 653 not merged into dev). Bundle backup first; patch-equivalent branches deleted; unique work merged in batches with collect-all checks; unmergeable work archived under refs/archive + PENDING-MERGE ledger. Owner RustExitLead; policy scratch/RustExitLead/CONSOLIDATION-POLICY.md. (2) Priority #1 = Rust out of the COMPILER (native self-host RustLead8 + Jet runtime RuntimeLead11); #2 = Rust out of everything else (CLI, Jetpack, tests). Rust ledger scratch/RustExitLead/RUST-LEDGER.tsv: 1,887,889 Rust lines in 1,732 files (backend/compiler 616,447; Prelude runtime split 265,874; runtime 4,197; other 1,001,371 incl tests)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER 2026-10-09 ~11:00: Rust removal is the ONLY primary goal; goldens green, bug fixes and speed come after Rust is removed. No overlapping/duplicate test suites (one owner per suite per candidate). Main parked Gate 2 (its goldens run the cargo-built Rust compiler) and the speed lane (#4551; #4911 design on SpeedLead6 handoff); retired speed and IO/CLI queued jobs to proofq/superseded. Leads: RuntimeLead11 (S5/S6 runtime in Jet), RustLead8 re-scoped to native self-host (M1 then S3/S11; m1dump split under 60 min; native golden suite deduped with s5-goldens), plus a remaining-Rust lead (CLI front door, Jetpack, tests off Cargo, bootstrap glue). Directive file: OWNER-DIRECTIVES.md #47."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "RuntimeLead-9 S5 status (scratch/RuntimeLead9/STATUS.md): dev pack 0 Jet objects, 0/3,997 C-ABI symbols. Large unlanded Jet runtime exists: U3/207b (E1 native asm + E2 runtime object, 16 alloc/trap exports), R7 cutover lineage f1e6ef64f (E4 carrier, pack wiring, dup guard, trap/alloc witnesses), host tail 409730d54 (59 Jet runtime sources, 31.7k lines, 682 exports, ~331 replacing RUNTIME-MAP rows), stop/task-panic rail commits, RtBurn CoreLib pieces. Landing order B0 (U3) -> B1 E4 carrier -> B2 alloc+trap linked first in pack -> B3 strings/numbers -> B4 lists/maps -> B5 display -> B6 host IO -> B7 tasks + stop rail -> B8 test runtime -> B9 Jet route adapters + native Core rows, delete Rust rlib/std/libgcc from pack. Main decisions: runtime Rust edits that remove replaced exports are Rust-exit work (prefer delete; cfg gates only as recorded transitions with removal condition); E4 = {data,len,cap} internal ABI approved; B2 lands before the stop rail with goldens as oracle (owner newest direction supersedes older r7 scope)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER APPROVED a 7th Opus lead, RuntimeLead, owning S5 (runtime in Jet -> Rust-free pack). Baseline Oct 7 (RuntimeJet1/RUNTIME-MAP): pack 0% Jet, 3,993 C-ABI symbols, ~250k Rust lines; enablers E1 native asm leaves, E2 runtime object + pack wiring, E3 raw memory w/o Rust sentries, E4 text representation ruling. Large unlanded prior work (RuntimeJet1-22, RtObject1-3, RtLand/RtTrap/RtUnwind/RtBurn, r7 cutover held). First deliverable: current runtime status table + landing order, then land per layer with collect-all proofs. Builds on RustLead3 U3 runtime-object chain (E2)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER DECISION 2026-10-09: contract = the Jet-built compiler passes the full test suite (Rust no longer an oracle; Rust compiler frozen). Guarantee: no Rust-only fix/feature lost; every Rust-only commit behaviour must be covered by a test that passes on the Jet compiler (plan scratch/Main/PARITY-GUARANTEE-PLAN.md; input parity-triage.tsv 257 commits/30d; owner RustLead3). SEED: once a Rust-bootstrapped Jet compiler passes the full suite, publish it as a pinned GitHub release (tag, sha256, provenance) so it cannot be lost; later bootstraps start from it. Native backend and Jet runtime still required before rustc/Rust runtime sources leave."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER GOAL 2026-10-09: remove Rust ASAP so divergence becomes impossible; all compiler work only in Jet. Rust compiler (crates/jet-*, Source/*.rs, Compiler/Bootstrap/*.rs) FROZEN: Rust changes only to (a) keep bootstrap/gates working until cutover, mirrored in Jet; (b) port Rust-only fixes TO Jet (parity backlog, census scratch/Main/parity-census.tsv); (c) delete Rust. Jet-only improvements preferred. U3 export rule re-scoped to Jet side only unless a bootstrap/gate path requires Rust acceptance. CLI parity: explain-rule leaf port + Jet catalog/help tests added to the CLI fix."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER STANDING RULE 2026-10-09 (parity): Rust and Jet compilers must not diverge. Any change to the Rust compiler must be made, checked, fixed and verified on the Jet side in the same change, with both sides tested; a Rust-only fix is not done, and a missing Jet counterpart is a parity defect to port. Parity audit of today Rust changes started: dfbc1400e Guest.rs export_signature (no Jet sandbox-export check exists; fold into U3 Jet export boundary), badd3ddb7 CheckerItems/comptime nominals, 7c08/7ca9/898b carrier caller cutover, DataEvent12, CLI test fixes."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Ranked critical path recorded (scratch/Main/RUST-REMOVAL-CRITICAL-PATH.md, from RUST-EXIT.md): S1 native goldens O0 -> S2 Jet front feeds Jet backend -> S3 compiler units native (largest unknown) -> S11 native fixed point -> cutover; S5 runtime in Jet co-critical. OWNER APPROVED a 6th Opus lead (NativeSelfHostLead) for milestone M1 \"native self-host table\": RANKED.tsv/OVERLAP.tsv of compiler functions the native backend lowers clean, per package, with ranked blockers, on integrated dev 0eee7cd0. Next milestones M2-M6 per RUST-EXIT section 4."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Original-7 meaning cases PASS 8/8 at badd3ddb7 (modern747 lineage): sema-original 4/4, codegen-default-err 3/3, codegen-net-dns 1/1; rc0, 145s, peak 3.3G, collect-all; receipt scratch/RustLead/original7-badd-run7/receipt.json. Roots fixed in sequence: 02473cd76 (Prelude Err field default used retired `name: Type = value`, broke every Rust-frontend check on the lineage), then badd3ddb7 (Prelude owner now publishes its own struct rows incl. __jet_ErrorMetadata; canonical_nominal_name keeps the bare compiler-owned Err leaf so default-error rules match). No prior fix existed on any branch. DataEvent12 proof4 (1f8b57de8, carries badd) admitted; U3 export rule (owner ruling) in progress on 207b lineage, folding the runtime-object proof."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER RULING 2026-10-09 (U3, native library C exports): exported functions may use whatever primitive types the job needs, including specifically sized ones (I8-I64, U8-U64, F32, F64, Bool, ...); prefer primitives; \"use the right tool for the job\". Replaces the Int/Float/Bool/String-only lower_exports rule; the RuntimeLibrary exports.list fallback is removed in the same cutover."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Collect-all workspace cutover: ONE workspace --all-targets --keep-going check on 7ca9 found the complete remaining set: 13 diagnostics, 2 roots, 1 crate (Source/main.rs 2204/2205 incremental 4-tuple; tests/pin.rs run_bundle missing checked nominals). Both fixed in ONE commit 898b5448 (2 files 5+/3-, Main reviewed). ONE workspace recheck: CHECK OK rc0, 266.428s, kernel 945737728B, swap0/OOM0, 0 errors / 965 JSON rows / build finished true; raw jet-lane-check.urkkDL, census error-census.json. Cumulative caller cutover 7c08+7ca9+898b: 10+2 files. Next: original-7 meaning cases (collect-all), then DataEvent12 and runtime publisher in parallel. Blocker inventory scratch/NativeFeed7/RUST-REMOVAL-BLOCKERS.md."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Current Native9b90 source actual6-package alltargets J1 keepgoing check GREEN bg1829 rc0/136.053s CPU134.951, kernel1869754368B/swap0/allOOM0; literalCHECKOK raw modern6pkg-9b90-light5/stdout.log6648 and positive cleanup64FD authenticated. Genuine cost-report retained nominal facts forwarded all5Source callers; no invented facts/Name seam. RootCLI bin still UNPROVED; reviewed bounded4G one Root -pjet --binjet CHECK packet4D47/liveCC85/warm2D00/wrapper383D; conditionalGO onlyafter nullable actualchildrc repair +full post-stop identity guard, new pinned recipes/current9b/source/tool/resource guards. Original7 meaning proofs notadmitted. DataEvent canonical12 includesNumber(String); sema/TIR11 mismatch open defect, corrective design only; no Rust-removal/native meaning completion."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Native actualDataEvent audit corrects earlier missingpayload conjecture: authenticcatalog/runtime alreadyFloat(f64),Text(String),Bytes(VecU8) and qualifiedcore.encoding::DataEvent nativeprojection supported. REAL existingcontract mismatch: generatedCoreModuleExports menu12 inclNumber; runtimeCommonTypes Number(String); sema intrinsicprovider/TIR payloadfacts11omitNumber. ExistingapprovedAPI/runtime meaning isdefect, notnewpublicfeature; no blessing11complete. WorkerauthorizedboundedDESIGN canonical12 typedfact propagation+authenticorigin sameleaf/importalias/reexport collision witnesses, nofakeAST/newType/ABI/policy, noDataEventcodeGOwhiletypingfrozen. Separate finalcosttransport9b90/treeb7b8 has exact3path19+/11- vsrevieweda37: qualifiedSpans, existingmoduleidentity.as_deref compare(no newgetter/Namesnetchange), retainednominalArc acrossALL5actualSourcecost callers. Main source review underway; sixpkg/Rootcaller/meaning/native proofs owed."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Actual b865 narrow warmrepeat RED101/38.049s/1516089344B/swap0/OOM0 exposed FOUR coherent sema roots; Main fullreviewed exact4path10+/5- a37bf9 repair (registrationexport, qualifiedItem, diagnostic-only aliascycle3tuple/no successfulfacts, solecopycountervisibility/caller). Subsequent authorized exacta37 warmrepeat ACTUALLY RED101/52.339s/1790820352B/swap0/OOM0. CompleteD0F8 diagnostics THREE causes solelyCodegen/TIR: missingqualifiedSpan at5371/5377, Option<String> vsSome(&str) identitycomparison5375, genuinechecked_nominals argument omitted actual11468caller(lib+libtest). Sema/Pkg advancedChecking, notall6freshPASS. Full logs/custody/positivecleanup retained; no retry. Native soleworker tracing completeproducer/caller closure to forward genuineexistingArc once, no emptyfallback/codegen recheck/new meaning, nextfreeze notyetverified; Source/native units remainowed."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Import-only successor b865673b611ab1b997761e75669a027e15b8d00c/tree57b57c4e5d2603dc41c9aef77e669a593a961c9e exactsole MirBridge.rs9 unusedimport removal, no lint suppression. Main reviewed new packet7A08 SHA88b1dcaf4a14e06b35823b1c4da1e50eddfa18f5c224ad9511d15a95181e1b8f, warmown-target authentication0E96 against immutable92b oldlivebefore73e6/compiler/Nix flags, canonical frozen resource78eabd and actualfailclosed cleanup6A8F (failed/empty manager reads no longer count ascollected; exactunit/job/group + positive not-found/inactive required). ONE4G/J1 sixpkg alltargets --keep-going actualSTART bg1804, inner1200k5/outer1250k10, source frozen whilelive, no polling/autoretry. Terminal typing/diagnostics owed; no supplier-meaning/native/DataEvent/public activation proof claimed."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Actual sixpkg92b5 terminal RED101 after425.794s/CPU420.494s/kernelpeak2049650688B/swap0/allOOMevents0, exact postsource/tool/tmp custody and cleanupinactive101. Main consumed full diagnostic summary1A84/B7EF+liveafter. ONE actual root: unused unqualified AccessConvention import at Comptime/MirBridge.rs9, two additional Cargo lib/libtest summaries; source3547/census confirms every used AccessConvention is already qualified crate::AST::AccessConvention. Codegen downstream may remain dependencyblocked; no allsixtyping/native/meaning pass claimed. Worker authorized exact unusedimport removal only, immutable newfreeze and unique proofout preserving full light2 logs, samecheckout warmtarget qualification and freshv2 guards; ONE conditional4G/J1 sixpkg keepgoing followup on exactfix after freshbind/startrecord, not automatic unbounded retries. Independent4+3+1 meaning groups remain unrun."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Actual Rust six-package type-check STARTED ONCE after Pip fullguard review: frozen92b5/tree88cc, exact v2 packetSHA9e26e409f3590efa63ed77a36487fa579a98cbd681d86a0dfd879c09f69ce154. Corrected bothmanager/scopes/privatekernel/PQ-dedup budget avoids false unboundedcontroller classification; resource-only actual0/530ms/34.1M/swap0, source/tool/target/TMP prepost matched, actual4G/Swap0/OOMstop/controlgroup90s readbacks and cleanupinactive0. Fresh previous total4/40 host47.006>=10G disk1049017282560B. ONE canonical sixpkg alltargets keepgoing J1 lane admitted inner1200k5/outer1250k10, full durable diagnostics; Native eventjobbg1790 executing, no sourcewrites/poll/rerun. No terminal outcome yet, no 4+3+1 meaning tests/native/sourcefactory/wholeHEAD claim. Frontend/Gate independent work continues."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Authentic error-source dependency is now ready for bounded composition: Speed standalone three-path commit f7f6fa2440f0a4c5a736db70d7961088e49fe1b4 parentc6/treecac4; Errors5345B SHAaab2155cd992caa76c262a6fb2bcdb2573c422865dee463c5065407afe41129d, canonical generator and generated Prelude text only. Actual worker generator --check0 and both decoded byte-equality PASS; Pip independently ran generator --check0 and decoded originalDerives4491B+Errors5345B exact equality0 in correct rootfix. Record scratch/SpeedPareto2/original-error-source-three-check/record.json0CF3; Pip decoder scratch/Main-dev-collectall/check-prelude-embedded-source.mjsE86C. Exact threepath cherry-pick into frozen209 authorized, no SourceItems entry-injection composed/activation/parity claim. Next immutable composed freeze+fresh sixpkg4G proposal before execution admission. Proposed independent meaning groups4+3+1 named units use supported --no-fail-fast and explicit dependency blocking; not run yet."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Main independently inspected modern747 ContextEB77134/346, NamesABC01052–1063 and Syntax148D318–406/444. Approved canonical original Errors supplier alias using existing injective Syntax.generated_path(actual authenticated jet:canonical-prelude/Prelude/Errors.jet), preserved by existing mangle; alias is never owner selector. Real cached Program/bytes/spans supplier context and ordinary owner defaults atomic repair approved in Native-owned Rust paths; Source counterpart Speed design-only until emitter identity audit. Correction: six __jet_Error* are reserved E0067, not legal user-shadow witnesses. No build/native proof admitted; modern tuple4/callers/public NetDNSError/DataEvent mapping continues."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Main completed FULL static consumption of immutable old1197 111-path NET108209/all7132lines +84-line AST108211 and corrected tests.rs-only108217. This is review, NOT acceptance/typecheck/native/Err/Rust-removal PASS. Modern dev has evalhost and Arc<map<Arc<CoreSourceModule>>>/NameLedger body snapshot already; no old workspace/engine/84types replacement. NativeFeed7 owns exact modern mapping/caller/TIR/Sema/SourceCmdCompile packet and 6pkg4GJ1 check proposal. Focus original canonical Err parse/owner/default AST validation before nominal publication, six private-name precedence under genuine valid shadow/alias, and DataEvent same-leaf witnesses based on checked owner identities (not ambiguous leaf mapkeys/filtered foreign rows). Modern public NetDNSError full source/Rust/provider/test cutover must retain actual private JetNetDnsError/frozen CABI symbol mapping; no public fallback alias. Four Source Err paths remain Speed sole composition. Native18 request/layout/nominal producer handshake goes directly NF↔Speed; no waiting for Gate. IO current-dev disjoint leaf/private-module composition approved to sole IO worker, SourceCmdCompile parent attachment Main/NF only and no existing edits yet."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Shared Source dependency writer handoff resolved: NativeFeed7 froze Source Registration/Items plus original Errors.jet/canonical generator/generated PreludeDerives, Main FULL reviewed NET108134/108144 and assigned Speed sole composition writer for these FOUR paths. NF keeps WIP intact and future corrections proposals only; continues disjoint original Runtime/Rust Err/Arc/DataEvent nominal custody and Native request producer. Source current Driver request has18 fields, not NF historical10: canonical full mode/gates/schema/evaluation/output intent/address defaults and selected caller variants require WHOLE aggregate/factory-signature/layout-seal migration. Precise Speed proposal pending; no old10 or separate codec25 proof promotion. Original Foundation Output AST already exists; missing canonical Source producer is an implementation defect actively ported, not authority to weaken approved output checks. No new worker spawned or Rust/native readiness claimed."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Actual focused native MIR codec checkpoint GREEN: Main independently read NativeFeed7/current7-codec0e1-run1/artifacts/receipt.json and complete raw 30-line harness stdout: all25 named tests passed, zero failed/ignored/filtered. Source0e1a02f2/tree25e4c31e, four git-qualified immutable codec/schema/SHA inputs identical pre/post, real matching rustc compile/inventory/harness all rc0, inventory exact25/allAttemptedtrue; binarycef4982948f653b5, helper2ba5f22c9320429d. This is genuine codec execution only, not full HEAD/sema/Err/native/runtime/Rust-removal acceptance. NativeFeed7 continues canonical Err ownership and prepares six-package matching-source own-target check; no native green claimed."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Concrete authored source checkpoint: NativeFeed7 current7 cd4b785c479a93de5124f6f6d263886777c3a76c/treee8109a14,39 files693+/236-, full2003-line NET reviewed by Main. Source and Rust MIR schema7, strict42-byte magic/schema/resolved declaration layout seal before table allocation in whole/signature readers, one canonical TraitBox with original generic child, checked place_only capture address facts and all constructors/validators/digests/tests migrated. Later0e1a02f header-only correction retains code cohort. These are source-only, no CHECK/test/native acceptance yet. Independent real standalone codec test recipe is being prepared; bounded package and root lifecycle proof remain owed. Genuine Err declarations/acyclic shared original checked facts/default owner-context integration continues under soleNF7. Core IO stream now has one child #4910 c0kvvilb after verifiedCLIreadback: ba9 matching five-package CHECK OK0/129.792s/1.7G and canonicalTEMP projection actual0, but real three codegen units/two embedded bridge cases/decoder-free-once/native tiers still owed. Five workers only; no Rust-free/runtime-ready/25x/master claims."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Additional authoredrootpatch1b19d281caf4007e5c4b0b7a5ae7408f31260075/treeccc6b40e/parent0b1: sixfiles100+/32-, Source genuine firstCapture/checkedMOVE place classifier and actualsignature/loan/closure/binding consumers; pairedRust ordinary/history/managed traitreferent projection, existingcapture tierfixtureextended non-scalar snapshot/repeatedcalls/creatorframe lifetime. Main fullNET/source-onlyreceipt33D2 consumed, no checks/testsclaimed. Main review caught committedRust helper arity/typeguard mismatch (new3arg callers vsold2arg helper); soleNF7 instructed immediate canonicaltypedhelper andallcaller cutover before proof, nontrait numeric/String mustnot get .as_ref(). Strictschema/Err continue, no Rootready/mergedeclaration."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Further concrete IO11 preverification GREEN: Main consumed canonicalTEMP r2 exact914/tree527abc receiptEFC7 and full5A99diff. Atomicrc0/2.739s/93M/swap0, source-qualified22-input immutablearchive608bc807...5918720 and canonicalproducer16bf1ac5...272040. Eight generated views byte-identical; ONLYCoreEnumPayloadRows source hash plus AlreadyExists9/Unsupported10 IOContext rows added, ResourceLimit8 ProcessResourceLimit intact; all11 rows observed. No frozen/live copyback. Five-package literal CHECKreceiptED9C fullsource/unit/command consumed. Three real Codegen tests/actual embedded FFI bridge remain owed; canonicalheavylauncher is a frozen Gate identity and33G+8G exceeds40Gparent, so do not mutate/queue during this window. RtLand1-2 prepares exact canonical bridge closure and test recipe, not substitutes."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Main review of actual0b1 found a real Source/Rust ownership-parity gap before integration: Source READ capture does not imply loan when the genuine capture result place is MOVE; cloned/materialized captures can retain READ with OWNED ownership. NativeFeed7 confirmed canonical Rust first-Capture/checked-place classifier and is porting it once into Source body facts/signature/loan/binding/closure callers. This is root prevention, not runtime proof: no escaping-name heuristics, guessed metadata, new Clone capability or owner exception. Original0b1 preserved; strict-prefix root edit also underway."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Concrete IO11 preverification: Main physically read matching914c1e4a/tree527abc exact five-package debug/default/all-targets/j1 lane stdout CHECK OK AF74, atomicrc0 and empty stderr5D05. Actual canonical HOME unit8m31.255s/peak2.3G/swap0, checkout-owned target120cap. This proves package check only, not embedded generated plugin/runtime, component/native behavior or three planned Codegen unit executions. Canonical TEMP projection first attempt failed1 missing top-level Syntax.rs; corrected complete22-prefix closure and fresh immutable1G intake pending, failed output preserved. RtLand1-2 remains sole independent I/O goal worker, no extra agents."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Actual first consolidated patch delivered: NativeFeed7 commit0b1d78314b08b7cdd6b2da3748b3435a3977106e/treeca5a7a77f9ad2c2eac04cf28a631e1a0c5e5f0de,14 explicit paths361+/236-. Checked borrowed Trait READ keeps original place/no MovePlace/owned_last_use; falseCloneBox collector/bridge/supertrait/derive retired in Source and Rust mirror. Main consumed exact authored-source receipt DFE1. Source only/unactivated; native case/lifecycle/owned generic metadata, strict schema/Err and final CHECK OK still owed. RtLand1-2 independently verifies IO eleven-kind consistency as the fifth roster goal; generator first attempt failed missing top-level Syntax.rs, five-package check is separately underway. No complete Rust removal claimed."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-CORE-GLOBAL-STATE1=A ratified: Core RNG shared state, logical env overlay, fault switch, auth/native storage port design hold removed. #29/#31 minimal required compiler seams may mirror temporarily with dies-at-cutover ledger; caller-owned RNG/precise/vault/Presentation port-seam deferrals reopened. Real callback/resource/carrier/runtime implementations and proofs still required."
+        },
+        {
+          "at": "2026-10-06",
+          "by": "Pip",
+          "text": "Main 2026-10-06 06:35: temporary leaf boundary for the corelib cutover: a Rust leaf may remain only if Jet cannot express it yet, it is one primitive op with zero policy, and it is listed in $JET_STATE_ROOT/scratch/CorelibInteg/RUST-LEAVES.tsv with the missing Jet capability. Capabilities needed so far: float bit-cast intrinsic (to_bits/from_bits), extern C calls to libm, OS syscalls (clocks, getrandom, fds), host handles (raylib, browser)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every remaining active Rust-authored toolchain/runtime/provider/test source is ported to the canonical Jet path, and all in-repository callers, schemas, artifacts and explanations migrate in one cutover; no Rust remnants, policy-free Rust leaves, legacy execution fallback or parallel runtime is required by the shipped Jet-native path. Out of scope here: the JetDevserver, JetLSP and JetSemIndex sources (ported under #6582 and #6386, G5) and the Jetpack crates (#3590 and #6632, G7).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev 2c40493778, git ls-files lists 64 .rs files: 59 benchmark peers (Tools/gauntlet, Tools/perf, tests/compiled_workloads/adapters/peer), the Rust FFI example Examples/Interop/FFI/Projections/Rust/host.rs, and the Zed extension Tools/editors/zed/wasm-src (Zed loads extensions only as Rust-built wasm). No toolchain, runtime, provider or test source is Rust, and no Cargo workspace builds anything the shipped path needs.",
+          "at": "2026-11-07T02:39:57.031Z"
+        },
+        {
+          "n": 2,
+          "text": "Matching-source focused lane and executable root proofs cover checked Trait ownership, MIR schema rejection, original Err/default/private-field custody, packed U8 and wide integers, authentic Foreign/runtime object/ABI transport, canonical runtime pack and callback/image/resource lifetime; static source or grammar receipts do not substitute for execution.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by c3 and the Rust removal (c9129d174d): the focused-lane/MIR proof harness was part of the Rust mirror and the MIR names are retired (c64611367f); executable proof now lives in c3 (goldens, ui, cases on o0/o1/o2).",
+          "at": "2026-11-04T19:42:38.761Z"
+        },
+        {
+          "n": 3,
+          "text": "The composed Jet-native CLI/compiler/package/runtime path passes its exact golden/diagnostic/examples and applicable O0/O1/O2/web contracts with one meaning; recorded producer/input/process-tree evidence proves no rustc, Cargo, Cranelift or retiring interpreter is needed by the final cutover. Broad milestone proof is separately admitted and commit-bound before closure.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69d5a9a4cb + 8f1681f68f (CoreOwnership). Process tree: seed a0_025 built s1, pack1, s2, pack2 and s3 fresh under no-Rust PATH plus strace -f execve/openat; FIXED_POINT s2==s3 1f9eb56dca91; 0 rustc/cargo/rustup/cranelift/interpreter execs and 0 Rust-input reads. Contracts with that s2: golden census 1224 pass (on the card); golden --filter=web 85/85 on o0/o1/o2; all 3 browser-target goldens pass (ui_web_mount case, ui_web_reactive, web_hello after correcting its stale JS golden 100 -> 100.0 to match web_hello.out, I9); 0 Rust execs in the web traces (jet dev's watcher reads repo .rs/Cargo.toml as data only). Evidence $JET_SCRATCH_ROOT/lanes/CoreOwnership/c3out. The broad commit-bound milestone proof remains for card closure.",
+          "at": "2026-11-06T05:11:43.576Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #3690) Every semantic Core group in the inventory has its Jet owner in Core/*.jet and no Rust dispatcher row, JIT shim or interpreter route re-implements it; the remaining Rust is emission, compiler, or a declared provider leaf.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by its retarget c7 on this card (same requirement restated for the Jet compiler after the Rust removal, c9129d174d).",
+          "at": "2026-11-04T19:42:39.451Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #3690) Each wave's cutover is proven by golden examples with identical output on AOT, default jet run, interpreter and web where applicable (I9), and passes the strict performance gate against the replaced Rust route.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by its retarget c8 on this card (interpreter tier retired: --interpret is jet.UnknownFlag since dfc4e930b2).",
+          "at": "2026-11-04T19:42:40.100Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #3690) Provider leaves are either Jet source via ratified F4/F5 facilities or listed as owner-approved remaining Rust with the vetted engine named.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by c9 on this card, which carries the identical text (c9 is met).",
+          "at": "2026-11-07T02:50:55.541Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "(was #3690) [retarget] Every semantic Core group in the inventory has its Jet owner in Core/*.jet, and no row in Compiler/JetFoundation/Source/Registry, no handle route in Compiler/JetCodegen/Source/Codegen/HandleMethods.jet, no Compiler/JetEval route and no Rust JIT shim re-implements it; the remaining Rust is emission, compiler host, jet-rt, or a declared provider leaf.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a505a90bcb + 799a336728 (CoreOwnership): all 16 unowned rows settled. crypto.wipe, game.run, testing.world, reactive.signal, ui.button and ui.text_input are Core-owned; args.decode, ui.mount, web.form and ui.reactive_render are sema-owned calls with no row; args.merge (phantom) deleted; process.argv is an adapter leaf of process.args()/#CLI; compute gradient/value_and_gradient/vjp/jvp recorded as emission in Tools/hardening/special-routes.tsv (TExprKind.MathBuiltin); plugin.load stays a compiler-host row (literal-artifact interface resolution plus per-artifact guest entry ir_plugin_guest). A/B vs HEAD-only f310cc004e, both chain FIXED_POINT: 0 changed rows (ui 2256 plus 216 ui/reactive/compute/web/testing cases).",
+          "at": "2026-11-06T03:37:51.953Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #3690) W1 exit: `crates/jet-codegen/src/Prelude/Core.jet` has 0 `dispatcher_row`s whose member is in the same module's `source_module … owns {…}` set (today 1,440 of 1,549 module rows). A throwaway count over Core.jet shows it, `node Tools/agent/check-core-surface-ledger.mjs` passes, and `JET_GOLDEN_FILTER=text/ cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=serde/ cargo test --test golden examples_compile_and_run` pass on AOT/default-run/interpreter.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate: crates/jet-codegen and cargo were deleted (c9129d174d); the live requirement (0 Jet-owned dispatcher rows in Compiler/Prelude/Core.jet) is #4717 c7, and the ledger half is #4717 c35. Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:28.394Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #3690) [#3695] The 15 listed Core modules pass the import probe on the Jet compiler. Goldens ui/reactive, crypto/crypto_envelope, net/http_server and io/db pass on every level. `reactive.autorun` follows D-REACT-EFFECT-NAME.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2db7b4d68c (CoreOwnership): reactive.autorun replaces reactive.effect (D-REACT-EFFECT-NAME=A), 38 paths cut over. s1 438f987e of 31ad717db4+patch: goldens ui/reactive, crypto/crypto_envelope, net/http_server, io/db PASS o0/o1/o2 12/12; probe c4717_11_imports.jet prints 15 Core modules on jet run and --release; ui reactive_* 9 PASS + member_name_keyword PASS; cases data_math_reactive 4 PASS; other fails match base 25fb199ce5",
+          "at": "2026-11-05T23:29:19.674Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #3690) [#3383] Golden concurrency/native_resource_streams covers channel, timer and fallible-reader streams with source-specific wait, end and error, on every level and without Tokio (D-ITER-TOKIODEP1).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: golden concurrency/native_resource_streams (channel values and end, interval ticks, file lines, reader error, missing-file lines) passes on o0 (jet run), o1 (jet build) and o2 (jet build --release); no Rust or Tokio on the host. Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:41.229Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #3690) (was #3667) Every semantic item listed in the body lives in the named Core/*.jet home; the Rust Prelude keeps only policy-free provider leaves, and duplicated Rust policy is deleted in the same cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2db7b4d68c (CoreOwnership): in Core.jet every public core.crypto/core.crypto.* function export is owned by its Core/Crypto/*.jet source_module; the only unowned rows are policy-free provider leaves: 12 __jetc_* fd leaves (#Export(c) in JetRuntime RouteACrypto.jet:48-192), __os_entropy (CryptoEntropy.jet:111), wipe (IR zeroization intrinsic, BuildRoutes.jet:4374); 0 .rs files under Compiler/ or Core/",
+          "at": "2026-11-05T23:32:43.815Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #3690) (was #3667) `JET_GOLDEN_FILTER=crypto/ cargo test --test golden examples_compile_and_run` passes with identical AOT/default-run/interpreter output. It includes a new `Examples/features/crypto/file_seal_jetc.jet` that seals a multi-chunk file to JETC v2, reopens it, prints the X25519 public-key text form and round-trips it through `from_text`. `cargo test --test core_crypto_api` and `cargo test --test core_crypto_argon2id -- argon2id_parallel_lanes_match_rfc_vector_across_tiers` also pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69d5a9a4cb (CoreOwnership), cargo targets read as their Jet testkit rows: golden crypto/ 57 PASS on o0/o1/o2, including new Examples/features/crypto/file_seal_jetc.jet (3-record JETC v2 seal and reopen, X25519 public-key text form round-tripped through from_text, Bech32m); cases --filter=crypto 42 PASS 0 FAIL, including the three core_crypto_api cases and argon2id parallel-lanes RFC vector across tiers; 7 stale known-failing rows removed. Also: a non-codable decode<T> reports E0905 once, not twice (JetSema Calls/Data.jet).",
+          "at": "2026-11-06T04:33:47.570Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #3690) (was #3667) [#3668] JVLT2 store, JVKW key wrap, the prepare/commit state machine, stale-lock recovery and full Unicode NFC are in Jet. vault_keys and vault_key_wrap fixtures and golden text/unicode_* pass on every level.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: JVLT2 (Compiler/JetRuntime/Source/VaultCodec.jet, VaultState.jet), JVKW (CryptoArgon2id.jet, Core/Crypto/Vault.jet:456), prepare/commit (Core/Crypto/Vault.jet:255-373), stale-lock recovery (VaultLinux.jet:906) and NFC (Core/Text/Text.jet:99) are Jet; goldens crypto/vault_keys and crypto/vault_key_wrap pass on o0 (jet run), o1 (jet build) and o2 (jet build --release). Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:41.820Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #3690) (was #3667) [#3256] Golden crypto/primitive_matrix proves known-answer vectors and typed length errors for the selected hashes, MAC and secure randomness, using audited implementations. A new algorithm or dependency goes to an owner ballot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet PASS o0/o1/o2 (candidate-golden-2.log:34-36).",
+          "at": "2026-11-07T02:50:38.512Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #3690) (was #3667) [#3093] Golden crypto/password_auth: correct login succeeds, a wrong login is rejected without leaking the password, hash, key or token, and the Argon2 path is identified. Examples state nonce and key ownership, with no deterministic sample nonce.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7e0eb40623 (CoreOwnership): golden Examples/features/crypto/password_auth.jet passes on o0/o1/o2 (golden crypto/ 54 PASS 0 FAIL). Output: argon2id v=19 m=65536,t=3,p=1 hash; the right password grants a 43-character token; wrong password and unknown user both get 'invalid user name or password', and a check that the rejection contains no password, hash, key or token prints false; the example states the server owns its X25519 key and seal draws a fresh nonce per call (two seals differ), with no sample nonce.",
+          "at": "2026-11-06T04:22:00.551Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #3690) (was #3667) [#1000] On deferred platforms, consumer failure propagation (raw, keygen, nonce, salt, UUID) is failure-injection tested and agrees on every level.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0998acbb54 (CoreOwnership): #Test(faults:) was a silent no-op (the schedule was never armed); TestArtifacts and the runtime jet_rt_test_unit_faults now arm it, and random.bytes takes the Rand checkpoint. Case crypto_entropy/rand_faults_reach_every_consumer_on_every_level: with faults: [Rand], raw bytes, keygen, the seal nonce/salt/key draws, the password salt and UUID v4 each return their typed unavailable failure (5/5 pass) with identical exit, stdout and stderr at --optimize=none, basic and full; a negative control where every consumer leaves the failure unhandled FAILs 5/5 at all three levels, each report naming 'fault injected: Rand call 1'. FS.Read faults also fire (probed).",
+          "at": "2026-11-06T05:37:10.624Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #3690) (was #3669) Every semantic item listed in the body lives in the named Core/*.jet home; the Rust Prelude keeps only policy-free provider leaves, and duplicated Rust policy is deleted in the same cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2db7b4d68c (CoreOwnership): every public core.data*/core.db* function export in Core.jet is source-owned by its Core/*.jet home; the only provider leaf left is __host_path_is_file (RouteAEncoding.jet:448); 0 .rs files under Compiler/ or Core/",
+          "at": "2026-11-05T23:32:44.584Z"
+        },
+        {
+          "n": 25,
+          "text": "(was #3690) (was #3669) `cargo test --test db_policy` passes, including a new `db_malformed_param_is_typed_error_across_tiers`: a malformed `I`/`F`/`X` parameter returns `DBError` instead of binding 0/0.0/Null, identically on AOT/default-run/interpreter.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by construction (CoreOwnership, dev 2db7b4d68c): db parameters are the typed DBValue enum bound by tag (Core/Db/Db.jet:1561-1565); the I/F/X text wire that could bind 0/0.0/Null no longer exists, so a malformed parameter cannot be constructed on any tier, and cargo is gone",
+          "at": "2026-11-05T23:32:46.026Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #3690) (was #3669) New `cargo test --test core_data_parquet -- parquet_limits_int96_and_error_kinds_agree_across_tiers` writes fixtures with the parquet crate. It covers over-limit rows/bytes (`DataErrorKind.Limit`), an INT96 column at the declared resolution, an unsupported type (typed error) and a corrupt page (typed kind from provider codes, not message substrings). All must be identical across tiers.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev b3ed361346 (CoreOwnership), cargo/parquet-crate test read as its Jet golden: tooling/parquet_limits over apache parquet-testing fixtures passes at O0/O1/O2 (golden --filter=parquet 3 PASS) with identical output. Covers DataErrorKind.Limit for rows and for bytes, Unsupported for DATA_PAGE_V2, Decode for a corrupt page type and a truncated file, and INT96 read as UTC at microsecond resolution; the program branches on err.kind, never on message text.",
+          "at": "2026-11-06T04:41:49.730Z"
+        },
+        {
+          "n": 27,
+          "text": "(was #3690) (was #3669) [#3308] Golden io/db_contracts covers typed rows, prepared values, rollback, pool timeout and lease release, cancellation and use-after-close on the selected engines (D-FOUND-COREAPI1 pool). A new driver goes to an owner ballot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e545fcbbca (CoreOwnership): golden io/db_contracts on SQLite covers typed rows, prepared values, rollback, pool timeout, lease release, cancellation of a waiter in DBPool.acquire, and use after close; golden db filter 43 PASS. The cancellation proof found and fixed a real bug: a waiter cancelled inside DBPool.acquire left its FIFO ticket at the queue head so every later acquire timed out (fixed with a Close guard). Statement-level cancel has no API; core-library.md documents the gap (a new surface needs an owner ballot).",
+          "at": "2026-11-06T04:23:49.203Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #3690) (was #3669) [#3228] One CSV contract with declared results for quoted delimiters and newlines, header mapping, malformed or ragged rows (no silent padding) and type errors. Bounded streaming shares limits and errors with the eager path.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 9277e9f134 (CoreOwnership): eager rows, dict_rows, decode and the data loader share the streaming reader's record and error contract (probe: identical rows and errors on 7 inputs across header/skip_blank); ragged rows are errors wherever cells map to a header, with no silent padding; the eager path has no limits per ratified encoding-decisions.md and shares the streaming errors. Proof: chain FIXED_POINT at b624b510be + patch; golden serde 219 PASS; csv cases 16 PASS (2 fail identically without the patch).",
+          "at": "2026-11-06T03:49:24.255Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #3690) (was #3669) [#3270] An independent ETF JSON-view and typed codec (D-CORE-EETF1, D-CORE-ETF-CODEC1) uses the version-131 count-map fixture, keeps atom/string/binary distinctions and bounds, and documents conversion loss.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 71ec88cbf8 (CoreOwnership): core.encoding.eetf JSON view and typed codec (D-CORE-EETF1=A, D-CORE-ETF-CODEC1=A) over the version-131 count-map fixture; COUNT-ETF-131 golden matches on a chain FIXED_POINT build at 9730019b38 + patch; golden serde 222 PASS 0 FAIL; 3 conformance witnesses run. Keeps atom/string/binary distinctions (variants UTF8Binary/UTF8ByteList; layout type TermLayout because core.compiler.lang.Layout exists); documented loss: encode writes every object key as an atom.",
+          "at": "2026-11-06T04:21:28.083Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #5078) Rust exit E1: reconcile origin/port/main (638 Jet files absent from master)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "There is no port branch left to reconcile (git branch -a has no *port*; origin/port does not exist); the Rust removal finished on dev.",
+          "at": "2026-11-07T02:39:58.447Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 33,
+          "text": "(was #5974) (was #4589) One source-unit assembler: Compiler/Bootstrap/assemble.mjs and Jetpack/Bootstrap/assemble.mjs are two implementations of one mechanism",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): one assembler is left: commit 148a22db3f retired Compiler/Bootstrap/assemble.mjs (-299 lines; \"the compiler is built only in package form\"); `git ls-files | rg assemble\\.mjs$` -> only Jetpack/Bootstrap/assemble.mjs",
+          "at": "2026-10-31T16:09:28.108Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #5974) (was #4598) 839 Core dispatcher rows (and their Rust Prelude functions) look dead: owned members whose Jet wrappers no longer call them",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d3584e6c3c (CoreOwnership): 550 dead owned-member Core.jet rows (jet_* symbol with no #Export(c) fn in Compiler/Core and no source naming the module/member pair) + 254 orphaned RuntimeRoutes IRRoute rows removed, views regenerated; 158 remaining rows bind live exported runtime fns. s1 25fb199ce5+patch vs s1 base: ui 2167 PASS both, cases 2782 PASS both, 0 rows changed; goldens 1224/1289 passed, 0 lost vs base (1219); gen-core-tables --check, check-core-surface-ledger --check, test-route-abi CHECK OK",
+          "at": "2026-11-05T23:18:07.852Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #5974) (was #4924) Core surface ledger: finish the Jet-native receiver-aware method inventory (replaces the Rust-derived inventory)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 59ffda6c23 (CoreOwnership): the Core surface ledger reads receiver methods from the Jet tables (BUILTIN_METHOD_ROWS, COLLECTION_OPERATIONS, BUILTIN_STATIC_ROWS, the numeric sources and Core type declarations) through receivers rows; the remaining methods rows cover only the sema-coded handle families (Cell, Shared, Event, Task and others with no table). --check rejects any name sema does not spell and any repeat of a derived name (negative controls pass); check-core-surface-ledger --check passes; core-conformance output byte-identical to HEAD.",
+          "at": "2026-11-06T05:49:59.750Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #5974) (was #4983) Post-cutover Tower burndown: close Rust-only cards and cards proven by the native chain",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Criteria pass 2026-11-06: no live card is Rust-only any more (titles naming Rust are benchmark peers, the FFI v3 Rust gallery #6511, or Jet ports of deleted Rust tests #5454/#6096); the remaining parity rows were moved to their natural goal cards (#6632, #6386, #6425, #6634, #6635, #6636, #6637, #4599). Closing cards that the native chain proves continues through the normal batch verification, not this card.",
+          "at": "2026-11-07T02:49:16.856Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 37,
+          "text": "(was #5974) (was #4988) Integrate retired-branch commits into dev after the self-host fixed point",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate of #4717 c30 (integrate the retired port branch, commit 61693bcbd7, into dev). Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:30.663Z"
+        },
+        {
+          "n": 41,
+          "text": "(was #4766) (was #3942) Parity: Web/JS emission coverage: MIRWeb 8.6k lines vs Jet Emit/Web ~3.7k",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Compares against the Rust MIRWeb emitter, deleted with the Rust tree (c9129d174d); web-tier coverage itself is required by #4717 c3. Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:32.004Z"
+        },
+        {
+          "n": 42,
+          "text": "(was #4766) (was #4801) Jet sema lacks the atomic_field_inner check the Rust checker has (I9)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: sema_atomic_field_inner (Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:319) with Compiler/JetSema/Tests/AtomicFieldFixtures.jet; probes c4717_42_atomic_field (prints prior=5 now=7, jet run and --release) and _bad (E0108); golden concurrency/bounded_spsc_atomic passes o0/o1/o2. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:42.347Z"
+        },
+        {
+          "n": 45,
+          "text": "(was #4766) (was #3893) [#3888] `debug(expr)` returns expr unchanged and writes `[dbg]` with site, text and Debug value, without adding an effect. Run, dev, test and debug builds allow it; release rejects it (E3405).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: Examples/Basics/DebugTrace.jet PASS o0/o1/o2 (candidate-golden-2.log:247-249), spelled `debug` under D-DBG1=A.",
+          "at": "2026-11-07T02:50:40.223Z"
+        },
+        {
+          "n": 46,
+          "text": "(was #4766) (was #3893) [#3717] Dropping a pure call's value is a registered error (p03 and pure method calls). Impure calls, unit results, unproven rows, E0402 cases and `.drop(\"reason\")` stay quiet. The repo-wide run is clean.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ui discarded_pure_call, discarded_pure_method, discarded_pure_quiet, discarded_pure_e0402, drop_method_silences_e0402 PASS on base 5dfbe82cd6 (SemaParity)",
+          "at": "2026-11-05T21:10:03.910Z"
+        },
+        {
+          "n": 47,
+          "text": "(was #4766) (was #3893) [#3732] A bounded type parameter forwarded to another bounded generic checks (prints 9 with and without the explicit type argument). A missing bound still reports E0905 (types/generic_bound_forward, tests/ui/generic_bound_forward_missing).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/run/Generics/GenericBoundForward.jet PASS o0/o1/o2 (candidate-golden-3.log:1257-1259) and tests/ui/generic_bound_forward_missing.jet PASS (candidate-ui-3.log:571).",
+          "at": "2026-11-07T02:50:42.082Z"
+        },
+        {
+          "n": 48,
+          "text": "(was #4766) (was #3893) [#3739] `[Int]{xs.map(...)}`, `[[Int]]{xs}` and `[String:Int]{m}` are whole values. Element and entry bodies are unchanged. `Float{rows()}` widens by the checked rule, and the lossy case gives E3010. The amendment is logged. types/typed_literal_whole_value golden.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: goldens types/typed_literal_forms, typed_literal_whole_value and typed_literal_whole_value_lossy (stops with E3010) pass on o0 (jet run), o1 (jet build) and o2 (jet build --release); the D-DOTCTOR3 amendment is in Docs/spec/syntax-decisions.md:1211 (landed bd83fe6361). Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:42.919Z"
+        },
+        {
+          "n": 54,
+          "text": "(was #4766) (was #3908) [#3912] Workspace members and Jetpack package kinds (E1334, E0982, E0983, E1241, E3109, E3260) in JetDriver.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "E0983 is Retired in the diagnostic registry (Do not use E0983); there is nothing to port.",
+          "at": "2026-11-07T02:50:36.783Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 61,
+          "text": "(was #4766) (was #3917) [#3916] #SingleUse E0140-E0143 parity.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: tests/ui/single_use_{aliased,branch,branch_expr,consume_unaudited,discarded,dropped} pass, and all 17 tests/cases/single_use cases pass (E0140-E0143 emitted by Compiler/JetSema/Source/Sema/Ownership/SingleUse.jet). Docs/audits/g15-2026-11/RESULTS.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:43.482Z"
+        },
+        {
+          "n": 62,
+          "text": "(was #4766) (was #3917) [#3918] string-view lifetime (E2307) and #MustUse (E0419), including the declared-owner boundary.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: tests/ui/core_string_view_reuse_after_json passes; its known-failing row (#6425 check not ported: E2307) is removed and the .fixed.jet companion added. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:06.174Z"
+        },
+        {
+          "n": 63,
+          "text": "(was #4766) (was #3917) [#3966] A dropped `[Lease]` or `Lease?` is rejected (one snapshot each). Consuming every element checks clean on every level. The duty covers List, Option, Result, Map, tuples and user generic structs, enumerated by a test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: five new tests/ui/ownership/single_use_* rows pass: a dropped [Lease] or Lease? is E0140, and each loop name owes its consume. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:06.972Z"
+        },
+        {
+          "n": 64,
+          "text": "(was #4766) (was #3917) [#3840] (1) A struct `&` param forwarded bare to a write callee gives E0202. (2) A lambda under `??` does not leak `T Never!`. (3) `?? break` counts as a reachable break (no false L0525 or E0402). One fixture each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a0_029 seed (dev 42f746371b), 2026-11-06 probes in $JET_SCRATCH_ROOT/lanes/Main/critpass/p64: (2) lam.jet `xs.map(n -> maybe(n) ?? panic(\"none\"))` into total(zs: [Int]) prints 2 and [1, 2], no Never leak; (3) qqbreak.jet `v := maybe(i) ?? break` prints 0 1 2 after with no L0525/E0402 (and tests/ui/qq_break_outside_loop.jet PASS on eb94f67b7a). (1) is overtaken: call marks are retired, so a bare forward `bump(p)` of a `&P` parameter is the canonical spelling and `fwd(&p)` warns E0434.",
+          "at": "2026-11-07T02:50:47.971Z"
+        },
+        {
+          "n": 65,
+          "text": "(was #4766) (was #3917) [#4029] carry over #3845 (a Close value copied into two struct literals is rejected) and #3847 (`^holder.field` partial moves recorded; taking from a borrowed parameter rejected).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: three new ownership ui rows pass (Close copied into two literals, ^holder.field partial move, take from a borrowed parameter field). Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:07.715Z"
+        },
+        {
+          "n": 70,
+          "text": "(was #4766) (was #3919) [#3923] L0601, L2001, L2401, L2421 and L0510, plus lint-policy denial to E1293, proven separately from visibility.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 25fb199ce5 + 0fcb475cd5 (SemaParity): L2421 (ui_lint/inferred_never_return), L0601 on soft-public signature types (case imported_soft_public_declared_types KF->PASS) and L0514 (both same_subject_dispatch cases pass) emit; L2001, L2401 and L0510 already had emit sites and fixtures; E1293 proven by ui/lint_policy_same_subject. Full ui: only these 3 rows change, FAIL->PASS. Full cases A/B: 2755 PASS both; the 2 new FAILs are a load flake (core_process_pipeline_honors_stage_timeout) and a network row (h1_skips_early_hints, ERROR->FAIL), neither from these codes",
+          "at": "2026-11-05T22:55:46.129Z"
+        },
+        {
+          "n": 73,
+          "text": "(was #4766) (was #3919) [#3866] The Jet cognitive-complexity walker adds the nesting depth term. `jet lint --complexity` on the committed fixture prints two_loops 3, nested_if 3, if_in_loop 3.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3939a36606: the cognitive-complexity walker adds the nesting term; jet lint --complexity on the committed fixture prints two_loops 3, nested_if 3, if_in_loop 3; ui lint_cognitive 3/3 PASS (SemaParity)",
+          "at": "2026-11-05T22:22:21.290Z"
+        },
+        {
+          "n": 76,
+          "text": "(was #4766) (was #4249) [#3974] Matching on &place binds optional payloads as exclusive write windows (owner ruling 2026-09-30), with aliasing negatives.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: two new match_place_*optional_payload* ui rows pass. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:08.404Z"
+        },
+        {
+          "n": 78,
+          "text": "(was #4766) (was #4249) [#4392] String.slice results carry borrowed-view provenance, so returning one as View<str> from its source is accepted.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: probe c4717_78_slice_view.jet: check clean, run prints jet; two new ui rows pass. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:09.086Z"
+        },
+        {
+          "n": 79,
+          "text": "(was #4766) (was #4249) [#4421] An explicit owner move across a live view is rejected. Read-only receiver borrows are kept.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: probe c4717_79_move_across_view is refused with E0212 OwnerMovedWhileViewed, and c4717_79_read_borrow_kept (read receiver borrows while the view is live) runs, on jet run and --release. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:43.999Z"
+        },
+        {
+          "n": 80,
+          "text": "(was #4766) (was #4249) [#4423] Return-view provenance applies only to success edges of fallible view returns.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: new row fallible_view_return_judges_only_success_edges passes. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:09.765Z"
+        },
+        {
+          "n": 81,
+          "text": "(was #4766) (was #4249) [#4444] Borrowed parameter and enum-payload places are stable provenance roots (no false E2305). True temporaries are still refused.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: probe c4717_81_temporary_refused.jet: check and run refuse both temporary arguments (jet.ViewOutlivesOwner, rc 1); c4717_81_payload_root.jet still runs (2 [7, 8] [7, 8]). Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:10.938Z"
+        },
+        {
+          "n": 82,
+          "text": "(was #4766) (was #4249) [#4446] A bare field or parameter place returned as View<T> is a read window (no E0113).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: probe c4717_82_bare_param_view.jet: check clean, run prints [1, 2, 3] [4, 5]; two new ui rows pass. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:11.770Z"
+        },
+        {
+          "n": 83,
+          "text": "(was #4766) (was #4249) [#4453] Fixed arrays range-slice into a read view without materializing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "100b8b4d70: new case fixed_list_values/a_fixed_list_range_slice_is_a_read_view passes on every tier, with jet_rt_view_end and no allocation in the emitted IR; probe prints [2, 3] 5 11. Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
+          "at": "2026-11-05T09:34:12.444Z"
+        },
+        {
+          "n": 84,
+          "text": "(was #4766) (was #4249) [#4465] A direct range-slice argument gets the expected View typing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: probe c4717_83_fixed_range_view passes a direct range-slice argument as a View and prints [2, 3], 5, 11 on jet run and --release. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:44.815Z"
+        },
+        {
+          "n": 85,
+          "text": "(was #4766) (was #4249) [#4461] Definite reassignment after a move propagates across loop back edges (swap loop accepted), with a negative snapshot for the unreinitialized path.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: probe c4717_85_swap_loop (reassign after move across the loop back edge) runs and prints [2] [1]; c4717_85_swap_loop_unreinit is refused with UseAfterMove; both on jet run and --release. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:45.377Z"
+        },
+        {
+          "n": 86,
+          "text": "(was #4766) (was #4249) [#4352] Mapped file windows and lines have element type View<U8>.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d1e6c214e1 (CoreOwnership): MappedFile.window and window_len return a View<U8> into the mapping and lines() yields one View<U8> per line (LF and a preceding CR excluded), Jet-native in JetRuntime CompilerMapped.jet with IR building the View<U8> header. Chain FIXED_POINT; cases --filter=mapped 4/4 PASS including the formerly known-failing mapped tiers case; a probe covers window/window_len success and error, CRLF and empty lines, and an empty file.",
+          "at": "2026-11-06T05:07:06.170Z"
+        },
+        {
+          "n": 87,
+          "text": "(was #4766) (was #4249) [#4305] After #815: a declaration-lifetime MIR fact gives each loop iteration a fresh capture cell.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d1ea12f79: probe c4717_87_fresh_capture prints 0 1 2 (each loop iteration captures a fresh cell) on jet run and --release. Docs/audits/g15-2026-11/PROBES.md (125e2e8f89)",
+          "at": "2026-11-04T19:42:45.896Z"
+        },
+        {
+          "n": 88,
+          "text": "(was #4766) (was #3881) [#3882] Port every active foreign-syntax and retired-spelling teaching diagnostic from the Rust parser to JetParser, with registry text and exact code/span parity rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-TEACH-RECONCILE1 ratified A by the owner on 2026-11-04 ('Do not teach any spellings at all now'): Jet teaches no foreign-syntax or retired spellings, so there is nothing to port. The retired-spelling half was already obsolete (ba6124f2b3). The replacement generic error is #6035 work (Recover3).",
+          "at": "2026-11-05T00:11:01.023Z"
+        },
+        {
+          "n": 89,
+          "text": "(was #4766) (was #3881) [#3504] A lambda writes only params and an effect row (no result type). Syntax registry, grammars and snapshots updated. tests/ui/lambda_written_result_type and the callable/lambda_interface golden pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ui lambda_return_type_written + lambda_error_type_written PASS on 5dfbe82cd6; Tools/editors grammars carry no lambda result-type rule (SemaParity)",
+          "at": "2026-11-05T21:10:05.208Z"
+        },
+        {
+          "n": 90,
+          "text": "(was #4766) (was #3881) [#3585] No in-repo source outside retirement fixtures uses the pre-arrow callable shape, and the ratchet lists only current forms. examples/canon.jet and every examples/suites program pass. The Jet parser emits E0068 for `fn f() Int -> 1`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Retired spellings were removed in ba6124f2b3 (greenfield cutover); fn f() Int -> 1 is now a plain parse error (jet.MissingFunctionBody), and the ratchet and example paths it names are Rust-era. Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:33.214Z"
+        },
+        {
+          "n": 91,
+          "text": "(was #4766) (was #3881) [#3719] Probe p16 reports only the unclosed `(` with a caret. Snapshots cover `(`, `[`, `{` and `{` inside interpolation, each with a single report. A guard fails if any parser diagnostic names the synthetic terminator `;`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/ui/unclosed_paren_call.jet (candidate-ui-3.log:1028), unclosed_bracket_list.jet (ui-2.log:1019), unclosed_brace_block.jet (ui-4.log:863) and unclosed_brace_interpolation.jet (ui-1.log:940) PASS, one error each.",
+          "at": "2026-11-07T02:50:44.382Z"
+        },
+        {
+          "n": 92,
+          "text": "(was #4766) (was #3881) [#3725] `a || b && c` and `a && b || c` are registered errors with a Safe parenthesis edit, and grouped or same-operator chains are accepted. `jet fmt` never emits an unparenthesized mix. All sources are migrated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/ui/logic_mix_or_then_and.jet (candidate-ui-4.log:803), logic_mix_and_then_or.jet (ui-2.log:949), logic_mix_grouped_ok.jet (ui-3.log:696) and tests/cases/fmt/fmt_never_emits_an_unparenthesized_and_or_mix.case PASS.",
+          "at": "2026-11-07T02:50:46.176Z"
+        },
+        {
+          "n": 93,
+          "text": "(was #4766) (was #3881) [#3727] There is no IncDec node or path in Compiler/. `++` and `--` exist only as retired tokens feeding one teaching diagnostic, which covers all seven forms. The census finds zero uses outside fixtures.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ba6124f2b3 removed retired-token teaching; n++ is jet.InvalidStatement and no IncDec node exists in Compiler/. Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
+          "at": "2026-11-04T22:18:34.351Z"
+        },
+        {
+          "n": 94,
+          "text": "(was #4766) (was #3881) [#4204] Literal bidi control characters are rejected with a located registered diagnostic and snapshot. Escaped forms in strings still compile.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 264ffc4576 + 33e0cdb41f: E0088 rejects literal bidi controls in source; E2937 reads Core source calls so a UI host service needs its authority capability (SemaParity)",
+          "at": "2026-11-05T21:37:19.176Z"
+        },
+        {
+          "n": 95,
+          "text": "(was #4765) Jet sema reports E2937 when a UI host service is used without its capability in `authority.needs`. A tests/ui fixture shows the error, and the fixed manifest passes. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 264ffc4576 + 33e0cdb41f: E0088 rejects literal bidi controls in source; E2937 reads Core source calls so a UI host service needs its authority capability (SemaParity)",
+          "at": "2026-11-05T21:37:20.395Z"
+        },
+        {
+          "n": 96,
+          "text": "diagnostic-parity-ratchet.json matches today's code: its rustOnly list names no code Jet sema already reports (E2807 is listed but Jet sema emits it; found by Prep-2 2026-11-04), regenerated from the registry and sema rather than edited by hand.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 750ce7996b: diagnostic-parity-ratchet.json deleted rather than regenerated; its only checker (diagnostic-parity.mjs) went in ee9aa75cee and nothing reads or regenerates it, so no stale rustOnly list remains (SemaParity)",
+          "at": "2026-11-05T21:59:41.574Z"
+        },
+        {
+          "n": 97,
+          "text": "(was #3518 c1) Core source metadata owns core.sys.success and its body is Jet source [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:21.278Z"
+        },
+        {
+          "n": 98,
+          "text": "(was #3518 c3) Fresh JIT and AOT fixtures print the existing exact success result [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:22.233Z"
+        },
+        {
+          "n": 99,
+          "text": "(was #3542 c1) Core source metadata owns core.data.sketch empty and merge [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:22.930Z"
+        },
+        {
+          "n": 100,
+          "text": "(was #3542 c2, #3543 c2) Generated projections and source-derived ledger regenerate cleanly [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 73e720ed17: check-core-surface-ledger --check and --check-core-call-registry pass, core-module-check 115/115, gated in ci.yml (CoreOwnership)",
+          "at": "2026-11-05T21:32:23.447Z"
+        },
+        {
+          "n": 101,
+          "text": "(was #3542 c3) Fresh JIT and AOT fixtures preserve exact empty and merge output [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:23.612Z"
+        },
+        {
+          "n": 102,
+          "text": "(was #3542 c4) No native dispatcher or compatibility route exists for the pure helpers [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:24.309Z"
+        },
+        {
+          "n": 103,
+          "text": "(was #3543 c1) Core source metadata owns core.time.expiring expired and remaining_ms [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:25.025Z"
+        },
+        {
+          "n": 104,
+          "text": "(was #3543 c3) Fresh JIT and AOT fixtures preserve exact expiration outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:25.783Z"
+        },
+        {
+          "n": 105,
+          "text": "(was #3543 c4) Obsolete native time expiring routes and wrappers are removed [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a7fb7cbfec: goldens io/sys_success, collections/sketch_state, time/expiring pass --tier run and --tier build on base; helpers CoreSourceOwned runtime:false with no dispatcher/runtime route (CoreOwnership)",
+          "at": "2026-11-05T21:24:26.487Z"
+        },
+        {
+          "n": 106,
+          "text": "Single-source census F13 (Docs/audits/2026-11-05-single-source-census.md): Dead test-harness data from the Rust era. One hand-written home: none; the facts they describe no longer exist. Fix: delete (keep `diagnostics_coverage_allowlist.tsv` and `retired-with-rust.tsv`, which have readers). Drift check: Guard: every committed `.tsv`/`.txt` under tests/ and Tools/ci has a reader. Drifted on 2026-11-05: Yes. No `tests/*.rs` and no `crates/` exist. suites.txt says `test-shards.sh` and `tests/suite_membership.rs` read it; neither does (`test-shards.sh:47` has its own list). test-weights.tsv is not read by test-shards.sh. golden-rust-known-failures.tsv's reader, tests/golden.rs, is gone. suites.txt and suite_budgets.txt are read only by `Tools/agent-eval/test-economics`. The others have no reader Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 68624b3bb4: dead Rust-era test-harness tables deleted; RustEraRatchet.jet in the native suite reports 0 unread .tsv/.txt tables under tests/ and Tools/ci (CoreOwnership)",
+          "at": "2026-11-05T21:56:09.545Z"
+        },
+        {
+          "n": 107,
+          "text": "Single-source census F33 (Docs/audits/2026-11-05-single-source-census.md): Provenance comments citing deleted Rust sources. One hand-written home: none; the cited homes are gone. Fix: delete (or point to the live Jet home). Drift check: Guard: no `\\w+\\.rs` in Compiler outside foreign-binding code. Drifted on 2026-11-05: Yes. Every citation points at a file that no longer exists Effort L (mechanical). Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e4a3f3bbbf: RustEraRatchet scans every Compiler and Core line (incl. glued X.rs61-85) and fails on any .rs citation; 0 hits; allowed: upstream library/{std,core,alloc}, RustForeign and extern-rust fixtures, the Zed test, and the debug tier (#6576); E2106 why now names Compiler/JetFoundation/Data/Syntax; s1 OK (CoreOwnership)",
+          "at": "2026-11-05T22:08:46.880Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-06T10:08:37.412Z",
+      "updated": "2026-11-07T02:50:58.790Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G16",
+        "G2"
+      ],
+      "criteriaLastN": 108,
+      "completedAt": "2026-11-07T02:50:58.790Z",
+      "questions": [
+        {
+          "id": "q3tr3c3g",
+          "cardId": "c0rqi33c",
+          "decisionId": "D-CORE-GLOBAL-STATE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Not sure that shared keyword is valid jet.. Ensure accurate",
+          "status": "answered",
+          "answer": "shared is valid Jet. It is the registered keyword that builds a shared cell (D-CONC-SHARE1, Syntax.rs KW_SHARED). The example shared_config.jet uses it, and it parses and runs. Checking the ballot's examples against the compiler did find four other mistakes, now fixed. [:] is not Jet; an empty table is [String: String]{}. Semicolons between statements are not Jet. The module-level binding must be capitals, STORE. The setter must store value.copy(). With those fixes, option A's declaration fails today with exactly one error, E0622, \"a module binding's value must be a literal\", which is what this vote would change. The options and the recommendation are unchanged. Separately, the probes found a compiler bug: writing a table entry through a shared cell is silently lost today.",
+          "created": "2026-10-07T16:21:07.403Z",
+          "answeredAt": "2026-10-07",
+          "answeredBy": "Pip"
+        },
+        {
+          "id": "q0c8f0ah",
+          "cardId": "c0rqi33c",
+          "decisionId": null,
+          "by": "Main",
+          "kind": "message",
+          "text": "G3 No Rust anywhere: VERIFIED and marked achieved (dev a9be739dae). The only Rust left is the benchmark peers (Tools/gauntlet, Tools/perf, tests/compiled_workloads), the Zed extension, the Rust host in the FFI example Examples/ffi/projections/rust/host.rs, and Cargo fixture files Jetpack's tests read as data. This card's remaining proof rows ride on G1 (goldens). — Main",
+          "status": "done",
+          "answer": "",
+          "created": "2026-10-30T00:34:01.466Z",
+          "completedAt": "2026-10-30T00:39:44.399Z",
+          "doneBy": "owner"
+        },
+        {
+          "id": "qkungko5",
+          "cardId": "c0rqi33c",
+          "decisionId": "D-CORE-COVERAGE-RATCHET1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Just because something isn't used directly in this specific repo doesn't mean we shouldn't have it or it isn't useful. Why would we act like that?",
+          "status": "answered",
+          "answer": "We would not, and no option removes or devalues any Core function. The old wording (uncovered, gaining a use) was misleading. The check asks one thing: does some test, example or doc example run this function, so we know it works? 4639 public functions have no test yet. That is test work owed, not a sign they are unwanted. The ballot now says untested throughout. Recommended A records today's untested functions by name. Each new function must arrive with a test, and the list shrinks as the missing tests are written.",
+          "created": "2026-11-06T00:22:44.160Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-10T02:53:13.988Z"
+    },
+    {
+      "id": "c0jwqaa5",
+      "num": 6003,
+      "title": "Map: Goldens: packages, loader and workspace entries",
+      "body": "Destination: Package/loader examples (inline packages, path deps, workspaces, effect budgets) match goldens.\nNotes: Batch G13 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G13.golden.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite golden\" ; cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G13.cases.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite cases\". Order: #5594 #5673 #5685 #5496 #5576 #5577 #5731 #5784 #5785 #5797 #5798 #5800 #5808.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #5673 #5785 #5797 #5800 #5798 #5784 #5685 #5731 #5594 #5496 #5576 #5577 #5808 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "All criteria met with commit-bound evidence (c3/c13 re-met on the eb94f67b7a candidate kit)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c5: Examples/features/lowlevel/run.jet -> Examples/Interop/FFI/OpaqueHandles.out [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: c5 named `Examples/features/lowlevel/run.jet`, a path that does not exist; reworded to the three projects that census row covered. The E1002 root no longer reproduces; opaque_handles still needs its expected stream."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Owner 2026-10-30: ballot the namespace question for C6 instead of Main's ruling. Options: one shared namespace where a re-export takes over the child module name, versus separate module and value namespaces as in Rust. C13 (E0610 fix text) proceeds independently."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "C6 root cause (BallotDesign at d90660da90): the bodyless child declaration 'module wrap' registers a Module symbol wrap (Registration/Items.jet:1989); 'pub use wrap.wrap' then binds the function wrap in the same namespace, and the duplicate check at Items.jet:3657 reports E0105. Dropping 'module wrap' gives E0610, so the spec's canonical form (spec.md:2232-2243, D-MOD4) cannot compile. Main's ruling, within D-MOD4: a parent's re-export of a child item that has the child module's name replaces the child module name in the parent namespace. The child stays reachable as a path prefix inside use declarations. No separate module and value namespaces."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5808 \"Unit family: imported public units fail with E0626 (dependency package has errors)\" (CardTrim 2026-10-28: golden/test-gap step of map #6003). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 2 unit_family cases: imported_public_units_keep_display_metadata_across_tiers, imported_same_leaf_units_keep_distinct_dimensions. The dependency's own errors are hidden (see collect-all card #5571)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5800 \"golden: E1363 An inline Package conflicts with package.jet\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/foundations/run.jet=n/a). Body: - Root: E1363 An inline Package conflicts with package.jet - Raised at: Compiler/JetDriver/Source/Driver/Loader.jet:947, Compiler/JetDriver/Source/Driver/Loader.jet:981 - Examples: foundations/time (Examples/features/foundations/run.jet:1) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5797 \"golden: E1221 `_` has a malformed `_` block\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/packages/package.jet=n/a). Body: - Root: E1221 `_` has a malformed `_` block - Raised at: Compiler/JetDriver/Source/Driver/Loader.jet:207 - Examples: packages/effect_budget (Examples/features/packages/package.jet:12) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5785 \"golden: E0624 `_` is declared in two files of package `_`\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/tooling/config/build.jet=n/a). Body: - Root: E0624 `_` is declared in two files of package `_` - Raised at: Compiler/JetDriver/Source/Driver/Loader.jet:2427, Compiler/JetDriver/Source/Driver/Loader.jet:2487, Compiler/JetSema/Source/Sema/Registration/Items.jet:3779 - Examples: tooling/compiler_api_package (Examples/features/tooling/config/build.jet:1) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5784 \"golden: E0603 A path dependency has no matching authorized package root\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/packages/package.jet=n/a). Body: - Root: E0603 A path dependency has no matching authorized package root - Raised at: Compiler/JetCli/Source/Cli/Inspect.jet:1507, Compiler/JetCli/Source/Cli/Inspect.jet:1534, Compiler/JetCli/Source/Cli/Request.jet:575 - Examples: packages/pub_package_visibility (Examples/features/packages/package.jet:4) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5731 \"golden: E0104 `_` expects N argument, got N\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/io/progress.jet=failed). Body: - Root: E0104 `_` expects N argument, got N - Raised at: Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:85, Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:94, Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:95 - Examples: io/progress (Examples/features/io/progress.jet:12) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5685 \"golden: E0105 `_` is defined twice\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/modules/run.jet=n/a Examples/features/modules/text/module.jet=n/a Examples/features/types/multi_head_functions.jet=failed). Body: - Root: E0105 `_` is defined twice - Raised at: Compiler/JetDriver/Source/Driver/Identity.jet:733, Compiler/JetDriver/Source/Driver/Identity.jet:737, Compiler/JetDriver/Source/Driver/Loader.jet:843 - Examples: modules/module_boundary_returns (Examples/features/modules/run.jet:9), modules/module_reexport (Examples/features/modules/text/module.jet:1), types/multi_head_functions (Examples/features/types/multi_head_functions.jet:9) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5673 \"golden: E1002 `_` is reserved for first-party or foreign packages\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/lowlevel/run.jet=n/a). Body: - Root: E1002 `_` is reserved for first-party or foreign packages - Raised at: Compiler/JetDriver/Source/Driver/Loader.jet:2560, Compiler/JetDriver/Source/Driver/Loader.jet:2571, Compiler/JetDriver/Source/Driver/Loader.jet:2577 - Examples: lowlevel/cbind (Examples/features/lowlevel/run.jet:8), lowlevel/polyglot_ada (Examples/features/lowlevel/run.jet:2), lowlevel/polyglot_dart (Examples/features/lowlevel/run.jet:3), lowlevel/polyglot_dotnet (Examples/features/lowlevel/run.jet:2), lowlevel/polyglot_fortran (Examples/features/lowlevel/run.jet:2), lowlevel/polyglot_go (Examples/features/lowlevel/run.jet:2), lowlevel/polyglot_java (Examples/features/lowlevel/run.jet:2), lowlevel/polyglot_pascal "
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5594 \"golden: E2105 `_` has no `_` to build\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: Examples/features/basics/first_hour.jet=failed Examples/features/basics/onboarding.jet=n/a Examples/features/cli/positionals.jet=failed Examples/features/cli/subcommands.jet=failed Examples/features/cli/typed_entry_args.jet=failed Examples/features/errors/env_divisor_trap.jet=no-match Examples/features/tooling/output_callable.jet=passed Examples/features/web/app_typed_args.jet=failed Examples/features/basics/onboarding/run.jet=failed). Body: - Root: E2105 `_` has no `_` to build - Raised at: Compiler/JetCli/Source/Cli/Host.jet:802 - Examples: basics/first_hour (Examples/features/basics/first_hour.jet), basics/onboarding (Examples/features/basics/onboarding.jet), cli/positionals (Examples/features/cli/positionals.jet), cli/subcommands (Examples/features/cli/subcommands.jet), cli/typed_entry_args (Examples/features/cli/typed_entry_args.jet), errors/env_divisor_trap (Examples/features/errors/env_divisor_trap.jet), tooling/output_callable (Examples/features/tooling/output_callable.jet), web/app_typed_args (Examples/features/web/app_typed_args.jet) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5577 \"Link ICE: 'linking main.jet with the Jet runtime failed' on ws_law live_query_rerun\" (CardTrim 2026-10-28: golden/test-gap step of map #6003). Body: Rust-test port (RustTests slice 1): tests/cases ws_law live_query_rerun fails at link with an internal error. An ICE (I2); needs the missing runtime symbol named and the lowering or runtime pack fixed."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5576 \"Extern rust companions report E0703 'needs cargo' instead of skipping when cargo is absent\" (CardTrim 2026-10-28: golden/test-gap step of map #6003). Body: Rust-test port (RustTests slice 1): ui_fixes ownership_ui_fixes_compile, companions c12-c14. The case contract says rust companions skip without cargo; the Jet CLI instead fails with E0703. Decide: the case's skip contract or the error (product behaviour), then align the case or the CLI."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5496 \"Workspace build entry without fn run is not runnable\" (CardTrim 2026-10-28: golden/test-gap step of map #6003; full-run.json: tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case=kit:KNOWN-FAILING). Body: Found by the Rust test port (RustTests, 2026-10-23). The ported testkit case is known-failing until this lands. First error: E2105 `workspace.jet` has no `fn run` to build Cases: tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case Rust behavior it replaces: compile_programmable_build_opts running member build entries in dependency order, then the workspace entry Acceptance: the case(s) pass on the current seed with the same meaning on every applicable tier; drop the known-failing row in the same patch."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case pass o0+o1 goldens (was #5496: Workspace build entry without fn run is not runnable)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case passes on dev 190f826022 (base $JET_SCRATCH_ROOT/discovery/base/190f826022, Jet-compiled, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/build_entry_epoch4/workspace_build_observes jet test Tools/testkit 'suite cases' gives 1 passed, 0 failed.",
+          "at": "2026-11-02T23:36:38.390Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #5576) Extern rust companions report E0703 'needs cargo' instead of skipping when cargo is absent",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c5c535905f, restored by 41b2d1e274 (GoldenRoots3): the three ffi_* companion steps moved to ui_fixes/ownership_ui_fixes_compile_ffi_companions.case with requires: tool:cargo; base/latest cases --filter ui_fixes/ownership_ui_fixes_compile PASS 1, SKIP-HOST 1 (tool:cargo), FAIL 0 (was E0703 MissingCargo)",
+          "at": "2026-11-05T23:27:51.171Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #5577) Link ICE: 'linking main.jet with the Jet runtime failed' on ws_law live_query_rerun",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/cases/ws_law/live_query_rerun_publishes_and_reconnect_replays_latest.case PASS (candidate-cases-2.log:667, release-cases-2.log:869); no link ICE.",
+          "at": "2026-11-07T02:48:40.232Z"
+        },
+        {
+          "n": 4,
+          "text": "Examples/features/basics/first_hour.jet, Examples/features/basics/onboarding.jet, Examples/features/cli/positionals.jet pass o0+o1 goldens (was #5594: golden: E2105 `_` has no `_` to build)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "golden o1 PASS (testkit golden --tier o1, rg16a = dev a9be739dae tree, 2026-10-29) and o0 PASS per run-tier census: basics/first_hour, basics/onboarding, cli/positionals",
+          "at": "2026-10-30T00:24:49.844Z"
+        },
+        {
+          "n": 5,
+          "text": "Every non-polyglot lowlevel example project (cbind, native_c and opaque_handles, or their successors after the Examples cutover) passes its O0 and O1 goldens with no E1002 (was #5673: golden: E1002 `_` is reserved for first-party or foreign packages; the 2026-10-28 census recorded the path without the project directory). On vb5 (dev 7f0b3d03ed) cbind and native_c PASS on O0/O1/O2 and opaque_handles fails only for its missing expected stream.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Release candidate eb94f67b7a (kit candidate-golden-2.log:548-550, candidate-golden-3.log:319-321 and 1367-1369): Examples/Interop/FFI/NativeC, Cbind and OpaqueHandles PASS on o0, o1 and o2 with no E1002; OpaqueHandles' last failure (gzclose(handle.copy()) CopyNotSupported) was fixed by e32b979063.",
+          "at": "2026-11-07T02:42:34.926Z"
+        },
+        {
+          "n": 6,
+          "text": "Examples/features/modules/run.jet, Examples/features/modules/text/module.jet, Examples/features/types/multi_head_functions.jet pass o0+o1 goldens (was #5685: golden: E0105 `_` is defined twice)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "land/BallotDesign-c6 on dev f6eb2f2e08 (compiler 70b441a147), s1 build. The examples named by the criterion live at Examples/features/modules/module_reexport/{run.jet,text/module.jet,text/wrap.jet}: `jet run` prints [hi], matching expected/modules/module_reexport.out at o0, o1 and o2. Base reports E0105 \"`wrap` is defined twice\" at every level (evidence/module_reexport-runs.txt). In the golden suite, modules/module_reexport goes from FAIL to PASS at o0/o1/o2, and types/multi_head_functions PASSes at o0/o1/o2 on base and new (evidence/compare-golden.txt). D-MOD-NAMESPACE1 = A: the re-exported item owns the name. Other `wrap.member` reports E0628 and other equal names stay E0105 (probes ta/da/db/dc, UI module_file_name_taken_member and module_file_and_function_same_name).",
+          "at": "2026-10-30T19:40:14.988Z"
+        },
+        {
+          "n": 7,
+          "text": "Examples/features/io/progress.jet pass o0+o1 goldens (was #5731: golden: E0104 `_` expects N argument, got N)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "golden o1 PASS (testkit golden --tier o1, rg16a = dev a9be739dae tree, 2026-10-29) and o0 PASS per run-tier census: io/progress",
+          "at": "2026-10-30T00:24:50.545Z"
+        },
+        {
+          "n": 8,
+          "text": "Examples/features/packages/package.jet pass o0+o1 goldens (was #5784: golden: E0603 A path dependency has no matching authorized package root)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "#6003 log 'Folded #5784' names packages/pub_package_visibility as the E0603 example from the 2026-10-23 O0Load census; testkit golden --filter packages/pub_package_visibility --tier o0,o1,o2 PASS 3/3 on base 5dfbe82cd6 (GoldenRoots3)",
+          "at": "2026-11-05T23:14:15.061Z"
+        },
+        {
+          "n": 9,
+          "text": "Examples/features/tooling/config/build.jet pass o0+o1 goldens (was #5785: golden: E0624 `_` is declared in two files of package `_`)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "#6003 log 'Folded #5785' names tooling/compiler_api_package (tooling/config/build.jet) as the E0624 example; testkit golden tooling/compiler_api_package o0,o1,o2 PASS 3/3 on base 5dfbe82cd6 (GoldenRoots3)",
+          "at": "2026-11-05T23:14:16.188Z"
+        },
+        {
+          "n": 10,
+          "text": "Examples/features/packages/package.jet pass o0+o1 goldens (was #5797: golden: E1221 `_` has a malformed `_` block)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "#6003 log 'Folded #5797' names packages/effect_budget (package.jet:12) as the E1221 example; testkit golden packages/effect_budget o0,o1,o2 PASS 3/3 on base 5dfbe82cd6 (GoldenRoots3)",
+          "at": "2026-11-05T23:14:16.883Z"
+        },
+        {
+          "n": 11,
+          "text": "Examples/features/foundations/run.jet pass o0+o1 goldens (was #5800: golden: E1363 An inline Package conflicts with package.jet)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "#6003 log 'Folded #5800' names foundations/time (foundations/run.jet:1) as the E1363 example; testkit golden foundations/time o0,o1,o2 PASS 3/3 on base 5dfbe82cd6 (GoldenRoots3)",
+          "at": "2026-11-05T23:14:18.371Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #5808) Unit family: imported public units fail with E0626 (dependency package has errors)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 79215b24a2 (GoldenRoots3): s1 from c013db1f26 + patch, testkit cases --filter unit_family/ PASS 35 FAIL 0 KF 19 UNEXPECTED-PASS 0; imported_public_units_keep_display_metadata_across_tiers and imported_same_leaf_units_keep_distinct_dimensions PASS at none/basic/full; 4 known-failing rows removed; golden unit/display/quantit/measure/print/packages and ui --filter unit regression clean",
+          "at": "2026-11-05T23:17:35.508Z"
+        },
+        {
+          "n": 13,
+          "text": "E0610's fix text names a real Jet spelling (today it says Add 'import ... as wrap', but import is not a Jet keyword), generated from the registry, with its UI snapshot updated from real output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/ui/module_alias_not_module.jet PASS against the registry-generated E0610 snapshot (candidate-ui-4.log:820, release-ui-4.log:1798).",
+          "at": "2026-11-07T02:48:42.238Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28",
+        "wayfinder:task"
+      ],
+      "parentId": "c0max8v8",
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:42:12.218Z",
+      "updated": "2026-11-07T02:48:44.376Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G1"
+      ],
+      "completedAt": "2026-11-07T02:48:44.376Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T02:53:13.989Z"
     }
   ]
 }

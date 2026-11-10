@@ -15107,6 +15107,765 @@
       "outcome": "B",
       "ratifiedAt": "2026-10-17",
       "retiredAt": "2026-11-10T02:13:18.217Z"
+    },
+    {
+      "id": "D-CORE-GLOBAL-STATE1",
+      "cardId": "c0rqi33c",
+      "group": "runtime",
+      "title": "Where Core keeps mutable state shared by every task",
+      "situation": "Jet's built-in library, Core, needs one table that every running task shares, such as the in-memory storage behind web storage in a desktop app. Jet refuses to create such a table at the top of a module today. Keeping the table in Rust instead breaks your rule that Rust leaves Jet entirely. The vote picks its home: the existing marker for state kept across code reloads, a new marker that empties on reload, or a table the host program owns. We recommend the existing marker, #Persist, so Jet owns the table, its locking and its updates with nothing new to learn.",
+      "gist": "Should Core's shared tables use extended #Persist, a new #Global marker, or host keyed storage?",
+      "lesson": "A process is one running program; its tasks are separate pieces of work. A shared table protects each update with a lock. #Persist already keeps changing state through development reloads. Jet rejects a shared table initializer today. Every option must remove Rust and keep isolated tests from changing the real application's storage.",
+      "explainer": "Beginner path: application code keeps calling Core storage functions. It never declares a global table or manages a lock. The example starts two tasks, writes different keys, waits for both, and prints dark light. A missing key returns None, not an empty string. This vote concerns Core internals; it adds no requirement to ordinary storage callers. Native storage here means an in-memory table for the current process, not saving to disk between launches. Browser storage retains its existing origin and tab rules.\n\nExpert path: a library declares #Persist STORE :: shared Storage{items: [String: String]{}}. Storage is a record with an items field of type [String: String], a table from text keys to text values. shared creates a Shared<Storage> cell. :: keeps the cell's identity fixed; it does not prevent changing the protected contents. Each statement touching the contents is one locked step. #Transact groups several steps into one indivisible commit. An initializer is the expression that creates the starting value; lazy means it runs on first access rather than at startup.\n\nReading the examples: fn defines a function; every declaration is public by default. -> names the result type. String? means text or None. [String: String]{} is an empty table. m[k] = v stores v under k, and m.get(k) reads an optional value. task { ... } starts a task; join waits for it. ?? panic(...) stops this example if a task failed. print shows the result. Words after // are comments. #Persist means keep this binding through a compatible development reload; #Global is the proposed alternative, not an existing marker.\n\nNames and copies in the examples. A module-level :: binding is written in capitals, STORE, as Jet's naming rule requires. shared is Jet's word for building a shared cell. v.copy() stores a copy of the caller's text, because the table must own its entries.\n\nA guard is an owned lock token for expert manual access. Existing Shared guards and Condition remain available. No read/edit closures are reintroduced. Plain Shared statements and #Transact are the ratified access forms. Shared handle copies refer to the same cell, not independent tables. A whole-module binding replacement or move-out is not an allowed update of the new shared global.\n\nAn execution world is a test scope with its own effect providers and child tasks. A process-global binding is not automatically a test-local binding. Core storage must choose the world's own storage provider inside a controlled world, and the process table outside it. A user library needing isolation passes its own state or uses an existing world provider; it must not claim that a bare #Persist binding is isolated.",
+      "story": "Mina implements native web storage in Jet. Two tasks must see one table without losing updates, and parallel tests must not overwrite an application's preferences. She needs to know where that table lives and whether editing her code keeps its contents.",
+      "inWild": "use std::{collections::HashMap, sync::{Mutex, OnceLock}};\nstatic STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();\nfn set(k: &str, v: &str) {\n    STORE.get_or_init(|| Mutex::new(HashMap::new()))\n        .lock().unwrap().insert(k.into(), v.into());\n}\nfn get(k: &str) -> Option<String> {\n    STORE.get_or_init(|| Mutex::new(HashMap::new()))\n        .lock().unwrap().get(k).cloned()\n}\nfn main() {\n    let a = std::thread::spawn(|| { set(\"a\", \"dark\"); get(\"a\").unwrap() });\n    let b = std::thread::spawn(|| { set(\"b\", \"light\"); get(\"b\").unwrap() });\n    println!(\"{} {}\", a.join().unwrap(), b.join().unwrap());\n}\n// Expected: dark light. Comparison code, not exercised here.\n// Sources: https://doc.rust-lang.org/std/sync/struct.OnceLock.html\n// https://doc.rust-lang.org/std/sync/struct.Mutex.html",
+      "detail": "Correction, 2026-10-07, answering the owner's question on whether shared is valid Jet (q3tr3c3g). It is. shared is a registered contextual keyword, KW_SHARED in crates/jet-foundation/src/Syntax.rs:501, from ratified D-CONC-SHARE1=A. Both parsers read it and the formatter prints it. Examples/features/memory/shared_config.jet:25 builds a cell with shared AppConfig{…}, and a probe of shared Storage{…} inside a function checks and runs.\n\nThe same probes found four other errors in the examples, now fixed. [:] is not Jet: it fails with E0003, and the empty table is [String: String]{}. A semicolon between statements is E0373, so task bodies use line breaks. A module-level :: binding must be capitals, E0357, so store became STORE. Storing a borrowed parameter in the table is E0120, so the setter stores value.copy(), the ratified copy spelling (D-COPY-MOVE-SPELL1=A).\n\nWith those fixes, today's checker reports exactly one error for A's declaration: E0622, a module binding's value must be a literal. That is the gap this vote closes. Options, letters, recommendation and losses are unchanged.\n\nImplementation finding, not a ballot change. On the dev candidate, writing a table entry through a shared cell is silently lost. After store.items[\"a\"] = \"dark\" on a local shared Storage, store.items.get(\"a\") is None and len() is 0, also inside #Transact. Plain fields work: c.hits += 1 through a shared cell counts correctly. Every option's acceptance must include an indexed write through a shared cell.\n\nSuite revision by BallotSuite1, 2026-10-07. Examples now follow owner directive 21: no pub, and every declaration is public. They also use today's shared construction syntax, shared Storage{…}, as in Examples/features/memory/shared_config.jet:25. The earlier draft wrote Storage.{…}. The situation was rewritten in plain words. Options, recommendation and losses are unchanged. This vote unblocks the Core state work on card #4717; vote it first.\n\nOwner-only choice, not an implementation detail: D-PERSIST-DEVSTATE1 makes #Persist the one writable module binding for reload-pinned state. It does not admit a typed shared initializer or establish process-wide initialization across tasks. This ballot extends that contract rather than assuming the extension is already law. Its source question is $JET_STATE_ROOT/scratch/CorelibCompiler/HANDOFF.md:57-72. Owner directive #19 in $JET_STATE_ROOT/OWNER-DIRECTIVES.md:69-73 requires complete Rust removal, including provider leaves. Card #4717 records that directive.\n\nRead first using Tower decision show: D-PERSIST-DEVSTATE1=A, D-SHAREDGUARD1=A, D-HOTSWAP1=A, D-MARK-REG1=A, then D-CALLSITE-MARK1 for the field structure. Three are imported records; their source spans need reconciliation with the current spec. Docs/spec/syntax-decisions.md:7554-7567 states the writable #Persist rule; :5913-5914 states compatible swaps and layout restarts.\n\nThe old D-PERSIST1 paragraph at :2891-2895 is not authority for silently reinitializing a changed live type. The later D-LIVE-PERSIST1=A rule at :8735-8740 permits declared migration for a published schema, otherwise an announced restart. This ballot preserves that later exception rather than replacing it.\n\nImportant correction to the handoff: D-CONC-SHARE1=A, read from Tower, deletes Shared.read/edit closures and constructs cells with shared expr. Docs/spec/syntax-decisions.md:2445-2453 confirms statement locking. D-CONC-STM1=A at :2645-2649 keeps one-run ordered transaction commit. A and B therefore use shared Storage{items: [String: String]{}} and ordinary protected field access. They do not revive Shared<T>{...}, Shared.new, or edit lambdas. D-SHAREDGUARD1's expert guards and Condition survive that amendment. D-MARK-REG1 requires a registry row for B; A adds no marker.\n\nCurrent source evidence, not a fresh compiler probe: crates/jet-sema/src/Sema/Registration/Items.rs:1591-1608 reports E0622, 'a module binding's value must be a literal', for unsupported mutable/#Persist globals. Its note limits their initializers to scalar literals. The handoff additionally reports separate take/set locking for scalar persist storage, including a possible uninitialized read. This ballot does not bless that path for concurrent table updates or claim to repair every scalar operation.\n\nNew shared globals keep the handle present and update its protected contents without a take/set gap. Core/web/storage/local.jet and session.jet still forward storage calls, while storage.jet:15-25 defines namespaces. These are moving implementation surfaces, not evidence of completed Jet-owned storage.\n\nSame workload in every option: two tasks independently set keys a and b in the native local namespace, then read their own keys. After both join, the expected output is dark light. Distinct keys make that output independent of task order. A separate acceptance case uses concurrent read-modify-write and a two-key invariant; the basic example alone does not prove either property. All proposed examples are future contracts, not executed results.\n\nWorld isolation is shared work, not a fourth storage-lifetime option. Ratified D-TEST-WORLD1=A supplies isolated effect providers and task context, and requires parallel worlds to remain independent. A global table cannot become isolated merely by taking a lock. Under all options, Core's controlled storage provider supplies a fresh table per isolated world; descendants inherit it, and the scope accounts for them before releasing it.\n\nOutside controlled worlds, storage uses the process default. A and B can also use an explicitly passed local Shared cell. C needs separate host namespace identities per world, with cleanup at world exit. No process-wide 'clear before each test' workaround is allowed.\n\nResearch checked on 2026-10-06. Rust's official OnceLock documentation guarantees one successful initialization under contention, identifies reentrant initialization as an error, and says initializer panic leaves the cell uninitialized. Its Mutex documentation requires guarded access and warns that poisoning is advisory, not a soundness guarantee. Go's official maps article says maps are not safe for concurrent reads and writes; sync.Mutex's source documents lock/unlock ordering and forbids copying a used mutex.\n\nSwift's official book describes one-task actor access and warns that interruption at await can expose inconsistent multi-step state. Its Properties chapter says global constants and variables initialize lazily. Zig's language reference says namespace variables have global lifetime and comptime initialization; lazily analyzed does not mean lazy runtime construction.\n\nRust sources: https://doc.rust-lang.org/std/sync/struct.OnceLock.html and https://doc.rust-lang.org/std/sync/struct.Mutex.html .\n\nGo sources: https://go.dev/blog/maps and https://go.dev/src/sync/mutex.go .\n\nSwift sources: https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/LanguageGuide/Concurrency.md and https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/LanguageGuide/Properties.md .\n\nZig source: https://ziglang.org/documentation/master/#Namespace-Level-Variables . These are design contracts and documented failure modes, not adoption counts or measured performance. No comparative runtime benchmark or user study was run.\n\nWhat to borrow: Rust's separation of once-only construction and protected mutation, Go's explicit synchronization of maps, Swift's protected task access, and Zig's clear lifetime. What to avoid: a map without locking, a published half-initialized cell, relying on panic poisoning for memory safety, or treating two individually safe calls as one transaction. A combines safe construction with Jet's existing Shared access and reload identity. C remains credible for a host with its own storage service, but is not permission to retain Rust.\n\nProfile: short is Tower's default for one mechanism with three options. A extends initializer admission using existing marker, binding, shared, and transaction grammar; it requests no invariant carve-out. B uses the existing marker grammar but needs new marker registration. There is no proposed parser grammar change. The full CALLSITE JSON field structure is retained where applicable, with reviewPasses null for the short profile. The assignment requested one self fresh-reader check and prohibited spawning; checkInstructions records that self-check honestly, not independent full-profile reviews.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend pinned Jet state",
+          "detail": "Admit a #Persist module binding whose initializer creates Shared<T>. Use existing shared expression syntax and an immutable handle binding. Build one cell on first access per process; simultaneous callers wait for the same initialized cell. All tasks outside controlled worlds use that cell. Change contents through existing Shared statement locking, #Transact, or expert guards, never by replacing or removing the module handle. Existing scalar #Persist declarations remain governed by their existing rules.\n\nA compatible jet dev reload retains this cell by resolved module identity plus binding name. The identity must distinguish package instances; equal leaf names in different modules do not collide. Changing initializer text alone does not reset a live cell. Changing module identity or binding name starts fresh state with an announced reset. A new process also starts fresh; this is not disk persistence. Caches whose meaning changes must invalidate entries in Jet or use explicitly scoped state.\n\nA layout change follows the ratified announced restart unless an existing published-schema migration covers it. The unannotated Storage example therefore restarts. In controlled tests, Core selects the world's separate provider table rather than reading this default table. The marker itself does not promise test isolation.",
+          "technical": "Proposed compiler law: sema admits a shared initializer for #Persist, checks T under existing Shared crossing rules, and records stable binding identity and type/layout facts. The new branch requires :: so the module handle cannot be reassigned, moved out, or transiently absent.\n\nThe initializer must be a closed, non-suspending, infallible state-construction expression: literal data and checked pure construction, no task/world capture, external effects, or access to other lazy globals. Cyclic global initialization is rejected, not allowed to hang. The example creates only an empty typed map inside Storage. Allocation remains subject to existing allocation behavior; no new retry policy is introduced.\n\nAll execution modes implement identical once-only publication. State is inaccessible until initialization finishes. Ordinary statements use the existing Shared lock/cleanup law, not scalar persist take/set. Transactions and guards remain unchanged; this ballot adds no new atomicity mechanism. A failed or cancelled ordinary update releases locks under existing Shared rules; this ballot does not promise rollback outside #Transact.\n\nReload never runs the initializer again for a retained cell. Layout/migration checks complete at the existing reload boundary before new code uses old storage. The process default and each test-world provider are implemented in Jet. Vetted #Unsafe FFI/syscalls may supply host synchronization, but no Rust implementation is retained.",
+          "code": "// Proposed Core native local-storage implementation.\nstruct Storage { items: [String: String] }\n#Persist STORE :: shared Storage{items: [String: String]{}}\nfn set(key: String, value: String) { STORE.items[key] = value.copy() }\nfn get(key: String) -> String? { STORE.items.get(key) }\nfn run() {\n    a :: task {\n        set(\"a\", \"dark\")\n        get(\"a\") ?? \"missing\"\n    }\n    b :: task {\n        set(\"b\", \"light\")\n        get(\"b\") ?? \"missing\"\n    }\n    av :: a.join() ?? panic(\"task a failed\")\n    bv :: b.join() ?? panic(\"task b failed\")\n    print(\"{av} {bv}\")\n}\n// Expected: dark light. A compatible reload keeps both entries.\n// Controlled-world dispatch surrounds these internal default-state functions."
+        },
+        {
+          "key": "B",
+          "name": "Separate global Jet state",
+          "detail": "Add #Global for lazily built Shared<T> state with the same immutable handle, initialization checks, statement locking, transactions, and guard access as A. Its lifetime is one process outside development reload. Unlike #Persist, it discards contents when its declaring module reloads, even if the type stays the same. It does not silently change #Persist's purpose. Experts can choose reload-pinned #Persist or reset-on-reload #Global.\n\nWhen the module reloads, the existing safe reload boundary invalidates the default contents. The next access initializes fresh contents once. Previously copied Shared handles must see the same reset, not keep an orphaned old table. Reset is ordered with protected accesses and reported to the developer. Layout changes still restart under the ratified rule and migration exception. Controlled-world tables remain separate, as in A. No global resetting substitutes for per-world isolation.",
+          "technical": "New mechanism: add the #Global registry row required by D-MARK-REG1, scoped to immutable module bindings with Shared<T> initializers. It does not allow bare mutable module bindings or reassignable global handles. This explicitly extends the module mutation contract for protected #Global contents; it does not grant arbitrary module mutation. Ordinary marker grammar is reused.\n\nThe implementation needs reset-on-reload semantics for one cell identity, including outstanding handle aliases. Reset occurs under existing safe reload and Shared synchronization; no caller sees half-reset contents. Construction restrictions, package-qualified identity, cleanup, execution-mode parity, and Jet-only ownership match A. There is no reset caused by a reload of an unrelated module.",
+          "code": "// Proposed Core native local-storage implementation.\nstruct Storage { items: [String: String] }\n#Global STORE :: shared Storage{items: [String: String]{}}\nfn set(key: String, value: String) { STORE.items[key] = value.copy() }\nfn get(key: String) -> String? { STORE.items.get(key) }\nfn run() {\n    a :: task {\n        set(\"a\", \"dark\")\n        get(\"a\") ?? \"missing\"\n    }\n    b :: task {\n        set(\"b\", \"light\")\n        get(\"b\") ?? \"missing\"\n    }\n    av :: a.join() ?? panic(\"task a failed\")\n    bv :: b.join() ?? panic(\"task b failed\")\n    print(\"{av} {bv}\")\n}\n// Expected: dark light. Reloading this module empties its table.\n// Controlled-world dispatch surrounds these internal default-state functions."
+        },
+        {
+          "key": "C",
+          "name": "Use a host keyed store",
+          "detail": "Do not extend module storage. Core uses a generic host keyed-store family for get, set, remove, and keys. The namespace separates local from session and each controlled world from the process default. Each individual leaf call is synchronized by the host. Storage values are text or bytes, not arbitrary Jet types. Jet owns namespace selection and higher-level policy; the host owns the table and its lock.\n\nThis can fit a browser or embedding host that already provides storage. On native, it is acceptable only through an actual non-Rust host service reached by Jet FFI/syscalls. Keeping Rust runtime leaves, even without policy, violates the standing owner directive. There is no invented fallback to a Rust map. If a native host lacks this service, C owes a real non-Rust provider before native support is complete.\n\nA compatible reload keeps the process namespace; process restart resets this in-memory workload. Core/world namespaces are not tied to a reloadable Jet record layout. Layout changes elsewhere still follow the ordinary restart law. Separate get/set calls cannot express an atomic read-modify-write or two-key transaction. Adding a host transaction API would be another mechanism outside C, not an assumed fix.",
+          "technical": "Proposed private Core leaf signatures: __state_get(ns: String, key: String) -> String?; __state_set(ns: String, key: String, value: String); __state_remove(ns: String, key: String); __state_keys(ns: String) -> [String]. These are contracts, not existing Jet entry points. The shown namespace is the process default.\n\nControlled-world dispatch selects a distinct host namespace using existing world context, and tears it down when the world ends. Host calls must preserve current storage missing-key and error contracts on each supported target. These four signatures do not add cross-call locking, compare-and-set, arbitrary typed tables, or #Transact participation. No retained Rust is authorized.",
+          "code": "// Proposed private Jet wrappers over a non-Rust host store.\nfn set(key: String, value: String) { __state_set(\"native.local\", key, value) }\nfn get(key: String) -> String? { __state_get(\"native.local\", key) }\nfn run() {\n    a :: task {\n        set(\"a\", \"dark\")\n        get(\"a\") ?? \"missing\"\n    }\n    b :: task {\n        set(\"b\", \"light\")\n        get(\"b\") ?? \"missing\"\n    }\n    av :: a.join() ?? panic(\"task a failed\")\n    bv :: b.join() ?? panic(\"task b failed\")\n    print(\"{av} {bv}\")\n}\n// Expected: dark light. Compatible reload keeps the host namespace.\n// Controlled worlds use separate namespaces, not native.local."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A static OnceLock initializes one Mutex-protected map lazily; the mutex guard scopes updates. An immutable static handle can still protect mutable contents. Returned text is cloned before the guard ends. Initialization recursion and advisory poisoning need care. Rust is a comparison only, not an allowed retained implementation.",
+          "code": "static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();\nlet cell = STORE.get_or_init(|| Mutex::new(HashMap::new()));\ncell.lock().unwrap().insert(\"a\".into(), \"dark\".into());\nlet value = cell.lock().unwrap().get(\"a\").cloned();\n// Imports and two-thread workload appear in inWild."
+        },
+        {
+          "lang": "Go",
+          "note": "Package variables have process lifetime. A package map needs sync.Mutex or another synchronization design for concurrent access. The package initializer runs before use; sync.Once can defer construction. Locking two separate calls does not make their combination atomic. Both tasks below may safely use these helpers.",
+          "code": "var mu sync.Mutex\nvar store = map[string]string{}\nfunc set(k, v string) { mu.Lock(); defer mu.Unlock(); store[k] = v }\nfunc get(k string) string { mu.Lock(); defer mu.Unlock(); return store[k] }\n// go func() { set(\"a\", \"dark\"); get(\"a\") }()\n// go func() { set(\"b\", \"light\"); get(\"b\") }()"
+        },
+        {
+          "lang": "Swift",
+          "note": "A global let can hold an actor whose contents change while the global name stays fixed. Actor methods serialize access; callers await them. A let holding an ordinary mutable class is not enough. Two calls remain two operations, and suspension inside a multi-step actor method can admit other work.",
+          "code": "actor Storage {\n    var items: [String: String] = [:]\n    func set(_ key: String, _ value: String) { items[key] = value }\n    func get(_ key: String) -> String? { items[key] }\n}\nlet store = Storage()\n// Task { await store.set(\"a\", \"dark\"); return await store.get(\"a\") }\n// Task { await store.set(\"b\", \"light\"); return await store.get(\"b\") }"
+        },
+        {
+          "lang": "Zig",
+          "note": "Namespace variables have global lifetime and comptime initializers. Lazy analysis is not lazy runtime initialization. A shared mutable map needs explicit synchronization and an allocator chosen by the program. This declaration fragment illustrates lifetime only; it is not a concurrent map implementation.",
+          "code": "const std = @import(\"std\");\nvar store: std.StringHashMapUnmanaged([]const u8) = .empty;\n// set/get must protect store, own key/value bytes, and use an allocator.\n// Global lifetime alone does not make either task's accesses safe."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives Core typed, protected state in Jet using existing shared access and pinned identity. It avoids another marker and a host-owned table while preserving safe reload and isolated-world contracts.",
+        "gains": [
+          "Core owns typed state and update policy entirely in Jet.",
+          "One initializer and one stable cell serve every task in the process default.",
+          "Existing statement locks, transactions, guards, and reload identity remain the access rules."
+        ],
+        "losses": [
+          {
+            "loss": "Compatible reloads keep old contents even when initializer text changes.",
+            "mitigation": "Restart development to rerun initialization; caches invalidate versioned entries in Jet. The reload line reports retained state."
+          },
+          {
+            "loss": "The #Persist name must teach process lifetime as well as development retention.",
+            "mitigation": "Document first-access construction, reload retention, and fresh state after process restart together beside the declaration."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B distinguishes reset-on-reload state clearly, but adds a second global mechanism and discards storage values on ordinary module edits."
+          },
+          {
+            "key": "C",
+            "reason": "C suits existing host storage but cannot provide typed Jet tables or atomic updates across calls. Native support still needs a non-Rust host provider."
+          }
+        ],
+        "tradeoff": "Keep state deliberately through compatible reloads; restart to rerun its initializer and use scoped state when retention is unwanted."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Evidence labels: decision records, source admission checks, and official comparison documents were read. On 2026-10-07 BallotQs1 probed the syntax with the installed jet: A's declaration, with the fixes in the detail, reports only E0622, and the shared-cell examples parse. Predicted outputs of the proposed programs were not run, because the declaration is not yet legal. The ballot validator is the only executable verification requested for this drafting assignment; its receipt is reported separately. No Tower writes, implementation, commits, compiler builds, or runtime probes are authorized.\n\nSelf fresh-reader exercise requested by the assignment, performed by BallotState using the complete draft and the rli5 skill. This is an author self-check, not an independent fresh-agent beginner or adversarial receipt. The short profile needs no reviewPasses.\n\nExplain: the vote chooses who owns a table used by every task and what a code reload does to it. A and B put the table in Jet; C puts it in a non-Rust host. A keeps contents through compatible reloads, B resets them, C retains its host namespace.\n\nPredict: all three two-task examples produce dark light after the joins because each task writes a different key before reading it. Rerunning the initializer text during a compatible reload is forbidden for A, required on next access for B's reloaded module, and irrelevant to C's host table. A fresh process starts empty in this in-memory workload.\n\nModify: replace dark with blue in task a, leaving task b unchanged. The expected result becomes blue light in every option. Removing task a's set makes its get return missing only when its key was not already present; A or C can retain that key across reload. This distinguishes a fresh run from a retained session.\n\nDerive: the lesson defines process and tasks; the explainer defines shared locking and immutable handles. Since two tasks reach one protected default table, they share contents but not an unprotected mutable reference. Since the world paragraph selects a separate provider, test isolation follows from that provider choice, not from #Persist. Since each statement is one step, two updates need #Transact for one commit.\n\nSelf-check friction table, with task failures and repairs:\n| Location | Failed derivation | Severity | Repair |\n| Initializer | :: seemed to forbid mutation. | Main | Distinguish handle from contents. |\n| Reload | Persist seemed disk-backed. | Main | Define process restart. |\n| Tests | Lock seemed to isolate worlds. | Main | Define provider selection. |\n| Output | Different keys explain output. | keep | Retain same workload. |\n| Layout | Restart seemed unconditional. | Edge | Preserve published-schema migration. |\n| Symbols | None and join were unexplained. | Main | Add definitions. |\n\nThese are simulated beginner reactions, not user-study observations. The failed chains became derivable after repair. No external reader identity or model provenance is claimed.\n\nOwner acceptance after ratification, not proof already exercised:\n\n1. A's declaration passes sema in every applicable execution mode. An equivalent unmarked mutable module table remains rejected. Reassignment or moving the global Shared handle is rejected.\n\n2. Simultaneous first access constructs exactly one cell with no partially published value. Initializers with global cycles, suspension, world capture, or foreign effects are rejected at sema.\n\n3. The same two-task workload prints dark light on fresh runs. A stress case performs a counter read-modify-write in one protected statement and loses no updates. No reader observes a missing handle during another task's edit.\n\n4. A two-key invariant changed under #Transact is never observed halfway through. Separate statements are demonstrated as separate steps, with no claim of automatic grouping. Existing expert guards release on cancellation and panic.\n\n5. A compatible body-only reload keeps values. An initializer-only edit keeps old values and the reload report says so. Renaming the binding/module reports a fresh identity. Process restart initializes empty state again.\n\n6. Changing unannotated Storage's layout announces a restart before incompatible access. A published-schema case follows an existing covering migration; without one it restarts. No silent decode fallback is added.\n\n7. Two simultaneous controlled worlds use separate storage tables, including child tasks and local/session namespace separation. Neither touches the process default, and world exit accounts for descendants before cleanup.\n\n8. Browser origin/tab scope and missing-key behavior stay unchanged. Native in-memory storage is not represented as durable browser storage.\n\n9. The admitted implementation and its lock/once state are Jet-owned with no Rust dependencies. Host primitives use only vetted Jet FFI/syscalls. Update the existing spec, marker metadata if B wins, diagnostics, examples, and both compiler paths after the owner's vote.",
+      "surface": {
+        "gist": "Where should Core keep tables shared by every task?",
+        "lesson": "Tasks share one running program. Shared protects updates with locks. #Persist keeps state through code reloads. Jet rejects shared table initializers today. A extends it; B resets on reload; C uses a non-Rust host. Tests need their own tables under every option.",
+        "trio": {
+          "current": {
+            "note": "Jet rejects the shared initializer before either task can use this table.",
+            "code": "struct Storage { items: [String: String] }\n#Persist STORE :: shared Storage{items: [String: String]{}}\n// E0622: a module binding's value must be a literal\n// Two-task storage therefore still needs the host workaround."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "OnceLock builds one map; Mutex locks access. The full example runs two threads.",
+            "code": "static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();\nlet cell = STORE.get_or_init(|| Mutex::new(HashMap::new()));\ncell.lock().unwrap().insert(\"a\".into(), \"dark\".into());\ncell.lock().unwrap().get(\"a\").cloned();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Extend #Persist",
+            "gist": "One lazy Jet table; compatible reloads keep its contents.",
+            "gains": [
+              "Typed state stays in Jet.",
+              "No new marker."
+            ],
+            "losses": [
+              "Initializer edits need a restart to take effect."
+            ],
+            "proposed": {
+              "code": "#Persist STORE :: shared Storage{items: [String: String]{}}\nfn set(k: String, v: String) { STORE.items[k] = v.copy() }\nfn get(k: String) -> String? { STORE.items.get(k) }\n// Both tasks share STORE; reload keeps their entries."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Add #Global",
+            "gist": "Same lazy Jet table; declaring-module reloads empty it.",
+            "gains": [
+              "Separates process state from reload retention."
+            ],
+            "losses": [
+              "Adds a marker.",
+              "Ordinary module edits discard storage contents."
+            ],
+            "proposed": {
+              "code": "#Global STORE :: shared Storage{items: [String: String]{}}\nfn set(k: String, v: String) { STORE.items[k] = v.copy() }\nfn get(k: String) -> String? { STORE.items.get(k) }\n// Both tasks share STORE; reload empties it."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Host keyed store",
+            "gist": "Jet calls a non-Rust host table using text keys.",
+            "gains": [
+              "No language storage change."
+            ],
+            "losses": [
+              "No atomic update across calls.",
+              "Text or bytes only; native needs a non-Rust provider."
+            ],
+            "proposed": {
+              "code": "fn set(k: String, v: String) { __state_set(\"native.local\", k, v) }\nfn get(k: String) -> String? { __state_get(\"native.local\", k) }\n// Both tasks share the host namespace; reload keeps it."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Core owns its tables in Jet, using existing locks and reload identity without another marker.",
+          "gains": [
+            "Typed, protected state.",
+            "One global-state mechanism."
+          ],
+          "losses": [
+            {
+              "loss": "Reload keeps old initializer results.",
+              "mitigation": "Restart to rerun initialization; invalidate changed cache entries in Jet."
+            },
+            {
+              "loss": "#Persist also means process lifetime.",
+              "mitigation": "Teach first access, reload retention, and process restart together."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Another marker; routine module edits erase storage."
+            },
+            {
+              "key": "C",
+              "reason": "Host-owned tables cannot support typed, atomic Jet updates across calls."
+            }
+          ],
+          "tradeoff": "Keep useful state through reloads; restart when fresh initialization is wanted."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Compatible reloads retain stale initialization or cache contents.",
+          "attempts": [
+            "Reset every global on reload, as B does; rejected for web-storage state that should survive editing code.",
+            "Version and invalidate derived cache entries in Jet; keep explicitly scoped cells for reset-on-scope state.",
+            "Use the existing development restart command to rerun initialization and retain the existing reload report."
+          ],
+          "result": "Retained only for deliberate pinned defaults, with visible retention and an existing reset path."
+        },
+        {
+          "loss": "#Persist's purpose broadens to process-global storage.",
+          "attempts": [
+            "Introduce a second marker solely to name process lifetime, as B does; this adds overlapping global-state mechanisms.",
+            "Teach process lifetime and reload retention as one explicit contract for the new shared initializer branch."
+          ],
+          "result": "Small teaching cost retained; no new spelling or hidden persistence across launches."
+        },
+        {
+          "loss": "Process-global tables could contaminate parallel tests.",
+          "attempts": [
+            "Clear the process table before each test; rejected because parallel tests can still interfere.",
+            "Pretend #Persist becomes test-local automatically; rejected because that changes arbitrary global identity.",
+            "Use the existing controlled-world provider boundary and a world-owned table; keep explicit state passing for libraries."
+          ],
+          "result": "Removed from A-specific losses; isolated provider selection is required shared work under every option."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T12:53:13.737Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-07",
+      "retiredAt": "2026-11-10T02:53:13.989Z"
+    },
+    {
+      "id": "D-RUST-SCOPE1",
+      "cardId": "c0rqi33c",
+      "group": "tooling",
+      "title": "Remove Rust: Jet's tools only, or every Rust file?",
+      "situation": "Jet's compiler, package manager and other tools are now written in Jet. The repository still holds 64 Rust files, but none of them is part of Jet. Most are the Rust versions of speed tests that also exist in C, Go, Zig, Python and Node. The question is whether removing Rust means no Rust inside Jet's tools, or no Rust file anywhere. We recommend the first: Jet never needs rustc, a check enforces it, and Rust stays only where Rust is what we compare against or connect to.",
+      "gist": "Does removing Rust mean no Rust in Jet's tools, or no Rust file anywhere in the repository?",
+      "lesson": "You ruled that every Rust part of Jet's tools moves to Jet, with two exceptions: the Zed editor plugin, and Rust libraries users call from Jet. That port is nearly done. What is left is Rust speed tests that compare Jet with Rust, and a Rust-interop example. Eight Rust programs that check Jet's results, and two tool calls to rustc, get deleted whatever wins.",
+      "explainer": "",
+      "story": "Mina installs Jet on a fresh laptop with no Rust installed. She runs jet check, jet run and jet test, and none of them looks for rustc. Separately, the speed board still shows how Jet's word-count program compares with the Rust, C and Go versions.",
+      "inWild": "Go: the toolchain is written in Go, yet its repository keeps C test programs for cgo, because C is what cgo connects to. Source: https://go.dev/src/cmd/cgo/internal/test/\n\nThe Computer Language Benchmarks Game keeps the same program in many languages side by side to compare them. Source: https://benchmarksgame-team.pages.debian.net/benchmarksgame/",
+      "detail": "OWNER RULINGS\n\n2026-10-06 06:20 (card #4717): everything is ported to Jet so Rust can leave the toolchain. Jet-only native must contain no Rust remnants, not even policy-free provider leaves. Host and OS access goes through Jet FFI or syscalls inside vetted #Unsafe Core internals. 2026-10-22: keep user-facing extern rust FFI; remove --target=sandbox via rustc and the jet self doctor rustc checks.\n\nD-ZED-EXT1 (2026-10-11) keeps the Zed extension in Rust. D-RUST-EMIT1's sandbox part is superseded by the 10-22 ruling. D-NATIVE-ANALYSIS-GAPS1 requires every missing native check to be ported before the Rust compiler is deleted.\n\nThe earlier draft asked 'port everything, or keep policy-free Rust leaves?'. The owner already answered that on 2026-10-06, so that option was a straw man. This revision asks the one question the rulings leave open.\n\nWHAT IS LEFT TODAY (git ls-files '*.rs' on dev, 2026-11-05)\n\n64 files, none in Compiler/, Core/ or Jetpack/. A keeps 56 and deletes 8.\n\nKept as speed peers, each beside a Jet version of the same program. Tools/gauntlet 31: 25 entries, 5 optimization fixtures, and the memory-safety fuzz axis (also in c, zig and jet). Tools/perf 19: function-boundary 14, build-time hello, runtime-library allocator, two domain-foundations baselines, and serde_peer. tests/compiled_workloads/adapters/peer 4.\n\nKept by ruling: Tools/editors/zed/wasm-src/src/lib.rs (D-ZED-EXT1) and Examples/ffi/projections/rust/host.rs (the extern rust example).\n\nDELETED WHATEVER WINS\n\nThe 8 Tools/perf/selfhost/workloads/*/oracle.rs files use Rust as the oracle for Jet results, which the owner forbids. They are deleted. Their manifest.json and evidence.json rows switch to committed expected output that the Jet run must match.\n\nCompiler/JetDebug/Source/Inferior.jet:615-624 runs rustc --print sysroot to load Rust pretty printers into lldb; Jet programs do not need them.\n\nCompiler/JetCli/Source/Cli/ReceiptIdentity.jet:120 hashes the rustc and cargo binaries into every receipt identity. Both calls are Rust-era leftovers that the existing directive already covers.\n\nKEPT USER-FACING RUST INTEROP\n\nCompiler/JetCli/Source/Cli/Doctor.jet:207-212 reports whether cargo is installed, only as a note for extern rust imports. Jetpack/Integrations/Source/Foreign/RustBridge builds the bridge crate for a user's extern rust import.\n\nCompiler/JetBuildSession/Source/Declarations.jet:3-13 implements the build-script call b.legacy(kind, ...). It wraps an outside build tool (cmake, make, gradle, npm or cargo) as one declared action in the user's own build. It is not a Jet fallback path, and Jet runs it only when a user's build calls it. Renaming the method is outside this ballot.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Rust could creep back into the tools. A adds one gate check over tracked .rs files with an exact allow list.\n\n- Tools/gauntlet/entries/*/rust/main.rs\n\n- Tools/gauntlet/entries/nbody/rust-expert/main.rs\n\n- Tools/gauntlet/axes/memory-safety-fuzz/rust/main.rs\n\n- Tools/gauntlet/optimization/fixtures/*/peer-rust.rs\n\n- Tools/perf/function-boundary/*/main.rs\n\n- Tools/perf/build-time/hello.rs\n\n- Tools/perf/runtime-library/allocator.rs\n\n- Tools/perf/domain-foundations/prim-numerics-perf/rust_bench.rs\n\n- Tools/perf/domain-foundations/prim-text/bench_rust.rs\n\n- Tools/perf/enum_codec/serde_peer/src/main.rs\n\n- tests/compiled_workloads/adapters/peer/*.rs\n\n- tests/compiled_workloads/adapters/peer/candidates/*.rs\n\n- Tools/editors/zed/wasm-src/src/lib.rs\n\n- Examples/ffi/projections/rust/host.rs\n\nAny other .rs file fails the gate. Card #4717 c3's process-tree proof shows jet check, run, test and build never start rustc or cargo unless the user's project uses extern rust or b.legacy(\"cargo\").\n\n2. The speed board needs rustc. Only the benchmark machine needs it, and the flake already provides the comparison toolchains (matrix.json: \"zig+go rails added to flake\"). A user machine never needs it.\n\nWHY NOT B OR C\n\nB deletes the Rust speed peers and the extern rust example. The strict performance gate then loses its strongest systems baseline, and the kept extern rust feature loses its only example. C moves them to another repository. Comparisons then drift from the Jet code they measure, and one commit can no longer update both.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No Rust in Jet's tools; Rust stays only as comparison and interop programs",
+          "detail": "Jet's tools never build, run or need rustc, except for a user's own extern rust bridge or cargo build step. Rust stays only as speed-test peers beside a Jet version, the Rust interop example and the Zed plugin. The Rust reference programs used to check Jet results are deleted. A gate fails on any Rust file outside an exact list.",
+          "technical": "Delete the 8 selfhost oracle.rs files, the debugger's rustc sysroot lookup and the receipt's rustc and cargo hashes. Add a gate over tracked .rs files with the exact allow list in detail. Card #4717 c3's process-tree proof covers the shipped commands.",
+          "code": "$ jet check app      # never starts rustc\n$ jet test app       # never starts rustc\n\n# gate: a Rust file not on the exact list\nTools/perf/selfhost/workloads/scan-parse/oracle.rs\nerror: Rust file is not on the allowed list"
+        },
+        {
+          "key": "B",
+          "name": "No Rust file anywhere, except the Zed plugin",
+          "detail": "Delete every Rust file but the Zed plugin. Speed tests compare Jet with C, Go and Zig only. The extern rust feature stays, but the repository has no Rust example of it.",
+          "technical": "Remove 63 files across Tools/gauntlet, Tools/perf, tests/compiled_workloads and Examples/ffi. Drop the rust rail from the gauntlet matrix. The same tool deletions as A apply.",
+          "code": "$ jet check app      # never starts rustc\n\n# speed board for wordfreq\njet  c  go  zig      # no rust column"
+        },
+        {
+          "key": "C",
+          "name": "Move Rust comparison programs to another repository",
+          "detail": "The Jet repository holds no Rust except the Zed plugin. The Rust speed peers and the interop example move to a separate repository that the speed board checks out.",
+          "technical": "Same deletions as A, including the 8 oracles. The 55 Rust peers and the interop example move to a peer repository that the gauntlet harness fetches at a pinned commit. Changing a workload then needs a commit in both repositories.",
+          "code": "$ jet check app      # never starts rustc\n\n# speed board\n$ git clone jet-peers   # Rust versions live here now"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's toolchain is written in Go, but its repository keeps C test programs for cgo, because C is what cgo connects to. Source: https://go.dev/src/cmd/cgo/internal/test/",
+          "code": "src/cmd/cgo/internal/test/*.c   # C kept as the interop peer"
+        },
+        {
+          "lang": "Benchmarks Game",
+          "note": "The same program is kept in many languages side by side so they can be compared. Source: https://benchmarksgame-team.pages.debian.net/benchmarksgame/",
+          "code": "nbody.rust  nbody.c  nbody.go  nbody.zig"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A finishes your ruling: Jet itself never needs rustc. It keeps Rust only where Rust is the thing being compared or connected to, and a gate stops Rust from creeping back.",
+        "gains": [
+          "No rustc on any user machine.",
+          "The speed board still compares Jet with Rust.",
+          "Extern rust keeps a working example."
+        ],
+        "losses": [
+          {
+            "loss": "Rust files still exist in the repository.",
+            "mitigation": "A gate fails on any Rust file not on an exact list of peer programs, so none can enter Jet's tools."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B drops the Rust speed comparison and the only extern rust example, but makes Jet no less Rust-free."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the comparison, but its programs drift from the Jet code they measure."
+          }
+        ],
+        "tradeoff": "A keeps Rust only as outside programs behind a gate. B deletes them. C moves them away."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Does removing Rust mean no Rust in Jet's tools, or no Rust file anywhere?",
+        "lesson": "You ruled that Jet's tools move from Rust to Jet, keeping only the Zed plugin and Rust libraries users call from Jet. That port is nearly done. What is left is Rust used as an outside program: speed tests that compare Jet with Rust, and interop examples.",
+        "trio": {
+          "current": {
+            "note": "The 64 Rust files left today. None is in the compiler, Core or the package manager.",
+            "code": "31  Tools/gauntlet     # speed peers, also in C, Go, Zig\n19  Tools/perf         # speed peers\n 8  Tools/perf/selfhost # Rust checks Jet results: deleted\n 4  tests/.../peer     # speed peers\n 1  Tools/editors/zed  # the Zed plugin\n 1  Examples/ffi       # extern rust example"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go's tools are written in Go, but it keeps C test programs for cgo. Source: go.dev/src/cmd/cgo/internal/test",
+            "code": "src/cmd/cgo/internal/test/*.c   # C kept as the interop peer"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "No Rust in Jet's tools",
+            "gist": "Keep Rust speed peers and interop behind a gate; delete Rust checkers.",
+            "gains": [
+              "The speed board still compares with Rust.",
+              "Extern rust keeps its example."
+            ],
+            "losses": [
+              "Rust files still exist in the repository."
+            ],
+            "proposed": {
+              "code": "$ jet check app   # never starts rustc\n\n# gate, a Rust file not on the list:\n.../scan-parse/oracle.rs\nerror: Rust file is not on the allowed list"
+            }
+          },
+          {
+            "key": "B",
+            "name": "No Rust file anywhere",
+            "gist": "Delete every Rust file except the Zed plugin.",
+            "gains": [
+              "The repository holds no Rust at all."
+            ],
+            "losses": [
+              "The speed board loses its Rust column.",
+              "Extern rust loses its only example."
+            ],
+            "proposed": {
+              "code": "$ jet check app   # never starts rustc\n\n# wordfreq speed board\njet  c  go  zig   # no rust column"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Move Rust programs elsewhere",
+            "gist": "Keep the Rust comparisons in a separate repository.",
+            "gains": [
+              "Comparison kept; this repository has no Rust."
+            ],
+            "losses": [
+              "Comparisons drift from the Jet code they measure."
+            ],
+            "proposed": {
+              "code": "$ jet check app   # never starts rustc\n\n$ git clone jet-peers   # Rust versions live here"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A finishes your ruling: Jet never needs rustc. Rust stays only where it is what we compare against or connect to.",
+          "gains": [
+            "No rustc on any user machine.",
+            "Speed board keeps the Rust comparison."
+          ],
+          "losses": [
+            {
+              "loss": "Rust files still exist in the repository.",
+              "mitigation": "A gate fails on any Rust file not on an exact list of peer programs."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B drops the Rust comparison but makes Jet no less Rust-free."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps the comparison, but it drifts from the code it measures."
+            }
+          ],
+          "tradeoff": "A keeps Rust only as outside programs behind a gate. B deletes them. C moves them away."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-23T01:40:54.557Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-05",
+      "retiredAt": "2026-11-10T02:53:13.989Z"
+    },
+    {
+      "id": "D-CORE-COVERAGE-RATCHET1",
+      "cardId": "c0rqi33c",
+      "group": "other",
+      "title": "Reset the Core untested-function list to the honest count, by function",
+      "situation": "Every public function in the Core library should have a test that runs it and proves it works. A check in hosted CI counts the public Core functions that no test, example or doc example runs yet. It fails when that count rises above a stored ceiling. The ceiling, 37, came from a broken count; the true count is 4639 of 7395. Nothing is removed or judged useless: an untested function is work owed, a missing test. We recommend recording today's untested functions by name, so the list only shrinks as tests are written.",
+      "gist": "The untested-function ceiling came from a broken count. Reset it to the true list, or stay red?",
+      "lesson": "A public function is tested when some test, example or doc example runs it. Untested does not mean unused or unwanted: it means nothing proves the function works yet. The check stops the number of untested functions from growing. It only works if the stored starting point was counted correctly.",
+      "explainer": "",
+      "story": "Ana adds a function to the Core text module, with a test. Hosted CI still fails: the check says 4639 Core functions are untested, against a ceiling of 37. Hers is tested. The 4602 extra were always untested; the old count simply missed them.",
+      "inWild": "Detekt (Kotlin): detekt --create-baseline records existing findings, so only new findings fail the build, and the baseline shrinks as findings are fixed. Source: https://detekt.dev/docs/introduction/baseline/",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe last draft said uncovered and talked about functions gaining a use. That read as if a function nobody in this repo calls were unwanted. It never meant that, and nothing in any option removes a Core function. The check asks one thing: does a test prove this function works? The ballot now says untested.\n\nTODAY\n\nTools/agent/core-coverage-census.mjs lists each public Core function, methods included. It marks one tested when a test, example or doc example in the repo calls it (:2-6). It reads calls in source; it does not run anything.\n\n--check fails when the untested count rises above the number in Tools/agent/core-coverage-ratchet.json. --write can lower that number but never raise it (:9-10, :355-359). Hosted CI runs --check (.github/workflows/ci.yml:27-30).\n\nThe stored number is 37. It was written in a checkpoint commit on 2026-10-02 (7bc7cc9d19), not by a decision.\n\nCommit 73e720ed17 fixed the census. It used to crash on repeated names, and its module names never matched any call, so it missed most functions. The honest run on 2026-11-05 finds 7395 public functions, 4639 of them untested, over 128 modules. For example, core.files has 92 of 226 untested, core.text 68 of 108 and core.time 129 of 343.\n\nSHAPE UNDER A\n\nThe stored file lists each module's untested functions by name and signature, instead of one number. The reset writes today's list once, in a commit that cites this decision.\n\n--check fails when an untested function is not on the list. So a new function must arrive with a test, and a tested function that loses its last test fails too. --write only removes names, as tests are written. The message names the module and function and says to add a test, example or doc example that runs it.\n\nWriting the missing tests becomes tracked work on this ballot's card, module by module. Each test removes its function from the list.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. The stored size jumps from 37 to 4639. Under A no count is stored at all. The file names each untested function, so it guards each one, which no count can.\n\n2. A count would let new untested functions in whenever old ones gain tests. The name list stops that.\n\n3. A reset by hand could become a habit. --write can only remove names. Adding one needs a hand edit citing an owner decision, and the check's message says so.\n\n4. Moving or renaming. A moved untested function keeps its entry, matched by name and signature, so a move needs no test it did not already need.\n\nNo loss remains.\n\nEDGE CASES\n\n- Deleting a module removes its list on the next --write. An entry for a function that no longer exists is ignored by --check.\n- If a later census fix finds more untested functions, it needs the same owner reset; --write cannot add them.\n\nWHY NOT B OR C\n\nB keeps hosted CI red until 4602 functions gain tests, which takes weeks. A check that is always red hides real regressions, because nobody reads it. C deletes the check and tracks the gap on a card. Then nothing stops new untested Core functions.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reset to today's untested list",
+          "detail": "You reset the check once to today's true list of untested functions, by module and name. After that the list can only shrink. A new function needs a test, example or doc example that runs it, and a tested function stays tested. No function is removed.",
+          "technical": "core-coverage-ratchet.json version 2 lists untested functions per module by name and signature. --check fails on any untested function not listed; a moved function keeps its entry. --write removes names and never adds one.",
+          "code": "// Tools/agent/core-coverage-ratchet.json after the reset\n{\n  \"version\": 2,\n  \"untested\": {\n    \"core.text\": [\"<function>(<signature>)\", ...],\n    \"core.time\": [\"<function>(<signature>)\", ...]\n  }\n}\n\n$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> has no test and is not listed\n  fix: add a test, example or doc example that runs it"
+        },
+        {
+          "key": "B",
+          "name": "Stay red until 37",
+          "detail": "The ceiling stays at 37. Hosted CI fails on every push until 4602 more functions have tests.",
+          "technical": "No change. --check fails with 4639 > 37 on every push.",
+          "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore untested functions: 4639 > ceiling 37"
+        },
+        {
+          "key": "C",
+          "name": "Drop the check",
+          "detail": "Remove the check from hosted CI and track untested Core functions on a card instead.",
+          "technical": "Delete the CI step and the ceiling file. The census stays as a report.",
+          "code": "$ node Tools/agent/core-coverage-census.mjs\ntotal: 7395 public functions; 4639 untested"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Detekt",
+          "note": "A baseline records existing findings; only new ones fail, and fixing one shrinks it. Source: https://detekt.dev/docs/introduction/baseline/",
+          "code": "detekt --create-baseline --baseline detekt-baseline.xml"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "No work can meet a ceiling taken from a broken count. One reset to the true list, by name, keeps the check honest, keeps every function, and makes sure each new one arrives with a test.",
+        "gains": [
+          "Hosted CI goes green and stays meaningful.",
+          "Every new Core function arrives with a test.",
+          "A tested function can never quietly lose its last test."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps CI red for weeks, and an always-red check hides real regressions."
+          },
+          {
+            "key": "C",
+            "reason": "C loses the guard that stops new untested Core functions."
+          }
+        ],
+        "tradeoff": "A records today's untested functions by name and lets the list only shrink. B waits red. C stops checking."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "The untested-function ceiling came from a broken count. Reset it to the true list, or stay red?",
+        "lesson": "A Core function is tested when some test, example or doc example runs it. Untested does not mean unwanted; it means nothing proves it works yet. The check stops untested functions from growing. The old starting number was miscounted.",
+        "trio": {
+          "current": {
+            "note": "Today every push fails against a ceiling taken from the broken count.",
+            "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore untested functions: 4639 > ceiling 37"
+          },
+          "wild": {
+            "lang": "Detekt",
+            "note": "A baseline records existing findings; only new ones fail. Source: detekt.dev",
+            "code": "detekt --create-baseline --baseline detekt-baseline.xml"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Reset to today's untested list",
+            "gist": "Reset once to today's untested functions by name; the list only shrinks.",
+            "gains": [
+              "CI goes green and stays meaningful.",
+              "New functions arrive with tests; no function is removed."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> has no test and is not listed\n  fix: add a test, example or doc example that runs it"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Stay red until 37",
+            "gist": "Keep 37; CI fails until 4602 more functions have tests.",
+            "gains": [
+              "No reset."
+            ],
+            "losses": [
+              "CI red for weeks."
+            ],
+            "proposed": {
+              "code": "Core untested functions: 4639 > ceiling 37"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Drop the check",
+            "gist": "Remove it from CI; track untested functions on a card.",
+            "gains": [
+              "No red CI."
+            ],
+            "losses": [
+              "Nothing stops new untested functions."
+            ],
+            "proposed": {
+              "code": "total: 7395 public functions; 4639 untested"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A ceiling from a broken count cannot be met. One reset to the true list keeps every function and makes new ones arrive tested.",
+          "gains": [
+            "CI green and meaningful.",
+            "New functions arrive with tests."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Always-red CI hides real regressions."
+            },
+            {
+              "key": "C",
+              "reason": "Nothing stops new untested Core functions."
+            }
+          ],
+          "tradeoff": "A lists today's untested functions and only shrinks. B waits red. C stops checking."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-05T21:37:45.253Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-10T02:53:13.989Z"
+    },
+    {
+      "id": "D-MOD-NAMESPACE1",
+      "cardId": "c0jwqaa5",
+      "group": "semantics",
+      "title": "A folder module publishes an item named like the file it lives in",
+      "situation": "A folder module lists each of its files with a line such as `module wrap`, then publishes chosen items from those files. When a file and its item share a name, as `wrap` does in the language guide's own example, Jet stops with \"`wrap` is defined twice\". Both names land in the folder's one list of names. The vote decides which one the name means; we recommend the published item, while `use` lines and aliases still reach the file.",
+      "gist": "When a folder's file and the item it publishes share a name, should the published item take the name?",
+      "lesson": "A folder module is a folder of `.jet` files with a summary file, `module.jet`. The summary lists each file, as in `module wrap`, and publishes chosen items with an alias such as `wrap :: wrap.wrap`, read \"the name wrap means wrap.wrap\". Jet keeps one list of names per module, so today the file and the item collide.",
+      "explainer": "",
+      "story": "Lena splits her `text` module into a folder. The file `text/wrap.jet` holds the function `wrap` and a helper, `decorate`. Her summary file lists the file and publishes the function, exactly as the guide shows. Today Jet stops with \"`wrap` is defined twice\". Under A, `text.wrap(\"hi\")` prints `[hi]`, `decorate` stays inside the folder, and she writes nothing extra.",
+      "inWild": "// Rust: modules and functions live in separate name lists, and module paths use `::`.\n// https://doc.rust-lang.org/reference/names/namespaces.html\nmod wrap;\npub use wrap::wrap;          // text::wrap is the function\n// Python: one list; loading a submodule writes it into the same name, so the last write wins.\n// https://docs.python.org/3/reference/import.html#submodules\nfrom .wrap import wrap       # text.wrap is the function\n// Zig: the file is never given a name, so nothing collides.\npub const wrap = @import(\"wrap.zig\").wrap;",
+      "detail": "Before and after. Today the guide's example fails. Probe ns/a stops with E0105, \"`wrap` is defined twice\", at `pub use wrap.wrap`. The bodyless `module wrap` registers a module named `wrap` (Registration/Items.jet:1989). The import check then finds that name (Items.jet:3657). Dropping `module wrap` gives E0610 instead (probe ns/c), because a `use` path must start at a module the file names. Renaming works today: probe ns/b publishes `wrapped` and prints `[hi]`.\n\nWhat A says. In a folder's summary file, a bodyless `module wrap` lists a file. When the same summary also binds `wrap` from that file, the binding owns the name. The binding is an alias whose right side starts at the file, such as `wrap :: wrap.wrap` or `wrap :: wrap.make`. A `use` that takes `wrap` from the file counts too, as does today's `pub use wrap.wrap` until it is rewritten. Order never matters.\n\nWhere the file stays reachable. The right side of an alias and every `use` line start at a module; Jet already requires that (E0610). A name can never be the root of its own alias, so `wrap :: wrap.wrap` can only mean the file. Everywhere else in the summary, `wrap` is the published function.\n\nEdge case: `wrap.other` after the takeover. Inside the summary, `wrap.decorate(s)` is a new error in the module family (the next free code, E0628 today). It says `wrap` is the published function here and names the fix: `use wrap.decorate`, or `decorate :: wrap.decorate` to publish it too. Outside, `text.wrap` is the function. `text.wrap.decorate` reports that `text` does not publish `decorate`; today that path crashes the compiler (probe ns/g).\n\nEdge case: glob uses. Jet has none; `use wrap.*` is E0612. So A needs no rule like Rust's, where explicit items shadow glob imports. Edge case: a type and a function with one name. Jet's casing law (E0357) spells types `Wrap` and functions `wrap`, so they never meet (probe ns/d). Only a module and a value can share a spelling, which is exactly this ballot's case.\n\nEdge case: generic modules. A template `module cache<K>(capacity: Int) { … }` and an instance `module int_cache :: cache<Int>(64)` are written in the parent itself. So are inline `module wrap { … }` bodies. Beside a same-named function or alias they stay E0105, because the parent wrote both names (probe ns/f). Publishing from an instance works as usual: `key_of :: int_cache.key_of`.\n\nDiagnostics under A. Real duplicates keep E0105 with today's fix. Examples are `module wrap` beside `use other.wrap`, publishing both the module and its item under one name, and an inline module beside a function. The new error covers `wrap.x` in the summary after the takeover. E0610's fix names real Jet: declare `module wrap`, or bring the module into scope with `use wrap`. That text lands with this card (C13) regardless of the vote.\n\nFit with ratified law. The re-export vote chose aliases, `wrap :: wrap.wrap`, over `pub use`; its notes say this collision must be settled under every option. The folder rule stays: a folder exposes a child only through an explicit re-export. `priv module wrap` works the same way. `use` inside module bodies is unaffected. A changes no syntax and adds no keyword.\n\nResearch: Rust. Rust keeps a type list, holding modules, types and traits, apart from a value list of functions and constants. So `mod wrap; pub use wrap::wrap;` compiles. It works because module paths use `::` and fields use `.`; the two never compete. Rust also needs a precedence rule: explicit items shadow glob imports (Rust Reference, Names, Namespaces and Use declarations).\n\nResearch: Python. A package has one list of names. When a submodule loads, the import system writes it into the parent under its own name (Python reference, import system, Submodules). `from .wrap import wrap` then overwrites it with the function. That is A's outcome, decided at run time by the last write. A fixes the outcome by rule, so import order never changes it. The `datetime.datetime` trap shows the harm when both meanings stay visible; A shows only one.\n\nResearch: Go and Zig. Go forbids one identifier in both a file's imports and its package (Go spec, Declarations and scope), so one name has one meaning. Zig never names the file: `pub const wrap = @import(\"wrap.zig\").wrap;`. Both keep one list and avoid the clash by not binding the file name in code. A reaches the same reading: in code, `wrap` means one thing.\n\nResearch: Swift, OCaml and TypeScript. Swift looks up module and type names together; a type named like its module hides the module, and proposal SE-0491 adds `Module::name` to escape it. That is the cost of two meanings for one dotted name. OCaml separates modules from values by capital letters, as Jet's casing separates types from values. TypeScript merges a function and a namespace of one name (Handbook, Declaration Merging); we rejected that because one name would mean two things.\n\nOption B in Jet. B gives each module two name lists. A call reads the value list; a name before a dot reads the module list first. Jet writes `.` for both module members and fields, so a module-level value with fields beside a same-named module would silently resolve to the module. B then needs an extra error, and every tool, hover, rename and the API record carry two lists.\n\nOption C in Jet. C treats a folder like a package: its files share one list of names, as package files already do, with E0624 for two files declaring one name. No `module wrap` line and no alias are needed. But every helper becomes public unless wrapped in a `priv module` block, since that is the only private declaration Jet keeps. The summary file no longer decides what the folder offers, reversing the folder rule.\n\nProbes. All are in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/ns and run with the dev jet. Folder a shows E0105 today; b prints `[hi]` with a renamed alias; c shows E0610 without `module wrap`. Folder d shows `Wrap` and `wrap` side by side. Folder e prints `[HI]` from `wrap.wrap` inside the summary. Folder f shows E0105 for an inline module beside a function. Folder g crashes the compiler on `text.wrap.wrap` from outside.\n\nSize of A. A prototype of the `use` half changed three checks in Registration/Items.jet: the duplicate check, the export lookup and the scope build. It added one 20-line helper and is parked unlanded. The alias half lands with the re-export alias work. Acceptance tests are UI snapshots: the guide example prints `[hi]` on every tier, plus the new error and the E0105 cases above.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The published item takes the name",
+          "detail": "Inside the folder's summary file, `wrap` means the item published from the file `wrap`. The file is still reached where a module is expected: on the right of an alias and in `use` lines.\n\nEvery other pair of equal names stays the duplicate-name error. Code outside sees only the published function.",
+          "technical": "A bodyless child declaration `module wrap` registers a module symbol (Items.jet:1989). When the parent binds `wrap` by an alias starting at that child, or by a `use` taking `wrap` from it, that binding owns the name. The child symbol is left out of the parent's export lookup, duplicate check and scope build (Items.jet:3460, 3657, 4352).\n\nAlias right sides and `use` roots resolve among modules, as the loader already does (Loader.jet:4529). A new E06xx error covers `wrap.x` in parent code. Inline, generic and aliased module declarations keep E0105.",
+          "code": "// text/wrap.jet\nfn wrap(s: String) -> String { \"[{decorate(s)}]\" }\nfn decorate(s: String) -> String { s }\n\n// text/module.jet\nmodule wrap                // lists the file text/wrap.jet\nwrap :: wrap.wrap          // publishes its function under the file's name\n\nfn shout(s: String) -> String { wrap(s.to_upper()) }   // the function\n// wrap.decorate(s)        // error: here `wrap` is the published function\n//                         // fix: add `use wrap.decorate`, then call decorate(s)\n\n// run.jet\nmodule text\nfn run() { print(text.wrap(\"hi\")) }        // [hi]\n// text.wrap.decorate(\"hi\") from run.jet: error, `decorate` is not published"
+        },
+        {
+          "key": "B",
+          "name": "Separate name lists, as in Rust",
+          "detail": "Modules get one list of names and values get another. A call reads the value list, and a name before a dot reads the module list first.\n\nThe guide's example works, and `wrap.decorate` still reaches the file inside the folder. Jet writes `.` for both modules and fields, so a fixed lookup order decides each dotted name.",
+          "technical": "Two scope tables per module. For `x.y`, x is looked up among modules first, then among values. A module-global value with fields beside a same-named module resolves to the module unless a new ambiguity error is added. Duplicate checks, hover, rename, docs and the public API record each handle two lists. Casing (E0357) already separates types from values, so B separates only modules from values.",
+          "code": "// text/wrap.jet\nfn wrap(s: String) -> String { \"[{decorate(s)}]\" }\nfn decorate(s: String) -> String { s }\n\n// text/module.jet\nmodule wrap                // module list: the file\nwrap :: wrap.wrap          // value list: the function\n\nfn shout(s: String) -> String { wrap(s.to_upper()) }   // value list: a call\nfn quiet(s: String) -> String { wrap.decorate(s) }     // module list: a name before a dot\n\n// run.jet\nmodule text\nfn run() { print(text.wrap(\"hi\")) }        // [hi]\n// a module-level value with fields beside a module of the same name:\n// `settings.port` must pick one list by a fixed order; Rust writes `settings::port`"
+        },
+        {
+          "key": "C",
+          "name": "Folders share one name list, as in Go",
+          "detail": "A folder works like a package: every file in it adds its names to the folder, with no `module wrap` line and no alias. The file never gets a name, so nothing collides.\n\nA helper stays inside only when wrapped in a `priv module` block. The summary file no longer decides what the folder offers.",
+          "technical": "A folder module merges its direct files into one namespace, as package members already do; two files declaring one name is E0624. `module.jet` becomes optional. The folder rule that a child is exposed only through an explicit re-export is reversed. Hiding needs `priv module` blocks, the only declaration-level privacy Jet keeps. Existing folder modules would publish their helpers until wrapped.",
+          "code": "// text/wrap.jet: every file in the folder adds its names to `text`\nfn wrap(s: String) -> String { \"[{helpers.decorate(s)}]\" }\npriv module helpers {                  // the only way to keep a helper inside\n    fn decorate(s: String) -> String { s }\n}\n\n// text/module.jet: no `module wrap` line and no alias\n\n// run.jet\nmodule text\nfn run() { print(text.wrap(\"hi\")) }        // [hi]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Modules and functions live in separate name lists, and module paths use `::`, so the two never compete. Source: https://doc.rust-lang.org/reference/names/namespaces.html",
+          "code": "mod wrap;\npub use wrap::wrap;"
+        },
+        {
+          "lang": "Python",
+          "note": "One list of names: loading a submodule writes it into the parent, and a later import overwrites it, so the last write wins. Source: https://docs.python.org/3/reference/import.html#submodules",
+          "code": "# text/__init__.py\nfrom .wrap import wrap"
+        },
+        {
+          "lang": "Zig",
+          "note": "One list of names and no shadowing; the file is never bound to a name, so it cannot collide. Source: https://ziglang.org/documentation/master/#import",
+          "code": "pub const wrap = @import(\"wrap.zig\").wrap;"
+        },
+        {
+          "lang": "Swift",
+          "note": "Module and type names are looked up together, so a type named like its module hides the module; proposal SE-0491 adds `Module::name` to escape it. Source: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0491-module-selectors.md",
+          "code": "import Wrap\nlet w = Wrap.Wrap()   // `Wrap.` now means the type"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps Jet's one list of names and gives `wrap` one meaning in code. The file stays reachable where a module is expected, in `use` lines and alias right sides. Every other clash stays an error.",
+        "gains": [
+          "The guide's own example works as written.",
+          "One list of names, and a dot keeps one meaning.",
+          "Every other repeated name is still an error."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B needs a fixed lookup order to read `wrap.x`, because Jet writes `.` for both modules and fields."
+          },
+          {
+            "key": "C",
+            "reason": "C publishes every helper in a folder unless wrapped, and drops the folder's chosen list of what it offers."
+          }
+        ],
+        "tradeoff": "Inside the summary file, the file's other items need a `use` line before plain calls; the error names that line."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree. The probes are folders in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/ns; run `jet run run.jet` in each. Folder a shows E0105 today, and c shows E0610 without `module wrap`. Folder b prints `[hi]` with a renamed alias, and g shows the compiler crash for `text.wrap.wrap`.",
+      "surface": {
+        "gist": "When a folder's file and the item it publishes share a name, should the published item take the name?",
+        "lesson": "A folder module is a folder of `.jet` files with a summary file, `module.jet`. The summary lists each file, as in `module wrap`, and publishes chosen items with an alias such as `wrap :: wrap.wrap`. Jet keeps one list of names per module, so today the file and the item collide.",
+        "trio": {
+          "current": {
+            "note": "The guide's own example stops today, because the file and its function share the name `wrap`. An earlier vote turns `pub use` into the alias form.",
+            "code": "// text/module.jet\nmodule wrap            // lists the file text/wrap.jet\npub use wrap.wrap      // publishes its function `wrap`\n// error[E0105]: `wrap` is defined twice"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust keeps modules and functions in separate name lists and writes module paths with `::`, so the two never compete.",
+            "code": "// src/text/mod.rs\nmod wrap;              // module list\npub use wrap::wrap;    // value list: text::wrap is the function"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The published item takes the name",
+            "gist": "In code, `wrap` means the published function; `use` lines and aliases still start at the file.",
+            "gains": [
+              "The guide's own example works as written.",
+              "One list of names, and a dot keeps one meaning.",
+              "Every other repeated name is still an error."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// text/module.jet\nmodule wrap              // lists the file text/wrap.jet\nwrap :: wrap.wrap        // publishes its function under the file's name\n\nfn shout(s: String) -> String { wrap(s.to_upper()) }   // the function\n// wrap.decorate(s)      // error: add `use wrap.decorate` first\n\n// run.jet\nprint(text.wrap(\"hi\"))   // [hi]"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Separate name lists, as in Rust",
+            "gist": "Modules and values get separate name lists; a name before a dot reads modules first.",
+            "gains": [
+              "`wrap.decorate` still reaches the file inside the folder.",
+              "Matches Rust."
+            ],
+            "losses": [
+              "A fixed lookup order decides what each dotted name means.",
+              "Every tool and error handles two name lists."
+            ],
+            "proposed": {
+              "code": "module wrap              // module list\nwrap :: wrap.wrap        // value list\nwrap(\"hi\")               // value list: the function\nwrap.decorate(\"hi\")      // module list: the file's helper"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Folders share one name list, as in Go",
+            "gist": "Every file in a folder adds its names to the folder; files get no names.",
+            "gains": [
+              "No `module` or alias lines for files.",
+              "Folders follow the package rule."
+            ],
+            "losses": [
+              "Every helper is published unless wrapped in `priv module`.",
+              "The summary file no longer chooses what the folder offers."
+            ],
+            "proposed": {
+              "code": "// text/wrap.jet\nfn wrap(s: String) -> String { \"[{helpers.decorate(s)}]\" }\npriv module helpers { fn decorate(s: String) -> String { s } }\n\n// run.jet\nprint(text.wrap(\"hi\"))   // [hi]"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps Jet's one list of names and gives `wrap` one meaning in code. The file stays reachable where a module is expected, in `use` lines and alias right sides. Every other clash stays an error.",
+          "gains": [
+            "The guide's own example works as written.",
+            "One list of names, and a dot keeps one meaning.",
+            "Every other repeated name is still an error."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B needs a fixed lookup order to read `wrap.x`, because Jet writes `.` for both modules and fields."
+            },
+            {
+              "key": "C",
+              "reason": "C publishes every helper in a folder unless wrapped, and drops the folder's chosen list of what it offers."
+            }
+          ],
+          "tradeoff": "Inside the summary file, the file's other items need a `use` line before plain calls; the error names that line."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Inside the summary file, `wrap.decorate(s)` no longer reaches the file.",
+          "attempts": [
+            "Merge the function and the file under one name, as TypeScript merges a function and a namespace: rejected, `wrap` would mean two things in one place."
+          ],
+          "result": "`use wrap.decorate` brings the helper in by name. The new error names that line, and `decorate :: wrap.decorate` publishes it too."
+        },
+        {
+          "loss": "A reader may not know whether `wrap` means the file or the function.",
+          "attempts": [
+            "Require a file name different from its item: rejected, it breaks the guide's one-item-per-file pattern and its own example."
+          ],
+          "result": "In code, `wrap` always means the function. Alias right sides and `use` lines always start at a module, which Jet already requires, and a name can never be the root of its own alias."
+        },
+        {
+          "loss": "A real clash could slip through.",
+          "attempts": [
+            "Let any binding replace a file name: rejected, `module wrap` beside `use other.wrap` would hide a mistake."
+          ],
+          "result": "Only a binding that takes the file's name from that same file replaces it. Every other repeated name stays E0105."
+        },
+        {
+          "loss": "Code outside could still reach the file's helpers through the folder.",
+          "attempts": [
+            "Keep the file as a public member beside the function: rejected, `text.wrap` would mean two things to callers."
+          ],
+          "result": "The folder publishes only what it aliases, as the folder rule already says. `text.wrap.decorate` is an ordinary not-published error instead of today's compiler crash."
+        },
+        {
+          "loss": "The rule could depend on line order.",
+          "attempts": [
+            "Let the later line win, as Python's import order does: rejected, moving a line would change meaning."
+          ],
+          "result": "The rule reads the whole summary file, like alias resolution, so order never matters."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T15:04:27.591Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-10T02:53:13.989Z"
     }
   ]
 }
