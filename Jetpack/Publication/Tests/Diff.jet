@@ -288,6 +288,30 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     // A defaulted trait method narrows like a fn.
     assert_eq(publication_diff_test_breaks([publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[IO]> = _")], [publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[]> = _")]).len(), 0)
 }
+publication_diff_test_cap: fn(entries: String) -> PublicAPIItem Never! {
+    publication_diff_test_item("cap", "Receipt", "cap Receipt #FX({entries})")
+}
+#Test("publication api diff caps may narrow but never widen") {
+    io_net: publication_diff_test_cap("IO, Net, !FS")
+    io: publication_diff_test_cap("IO, !FS")
+    io_open: publication_diff_test_cap("IO")
+    deny_net: publication_diff_test_cap("IO, !FS, !Net")
+    denials: publication_diff_test_cap("!FS")
+    // Fewer allowed effects, or one more denial, narrows.
+    assert_eq(publication_diff_test_breaks([io_net], [io]).len(), 0)
+    assert_eq(publication_diff_test_breaks([io], [deny_net]).len(), 0)
+    // A deny-only cap has no ceiling, so giving it one narrows it.
+    assert_eq(publication_diff_test_breaks([denials], [io]).len(), 0)
+    // `Panic` is no ceiling entry, as in the checker.
+    assert_eq(publication_diff_test_breaks([io], [publication_diff_test_cap("IO, Panic, !FS")]).len(), 0)
+    // A new cap is an added row.
+    assert_eq(publication_diff_test_breaks([publication_diff_test_item("struct", "Receipt", "struct Receipt")], [publication_diff_test_item("struct", "Receipt", "struct Receipt"), io]).len(), 0)
+    // A wider ceiling, a dropped denial, an emptied ceiling or a removed cap widens.
+    assert_eq(publication_diff_test_breaks([io], [io_net]), ["Receipt"])
+    assert_eq(publication_diff_test_breaks([io], [io_open]), ["Receipt"])
+    assert_eq(publication_diff_test_breaks([io], [denials]), ["Receipt"])
+    assert_eq(publication_diff_test_breaks([io], [publication_diff_test_item("struct", "Receipt", "struct Receipt")]), ["Receipt"])
+}
 #Test("publication api diff distinct range and unit scale changes break") {
     meters: publication_diff_test_item("distinct", "Meters", "distinct Meters: Float in 0.0..1000.0")
     wider: publication_diff_test_item("distinct", "Meters", "distinct Meters: Float in 0.0..2000.0")

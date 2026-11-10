@@ -15,7 +15,7 @@ use {
         pkg_api_snapshot_render, pkg_diagnostic_from_row, pkg_lock_compute_fingerprint, pkg_lock_load,
         pkg_manifest_load, publication_redact_registry_url, publication_resolve_publish_registry,
     ]
-    jet_sema.[sema_public_api_canonical, sema_public_api_items]
+    jet_sema.[sema_public_api_canonical, sema_public_api_cap, sema_public_api_items]
     jetpack_foundation.[foundation_tree_hash]
     jetpack_publication.[
         PublicationIndexEntry, PublicationPublishCheckout,
@@ -325,7 +325,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     // registry copy is the baseline, never the local cache, so clearing
     // `.jet/` cannot wave a breaking change through.
     if !quiet -> log.out("[3/3] checking public API ...")
-    public_api: jet_cli_publish_public_api(root, entry, color) ?? JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: "the compile stopped before sema produced the package's public API\n"}
+    public_api: jet_cli_publish_public_api(root, entry, name, color) ?? JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: "the compile stopped before sema produced the package's public API\n"}
     if public_api.refusal != "" {
         log.error("E2104", "the public API snapshot needs a package that compiles; `jet check` must pass before publishing")
         log.err(public_api.refusal)
@@ -491,14 +491,15 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
 // The package's public API: sema's rows for every module checked from the
 // entry that lives in the package (not under `.jet/`, not a dependency), the
-// entry module's names bare and another module's under its name. `refusal`
-// is the rendered failure when the package does not compile.
+// entry module's names bare and another module's under its name. A file's
+// head cap is the row of its module: the entry's under the package's name.
+// `refusal` is the rendered failure when the package does not compile.
 JetCLIPublishAPI: struct {
     rows: [PublicAPIItem]
     refusal: String
 }
 
-jet_cli_publish_public_api: fn(root: String, entry: String, color: Bool) -> JetCLIPublishAPI {
+jet_cli_publish_public_api: fn(root: String, entry: String, package: String, color: Bool) -> JetCLIPublishAPI {
     compiled: jet_cli_compile_file(entry, color, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> return JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: refusal.stderr.copy()}
@@ -513,8 +514,10 @@ jet_cli_publish_public_api: fn(root: String, entry: String, color: Bool) -> JetC
                 path: publish_files.realpath(doc.physical_path) ?? doc.physical_path
                 if !path.starts_with("{package_root}/") || path.starts_with("{managed}/") -> next
                 module_name: if doc.module_name == "" -> doc.alias else -> doc.module_name
-                prefix: if path == entry_path -> "" else -> "{module_name}."
+                is_entry: path == entry_path
+                prefix: if is_entry -> "" else -> "{module_name}."
                 sema_public_api_items(doc.items, doc.functions, prefix, rows)
+                sema_public_api_cap(doc.file_cap, if is_entry -> package else -> module_name, rows)
             }
             return JetCLIPublishAPI{rows: sema_public_api_canonical(rows), refusal: ""}
         }

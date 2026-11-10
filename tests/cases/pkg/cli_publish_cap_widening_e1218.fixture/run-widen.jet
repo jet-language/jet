@@ -1,0 +1,12 @@
+#Test("smoke") { assert(total(Receipt{total: 2}) == 2) }
+
+#FX(IO, Net, !FS)
+Receipt: struct {
+    total: Int
+
+    show: fn(self) { print("total: {self.total}") }
+}
+
+total: fn(receipt: Receipt) -> Int { receipt.total }
+
+run: fn() { Receipt{total: 3}.show() }

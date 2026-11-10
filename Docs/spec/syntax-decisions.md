@@ -5793,7 +5793,8 @@ opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sb
 package and asks sema for its public API rows (every public fn with its solved
 effect row, struct with its fields, enum with its variants, trait with its
 required and defaulted members, method, `impl`, distinct, type, const and unit
-family; another module's names carry the module prefix, and an inline
+family, and a `cap` row for each written `#FX(…)` cap of a public type, trait
+or module; another module's names carry the module prefix, and an inline
 module's members carry their module path). A soft-public `_name` is no row
 (D-SHAPE-INTERNAL1). A unit family is a row only when the package declares
 it; a signature that names a standard `core.units` type spells it with its
@@ -5803,11 +5804,13 @@ fills a bare positional ends in `[positional N]`. It uploads them as
 registry's snapshot for the highest published version below the new one,
 yanked or not; the local `.jet/cache/api/<name>.api` copy feeds the lock
 fingerprint only. A published version without a snapshot is E2607. Breaking:
-a removed or changed row; a widened effect row (a narrowed one is
-compatible); a field without a default added to a struct that has no private
-fields; a variant added to an enum; a required member added to a trait; a
-changed distinct range or unit scale. Compatible: every other addition,
-including a defaulted field and a defaulted trait method. A release may break
+a removed or changed row; a widened effect row or cap (a narrowed one is
+compatible: a cap narrows when it keeps every denial and allows nothing it did
+not, and a removed cap widens); a field without a default added to a struct
+that has no private fields; a variant added to an enum; a required member
+added to a trait; a changed distinct range or unit scale. Compatible: every
+other addition, including a new cap, a defaulted field and a defaulted trait
+method. A release may break
 exactly when it lies outside the caret range of the version it is compared
 with (the resolver's `^` rule: `1.4.2` → `2.0.0`, `0.2.3` → `0.3.0`, `0.0.3`
 → `0.0.4`); an additive change under a patch bump is accepted. A breaking
