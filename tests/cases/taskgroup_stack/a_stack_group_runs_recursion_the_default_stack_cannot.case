@@ -1,0 +1,28 @@
+# `task.group g(stack: bytes)` gives its tasks, and the groups and tasks
+# they open, at least that much stack; every other task gets the program's
+# stack size, 8 MiB here (D-THREAD-STACK1=A, #6403 c6). deep.jet recurses
+# 400,000 calls in the group, in a group opened inside it and in a loose task
+# started from it; shallow.jet's same recursion outside any `stack:` group
+# stops with E3012, whose fix names `stack:`. The overflow is checked at -O0,
+# where every call keeps its frame.
+fixture: fixtures/stack
+env: NO_COLOR=1
+env: JET_SCHEDULER_THREADS=2
+step: jet run deep.jet
+exit: 0
+stdout: = "group task reached the bottom true\ninner group and loose task inherit true\n"
+stderr: empty
+step o2: jet run --optimize=full deep.jet
+exit: 0
+stdout: = "group task reached the bottom true\ninner group and loose task inherit true\n"
+stderr: empty
+step: jet build --optimize=none deep.jet
+exit: 0
+step built: built
+exit: 0
+stdout: = "group task reached the bottom true\ninner group and loose task inherit true\n"
+stderr: empty
+step overflow: jet run shallow.jet
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow" # the stop's heading; its frame and source lines are the report's
+stderr: ~ "give deep work more stack with `task.group deep(stack: bytes)`" # the fix line names `stack:`

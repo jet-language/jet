@@ -433,12 +433,12 @@ thread_rlimit_soft: fn(resource: I64) -> I64 {
 // A runtime thread's stack, and a fiber's that asks for no more: the soft
 // RLIMIT_STACK, the size the main thread got, so work moved onto a scheduler
 // worker or a fiber keeps the main thread's recursion budget. It is at least
-// THREAD_STACK_DEFAULT (192 MiB, which RLIM_INFINITY, failures and a comptime
-// child, with no host probe, also take: the compiler's stages run on
-// scheduler workers) and at most THREAD_STACK_MAXIMUM. Nothing writes the
-// rlimit, so a child process inherits the user's. A task group that needs
-// more asks for it (`task.group g(stack: bytes)`, Fiber.jet
-// fiber_stack_class).
+// THREAD_STACK_DEFAULT (8 MiB, which RLIM_INFINITY, failures and a comptime
+// child, with no host probe, also take) and at most THREAD_STACK_MAXIMUM.
+// Nothing writes the rlimit, so a child process inherits the user's. A task
+// group that needs more asks for it (`task.group g(stack: bytes)`, Fiber.jet
+// fiber_stack_class); the compiler asks for 192 MiB on its compile group
+// (JetCli Host.jet JET_CLI_COMPILE_STACK_BYTES).
 thread_stack_bytes: fn() -> I64 {
     soft: thread_rlimit_soft(I64{3})
     thread_stack_capped(if (soft < THREAD_STACK_DEFAULT) -> THREAD_STACK_DEFAULT else if (soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft)
@@ -458,14 +458,14 @@ thread_stack_capped: fn(bytes: I64) -> I64 {
     capped
 }
 
-// The least default stack.
-THREAD_STACK_DEFAULT: I64{201326592}
+// The least default stack, Linux's usual soft RLIMIT_STACK.
+THREAD_STACK_DEFAULT: I64{8388608}
 // The most any stack takes, default or asked for: 8 GiB.
 THREAD_STACK_MAXIMUM: I64{8589934592}
 // The smallest stack thread_spawn falls back to.
 THREAD_STACK_FLOOR: I64{1048576}
 // Under a finite RLIMIT_AS a stack takes at most a hundredth of it: 204 MiB
-// of a 20 GiB cap, as much as an uncapped thread's 192 MiB.
+// of a 20 GiB cap, as much as the compiler's 192 MiB compile group asks for.
 THREAD_STACK_SPACE_SHARE: I64{100}
 
 // A thread handle (thread_spawn's result): mapping@0 and its bytes@8 (the

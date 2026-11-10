@@ -1,0 +1,26 @@
+// deep.jet's recursion in a task outside any `stack:` group: the task gets
+// the program's 8 MiB, which the recursion outgrows, so it stops with E3012
+// (D-THREAD-STACK1=A).
+package: {
+    name: "taskgroup_stack"
+    authority: { allow: [Env, Exec, FS, FS.Read, IO] }
+}
+
+use sys: core.sys
+
+DEPTH: 400000
+PROGRAM_STACK: 8388608
+
+deep: fn(n: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
+    if n == 0 -> return a + b + c + d
+    1 + deep(n - 1, b, c, d, a + n)
+}
+
+run: fn() {
+    limit: sys.stack_limit() ?? panic("stack limit: {err}")
+    sys.set_stack_limit(Val(PROGRAM_STACK), limit.hard) ?? panic("set stack limit: {err}")
+    task.group plain {
+        direct: task deep(DEPTH, 1, 2, 3, 4)
+        print("reached {direct.join() ?? -1}")
+    }
+}

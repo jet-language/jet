@@ -3167,7 +3167,7 @@ retain source order. `race` and `any` remain positional.
 admission. `task.group name(stack: bytes) { ... }` gives each child at least
 `bytes` of stack, and the groups and tasks a child opens inherit it unless
 they name their own; every other task gets the system's stack size (the soft
-`RLIMIT_STACK`), at least 192 MiB. The runtime caps a request at 8 GiB, and
+`RLIMIT_STACK`), at least 8 MiB. The runtime caps a request at 8 GiB, and
 under a finite address-space limit at a hundredth of it; a constant `stack:`
 outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
 **E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both

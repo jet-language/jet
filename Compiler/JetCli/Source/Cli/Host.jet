@@ -3383,18 +3383,20 @@ jet_cli_main: fn(args: [String]) -> Int {
 }
 
 // Carry out a compiling verb's plan as a task, on a scheduler worker rather
-// than the main thread. A compile recurses once per nesting level of an
-// expression that it does not walk as a loop; for a left-leaning operator
-// chain the deepest such recursion left is the drop of its expression tree,
-// about 100 bytes a level, so a 100,000-term `a + a + ...` sum needs about
-// 10 MiB (measured at the default -O0 `jet run`). That is more than the main
-// thread's default 8 MiB and far less than a worker's stack (the runtime's
-// thread_stack_bytes, at least 192 MiB). The program `jet run` launches keeps
-// the main thread and every stack default. The trace sink is made on the
-// worker, the thread the compile runs on.
+// than the main thread, in a group that asks for JET_CLI_COMPILE_STACK_BYTES of
+// stack. A compile recurses once per nesting level of an expression that it
+// does not walk as a loop; for a left-leaning operator chain the deepest such
+// recursion left is the drop of its expression tree, about 100 bytes a level,
+// so a 100,000-term `a + a + ...` sum needs about 10 MiB (measured at the
+// default -O0 `jet run`), more than the default 8 MiB stack every task gets.
+// The compile's own groups and tasks inherit the size; the program `jet run`
+// launches keeps the main thread and every stack default. The trace sink is
+// made on the worker, the thread the compile runs on.
+JET_CLI_COMPILE_STACK_BYTES: 201326592
+
 jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     steps := [JetCLIRunStep]{}
-    task.group compile_stack {
+    task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
         compiling: task jet_cli_execute_compiling(plan, trace, recording)
         steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))
     }
