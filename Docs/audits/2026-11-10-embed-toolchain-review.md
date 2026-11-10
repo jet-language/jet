@@ -183,3 +183,24 @@ No claim of A depends on unbuilt behavior without saying so.
   Card #5072 or the D-CTIO1 owner card.
 - The ballot's scope missed four derived compiler tables (960,769 bytes); A's build card should list
   all nine.
+
+## Different-family review (GPT, 2026-11-10)
+
+This section supersedes conflicting scope and performance conclusions above.
+
+| Claim | Attack and independent evidence | Verdict |
+|---|---|---|
+| Nine generated compiler outputs | Read origin/dev CoreSourceRows.jet:2909-2922: twelve output paths, eight compiler/Jetpack tables and four other outputs. OwnedTraitRows is not in that output list. | Fails; corrected to eight. Earlier nine-file byte/churn totals do not describe this generator scope. |
+| Every Core edit needs regeneration | The generator's source header distinguishes row/asset/effect edits; unchanged output need not be committed. | Fails; corrected synchronization claim. |
+| The shown generator command works | Ran `jet Tools/agent/CoreSourceRows.jet --write`: exit 1, usage allows only --check or --facts. No-flag mode writes. | Fails; removed --write from D. |
+| Embedding works beside a file and refuses traversal | Reran e01-e04, pkg and pkg_ok. Neighboring read succeeds; parent traversal E0957; prefixes E0955; #run E0733. | Holds on a0.0.43 only. Proposals now show ratified #run, without adding a retired-spelling rewrite. |
+| A adds 44 ms, at most three seconds in real builds | Reran cost programs: literal prints `source_module rows: 0 0`; scan prints `source_module rows: 116`. The pair is not same-output, and neither derives the real compiler tables. | Fails as performance evidence; removed forecast and upper bound. |
+| A permission is private because the package is below the root | A nested vendored package also satisfies mere containment. Environment selection does not confer trust. | Fails; admission now requires declared workspace membership and held-root no-follow confinement. |
+| A lock provides B's permission benefit | A digest records what was read; B's grant limits what may be read. | Fails; B's narrower prior authority is a genuine benefit. |
+| Content digests alone prevent staleness | find must notice additions and empty-to-nonempty changes; root changes also matter. Read ComptimeInputs: file hashes exist, but that alone proves no glob-membership invalidation. | Holds only with new required root and membership inputs; no broad current-cache guarantee. |
+| No lock input defect exists | pkg_ok runs and its directory has no .jet tree. The cited driver records digests, but recording in memory is not persisting a lock. | Fails for the probe; lock persistence remains a build prerequisite. |
+| A changes no ratified rule | Read D-CTIO1, D-CTFIND1, D-BUILD-COREUNIT1 and D-META-SPELL1 directly. Toolchain-wide reads amend the project-root rule. | Holds only with explicit amendment; C explicitly reopens the single-Core-package choice. |
+
+Read Rust include_str, Go embed rules and Go's generated builtin.go independently. Generated sources are a strong alternative when builds must not depend on source-tree reads. No claim that A wins the performance gate is supported.
+
+Agree with A only under the repaired workspace boundary and complete-input requirements. B is a serious, auditable narrower-authority alternative. Do not post the nine-output totals, the 44-ms forecast, the three-second upper bound, or the --write command.
