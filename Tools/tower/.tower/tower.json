@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98915,
+    "rev": 98920,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56536,6 +56536,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Syntax gaps from the same measurement are owner gates, kept for a ballot and not filed as criteria: S1 `!` error propagation (2 tokens per fallible call, 12 on streamb10; it overlaps the file-op gap), S2 a filtering loop with an else arm plus list concatenation (13), S3 an open-ended slice xs[2..] (7). Budget on streamb10: about 226 tokens with the four Core gaps, and 203 with S1-S3 as well, both above the 166 original. The token bar on shell originals is not winnable by porting alone."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "PerfLead2 measurement, 2026-11-10, with PortBars.jet's tokenizer. On the streamb10 shell entry the original is 166 tokens and the current Jet twin is 873. The tersest twin possible, with the roots code in a sibling module (a `use` of a parent path is E0602) and Core APIs that don't exist yet assumed (line predicates, process.fail/exec, a filtering loop, `!` propagation), is still 203. Bash `cp \"$a/x\" \"$b/x\"` is 3 tokens; files.copy plus its failure handling is at least 10. The other shell entries are at 3.3-7.3x; jetc-trace is at 1.13x (c22, ballot-held) and tower-spec-apply at 2.60x against .mjs. Main ruling: the bars stand, since they are owner gate criteria. tower-spec-apply is cut first, and each missing convenience is filed here as a Core API gap criterion, as c14 says."
         },
         {
@@ -56908,6 +56913,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-10T17:28:40.971Z"
+        },
+        {
+          "n": 29,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). The public shape is an owner gate, so it is built only after a ballot ratifies it. A line-wise regex test on a String, such as `text.has_line(r\"^(a|b)\")`, with no separate compile, flags or failure step for a literal pattern (the pattern is checked at compile time). It saves 29 tokens (39 to 10).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T17:40:09.456Z"
+        },
+        {
+          "n": 30,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). The public shape is an owner gate, so it is built only after a ballot ratifies it. `process.exec(argv, env: …)`: run a child with inherited stdio and exit with its status, where a signal gives 128+n. It saves 57 tokens (71 to 14), the largest gap.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T17:40:10.812Z"
+        },
+        {
+          "n": 31,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). The public shape is an owner gate, so it is built only after a ballot ratifies it. File operations a script can call without per-call failure handling where the original keeps going (copy, copy_dir, remove_all, create_dir_all, symlink, canonicalize). 3 tokens per call, 18 on streamb10. The ballot must square this with the reasoning bar's rule that every failure path is visible at the call (for example, a scoped best-effort mode that reports what failed), because a silent ignore would lose that bar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T17:40:12.643Z"
+        },
+        {
+          "n": 32,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). The public shape is an owner gate, so it is built only after a ballot ratifies it. `process.fail(code, message)`: print the message to stderr and exit with the code in one call. It saves 3 tokens per use.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T17:40:14.551Z"
         }
       ],
       "refs": [],
@@ -56920,12 +56961,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T17:38:02.488Z",
+      "updated": "2026-11-10T17:40:16.451Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 28
+      "criteriaLastN": 32
     },
     {
       "id": "c022g7qw",
@@ -200126,6 +200167,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:40:16.451Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T17:40:14.551Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#32 Core API gap from the port bars (c14), measured by PerfLead2"
+    },
+    {
+      "at": "2026-11-10T17:40:12.643Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#31 Core API gap from the port bars (c14), measured by PerfLead2"
+    },
+    {
+      "at": "2026-11-10T17:40:10.812Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#30 Core API gap from the port bars (c14), measured by PerfLead2"
+    },
+    {
+      "at": "2026-11-10T17:40:09.456Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#29 Core API gap from the port bars (c14), measured by PerfLead2"
+    },
     {
       "at": "2026-11-10T17:38:02.488Z",
       "by": "Main",
