@@ -1900,6 +1900,15 @@ function renderFocus() {
     $('#f-facets', f).querySelectorAll('.facet').forEach(x => x.classList.toggle('on', x.dataset.fk === focusFacet));
     $('#f-facetbody', f).innerHTML = facetBody(d, focusFacet);
   }));
+  // A report link opens that document in the docs view.
+  f.querySelectorAll('a[data-doc-path]').forEach(a => a.addEventListener('click', (event) => {
+    event.preventDefault();
+    const path = a.dataset.docPath;
+    exitFocus();
+    docsSel = { kind: 'doc', path };
+    docsBrowse = false;
+    go('docs');
+  }));
   $('#f-prev', f).onclick = () => focusGo(-1);
   $('#f-next', f).onclick = () => focusGo(1);
   $('#f-close', f).onclick = exitFocus;

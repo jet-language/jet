@@ -2761,6 +2761,37 @@ function verdictSupersededBy(s, p) {
   return id;
 }
 
+// The reports a ballot links to, so the owner can read the research,
+// measurements and audits behind it. A report is a Tower doc under Docs/
+// (`path`) or an outside https source (`url`), with a title and an optional
+// one-line note on what it shows.
+const REPORT_PATH_RE = /^Docs\/(?:audits|research|proposals|spec)\/(?:[\w.-]+\/)*[\w.-]+\.(?:md|html)$/;
+const MAX_REPORTS = 20;
+export function normalizeReports(list) {
+  if (list == null) return [];
+  if (!Array.isArray(list)) fail('E_INVALID', 'decision reports must be a list');
+  if (list.length > MAX_REPORTS) fail('E_INVALID', `a decision links at most ${MAX_REPORTS} reports`);
+  const seen = new Set();
+  return list.map((r, i) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) fail('E_INVALID', `report ${i + 1} must be an object`);
+    const title = typeof r.title === 'string' ? r.title.trim() : '';
+    if (!title) fail('E_INVALID', `report ${i + 1} needs a title`);
+    if (title.length > 160) fail('E_INVALID', `report ${i + 1} title is longer than 160 characters`);
+    const path = typeof r.path === 'string' ? r.path.trim() : '';
+    const url = typeof r.url === 'string' ? r.url.trim() : '';
+    if (!!path === !!url) fail('E_INVALID', `report ${i + 1} needs exactly one of path (a Tower doc) or url`);
+    if (path && (!REPORT_PATH_RE.test(path) || path.split('/').includes('..')))
+      fail('E_INVALID', `report ${i + 1} path ${path} is not a Tower doc under Docs/audits, Docs/research, Docs/proposals or Docs/spec`);
+    if (url && !/^https:\/\/[^\s<>"]+$/.test(url)) fail('E_INVALID', `report ${i + 1} url must be an https address`);
+    const key = path || url;
+    if (seen.has(key)) fail('E_INVALID', `report ${key} is linked twice`);
+    seen.add(key);
+    const note = typeof r.note === 'string' ? r.note.trim() : '';
+    if (note.length > 400) fail('E_INVALID', `report ${i + 1} note is longer than 400 characters`);
+    return { title, ...(path ? { path } : { url }), ...(note ? { note } : {}) };
+  });
+}
+
 export function addDecision(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'decision needs a title');
@@ -2799,6 +2830,7 @@ export function addDecision(s, p) {
     // Owner law 2026-09-03: each loss records two elimination attempts before
     // any mitigation. Own field so it survives ballot edits.
     ...(candidate.designAway ? { designAway: candidate.designAway } : {}),
+    ...(candidate.reports != null && normalizeReports(candidate.reports).length ? { reports: normalizeReports(candidate.reports) } : {}),
     draft, status: 'open', created: now() };
   s.decisions.push(d);
   touchCard(card, candidate.by);
@@ -2915,6 +2947,10 @@ export function updateDecision(s, id, patch, by) {
   const storedVersion = Number(d.ballotProcessVersion || 0);
   for (const k of ['title', 'situation', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
     if (k in patch) d[k] = patch[k];
+  if ('reports' in patch) {
+    const reports = normalizeReports(patch.reports);
+    if (reports.length) d.reports = reports; else delete d.reports;
+  }
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
   if (d.group !== 'acceptance' && d.status !== 'ratified' && d.ballotMode !== 'short') {
@@ -3651,7 +3687,7 @@ function decisionForBrief(d) {
   const base = { id: d.id, cardId: d.cardId, group: d.group, status: d.status, draft: !!d.draft,
     title: d.title, gist: d.gist, ballotMode: d.ballotMode ?? null, shortAuthorizedBy: d.shortAuthorizedBy ?? null,
     ballotProcessVersion: d.ballotProcessVersion ?? null,
-    visualMedia: d.visualMedia || [],
+    visualMedia: d.visualMedia || [], reports: d.reports || [],
     outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
   return { ...base, situation: d.situation ?? '', lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
