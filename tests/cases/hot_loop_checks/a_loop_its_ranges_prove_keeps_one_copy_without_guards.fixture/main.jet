@@ -1,0 +1,27 @@
+// `squares` sums values its trip count bounds: the ranges prove every Int
+// in its loop inline, so the loop stays one copy with no guard. `total`
+// sums list elements no range bounds, so its loop is versioned behind a
+// guard.
+package: {
+    name: "main"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+total: fn(xs: [Int]) -> Int {
+    sum := 0
+    loop i in 0..<xs.len() -> sum += xs[i] * 3
+    sum
+}
+
+squares: fn(n: Int) -> Int {
+    sum := 0
+    loop i in 1..<30001 -> sum += i * i %% 7919
+    sum + n
+}
+
+run: fn() {
+    xs := [Int]{}
+    loop i in 0..<1000 -> xs.push(i)
+    print(total(xs))
+    print(squares(1))
+}
