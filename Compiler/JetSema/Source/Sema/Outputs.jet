@@ -38,7 +38,7 @@ sema_output_error: fn(span: Span, what: String, why: String, fix: String) -> Dia
 // E0101: a run or build of a program whose entry file selects nothing to
 // start at (spec.md:2115-2117).
 sema_no_run_diagnostic: fn() -> Diagnostic Never! {
-    diagnostic_from_registry("E0101", None, "this program has no `run` function", "running a program starts at `run: fn`, and the entry file doesn't define one", "add `run: fn() {{ ... }}` to the entry file")
+    diagnostic_from_registry("E0101", None, "this program has no `run` function", "a program starts at its top-level statements or its `run: fn`, and the entry file has neither", "write the statements to run at the top level of the entry file, or add `run: fn() {{ ... }}`")
 }
 
 sema_output_kind: fn(name: String) -> OutputKind? Never! {

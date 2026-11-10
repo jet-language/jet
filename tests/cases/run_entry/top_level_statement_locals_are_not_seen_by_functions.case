@@ -1,0 +1,11 @@
+# Claim (#6281 c128, Main ruling 2026-11-09 option A): in a file of top-level
+# statements, `total := 0` is a local of the file's entry, so a function
+# declared in the file doesn't see it: reading it is E0107, which names the
+# top-level local and says to pass it as a parameter. An ALL_CAPS constant
+# (`LIMIT: 3`) stays a module constant every function and statement reads.
+fixture: top_level_statement_locals_are_not_seen_by_functions.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stdout: = ""
+stderr: = top_level_statement_locals_are_not_seen_by_functions.fixture/check.stderr

@@ -359,21 +359,32 @@ for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
 **D-ENTRY-SCRIPT1=C / D-ENTRY-ORDER1=C — explicit ordinary-file entry** *(amends
-the 2026-08-08 D-ENTRY-SCRIPT1=B ruling)*: ordinary files never synthesize a
-runtime function from loose top-level statements. `run: fn` is the only ordinary
-file execution body; `jet run`, `jet dev`, and `jet test` use that same entry
-law. At file scope, `name: value` and `name := value` are module globals
+the 2026-08-08 D-ENTRY-SCRIPT1=B ruling; amended by D-ENTRY-STATEMENTS1
+below)*: in a file with `run: fn`, that is the file's execution body; `jet run`,
+`jet dev`, and `jet test` use that same entry law. At file scope of such a file,
+`name: value` and `name := value` are module globals
 visible to every function in the file; the mutable form is writable and is
 initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
 instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23) amends the
 immutable form: its initializer is any expression, computed once in dependency
 order before `run: fn` and read as an ordinary copy on every tier (spec "Values,
-expressions, and calls"). Loose top-level statements are E0621, and an
-imported file with loose statements is E0620. Notebook and REPL adapters may
-construct an explicit `run: fn` for their submitted fragment. `dev: fn`,
-`build: fn`, and `#Test` declarations remain legal beside module globals.
-The maintained example corpus enforces this same explicit-entry law: an
-ordinary `run: fn` is not optional teaching ceremony.
+expressions, and calls"). Loose top-level statements beside `run: fn` are
+E0621, and an imported file with loose statements is E0620. Notebook and REPL
+adapters may construct an explicit `run: fn` for their submitted fragment.
+`dev: fn`, `build: fn`, and `#Test` declarations remain legal beside module
+globals.
+
+**D-ENTRY-STATEMENTS1 — a file of top-level statements just runs** *(owner
+ruling 2026-11-09, #6281 c128; amends D-ENTRY-SCRIPT1=C)*: an entry file whose
+top level holds statements and declares no `run: fn` is a program, and every
+top-level line is its entry, in source order. Its bindings are locals of that
+entry (Main ruling 2026-11-09, option A): `total := 0` is written by a later
+top-level loop and captured by a lambda in the body, and the file's functions
+don't see it (E0107, "pass it as a parameter"). ALL_CAPS constants, `#Persist`
+and comptime bindings stay module declarations. A file with `run: fn` keeps the
+module rules above; a file with both is E0621; a file with neither is a library
+(E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
+meaning on every tier.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from

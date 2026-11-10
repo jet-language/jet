@@ -1,0 +1,66 @@
+# Claim (#6281 c128, owner ruling 2026-11-09): a file of top-level statements
+# just runs. Every top-level line is its entry, in order: `limit: 3` and
+# `total := 0` are locals of that entry, which a later top-level loop writes
+# and a lambda in it captures, beside its declarations (`greet` is declared
+# after the statement that calls it). The file
+# checks clean, and jet run FILE, jet -e with the same statements and the
+# file piped to `jet run -` print the same lines on O0, O1 and O2. A file with
+# statements and `run: fn` is E0621
+# (loose_statements_are_rejected_even_with_explicit_run.case); lib.jet, with
+# neither, is a library: it checks clean and `jet run` of it is E0101.
+fixture: top_level_statements_are_the_program_entry_on_every_tier.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `main.jet` has no problems\n"
+step file_o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "first\ntotal 6\nhi jet\nadd 10\n"
+stderr: = ""
+step file_o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step file_o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step eval_o0: jet run --optimize=none -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := (x: Int) -> x + total; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step eval_o1: jet run --optimize=basic -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := (x: Int) -> x + total; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step eval_o2: jet run --optimize=full -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := (x: Int) -> x + total; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step piped_o0: jet run --optimize=none -
+stdin: main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step piped_o1: jet run --optimize=basic -
+stdin: main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step piped_o2: jet run --optimize=full -
+stdin: main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step library_check: jet check lib.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `lib.jet` has no problems\n"
+step library_run: jet run lib.jet
+exit: nonzero
+stdout: = ""
+stderr: ~ "E0101" # the no-entry code; tests/ui/no_main.stderr pins its text

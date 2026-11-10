@@ -23,6 +23,11 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Diagnostic,
+    ast_binding,
+    ast_func,
+    ConstDef,
+    SemaNameCase,
+    sema_casing_has_case,
     core_module_export,
     classify_identifier,
     IdentifierClass,
@@ -928,6 +933,7 @@ sema_incremental_program_header: fn(program: Program) -> Program Never! {
         applied_rules: program.applied_rules, rule_facts: program.rule_facts,
         else_arms: program.else_arms, used_import_names: program.used_import_names,
         debug_sites: program.debug_sites, app_route_roots: program.app_route_roots,
+        entry_locals: program.entry_locals,
     }
 }
 
@@ -9034,11 +9040,13 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
     }
 }
 
-// Only an explicit `run: fn` may contain executable entry
-// code. An imported file with loose statements is E0620 and the entry file
-// E0621, spanning the first through the last statement. A file-scope
-// `name: value` binding is a module global which the
-// parser already registers as a declaration.
+// A file of top-level statements is a program: with no `run: fn` of its own,
+// the entry file's statements are, in order, the body of its `run: fn`
+// (sema_script_entry), so they reach this check only beside an explicit one.
+// That file is E0621, and an imported file with loose statements E0620, each
+// spanning the first through the last statement. A file-scope `name: value`
+// binding is a module global which the parser already registers as a
+// declaration.
 sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
     loop source_module_index in 0..<graph.modules.len() {
@@ -9047,13 +9055,73 @@ sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagn
         span: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
         start: diagnostics.len()
         if {
-            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].source_file}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `run: fn`, so an import never gains a hidden side effect.", "move the statements into the entry file's `run: fn`, or import a declaration-only file"))
-            else -> diagnostics.push(sema_error("E0621", span, "top-level executable statements require an explicit `run: fn`", "Jet does not invent a runtime function for ordinary files; only `run: fn` executes code", "move the statements into `run: fn`"))
+            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].source_file}` has executable top-level statements", "imported files provide declarations; executable code belongs in the entry file, so an import never gains a hidden side effect.", "move the statements into the entry file, or import a declaration-only file"))
+            else -> diagnostics.push(sema_error("E0621", span, "this file has top-level statements and a `run: fn`", "a file's top-level statements are its entry, and so is `run: fn`; a program has one entry", "move the statements into `run: fn`, or remove `run: fn` so the statements run"))
         }
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)
         found = true
     }
     found
+}
+
+// The entry file `program` of a load: a file whose top level holds
+// statements and declares no `run: fn` is a program whose `run: fn` runs
+// those statements in order (owner ruling 2026-11-09, #6281). Its
+// top-level bindings are part of that order: `total := 0` and `limit: 3`
+// are locals of the generated `run: fn` (Main ruling 2026-11-09, option A),
+// so its functions don't see them (sema_unknown_entry_local). An ALL_CAPS
+// constant, a `#Persist` or comptime binding and the Output defaults record
+// stay module declarations. A file with both keeps its statements for E0621
+// (sema_check_script_entries).
+sema_script_entry: fn(program: &Program) {
+    count: program.script_body.len()
+    if count == 0 -> return
+    loop item in program.items {
+        if item == .Func(function) && function.name == "run" && function.external_type == None -> return
+    }
+    statements := [Stmt]{}
+    compiler_transfer_rows<Stmt>(statements, program.script_body)
+    // Popped twice, the items come back in source order.
+    reversed := [Item]{}
+    loop program.items.len() > 0 -> reversed.push(program.items.pop() ?? panic("a nonempty item list failed to pop"))
+    locals := [Stmt]{}
+    loop reversed.len() > 0 {
+        item := reversed.pop() ?? panic("a nonempty item list failed to pop")
+        if item == .Const(definition) && sema_script_entry_local(definition) {
+            binding := ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
+            binding.ty = definition.ty.copy()
+            binding.meta = definition.meta.copy()
+            binding.markers = definition.markers.copy()
+            program.entry_locals.push(definition.name.copy())
+            locals.push(Stmt.Val{binding: binding})
+            next
+        }
+        program.items.push(item)
+    }
+    // `statements` and `locals` are each in source order: take the later of
+    // the two tails into `order`, which then pops in source order.
+    order := [Stmt]{}
+    loop statements.len() > 0 || locals.len() > 0 {
+        local_last: locals.len() > 0 && (statements.len() == 0 || sema_compiler_index_stmt_span(locals[locals.len() - 1]).start > sema_compiler_index_stmt_span(statements[statements.len() - 1]).start)
+        if local_last {
+            order.push(locals.pop() ?? panic("a nonempty local list failed to pop"))
+            next
+        }
+        order.push(statements.pop() ?? panic("a nonempty statement list failed to pop"))
+    }
+    start: sema_compiler_index_stmt_span(order[order.len() - 1]).start
+    end: sema_compiler_index_stmt_span(order[0]).end
+    entry := ast_func("run", Span{start: start, end: start}, Span{start: start, end: end})
+    loop order.len() > 0 -> entry.body.push(order.pop() ?? panic("a nonempty statement list failed to pop"))
+    program.items.push(Item.Func{value: entry})
+}
+
+// Whether the file-scope binding `definition` of an entry file of
+// top-level statements is a local of its entry (sema_script_entry).
+sema_script_entry_local: fn(definition: ConstDef) -> Bool Never! {
+    if definition.is_persist || definition.is_comptime -> return false
+    if definition.ty == (Val(Type.Named{name: "__OutputDefaults"})) -> return false
+    definition.mutable || sema_casing_has_case(definition.name, SemaNameCase.Snake)
 }
 
 // `host_hooks` are the driver's host callbacks; `threads` admits the

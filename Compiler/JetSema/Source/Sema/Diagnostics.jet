@@ -315,6 +315,21 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     sema_error("E0107", span, what, why, "declare it first: `{name}: ...`")
 }
 
+// E0107 for a name an unresolved read or write spells in a function of an
+// entry file of top-level statements: when the file binds `name` at its top
+// level, that binding is a local of the file's entry (sema_script_entry),
+// which the function can't see, and the fix is to pass it in.
+sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, environment.module_identity) == .Val(index) {
+            if graph.modules[index].program.entry_locals.contains(name) {
+                return sema_error("E0107", span, "`{name}` is a local of this file's top-level statements, which a function can't see", "a file's top-level statements are its entry, and the names they bind are that entry's locals", "pass `{name}` as a parameter")
+            }
+        }
+    }
+    sema_unknown_name_in(name, span, scopes)
+}
+
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) -> return nested_fn
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text

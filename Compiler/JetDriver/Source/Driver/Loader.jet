@@ -108,6 +108,7 @@ use {
         sema_marker_rules_applied_row,
         sema_core_error_family_member,
         sema_eval_entry_show,
+        sema_script_entry,
         sema_source_words,
         sema_source_wanted_words,
         sema_unknown_module_alias,
@@ -4796,7 +4797,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }
-        if request.eval_entry && !is_core && source_unit_index == (entry_index ?? -1) -> sema_eval_entry_show(program)
+        if !is_core && source_unit_index == (entry_index ?? -1) {
+            sema_script_entry(program)
+            if request.eval_entry -> sema_eval_entry_show(program)
+        }
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
         // lowercase nominal alias.

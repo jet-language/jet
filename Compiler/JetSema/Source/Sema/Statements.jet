@@ -5452,7 +5452,7 @@ sema_stmt_compound_result: fn(op: BinOp, place: Type, offered: Type, value: Expr
 sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     index: sema_scope_resolve_index(scopes, name)
     if index == None {
-        diagnostics.push(sema_unknown_name_in(name, name_span, scopes))
+        diagnostics.push(sema_unknown_name_at(name, name_span, environment, program, scopes))
         return None
     }
     binding: sema_scope_binding_row(environment, scopes, index)

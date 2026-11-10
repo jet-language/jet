@@ -4320,7 +4320,7 @@ sema_expr_ascii_letter: fn(byte: U8) -> Bool Never! {
 
 sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index: sema_scope_resolve_index(scopes, name) ?? {
-        diagnostics.push(sema_unknown_name_in(name, span, scopes))
+        diagnostics.push(sema_unknown_name_at(name, span, environment, program, scopes))
         return None
     }
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None

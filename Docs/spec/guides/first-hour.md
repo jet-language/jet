@@ -181,45 +181,42 @@ greet says hello: pass
 Tests stay beside the source they exercise. Use `jet run` for the program's
 normal output and `jet test` for its test blocks.
 
-## 7. Lesson 5: repair an explicit entry
+## 7. Lesson 5: one entry
 
-Make the source invalid in a recoverable way by replacing its contents with a
-top-level statement:
+A file of top-level statements is a program on its own. Replace the
+contents of `run.jet` with two statements:
 
 ```jet
 print("before")
-```
-
-Check it:
-
-```sh
-jet check run.jet
-```
-
-Jet reports E0621 because an ordinary source file executes only through an
-explicit `run: fn`. Put the statement inside the entry function, then check
-and run it:
-
-```jet
-run: fn() {
-    print("before")
-}
+print("after")
 ```
 
 ```sh
-jet check run.jet
 jet run
 ```
 
-The repaired program prints:
+The statements run in order:
 
 ```text
 before
+after
 ```
 
-The author chooses the execution boundary; Jet does not invent an implicit
-entry function. `jet fix` is available for registered safe automatic fixes,
-but it is not an implicit-run repair.
+A program has one entry: either its top-level statements or a `run: fn`.
+Add a `run: fn` between the two statements and check the file:
+
+```jet
+print("before")
+run: fn() { print("middle") }
+print("after")
+```
+
+```sh
+jet check run.jet
+```
+
+Jet reports E0621, because the file now has two entries. Move the statements
+into `run: fn`, or remove `run: fn`, and the file checks clean again.
 
 ## 8. Lesson 6: `explain`
 
