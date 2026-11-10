@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98876,
+    "rev": 98880,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53363,7 +53363,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -53427,8 +53427,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w12 jet: native `jet build` runs comptime prep bindings and gives no E0956. `jet build --output-dir=sc/b4926e Examples/features/comptime/embed_bytes.jet` (embed_bytes plus comptime fn calls SIZE/FIFTH) exits 0, and the binary prints \"logo is 8 bytes\" / \"byte 5 is 74\", the same as expected/comptime/embed_bytes.out. p/ci4926/run.jet (`NOTICE :: comptime { embed_file(\"notice.txt\") }`) built and its binary printed \"notice: second\". The input wiring is ComptimeInputs.jet:94-114 and Pipeline.jet:1601.",
-          "at": "2026-10-31T19:33:34.739Z"
+          "evidence": "Re-proved on dev 00a2b37a42 (train t12c) with the compiler built from that tree: tests/cases/comptime_cli_parity/.../comptime_embed_bytes/embed_bytes.jet (embed_bytes plus comptime fn calls) gives output byte-equal to tier_parity_examples_run_through_aot_jit_and_interpreter.embed_bytes.out under jet run (O0), jet build (O1) and jet build --release (O2); every exit is 0 and nothing reports E0956 ($JET_SCRATCH_ROOT/lanes/Main/runs/p4926.sh).",
+          "at": "2026-11-10T16:37:27.640Z"
         },
         {
           "n": 2,
@@ -53445,8 +53445,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: With CardClose-13 (wave/14/in): the new golden Examples/features/reflection/fields_count.jet (`comptime { Point.$fields.len() }`, prints \"Point has 3 fields\") PASSes on o0/o1/o2 with the w12 jet (TestGreen testkit golden).",
-          "at": "2026-10-31T21:20:11.201Z"
+          "evidence": "Re-proved on dev 00a2b37a42 (train t12c) with the compiler built from that tree: golden Examples/Metaprogramming/Reflection/FactSigil.jet (count: comptime { Point.$fields.len() }) is byte-equal to FactSigil.out on O0 and O1 and to FactSigil.o2.out on O2 ($JET_SCRATCH_ROOT/lanes/Main/runs/p4926.sh).",
+          "at": "2026-11-10T16:37:29.543Z"
         },
         {
           "n": 4,
@@ -53468,11 +53468,12 @@
       "parentId": "c0ikz0pb",
       "needsAcceptance": false,
       "created": "2026-10-09T18:54:02.194Z",
-      "updated": "2026-11-10T16:30:29.200Z",
+      "updated": "2026-11-10T16:37:33.599Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
-      ]
+      ],
+      "completedAt": "2026-11-10T16:37:33.599Z"
     },
     {
       "id": "c01sunrb",
@@ -95127,6 +95128,15 @@
           "verifiedBy": null,
           "evidence": "Landed in QuickLead's 775f3b07ae, on dev e4096a0f3b. In the Lander's fR3 fullprof run of that tree: tests/cases/run_entry/c_and_cpp_files_run_by_extension.case PASS (jet run, jet build and plain jet on hello.c and shapes.cpp print the output and exit code; notes.txt is refused with E2116, its stderr byte-compared with the snapshot tests/cli/unhandled_extension_e2116.txt; E2116 has registered what/why/fix text in Compiler/Prelude/Diagnostics.jet), and the golden Examples/Interop/FFI/PlainC.c PASS on o0, o1 and o2.",
           "at": "2026-11-10T01:35:57.574Z"
+        },
+        {
+          "n": 5,
+          "text": "A jet cc whose project input set is over its 512 MiB cap reports a registered error of its own, naming the project root it inferred, the size and the cap, and saying how to narrow it (--project-root). Today it reports E2102 'Invalid arguments for jet cc' (kind UnknownFlag) with only the usage line as the fix. Found on dev 00a2b37a42 when jet cc hello.c ran in a directory that held a Hangar. Proof: a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:37:48.428Z"
         }
       ],
       "refs": [],
@@ -95141,9 +95151,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:40:30.554Z",
-      "updated": "2026-11-10T01:35:57.574Z",
+      "updated": "2026-11-10T16:37:48.428Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0lscvc9",
@@ -200126,6 +200136,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:37:48.428Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c086wraw",
+      "note": "#5 A jet cc whose project input set is over its 512 MiB cap rep"
+    },
+    {
+      "at": "2026-11-10T16:37:33.599Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xk73ss",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-10T16:37:29.543Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xk73ss",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-10T16:37:27.640Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xk73ss",
+      "note": "#1"
+    },
     {
       "at": "2026-11-10T16:36:05.864Z",
       "by": "Main",
