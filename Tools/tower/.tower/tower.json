@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98894,
+    "rev": 98896,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56878,12 +56878,21 @@
         },
         {
           "n": 27,
-          "text": "D-EMBED-TOOLCHAIN1=A, table cutover (the bootstrap half after c26; it builds with a seed cut from the train that lands c26): the derived compiler and Jetpack tables that CoreSourceRows.jet writes today (eight outputs, per Docs/audits/2026-11-10-embed-toolchain-review.md) are computed at build time from `toolchain:` reads. Their checked-in copies and the generator modes that wrote them are deleted. The Effect and ForeignLanguage enums stay authored as the one home of their names, and a comptime check against the derived list fails the build with a registered error naming any missing or extra name. The comptime cost of deriving CoreCallRows is measured against the generator run; if it is slower, that table stays generated, with the numbers on a performance criterion, until it is fixed.",
+          "text": "D-EMBED-TOOLCHAIN1=A, table cutover part 1 (the bootstrap half after c26; it builds with a seed cut from the train that lands c26). EffectVocabulary, the CoreSources effect source and ForeignLanguages are computed at build time from `toolchain:` reads, and their checked-in copies and generator modes are deleted. The Effect and ForeignLanguage enums stay authored as the one home of their names, and a comptime check against the derived list fails the build with a registered error naming any missing or extra name.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T16:51:46.429Z"
+          "at": "2026-11-10T17:28:39.077Z"
+        },
+        {
+          "n": 28,
+          "text": "D-EMBED-TOOLCHAIN1=A, table cutover part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from `toolchain:` reads, and their copies and generator modes are deleted. The declaration parser lives in one package, and the generator's copy is deleted. Blocked: the parser reads files known only from a walk (Core/*/Runtime/**/*.jet and every Syntax dir file), but embed_file takes only a string literal (E0957), find returns paths without content, and a script can't import package code (E0602). The owner ballot on the comptime read surface (embed_file of a comptime String, or an embed_files(glob) builtin) decides the mechanism. The comptime cost of CoreCallRows (896 KB) is measured against the generator run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T17:28:40.971Z"
         }
       ],
       "refs": [],
@@ -56896,12 +56905,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T16:51:46.429Z",
+      "updated": "2026-11-10T17:28:40.971Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 27
+      "criteriaLastN": 28
     },
     {
       "id": "c022g7qw",
@@ -200096,6 +200105,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:28:40.971Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#28 D-EMBED-TOOLCHAIN1=A, table cutover part 2: the five Core-de"
+    },
+    {
+      "at": "2026-11-10T17:28:39.077Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#27: Split: 3 tables now, 5 Core-declaration tables blocked on a comptime read-surface ballot (PerfLead2, 2026-11-10); was: D-EMBED-TOOLCHAIN1=A, table cutover (the bootstrap half after c26; it builds with a seed cut from the train that lands c26): the derived compiler and Jetpack tables that CoreSourceRows.jet writes toda"
+    },
     {
       "at": "2026-11-10T17:20:30.608Z",
       "by": "Main",
