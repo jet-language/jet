@@ -36,13 +36,19 @@ sync_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
     }
 }
 
+// Wakes up to `count` waiters on `address`: parked fibers first, then
+// threads on the futex. When the fibers take the whole count the futex is
+// still woken: a thread waiter may be the carrier a woken fiber needs (a task
+// with no fiber stack runs on its carrier and waits on the futex, #6403 c8),
+// and it would sleep on with the word free while the fiber waits for it.
+// Every count-limited caller rechecks its word or predicate on a spurious wake.
 sync_wake: fn(address: I64, count: I64) {
     lot: sync_lot
     remaining := count
     // The locked read orders it after the store this wake publishes.
     if (lot != I64{0} && sync_add(lot, I64{0}) != I64{0}) {
         remaining = remaining - coll_call3(sync_load(wrapping(lot + I64{16})), lot, address, count)
-        if (remaining <= I64{0}) -> return
+        if (remaining <= I64{0}) -> remaining = I64{1}
     }
     sync_futex_wake(address, remaining)
 }
