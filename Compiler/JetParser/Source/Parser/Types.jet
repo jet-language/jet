@@ -613,7 +613,7 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
                     args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
                 }
                 else -> {
-                    args.push(parser_parse_type(state, depth + 1).ty)
+                    args.push(parser_parse_type_argument(state, depth + 1))
                 }
             }
             if parser_type_close_here(state) -> break
@@ -634,6 +634,18 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
     close: parser_type_gt_span(state)
     ty: parser_apply_named_type(name, args)
     ParsedType{ty: ty, span: parser_cover(prefix, close)}
+}
+
+// One written type argument. An integer literal is the argument of a
+// `<comptime N: Int>` number parameter (`Packet<4>`), the same length
+// measure `[T#4]` spells; anything else is a type. A named constant
+// (`Packet<SIZE>`) parses as a type name and sema reads its value.
+parser_parse_type_argument: fn(state: &JetParserState, depth: Int) -> Type {
+    if parser_current_kind(state) == TOKEN_INT {
+        token: parser_bump(state)
+        return Type.Measure{measure: Measure.Literal{kind: "length", value: parser_integer(state, token) ?? 0}}
+    }
+    parser_parse_type(state, depth).ty
 }
 
 parser_parse_measure: fn(state: &JetParserState, kind: String, depth: Int) -> Measure {

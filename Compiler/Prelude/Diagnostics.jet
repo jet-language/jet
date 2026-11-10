@@ -3663,14 +3663,15 @@ RetiredAtNumberParameter: struct {
 
 CompileTimeNumberParameter: struct {
     name: String
+    value_type: String
 
     impl Diagnostic {
         code: "E0390"
-        meaning: "Compile-time number parameters are not implemented yet"
+        meaning: "A compile-time number parameter must be `Int`"
         detail: true
-        what: fn(self) -> String { "`{self.name}` is a compile-time number parameter, which this compiler does not support yet." }
-        why: fn(self) -> String { "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented." }
-        fix: fn(self) -> String { "Use a type parameter, or pass the number as an ordinary argument or field until number parameters ship." }
+        what: fn(self) -> String { "`{self.name}` is a compile-time `{self.value_type}` parameter, and only `Int` number parameters exist." }
+        why: fn(self) -> String { "An instance of the declaration is named by its number arguments (`Packet<4>`), which are whole numbers known while compiling." }
+        fix: fn(self) -> String { "Declare it `comptime {self.name}: Int`, or make it a type parameter or an ordinary argument." }
     }
 }
 

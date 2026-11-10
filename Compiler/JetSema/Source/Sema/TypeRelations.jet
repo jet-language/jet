@@ -1029,7 +1029,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
     if ty == {
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
         .Apply(name, args) -> {
-            rewritten: loop arg in args -> sema_type_resolve_declared_recursive(graph, arg, caller, generic_params)
+            rewritten: loop arg in args -> sema_type_resolve_type_argument(graph, arg, caller, generic_params)
             head: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets.
@@ -1074,6 +1074,15 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         else -> ty
     }
+}
+
+// One argument of `Name<…>`: a constant of the spelling module (`Packet<SIZE>`)
+// is the number it holds, as a literal argument (`Packet<4>`) is.
+sema_type_resolve_type_argument: fn(graph: SemaRegistrationGraph, arg: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
+    if arg == .Named(name) && !sema_type_name_is_generic(generic_params, name) {
+        if sema_type_measure_constant(graph, caller, name, 0) == .Val(value) && value >= 0 -> return Type.Measure{measure: Measure.Literal{kind: "length", value: value}}
+    }
+    sema_type_resolve_declared_recursive(graph, arg, caller, generic_params)
 }
 
 // Rust `resolve_measure`: a fixed length spelled by a constant of the module

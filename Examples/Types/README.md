@@ -37,6 +37,10 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [TypeMarksSuffix](TypeMarksSuffix.jet) — `?` and `!` follow the type they mark.
 - [TypeState](TypeState.jet) — Typestate: order-of-events safety, checked at compile time.
 
+## Generics
+
+- [ConstPacket](Generics/ConstPacket.jet) — A number parameter, `<comptime N: Int>`, makes one instance per number: a `Packet<4>` and a `Packet<2>` are two types with their own lengths, and a…
+
 ## Optionals
 
 - [Option](Optionals/Option.jet) — Option with pattern tests and flow narrowing.

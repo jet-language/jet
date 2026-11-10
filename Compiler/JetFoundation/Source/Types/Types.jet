@@ -679,7 +679,12 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             names.join(" | ")
         }
         .Quantity(base, _) -> type_carrier_identity(base)
-        .Measure(_) -> "Int"
+        // A `<comptime N: Int>` argument names its instance by its number
+        // (`Packet<4>` and `Packet<2>` are two instances).
+        .Measure(measure) -> {
+            if measure == .Literal(kind, value) && kind == "length" -> return "{value}"
+            "Int"
+        }
     }
 }
 
@@ -1147,6 +1152,13 @@ compute_dimension_value: fn(ty: Type) -> Int? {
         }
         else -> None
     }
+}
+
+// The number a `<comptime N: Int>` argument holds: a literal length
+// measure (`Packet<4>`, or a constant sema folded to one).
+number_argument_value: fn(ty: Type) -> Int? Never! {
+    if ty == .Measure(value) -> return measure_literal_value(value)
+    None
 }
 
 compute_shape_type: fn(name: String, dimensions: [Int]) -> Type Never! {

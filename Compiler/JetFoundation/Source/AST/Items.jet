@@ -595,8 +595,9 @@ TypeParam: struct {
 }
 
 // The declaration head of a compile-time number parameter.
-// Only the declaration carries `comptime`; uses write the plain name. Sema rejects
-// it with E0390 until card #3505 lands substitution, identity and layout.
+// Only the declaration carries `comptime`; uses write the plain name. An
+// `Int` one is a generic parameter whose arguments are numbers (#3505);
+// sema rejects any other value type with E0390.
 PrepParam: struct {
     prep_span: Span
     value_type: String

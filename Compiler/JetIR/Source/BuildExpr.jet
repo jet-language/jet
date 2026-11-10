@@ -5,7 +5,7 @@
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
-    jet_foundation.[AutoVectorizationFacts]
+    jet_foundation.[AutoVectorizationFacts, number_argument_value]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
@@ -1853,6 +1853,13 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
         .ConstRef(symbol) -> return ir_constant(m, p, b, expression_ty, symbol.key, span)
         .GlobalShared(initializer, lifetime) -> return ir_shared_site(m, p, b, expression_ty, initializer, lifetime, span)
         .TraitConst(owner, trait_short, name) -> return ir_trait_constant(m, p, b, expression_ty, owner, trait_short, name, span)
+        .NumberParam(param) -> {
+            // The instance binds the number parameter to its Type.Measure
+            // argument; a body built outside any instance has no number.
+            number: number_argument_value(ir_fact(p, b, param, span)) ?? return ir_fail_slot(b, span, "number parameter {ir_type_name(param)} has no number in this instance")
+            ty: ir_value_type(m, p, expression_ty) ?? return ir_type_fail(b, span, expression_ty)
+            return ir_int_constant(m, b, ty, number)
+        }
         .CtLit(value) -> return ir_comptime(m, p, b, expression_ty, value, span)
         .ListLit(values) -> return ir_list_literal(m, p, b, expression_ty, values, span)
         .List(values, coercion) -> {

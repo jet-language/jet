@@ -137,13 +137,12 @@ sema_casing_alias_number_diagnostic: fn(definition: TypeAliasDef, zero: String) 
 
 // Every generic declaration site (functions and methods, structs, enums,
 // aliases) reaches its parameters through this one walk. A `<comptime N: Int>`
-// number parameter parses into `TypeParam.prep`, but number-parameter
-// substitution, instance identity and layout belong to card #3505, so it is
-// rejected here, once per written parameter, and registration never treats
-// `N` as a type.
+// number parameter parses into `TypeParam.prep` and registers as a generic
+// parameter whose arguments are numbers; one of any other value type is
+// rejected here, once per written parameter, and never registered.
 sema_casing_type_parameter: fn(parameter: TypeParam, diagnostics: &[Diagnostic]) {
-    if parameter.prep != None {
-        diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet.", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented.", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship."))
+    if parameter.prep == .Val(prep) {
+        if prep.value_type != "Int" -> diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time `{prep.value_type}` parameter, and only `Int` number parameters exist.", "An instance of the declaration is named by its number arguments (`Packet<4>`), which are whole numbers known while compiling.", "Declare it `comptime {parameter.name}: Int`, or make it a type parameter or an ordinary argument."))
         return
     }
     sema_casing_pascal(parameter.name, parameter.name_span, "type parameter", diagnostics)

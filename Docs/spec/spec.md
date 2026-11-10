@@ -908,6 +908,27 @@ channels[channel] += U64{1}
 ```
 Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
 
+### Number parameters
+
+A type or function may take a compile-time `Int` as a generic parameter,
+declared `<comptime N: Int>`; only the declaration writes `comptime`. Each
+number is its own instance: `Packet<4>` and `Packet<2>` are two types, laid
+out and named apart. An argument is an integer literal or a constant
+(`Packet<SIZE>`), or a number parameter in scope (`Packet<N>`). Inside the
+declaration, `[T#N]` takes the instance's length and `N` reads as an `Int`.
+A call infers `N` from its arguments' types (D-CONSTGEN1, D-CONSTGEN2).
+
+```jet
+Packet: struct<comptime N: Int> {
+    data: [U8#N]
+}
+
+size_of: fn<comptime N: Int>(packet: Packet<N>) -> Int { N }
+```
+
+A number parameter of any other value type (`<comptime N: String>`) is
+**E0390**.
+
 ## Closures and function values
 
 A lambda is `(params) -> expression` or `(params) -> { ... }`. A single

@@ -4337,7 +4337,7 @@ sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], fact
 // which the generic visitors cannot do.
 sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
     if node.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)

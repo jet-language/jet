@@ -4368,6 +4368,14 @@ sema_expr_ascii_letter: fn(byte: U8) -> Bool Never! {
 
 sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index: sema_scope_resolve_index(scopes, name) ?? {
+        // `N` of a `<comptime N: Int>` number parameter in scope reads as the
+        // instance's number.
+        loop parameter in context.generic_params {
+            if parameter.number && parameter.name == name {
+                value: sema_node(context, Type.Int, NodeKind.NumberParam{param: Type.Named{name: name.copy()}}, span)
+                return sema_expr_expected(value, expected, environment, program, diagnostics)
+            }
+        }
         diagnostics.push(sema_unknown_name_at(name, span, environment, program, scopes))
         return None
     }

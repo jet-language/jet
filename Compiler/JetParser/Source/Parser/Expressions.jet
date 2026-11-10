@@ -2107,7 +2107,7 @@ parser_parse_call_type_args: fn(state: &JetParserState, depth: Int) -> [Type] {
     parser_bump(state)
     args := [Type]{}
     loop {
-        args.push(parser_parse_type(state, depth + 1).ty)
+        args.push(parser_parse_type_argument(state, depth + 1))
         if state.pending_type_gt || parser_current_kind(state) != TOKEN_COMMA -> break
         parser_bump(state)
         if parser_type_close_here(state) -> break

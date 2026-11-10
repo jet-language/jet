@@ -382,6 +382,8 @@ SemaRegistrationGenericParam: struct {
     identity_key: String
     // The declaring module, where the bounds' trait names resolve.
     module_identity: String
+    // A `<comptime N: Int>` number parameter (TGenericParam.number).
+    number: Bool{false}
 }
 
 SemaRegistrationParameter: struct {
@@ -1077,9 +1079,10 @@ sema_registration_generic_identity: fn(owner_key: String, params: [SemaRegistrat
 sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String, module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // A `<comptime N: Int>` number parameter is rejected by the casing
-        // walk (E0390) and is never registered as a type parameter.
-        if parameter.prep != None -> next
+        // A `<comptime N: Int>` number parameter is a generic parameter whose
+        // arguments are numbers; one of another value type is E0390 in the
+        // casing walk and is never registered.
+        if parameter.prep == .Val(prep) && prep.value_type != "Int" -> next
         duplicate: loop previous in params {
             if previous.name == parameter.name -> break true
         } ?? false
@@ -1094,6 +1097,7 @@ sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String
             span: parameter.name_span,
             identity_key: "{owner_key}<{index}:{parameter.name}[{bound_key}]>",
             module_identity: module_identity,
+            number: parameter.prep != None,
         })
     }
     params
