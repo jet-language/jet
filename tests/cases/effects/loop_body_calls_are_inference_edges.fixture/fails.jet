@@ -1,0 +1,26 @@
+// The edge carries a real failure too: `parse_guest` returns `Err`, so
+// `has_guest`, which calls it in a loop body, fails with it, and a `Never!`
+// caller is refused.
+parse_guest: fn(name: String) -> Bool {
+    if name == "" -> return Err("blank name")
+    name.starts_with("guest")
+}
+
+has_guest: fn(names: [String]) -> Bool {
+    found: loop name in names {
+        if parse_guest(name) -> break true
+    } ?? false
+    found
+}
+
+count_guests: fn(names: [String]) -> Int Never! {
+    hits := 0
+    loop name in names {
+        if has_guest([String]{name}) -> hits += 1
+    }
+    hits
+}
+
+run: fn() Never! {
+    print("{count_guests([String]{"ann", "guest1"})}")
+}
