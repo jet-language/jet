@@ -1,0 +1,12 @@
+# #6281 c67: Zig's `.{ .field = value }` is not Jet (tests/ui/dotfield_construction_declined pins its parse
+# diagnostic); `Point{x: 1, y: 2}` and leading-dot enum values keep their meaning on O0, O1 and O2.
+fixture: dotfield_declined_literals_keep_meaning/input
+step: jet run run.jet
+exit: 0 # O0 runs the struct literal and both enum values
+stdout: = "1 2\ncareful\nfast\n" # Point{x: 1, y: 2} fields, then .Careful and .Fast
+step o1: jet run --optimize=basic run.jet
+exit: 0 # O1 runs the same program
+stdout: = "1 2\ncareful\nfast\n" # same meaning at O1
+step o2: jet run --optimize=full run.jet
+exit: 0 # O2 runs the same program
+stdout: = "1 2\ncareful\nfast\n" # same meaning at O2
