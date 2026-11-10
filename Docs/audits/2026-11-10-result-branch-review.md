@@ -102,3 +102,17 @@ The "leaves" class only checks the first word of the arm.
 
 76 handlers grow from one line to four, about 230 lines in all. The old form gets the generic parse error
 rather than a message naming the new form; that is the ratified D-TEACH-RECONCILE1=A rule.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independent evidence | Verdict |
+|---|---|---|
+| Existing branch forms agree | Reran r01-r08: r01/r02 print got 3, failed Empty, size 2; r03 binds payloads; r04 is E0003; r05 E0373; r06 prints 20 20 20; r07/r08 agree. | Holds for these examples on a0.0.43. |
+| Deletion leaves ? and ! one meaning each | The draft itself lists optional types, fallback, diagnostic forms, negation and error contracts. | Fails literally; corrected to removing one result-specific surface. |
+| Regex census proves exact cutover and line cost | Read rb-census-dev.mjs: its 400-character regex window and first-word exit heuristic are not an AST walk. | Fails; exact line-growth forecasts withdrawn, census treated as an estimate. |
+| Every rewrite is equivalent | Scalar outputs check one evaluation, not move-only ownership, cleanup, branch laziness, nested err shadowing or loop-target scope. | Holds only within tested limits; full-table fallback required for unproved compact rewrites. |
+| C's two layouts violate one mechanism | AGENTS I8 expressly allows helpful spelling and organization differences; C keeps ordinary patterns. | Fails; C's real costs are separator grammar and formatter rules. |
+| ?? covers any value-position fold | fold can transform both branches; fallback keeps the success value. Read Kotlin Result.fold, which is inline. | Fails; corrected D's best case. Non-local return is not thereby granted to Jet. |
+| The operator was not previously approved | Read D-RESULT-DECON2: outcome B; D-FAIL-BIND1: A; D-TEACH-RECONCILE1: A. | Fails as a possible framing; A explicitly reverses approved syntax. |
+
+Recommendation: A is defensible for a strictly vertical style, but I prefer C for short exhaustive two-payload handlers. It removes the specialized operator without losing compactness or adding a second semantic mechanism. The draft still recommends A, now with the real tradeoff rather than an I8 objection. No new option was needed. Do not post exact regex-based migration guarantees, a speed claim, or the literal one-meaning slogan.
