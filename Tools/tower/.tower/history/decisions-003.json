@@ -15866,6 +15866,357 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-30",
       "retiredAt": "2026-11-10T02:53:13.989Z"
+    },
+    {
+      "id": "D-USE-MEMBERS1",
+      "cardId": "c0rodlty",
+      "group": "syntax",
+      "title": "How a `use` block imports several names from one module",
+      "situation": "You chose import blocks with `alias :: path` rows, and answered that member lists become alias rows. That answer rested on a wrong count: Main reported 2 lists. The step-2 tree has 2,772 lists of the form `use pkg.[A, B]`, importing 16,498 names, mostly in the compiler and Jetpack. The cutover in flight keeps lists as rows, so choosing B or C adds a second mechanical rewrite. This ballot asks again with the real numbers, and we recommend keeping lists as rows.",
+      "gist": "Inside a `use` block, how do you take many names from one module?",
+      "lesson": "Big programs pull dozens of names from one module. One row per name is uniform but long.",
+      "explainer": "",
+      "story": "Mia adds a parser file to the compiler. It needs nine names from jet_foundation; she writes nine path rows or one list, and `jet fmt` prints one list row. Her teammate Leo, new to Jet, needs one name: he writes `core.math.max`, and it stays that way.",
+      "inWild": "use std::{env, path::PathBuf};",
+      "detail": "Today the compiler imports names like this: `use jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]`. Counted on the step-2 tree: 2,772 lists, 16,498 names, largest 111. Large lists are already one name per line, so the lists take 10,527 lines now.\n\nUnder A, a list is one row of a block: `jet_foundation.[BuildOptions, build_options_key]`. It is the ordinary path row with its last segment grouped. Each entry is a path under that prefix, so a dotted entry such as `m.[a.b, c]` stays legal.\n\nA bare path row such as `core.math.max` already binds `max` today. `jet fmt` groups two or more path rows that share a prefix into one list row; a single row stays a bare path. It rewrites an identity alias row such as `term :: core.term` into the bare path `core.term`.\n\nA one-line `use x` is the block form holding one row, not a second spelling. `jet fmt` folds a file's one-line uses into one block once there are two. Brace groups such as `use m.{x}` stay the existing E0003 error.\n\nThe cutover moves plain lists unchanged. An `x as y` entry, found in at least 73 one-line lists, becomes the alias row `y :: m.x`. `pub use` re-export lists and foreign-language lists such as `use c.[…]` follow the same row rules.\n\n`jet fmt` sorts list names. It puts one name per line once the row passes the line width. Importing one name twice is the existing E0105 error, \"defined twice\".\n\nUnder B, lists are removed and each name is its own path row: `jet_foundation.BuildOptions`. The module prefix repeats on every row, and the tree grows by about 6,000 lines.\n\nUnder C, the module is imported once and code writes `jet_foundation.BuildOptions` at each use. The rewrite is mechanical but touches most compiler lines. It matches Go, which qualifies every use.\n\nThe `use` block itself, `alias :: path` and the removal of `as` are unchanged by this vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A member list is a row",
+          "detail": "A row may be `module.[A, B]`: the path row with its last segment grouped. It brings in those names, unrenamed. Rename a name with an alias row. `as` is gone everywhere.",
+          "technical": "Plain lists move into blocks unchanged; `x as y` entries split into `y :: m.x` alias rows, including `pub use` and foreign-language lists. Dotted entries stay. `jet fmt` groups two or more same-prefix path rows, rewrites identity alias rows to bare paths and folds one-line uses into a block. Duplicates are E0105.",
+          "code": "use {\n    core.term\n    jet_foundation.[BuildOptions, build_options_key]\n}"
+        },
+        {
+          "key": "B",
+          "name": "One path row per name",
+          "detail": "Member lists are removed. Each imported name is its own bare path row, `module.Name`, with the module prefix repeated.",
+          "technical": "A second codemod turns each listed name into its own path row: about 6,000 more lines, with the module prefix repeated on each.",
+          "code": "use {\n    core.term\n    jet_foundation.BuildOptions\n    jet_foundation.build_options_key\n}"
+        },
+        {
+          "key": "C",
+          "name": "Qualify at each use",
+          "detail": "Member lists are removed. Code imports the module and writes `module.Name` where it uses a name.",
+          "technical": "A second codemod qualifies every use site of the 16,498 names; mechanical, but it touches most compiler lines. This is how Go reads.",
+          "code": "use jet_foundation\n\nfn f(options: jet_foundation.BuildOptions) { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "No member lists: code qualifies every use (fmt.Println).",
+          "code": "import \"fmt\""
+        },
+        {
+          "lang": "Rust",
+          "note": "A use tree brings in several names from one path.",
+          "code": "use std::{env, path::PathBuf};"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It keeps a 111-name import one row long, and each import has one canonical spelling, which `jet fmt` prints.",
+        "gains": [
+          "No 6,000-line growth, and no module prefix repeated per name.",
+          "A beginner can write one path per name, as today, and `jet fmt` groups them.",
+          "`as` is still gone and aliases still read `name :: path`."
+        ],
+        "losses": [
+          {
+            "loss": "`jet fmt` reshapes what the writer typed: two path rows from one module become a list.",
+            "mitigation": "It is the same canonical printing `jet fmt` already does; a single row is never changed."
+          },
+          {
+            "loss": "Two branches that add names to the same short list conflict on that line.",
+            "mitigation": "Long lists are one name per line, so conflicts stay on small lists and resolve by keeping both names."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The module prefix repeats on every row, and the compiler imports grow by about 6,000 lines."
+          },
+          {
+            "key": "C",
+            "reason": "It rewrites every use site of 16,498 names and makes long qualified names the norm."
+          }
+        ],
+        "tradeoff": "Formatter reshaping and rare one-line merge conflicts, for short imports with one canonical spelling."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: IrTypes-3. The review checked every claim against dev and probes. Main fixed the name count, the list migration rules, B, the fmt grouping threshold, the one-line form and the losses."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Inside a `use` block, how do you take many names from one module?",
+        "lesson": "Big programs pull dozens of names from one module. One row per name is uniform but long.",
+        "trio": {
+          "current": {
+            "note": "Today a member list sits on its own use line.",
+            "code": "use jet_foundation.[BuildOptions, build_options_key]"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A use tree brings in several names from one path.",
+            "code": "use std::{env, path::PathBuf};"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A member list is a row",
+            "gist": "A row may be `module.[A, B]`, the path row grouped.",
+            "gains": [
+              "No growth.",
+              "Write paths as today; `jet fmt` groups them."
+            ],
+            "losses": [
+              "`jet fmt` reshapes rows into lists."
+            ],
+            "proposed": {
+              "code": "use {\n    core.term\n    jet_foundation.[BuildOptions, build_options_key]\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "One path row per name",
+            "gist": "One `module.Name` row per imported name.",
+            "gains": [
+              "One row form."
+            ],
+            "losses": [
+              "About 6,000 more lines; the prefix repeats per row."
+            ],
+            "proposed": {
+              "code": "use {\n    jet_foundation.BuildOptions\n    jet_foundation.build_options_key\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Qualify at each use",
+            "gist": "Import the module; write `module.Name` at each use.",
+            "gains": [
+              "No list form."
+            ],
+            "losses": [
+              "Every use site of 16,498 names changes."
+            ],
+            "proposed": {
+              "code": "use jet_foundation"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Large imports stay one row, and each import form has one spelling.",
+          "gains": [
+            "No growth; one canonical spelling printed by `jet fmt`."
+          ],
+          "losses": [
+            {
+              "loss": "`jet fmt` reshapes rows into lists.",
+              "mitigation": "A single row is never changed."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "About 6,000 extra lines, the prefix on every row."
+            },
+            {
+              "key": "C",
+              "reason": "Rewrites every use site."
+            }
+          ],
+          "tradeoff": "Formatter reshaping, for short imports with one spelling."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-01T17:34:19.634Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-01",
+      "retiredAt": "2026-11-10T03:51:39.515Z"
+    },
+    {
+      "id": "D-COMPTIME-USE1",
+      "cardId": "c0rodlty",
+      "group": "syntax",
+      "title": "What `comptime use` imports, and where its names can be used",
+      "situation": "Imports now use Go-style `use` blocks, and a file may hold several of them. You mentioned `comptime use` for custom linking logic in single-file programs, and the #6542 step-1 criterion names it, but no meaning exists yet. Today every import is an ordinary import, so build-only helpers sit beside the program code they configure. This ballot decides whether `comptime use` exists and what it means. We recommend a `comptime use` form whose names only compile-time code can see, so the helpers never ship.",
+      "gist": "Should `comptime use { … }` import modules that only compile-time code can see, so they never ship in the program?",
+      "lesson": "Some code runs only while building, for example choosing link libraries. Its imports should not become part of the program that ships.",
+      "explainer": "",
+      "story": "Ana writes one file that builds a small tool and links a system library only on Linux. She imports the build helpers with `comptime use`. The helpers run while building, the tool links the library, and the shipped binary contains none of the helper code. If she calls a helper from `main`, the compiler stops her with a clear error.",
+      "inWild": "Zig: build logic lives in build.zig, a separate file that imports std.Build. Source: https://ziglang.org/learn/build-system/\n\nRust: build-only dependencies go in [build-dependencies] and are visible only to build.rs. Source: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#build-dependencies",
+      "detail": "`comptime` is already a registered keyword, used by comptime blocks, functions and loops. The `link` and `build` helper names in the examples are proposed API. They do not exist in Core today; the vote is about the import form.\n\nUnder A, `comptime use` takes the same rows as `use`, as a block or as one line. Its names work only in compile-time positions: a `comptime { }` block, a `comptime fn` body, a comptime argument, and a constant computed while building. In that last case the value ships, but the helper does not.\n\nA use in a runtime body, a runtime type or a `#Test` body is a sema error. It has its own registered code, what/why/fix text and UI snapshot. The fix offers both ways out: move the call into compile-time code, or switch to plain `use`, which ships the helper.\n\nPlain `use` stays visible to compile-time code too. Importing one name both ways is the existing E0105 error, \"defined twice\". A `comptime { }` block inside a `#Test` body is a compile-time position, so tests reach build helpers through it.\n\nA module reached only from compile-time code is built for the comptime child and left out of the runtime link set, whichever form imported it. So a beginner who writes plain `use` ships no build helper either. `comptime use` is the expert opt-in that turns a runtime call into an error. Jetpack still resolves and locks the package like any dependency. Target-dependent linking is an ordinary `if` inside the comptime block, so imports are never conditional.\n\nUnder B, there is no new form. Plain `use` works in comptime code, a lint warns when a module is used only from comptime code, and the linker drops unreached modules.\n\nUnder C, build logic lives only in a separate build file.\n\nA build-time constant whose type comes from a `comptime use` module cannot ship, because that type is not linked. Using one in runtime code raises the same new error, and the fix is to import that module plainly.\n\nUnder A and B alike, a module used only from compile-time code is never linked. A adds an enforced boundary: a runtime call to an opted-in helper is an error, not a lint.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A comptime-only import block",
+          "detail": "`comptime use { … }` takes the same rows as `use`. Its names work only in compile-time code. Any module used only by compile-time code, however imported, is never linked into the program.",
+          "technical": "Parser: `comptime use` block and one-line form, registered in the syntax registry. Sema: comptime-only bindings; a runtime, type-position, shipped-constant-type or #Test-body reference raises a new registered diagnostic with a UI snapshot and a two-way fix. Driver: modules used only from compile-time code stay out of the runtime link set. The helper API shown is proposed.",
+          "code": "comptime use {\n    build :: core.build       // proposed API\n    link :: core.build.link   // proposed API\n}\n\ncomptime {\n    if build.target.os == .linux -> link.system(\"z\")\n}\n\nfn main() { print(\"ok\") }"
+        },
+        {
+          "key": "B",
+          "name": "Plain `use` plus a lint",
+          "detail": "No new form. Compile-time code imports with ordinary `use`; a lint warns when a module is used only from comptime code; the linker drops unreached code.",
+          "technical": "No grammar change; a new lint; relies on linker reachability for size.",
+          "code": "use link :: core.build.link\n\ncomptime { link.system(\"z\") }"
+        },
+        {
+          "key": "C",
+          "name": "Build logic only in a build file",
+          "detail": "Link and build logic must live in a separate build file; program files import only runtime modules.",
+          "technical": "No grammar change; the single-file case needs a second file.",
+          "code": "// build.jet\nuse link :: core.build.link\nlink.system(\"z\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Build-only dependencies are visible only to build.rs. Source: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#build-dependencies",
+          "code": "[build-dependencies]\ncc = \"1\""
+        },
+        {
+          "lang": "Zig",
+          "note": "Build logic is a separate build.zig file. Source: https://ziglang.org/learn/build-system/",
+          "code": "const std = @import(\"std\");\npub fn build(b: *std.Build) void { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It keeps build logic in the same file, as you asked, and lets a writer make a runtime call to a build helper a compile error.",
+        "gains": [
+          "One file can hold its own link logic.",
+          "An opted-in build helper can never be called from runtime code: it is an error, not a warning.",
+          "Beginners keep plain `use`, which links nothing that only compile-time code uses."
+        ],
+        "losses": [
+          {
+            "loss": "Two spellings import a build-only helper: plain `use` and `comptime use`.",
+            "mitigation": "They differ in meaning: plain `use` is the default, and `comptime use` is the expert opt-in that adds the error."
+          },
+          {
+            "loss": "Compiler work: one grammar form, one sema binding class and one new diagnostic with its snapshot.",
+            "mitigation": "Comptime blocks already carry compile-time-only checks that the binding class reuses."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B never makes a runtime call to a build helper an error; the boundary stays advice."
+          },
+          {
+            "key": "C",
+            "reason": "C needs a second file, which defeats the single-file setups you asked for."
+          }
+        ],
+        "tradeoff": "One opt-in import form, for single-file link logic with an enforced compile-time boundary."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: IrTypes-3. The review checked every claim against dev and probes; Main fixed the B comparison, the E0105 rule, the shipped-constant edge, the #Test path, the two-way fix and the stated losses."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `comptime use { … }` import modules that only compile-time code can see?",
+        "lesson": "Some code runs only while building, such as choosing link libraries. Its imports should not ship in the program. How should a file import build-only helpers?",
+        "trio": {
+          "current": {
+            "note": "Every import is a runtime import, even when only comptime code uses it.",
+            "code": "use link :: core.build.link\ncomptime { link.system(\"z\") }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Build-only dependencies are visible only to build.rs. Source: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#build-dependencies",
+            "code": "[build-dependencies]\ncc = \"1\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A comptime-only import block",
+            "gist": "Names from `comptime use` work only in compile-time code and never ship.",
+            "gains": [
+              "Single-file link logic; runtime calls to opted-in helpers are errors."
+            ],
+            "losses": [
+              "An opt-in second import form."
+            ],
+            "proposed": {
+              "code": "comptime use {\n    link :: core.build.link   // proposed API\n}\ncomptime { link.system(\"z\") }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Plain use plus a lint",
+            "gist": "No new form; a lint flags comptime-only imports; the linker drops unreached code.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "A warning, not an error, guards runtime calls to build helpers."
+            ],
+            "proposed": {
+              "code": "use link :: core.build.link"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Separate build file only",
+            "gist": "Build logic must live in its own file.",
+            "gains": [
+              "Clear split between build and program."
+            ],
+            "losses": [
+              "Single-file setups need a second file."
+            ],
+            "proposed": {
+              "code": "// build.jet\nuse link :: core.build.link"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Build logic stays in the same file, and an opt-in makes runtime calls to build helpers an error.",
+          "gains": [
+            "Single-file link logic with an enforced boundary; beginners keep plain `use`."
+          ],
+          "losses": [
+            {
+              "loss": "An opt-in second import form.",
+              "mitigation": "Beginners never need it; it only adds the error."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B never makes a runtime call to a build helper an error."
+            },
+            {
+              "key": "C",
+              "reason": "Needs a second file, defeating single-file setups."
+            }
+          ],
+          "tradeoff": "One opt-in import form, for an enforced build boundary."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-01T17:34:21.708Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-01",
+      "retiredAt": "2026-11-10T03:51:39.515Z"
     }
   ]
 }

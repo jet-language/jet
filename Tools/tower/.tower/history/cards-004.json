@@ -87981,6 +87981,204 @@
       "completedAt": "2026-11-07T03:39:28.500Z",
       "questions": [],
       "retiredAt": "2026-11-10T03:46:46.166Z"
+    },
+    {
+      "id": "c0m0ims7",
+      "num": 6431,
+      "title": "Jet-hosted `jet build` never creates JET_STORE_DIR: no function or blob store, so stored-function rebuilds cannot work",
+      "body": "Found by TestGreen-3 (2026-10-31) on tests/cases/build_entry/dev_build_from_stored_functions_is_byte_identical (after correcting its remove step to run-cache/cas, ported from build_entry.rs:857-897 at ed77c235f). With JET_STORE_DIR={work}/run-cache, the Jet-hosted `jet build` writes nothing there: no function store and no blob store (reproduced by hand). The Rust compiler populated it. The case ERRORs until the store is written.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-49 (patch row: criterion/count 49): UNEXPECTED-PASS (KF row removed by this patch) tests/cases/build_entry/dev_build_from_stored_functions_is_byte_identical.case; PASS dev_build_restores_a_deleted_executable_from_its_cached_image.case (testkit 14fbedd cases, jet = tb s1 160ef98c200bb16e = dev 33f5e526a2 + wave 19 + this patch)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Scope (GoldC-3, 2026-10-31): the Jet-hosted jet build never opens ArtifactStore (only cache, doctor and inspect do). Meeting this needs function-granular object emission keyed by an IR digest, per-function store records, the image published as a cas blob, and link-from-records when the blobs are gone: a backend port of about 1-2 days. Stays KNOWN-FAILING until then."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in TestGreen3-3: TestGreen3-3: dev_build_from_stored_functions now removes run-cache/cas, the store actually in use (Main ruling a; build_entry.rs:857-897 at ed77c235f). It still ERRORs because the product `jet build` never creates JET_STORE_DIR (no function or blob store), so it gets a known-failing row on #6431."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/cases/build_entry/dev_build_from_stored_functions_is_byte_identical PASSes: jet build populates JET_STORE_DIR with its function and blob stores, and after the blobs are deleted the rebuild is byte-identical.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/build_entry/dev_build_from_stored_functions_is_byte_identical.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:48:02.539Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T10:04:45.865Z",
+      "updated": "2026-11-07T03:48:56.480Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T03:48:56.480Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T03:51:39.514Z"
+    },
+    {
+      "id": "c0rodlty",
+      "num": 6542,
+      "title": "Imports: Go-style `use { … }` blocks with `alias: path` rows; retire `as` and member lists",
+      "body": "Owner instruction 2026-11-01 07:40 EST (chat): imports use Go-style blocks; aliasing uses `name:` (D-DECL-COLON1=A), not `as`; more than one use block per file is allowed (single-file multi-module setups, `comptime use` for custom linking logic). Owner answers the same morning: a single import may stay on one line (like Go); member lists (`use math.{double}`) are retired in favor of alias rows.\n\nCanonical form:\n\n```jet\nuse core.term\n\nuse {\n    jetfoundation\n    unicode: core.text\n    double: math.double\n    \"./lib\"\n}\n```\n\nRows: a module path, `alias: path`, a string file path, or `alias: \"path\"`. One row per line. `use alias: path` is the single-line alias. `as` in imports and the `.{…}` member list are removed (they are no longer Jet syntax and get no teaching diagnostic).\n\nBootstrap order: (1) the parser, formatter, registry and LSP accept the block and the `::` alias beside the old forms; a seed is cut from that commit. (2) One cutover migrates every in-repository `use` (Compiler, Core, Prelude, Jetpack, Tools, Examples, tests, .case sources, docs, editor grammars, snapshots) and deletes the old forms.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: alias rows are written alias: path under D-DECL-COLON1=A; the bootstrap seed step is done (c2 met) so c1 keeps only the surface; the retired-form teaching is removed per the owner's order."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner ruling: import rows switch to alias: path (use { alias: path }, use alias: path) with the #6586 name: value cutover, which carries them. c2-c6 met (f2898ba8d5). c1 is open only for comptime use (D-COMPTIME-USE1=A, unbuilt), assigned to Builder5 in the alias: path spelling; the seed requirement is met by a0_027 (dfc887571e) once it is shown to contain 1620f05362."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "Correction: the wave 33 landing log for c2 came from CardClose-63, which did NOT land (stale on f251c88891 at Compiler/JetCli/Tests/SourceTransaction.jet). Step 2 is rebased as CardClose-63b onto the wave 33 tree (dev 190f826022): the stale hunk is replaced by the same codemod (useblock/migrate.mjs) on the current file, plus the two fixtures wave 33 added; a full-tree codemod --check then changes 0 files; lane-check CHECK OK. It runs in wave 34 now. c1 still needs D-COMPTIME-USE1=A (ratified): `comptime use { … }` with comptime-only bindings, a registered diagnostic with a UI snapshot, and compile-time-only modules kept out of the link set. None of that exists yet."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "DONE (owner order #6542 c2). CardClose-63.patch is tsr's tree (dev 360e470044 + CC-63) diffed against 360e470044: 7077 files, apply --check OK on a fresh 360e470044 index. It is all of CC-62 plus its wave-31 fixes, rebased. One cutover migrates every in-repo use to `alias :: path` / `use { … }`. Main's migrate.mjs was rerun after the rebase, migrated dev's 2 new files (JetWeb Build.jet and the regex literal fixture), and --other-files --check reports 0 left. The cutover deletes `use … as`, `.[x as y]` and `.{…}`, and the old spellings now give E0630 (registered row, Spellings ledger, E0630 page, tests/ui/use_retired_spellings). Wave-31 fixes: 4 golden stop-report lines follow the 2-line header shift (Crypto.jet 409→411 and crypto_error_run.jet 29→31; Math.jet 285→287, 339→341, 173→175). Each is golden o0/o1/o2 PASS 3/3 on tsr. All 29 Core API fixture review rows were re-reviewed in a fresh context on 2026-10-31 by agent Floor-1, an independent reviewer who is not the author: import lines only, task/inputs/outcomes unchanged, idiomatic, minimal. Digests were recomputed with the checker's own formula. On tsr, core_surface_ledger_checker_rejects_hostile_fixtures and compiled_workload_release_gate_uses_frozen_contract_and_canaries each PASS 1/1 on o0/o1/o2. Golden modules 147/147. Dev's new cases reader_region_tiers, receipt_sections, a_literal_pattern…, authority_example…, build_option_debug_info_and_small all PASS. allocator_families and cli_parts match dev HEAD row for row. Guards 94/7: the same 7 as base, and diagnostic_pages fails only on dev's missing L0533. The E0511 page was regenerated for the re-blessed expiring_force_unwrap snapshot. Landed in wave 33 as dev 190f826022 (CardClose-63)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "DONE pending tsn chain s2/s3 (tsl chain FIXED_POINT): CardClose-62.patch = tsn bb770de593..1575d771cd (7070 files). One cutover migrates every in-repo use to `alias :: path` / `use { … }` (Main's migrate.mjs, --check 0 of 18677 and --other-files 0 of 14132) and deletes `use … as`, `.[x as y]` and `.{…}`. The old spellings now give E0630 (registered row, Spellings ledger, Docs/site/dist/e/E0630 page, UI snapshot tests/ui/use_retired_spellings.{jet,stderr}, PASS). The grep `^\\s*(pub )?use [^:]*\\bas\\b` finds code rows only in the E0630 tests (UseBlocks.jet, use_retired_spellings.jet). Chain: 3f85162ad7+patch from seed-cc61 FIXED_POINT s2==s3 jet d232775c0c24e68d, pack1==pack2; tsn s1 by a0_024 jet 1322b3d04b75327a, pack1 62126cdc51e308eb, full chain queued. lane-check CHECK OK. golden modules o0/o1/o2 147/147. ui full o0 against Main's ui-w29-base: 0 lost after re-bless/re-run, apart from ffi_foreign_unsafe (TIMEOUT on CC-61 without the patch in the same harness) and dunder_marker_not_generated (REFUSED, old testkit binary lacks generated_source). cases import 60/fmt 256/source_import 6 lose 0 rows; retired_core_namespaces 1/1, with the 3.jet row L0103 and 28 rows E1001. Guards 94/7: the same 7 as CC-61, and diagnostic_pages fails only on dev's missing L0533 page. Landed in wave 31 as dev 360e470044 (CardClose-62)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Wave 31 (bb770de593 + 9 patches) ran CardClose-62 (#6542 step 2). It is held out of landing for two reasons, both in the wave 31 REPORT:\n- The codemod's `use` rewrites shift Core line numbers in 4 golden stop reports: crypto/crypto_error_run, math/float_bits_range_stop, math/int_pow_negative_stop, math/typed_abs_i64_min.\n- The repository-marker-scan fixture's independent review digest no longer matches its changed source, so 2 cases fail with 'Core API fixture review is not accepted': core_surface_ledger_checker_rejects_hostile_fixtures and compiled_workload_release_gate_uses_frozen_contract_and_canaries.\nCardClose-1 is preparing CC-63 with the golden updates and a genuine fresh fixture review. UI was +13/0 lost with CC-62."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "PARTIAL: comptime use is held for the owner ballot, and the seed cut is Main's. Step 1 is CardClose-61.patch, which is tsj 2f8e5c23d7..2217f9e535, s1 jet ca6194e3f8d35062 OK, lane-check CHECK OK. JetParser/Tests: 147 pass, 9 fail; the same 9 fail on base, and UseBlocks passes 8/8. Golden o0/o1/o2: testkit golden modules PASS 147/147, including Examples/features/modules/use_blocks.jet. Tree-sitter corpus 19/19, including use_blocks.txt. testkit non-PASS rows are identical to base: cases fmt 19, cases import 69, cases source_import 7, ui import 9, ui alias 8, ui lowlevel 6, ui mem_arena 0, ui no_prelude 0. ui module has 8 on tsj and 7 on wave/25; the extra row is module_inline_private, stale at dev 2f8e5c23d7 and fixed by CC-59 in wave/25. cond-2: `use X as A` against `A :: X` is identical in 928/928 files. Core item pairs are identical in 206/206 and Core module-member pairs in 69/69. Renamed-member files are identical in 8/10; the 2 that differ are foreign js inline rows, both errors before and after, and the msg lists them for blessing. Landed in wave m26 as dev 1620f05362 (CardClose-61)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Step-2 codemod ready: $JET_SCRATCH_ROOT/lanes/Main/useblock/migrate.mjs (Main). A dry run on an export of 2f8e5c23d7 changes 6,421 of 17,905 .jet files (+19,609/-15,671) and leaves 0 import lines with as. It keeps member lists as rows (owner question q0q1zwor: the real count is 2,816 lists / 16,445 names) and turns renamed members into alias rows. Still to do by hand: 100 lines in 28 files that hold old import text in strings (diagnostic help text, test sources), and the jet code fences in 60 .md files. Step-1 grammar (CardClose-1): a use block allows blank lines, comment lines and trailing comments; pub use { ... } is the re-export form; A :: owner.x desugars to an aliased member (foreign roots stay Module aliases)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Open item: the owner mentioned comptime use for custom linking logic. No semantics exist for it today, so it's held for an owner ballot. Step 1 accepts use blocks wherever imports are legal, including inline module bodies, and several per file."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Step 1: parser, formatter (jet fmt emits a block for two or more imports), syntax registry, LSP and editor grammars accept use { … } rows (path, alias: path, string path, alias: \"path\") and use alias: path (D-DECL-COLON1=A); several use blocks per file and comptime use work; examples golden on o0/o1/o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1620f05362 (step 1) and 42df0089b4 (comptime use). Release kit of aaa6331fc0 (a0_031, chain s2 jet 98d89707fb97975a): Examples/Modules/UseBlocks.jet o0, o1 and o2 PASS; Examples/Metaprogramming/Comptime/ComptimeUse/run.jet o0, o1 and o2 PASS; tests/ui/comptime_use_runtime_reference PASS. Golden 4373 rows and ui 2391 rows lost 0 against a0_029.",
+          "at": "2026-11-07T03:48:40.234Z"
+        },
+        {
+          "n": 2,
+          "text": "Step 2: one cutover migrates every in-repo use (Compiler, Core, Prelude, Jetpack, Tools, Examples, tests incl. .case sources and snapshots, docs, spec) to the new form and deletes use … as and the .{…} member list; the old spellings get a registered teaching diagnostic with a UI snapshot; chain FIXED_POINT; suites lose no row.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
+          "at": "2026-11-06T10:25:10.965Z"
+        },
+        {
+          "n": 3,
+          "text": "Data/Syntax registry entry updated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
+          "at": "2026-11-06T10:25:12.012Z"
+        },
+        {
+          "n": 4,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
+          "at": "2026-11-06T10:25:13.126Z"
+        },
+        {
+          "n": 5,
+          "text": "editor grammars regenerated (editor-grammars.mjs --write)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
+          "at": "2026-11-06T10:25:14.046Z"
+        },
+        {
+          "n": 6,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
+          "at": "2026-11-06T10:25:14.946Z"
+        },
+        {
+          "n": 7,
+          "text": "The teaching diagnostic and UI snapshot for the retired `use … as` and `.{…}` member list (c2) are removed: retired spellings are not Jet syntax (owner order; the removal is tracked with every other teaching row on #4148 c4).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a398337ff6: E0630 is status .Retired in Compiler/Prelude/Diagnostics.jet:5183-5190 (and its generated row in DiagnosticRows.jet), no parser, sema or CLI code emits it (grep for E0630 and RetiredImportAlias in JetParser, JetSema and JetCli finds nothing at dev 22c9a04985), and tests/ui has no E0630 snapshot. Retired spellings are ordinary parse errors.",
+          "at": "2026-11-07T03:33:38.028Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T12:40:05.857Z",
+      "updated": "2026-11-07T03:48:45.200Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-07T03:48:45.200Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T03:51:39.514Z"
     }
   ]
 }
