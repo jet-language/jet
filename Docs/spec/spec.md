@@ -784,6 +784,19 @@ finding is a compiler bug (an ICE), never a user diagnostic. A routine that
 reveals a fixed value (`#Scrub`) is not inlined where its result is public
 (D-SECRET-CT1).
 
+The selected instructions are checked too. For each function that holds a
+fixed value, a validator reads the code selected for it on every target,
+instruction by instruction. Each instruction a fixed value meets must be in
+that target's table. x86-64's table holds the general-purpose instructions
+on Intel's list of data operand independent timing instructions. It has no
+division, no branch or stop the value decides, no memory access at a fixed
+address, no string operation and no inline-asm template given the value.
+wasm32's table is CT-Wasm's: integer constants, local and global access,
+arithmetic without division or remainder, bit operations, shifts, rotates,
+comparisons and width changes, but no branch, select, call target or
+address. A finding is an ICE that names the function, the instruction and
+its line (D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`

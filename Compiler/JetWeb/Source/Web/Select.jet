@@ -13,7 +13,7 @@
 
 use {
     jet_backend.[LINK_FAULT_REPORT]
-    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_overflow_wraps, ir_x64_overflow_message]
+    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_overflow_wraps, ir_timing_marked, ir_x64_overflow_message]
     jet_foundation.[name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
 }
@@ -107,11 +107,16 @@ web_select_function: fn(st: &WebState, m: IRModule, tables: IRX64Tables, row: In
     web_select_body(st, m, f, tables)
 }
 
+// A function with a fixed slot (JetIR Timing.jet ir_timing_marked) records
+// where each instruction's code starts, for the fixed-timing check
+// (Timing.jet web_timing_check).
 web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables) -> WebBody Never! {
     e := web_emitter(m, f)
     web_layout_frame(e, m, f)
     frame_size: e.frame_size
     frame: e.frame
+    checked: ir_timing_marked(f)
+    marks := [Int]{}
     if frame_size > 0 {
         web_global_get(e, WEB_GLOBAL_SP)
         web_i64(e, frame_size)
@@ -121,6 +126,10 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
     }
     at := 0
     loop at < f.op.len() {
+        if checked {
+            marks.push(e.code.len())
+            marks.push(at)
+        }
         if st.stop_points && e.pad_ends.len() == 0 {
             resume: web_stop_point(e, st, m, f, at)
             if resume >= 0 {
@@ -134,8 +143,14 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
         at += 1
     }
     if e.pad_ends.len() > 0 -> st.errors.push("{f.name}: {e.pad_ends.len()} stop edges are never closed")
+    if checked {
+        marks.push(e.code.len())
+        marks.push(-1)
+    }
     web_return(e, st, m, f, -1)
-    web_finish(e)
+    body: web_finish(e)
+    if checked -> web_timing_check(st, m, f, body, marks)
+    body
 }
 
 // The stop point at `at`, if it is one: its check and the opened edge.

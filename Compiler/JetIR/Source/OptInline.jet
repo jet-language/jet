@@ -107,7 +107,7 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     // A callee holding a fixed value (IRFunction.slot_fixed) whose result
     // the call does not hold as fixed reveals it (a `#Scrub` routine):
     // inlined, IR Lint's fixed rule would follow the value on past it.
-    if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_opt_inline_fixed(callee) -> return -1
+    if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_timing_marked(callee) -> return -1
     // A parameter becomes the call's argument slot: same type rows only.
     loop slot in 0..<callee.param_count {
         if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
@@ -120,14 +120,6 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
         if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
     }
     size
-}
-
-// Whether a slot of `f` is marked fixed.
-ir_opt_inline_fixed: fn(f: IRFunction) -> Bool Never! {
-    loop bit in f.slot_fixed {
-        if bit -> return true
-    }
-    false
 }
 
 // The largest ir_opt_size of `callee` that ir_opt_inline_build may inline at

@@ -1,0 +1,121 @@
+// Fixed timing in the selected WebAssembly: the wasm32 table of the
+// instructions a `timing: .Fixed` value may meet, and the validator that
+// checks the code emitted for a function with a fixed slot against it (the
+// fixed slots and the x86-64 table are JetIR Timing.jet's).
+//
+// The WebAssembly Core Specification gives no instruction a timing. The
+// table is CT-Wasm's: Watt, Renner, Popescu, Cauligi and Stefan, "CT-Wasm:
+// Type-Driven Secure Cryptography for the Web Ecosystem" (POPL 2019), whose
+// secret integers may meet the integer constants, arithmetic, bit, shift,
+// rotate, comparison and width instructions but not division or remainder,
+// and may decide no branch, select, call target or memory address. Of
+// those, web_timing_row admits the ones the selector (Select.jet) writes
+// for a fixed word. The engine that compiles the module chooses the machine
+// instructions, so the code's timing on a host is the engine's.
+
+use {
+    jet_foundation.[Type]
+    jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IR_OVERFLOW_WRAP, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_timing_any, ir_timing_at, ir_timing_finding, ir_timing_fixed, ir_type_row, ir_x64_reads_into]
+    jet_wasm.[WasmOpTable, WasmReader, wasm_decode_body]
+}
+
+// Whether opcode `op` (0xfc00 + n for a 0xfc-prefixed one) is in the
+// wasm32 table: the structure that decides nothing (nop, block, else, end,
+// br, return), a direct call (its callee is checked on its own), drop,
+// local and global access, i32 and i64 constants, comparisons, add, sub,
+// mul, and, or, xor, shifts and rotates, wrap and the extensions.
+web_timing_row: fn(op: Int) -> Bool Never! {
+    if op == 0x01 || op == 0x02 || op == 0x05 || op == 0x0b || op == 0x0c || op == 0x0f || op == 0x10 || op == 0x1a -> return true
+    if op >= 0x20 && op <= 0x24 -> return true
+    if op == 0x41 || op == 0x42 -> return true
+    if op >= 0x45 && op <= 0x5a -> return true
+    if (op >= 0x6a && op <= 0x6c) || (op >= 0x71 && op <= 0x78) -> return true
+    if (op >= 0x7c && op <= 0x7e) || (op >= 0x83 && op <= 0x8a) -> return true
+    op == 0xa7 || op == 0xac || op == 0xad || (op >= 0xc0 && op <= 0xc4)
+}
+
+// Whether opcode `op` reads or writes linear memory.
+web_timing_memory: fn(op: Int) -> Bool Never! {
+    (op >= 0x28 && op <= 0x3e) || op == 0xfc0a || op == 0xfc0b
+}
+
+// The findings of `body`, the code emitted for `f`, into `st.errors`.
+// `marks` holds pairs: the emitter's code offset where an IR instruction's
+// code starts, and the instruction (-1 for the epilogue after the last).
+// Each wasm instruction in the code of an IR instruction with a fixed
+// operand is in the table, or is a load or store of that instruction's
+// public address (a Load's, Store's or StreamStore's `a`, a CopyBytes' `a`
+// and `b`).
+web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, marks: [Int]) Never! {
+    fixed: ir_timing_fixed(f)
+    reads := [Int]{}
+    operands := [Bool]{}
+    loop at in 0..<f.op.len() {
+        ir_x64_reads_into(f, at, reads)
+        operand: ir_timing_any(fixed, reads)
+        operands.push(operand)
+        callee: f.a[at]
+        if operand && f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None -> st.errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
+    }
+    ops: WasmOpTable.new()
+    reader := WasmReader.new(body.code.copy())
+    code: wasm_decode_body(reader, ops, true) ?? {
+        st.errors.push("{f.name}: fixed timing: its code does not decode: {err.render()}")
+        return
+    }
+    mark := 0
+    loop k in 0..<code.op.len() {
+        offset: code.at[k] - code.start
+        loop mark + 2 < marks.len() && marks[mark + 2] <= offset -> mark += 2
+        if mark >= marks.len() || marks[mark] > offset -> next
+        at: marks[mark + 1]
+        if at < 0 || !operands[at] -> next
+        op: code.op[k]
+        if web_timing_row(op) -> next
+        if web_timing_memory(op) && web_timing_public_address(f, fixed, at) -> next
+        name := "opcode {op}"
+        if ops.info(op) == .Val(info) -> name = info.name
+        st.errors.push(ir_timing_finding(f, at, "a fixed operand meets `{name}`, which the wasm32 table has no row for"))
+    }
+}
+
+// Whether instruction `at` of `f` is a memory access at public addresses.
+web_timing_public_address: fn(f: IRFunction, fixed: [Bool], at: Int) -> Bool Never! {
+    if f.op[at] == {
+        .Load | .Store | .StreamStore -> !ir_timing_at(fixed, f.a[at])
+        .CopyBytes -> !ir_timing_at(fixed, f.a[at]) && !ir_timing_at(fixed, f.b[at])
+        else -> false
+    }
+}
+
+// The findings for `code`, the instructions of `f`'s one IR instruction `op`
+// of its fixed `key` and public `data` (no local declarations, no `end`).
+web_timing_test_errors: fn(op: IROp, code: [U8]) -> [String] Never! {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
+    f := ir_function_new("mix", "test:timing.jet::mix", "", "timing.jet", 1)
+    key: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "key"), 1)
+    data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
+    mixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    f.slot_fixed[key] = true
+    _ := ir_emit(f, op, mixed, key, data, IR_OVERFLOW_WRAP, 2)
+    st := WebState{
+        app: true, stop_points: false, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
+        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
+        exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: -1, trap: -1, errors: [String]{},
+    }
+    bytes := [U8]{0x00}
+    bytes.extend(code.copy())
+    bytes.push(0x0b)
+    web_timing_check(st, m, f, WebBody{code: bytes, fixups: [Int]{}}, [Int]{0, 0, code.len(), -1})
+    st.errors.move()
+}
+
+#Test("A fixed word's xor passes the wasm32 validator and its division does not") {
+    // local.get 0, local.get 1, i64.xor, local.set 2
+    assert_eq(web_timing_test_errors(IROp.BitXor, [U8]{0x20, 0x00, 0x20, 0x01, 0x85, 0x21, 0x02}).len(), 0)
+    // local.get 0, local.get 1, i64.div_u, local.set 2
+    errors: web_timing_test_errors(IROp.Div, [U8]{0x20, 0x00, 0x20, 0x01, 0x80, 0x21, 0x02})
+    assert_eq(errors.len(), 1)
+    assert_eq(errors[0], "mix: instruction 0 (div) at timing.jet:2: fixed timing: a fixed operand meets `i64.div_u`, which the wasm32 table has no row for")
+}

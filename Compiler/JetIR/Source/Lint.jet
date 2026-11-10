@@ -751,40 +751,18 @@ ir_lint_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
     m.types[f.slot_type[slot]].kind
 }
 
-// The fixed rule. A slot is fixed when it is marked (IRFunction.slot_fixed)
-// or a data instruction writes it from a fixed operand: a Copy, Move,
-// arithmetic, bit, shift, compare, Neg, Not, Convert, Sqrt or IntBig, an
-// Offset of a fixed address or a Load from one. A call's result and a load
-// of a public address are fixed only as marked. No fixed slot may be an If's
-// or BrIf's test, a Div's, Rem's, FloorDiv's or Mod's operand, a Shl's or
-// Shr's amount, the address of a Load, Store, StreamStore, Offset or
-// CopyBytes, a CallIndirect's callee, or the operand of a word Add, Sub or
-// Mul that does not wrap.
+// The fixed rule. The fixed slots are Timing.jet's (ir_timing_fixed): the
+// marked ones (IRFunction.slot_fixed) and each one a data instruction writes
+// from one. No fixed slot may be an If's or BrIf's test, a Div's, Rem's,
+// FloorDiv's or Mod's operand, a Shl's or Shr's amount, the address of a
+// Load, Store, StreamStore, Offset or CopyBytes, a CallIndirect's callee, or
+// the operand of a word Add, Sub or Mul that does not wrap.
 ir_lint_fixed: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) Never! {
-    marked := false
-    loop bit in f.slot_fixed {
-        if bit {
-            marked = true
-            break
-        }
-    }
-    if !marked -> return
-    fixed := f.slot_fixed.copy()
-    grew := true
-    loop grew {
-        grew = false
-        loop at in 0..<f.op.len() {
-            dst: f.dst[at]
-            if dst < 0 || fixed[dst] -> next
-            if ir_lint_fixed_flows(f, fixed, at) {
-                fixed[dst] = true
-                grew = true
-            }
-        }
-    }
+    if !ir_timing_marked(f) -> return
+    fixed: ir_timing_fixed(f)
     loop at in 0..<f.op.len() {
-        a: ir_lint_fixed_at(fixed, f.a[at])
-        b: ir_lint_fixed_at(fixed, f.b[at])
+        a: ir_timing_at(fixed, f.a[at])
+        b: ir_timing_at(fixed, f.b[at])
         what: if f.op[at] == {
             .If | .BrIf -> if a -> "decides a branch" else -> ""
             .Div | .Rem | .FloorDiv | .Mod -> if a || b -> "divides" else -> ""
@@ -797,19 +775,6 @@ ir_lint_fixed: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding
         }
         if what != "" -> out.push(ir_lint_at(f, at, pass, IR_LINT_FIXED, "a fixed value {what}"))
     }
-}
-
-// Whether instruction `at` writes its destination from a fixed operand.
-ir_lint_fixed_flows: fn(f: IRFunction, fixed: [Bool], at: Int) -> Bool Never! {
-    if f.op[at] == {
-        .Copy | .Move | .Neg | .Not | .Convert | .Sqrt | .IntBig | .Offset | .Load -> ir_lint_fixed_at(fixed, f.a[at])
-        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> ir_lint_fixed_at(fixed, f.a[at]) || ir_lint_fixed_at(fixed, f.b[at])
-        else -> false
-    }
-}
-
-ir_lint_fixed_at: fn(fixed: [Bool], slot: Int) -> Bool Never! {
-    slot >= 0 && slot < fixed.len() && fixed[slot]
 }
 
 // Every instruction's fields against the row of its opcode (roles and

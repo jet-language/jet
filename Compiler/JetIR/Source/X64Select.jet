@@ -4092,10 +4092,13 @@ ir_x64_wrap_return: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64
     x64_ret(e.code)
 }
 
-// Function row `row` (`f`, borrowed from `m`).
+// Function row `row` (`f`, borrowed from `m`). A function with a fixed slot
+// keeps its encoder's emission log for the fixed-timing check (Timing.jet).
 ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: x64_code_logged(ir_x64_logged(tables, row)), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore)}
+    checked: ir_timing_marked(f)
+    logged: ir_x64_logged(tables, row)
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore)}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
@@ -4330,7 +4333,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     ranges := [X64VariableRange]{}
     ir_x64_variables(m, f, al, tables, positions, body_at, ends, variables, ranges)
     name: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
-    log: ir_x64_log_text(m, f, e.code)
+    log: if logged -> ir_x64_log_text(m, f, e.code) else -> [String]{}
+    if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
         debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move()},
