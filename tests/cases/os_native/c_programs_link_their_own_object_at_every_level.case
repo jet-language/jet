@@ -12,21 +12,21 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step o0: jet build --optimize=none main.jet
 exit: 0
-stderr: !~ "duplicate symbol"
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
 step o0_run: built
 exit: 0
 stdout: = c_programs_link_their_own_object_at_every_level.out
 stderr: empty
 step o1: jet build --optimize=basic main.jet
 exit: 0
-stderr: !~ "duplicate symbol"
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
 step o1_run: built
 exit: 0
 stdout: = c_programs_link_their_own_object_at_every_level.out
 stderr: empty
 step o2: jet build --optimize=full main.jet
 exit: 0
-stderr: !~ "duplicate symbol"
+stderr: !~ "duplicate symbol" # the program object links once, beside the Jet-only runtime object
 step o2_run: built
 exit: 0
 stdout: = c_programs_link_their_own_object_at_every_level.out
