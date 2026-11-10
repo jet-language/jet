@@ -28,6 +28,7 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
         .Copies -> "copies"
         .Sentries -> "sentries"
         .Arithmetic -> "arithmetic"
+        .Writes -> "writes"
     }
 }
 
@@ -55,6 +56,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
         "copies" -> Val(PolicyKey.Copies)
         "sentries" -> Val(PolicyKey.Sentries)
         "arithmetic" -> Val(PolicyKey.Arithmetic)
+        "writes" -> Val(PolicyKey.Writes)
         else -> None
     }
 }
@@ -62,7 +64,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
 // Rust `PolicyKey::is_audited_gate`.
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
-        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic -> false
+        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes -> false
         else -> true
     }
 }
@@ -166,6 +168,7 @@ POLICY_RULES: comptime { [PolicyRule]{
     {key: PolicyKey.Sentries, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     // The innermost mode wins: a wrapping block inside a checked function wraps.
     {key: PolicyKey.Arithmetic, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Override},
+    {key: PolicyKey.Writes, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
 } }
 
 // Rust `rule`.
@@ -256,6 +259,7 @@ policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
         .Copies -> "Copies"
         .Sentries -> "Sentries"
         .Arithmetic -> "Arithmetic"
+        .Writes -> "Writes"
     }
 }
 
@@ -330,7 +334,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
 // The widening arm of Rust `resolve_policy`.
 policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return false
-    if key == PolicyKey.Copies && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit -> return false
+    if (key == PolicyKey.Copies || key == PolicyKey.Writes) && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit -> return false
     if key == PolicyKey.Sentries {
         if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
         if outer == PolicyValue.Off && inner == PolicyValue.On -> return true
@@ -383,6 +387,10 @@ policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueEr
     if key == PolicyKey.Copies {
         if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
         return Err(PolicyValueError{detail: "`copies` must be `.Explicit`"})
+    }
+    if key == PolicyKey.Writes {
+        if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
+        return Err(PolicyValueError{detail: "`writes` must be `.Explicit`"})
     }
     if key == PolicyKey.Sentries {
         if value == {

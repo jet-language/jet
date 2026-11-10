@@ -5921,10 +5921,12 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
     loop fact in fixed_over -> sema_ownership_uninit_set(state, fact)
     // A method that writes its receiver edits storage, and a computed field
     // has none, so a computed receiver never reaches it.
-    receiver_writes: state.receiver_frames[state.receiver_frames.len() - 1].convention == (Val(AccessConvention.Write))
+    receiver_frame: state.receiver_frames[state.receiver_frames.len() - 1]
+    receiver_writes: receiver_frame.convention == (Val(AccessConvention.Write))
     refused := false
     if receiver_writes && checked == .Val(call) -> refused = sema_expression_refuse_computed_receiver(call, environment, program, scopes, diagnostics)
     if refused -> checked = None
+    sema_call_marks_check_receiver(scopes, receiver, unmarked, receiver_frame, method, diagnostics)
     sema_receiver_mark_finish(state)
     if written_place {
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, scopes, state, diagnostics)

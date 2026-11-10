@@ -22,6 +22,7 @@ use {
         MarkerCallArg,
         NamedSpan,
         Pattern,
+        PlaceAccess,
         RuleSite,
         Span,
         Stmt,
@@ -1689,7 +1690,7 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
     named: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
-    if !named && !parser_starts_expression(start.kind) {
+    if !named && !parser_starts_expression(start.kind) && start.kind != TOKEN_AND_AND {
         parser_report_not_a_statement(state, start)
         // Consume the offending token (as the `in` arm does): every statement
         // loop re-enters here at the same position otherwise, reporting it
@@ -1699,13 +1700,21 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         }
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
-    // A line opening with a mark (`&mask`) starts a new statement, and a mark
-    // is not a value: the line is not a statement. Its
-    // operand is consumed with it, so the line reports once.
-    if start.kind == TOKEN_AMP || start.kind == TOKEN_CARET {
-        parser_report_not_a_statement(state, start)
+    // A line opening with a mark (`&mask`) starts a new statement. A mark
+    // before a call on a place marks that call's receiver (`&xs.push(4)`,
+    // `&&buf.seal()`, parser_receiver_mark); any other marked line is not a
+    // statement. Its operand is consumed with it, so the line reports once.
+    if start.kind == TOKEN_AMP || start.kind == TOKEN_AND_AND || start.kind == TOKEN_CARET {
         parser_bump(state)
-        _ := parser_parse_expression(state, 1, 0)
+        operand: parser_parse_expression(state, 1, 0)
+        if start.kind != TOKEN_CARET {
+            access: if start.kind == TOKEN_AMP -> PlaceAccess.Write else -> PlaceAccess.Take
+            if parser_receiver_mark(state, operand.expr, access, start.span) == .Val(call) {
+                parser_finish_statement(state)
+                return Stmt.Expr{expr: call}
+            }
+        }
+        parser_report_not_a_statement(state, start)
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
     left: parser_parse_expression(state, 1, 0)

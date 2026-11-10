@@ -9514,10 +9514,12 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             // operator checks as `context.arithmetic_policy`.
             outer_arithmetic: context.arithmetic_policy
             if sema_policy_arithmetic_mode(declarations) == .Val(mode) -> context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})
+            previous_writes_policy := sema_call_marks_push_policy(scopes, declarations)
             nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "policy@{span.start}", loop_depth)
             context.arithmetic_policy = outer_arithmetic
             sema_scope_pop_unit_policy(scopes, previous_unit_policy)
             scopes.copies_explicit = previous_copies_policy
+            scopes.writes_explicit = previous_writes_policy
             if {
                 !nested.complete -> {
                     complete = false

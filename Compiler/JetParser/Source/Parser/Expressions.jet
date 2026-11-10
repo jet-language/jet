@@ -9,6 +9,7 @@ use {
         Call,
         CallArg,
         CallLabel,
+        CallMark,
         Diagnostic,
         DiagnosticFixApplicability,
         DiagnosticFixSafety,
@@ -355,11 +356,16 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
 
     // `&place == pattern` is a one-arm match that writes
     // into its subject (`if &slot == .Val(item) -> item.count += 1`); a `&`
-    // that a pattern test does not follow is not a value.
+    // that a pattern test does not follow is not a value. `&&` opens a take
+    // mark on a receiver (parser_parse_take_mark).
     marked_subject := parser_current_kind(state) == TOKEN_AMP
-    left := if marked_subject -> parser_parse_marked_place(state, depth + 1, allow_struct_lit, true) else -> {
-        prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
-        parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
+    left := if {
+        marked_subject -> parser_parse_marked_place(state, depth + 1, allow_struct_lit, true)
+        parser_current_kind(state) == TOKEN_AND_AND -> parser_parse_take_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
+        else -> {
+            prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
+            parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
+        }
     }
     // A non-place after `&` was reported where it was read.
     if marked_subject && !(left.expr == .Place(_, _, _, _)) -> marked_subject = false
@@ -2150,12 +2156,59 @@ parser_parse_call_type_args: fn(state: &JetParserState, depth: Int) -> [Type] {
 // that writes into its subject (`if &shape == {…}`), and a writing loop
 // source (`loop v in &values`). Those positions parse the `&` here; sema
 // requires its operand to be a place (E0213), so a window over a call result
-// teaches binding the temporary first.
+// teaches binding the temporary first. A mark before a call on a place
+// (`&xs.push(4)`) marks that call's receiver instead (parser_receiver_mark).
 parser_parse_marked_place: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     mark: parser_bump(state)
     operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
     span: parser_cover(mark.span, operand.span)
+    if parser_receiver_mark(state, operand.expr, PlaceAccess.Write, mark.span) == .Val(call) -> return ParsedExpr{expr: call, span: span}
     ParsedExpr{expr: Expr.Place{value: operand.expr, access: PlaceAccess.Write, span: span, id: parser_node_id(state)}, span: span}
+}
+
+// `&&buf.seal()`: the take mark on a receiver. Any other `&&` in value
+// position is the ordinary "expected a value" report.
+parser_parse_take_mark: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
+    mark: parser_bump(state)
+    operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
+    span: parser_cover(mark.span, operand.span)
+    if parser_receiver_mark(state, operand.expr, PlaceAccess.Take, mark.span) == .Val(call) -> return ParsedExpr{expr: call, span: span}
+    parser_report_mark_not_value(state, mark)
+    operand
+}
+
+parser_report_mark_not_value: fn(state: &JetParserState, mark: Token) {
+    found: parser_text(state, mark)
+    parser_add_error(state, mark.span, "expected a value, found `{found}`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
+}
+
+// A call mark (`&` writes, `&&` takes) binds the maximal place after it: the
+// receiver of the first method call on that place (`&xs.push(4)`,
+// `&&self.buf.seal()`). The receiver becomes a written Place; sema checks it
+// against the method's signature under `#Policy(writes: .Explicit)` and
+// reports it as the ordinary parse error outside that policy.
+parser_receiver_mark: fn(state: &JetParserState, expr: Expr, access: PlaceAccess, mark: Span) -> Expr? {
+    if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, id) {
+        if parser_mark_place(receiver) {
+            place: Expr.Place{value: receiver, access: access, span: Span{start: mark.start, end: expr_span(receiver).end}, id: parser_node_id(state)}
+            return Val(Expr.MethodCall{receiver: place, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: id})
+        }
+        inner: parser_receiver_mark(state, receiver, access, mark) ?? return None
+        return Val(Expr.MethodCall{receiver: inner, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: id})
+    }
+    None
+}
+
+// A place a call mark can name: a local, parameter or `self`, through fields,
+// indexes and ranges.
+parser_mark_place: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(_, _, _) -> true
+        .Field(base, _, _, _) -> parser_mark_place(base)
+        .Index(base, _, _, _, _) -> parser_mark_place(base)
+        .Slice(base, _, _, _, _, _) -> parser_mark_place(base)
+        else -> false
+    }
 }
 
 parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labels: Bool) -> [CallArg] {
@@ -2180,8 +2233,13 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }
-            argument: parser_parse_expression(state, 1, depth + 1)
-            args.push(CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label.move(), spread: spread})
+            mark_kind: parser_current_kind(state)
+            if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+                args.push(parser_parse_marked_argument(state, depth, argument_span, label.move(), spread))
+            } else {
+                argument: parser_parse_expression(state, 1, depth + 1)
+                args.push(CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label.move(), spread: spread})
+            }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             if parser_current_kind(state) != TOKEN_COMMA {
                 if parser_unclosed_delimiter(state, "call") -> return args
@@ -2195,6 +2253,24 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
     }
     parser_expect(state, TOKEN_RPAREN, "`)` after call arguments")
     args
+}
+
+// `grow(&xs)` / `archive(&&title)`: a call mark on a place argument
+// (CallMark). A mark before a call on a place marks that call's receiver
+// (parser_receiver_mark); before any other value it is the ordinary
+// "expected a value" report.
+parser_parse_marked_argument: fn(state: &JetParserState, depth: Int, argument_span: Span, label: CallLabel?, spread: Bool) -> CallArg {
+    mark_token: parser_bump(state)
+    access: if mark_token.kind == TOKEN_AMP -> PlaceAccess.Write else -> PlaceAccess.Take
+    argument: parser_parse_expression(state, 1, depth + 1)
+    if parser_mark_place(argument.expr) {
+        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}
+    }
+    marked: parser_receiver_mark(state, argument.expr, access, mark_token.span) ?? {
+        parser_report_mark_not_value(state, mark_token)
+        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread}
+    }
+    CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread}
 }
 
 parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> ParsedExprFields {

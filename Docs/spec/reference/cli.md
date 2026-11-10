@@ -1092,6 +1092,18 @@ size, kind}`. A source that does not check reports its diagnostics on stderr
 is the memory-ledger audit; the dependency audit is refused with E2104
 until it is ported.
 
+`jet audit writes [--json] [<entry.jet>]` (also `jet inspect audit writes`)
+lists every call of the entry's checked package that changes or takes a named
+value, chosen and checked as `audit copies` chooses and checks it, without
+writing anything. The sites are the Safe E0228 edits sema gives every module of
+the entry's source root under `#Policy(writes: .Explicit)`: `&` before a value a
+call changes (a `&` parameter or `&self` method), `&&` before one it takes. The
+text form is `calls that change or take a named value: N` and then one
+`  <path>:<line>:<col>  span=<start>..<end>  mark=<&|&&>  access=<write|take>`
+row per site, sorted by path and then by offset. `--json` emits the
+`audit.writes` status envelope with a `writes` array of `{path, line, column,
+span{start, end}, mark, access}`.
+
 `jet audit foreign [--json] [<entry.jet>]` (also `jet inspect audit foreign`)
 reports the foreign code of an executable entry, chosen as `audit copies`
 chooses it. It checks the entry and links its image in memory as `jet run`

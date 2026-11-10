@@ -2418,6 +2418,20 @@ MarkedFunctionValue: struct {
     }
 }
 
+CallMarkRequired: struct {
+    impl Diagnostic {
+        code: "E0228"
+        meaning: "Under `#Policy(writes: .Explicit)`, a call's `&` or `&&` mark doesn't match what its signature does to the named value"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "A call under `#Policy(writes: .Explicit)` is missing the `&` or `&&` mark its callee's signature implies for a named argument or receiver, or writes a mark the signature doesn't imply." }
+        why: fn(self) -> String { "Calls are written plain and the signature decides what each one does. The policy asks that every call that changes a named value write `&` before it and every call that takes one write `&&`, so the text shows each write and take; a mark that disagrees with the signature would tell the reader something false." }
+        fix: fn(self) -> String { "Write the mark the quoted signature implies: `&` for a `&` parameter or `&self` method, `&&` for a `&&` parameter or `&&self` method, and no mark for a read." }
+    }
+}
+
 InvalidReceiverFootprint: struct {
     impl Diagnostic {
         code: "E0231"

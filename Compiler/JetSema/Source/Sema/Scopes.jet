@@ -747,6 +747,7 @@ SemaCheckContext: struct {
 SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool
     copies_explicit: Bool
+    writes_explicit: Bool
     // Split the exact span key into scalar indexes, without formatting it.
     function_unit_starts: [Int:Int]
     function_unit_ends: [[Int:Bool]]
@@ -777,6 +778,9 @@ SemaScopeTable: struct {
     // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     copies_explicit: Bool{false}
+    // `writes: .Explicit` is active: every call writes the `&`/`&&` mark its
+    // signature implies (Ownership/CallMarks.jet).
+    writes_explicit: Bool{false}
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0}
@@ -1535,6 +1539,7 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        writes_explicit: source.writes_explicit,
         context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
@@ -1574,6 +1579,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            writes_explicit: table.writes_explicit,
             context_allocation: table.context_allocation,
             open_marks: table.open_marks,
         },
@@ -1614,6 +1620,7 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
+    table.writes_explicit = saved.writes_explicit
     table.context_allocation = saved.context_allocation
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
@@ -1865,6 +1872,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
     policy := SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
+        writes_explicit: false,
         function_unit_starts: [Int:Int]{},
         function_unit_ends: [[Int:Bool]]{},
     }
@@ -1887,6 +1895,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
                 if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) -> next
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
+                if sema_call_marks_writes_declaration(declaration) -> policy.writes_explicit = true
             }
         }
     }
@@ -2125,6 +2134,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        writes_explicit: source.writes_explicit,
         context_allocation: source.context_allocation,
         policy_modules: source.policy_modules.copy(),
         policy_rows: source.policy_rows.copy(),

@@ -32,6 +32,7 @@ use {
         TypedLitBody,
         LIST_TYPE_OWNER,
         dimension_display_name,
+        expr_source_start,
         expr_span,
         measure_expression,
         pipe_value_is_name,
@@ -1557,16 +1558,19 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, "~")
             jfmt_fmt_expr(f, inner, JFMT_PREC_UNARY)
         }
-        .Place(inner, access, _, _) -> {
-            // Parsed places are write windows (`&values[2..3]`) or plain
-            // reads; only sema builds a take, spelled `.move()` here.
+        .Place(inner, access, span, id) -> {
+            // Parsed places are write windows (`&values[2..3]`), plain reads,
+            // and marked receivers (`&xs.push(4)`, `&&buf.seal()`), which start
+            // at their mark; a take sema builds is spelled `.move()` here.
+            written_take: access == PlaceAccess.Take && id != AST_NODE_GENERATED && span.start < expr_source_start(inner)
             if access == {
                 .Write -> jfmt_write(f, "&")
-                .Take -> {}
+                .Take -> if written_take -> jfmt_write(f, "&&")
                 .Read -> {}
             }
-            jfmt_fmt_expr(f, inner, if access == PlaceAccess.Take -> JFMT_PREC_POSTFIX else -> JFMT_PREC_UNARY)
-            if access == PlaceAccess.Take -> jfmt_write(f, ".move()")
+            sema_take: access == PlaceAccess.Take && !written_take
+            jfmt_fmt_expr(f, inner, if sema_take -> JFMT_PREC_POSTFIX else -> JFMT_PREC_UNARY)
+            if sema_take -> jfmt_write(f, ".move()")
         }
         .Field(base, field, span, _) -> {
             jfmt_fmt_expr(f, base, JFMT_PREC_POSTFIX)
@@ -2533,7 +2537,8 @@ jfmt_fmt_call_args: fn(f: &JetFmt, args: [CallArg]) {
 }
 
 jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
-    // Calls are plain: a parameter's mark lives in the signature only.
+    // Calls are plain: a parameter's mark lives in the signature. Under
+    // `#Policy(writes: .Explicit)` a written `&`/`&&` stays (CallArg.mark).
     // `f(...xs)` call spread.
     if arg.spread -> jfmt_write(f, "...")
     // S61: the call-site argument label `name:`.
@@ -2541,6 +2546,7 @@ jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
         jfmt_write(f, label.name)
         jfmt_write(f, ": ")
     }
+    if arg.mark == .Val(mark) -> jfmt_write(f, if mark.access == PlaceAccess.Take -> "&&" else -> "&")
     jfmt_fmt_expr(f, arg.expr, JFMT_PREC_OR_FALLBACK)
 }
 

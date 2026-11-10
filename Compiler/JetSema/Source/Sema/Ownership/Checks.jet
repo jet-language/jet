@@ -440,10 +440,12 @@ SemaOwnershipUninitFact: struct {
 }
 
 // One frame per method call being checked. Receiver hooks
-// record the strongest convention the resolved call uses for its receiver.
+// record the strongest convention the resolved call uses for its receiver,
+// and under `#Policy(writes: .Explicit)` the signature line of that call.
 SemaReceiverMarkFrame: struct {
     receiver_span: Span
     convention: AccessConvention?
+    signature: String{""}
 }
 
 SemaOwnershipCallViewFact: struct {
@@ -3349,6 +3351,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             }
             places.push(place)
         }
+        if (scopes.writes_explicit || arg.mark != None) && !binder_rooted -> sema_call_marks_check_argument(scopes, callee, receiver, params, param, arg, diagnostics)
         if !binder_rooted && single_use && !callee.starts_with("core.") && !sema_single_use_check_argument(state, callee, param.convention, arg.expr, scopes, diagnostics) {
             accepted = false
             next
@@ -3802,6 +3805,7 @@ sema_ownership_check_method_receiver: fn(state: &SemaOwnershipState, receiver: E
 // signature line a changeability error quotes.
 sema_ownership_check_call_receiver_as: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_note_call_receiver(state, receiver, convention)
+    if scopes.writes_explicit && convention != AccessConvention.Read -> sema_receiver_mark_sign(state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     if places.len() == 0 {
         if convention == AccessConvention.Write {
@@ -3909,6 +3913,22 @@ sema_receiver_mark_note: fn(state: &SemaOwnershipState, receiver: Expr, conventi
                 updated.convention = Val(convention)
                 state.receiver_frames[index] = updated
             }
+            return
+        }
+        index -= 1
+    }
+}
+
+// The signature line E0228 quotes for the innermost frame over `receiver`.
+sema_receiver_mark_sign: fn(state: &SemaOwnershipState, receiver: Expr, signature: String) {
+    span: expr_span(receiver)
+    index := state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end {
+            updated := frame
+            updated.signature = signature
+            state.receiver_frames[index] = updated
             return
         }
         index -= 1

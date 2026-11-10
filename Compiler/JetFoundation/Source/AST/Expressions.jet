@@ -135,6 +135,16 @@ CallArg: struct {
     flags: CallArgFlags
     label: CallLabel?
     spread: Bool
+    // The written `&`/`&&` on a place argument; only
+    // `#Policy(writes: .Explicit)` accepts it (sema CallMarks.jet).
+    mark: CallMark?{None}
+}
+
+// A call mark: `grow(&xs)` writes the place, `archive(&&title)` takes it. A
+// marked receiver is a written Expr.Place instead (`&xs.push(4)`).
+CallMark: struct {
+    access: PlaceAccess
+    span: Span
 }
 
 CallLabel: struct {

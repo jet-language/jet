@@ -1,0 +1,53 @@
+Error [jet.CallMarkRequired]: `.push()` changes `items`, so the call writes `&items`
+  --> tests/ui/writes_policy_call_marks.jet:4:5
+    |
+  4 |     items.push(4)
+    |     ^^^^^
+ Why: `push: fn(&self, &&Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Fix: Write `&items`
+More: jet-lang.dev/e/E0228
+
+Error [jet.CallMarkRequired]: `grow` changes `xs`, so the call writes `&xs`
+  --> tests/ui/writes_policy_call_marks.jet:17:10
+    |
+ 17 |     grow(xs)
+    |          ^^
+ Why: `grow: fn(items: &[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Fix: Write `&xs`
+More: jet-lang.dev/e/E0228
+
+Error [jet.CallMarkRequired]: `.push()` changes `xs`, so the call writes `&xs`
+  --> tests/ui/writes_policy_call_marks.jet:18:5
+    |
+ 18 |     xs.push(5)
+    |     ^^
+ Why: `push: fn(&self, &&Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Fix: Write `&xs`
+More: jet-lang.dev/e/E0228
+
+Error [jet.CallMarkRequired]: `grow` changes `xs`, so its mark is `&`, not `&&`
+  --> tests/ui/writes_policy_call_marks.jet:19:10
+    |
+ 19 |     grow(&&xs)
+    |          ^^
+ Why: `grow: fn(items: &[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Fix: Write `&xs`
+More: jet-lang.dev/e/E0228
+
+Error [jet.CallMarkRequired]: `archive` takes `title`, so the call writes `&&title`
+  --> tests/ui/writes_policy_call_marks.jet:21:16
+    |
+ 21 |     n: archive(title)
+    |                ^^^^^
+ Why: `archive: fn(title: &&String)` takes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Fix: Write `&&title`
+More: jet-lang.dev/e/E0228
+
+Error [jet.CallMarkRequired]: `count` neither changes nor takes `xs`, so it takes no `&`
+  --> tests/ui/writes_policy_call_marks.jet:22:19
+    |
+ 22 |     print("{count(&xs)} {n}")
+    |                   ^
+ Why: `count: fn(items: [Int])` reads this input; a mark says the call changes or takes the value, so it would tell the reader something false
+ Fix: Remove the `&`
+More: jet-lang.dev/e/E0228
