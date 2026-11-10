@@ -263,7 +263,11 @@ module.exports = grammar({
         ),
       )),
 
-    _head_name: ($) => choice($.type_identifier, $.primitive_type, $.identifier, $.meta_name),
+    _head_name: ($) => choice($.type_identifier, $.primitive_type, $.identifier, $.meta_name, $.template_paste),
+
+    // `#{name}`: a derive or marker template pastes a binding as the name
+    // (`impl #{type_name} { … }`). Elsewhere `#` and the block are loose elements.
+    template_paste: ($) => seq("#", $.block),
 
     _head_part: ($) =>
       choice($.type_parameters, $.paren_expr, $.bracket_expr, $.identifier, $.type_identifier, $.primitive_type, $.attribute, ".", ":", ",", "|", "+", "="),
