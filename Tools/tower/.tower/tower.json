@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98373,
+    "rev": 98375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35331,11 +35331,11 @@
         {
           "n": 16,
           "text": "Tools/agent/check-core-surface-ledger.mjs reads the Tower board from both Tools/tower/.tower/tower.json and history.json (towerBoard, towerCards, validateOwners), so archived ratified decisions and archived done cards resolve. On dev, node Tools/agent/check-core-surface-ledger.mjs --check no longer stops with 'declined row names an unknown decision: D-STR-DECLINE1'. The rows declined under D-STR-DECLINE1, D-SET-DECLINE1 and D-CORESURF-SMALL1 validate, an archived done owner card counts as closed rather than missing, and --hostile-fixtures still rejects a declined row whose decision is open or absent from both files.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T20:14:03.325Z"
+          "evidence": "On dev e4096a0f3b the .mjs is replaced by its Jet twin, Tools/agent/CoreSurfaceLedger.jet. That tool reads decisions and owners through the tree's Tower board reader, whose show reads tower.json and then the history.json archive (header comment, lines 31-37); rows declined under D-STR-DECLINE1, D-SET-DECLINE1 and D-CORESURF-SMALL1 are handled at line 567. Run with seed a0_042 (Main, 2026-11-10): --check passes ('core surface ledger: source-derived, verified against 11 recorded competitor surfaces, and unique'; 12134 rows; no unknown-decision stop). --hostile-fixtures rejects every hostile case, including 'Core API workflow hides an unratified decline'.",
+          "at": "2026-11-10T02:01:06.875Z"
         },
         {
           "n": 17,
@@ -35744,7 +35744,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-09T20:46:08.240Z",
+      "updated": "2026-11-10T02:01:06.875Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-09T19:32:04.021Z",
       "goals": [
@@ -82014,6 +82014,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Correction (Main): the compiler cannot call a core.sys __ row, because the lexer refuses __ names outside Core (E0067, JetLexer Payload.jet identifier_respelling). Every remaining route to a process-local 192 MiB floor for the compiler only is an owner gate: a Compiler exception to the __ rule, a public core.sys call, or a package.jet field. c6 waits on ballot D-THREAD-STACK1. Its options also cover keeping 192 MiB for every program and making the compiler not need the floor (#5910). c6b2, c6b3 and c6b4 stay withdrawn; c6a (in train 2) does not change behavior."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Decision (Main) on c6 replaces the earlier rlimit plan: the compiler never changes RLIMIT_STACK, because every child (jet dev's program, jet test binaries, core.process spawns) would inherit it. The runtime gets a process-local worker-stack floor reached through an internal core.sys.__ row (not public API; Host.jet already calls core.sys.__rlimit the same way). Program default: soft RLIMIT_STACK with an 8 MiB minimum. The compiler sets a 192 MiB floor for its own compile. Staged as G1Lead-3-6403c6f1 (runtime plus row, train 3) and c6f2 (Host.jet call plus case rows for run, dev and test children, on the next seed). c6b2, c6b3 and c6b4 are withdrawn."
         },
         {
@@ -82115,7 +82120,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-10T01:59:05.914Z",
+      "updated": "2026-11-10T02:00:57.954Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -194084,6 +194089,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T02:01:06.875Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-10T02:00:57.954Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-10T01:59:05.914Z",
       "by": "Main",
