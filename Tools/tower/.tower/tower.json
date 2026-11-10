@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98881,
+    "rev": 98882,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77066,7 +77066,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-10T16:05:55.917Z",
+      "updated": "2026-11-10T16:41:16.659Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -185548,13 +185548,13 @@
       "explainer": "Words used here. An allocation is a request for memory, such as a list growing. AllocError is Core's error for a refused one. A contract is the part of a signature that names the errors a function can fail with. A handler is ?? or an arm table on a call.",
       "story": "Rin writes firmware with a fixed memory pool. Today she must remember try_push, try_reserve and try_insert, and a plain push slips in and stops the device. Under A her function names AllocError once, and every push in it reports failure as a value.",
       "inWild": "// Rust: a twin beside each operation, as Jet has today.\nlet mut rows = Vec::new();\nrows.try_reserve(n)?;   // Err(TryReserveError) instead of an abort",
-      "detail": "What this ballot decides. How code asks for allocation failure as a value. The AllocError type, the hosted stop when nobody asks, and the allocator choice of D-ALLOC-SITE1=A are unchanged.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Probe a01 uses try_with_capacity and try_push, and String's try_push, and prints loaded 3 then abc. Probe a06 asks a 40-byte fixed allocator for 7 then 9 bytes with try_alloc and prints 7 -1, the second refused as a value.\n\nProbe a02 writes a handler on a plain push and gets E0405, ?? only works on a fallible value, not Unit. Probe a03 already compiles a function whose contract names AllocError around plain pushes and prints loaded 3; today those pushes would still stop on failure. Probe a04's heap budget prints grew 100.\n\nProbe a05 puts a #Context(allocator: …) block in value position and gets E0003, because D-ALLOC-SITE1's block value is not built. Probe a07 calls [String].with_capacity from a user file and gets E0311, whose fix offers only List.try_with_capacity; the plain form is compiler-internal.\n\nThe rule under A. Each allocating operation has one spelling: push, reserve, insert, with_capacity, new and alloc. A plain call fails as an AllocError value in exactly two places, both visible in the source.\n\nFirst, at a handled call. A ?? or an arm table written on the allocating call itself makes that call fallible, as its try_ twin is today. This is what a device needs at one site.\n\nSecond, in a function whose contract names AllocError. That body is the one scope: every allocating operation in it fails as a value, and the failure propagates by the ordinary rule. A call to another function whose contract names AllocError propagates too.\n\nEverywhere else a failed allocation stops the program with today's report, under D-RESOURCE-LIMIT1=A. Callees whose contracts do not name AllocError keep that stop inside them, so no function changes meaning because of who calls it.\n\nResults that are already optional. Map.add allocates and returns the old value as an Option, so m.add(k, v) ?? x already means something: no old value. Probe a08 prints first -1, second 1. Under A a bare ?? there keeps that meaning and never catches refused memory, so no existing line changes. Such an operation becomes fallible only inside a contract that names AllocError.\n\nWhat counts inside that contract. Every allocation in the body, named or implicit: list and map literals, text interpolation and concatenation, and closure captures. A refused allocation leaves the value it was growing unchanged, as try_push does today. jet inspect lists each fallible point in the body, so none is hidden.\n\nWhy this stays sound. Whether a call can fail is known from its own line and its own function's signature, never from the caller's context. Each function compiles once. Cleanup on the early return is the ordinary error route's, the same as for any other error.\n\nBeginners never see it. Core declares the one conversion from AllocError to Err, so a library function that names AllocError can be called from a plain run. An unhandled one ends the program with the same report as today's stop.\n\nCensus on dev, Jet code lines over Core, Compiler, Jetpack, Tools, Examples and tests, comments excluded. 53 lines call a try_ allocation form: 31 with ?? on the call, 13 with ?, 2 matched in place and 7 bound, returned or ignored. The earlier count of 92 also counted Tower JSON and comments.\n\nThe commit that deletes the twins rewrites those 53 lines in the tree. A ?? or match on the call keeps its meaning as written. A ? or a returned result sits in a function whose contract names AllocError, so rule two keeps it. The few bound results become a match on the call.\n\nNo jet fix rewrite and no teaching diagnostic is added for the retired try_ names, under D-TEACH-RECONCILE1=A and the owner's rule pending D-LANG-MIGRATE1. 69 Jet lines in 51 files put ?? on an add call; under A their meaning is unchanged.\n\nWhat A removes. Core's twin family, its docs and its signature rows go. D-FREESTAND-ALLOCAPI1=A's T ! AllocError result now belongs to a handled plain call.\n\nBeginner path. Write push; if memory runs out, the program stops with a report. Expert path. Write ?? on the call that must recover, or name AllocError in a function's contract to make its whole body report failure.\n\nDownsides of A, and what the design does about them. A handler now changes whether a call can fail, which a reader might miss. Hover marks a handled allocating call as fallible here. A ?? on a call that can never fail stays an error, as E0405 is today.\n\nA library function that allocates but does not name AllocError still stops inside, so a device cannot recover through it. That is today's rule for every plain call. The library can name AllocError in its contract without adding a second function, and jet inspect lists the stopping callees.\n\nMap.add at a single site. A device that must recover from one add, and not the whole function, moves that add into a small function whose contract names AllocError. The helper is three lines, and try_insert has no uses on dev, so no existing line needs it.\n\nWhat remains. A function that names AllocError checks each allocation, the check its twins made. Functions that do not name it keep the abort path and pay nothing new.\n\nOther options. B keeps the twins. C is Zig's: every allocating call can fail and the allocator is passed in. D is a dynamic #Context scope: any allocation inside, in any callee, fails as a value. E is Swift's and Go's: allocation failure always stops, and devices use budgets and fixed capacity.\n\nTheir best cases. B is built and explicit. C never hides an allocation. D reaches callees that never planned for it. E is the simplest language. Their costs: B doubles every allocating API. C marks every call. D makes every function carry a failure path, and a callee's ! Never contract would be untrue inside it.\n\nE leaves a device no way to recover from a refused allocation, which D-ALLOCFAIL1 exists to give it.",
+      "detail": "This vote chooses how allocation failure enters ordinary error handling. It does not change allocator selection, and A is not implemented.\n\nReran a01-a08 on a0.0.43. Twins run; handled plain push is E0405; the AllocError-contract success case runs; a fixed allocator refuses the second request as a value. Context value syntax is E0003 and user with_capacity is E0311. Map.add fallback prints first -1, second 1. Successful pushes do not prove recovery, rollback or cleanup under forced failure.\n\nA uses one allocation primitive and one ordinary error route. A handler can select recovery on an otherwise infallible allocation operation. A function explicitly admitting AllocError makes its own allocation sites recoverable. Resolve aliases and error unions before checking this opt-in; a broad Err contract alone does not opt in through a conversion. Nested functions and lambdas use their own contracts; creating their captures is an allocation in the enclosing body.\n\nAn already optional or fallible operation keeps its existing handler meaning. Map.add fallback still means no old value. Allocation recovery for such operations requires the AllocError contract; propagate allocation failure before applying the existing optional fallback. Do not silently make a handler catch a new error kind.\n\nAll allocating expressions in the selected body are covered, including literals, interpolation, captures and temporary values. Called functions keep their independently checked contracts. A callee without allocation recovery may still stop, including cleanup callees. Inspection must expose these stopping boundaries; a function contract alone is not whole-call-tree recovery.\n\nOn a failed growth, leave the collection unchanged. Already-evaluated arguments are not evaluated again; moved arguments and partial construction clean up exactly once. Construct AllocError and perform the failure transfer without allocating. Failure reporting and cleanup must not recursively need the exhausted allocator. No automatic retry or dynamic unwinding mechanism is added. Prove these cases with forced-failure tests across applicable tiers and fixed budgets before claiming recovery.\n\nB's twin spellings express different failure contracts over one primitive; they are not by themselves two runtime mechanisms. C is strengthened to always-fallible allocation with the existing context allocator. Failure typing and allocator passing are independent choices. C provides a uniform result type without handler-directed inference; its cost is ordinary propagation/handling at allocating boundaries.\n\nD propagates through callees dynamically and would need an explicit amendment to static Never contracts; it cannot be described as already sound. E cannot meet local recovery needs. A offers a smaller beginner surface, but adds contextual fallibility rules and must prove full failure-path safety.",
       "options": [
         {
           "key": "A",
           "name": "One spelling; fails where asked",
           "detail": "A plain allocating call fails as an AllocError value when a handler sits on it or when its function's contract names AllocError. Otherwise it stops as today. The try_ twins go.",
-          "technical": "Reverses D-ALLOCFAIL1=A's twin family; keeps AllocError, its raw entry point and E0402. Fallibility is lexical: handled call or AllocError in the enclosing contract. Core declares AllocError -> Err. The deleting commit rewrites the 53 try_ code lines in the tree; the retired names get no jet fix rewrite or teaching. Hover and jet inspect show fallible sites and stopping callees.",
+          "technical": "Reverses the twin-family choice while preserving one raw primitive and ordinary error cleanup. Explicit AllocError admission, after alias/union resolution, selects local recovery; broad Err alone does not. Nested function contracts are independent. Already optional/fallible handler meaning stays unchanged. Failure construction and transfer allocate nothing.",
           "code": "use mem: core.mem\n\n// The contract names AllocError, so every allocation in this body is fallible\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)   // a failed push returns Err(AllocError)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {(load(3) ?? [Int]{}).len()}\")\n    s := \"ab\"\n    s.push(\"c\") ?? panic(\"no memory\")   // a handler at the call makes it fallible\n    print(s)\n}\n// Proposed (A): loaded 3, abc. Probe a03 runs load today; probe a02's handled push is E0405."
         },
         {
@@ -185566,10 +185566,10 @@
         },
         {
           "key": "C",
-          "name": "Zig's: every call can fail",
-          "detail": "Every allocating call returns AllocError, is marked at the call, and takes its allocator as an argument.",
-          "technical": "Zig's std.ArrayList with try. Reverses D-ALLOC-SITE1=A's context allocator; every allocating line in Core and user code changes.",
-          "code": "// Zig's way (C): every allocating call can fail, and the caller passes the allocator\nload: fn(a: mem.Allocator, n: Int) -> [Int] mem.AllocError! {\n    rows := [Int].init(a)\n    loop i in 0..<n -> rows.push(i)?\n    rows\n}\n\nrun: fn() {\n    a: mem.heap()\n    print(\"loaded {(load(a, 3) ?? [Int]{}).len()}\")\n    s := String.init(a, \"ab\")\n    s.push(\"c\")? ?? panic(\"no memory\")\n    print(s)\n}\n// Proposed (C), not built: no plain call is infallible; every one is marked."
+          "name": "Always fallible; existing context allocator",
+          "detail": "Every allocating operation returns AllocError through ordinary error handling; allocator selection stays context-based.",
+          "technical": "One stable result type for each operation, independent of whether a handler surrounds it. Keep D-ALLOC-SITE1 allocator selection; this option does not require explicit allocator parameters. Callers propagate or handle failure using ordinary Jet rules.",
+          "code": "// Proposed C: same context allocator, uniform fallible operations.\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n { rows.push(i) ?? return Err(err) }\n    rows\n}\n// At a hosted boundary, an unhandled error uses the existing stop report.\n// At a recovery boundary, handle load(n)'s AllocError."
         },
         {
           "key": "D",
@@ -185611,7 +185611,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A halves the allocating API and keeps recovery for devices. Whether a call can fail is visible on its own line or in its function's signature, so nothing changes meaning behind a reader's back.",
+        "why": "A removes twin names and keeps explicit recovery boundaries. Its contextual failure rules are a real language cost, and whole-call-tree recovery still requires compatible callee contracts.",
         "gains": [
           "One spelling per allocating operation.",
           "Devices recover at the call or for a whole function.",
@@ -185628,7 +185628,7 @@
           },
           {
             "loss": "One add on a map recovers only inside a contract that names AllocError.",
-            "mitigation": "A three-line helper does it, and no line on dev needs it today."
+            "mitigation": "A helper with an AllocError contract selects recovery without changing the optional fallback's meaning; this remains extra ceremony."
           },
           {
             "loss": "Code outside the tree that calls try_push stops compiling with a generic unknown-method error.",
@@ -185642,7 +185642,7 @@
           },
           {
             "key": "C",
-            "reason": "C marks every allocating call in every program."
+            "reason": "C has uniform result typing and preserves context allocation, but ordinary callers must propagate or handle allocation failure at more boundaries."
           },
           {
             "key": "D",
@@ -185660,48 +185660,48 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. A's jet fix rewrite of the retired try_ names broke D-TEACH-RECONCILE1=A and the owner's rule, so the tree is rewritten in the deleting commit instead. The census, which counted Tower JSON, is now 53 Jet lines broken down by form."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Reran a01-a08, distinguished success from forced-failure proof, specified lexical and cleanup rules, and separated C's uniform failure type from allocator selection."
       },
       "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-ALLOC-FAIL1/probes for a01 to a08. The census runs git grep on '\\.try_(alloc|with_capacity|push|new|reserve)\\(' and '\\.add\\([^)]*\\) *\\?\\?' over *.jet files in Core, Compiler, Jetpack, Tools, Examples and tests, with comment lines dropped.",
       "surface": {
-        "gist": "Should the try_ twins go, so a plain allocating call fails as a value wherever the code handles it or declares AllocError?",
-        "lesson": "Adding to a list needs memory, and memory can run out. Most programs should stop with a report; a device must recover. Today Jet has two names per operation, one for each need. This vote decides whether one name can do both.",
+        "gist": "Should allocation failure be recoverable where requested, explicitly named with try_, or always returned as a value?",
+        "lesson": "Memory can run out. A stops by default and selects recovery at a handler or an explicit AllocError contract. Called functions keep their own contracts. The other options trade API size against uniform failure typing.",
         "trio": {
           "current": {
-            "note": "A twin per operation.",
-            "code": "rows.push(i)                    // stops on failure\nrows.try_push(i) ?? return rows  // a value"
+            "note": "The try_ form reports a value; plain push has no handled failure today.",
+            "code": "rows.try_push(i) ?? return rows"
           },
           "wild": {
-            "lang": "Zig",
-            "note": "Every call can fail.",
-            "code": "try list.append(item);"
+            "lang": "Rust",
+            "note": "A separate fallible reservation operation.",
+            "code": "rows.try_reserve(n)?;"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "Where asked",
-            "gist": "A handler or an AllocError contract makes it fail as a value.",
+            "gist": "Recover at a handler or explicit AllocError contract.",
             "gains": [
-              "Half the API.",
-              "Devices recover."
+              "One operation name."
             ],
             "losses": [
-              "Handler changes the call."
+              "Context determines failure typing.",
+              "Some callees still stop."
             ],
             "proposed": {
-              "code": "load: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\ns.push(\"c\") ?? panic(\"no memory\")"
+              "code": "s.push(\"c\") ?? panic(\"no memory\")"
             }
           },
           {
             "key": "B",
             "name": "Twins",
-            "gist": "Keep try_ beside each operation.",
+            "gist": "Keep explicit stopping and fallible names.",
             "gains": [
-              "Built."
+              "Failure contract visible in the name."
             ],
             "losses": [
-              "Double API."
+              "Larger API."
             ],
             "proposed": {
               "code": "rows.try_push(i) ?? return rows"
@@ -185709,27 +185709,27 @@
           },
           {
             "key": "C",
-            "name": "Zig",
-            "gist": "Every allocating call can fail.",
+            "name": "Always fallible",
+            "gist": "One result type; keep the context allocator.",
             "gains": [
-              "Nothing hidden."
+              "Uniform failure typing."
             ],
             "losses": [
-              "Marks everywhere."
+              "More ordinary error propagation."
             ],
             "proposed": {
-              "code": "rows.push(i)?"
+              "code": "rows.push(i) ?? return Err(err)"
             }
           },
           {
             "key": "D",
             "name": "Dynamic scope",
-            "gist": "Any allocation inside fails as a value.",
+            "gist": "Recovery reaches callees dynamically.",
             "gains": [
-              "Reaches callees."
+              "Covers the whole call tree."
             ],
             "losses": [
-              "Hidden failure paths."
+              "Requires changing static Never contracts."
             ],
             "proposed": {
               "code": "#Context(alloc_failure: .Error) -> load(3)"
@@ -185738,50 +185738,49 @@
           {
             "key": "E",
             "name": "Always stop",
-            "gist": "Failure always stops the program.",
+            "gist": "No allocation recovery.",
             "gains": [
-              "Simplest."
+              "Smallest failure surface."
             ],
             "losses": [
-              "No recovery."
+              "Cannot drop one failed packet and continue."
             ],
             "proposed": {
-              "code": "rows.push(i)   // stops on failure"
+              "code": "rows.push(i)"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Half the API, recovery kept, and a call's failure is visible on its line or signature.",
+          "why": "One name and explicit recovery boundaries, at the cost of contextual failure rules.",
           "gains": [
-            "Half the API.",
-            "Devices recover."
+            "One operation name."
           ],
           "losses": [
             {
-              "loss": "Handler changes the call.",
-              "mitigation": "Hover marks it; a needless ?? stays an error."
+              "loss": "Callees may still stop.",
+              "mitigation": "Inspect and require compatible callee contracts."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Double API."
+              "reason": "Larger API, though failure names are explicit."
             },
             {
               "key": "C",
-              "reason": "Marks everywhere."
+              "reason": "Uniform typing needs more error propagation."
             },
             {
               "key": "D",
-              "reason": "Hidden failure paths."
+              "reason": "Requires changing static Never contracts."
             },
             {
               "key": "E",
-              "reason": "No recovery."
+              "reason": "No local recovery."
             }
           ],
-          "tradeoff": "A handler that changes a call, for half the API."
+          "tradeoff": "Smaller API with contextual fallibility; failure safety still needs proof."
         }
       },
       "draft": false,
@@ -185831,7 +185830,7 @@
             "Exclude literals and interpolation; then a contract body could still stop.",
             "Count every allocation, named or implicit, and list each fallible point in jet inspect."
           ],
-          "result": "Removed: none is hidden."
+          "result": "Required design coverage, not established by inspection alone; forced failure must prove implicit allocations and cleanup."
         },
         {
           "option": "B",
@@ -185844,12 +185843,12 @@
         },
         {
           "option": "C",
-          "loss": "Every allocating call is marked and takes an allocator.",
+          "loss": "Always-fallible operations require ordinary propagation or handling.",
           "attempts": [
-            "Default the allocator from #Context.",
-            "Elide the mark where the caller cannot fail."
+            "Keep the already ratified context allocator, removing unrelated allocator-passing ceremony.",
+            "Use ordinary error propagation and the hosted boundary report rather than a new allocation-specific failure mechanism."
           ],
-          "result": "The first attempt reverses D-ALLOC-SITE1=A's design back toward A."
+          "result": "C remains a strong uniform-typing alternative; its cost is failure plumbing, not allocator arguments."
         },
         {
           "option": "D",
@@ -200136,6 +200135,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:41:16.659Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ALLOC-FAIL1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:38:20.454Z",
       "by": "Main",
