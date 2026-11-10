@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98891,
+    "rev": 98892,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77075,7 +77075,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-10T16:41:16.659Z",
+      "updated": "2026-11-10T17:06:58.729Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -192361,162 +192361,157 @@
       "id": "D-REGION-ALLOC1",
       "cardId": "c0ct4a0i",
       "group": "memory",
-      "title": "The arena block keeps what it makes inside: values leave only by an explicit copy",
-      "situation": "The owner approved a block in which ordinary lists and text take memory from an arena, kept inside by the escape check. The ratified context rule already has that block, but it moves escaping values out automatically, in user code and in every library. This ballot amends that one clause: a value made in the block leaves only through a visible copy.\n\nIt replaces a posted draft that a review marked not clean. Keeping the automatic move is option E.",
-      "gist": "Should a value made inside an arena block leave only by an explicit copy, instead of moving out by itself?",
-      "lesson": "An arena hands out memory quickly and frees it all at once when its block ends. The risk is a value made there that is still used after. Jet can move such values out silently, or refuse them and ask for a copy. This vote decides which, for user code and for every library the block calls.",
-      "explainer": "Words used here. The heap is the program's ordinary memory. An arena is one block of memory that is emptied in one step, called a rewind. An escape is a value made in the block that would outlive it: returned, stored in older data, or captured by a closure that outlives the block.\n\nE0631 is today's error for an arena value that escapes.",
-      "story": "Noor's web service builds hundreds of small strings per request through a templating library. She wraps the handler in one arena block. The compiler points to the one line where the response leaves, and she adds a copy there.",
-      "inWild": "// Odin and Jai: an implicit context allocator; nothing checks what leaves.\ncontext.allocator = context.temp_allocator\nrows := build_rows(names)   // dangles after free_all\n\n// Zig: the allocator is a parameter of every call that allocates.\nconst rows = try buildRows(arena.allocator(), names);",
-      "detail": "What this ballot decides. What happens to a value made inside #Context(allocator: arena) that would outlive the block. Everything else in D-CONTEXT1=A and D-ALLOC-SITE1=A stays: the one selector, rewind at block end, collections that remember their allocator, and the expression form.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). The block does not yet move allocations: r1, the request handler, prints ada=3;lin=3 from the heap, and r4's frame prints 3 and frame 2. BuildTransact.jet's ir_context_block, lines 250 to 275, installs only a deadline; other guard values run and are released. The expression form r2 gives UnknownTag, and context.scratch in r3 gives UnknownName.\n\nToday's escape check exists for arena views. Returning arena.alloc's view is E0631, ArenaViewEscapes (r6). Closures that capture an arena value are accepted (r8 prints 5, r8b prints made in the arena). Under !Mem.Alloc a list push is accepted (r13 and r13b print 1), a known gap tracked separately. None of these unbuilt or missing checks is used below as an argument.\n\nThe rule under A. Inside the block, new storage comes from the arena, in user code and in every function it calls. Such a value may not be returned past the block, stored in older data, captured by a closure that outlives the block, or handed to a task that may outlive it. Each is E0631 at the line that would let it leave.\n\nLeaving by copy. A .copy() written at the exit, as in response = rows.join(\";\").copy(), takes its memory from the destination, not from the arena. It copies every owned buffer the value holds, nested lists, text and maps included, so nothing it returns points into the arena.\n\nValues a copy cannot move. A Shared cell always lives in program memory, as CONTEXT1 already says of links, so a Shared made in the block leaves freely and keeps its identity. A Pool made in the block leaves by copy, and its IDs stay valid. A resource that must be closed cannot be copied; leaving is refused, and the fix is to open it before the block.\n\nLibraries, the same rule everywhere. A function's escape facts are inferred: which arguments it stores into older data, returns or captures, and whether it keeps new storage in older state. They are carried in package interfaces, so a store in a dependency gets the same E0631 as the same store in the caller's own code. No library store is copied silently.\n\nCalls the checker cannot see through. A function value or a trait method has no body at the call site. So its escape facts travel in its type, beside the effect row, the way D-FNVAL-WRITE1 keeps write parameters in stored function types. They are inferred when the closure is made, and an impl may not keep more than its trait method declares.\n\nA closure made before the block that caches into its captured list therefore has a keeping type. Calling it inside the block is E0631 at the call, with the fix of a .copy() at its store. This closes the hole r8 shows today, where a capture of arena data is accepted.\n\nBuild order. Function types do not yet carry per-parameter facts: D-FNVAL-WRITE1=A, ratified on 2026-11-05, is unbuilt, and r15's fn(&Mobj) field is E0003. Until it lands, A treats a call through a function value or trait method inside the block as keeping. That is stricter, never unsound, and relaxes once the facts are in the type.\n\nEscape facts are part of a package's public surface. If the open API ballot passes, they are recorded in package.api, one more column beside each row's effects. So a library that starts keeping arena-reachable data shows up as an API change at its own jet check. It never silently breaks a caller's block.\n\nEngineering away the library cost. A library that caches new data in older state would be refused inside the block. The error names the library's store and the block that reaches it. The library fix is a .copy() at the cache store, which is correct under every allocator, and jet fix writes it in the program's own code.\n\nEngineering away the copy ceremony. Each exit needs one .copy(), and E0631 offers it as the fix, which jet fix inserts. In practice a request or frame has one or two exits: the response, or the line appended to a log.\n\nGrowth, nesting and exits. An older list keeps growing from its own allocator, as ALLOC-SITE1 says; pushing an arena value into it is a store, so it needs the copy. A nested block on the same arena is a nested mark. Resetting or closing the arena inside its block stays E0204, as ratified.\n\nEvery way out of the block rewinds the arena: normal end, early return, error and cancellation. Closes run first, and borrowers are joined first. A task started inside the block starts on the heap, amending JAI-CONTEXT1's inherited allocator. A task group joined inside the block may borrow arena data.\n\nThe expression form stays. names := #Context(allocator: frame) -> read_names(path) keeps its value in frame until close(frame), and E0631 refuses any use after the close, as ALLOC-SITE1 ratified. Only the block form rewinds.\n\nThe same programs under every option. The request handler is r1, shown in each option. The frame loop r4 needs one copy for the log line. The parser r5 returns an Int, which leaves freely; returning its tree needs a copy.\n\nCensus on dev, by git grep. #Context(allocator: appears in 5 Jet files: Examples/ErrorsAndEffects/Effects/SmartContext.jet, 3 tests and one parser error message. None is in Core or Jetpack. The example and fixtures use arena.alloc views that already stay inside. Since the block does not retarget today, no program changes output under any option.\n\nNo speed claim. Every probe runs on the heap today. Delivery acceptance includes paired measurements of the request, frame and parser, counting copies, escape checks and rewinds, before this is described as faster.\n\nWhat remains after the engineering. An unmodified library that caches arena data in older state is refused inside the block until it adds its copy. The cost falls on library authors; the mitigation is an error that names the store and a one-line fix.\n\nBeginner path. Wrap a request or a frame in the block; the compiler names each line that would let a value leave, with a copy as the fix. Expert path. arena.alloc views and the expression form, for data that lives until close.\n\nOther options. B drops the block and passes an allocator to every function that should use it, as Zig does. C retargets the block with no escape check, as Jai and Odin do, only under #Unsafe. D keeps arenas inside Core's server and game loop only. E keeps CONTEXT1 as ratified: escaping values move out by themselves, in every callee.\n\nB reaches only libraries written to take an allocator. C lets a value dangle after the rewind. D leaves user and library lists on the heap. E hides a copy and an address test at each store a block can reach, so a cost appears where the code shows none.",
+      "title": "Arena escapes: explicit deep copies or ratified automatic relocation",
+      "situation": "The ratified context rule sends ordinary allocations, including synchronous library calls, through the selected allocator. It rewinds arena blocks and automatically relocates values that leave. The allocator block is still ignored by the tested native lowering. This ballot proposes changing the escape policy, not merely implementing an approved block. A requires visible copies for escaping arena-owned storage; E keeps automatic relocation. Both need complete ownership and region checks.",
+      "gist": "Should escaping arena-owned storage require an explicit copy instead of automatic relocation?",
+      "lesson": "An arena reclaims a phase's storage together. Any value that still depends on reclaimed bytes is invalid. A rejects those escapes unless an explicit deep copy makes them independent. E relocates escaping owned storage automatically. Neither policy is implemented by these probes.",
+      "explainer": "An escape is a surviving dependency on arena storage, not every value created during a block. Scalars, old values and stable resource handles can leave when their owned graph contains no arena dependency. Copying bytes cannot duplicate a resource's identity or finishing duty.",
+      "story": "Noor builds the same response, ada=3;lin=3, through a helper. A puts an explicit copy at the response store. E performs relocation there automatically. A caching dependency may need its own change under A; the caller cannot always repair it.",
+      "inWild": "// Zig allocator-parameter illustration, not executed here:\nconst rows = try buildRows(arena.allocator(), names);\n// Odin instead supplies a context allocator to ordinary calls.",
+      "detail": "Scope. A amends D-CONTEXT1=A's automatic relocation clause. E keeps it. D-ALLOC-SITE1=A's canonical selector, remembered collection allocator and expression lifetime remain, except where B or D removes ambient selection. Copy placement and escape summaries are build work, not current guarantees.\n\nEvidence on a0.0.43. Independent r1 prints ada=3;lin=3; r4 prints 3 and frame 2. Origin/dev BuildTransact.jet:250-275 installs deadline but releases other guard values, so these outputs do not prove arena allocation. r2 rejects the expression form; r3 rejects context.scratch. r6 rejects a direct arena-view return with E0631. r8 and r8b accept closure capture and print 5 and text. These reveal inconsistent static coverage, not observed use-after-free.\n\nA retargets ordinary synchronous allocations, including callees, into the installed arena. Older collections still grow with their own allocator. Existing values do not acquire arena provenance because a block reads them. Reachable owned storage, views, closures, trait values, erased carriers and containers determine whether an escape is safe.\n\nExplicit copy. At an escaping store or return, .copy() deep-copies copyable owned buffers into the destination allocator. This extends canonical copy placement, not its value meaning. Infer destination through the use graph; a temporary alone selects no outer allocator. Reject conflicting or unknown destinations rather than silently choosing the heap. Non-escaping copies retain ordinary allocation context.\n\nCopies preserve required graph sharing and do not convert loans into ownership. Tags and protected storage remain protected. Partial allocation failure drops only constructed destination values and leaves source ownership defined. Copying cannot settle or duplicate a finishing duty. Identity-bearing resources need valid ownership paths, not byte cloning.\n\nShared cells use program storage under CONTEXT1, but their contents must be independent of the block before escape. A persistent cell around arena data is still an escape. A new Pool cannot promise copied IDs remain valid in another pool. Older stable pool references may leave. New arena-dependent pools need a valid copy contract or are refused. An independent resource handle may move out without copying.\n\nLibrary summaries cover argument-to-result, retained-store and capture provenance, including fresh storage made inside the callee. Carry them through interfaces, generic instances, function values and trait methods. Keeps arguments alone misses internally cached text. Overrides cannot retain more than their contract permits. Unknown foreign or indirect calls remain conservative unless an audited contract proves safety.\n\nComplete callable summaries are required before shipping. r15's fn(&Mobj) rejection proves one stored-type grammar gap, not absence of every callable fact. Copying a caller argument cannot repair fresh storage cached internally. Name both call and retaining store. Repair editable code, move the call outside, or update the dependency; no universal one-line caller fix exists.\n\nSummaries belong in the canonical checked interface. If D-API-SURFACE1 passes, its rendered receipt includes them; otherwise caller checking still enforces safety. A new retaining edge is a compatibility change. Introduce no second hand-maintained summary file.\n\nExits. Drop resources and settle duties before rewind; join arena borrowers first. Restore context and rewind each nested mark once on normal exit, return, error, break, panic unwinding and cancellation. Abort and kill are excluded. Reject reset or close while installed storage or borrowers remain live.\n\nNewer CONTEXT1=A already gives spawned tasks the program allocator and their own scratch. This ballot does not newly reverse JAI-CONTEXT1. Arena borrowing requires a join before rewind; otherwise reject or explicitly copy transferable data. The lexical block does not retarget an independent child's storage.\n\nThe expression form retains allocation until close/reset under ALLOC-SITE1, unlike block rewind. Existing views never relocate. Occurrence counts prove neither complete migration nor unchanged output after retargeting starts.\n\nB replaces ambient selection with allocator parameters, not a second selector. It makes allocation dependencies explicit and supports allocator-polymorphic libraries; only participating APIs use the selected allocator. D keeps ordinary user allocation on the heap while internal libraries use public safe region primitives. Core gains no private memory powers.\n\nC permits unchecked escape inside audited #Unsafe code. Manually copying the response can preserve the same workload; omitting it can dangle. Removing checks proves neither safety nor speed. E safely supports unchanged caching libraries through automatic graph relocation. Elide checks using provenance and report remaining sites. No measurement establishes a test or copy at every store.\n\nNo speed claim. The request, frame and parser probes exercise heap behavior, not arena implementation or tier parity. Compare A and E on identical output and cleanup, counting copies, failures, memory peak and check costs before any performance claim. Beginners keep heap defaults. Experts choose arena blocks and inspect actual escape costs.",
       "options": [
         {
           "key": "A",
-          "name": "Escapes are refused; a value leaves only by an explicit copy",
-          "detail": "Inside the block, new storage comes from the arena, in libraries too. A value that would outlive the block is E0631 unless it leaves through .copy(), which takes memory from the destination.",
-          "technical": "Amends D-CONTEXT1=A's move-out clause and JAI-CONTEXT1's task inheritance. Escape facts are inferred and carried in package interfaces, and for function values and trait methods in their types beside the effect row. Copies are destination-directed over owned buffers; Shared cells live in program memory; rewind runs on every exit after closes and joins; the expression form is unchanged.",
-          "code": "use core.mem\n\n// A library function the caller did not write: it builds lists and text.\nrender_row: fn(name: String, hits: Int) -> String {\n    parts := [String]{}\n    parts.push(name.copy())\n    parts.push(\"{hits}\")\n    parts.join(\"=\")\n}\n\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}                       // from the arena\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\").copy()        // leaves by copy, into response's memory\n    }                                            // the arena rewinds here\n    close(arena)\n    response\n}\n\nrun: fn() { print(handle([\"ada\", \"lin\"])) }      // ada=3;lin=3\n// Without .copy(): E0631 at that line. Proposed (A), not built: today r1 runs on the heap."
+          "name": "Explicit escape copies",
+          "detail": "Reject surviving arena dependencies unless an explicit deep copy allocates in the proven destination.",
+          "technical": "Amends automatic relocation. Require complete graph and callable provenance, destination inference, cleanup-before-rewind and failure-safe copying. No temporary all-indirect-calls workaround is sold as complete delivery.",
+          "code": "// Proposed A; same render_row helper as r1.\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\").copy()\n    }\n    close(arena)\n    response\n}\n// Destination is response's allocator. Intended output: ada=3;lin=3."
         },
         {
           "key": "B",
-          "name": "Explicit allocator parameters, as in Zig",
-          "detail": "No block retargets anything. Code that should use an arena takes an allocator argument; code that takes none uses the heap.",
-          "technical": "Retires #Context(allocator:) from D-ALLOC-SITE1=A. Allocator-aware functions take a mem.Allocator from D-ALLOC-TRAIT1. A library opts in once per API, not with a twin per function.",
-          "code": "use core.mem\n\nrender_row: fn<A: mem.Allocator>(alloc: A, name: String, hits: Int) -> String {\n    parts := [String].new_in(alloc)\n    parts.push(name.copy_in(alloc))\n    parts.push(format_in(alloc, \"{hits}\"))\n    parts.join_in(alloc, \"=\")\n}\n\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    rows := [String].new_in(arena)\n    loop name in names -> rows.push(render_row(arena, name, name.len()))\n    response: rows.join(\";\")                    // heap\n    close(arena)\n    response\n}\n// Proposed (B), not built: today the mem.Allocator bound gives an error (r10)."
+          "name": "Explicit allocator parameters",
+          "detail": "Replace ambient retargeting with allocator-aware APIs. Allocation dependencies appear in signatures.",
+          "technical": "Amends ALLOC-SITE1's selector. Use the ratified safe allocator trait. One generic API can accept many allocators without generating twins. Libraries not taking an allocator keep their ordinary allocation behavior.",
+          "code": "// Proposed B, same names and response:\nrender_row: fn<A: mem.Allocator>(alloc: A, name: String, hits: Int) -> String {\n    parts := [String].new_in(alloc)\n    parts.push(name.copy_in(alloc))\n    parts.push(format_in(alloc, \"{hits}\"))\n    parts.join_in(alloc, \"=\")\n}\n// Build rows through render_row(arena, name, name.len()).\n// Build the final joined response with the program allocator, then close arena.\n// Intended output: ada=3;lin=3. APIs proposed, not executed."
         },
         {
           "key": "C",
-          "name": "No escape check, under #Unsafe",
-          "detail": "The block retargets as in A, but nothing checks what leaves, as in Jai and Odin. Safe code cannot use it.",
-          "technical": "No E0631 for block values. A value may dangle after the rewind, so the block needs #Unsafe(reason).",
-          "code": "use core.mem\n\n// A library function the caller did not write: it builds lists and text.\nrender_row: fn(name: String, hits: Int) -> String {\n    parts := [String]{}\n    parts.push(name.copy())\n    parts.push(\"{hits}\")\n    parts.join(\"=\")\n}\n\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}                       // from the arena\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\")               // points into the arena: dangles\n    }                                            // the arena rewinds here\n    close(arena)\n    response\n}\n\nrun: fn() { print(handle([\"ada\", \"lin\"])) }      // ada=3;lin=3\n// Proposed (C), not built; the block is wrapped in #Unsafe(reason)."
+          "name": "Unchecked region under #Unsafe",
+          "detail": "Retarget the block but leave escape management to audited unsafe code.",
+          "technical": "No automatic escape protection. Manual deep copy can preserve the workload; omitting it risks dangling storage. Safe code cannot obtain unchecked arena-dependent survivors.",
+          "code": "// Proposed C, inside the same handler:\n#Unsafe(\"audited response ownership before arena rewind\") {\n    #Context(allocator: arena) {\n        rows := [String]{}\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\").copy()\n    }\n}\n// Same intended response. Removing copy can dangle; no automatic proof."
         },
         {
           "key": "D",
-          "name": "Arenas inside Core only",
-          "detail": "No user block. Core's web server and game loop use arenas for their own buffers; user and library lists stay on the heap.",
-          "technical": "Retires #Context(allocator:). Builds on D-HTTP-REQMEM1's per-request memory and arena.alloc views.",
-          "code": "use core.mem\n\n// A library function the caller did not write: it builds lists and text.\nrender_row: fn(name: String, hits: Int) -> String {\n    parts := [String]{}\n    parts.push(name.copy())\n    parts.push(\"{hits}\")\n    parts.join(\"=\")\n}\n\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}                       // from the arena\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\")               // heap: the block is gone under D\n    }                                            // the arena rewinds here\n    close(arena)\n    response\n}\n\nrun: fn() { print(handle([\"ada\", \"lin\"])) }      // ada=3;lin=3\n// Proposed (D): written without the #Context line; Core's server owns its own arena."
+          "name": "No ambient user retargeting",
+          "detail": "Ordinary user and dependency allocations stay on the heap. Libraries may use public safe arena primitives internally.",
+          "technical": "Removes the user allocator context selector. Does not reserve private allocator powers for Core. Users retain the same safe region primitives that internal libraries use, but ordinary list APIs are not retargeted.",
+          "code": "// Proposed D: no arena or #Context line in this handler.\nhandle: fn(names: [String]) -> String {\n    rows := [String]{}\n    loop name in names -> rows.push(render_row(name, name.len()))\n    rows.join(\";\")\n}\n// Same intended output: ada=3;lin=3, ordinary heap storage."
         },
         {
           "key": "E",
-          "name": "Keep CONTEXT1: escaping values move out by themselves",
-          "detail": "As ratified: a value stored into older data, by the block or any callee, first moves into the destination's memory. No copy is written.",
-          "technical": "D-CONTEXT1=A and D-ALLOC-SITE1=A unchanged: an address test at stores a block can reach, and a move into the destination allocator at each exit.",
-          "code": "use core.mem\n\n// A library function the caller did not write: it builds lists and text.\nrender_row: fn(name: String, hits: Int) -> String {\n    parts := [String]{}\n    parts.push(name.copy())\n    parts.push(\"{hits}\")\n    parts.join(\"=\")\n}\n\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}                       // from the arena\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\")               // moves itself into response's memory\n    }                                            // the arena rewinds here\n    close(arena)\n    response\n}\n\nrun: fn() { print(handle([\"ada\", \"lin\"])) }      // ada=3;lin=3\n// Ratified (E), not built: today r1 runs on the heap."
+          "name": "Keep ratified automatic relocation",
+          "detail": "Owned arena storage relocates into its destination when it escapes, including from libraries.",
+          "technical": "Keep CONTEXT1=A and ALLOC-SITE1=A. Preserve graph identity, duties and failure safety. Provenance can elide unnecessary checks; report actual relocation sites. No every-store overhead or zero-cost promise is established.",
+          "code": "// Ratified E, not built: same handler and helper as A.\n#Context(allocator: arena) {\n    rows := [String]{}\n    loop name in names -> rows.push(render_row(name, name.len()))\n    response = rows.join(\";\")\n}\n// Relocate owned response storage before rewind. Same intended output."
         }
       ],
       "comparisons": [
         {
           "lang": "Odin",
-          "note": "An implicit context allocator; nothing checks what outlives free_all.",
-          "code": "context.allocator = context.temp_allocator\nrows := build_rows(names)\nfree_all(context.temp_allocator)"
+          "note": "Context allocators intercept ordinary library allocation; manual management remains the programmer's responsibility. Documentation checked; illustration not executed.",
+          "code": "context.allocator = context.temp_allocator\nrows := build_rows(names)"
         },
         {
           "lang": "Zig",
-          "note": "The allocator is an argument of every allocating call.",
-          "code": "var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\ndefer arena.deinit();\nconst rows = try buildRows(arena.allocator(), names);"
+          "note": "The allocator guide recommends parameters for libraries and arenas for phase lifetimes. This makes allocation dependencies explicit. Illustration not executed.",
+          "code": "const rows = try buildRows(arena.allocator(), names);"
         },
         {
-          "lang": "Rust",
-          "note": "bumpalo collections carry the arena's lifetime; the borrow checker refuses escapes.",
-          "code": "let bump = Bump::new();\nlet mut rows = bumpalo::collections::Vec::new_in(&bump);"
+          "lang": "Rust bumpalo",
+          "note": "Arena collections cannot outlive their arena through Rust lifetimes. Raw bump allocations do not run Drop; boxed wrappers do. Documentation checked; illustration not executed.",
+          "code": "let mut rows = bumpalo::collections::Vec::new_in(&bump);"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A is the block the owner approved: arena memory for every call inside, and the escape check keeps it inside. Every copy is visible, and libraries, closures and trait methods get the same rule as user code.",
+        "why": "A makes an escaping copy visible while keeping context allocation for synchronous libraries. This is an explicit policy amendment, not proof that automatic relocation is unsafe or slower.",
         "gains": [
-          "One line puts a request's or frame's lists and text in an arena.",
-          "No value made there can dangle, in user code or a library.",
-          "Every copy out of the arena is written where it happens."
+          "Visible copying at surviving arena edges.",
+          "One allocator selector and shared region checking."
         ],
         "losses": [
           {
-            "loss": "An unmodified library that caches arena data is refused inside the block.",
-            "mitigation": "The error names the store; one .copy() there fixes it under every allocator."
+            "loss": "Caching dependencies may need changes that callers cannot make.",
+            "mitigation": "Name the retaining store; move calls outside, change editable code or update the dependency."
           },
           {
-            "loss": "Each exit from the block needs a .copy().",
-            "mitigation": "E0631 offers the copy as its fix, and jet fix inserts it."
+            "loss": "Destination-directed copying and callable provenance require substantial new checks.",
+            "mitigation": "Ship complete graph summaries and failure-safe copies; reject ambiguous destinations."
           },
           {
-            "loss": "Function types carry one more inferred fact: whether the function keeps new storage.",
-            "mitigation": "It is inferred, shown on hover, and written only in a trait method that promises not to keep."
-          },
-          {
-            "loss": "Until D-FNVAL-WRITE1=A is built, every call through a function value inside the block counts as keeping.",
-            "mitigation": "The error names the call and offers a copy of the argument; the rule relaxes when function types carry the fact."
+            "loss": "Some identity-bearing graphs cannot be copied.",
+            "mitigation": "Move only independent storage, retain older identities, or keep that work outside the block."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B reaches only libraries written to take an allocator."
+            "reason": "B is explicit and composable, but only allocator-aware APIs participate."
           },
           {
             "key": "C",
-            "reason": "C lets a value dangle after the rewind."
+            "reason": "C allows expert manual management but provides no automatic escape proof."
           },
           {
             "key": "D",
-            "reason": "D keeps user and library lists on the heap."
+            "reason": "D avoids ambient complexity but does not retarget ordinary library allocations."
           },
           {
             "key": "E",
-            "reason": "E hides a copy and an address test at every store a block can reach."
+            "reason": "E preserves unchanged caching libraries; A instead chooses visible copy sites. Neither has a measured performance advantage."
           }
         ],
-        "tradeoff": "A visible copy at each exit and one inferred fact in function types, in return for no hidden moves and no dangling values."
+        "tradeoff": "Visible escape costs versus E's more transparent library reuse; both require complete safety machinery."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. A's function-type escape facts lean on D-FNVAL-WRITE1=A, which r15 shows is unbuilt, so A now treats such calls as keeping until then. Probes r1 to r14 match on a0.0.43, and reader-addressed wording is removed."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran all r probes and read the ratified context contracts. Fixed copy destination, pool/Shared graphs, task-policy history, unsafe examples and unfair E overhead claims; A remains conditional."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-REGION-ALLOC1/probes and compare with the detail; r15 is E0003 at fn(&Mobj). The census is git grep -l for #Context(allocator: over *.jet on dev. ir_context_block is BuildTransact.jet:250-275. Read D-CONTEXT1, D-ALLOC-SITE1, D-JAI-CONTEXT1 and D-FNVAL-WRITE1 in Tower.",
+      "checkInstructions": "Independent logs are probes/review7-*.run.txt. Read origin/dev BuildTransact.jet:250-275 and live CONTEXT1, ALLOC-SITE1, FNVAL-WRITE1 and ALLOC-TRAIT1. These probes establish current heap outputs and diagnostic coverage, not proposed arena behavior or tier parity.",
       "surface": {
-        "gist": "Should a value made inside an arena block leave only by an explicit copy, instead of moving out by itself?",
-        "lesson": "An arena hands out memory fast and frees it all when its block ends. A value made there must not be used after. Jet can move such values out silently, or refuse them and ask for a copy.",
+        "gist": "Should escaping arena-owned storage require an explicit copy instead of automatic relocation?",
+        "lesson": "A makes escaping copies visible; E relocates owned storage automatically. Both need complete region checks. Current native probes still allocate ordinary collections on the heap.",
         "trio": {
           "current": {
-            "note": "Today the block runs on the heap.",
-            "code": "#Context(allocator: arena) {\n    response = rows.join(\";\")\n}\n// ada=3;lin=3, from the heap"
+            "note": "The allocator guard is released by current lowering; output does not prove arena behavior.",
+            "code": "#Context(allocator: arena) { response = rows.join(\";\") }"
           },
           "wild": {
             "lang": "Zig",
-            "note": "An allocator argument.",
+            "note": "Explicit allocator dependencies; illustration not executed.",
             "code": "try buildRows(arena.allocator(), names)"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Explicit copy",
-            "gist": "Escapes are E0631; leave by .copy().",
+            "name": "Explicit copies",
+            "gist": "Reject surviving arena dependencies without a proven deep copy.",
             "gains": [
-              "Nothing dangles.",
-              "Copies are visible."
+              "Visible escape costs."
             ],
             "losses": [
-              "Caching libraries refused."
+              "Caching dependencies may need changes.",
+              "Ambiguous destinations are refused."
             ],
             "proposed": {
-              "code": "#Context(allocator: arena) {\n    response = rows.join(\";\").copy()\n}"
+              "code": "response = rows.join(\";\").copy()"
             }
           },
           {
             "key": "B",
-            "name": "Allocator arguments",
-            "gist": "Pass an allocator, as in Zig.",
+            "name": "Allocator parameters",
+            "gist": "Replace ambient selection with explicit APIs.",
             "gains": [
-              "Explicit everywhere."
+              "Visible, composable dependencies."
             ],
             "losses": [
-              "Only opted-in libraries."
+              "Allocator-aware APIs required."
             ],
             "proposed": {
               "code": "render_row(arena, name, name.len())"
@@ -192524,79 +192519,79 @@
           },
           {
             "key": "C",
-            "name": "Unchecked",
-            "gist": "No escape check, under #Unsafe.",
+            "name": "Audited unchecked",
+            "gist": "Manual escape management under #Unsafe.",
             "gains": [
-              "No copies."
+              "Expert control."
             ],
             "losses": [
-              "Values dangle."
+              "No automatic escape proof."
             ],
             "proposed": {
-              "code": "response = rows.join(\";\")   // dangles"
+              "code": "#Unsafe(\"audited region ownership\") {\n    #Context(allocator: arena) { response = rows.join(\";\").copy() }\n}"
             }
           },
           {
             "key": "D",
-            "name": "Core only",
-            "gist": "Arenas inside Core's server and loop.",
+            "name": "No ambient retargeting",
+            "gist": "Heap defaults; public safe regions remain.",
             "gains": [
-              "No user rule."
+              "No ambient rule.",
+              "No private Core powers."
             ],
             "losses": [
-              "User lists stay on heap."
+              "Ordinary library allocations not retargeted."
             ],
             "proposed": {
-              "code": "http.text(rows.join(\";\"))"
+              "code": "response = rows.join(\";\") // heap"
             }
           },
           {
             "key": "E",
-            "name": "Keep ratified",
-            "gist": "Escaping values move out by themselves.",
+            "name": "Keep ratified relocation",
+            "gist": "Relocate escaping owned storage automatically.",
             "gains": [
-              "No copies written."
+              "Caching libraries need fewer edits."
             ],
             "losses": [
-              "Hidden moves and tests."
+              "Implicit relocation costs."
             ],
             "proposed": {
-              "code": "response = rows.join(\";\")   // moves itself"
+              "code": "response = rows.join(\";\") // relocate before rewind"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A is the block the owner approved: arena memory inside, kept inside by the escape check.",
+          "why": "Choose visible escape copies, while acknowledging E's unchanged-library benefit and unmeasured relative cost.",
           "gains": [
-            "Nothing dangles.",
-            "Every copy visible."
+            "Visible copies."
           ],
           "losses": [
             {
-              "loss": "Caching libraries refused.",
-              "mitigation": "One .copy() at the named store."
+              "loss": "Dependency edits and complex graph proof remain.",
+              "mitigation": "Name retaining edges; move unsuitable calls outside the arena."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Only opted-in libraries."
+              "reason": "Strong explicit alternative, requiring API adoption."
             },
             {
               "key": "C",
-              "reason": "Values dangle."
+              "reason": "Manual safety proof."
             },
             {
               "key": "D",
-              "reason": "User lists on heap."
+              "reason": "No ambient library retargeting."
             },
             {
               "key": "E",
-              "reason": "Hidden moves."
+              "reason": "Strong unchanged-library alternative, with implicit relocation."
             }
           ],
-          "tradeoff": "A visible copy at each exit, for no hidden moves."
+          "tradeoff": "Explicit costs versus transparent reuse, not a measured speed ranking."
         }
       },
       "draft": false,
@@ -192605,93 +192600,80 @@
       "designAway": [
         {
           "option": "A",
-          "loss": "An unmodified library that caches arena data in older state is refused inside the block.",
+          "loss": "Copy destination may be hidden behind a temporary or call.",
           "attempts": [
-            "Copy silently at the library's store; that is E, with a hidden cost.",
-            "Name the library's store and the block in the error; one .copy() at the store is correct under every allocator."
+            "Infer destination through the use graph.",
+            "Reject ambiguity rather than silently select the heap."
           ],
-          "result": "Reduced to one line in the library, never a silent copy."
+          "result": "Precise behavior required; some code needs restructuring."
         },
         {
           "option": "A",
-          "loss": "Each exit from the block needs a .copy().",
+          "loss": "A dependency retains fresh arena data internally.",
           "attempts": [
-            "Copy automatically at the block's end; that hides the cost again.",
-            "Offer the copy as E0631's fix, which jet fix inserts; a request or frame has one or two exits (r1, r4)."
+            "Record fresh-storage retention and the store location.",
+            "Move the call outside or update the dependency."
           ],
-          "result": "Reduced to one fix per exit."
+          "result": "Not always repairable at the caller or by copying arguments."
         },
         {
           "option": "A",
-          "loss": "Function values and trait methods have no body to check at the call (the r8 hole).",
+          "loss": "Pools, Shared and erased resources hide arena edges.",
           "attempts": [
-            "Refuse every function value inside the block.",
-            "Carry the keeping fact in the function type, and until D-FNVAL-WRITE1=A is built, treat such calls as keeping."
+            "Check the entire graph, including persistent-cell contents.",
+            "Reject identity-changing byte copies and unproved callable summaries."
           ],
-          "result": "Removed: sound now, precise once function types carry the fact."
-        },
-        {
-          "option": "A",
-          "loss": "A library's inferred escape facts could change silently between versions.",
-          "attempts": [
-            "Freeze inferred facts at the first release.",
-            "Record them in package.api under D-API-SURFACE1, so a new keeping store is an API change at the library's own check."
-          ],
-          "result": "Removed if D-API-SURFACE1 passes; otherwise the caller's block reports it at build."
+          "result": "Required checks, not a generic one-line copy fix."
         },
         {
           "option": "B",
-          "loss": "Only libraries written to take an allocator use the arena.",
+          "loss": "Libraries must accept an allocator.",
           "attempts": [
-            "Default the allocator parameter from #Context.",
-            "Generate allocator-taking twins."
+            "One allocator-polymorphic API, not generated twins."
           ],
-          "result": "The first attempt is A without its escape check; the second is twins."
+          "result": "Explicit composability remains a strength; API adoption is real work."
         },
         {
           "option": "C",
-          "loss": "A value may dangle after the rewind.",
+          "loss": "Unchecked survivors may dangle.",
           "attempts": [
-            "Poison arena memory after reset in debug builds.",
-            "Require #Unsafe(reason) at the block."
+            "Audit the boundary and explicitly copy survivors."
           ],
-          "result": "Not removed: the dangling stays possible in release builds."
+          "result": "Manual proof remains; no safe default is claimed."
         },
         {
           "option": "D",
-          "loss": "User and library lists stay on the heap.",
+          "loss": "Ordinary user allocation is not retargeted.",
           "attempts": [
-            "Widen Core's arenas to more Core loops.",
-            "Expose arena.alloc views for user data, as today."
+            "Use the same public safe region primitives as libraries."
           ],
-          "result": "Not removed for ordinary lists and text."
+          "result": "Expert regions remain, but ambient convenience is absent."
         },
         {
           "option": "E",
-          "loss": "A hidden copy and address test at every store a block can reach.",
+          "loss": "Relocation cost is implicit.",
           "attempts": [
-            "Elide the test where the checker proves the value is older.",
-            "Report the moves in jet inspect."
+            "Elide checks using provenance and expose actual sites."
           ],
-          "result": "Reduced, not removed: the cost stays where the code shows none."
+          "result": "Reduced, not measured away; avoids dependency edits needed by A."
         }
       ],
       "reports": [
         {
-          "title": "Arena block escapes: probes, build order and adversarial review",
+          "title": "Arena escapes: independent probes and different-family review",
           "path": "Docs/audits/2026-11-10-region-alloc-review.md",
-          "note": "r1-r14 on a0.0.43 match; new r15 shows D-FNVAL-WRITE1=A unbuilt, so function-value calls count as keeping until it lands; ir_context_block at 250-275 installs only a deadline; 5 Jet files use the block; Odin, Zig, bumpalo sources."
+          "note": "All r probes rerun; destination copies, fresh library retention, Shared/Pool graphs and actual ratified task policy corrected. No arena speed or tier-parity proof."
         },
         {
-          "title": "Odin: the implicit context allocator",
+          "title": "Odin implicit context",
           "url": "https://odin-lang.org/docs/overview/#implicit-context-system"
         },
         {
-          "title": "Zig: ArenaAllocator",
+          "title": "Zig allocator guide",
           "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
         },
         {
-          "title": "bumpalo: collections that carry the arena's lifetime",
+          "title": "bumpalo arena collections",
           "url": "https://docs.rs/bumpalo/latest/bumpalo/"
         }
       ]
@@ -200134,6 +200116,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T17:06:58.730Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-REGION-ALLOC1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T17:02:10.624Z",
       "by": "Main",
