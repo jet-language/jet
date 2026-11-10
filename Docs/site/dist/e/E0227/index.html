@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0227 — Jet diagnostic</title>
-<meta name="description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value instead of being called.">
+<meta name="description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.">
 <meta property="og:title" content="E0227 — Jet diagnostic">
-<meta property="og:description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value instead of being called.">
+<meta property="og:description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,34 +25,38 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0227</h1>
-<p>A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value instead of being called.</p>
+<p>A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value instead of being called.</p>
+<p class="diag-copy what" data-registry-field="what">A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A function type gives each parameter plain read access, so a value of this function would lose the write or take its parameter declares; the function can only be called directly.</p>
+<p class="diag-copy why" data-registry-field="why">A function type gives each parameter plain read access unless it marks a take (`fn(&amp;&amp;T)`), so a value of this function in an unmarked slot would lose the write or take its parameter declares.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Call the function directly, or pass a lambda that makes that call.</p>
+<p class="diag-copy fix" data-registry-field="fix">Call the function directly, take the parameter in the function type (`fn(&amp;&amp;T)`) when the function takes it, or pass a lambda that makes that call.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/function_value_access_cannot_erase.stderr</code>.</p>
-<pre class="diag">Error [jet.MarkedFunctionValue]: `edit` can&#39;t be used as a function value because its parameter `value` is `&amp;`
-  --&gt; tests/ui/function_value_access_cannot_erase.jet:10:20
+<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/function_type_take_param.stderr</code>.</p>
+<pre class="diag">Error [jet.MoveWithoutMarker]: `f` takes `words`, but `words` is used again later
+  --&gt; tests/ui/function_type_take_param.jet:19:14
     |
- 10 |     edit_callback: edit
-    |                    ^^^^
- Why: A function type gives each parameter plain read access, so a value of `edit` would drop the `&amp;` its parameter declares
- Fix: Call `edit` directly, or pass a lambda that makes that call
-More: jet-lang.dev/e/E0227
+ 19 |     first: f(words)
+    |              ^^^^^
+  --&gt; tests/ui/function_type_take_param.jet:20:15
+    |
+ 20 |     first + f(words)
+    |               ^^^^^ `words` is used again here
+ Why: `f` takes ownership of this argument, and a call never copies on its own, so `words` has no value after this call
+ Fix: Write `words.copy()` to pass a copy and keep `words`, or reorder so this call is the last use of `words`
+More: jet-lang.dev/e/E0209
 
-Error [jet.MarkedFunctionValue]: `consume` can&#39;t be used as a function value because its parameter `value` is `&amp;&amp;`
-  --&gt; tests/ui/function_value_access_cannot_erase.jet:11:23
+Error [jet.MarkedFunctionValue]: `count` can&#39;t be used as a function value because its parameter `words` is `&amp;&amp;`
+  --&gt; tests/ui/function_type_take_param.jet:24:29
     |
- 11 |     consume_callback: consume
-    |                       ^^^^^^^
- Why: A function type gives each parameter plain read access, so a value of `consume` would drop the `&amp;&amp;` its parameter declares
- Fix: Call `consume` directly, or pass a lambda that makes that call
+ 24 |     slots: Slots{read_only: count, taking: count}
+    |                             ^^^^^
+ Why: A function type gives each parameter plain read access unless it marks a take (`fn(&amp;&amp;T)`), so a value of `count` would drop the `&amp;&amp;` its parameter declares
+ Fix: Call `count` directly, take the parameter in the function type (`fn(&amp;&amp;T)`), or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

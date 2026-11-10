@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `reactive.derived(() -&gt; … )` or `reactive.autorun(() -&gt; { … })`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2910</code>: <code>tests/ui/reactive_derived_not_lambda.stderr</code>.</p>
-<pre class="diag">Error [jet.ReactiveArgumentNotLambda]: `reactive.derived` needs a lambda, not Int (a whole number)
-  --&gt; tests/ui/reactive_derived_not_lambda.jet:4:27
+<p>First UI snapshot mentioning <code>E2910</code>: <code>tests/ui/button_metadata_needs_click.stderr</code>.</p>
+<pre class="diag">Error [jet.ReactiveArgumentNotLambda]: `button` with a shortcut or label needs its click lambda
+  --&gt; tests/ui/button_metadata_needs_click.jet:6:14
     |
-  4 |     d := reactive.derived(42)
-    |                           ^^
- Why: A reactive derived is built from a `() -&gt; …` body so it can re-run when a signal changes
- Fix: Write `reactive.derived(() -&gt; { … })`
+  6 |     node: ui.button(&quot;Save&quot;, label: &quot;Save the file&quot;)
+    |              ^^^^^^
+ Why: The shortcut and accessible label belong to the click form, whose handler is the `() -&gt; { … }` argument after them
+ Fix: Write `ui.button(&quot;Save&quot;, shortcut: …, () -&gt; { save() })`
 More: jet-lang.dev/e/E2910
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

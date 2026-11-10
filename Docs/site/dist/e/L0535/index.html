@@ -36,7 +36,34 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move it into the body of `{type_name}`: its methods as `fn` members, a trait impl as a nested `impl Trait { … }`</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>L0535</code>: <code>tests/ui_lint/impl_placement.warn</code>.</p>
+<pre class="diag">Warning [jet.DetachedImpl]: `impl Shape` sits outside the body of `Shape`
+  --&gt; tests/ui_lint/impl_placement.jet:12:1
+    |
+ 12 | impl Shape {
+    | ^^^^^^^^^^
+ Why: `Shape` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else
+ Fix: Move it into the body of `Shape`: its methods as `fn` members, a trait impl as a nested `impl Trait { … }`
+More: jet-lang.dev/e/L0535
+
+Warning [jet.DetachedImpl]: `impl Shape.Display` sits outside the body of `Shape`
+  --&gt; tests/ui_lint/impl_placement.jet:16:1
+    |
+ 16 | impl Shape.Display {
+    | ^^^^^^^^^^^^^^^^^^
+ Why: `Shape` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else
+ Fix: Move it into the body of `Shape`: its methods as `fn` members, a trait impl as a nested `impl Trait { … }`
+More: jet-lang.dev/e/L0535
+
+Warning [jet.DetachedImpl]: `impl Color` sits outside the body of `Color`
+  --&gt; tests/ui_lint/impl_placement.jet:25:1
+    |
+ 25 | impl Color {
+    | ^^^^^^^^^^
+ Why: `Color` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else
+ Fix: Move it into the body of `Color`: its methods as `fn` members, a trait impl as a nested `impl Trait { … }`
+More: jet-lang.dev/e/L0535
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>
