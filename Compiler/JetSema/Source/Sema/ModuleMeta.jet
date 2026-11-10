@@ -61,7 +61,7 @@ sema_module_meta_import: fn(declaration: ImportDecl) -> Bool Never! {
 
 // Whether a source of `items` may carry a Module record: a file module
 // (`declared_module` is the dotted path that declared it), or a file with an
-// inline module body. The loader loads core.meta for exactly these.
+// inline module body.
 sema_module_meta_wanted: fn(items: [Item], declared_module: String) -> Bool Never! {
     if declared_module != "" -> return true
     loop item in items {
@@ -167,7 +167,7 @@ sema_module_meta_package: fn(package: SemaModulePackage, span: Span) -> Expr Nev
     }
     if package.edition == .Val(edition) -> fields.push(sema_module_meta_field("edition", sema_module_meta_text(edition, span), span))
     if package.log == .Val(log) -> fields.push(sema_module_meta_field("log", sema_module_meta_text(log, span), span))
-    Expr.StructLit{type_name: "Package", type_args: [Type]{}, import_ns: Val(sema_module_meta_alias()), as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
+    Expr.StructLit{type_name: "{sema_module_meta_alias()}.Package", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
 }
 
 // The generated constant of a module named `name` whose body starts with
@@ -191,7 +191,10 @@ sema_module_meta_record: fn(items: &[Item], name: String, doc: String, source: S
             fields.push(ExprField{name: line.name, name_span: line.name_span, value: line.value.copy()})
         }
     }
-    record := ast_const(SEMA_MODULE_META, span, span, Expr.StructLit{type_name: "Module", type_args: [Type]{}, import_ns: Val(sema_module_meta_alias()), as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED})
+    // The record names its type through the core.meta alias, as a source
+    // writes `meta.Module`, so a `Module` another loaded module declares
+    // can't shadow it.
+    record := ast_const(SEMA_MODULE_META, span, span, Expr.StructLit{type_name: "{sema_module_meta_alias()}.Module", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED})
     record.is_pub = true
     // The field lines leave the body; every other item follows the record.
     kept := [Item]{Item.Const{value: record}}
@@ -214,6 +217,27 @@ sema_module_meta_tree_has_record: fn(definition: CodeModule, reads: [String:Bool
             if item == .CodeModule(child) {
                 if sema_module_meta_tree_has_record(child, reads) -> return true
             }
+        }
+    }
+    false
+}
+
+// The last segment of the dotted path `declared_module`: the file module's
+// name.
+sema_module_meta_leaf: fn(declared_module: String) -> String Never! {
+    segments: declared_module.split(".").to_list()
+    segments[segments.len() - 1].copy()
+}
+
+// Whether a source of `items` carries a record under `reads`: its file module
+// (`declared_module`) or a module of an inline module body's tree, as
+// sema_module_meta_lower gives them. Only then does the compile need
+// core.meta.
+sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: [String:Bool]) -> Bool Never! {
+    if declared_module != "" && sema_module_meta_has_record(items, sema_module_meta_leaf(declared_module), reads) -> return true
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if sema_module_meta_tree_has_record(definition, reads) -> return true
         }
     }
     false
@@ -249,10 +273,8 @@ sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_sour
     added := sema_module_meta_inline(program.items, meta_source, text, diagnostics)
     span: Span{start: 0, end: 0}
     if declared_module != "" {
-        segments: declared_module.split(".").to_list()
-        name: segments[segments.len() - 1]
-        if sema_module_meta_has_record(program.items, name, meta_source.reads) {
-            sema_module_meta_record(program.items, name, sema_module_meta_file_doc(text), meta_source, span, diagnostics)
+        if sema_module_meta_has_record(program.items, sema_module_meta_leaf(declared_module), meta_source.reads) {
+            sema_module_meta_record(program.items, sema_module_meta_leaf(declared_module), sema_module_meta_file_doc(text), meta_source, span, diagnostics)
             added = true
         }
     }
@@ -270,6 +292,13 @@ sema_module_meta_names: fn(items: [Item], names: &[String:Bool]) Never! {
             }
         }
     }
+}
+
+// The modules a source declares, by name: its file module, when
+// `declared_module` names one, and its inline module bodies.
+sema_module_meta_declared_names: fn(items: [Item], declared_module: String, names: &[String:Bool]) Never! {
+    if declared_module != "" -> names[sema_module_meta_leaf(declared_module)] = true
+    sema_module_meta_names(items, names)
 }
 
 sema_module_meta_word_byte: fn(code: Int) -> Bool Never! {
@@ -335,11 +364,7 @@ sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
     names := [String:Bool]{}
     loop input in inputs {
         if input.module_identity.starts_with("<corelib>/") -> next
-        if input.declared_module != "" {
-            segments: input.declared_module.split(".").to_list()
-            names[segments[segments.len() - 1].copy()] = true
-        }
-        sema_module_meta_names(input.program.items, names)
+        sema_module_meta_declared_names(input.program.items, input.declared_module, names)
     }
     if names.len() == 0 -> return
     reads := [String:Bool]{}

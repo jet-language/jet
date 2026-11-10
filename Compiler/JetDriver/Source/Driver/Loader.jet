@@ -111,7 +111,9 @@ use {
         sema_script_entry,
         sema_source_words,
         sema_source_wanted_words,
-        sema_module_meta_wanted,
+        sema_module_meta_declared_names,
+        sema_module_meta_value_reads,
+        sema_module_meta_carries,
         sema_module_meta_field_lines,
         sema_unknown_module_alias,
     ]
@@ -4610,6 +4612,30 @@ jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, 
     }
 }
 
+// Whether a loaded module carries a core.meta Module record
+// (sema_module_meta_lower): one whose body sets a field, or that some source
+// of the compile reads as a value (sema_module_meta_mark_reads). A read may
+// come from any source, so this is known only once every source is loaded.
+// Core declares no record and reads none.
+jet_driver_module_meta_needed: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule]) -> Bool Never! {
+    names := [String:Bool]{}
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        sema_module_meta_declared_names(module_row.program.items, module_row.declared_module, names)
+    }
+    if names.len() == 0 -> return false
+    reads := [String:Bool]{}
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        sema_module_meta_value_reads(jet_driver_source_unit_text(request, source_units[module_row.source_unit_index]) ?? "", names, reads)
+    }
+    loop module_row in modules {
+        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if sema_module_meta_carries(module_row.program.items, module_row.declared_module, reads) -> return true
+    }
+    false
+}
+
 jet_driver_load: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     jet_driver_load_reach(request, true)
 }
@@ -4715,14 +4741,33 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     bare_modules := [String]{}
     reach := jet_driver_reach(use_driven)
     pending_index := 0
+    meta_decided := false
     // The current parse wave's results, last-first: every unit queued when
     // the wave starts is parsed at once, on the admitted compiler threads.
     parsed := [JetDriverParsedUnit]{}
     loop {
         if pending_index == pending.len() {
-            // Every queued unit is loaded: follow each deferred Core import
-            // whose alias reached code now spells as a path head; the load
-            // ends when none is left to follow.
+            // Every queued unit is loaded: when a module carries a Module
+            // record, its core.meta loads once, even when no source imports
+            // core.meta.
+            if !meta_decided {
+                meta_decided = true
+                if jet_driver_module_meta_needed(request, source_units, modules) {
+                    if !bare_modules.contains("core.meta") -> bare_modules.push("core.meta")
+                    jet_driver_reach_open(reach, "core.meta")
+                    meta_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.meta", false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                    if meta_index == .Val(index) {
+                        if !queued[index] {
+                            queued[index] = true
+                            pending.push(index)
+                        }
+                    }
+                    if pending_index < pending.len() -> next
+                }
+            }
+            // Then follow each deferred Core import whose alias reached code
+            // now spells as a path head; the load ends when none is left to
+            // follow.
             if !reach.enabled -> break
             followed := false
             loop edge_index in 0..<reach.edges.len() {
@@ -4957,21 +5002,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             jet_driver_reach_open(reach, "core.prelude")
             prelude_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if prelude_index == .Val(index) {
-                if !queued[index] {
-                    queued[index] = true
-                    pending.push(index)
-                }
-            }
-        }
-        // A file module and each inline module body may carry a core.meta
-        // Module record (sema_module_meta_lower), even when the source never
-        // imports core.meta; which ones do is known only once every source
-        // is loaded, so core.meta loads for any of them.
-        if !is_core && sema_module_meta_wanted(program.items, declared_modules.get(source_unit_index) ?? "") {
-            if !bare_modules.contains("core.meta") -> bare_modules.push("core.meta")
-            jet_driver_reach_open(reach, "core.meta")
-            meta_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.meta", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
-            if meta_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)
