@@ -28,9 +28,11 @@ CI_ALLOWED: [CImportRow]{
     CImportRow{path: "Tools/agent-eval/ffi-assurance/jet/run.jet", count: 1, owner: "C-interop proof: the FFI assurance driver"},
 }
 
-// Whether a source line declares a C import: the attribute starts the line.
+// Whether a source line declares a C import: the attribute starts the line,
+// alone or in an attribute list (`#[Import(c), Unsafe(...)]`).
 ci_declares: fn(line: String) -> Bool Never! {
     text: line.trim_start()
+    if text.starts_with("#[") -> return text.contains("Import(c)") || text.contains("FFI(c)")
     text.starts_with("#Import(c)") || text.starts_with("#Import c.") || text.starts_with("#FFI(c)")
 }
 
@@ -90,8 +92,8 @@ ci_findings: fn(found: [String:Int]) -> [String] Never! {
 }
 
 #Test("the census counts declarations, not mentions") {
-    source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n"
-    assert_eq(ci_count(source), 3)
+    source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n#[Import(c), Unsafe(\"audited\")]\n#[Unsafe(\"audited\"), FFI(c)]\n#[Unsafe(\"audited\"), FFI(cpp)]\n"
+    assert_eq(ci_count(source), 5)
     found := [String:Int]{}
     found["Compiler/New.jet"] = 1
     found["Tools/agent-eval/ffi-assurance/jet/run.jet"] = 2
