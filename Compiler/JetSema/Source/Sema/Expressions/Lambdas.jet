@@ -479,10 +479,10 @@ sema_expression_lambda_effects: fn(lambda: &Lambda) -> TEffectFacts Never! {
     loop row in lambda.meta.effect_direct_spans {
         spans.push(TEffectSpan{name: row.name, span: row.span})
     }
-    TEffectFacts{direct: direct, solved: lambda.meta.effect_solved, call_edges: lambda.meta.effect_call_edges, maximal: lambda.meta.effect_maximal, direct_spans: spans, foreign_open: lambda.meta.effect_foreign_open}
+    TEffectFacts{direct: direct, solved: lambda.meta.effect_solved, call_edges: lambda.meta.effect_call_edges, maximal: lambda.meta.effect_maximal, direct_spans: spans}
 }
 
-sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_call: Int, direct: &[String], edges: &[String], spans: &[TEffectSpan], maximal: &Bool, foreign_open: &Bool) Never! {
+sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_call: Int, direct: &[String], edges: &[String], spans: &[TEffectSpan], maximal: &Bool) Never! {
     index := first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
@@ -493,10 +493,7 @@ sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_cal
                 root: fact.foreign_effect_root ?? ""
                 sema_expression_lambda_append_name(direct, root)
                 spans.push(TEffectSpan{name: root, span: fact.span})
-                if fact.foreign_opaque {
-                    maximal = true
-                    foreign_open = true
-                }
+                if fact.foreign_opaque -> maximal = true
             }
             fact.callee != None -> {
                 callee: fact.callee ?? SymbolID{key: ""}
@@ -2077,8 +2074,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     effect_edges := [String]{}
     effect_spans := [TEffectSpan]{}
     effect_maximal := false
-    effect_foreign_open := false
-    sema_expression_lambda_add_effect_facts(lambda_context, call_fact_start, direct_effects, effect_edges, effect_spans, effect_maximal, effect_foreign_open)
+    sema_expression_lambda_add_effect_facts(lambda_context, call_fact_start, direct_effects, effect_edges, effect_spans, effect_maximal)
     effect_seed := [String]{}
     loop name in direct_effects -> sema_expression_lambda_append_name(effect_seed, name)
     lambda_work.meta.effect_direct = direct_effects
@@ -2092,7 +2088,6 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         lambda_work.meta.effect_direct_spans.push(EffectRowEntry{name: effect_span.name, span: effect_span.span})
     }
     lambda_work.meta.effect_maximal = effect_maximal
-    lambda_work.meta.effect_foreign_open = effect_foreign_open
 
     // (Rust `once_lambda_sites`): a `.move()` take of a captured
     // name inside the body moves it into the lambda, and the lambda runs

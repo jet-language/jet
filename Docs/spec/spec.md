@@ -3396,7 +3396,11 @@ A C call records `FFI.C`. When no binding descriptor owns the declaration's
 effect row (a written `#Import c.<lib>: module` with no `c@` dependency
 descriptor), the checker cannot see what the C body does, so the call also
 reaches every effect: written ceilings (E0740) and `deny` rows (E0749) apply
-to it, and C `system` under `deny: [Exec]` is refused at check time. Core's
+to it, and C `system` under `deny: [Exec]` is refused at check time. A package
+`authority: { allow: […] }` row holds such a call by `FFI.C`, the explicit
+opt-in to foreign code that may do anything: a row without `FFI.C` is E0749
+naming it. A call whose descriptor declares its row is held to that row, and
+`FFI.C` covers neither another `FFI` leaf nor a Jet-side effect. Core's
 own C bindings are toolchain code whose public functions declare their rows.
 
 A C declaration binds by-value scalars, `String`, `Char`, and C-layout

@@ -9,7 +9,7 @@ use jet_pkg_model.[EffectBudgetWitness, ForeignLanguage, PackageEffects, Package
     package: PackageFacts.parse(source, "package.jet") ?? panic("one-line FFI denial should parse")
     assert_eq(package.effects_deny, Val([String]{"FFI"}))
     leaves: loop language in ForeignLanguage.all() -> "FFI.{language.debug_name()}"
-    entry: PackageEffects{name: "foreign-dep", effects: leaves, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, maximal_chain: [String]{}, boundary_span: None}
+    entry: PackageEffects{name: "foreign-dep", effects: leaves, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
     diagnostics: pkg_effect_enforce([PackageEffects]{entry}, package)
     assert_eq(diagnostics.len(), leaves.len())
     loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E1220")

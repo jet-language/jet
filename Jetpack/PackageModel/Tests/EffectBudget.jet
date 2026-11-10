@@ -64,7 +64,7 @@ pkg_test_budget_manifest: fn(allow: [String]) -> PackageFacts Never! {
 }
 
 pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [String]], panic_sites: [String], span: Span?) -> PackageEffects Never! {
-    PackageEffects{name: name, effects: effects, effect_chains: chains, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: panic_sites, maximal_chain: [String]{}, boundary_span: span}
+    PackageEffects{name: name, effects: effects, effect_chains: chains, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: panic_sites, boundary_span: span}
 }
 
 #Test("package budget ignores an unreachable loaded rand helper") {
@@ -163,36 +163,28 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
 }
 
-#Test("a C binding no descriptor owns reaches every effect past a written allow row") {
-    summaries := pkg_test_effect_summaries(false)
-    summaries["run::run"] = pkg_test_effect_summary([String]{"FFI.C"}, [String]{}, true)
-    solved := pkg_test_effect_solved()
-    solved["run::run"] = [String]{"FFI.C", "IO"}
-    entries: pkg_compute_package_effects(pkg_test_effect_program(), solved, summaries)
-    assert_eq(pkg_test_effect_package(entries, "root").maximal_chain, [String]{"run::run"})
-    diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
-    assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E0749")
-    assert(diagnostics[0].what.contains("`run::run` reaches the `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time` effect"))
-    assert((diagnostics[0].detail ?? "").contains("no descriptor owns"))
-    assert_eq(diagnostics[0].call_chain, [String]{"run::run"})
-    assert_eq(diagnostics[0].span, Val(Span{start: 3, end: 6}))
-    // A row that lists every root holds the call.
-    every: [String]{"Browser", "DB", "Env", "Exec", "FFI", "FS", "GPU", "IO", "Log", "Mem.Alloc", "Meta", "Net", "Rand", "Secret", "Time"}
-    assert_eq(pkg_effect_enforce(entries, pkg_test_budget_manifest(every)).len(), 0)
-}
-
-#Test("a dependency's open-world C call is E1220 at its call path") {
-    summaries := pkg_test_effect_summaries(true)
-    summaries["crypto::seal"] = pkg_test_effect_summary([String]{"Rand"}, [String]{}, true)
-    entries: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), summaries)
-    assert_eq(pkg_test_effect_package(entries, "root").maximal_chain, [String]{})
-    diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO", "Mem.Alloc", "Rand"}))
-    assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E1220")
-    assert(diagnostics[0].what.contains("`email` function `crypto::seal` uses the `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Secret, Time` effect"))
-    assert_eq(diagnostics[0].call_chain, [String]{"crypto::migrate_v1", "crypto::seal"})
-    assert_eq(diagnostics[0].span, Val(Span{start: 22, end: 26}))
+// #6281 c146: a foreign call is held to the written `allow` row by the
+// effects it has. An undescribed C call has `FFI.C`, the opt-in to "foreign
+// code may do anything"; a descriptor-owned binding has its descriptor's
+// root; `FFI.C` never covers another FFI leaf or a Jet-side effect.
+#Test("a written allow row holds each foreign call to the effects it has") {
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "IO"}, [String: [String]]{"FFI.C": [String]{"run::run"}}, [String]{}, None)}
+    omitted: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"IO", "Mem.Alloc"}))
+    assert_eq(omitted.len(), 1)
+    assert_eq(omitted[0].code, "E0749")
+    assert(omitted[0].what.contains("`FFI.C`"))
+    assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"})).len(), 0)
+    assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI", "IO", "Mem.Alloc"})).len(), 0)
+    described: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.Fortran"}, [String: [String]]{"FFI.Fortran": [String]{"run::run"}}, [String]{}, None)}
+    fortran: pkg_effect_enforce(described, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
+    assert_eq(fortran.len(), 1)
+    assert_eq(fortran[0].code, "E0749")
+    assert(fortran[0].what.contains("`FFI.Fortran`"))
+    jet_side: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "Net"}, [String: [String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
+    net: pkg_effect_enforce(jet_side, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
+    assert_eq(net.len(), 1)
+    assert_eq(net[0].code, "E0749")
+    assert(net[0].what.contains("`Net`"))
 }
 
 #Test("panic budget ignores allow omission but honors denial") {
