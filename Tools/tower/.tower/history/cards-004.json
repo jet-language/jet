@@ -90528,6 +90528,306 @@
       "completedAt": "2026-11-07T07:08:25.623Z",
       "questions": [],
       "retiredAt": "2026-11-10T07:27:48.499Z"
+    },
+    {
+      "id": "c0gcc21g",
+      "num": 6638,
+      "title": "Diagnostic renderer nests a second opener between Fix and More (tests/ui/build_action_failed.stderr)",
+      "body": "Found by MechC 2026-11-06 while porting the diagnostics_snapshots gate (#6096 c73, aa62fe56e0). tests/ui/build_action_failed.stderr renders a second opener, Error [jet.BuildProbeFailed] ... BuildAction::Failed, inside the first report, between its Fix: and More: lines. One report has one opener (I4). The file is listed in DS_NESTED_OPENER_SNAPSHOTS in tests/guards/diagnostics_snapshots.jet so the gate passes today.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A build-probe failure renders as one report with one opener; tests/ui/build_action_failed.stderr is regenerated from real output, and its entry leaves DS_NESTED_OPENER_SNAPSHOTS so tests/guards/diagnostics_snapshots.jet checks it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "06c94f91e9; jet test tests/guards with a0_031 on dev 34290833a9 (batch env): the diagnostics_snapshots guard PASS with build_action_failed out of DS_NESTED_OPENER_SNAPSHOTS (119 passed; the 2 failures are unrelated: closed_lists BuildCache.jet, DC_SPEC_AHEAD_OF_IMPL E3310-E3314).",
+          "at": "2026-11-07T05:58:47.696Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/ui/build_action_failed.jet runs in the ui suite instead of REFUSED: the ui runner provides the CLI fixture API build_grants the row needs (vb10: 'REFUSED missing CLI fixture API: build_grants'), and the row passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2ec700da30 release candidate kit (chain s2 a0_032): tests/ui/build_action_failed.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T07:07:28.241Z"
+        },
+        {
+          "n": 3,
+          "text": "The other tests/ui/build_*.jet rows (8 REFUSED after 5e49306946, @programmable_build with no invoking directive) run and pass: each fixture names its invocation and its snapshot matches current jet build output; the ui suite shows no REFUSED build_* row.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ffff735682 (MechD-3). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), tests/ui build_action_failed, build_action_ungranted, build_enforce_reserved_code, build_entry_bad_sig, build_entry_conflict/run, build_generated_collision/run, build_generated_cycle/run, build_locked_drift/run and build_plan_invalid all PASS, and the ui suite has no REFUSED build_* row.",
+          "at": "2026-11-07T07:51:55.143Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T03:06:38.842Z",
+      "updated": "2026-11-07T07:51:57.952Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-07T07:51:57.952Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c0b85u2y",
+      "num": 6654,
+      "title": "CompiledWorkloads self_check needs a git checkout, so it fails in release exports and lane trees",
+      "body": "From #6651. tests/cases/compiled_workloads/compiled_workload_gate_self_check fails in the release gate's exported tree because Tools/ci/CompiledWorkloads.jet self_check runs `git rev-parse HEAD` in the root. The self-check must not depend on git metadata (or must take the commit from the tree's SOURCE/receipt), so it passes in an exported tree.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case tests/cases/compiled_workloads/compiled_workload_gate_self_check PASS in a release kit (exported tree with no .git).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6d50143539 (CoreCliLead-2). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), tests/cases/compiled_workloads/compiled_workload_gate_self_check PASS (it was FAIL in the a0_032 kit).",
+          "at": "2026-11-07T07:51:54.332Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:55.401Z",
+      "updated": "2026-11-07T07:51:56.516Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T07:51:56.516Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c0drland",
+      "num": 6656,
+      "title": "Cases kit captures stdout as strict UTF-8 text, so byte-exact rows ERROR and their known-failing lines never apply",
+      "body": "From #6651 (MechD-3). tests/cases/terminal/stdout_write_bytes_is_byte_exact_and_ordered_with_print reports ERROR, not FAIL: the cases kit captures stdout as text and the runtime decodes text captures as strict UTF-8 (Compiler/JetRuntime/Source/ProcessExecutionReceipt.jet:321-355). The runtime already passes streamed bytes through undecoded; the kit should capture stdout/stderr as bytes and compare bytes (text predicates decode explicitly).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "In a release kit, case terminal/stdout_write_bytes_is_byte_exact_and_ordered_with_print reports PASS (or KNOWN-FAILING under its existing line), never ERROR; the cases kit captures child stdout/stderr as bytes and no case that wrote non-UTF-8 bytes ERRORs on decoding.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "23cb38c5f2. Main batch vb12 at dev c515c4ea10 (s1 built from seed a0_032, kit $JET_SCRATCH_ROOT/lanes/Main/vb12/kit): terminal/stdout_write_bytes_is_byte_exact_and_ordered_with_print passes (UNEXPECTED-PASS against its stale known-failing line, which Main removes), and the cases suite has ERROR 0.",
+          "at": "2026-11-07T09:12:43.839Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:17.442Z",
+      "updated": "2026-11-07T09:12:55.875Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T09:12:55.875Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c031tdlb",
+      "num": 6659,
+      "title": "Output callable lookup misses an inline module inside an imported file module (E1321)",
+      "body": "From #6649 c6 (PortsLead-2). JetSema/Tests OutputFixtures 'same-package entry': bank.package_scope.launch reports E1321 'Module `bank` has no function `package_scope.launch`' because Compiler/JetSema Outputs.jet sema_output_callable_target never looks for an inline module inside an imported file module. The real driver fails the same way.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JetSema/Tests OutputFixtures same-package entry passes, and a case or golden runs an output entry named through an inline module of an imported file module (bank.package_scope.launch) on the real driver.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2431f488f8. Main batch vb12 at dev c515c4ea10 (s1 built from seed a0_032, kit $JET_SCRATCH_ROOT/lanes/Main/vb12/kit): cases output_callable/qualified_entry_reaches_package_visible_inline_module (fixture entry bank.package_scope.launch on the real driver) PASS. Compiler/JetSema/Tests including OutputFixtures package_direct and package_forwarded: 27 passed, 0 failed on dev (Main package rerun); the only failure was on the a0_032 seed, which predates the ListTryNew route.",
+          "at": "2026-11-07T09:12:42.862Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T07:34:16.162Z",
+      "updated": "2026-11-07T09:12:54.042Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T09:12:54.042Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c0z3litn",
+      "num": 6662,
+      "title": "Released jet needs host cc/ar for C dependencies at O1/O2 (O0 builds them)",
+      "body": "Fresh-clone full-profile dry run ($JET_SCRATCH_ROOT/lanes/Main/fresh-c65.sh, seed a0_032, dev b2a5bd22a2, PATH has git, coreutils and archivers but no cc, ar or Rust). Examples/Interop/FFI/InlineC.jet and NativeC/run.jet pass at o0 but fail at o1 and o2: 'Couldn't realize C dependencies …: the C compiler is not installed'. tests/cases/ice_regressions/b12_c_module_import_keeps_plain_c_return ERRORs with 'spawn: not found during resolve ar'. The release ships a C toolchain pack, so C dependencies must build the same way on every tier with no host cc or ar (I9), or a row that truly needs a host tool must declare it (requires: tool:X) and report SKIP-HOST.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "On a PATH with no cc, ar or ld, a released jet builds Examples/Interop/FFI/InlineC.jet and NativeC/run.jet and they pass at o0, o1 and o2, and ice_regressions/b12_c_module_import_keeps_plain_c_return passes (or every row that truly needs a host tool declares requires: tool:X and reports SKIP-HOST).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7e5c38d01a: ForeignLink resolves the C step as CC/AR if set, else JET_CC_PACK_ROOT, else the engine's env fetch-toolchain --json root (clang, llvm-ar, lld, compiler-rt), else host cc. The testkit fetches the pack once per golden run. PortsLead-2 run, s1 from seed a0_032 under env -i with no cc, ar or rust on PATH: Examples/Interop/FFI/InlineC.jet and NativeC/run.jet PASS on o0, o1 and o2, and cases ice_regressions/b12_c_module_import_keeps_plain_c_return PASS. LaneCheck CHECK OK (Kit.jet, ForeignLink.jet); JETPACK HOSTED OK. The fresh-clone c65 run on a0_033 confirms it.",
+          "at": "2026-11-07T09:38:58.262Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T08:33:50.199Z",
+      "updated": "2026-11-07T09:39:00.169Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T09:39:00.169Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
+    },
+    {
+      "id": "c0onvbda",
+      "num": 6665,
+      "title": "Cases runner refuses 114 rows: missing fixture APIs and case-grammar errors",
+      "body": "Main batch vb12 at dev c515c4ea10: cases REFUSED 114 (the same rows refused in the a0_032 kit). They count as untracked failures (#6651 c2) and block jet test Compiler --profile full (#6096 c65). Rows with details: $JET_SCRATCH_ROOT/lanes/Main/untracked-vb12.tsv (status REFUSED). Fixture APIs the kit lacks: store-ingest 21, hangar-verified-realization 17, budget-verify 13, hangar-verified-fixture 11, process-file-fd 7, hangar-fixture-backdate 7, receipt-store 5, codec-allocation-probe 2, core-tls-server 2, package-tests 2, PENDING-SEAM(term-is-terminal) 2, and one each of sparse-set-len, core-sys-raw-env, manifest-facts-parse, runtime-http-internals, store-producer-facts, lock-fixture, build-target, crypto-provider-failure, process-merge-stderr and pty-stdio. Case-grammar refusals (about 16 rows): environment tokens are argv-only, missing ':', invalid stream or JSON assertion or missing partial reason, undefined capture token, conditional modifier without its process owner's guard. The ui suite's equivalent was #6035 c72 (afcf83c099).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every cases row REFUSED for a missing fixture API (about 98 rows in untracked-vb12.tsv) gets the API in the kit and passes, or carries a tests/known-failing.tsv line naming the open card that owns the product feature it probes. In a release kit, cases REFUSED is 0 for fixture reasons.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aeea7017ee: a ledger line owns a REFUSED row only when its detail reads 'REFUSED: <exact seam> '; an owned refusal reports KNOWN-FAILING. 395fbd1656: 87 refused rows carry lines naming the card that builds the seam: #6317 (case-suite kit seams: store ingest, hangar realization and fixtures, budget verify, receipt store, core-sys-raw-env) 78, #3594 (core.process file fds, merged stderr, pty stdio) 9. f4d679a9e5: the 15 image store-ingest cases run a real Store ingest setup and fail under #3590. MechD-3 cases run with s1 from the lane tree over all 114 vb12 REFUSED rows: REFUSED 0; the 102 seam rows KNOWN-FAILING; the 12 grammar rows PASS 4, KF 4, SKIP-HOST 4. Confirm in the next Main batch.",
+          "at": "2026-11-07T10:00:27.361Z"
+        },
+        {
+          "n": 2,
+          "text": "Every case file REFUSED for a grammar error (argv-only environment tokens, missing ':', invalid stream or JSON assertion, undefined capture token, unguarded conditional modifier) is corrected to the current case grammar and its row passes or is known-failing under an owning card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "091eb17840: 15 grammar-refused case files corrected to the current case grammar. MechD-3 cases run over them: PASS 4, KNOWN-FAILING 4 (shell_on_fail under #3590; script_to_system, forms_table and reference_loop under #6665), SKIP-HOST 4 (no browser), REFUSED 3 (all fixture seams, counted under c1), grammar refusals 0.",
+          "at": "2026-11-07T09:39:01.511Z"
+        },
+        {
+          "n": 3,
+          "text": "Regression in the vb12 batch against the a0_032 kit: pkg/cli_keygen_and_key_backup_write_the_signing_key passes again (the JET_KEYS_DIR key paths print in full where the case expects the kit to show <redacted>).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7a89d6fa80: the root was 23cb38c5f2's streamed child output skipping the Core receipt's secret-env redaction. kit_exec_redact now applies the same redaction to the text views; the bytes stay exact. MechD-3 lane run with s1 of the tree: pkg/cli_keygen_and_key_backup_write_the_signing_key PASS and the new JetTestKit redaction test passes. To be confirmed in the next Main batch.",
+          "at": "2026-11-07T09:26:26.260Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T09:13:07.024Z",
+      "updated": "2026-11-07T10:00:29.093Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-07T10:00:29.093Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T10:24:24.850Z"
     }
   ]
 }
