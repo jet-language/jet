@@ -51,7 +51,7 @@ build_test_assert_descendant_reaped: fn(marker: String) -[FS, Time]> {
 // One host action `sh -c <script>` reading `input.txt` and writing `out.txt`.
 build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPlan Never! {
     build := HermeticBuildContext.new()
-    spec := ActionSpec.cached([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
+    spec := ActionSpec.new([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
     loop cap in caps -> spec = spec.with_cap(cap)
     action: build.action("write", spec) ?? panic("declare action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("declare target")
@@ -73,11 +73,11 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
         .Ok(_) -> panic("a blank build path must be refused")
     }
     build := HermeticBuildContext.new()
-    if build.action("escape", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
+    if build.action("escape", ActionSpec.new([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
         .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../escape.o"))
         .Ok(_) -> panic("an escaping output must be refused")
     }
-    _: build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
+    _: build.action("inside", ActionSpec.new([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
 }
 
 #Test("resolve under: normal components join under the base, parent and root components are refused") {
@@ -137,8 +137,8 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 }
 
 #Test("network sharing: shared only when the root grants Net and the action declares it") {
-    with_net: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Net)
-    without_net: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Exec)
+    with_net: ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Net)
+    without_net: ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Exec)
     assert(build_action_shares_network([BuildEffect]{BuildEffect.Net}, with_net.caps))
     assert(!build_action_shares_network([BuildEffect]{BuildEffect.Exec}, with_net.caps))
     assert(!build_action_shares_network([BuildEffect]{BuildEffect.Net}, without_net.caps))
@@ -177,6 +177,33 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     result: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
     assert_eq(result.report.metrics.actions_total, 1)
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("action reuse: an action with no ambient effect is restored until an input changes, one with an ambient effect always runs") {
+    if !build_test_require_sandbox() -> return
+    root: build_test_root("reuse")
+    files.write(files.join(root, "input.txt"), "one") ?? panic("input")
+    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    grants: [BuildEffect]{BuildEffect.Exec, BuildEffect.Time}
+    pure: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
+    assert(pure.actions[0].reusable())
+    first: build_execute_build_plan(pure, root, store, grants) ?? panic("first run")
+    assert_eq(first.report.metrics.reusable_actions, 1)
+    assert_eq(first.report.metrics.cache_restored_actions, 0)
+    again: build_execute_build_plan(pure, root, store, grants) ?? panic("unchanged run")
+    assert_eq(again.report.metrics.cache_restored_actions, 1)
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("restored output"), "one")
+    files.write(files.join(root, "input.txt"), "two") ?? panic("edit input")
+    changed: build_execute_build_plan(pure, root, store, grants) ?? panic("changed run")
+    assert_eq(changed.report.metrics.cache_restored_actions, 0)
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("rebuilt output"), "two")
+    ambient: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Time}, BUILD_TEST_COPY_SCRIPT)
+    assert(!ambient.actions[0].reusable())
+    build_execute_build_plan(ambient, root, store, grants) ?? panic("ambient run")
+    rerun: build_execute_build_plan(ambient, root, store, grants) ?? panic("ambient rerun")
+    assert_eq(rerun.report.metrics.ambient_actions, 1)
+    assert_eq(rerun.report.metrics.cache_restored_actions, 0)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -238,7 +265,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 // fixtures.
 build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Never! {
     build := HermeticBuildContext.new()
-    handle: build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
+    handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
     plan: build.plan() ?? panic("plan")
     plan.actions[handle.id]
 }
@@ -301,7 +328,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
     // The last build wrote "old" to `table.txt`.
-    spec: ActionSpec.cached([String]{"gen"}).with_outputs([String]{"a.o", "table.txt"}).with_kept("table.txt", Val(ContentDigest.from_bytes("old".bytes()).as_str()))
+    spec: ActionSpec.new([String]{"gen"}).with_outputs([String]{"a.o", "table.txt"}).with_kept("table.txt", Val(ContentDigest.from_bytes("old".bytes()).as_str()))
     handle: build.action("gen", spec) ?? panic("declare action")
     action: (build.plan() ?? panic("plan")).actions[handle.id]
     files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
@@ -335,7 +362,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(!files.exists(files.join(root, "a.o")))
     assert_eq(files.read(table) ?? panic("hand-edited kept output"), "edited")
     // A kept path must be one of the action's outputs.
-    if build.action("stray", ActionSpec.cached([String]{"gen"}).with_outputs([String]{"b.o"}).with_kept("c.txt", None)) == {
+    if build.action("stray", ActionSpec.new([String]{"gen"}).with_outputs([String]{"b.o"}).with_kept("c.txt", None)) == {
         .Err(error) -> assert(error == HermeticBuildError.UndeclaredKeptOutput{action: "stray", output: "c.txt"})
         .Ok(_) -> panic("a kept path that is not an output must be refused")
     }
@@ -440,12 +467,12 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     other := HermeticBuildContext.new()
     own: build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
     foreign: other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
-    _: build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
-    if build.action("foreign", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
+    _: build.action("own", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
+    if build.action("foreign", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownToolchain(foreign.id))
         .Ok(_) -> panic("another context's toolchain must be refused")
     }
-    foreign_action: other.action("x", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
+    foreign_action: other.action("x", ActionSpec.new([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
     if build.add_executable("bad", TargetSpec.new().with_action(foreign_action)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownAction(foreign_action.id))
         .Ok(_) -> panic("another context's action must be refused")
@@ -458,13 +485,13 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("action environment: allowlisted variables reach the action, others and undeclared allowlist names are refused") {
-    spec: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_env("PATH", "/toolchain/bin").with_env("SECRET", "x").with_env_allowlist([String]{"PATH"})
+    spec: ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_env("PATH", "/toolchain/bin").with_env("SECRET", "x").with_env_allowlist([String]{"PATH"})
     build := HermeticBuildContext.new()
     handle: build.action("env", spec) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     env: build_action_environment(plan.actions[handle.id])
     assert_eq(env.keys().to_list(), [String]{"PATH"})
-    if build.action("undeclared", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
+    if build.action("undeclared", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
         .Err(error) -> assert(error == HermeticBuildError.UndeclaredEnvName{action: "undeclared", key: "HOME"})
         .Ok(_) -> panic("an allowlist name without a declared value must be refused")
     }
@@ -472,10 +499,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("output ownership: distinct outputs plan, a second owner of one output is refused") {
     build := HermeticBuildContext.new()
-    build.action("first", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
-    build.action("second", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
+    build.action("first", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
+    build.action("second", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
     assert(build.plan() == .Ok(_))
-    build.action("third", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
+    build.action("third", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
     if build.plan() == {
         .Err(error) -> assert(error == HermeticBuildError.DuplicateBuildOutput{output: "a.o", first_action: "first", second_action: "third"})
         .Ok(_) -> panic("a second owner of one output must be refused")
@@ -484,14 +511,14 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("folder inputs: an output outside every read folder plans, one inside a read folder and a folder outside the project are refused") {
     build := HermeticBuildContext.new()
-    build.action("read", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("read")
-    build.action("near", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"database.txt"})) ?? panic("near")
+    build.action("read", ActionSpec.new([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("read")
+    build.action("near", ActionSpec.new([String]{"sh"}).with_outputs([String]{"database.txt"})) ?? panic("near")
     assert(build.plan() == .Ok(_))
-    if build.action("escape", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"e.txt"}).with_folder("../up", None)) == {
+    if build.action("escape", ActionSpec.new([String]{"sh"}).with_outputs([String]{"e.txt"}).with_folder("../up", None)) == {
         .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../up"))
         .Ok(_) -> panic("a folder outside the project must be refused")
     }
-    build.action("inside", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"data/gen.txt"})) ?? panic("inside")
+    build.action("inside", ActionSpec.new([String]{"sh"}).with_outputs([String]{"data/gen.txt"})) ?? panic("inside")
     if build.plan() == {
         .Err(error) -> assert(error == HermeticBuildError.OutputInFolder{action: "read", output: "data/gen.txt", folder: "data"})
         .Ok(_) -> panic("an output inside a read folder must be refused")
@@ -506,15 +533,15 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
     musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
     shell: build.probe("shell", ProbeSpec.find_program("sh")) ?? panic("shell")
-    if build.action("unused", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"a.txt"}).with_found_folder(".jet/found/musl", musl)) == {
+    if build.action("unused", ActionSpec.new([String]{"sh"}).with_outputs([String]{"a.txt"}).with_found_folder(".jet/found/musl", musl)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
         .Ok(_) -> panic("the action must use the probe that finds its folder")
     }
-    if build.action("program", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"b.txt"}).with_found_folder(".jet/found/shell", shell).with_probe(shell)) == {
+    if build.action("program", ActionSpec.new([String]{"sh"}).with_outputs([String]{"b.txt"}).with_found_folder(".jet/found/shell", shell).with_probe(shell)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(shell.id))
         .Ok(_) -> panic("only a find_folder probe finds a folder")
     }
-    build.action("link", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"c.txt"}).with_found_folder(".jet/found/musl", musl).with_probe(musl)) ?? panic("link")
+    build.action("link", ActionSpec.new([String]{"sh"}).with_outputs([String]{"c.txt"}).with_found_folder(".jet/found/musl", musl).with_probe(musl)) ?? panic("link")
     assert(build.plan() == .Ok(_))
 }
 
@@ -522,19 +549,19 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build := HermeticBuildContext.new()
     cc: build.probe("cc", ProbeSpec.find_program("cc")) ?? panic("cc")
     musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
-    if build.action("unused", ActionSpec.cached([String]{"sh", "cc"}).with_outputs([String]{"a.txt"}).with_found_program(1, "", cc)) == {
+    if build.action("unused", ActionSpec.new([String]{"sh", "cc"}).with_outputs([String]{"a.txt"}).with_found_program(1, "", cc)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(cc.id))
         .Ok(_) -> panic("the action must use the probe that finds its program")
     }
-    if build.action("folder", ActionSpec.cached([String]{"sh", "libc.a"}).with_outputs([String]{"b.txt"}).with_found_program(1, "", musl).with_probe(musl)) == {
+    if build.action("folder", ActionSpec.new([String]{"sh", "libc.a"}).with_outputs([String]{"b.txt"}).with_found_program(1, "", musl).with_probe(musl)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
         .Ok(_) -> panic("only a find_program probe finds a program")
     }
-    if build.action("tool", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.txt"}).with_found_program(0, "", cc).with_probe(cc)) == {
+    if build.action("tool", ActionSpec.new([String]{"cc"}).with_outputs([String]{"c.txt"}).with_found_program(0, "", cc).with_probe(cc)) == {
         .Err(error) -> assert(error == HermeticBuildError.EmptyActionArgv("tool"))
         .Ok(_) -> panic("a found program passed to an action is one of its arguments")
     }
-    build.action("compile", ActionSpec.cached([String]{"sh", "--cc=cc"}).with_outputs([String]{"d.txt"}).with_found_program(1, "--cc=", cc).with_probe(cc)) ?? panic("compile")
+    build.action("compile", ActionSpec.new([String]{"sh", "--cc=cc"}).with_outputs([String]{"d.txt"}).with_found_program(1, "--cc=", cc).with_probe(cc)) ?? panic("compile")
     assert(build.plan() == .Ok(_))
 }
 
@@ -549,7 +576,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.write(files.join(root, "data/.gitignore"), "skip.txt\n") ?? panic("ignore")
     files.write(files.join(root, "data/skip.txt"), "skip") ?? panic("skip")
     build := HermeticBuildContext.new()
-    build.action("read", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("action")
+    build.action("read", ActionSpec.new([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     stamps := StampTable.load(root)
     first: build_snapshot_folders(stamps, root, plan.actions[0]) ?? panic("snapshot")
@@ -589,7 +616,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
     script: "read -r line < data/a.txt; printf %s \"$line\" > out.txt; if (printf x > data/w) 2>/dev/null; then printf ' writable' >> out.txt; fi"
-    spec: ActionSpec.cached([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_folder("data", None).with_cap(BuildEffect.Exec)
+    spec: ActionSpec.new([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_folder("data", None).with_cap(BuildEffect.Exec)
     action: build.action("read", spec) ?? panic("action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
@@ -613,7 +640,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build := HermeticBuildContext.new()
     probe: build.probe("marks", ProbeSpec.find_folder("marker.txt")) ?? panic("probe")
     script: "read -r line < .jet/found/marks/marker.txt; printf %s \"$line\" > out.txt"
-    spec: ActionSpec.cached([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_found_folder(".jet/found/marks", probe).with_probe(probe).with_cap(BuildEffect.Exec)
+    spec: ActionSpec.new([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_found_folder(".jet/found/marks", probe).with_probe(probe).with_cap(BuildEffect.Exec)
     action: build.action("read", spec) ?? panic("action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
@@ -621,7 +648,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "found")
     missing := HermeticBuildContext.new()
     absent: missing.probe("absent", ProbeSpec.find_folder("jet-test-no-such-file.a")) ?? panic("absent probe")
-    needs: missing.action("needs", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"o.txt"}).with_found_folder(".jet/found/absent", absent).with_probe(absent).with_cap(BuildEffect.Exec)) ?? panic("needs")
+    needs: missing.action("needs", ActionSpec.new([String]{"sh"}).with_outputs([String]{"o.txt"}).with_found_folder(".jet/found/absent", absent).with_probe(absent).with_cap(BuildEffect.Exec)) ?? panic("needs")
     missing_target: missing.add_executable("o", TargetSpec.new().with_action(needs)) ?? panic("missing target")
     missing_plan: missing.plan_with_default(missing_target) ?? panic("missing plan")
     if build_execute_build_plan(missing_plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
@@ -646,7 +673,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     root: build_test_root("records")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
-    handle: build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
+    handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     action: plan.actions[handle.id]
     digest: store.put_blob("object".bytes()) ?? panic("blob")

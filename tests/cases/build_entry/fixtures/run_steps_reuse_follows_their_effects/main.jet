@@ -1,0 +1,21 @@
+build: fn(b: Build) -[Exec, FS, Time]> {
+    #Impure("run declared steps") {
+        shell: b.probe("shell", "find_program", "sh")
+        // No ambient effect: reused while in.txt is unchanged.
+        mirror: b.run("mirror", b.found(shell), ["Exec", "FS"])
+        mirror.arg("-c")
+        mirror.arg("read -r word < in.txt; printf '%s' \"$word\" > mirror.txt")
+        mirror.reads("in.txt")
+        mirror.writes("mirror.txt")
+        // Time is ambient: the step always runs.
+        stamp: b.run("stamp", b.found(shell), ["Exec", "FS", "Time"])
+        stamp.arg("-c")
+        stamp.arg("read -r word < in.txt; printf '%s' \"$word\" > stamp.txt")
+        stamp.reads("in.txt")
+        stamp.writes("stamp.txt")
+        app: b.add_executable("app", ["main.jet"], [mirror, stamp])
+        b.default(app)
+    }
+}
+
+run: fn() {}

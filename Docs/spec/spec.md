@@ -5459,10 +5459,23 @@ probe runs before anything else does. Then whatever is ready runs: the ready
 steps together, up to `--threads` at once, then a ready target compiles. A
 failure stops only what waits on it, the rest of the graph still runs, and
 every failure is reported. Steps and targets that wait on each other are
-refused (E3502) before anything runs. Cached actions include declared input
+refused (E3502) before anything runs. A step's key covers its declared input
 content, argv, authority, toolchain, probes, signing identity, and
-generated-source hashes. A cache hit restores only declared outputs from the
-local CAS.
+generated-source hashes.
+
+A step's effects decide whether it is reused; nothing else does. An effect is
+ambient when its result is not fixed by the step's declared inputs. `FS`,
+`Exec` and `Env` are not: the sandbox lets the step read only its declared
+inputs, write only its tree, run only its tool and what is mounted (each
+identified by content in the key), and see only its declared variables (their
+values in the key). `Net`, `Time`, `Rand`, `IO`, `DB`, `Log` and `GPU` are. A
+step with no ambient effect is reused on an unchanged rebuild: its stored
+record restores only its declared outputs from the local CAS, and a changed
+input changes its key, so it runs again. Such a step must write an output. A
+step with an ambient effect always runs. The sandbox is what makes the
+readings hold, and no step runs outside it: a read of an undeclared file fails
+the step instead of reusing a stale result. Example:
+[`tests/cases/build_entry/run_steps_reuse_follows_their_effects.case`](../../tests/cases/build_entry/run_steps_reuse_follows_their_effects.case).
 
 When `jet build` runs the graph of a `build: fn`, it leaves two records under
 `.jet/build/` beside the build entry, whether or not the build succeeded. `receipt.json` is

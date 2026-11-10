@@ -320,7 +320,8 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     }
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
-    if action.cache == ActionCache.Cached {
+    // Only an action with no ambient effect is reused (build_effects_reusable).
+    if action.reusable() {
         if build_read_action_record(artifact_store, key) == {
             .Val(record) -> {
                 if record.failure_report == .Val(report) {
@@ -340,7 +341,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
             .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
         }
     }
-    rebuild_status: if action.cache == ActionCache.UncachedPhony -> ActionCacheStatus.Miss(.UncachedAction) else -> ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
+    rebuild_status: if !action.reusable() -> ActionCacheStatus.Miss(.AmbientEffect) else -> ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
     build_record_cache_event(action.name, key, rebuild_status, "lookup", None)
 
     sandbox: files.join(files.join(project_root, ".jet/build-sandbox"), "{sys.pid()}-{action.id}-{key.removeprefix("act-sha256:")}")
@@ -456,7 +457,7 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
     if !ran.receipt.success {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
         report: build_action_failure_report(action.name, code, ran.receipt.errors.trim())
-        if action.cache == ActionCache.Cached {
+        if action.reusable() {
             record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
             build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
             build_record_cache_event(action.name, key, run.rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
@@ -472,7 +473,7 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         return Err(BuildExecutionError.HandEdited{action: action.name, path})
     }
     outcome: ActionOutcome.Succeeded{exit_code: code}
-    if action.cache == ActionCache.Cached {
+    if action.reusable() {
         record: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
         build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
         build_record_cache_event(action.name, key, ActionCacheStatus.Miss(.NoLocalActionRecord), "publish", Val(outcome))

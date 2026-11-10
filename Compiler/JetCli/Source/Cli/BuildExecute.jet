@@ -792,7 +792,7 @@ jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: Bu
 }
 
 jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String: String]) -> ActionSpec Never! {
-    spec := ActionSpec.cached(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
+    spec := ActionSpec.new(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop path in action.kept -> spec = spec.with_kept(path, last_kept.get(path))
     loop id in action.folders {
         file: files[id]

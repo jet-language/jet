@@ -103,7 +103,8 @@ CacheMissReason: enum {
     CacheRecordInvalid
     CacheRestoreFailed
     RemoteDenied
-    UncachedAction
+    // The action has an ambient effect, so it always runs.
+    AmbientEffect
     FrontEndIncomplete
 }
 
@@ -603,7 +604,7 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
         .Miss(.CacheRecordInvalid) -> (status: "miss", reason: "cache_record_invalid")
         .Miss(.CacheRestoreFailed) -> (status: "miss", reason: "cache_restore_failed")
         .Miss(.RemoteDenied) -> (status: "miss", reason: "remote_denied")
-        .Miss(.UncachedAction) -> (status: "miss", reason: "uncached_action")
+        .Miss(.AmbientEffect) -> (status: "miss", reason: "ambient_effect")
         .Miss(.FrontEndIncomplete) -> (status: "miss", reason: "front_end_incomplete")
     }
     rendered_outcome: if outcome == {
