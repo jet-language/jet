@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98937,
+    "rev": 98941,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56541,6 +56541,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~13:35, verbatim: \"I think most of those syntax wins already exist?? Like error propagation inferred effects element list literals all are already in jet. No implicit copies. My goal is to provide excellent APIs that cover most use cases so when syntax can't get shorter maybe logic can so that a long script could become a minor call to a corelib function or something.\" Applied: c35 is now the twins using existing terse Jet, not syntax ballots. c39 drops its syntax half. c40 adds whole-block Core calls. No syntax ballots are drafted for the token gap."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Main token attribution, 2026-11-10 ~13:40, over the nine twins with PerfLead-5072portcut applied (PortBars rules, tests excluded). The twins total 23773 tokens and the originals 7631. Helper fns re-implementing shell builtins: text 1425 (26 fns), file ops 1408 (22), command wrappers 1224 (20), print-and-exit 732 (20), JS emulation 299, version sort 241, roots 294. Inline: `??` arms 1368 (228), process.cmd chains 1072 (35), effect rows 1013 (121), files.* calls 904 (226), typed list literals 696 (174), .copy() 628 (157), term.eprint 483 (78), Never! 322 (161), use blocks 279. Script: $JET_STATE_ROOT/scratch/Main/tokfam.mjs and tokcat.mjs."
         },
         {
@@ -56990,12 +56995,12 @@
         },
         {
           "n": 35,
-          "text": "Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides engineered away, one ballot per mechanism, each linked to its report and given a different-family review. Main's attribution over the nine orchestrator twins (23773 tokens against 7631) ranks the inline costs: error propagation and a failing script main that reports and exits (the syntax half of 2583 failure-handling tokens); effect rows on private script fns (121 rows, 1013 tokens) and `Never!` (161, 322), meaning inference for non-public fns; element-type inference for list literals (`[\"a\", \"b\"]`, 174 typed literals, about 520); implicit copy where a String value is used (157 `.copy()`, 628); a filtering loop with an else arm plus list concatenation (13 on streamb10); an open-ended slice `xs[2..]` (7); and default core imports in scripts (279 in use blocks).",
+          "text": "Owner instruction 2026-11-10 ~13:35: every twin is written in the terse Jet that already exists, not with ballots. A fallible call propagates automatically (no `??` arm where propagation is the meaning), effect rows are inferred (no written row on a private fn), list literals take their element type (`[\"a\", \"b\"]`, not `[String]{…}`), and `Never!` is written only where a public contract needs it. Implicit copies are out: `.copy()` stays where ownership needs it, and an API that returns an owned value removes it where it doesn't. A twin that still loses is reported with its remaining costs by construct, and each one is answered by a Core API (c36-c40). Measured by PortBars on all nine entries, with no parity loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T18:28:14.059Z"
+          "at": "2026-11-10T18:34:40.779Z"
         },
         {
           "n": 36,
@@ -57026,12 +57031,21 @@
         },
         {
           "n": 39,
-          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): failure handling costs 2583 tokens: 228 `??` arms (1368), 78 term.eprint calls (483) and 20 print-and-exit fns (732). The API half, with c31 and c32: process.fail, and read/list/stat forms that take the default in the call (`files.read_or(path, \"\")`), so a script states its fallback once per call without an arm. The syntax half (propagation, a failing script main that reports and exits) goes to ballot under c35.",
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): failure handling costs 2583 tokens: 228 `??` arms (1368), 78 term.eprint calls (483) and 20 print-and-exit fns (732). The API half, with c31 and c32: process.fail, and read/list/stat forms that take the default in the call (`files.read_or(path, \"\")`), so a script states its fallback once per call without an arm. Automatic propagation already covers the rest (c35).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T18:28:12.768Z"
+          "at": "2026-11-10T18:34:42.413Z"
+        },
+        {
+          "n": 40,
+          "text": "Owner instruction 2026-11-10 ~13:35 (\"provide excellent APIs that cover most use cases so when syntax can't get shorter maybe logic can so that a long script could become a minor call to a corelib function\"): find the multi-line blocks that recur across the nine twins and the in-repo scripts (git status, diff, apply and commit sequences; the patch-and-land flow; tree comparison; TSV and report emission; lock and slot handling; retries with timeouts) and give each common one a Core call that does it whole, with a #Test, docs and a golden on O0/O1/O2. Each twin replaces its block with the call. Report, per entry, the tokens the block cost and what the call costs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T18:34:43.974Z"
         }
       ],
       "refs": [],
@@ -57044,12 +57058,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T18:28:15.320Z",
+      "updated": "2026-11-10T18:34:45.529Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 39
+      "criteriaLastN": 40
     },
     {
       "id": "c022g7qw",
@@ -200250,6 +200264,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T18:34:45.530Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T18:34:43.974Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#40 Owner instruction 2026-11-10 ~13:35 (\"provide excellent APIs"
+    },
+    {
+      "at": "2026-11-10T18:34:42.413Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#39: Owner instruction 2026-11-10 ~13:35: the syntax is already in Jet (automatic propagation, inferred effects, inferred list literals); no implicit copies; the goal is APIs that turn script logic into Core calls.; was: Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens agains"
+    },
+    {
+      "at": "2026-11-10T18:34:40.779Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#35: Owner instruction 2026-11-10 ~13:35: the syntax is already in Jet (automatic propagation, inferred effects, inferred list literals); no implicit copies; the goal is APIs that turn script logic into Core calls.; was: Owner instruction 2026-11-10 ~13:25: the syntax that would bring Jet scripts closer to their shell and JS peers on tokens goes to owner ballots, with research, same-program alternatives and downsides "
+    },
     {
       "at": "2026-11-10T18:28:15.320Z",
       "by": "Main",
