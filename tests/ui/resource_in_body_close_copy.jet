@@ -1,0 +1,20 @@
+Stream: struct {
+    fd: Int
+
+    impl Close {
+        close: fn(&&self) { print("closed {self.fd}") }
+    }
+}
+
+FileReader: struct {
+    stream: Stream
+}
+
+run: fn() {
+    a: Stream{fd: 3}
+    b: a.copy()
+    print(b.fd)
+    r: FileReader{stream: Stream{fd: 4}}
+    s: r.copy()
+    print(s.stream.fd)
+}

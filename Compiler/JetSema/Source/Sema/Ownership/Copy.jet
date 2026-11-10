@@ -401,8 +401,9 @@ sema_copy_foreign_handle_facts: fn(
 }
 
 // Whether an impl of the trait spelled `trait_name` targets `nominal`: an
-// impl whose declared trait name or registered trait symbol spells it, and
-// whose target resolves to the nominal. With the registration index built,
+// `impl` block in the nominal's own body (`Stream: struct { impl Close {…} }`),
+// or an impl whose declared trait name or registered trait symbol spells it,
+// and whose target resolves to the nominal. With the registration index built,
 // only that name's impl rows are read (the same rows the full scan would
 // accept, in the same order); before then every impl is scanned. The graph
 // and its impl rows are read in place through the `.Val(…)` pattern on the
@@ -412,6 +413,11 @@ sema_copy_nominal_has_impl: fn(
     nominal: SemaRegistrationNominal,
     trait_name: String,
 ) -> (known: Bool, value: Bool) Never! {
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name == trait_name || block.trait_name.ends_with(".{trait_name}") -> return (known: true, value: true)
+        }
+    }
     if graph == .Val(registered) {
         if registered.impl_traits_indexed {
             if registered.impl_trait_name_slots.get(trait_name) == .Val(found) {
