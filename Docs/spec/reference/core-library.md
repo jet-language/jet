@@ -2759,9 +2759,10 @@ Float Display text.
 
 Fixed-size vectors and matrices use `Float` components. `Vec2`, `Vec3`, and
 `Vec4` provide constructors, `splat`, `from_array`, `to_array`, checked lane
-indexing, vector addition and subtraction, and element-wise multiplication.
-`Vec3` also supports scalar multiplication and division, and the `dot`,
-`cross`, `length`, and `normalize` operations. `Mat3` and `Mat4` constructors
+indexing, vector addition and subtraction, element-wise multiplication,
+multiplication and division by a `Float` on either side, and the `dot`,
+`length`, `length_sq`, `distance`, `distance_sq`, and `normalize` operations;
+`Vec3` also has `cross`. `Mat3` and `Mat4` constructors
 use column-major storage; they provide `from_array`, `to_array`, addition,
 subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
 Reductions use a scalar left-to-right fold, so the reduction order is part of
