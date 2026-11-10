@@ -5,7 +5,8 @@
 // sema refuses the call with E2104 in any compile that lowers it. This is the
 // only table of unbuilt surfaces. A row names the feature, the card that builds
 // it, and its user-facing surface:
-// - the Core calls `module_name.member` for each member in `members`;
+// - the Core calls `module_name.member` for each member in `members`, where a
+//   static constructor member is spelled `Type.member`;
 // - every method of each handle type in `handles`, and its static `new`.
 // A row goes away when its feature lands.
 CoreUnbuiltRow: struct {
@@ -23,6 +24,13 @@ CORE_UNBUILT_ROWS: [CoreUnbuiltRow]{
         module_name: "",
         members: [String]{},
         handles: [String]{"HTTPClient"},
+    },
+    {
+        feature: "streamed and multipart HTTP request body support (`http.Body.reader` and `http.Body.multipart`)",
+        card: 3665,
+        module_name: "core.http",
+        members: [String]{"Body.reader", "Body.multipart"},
+        handles: [String]{},
     },
     {
         feature: "forward- and reverse-mode automatic differentiation (`compute.jvp` and `compute.vjp`)",

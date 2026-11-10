@@ -31,6 +31,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 ## HTTP
 
 - [HTTPClient](HTTP/HTTPClient.jet) — core.http is the one-shot rung; core.http.client is the configurable rung.
+- [HTTPMessageValues](HTTP/HTTPMessageValues.jet) — Checked HTTP message values: methods, statuses, versions, fields and bodies.
 - [HTTPObservability](HTTP/HTTPObservability.jet) — Static responses and access records share the server surface.
 - [HTTPRestService](HTTP/HTTPRestService.jet) — Realistic core.http client + server, no third-party package.
 - [HTTPRouteMarkers](HTTP/HTTPRouteMarkers.jet) — Tags expose only this explicitly mounted value.

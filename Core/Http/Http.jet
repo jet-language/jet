@@ -91,6 +91,17 @@ Headers: struct {
     fields: [Header]
 }
 
+/// A checked field name: one RFC 9110 token (`HeaderName.new`).
+HeaderName: struct {
+    __text: String
+}
+
+/// A checked field value: HTAB, space, visible ASCII and obs-text bytes
+/// (`HeaderValue.new`).
+HeaderValue: struct {
+    __text: String
+}
+
 Body: enum {
     Empty
     Text(String)
@@ -688,6 +699,61 @@ version_parse: fn(token: String) -> Version Never! {
     }
 }
 
+impl Method {
+    /// The method named by `token`: a standard method is its own variant and
+    /// any other RFC 9110 token is `Custom`. Methods are case-sensitive, so
+    /// `get` is a custom method. An empty token or a non-token byte is
+    /// InvalidMethod.
+    custom: fn(token: String) -> Method HTTPError! {
+        if !valid_method(token) -> return Err(.InvalidMethod)
+        parsed: method_parse(token)
+        if method_text(parsed) == token -> return Ok(parsed)
+        Ok(Method.Custom(token))
+    }
+}
+
+impl Method.Display { display: fn(self) -> String { method_text(self) } }
+
+impl Status {
+    /// The status `code` with its reason phrase; a code outside 100..=599 is
+    /// InvalidStatus.
+    new: fn(code: Int) -> Status HTTPError! {
+        if code < 100 || code > 599 -> return Err(.InvalidStatus)
+        Ok(status(code))
+    }
+}
+
+impl Status.Display { display: fn(self) -> String { "{self.code}" } }
+
+impl Version {
+    http_1_0: fn() -> Version Never! { Version.HTTP10 }
+    http_1_1: fn() -> Version Never! { Version.HTTP11 }
+    http_2: fn() -> Version Never! { Version.HTTP2 }
+}
+
+impl Version.Display { display: fn(self) -> String { version_text(self) } }
+
+impl HeaderName {
+    /// `name` as a field name; a name that is not one token is InvalidHeader.
+    new: fn(name: String) -> HeaderName HTTPError! {
+        if !valid_header_name(name) -> return Err(.InvalidHeader)
+        Ok(HeaderName{__text: name})
+    }
+}
+
+impl HeaderName.Display { display: fn(self) -> String { self.__text.copy() } }
+
+impl HeaderValue {
+    /// `value` as a field value; a control byte other than HTAB is
+    /// InvalidHeader.
+    new: fn(value: String) -> HeaderValue HTTPError! {
+        if !client_header_value(value) -> return Err(.InvalidHeader)
+        Ok(HeaderValue{__text: value})
+    }
+}
+
+impl HeaderValue.Display { display: fn(self) -> String { self.__text.copy() } }
+
 status: fn(code: Int) -> Status Never! { Status{code: code, reason: reason_phrase(code)} }
 status_ok: fn() -> Status Never! { status(200) }
 status_created: fn() -> Status Never! { status(201) }
@@ -829,6 +895,25 @@ body_text: fn(text: String) -> Body Never! {
 body_bytes: fn(bytes: [U8]) -> Body Never! {
     if bytes.len() == 0 -> return Body.Empty
     Body.Bytes(bytes)
+}
+
+// The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
+// `http.Body.json(value)` constructors: sema checks the call and runs these.
+// A Body holds only its payload; a message names the media type in its own
+// Content-Type field, so the typed text form keeps the text.
+__body_typed_text: fn(text: String, _media_type: String) -> Body Never! { body_text(text) }
+
+// application/x-www-form-urlencoded fields, in map order.
+__body_form: fn(fields: [String:String]) -> Body Never! {
+    pairs := [QueryPair]{}
+    loop (name, value) in fields -> pairs.push(QueryPair{key: name.copy(), value: value.copy()})
+    body_text(form_encode(Query{pairs: pairs}))
+}
+
+// Compact JSON text; a value with no JSON form (a NaN Float) stops the call.
+__body_json: fn<T: Encode>(value: T) -> Body Never! {
+    text: json_codec.to_string(value) ?? panic("http.Body.json: the value has no JSON form")
+    body_text(text)
 }
 
 body_as_text: fn(body: Body) -> String Never! {

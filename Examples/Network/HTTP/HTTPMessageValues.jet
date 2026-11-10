@@ -1,0 +1,51 @@
+// Checked HTTP message values: methods, statuses, versions, fields and bodies.
+package: {
+    name: "http_message_values"
+    authority: { allow: [Net] }
+}
+
+use {
+    http: core.http
+    mime: core.net.mime
+}
+
+method_named: fn(token: String) -> String {
+    method: http.Method.custom(token) ?? return "refused"
+    "{method}"
+}
+
+status_named: fn(code: Int) -> String {
+    status: http.Status.new(code) ?? return "refused"
+    "{status}"
+}
+
+field_named: fn(name: String, value: String) -> String {
+    field_name: http.HeaderName.new(name) ?? return "refused name"
+    field_value: http.HeaderValue.new(value) ?? return "refused value"
+    "{field_name}: {field_value}"
+}
+
+run: fn() {
+    // A standard token is its own method; any other token is a custom one.
+    print(method_named("PURGE"))
+    print(method_named("GET"))
+    print(method_named("get"))
+    print(method_named("PUR GE"))
+    print(method_named(""))
+
+    print(status_named(299))
+    print(status_named(600))
+    print("{http.Version.http_1_0()} {http.Version.http_1_1()} {http.Version.http_2()}")
+
+    print(field_named("X-Test", "ok"))
+    print(field_named("X Test", "ok"))
+    print(field_named("X-Test", "a\nb"))
+
+    print(http.Body.empty().bytes(1) ?? panic("empty"))
+    print(http.Body.bytes([0, 255]).bytes(2) ?? panic("bytes"))
+    print(http.Body.text("hello").text(5) ?? panic("text"))
+    print(http.Body.text("hello", mime.parse("text/custom") ?? panic("mime")).text(5) ?? panic("typed text"))
+    print(http.Body.form(["a": "b c", "x": "1&2"]).text(32) ?? panic("form"))
+    print(http.Body.json(42).json<Int>(16) ?? panic("json"))
+    print(http.Body.json([1, 2]).text(16) ?? panic("json text"))
+}

@@ -28,6 +28,7 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     core_call_typed_signature,
+    core_unbuilt_call,
     symbol_id,
     type_identity_equal,
     type_name,
@@ -63,11 +64,6 @@ sema_call_http_static_target: fn(receiver: Expr, environment: SemaScopeEnvironme
                         namespace == "core.http.client" && leaf == "Proxy" -> "HTTPProxy"
                         namespace == "core.http.client" && leaf == "RedirectPolicy" -> "HTTPRedirectPolicy"
                         namespace == "core.http" && (leaf == "Body" || leaf == "Headers") -> leaf
-                        namespace == "core.http" && leaf == "Method" -> "HTTPMethod"
-                        namespace == "core.http" && leaf == "Status" -> "HTTPStatus"
-                        namespace == "core.http" && leaf == "Version" -> "HTTPVersion"
-                        namespace == "core.http" && leaf == "HeaderName" -> "HTTPHeaderName"
-                        namespace == "core.http" && leaf == "HeaderValue" -> "HTTPHeaderValue"
                         namespace == "core.http" && leaf == "Request" -> "HTTPRequest"
                         namespace == "core.http" && leaf == "Response" -> "HTTPResponse"
                         namespace == "core.http" && (leaf == "Error" || leaf == "HTTPError") -> "HTTPError"
@@ -94,19 +90,6 @@ sema_call_http_unit_receiver: fn(span: Span, context: &SemaCheckContext) -> TExp
     sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
 }
 
-sema_call_http_static_rust_type: fn(type_name: String) -> String Never! {
-    if type_name == {
-        "HTTPMethod" -> "JetHTTPMethod"
-        "HTTPStatus" -> "JetHTTPStatus"
-        "HTTPVersion" -> "JetHTTPVersion"
-        "HTTPHeaderName" -> "JetHTTPHeaderName"
-        "HTTPHeaderValue" -> "JetHTTPHeaderValue"
-        "Headers" -> "JetHTTPHeaders"
-        "Body" -> "JetHTTPBody"
-        else -> "Jet{type_name}"
-    }
-}
-
 sema_call_http_static_tree_arg: fn(value: TExpr, argument: CallArg) -> TCallArg Never! {
     TCallArg{
         value: value,
@@ -122,23 +105,17 @@ sema_call_http_static_tree_arg: fn(value: TExpr, argument: CallArg) -> TCallArg 
     }
 }
 
-sema_call_http_static_value: fn(
-    type_name: String,
-    method: String,
-    method_rust: String,
-    args: [CallArg],
-    values: [TExpr],
-    result_type: Type,
-    span: Span,
-) -> TExpr Never! {
+// The typed tree of an unbuilt Body constructor (core_unbuilt_call): only a
+// compile that lowers nothing keeps it, so it never reaches the IR.
+sema_call_http_unbuilt_body: fn(method_rust: String, args: [CallArg], values: [TExpr], result_type: Type, span: Span) -> TExpr Never! {
     lowered := [TCallArg]{}
     loop index in 0..<values.len() -> lowered.push(sema_call_http_static_tree_arg(values[index], args[index]))
-    symbol := symbol_id(SymbolKind.Function, "core.http", type_name, method_rust)
+    symbol := symbol_id(SymbolKind.Function, "core.http", "Body", method_rust)
     reference := TMethodRef{symbol: symbol, name: method_rust, mangled: false, trait_owner: None, operator_identity: None}
     sema_tree_expr(
         result_type,
         TExprKind.StaticCall{
-            owner: TStaticOwner.Prelude{rooted: true, path: sema_call_http_static_rust_type(type_name), generics: [TPreludeArg]{}},
+            owner: TStaticOwner.Prelude{rooted: true, path: "JetHTTPBody", generics: [TPreludeArg]{}},
             owner_type: None,
             method: reference,
             type_args: [Type]{},
@@ -146,6 +123,27 @@ sema_call_http_static_value: fn(
         },
         span,
     )
+}
+
+// E2104 at a user call of an unbuilt Body constructor in a compile that
+// lowers it; true when reported.
+sema_call_http_body_unbuilt: fn(method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
+    row: core_unbuilt_call("core.http", "Body.{method}") ?? return false
+    diagnostics.push(sema_call_core_unbuilt_error("http.Body.{method}", row, span))
+    true
+}
+
+// A checked HTTP static constructor runs the `core.http` source function
+// `member`, typed by that function's own signature as core.http sees it.
+sema_call_http_core_static: fn(member: String, args: [CallArg], values: [TExpr], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    identity: sema_call_core_module_identity(environment, program, "core.http") ?? return None
+    target: sema_call_core_source_target(environment, program, identity, member, type_args, span, true, diagnostics) ?? return None
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    result: sema_call_signature_return(target.signature) ?? return None
+    lowered := [TCallArg]{}
+    loop index in 0..<values.len() -> lowered.push(sema_call_http_static_tree_arg(values[index], args[index]))
+    Val(sema_tree_node(sema_call_resolved_type(result, environment, program), TExprKind.Call{callee: callee, type_args: target.type_args, args: lowered}, span))
 }
 
 // Source-owned HTTP text carriers cross into native leaves through their
@@ -161,12 +159,11 @@ sema_call_http_source_text: fn(value: &&TExpr, span: Span, environment: SemaScop
     }
 }
 
+// The `http.Headers` and `http.Body` constructors. `Method`, `Status`,
+// `Version`, `HeaderName` and `HeaderValue` construct through their own Core
+// static methods; the Body ones share names with Body's reading methods.
 sema_call_http_static_known: fn(type_name: String, method: String) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return true
-    if type_name == "HTTPMethod" && (method == "custom" || sema_http_route_verbs().contains(method)) -> return true
-    if type_name == "HTTPStatus" && method == "new" -> return true
-    if type_name == "HTTPVersion" && (method == "http_1_0" || method == "http_1_1" || method == "http_2") -> return true
-    if (type_name == "HTTPHeaderName" || type_name == "HTTPHeaderValue") && method == "new" -> return true
     if type_name == "Headers" && method == "new" -> return true
     if type_name == "Body" && (method == "empty" || method == "bytes" || method == "text" || method == "json" || method == "form" || method == "multipart" || method == "reader") -> return true
     false
@@ -174,11 +171,6 @@ sema_call_http_static_known: fn(type_name: String, method: String) -> Bool Never
 
 sema_call_http_static_arity: fn(type_name: String, method: String, actual: Int) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return actual == 0
-    if type_name == "HTTPMethod" && method == "custom" -> return actual == 1
-    if type_name == "HTTPMethod" -> return actual == 0
-    if type_name == "HTTPStatus" && method == "new" -> return actual == 1
-    if type_name == "HTTPVersion" -> return actual == 0
-    if (type_name == "HTTPHeaderName" || type_name == "HTTPHeaderValue") && method == "new" -> return actual == 1
     if type_name == "Headers" && method == "new" -> return actual == 0
     if type_name == "Body" && (method == "empty") -> return actual == 0
     if type_name == "Body" && (method == "bytes" || method == "json" || method == "form" || method == "multipart") -> return actual == 1
@@ -188,9 +180,6 @@ sema_call_http_static_arity: fn(type_name: String, method: String, actual: Int) 
 }
 
 sema_call_http_static_arg_types: fn(type_name: String, method: String, count: Int) -> [Type] Never! {
-    if type_name == "HTTPMethod" && method == "custom" -> return [Type]{Type.String}
-    if type_name == "HTTPStatus" && method == "new" -> return [Type]{Type.Int}
-    if type_name == "HTTPHeaderName" || type_name == "HTTPHeaderValue" -> return [Type]{Type.String}
     if type_name == "Body" && method == "bytes" -> return [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
     if type_name == "Body" && method == "text" -> return if count == 2 -> [Type]{Type.String, Type.Named{name: "MIME"}} else -> [Type]{Type.String}
     if type_name == "Body" && (method == "form" || method == "multipart") -> return [Type]{Type.Map{key: Type.String, key_span: None, value: Type.String}}
@@ -270,12 +259,9 @@ sema_call_try_http_static: fn(
     if !sema_call_http_static_known(target.type_name, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_call_http_static_arity(target.type_name, method, args.len()) {
         expected_arity := if {
-            target.type_name == "Body" && (method == "text" || method == "reader") -> 1
             target.type_name == "Body" && method == "empty" -> 0
             target.type_name == "Body" -> 1
-            target.type_name == "HTTPVersion" || (target.type_name == "HTTPMethod" && method != "custom") || target.type_name == "Headers" || target.type_name == "HTTPClientType" -> 0
-            method == "new" && target.type_name != "Body" -> 1
-            else -> args.len()
+            else -> 0
         }
         diagnostics.push(sema_call_arity_diagnostic("{target.type_name}.{method}", expected_arity, args.len(), false, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -297,13 +283,15 @@ sema_call_try_http_static: fn(
     values := [TExpr]{}
     if {
         target.type_name == "Body" && method == "json" -> {
-            if args.len() == 1 {
-                value: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                params := sema_call_http_ownership_params(call_args, [Type]{value.ty}, moving)
-                ownership := sema_ownership_check_call_arguments(state, "Body.json", params, call_args, scopes, diagnostics)
-                if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-                values.push(value)
+            value: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            if !sema_serde_type_is_admissible(environment, program, value.ty, SemaSerdeDirection.Encode) {
+                sema_call_http_check_serde(SemaSerdeDirection.Encode, value.ty, args[0].span, environment, program, diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: None}
             }
+            params := sema_call_http_ownership_params(call_args, [Type]{value.ty}, moving)
+            ownership := sema_ownership_check_call_arguments(state, "Body.json", params, call_args, scopes, diagnostics)
+            if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+            values.push(value)
         }
         else -> {
             loop index in 0..<args.len() {
@@ -317,28 +305,35 @@ sema_call_try_http_static: fn(
             if !sema_call_http_static_ownership(call_args, arg_types, moving, "{target.type_name}.{method}", scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    result_type := Type.Named{name: target.type_name}
-    if (target.type_name == "HTTPMethod" && method == "custom") || (target.type_name == "HTTPStatus" && method == "new") || target.type_name == "HTTPHeaderName" || target.type_name == "HTTPHeaderValue" {
-        result_type = sema_call_http_static_result(Type.Named{name: target.type_name})
+    if target.type_name == "Body" && (method == "reader" || method == "multipart") {
+        if sema_call_http_body_unbuilt(method, span, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        // A compile that lowers nothing (`jet check`) keeps the call's type.
+        result_type := if method == "reader" -> sema_call_http_static_result(Type.Named{name: "Body"}) else -> Type.Named{name: "Body"}
+        rust_method := if {
+            method == "multipart" -> "from_multipart"
+            args.len() == 1 -> "from_reader"
+            else -> "from_reader_with_length"
+        }
+        built := sema_call_http_unbuilt_body(rust_method, args, values, result_type, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
     }
-    rust_method := if {
-        target.type_name == "Body" && method == "bytes" -> "from_bytes"
-        target.type_name == "Body" && method == "text" && args.len() == 1 -> "from_text"
-        target.type_name == "Body" && method == "text" -> "from_text_with_mime"
-        target.type_name == "Body" && method == "json" -> "from_json"
-        target.type_name == "Body" && method == "form" -> "from_form"
-        target.type_name == "Body" && method == "multipart" -> "from_multipart"
-        target.type_name == "Body" && method == "reader" && args.len() == 1 -> "from_reader"
-        target.type_name == "Body" && method == "reader" -> "from_reader_with_length"
-        else -> method
+    member := if {
+        target.type_name == "Headers" -> "headers"
+        method == "empty" -> "body_empty"
+        method == "bytes" -> "body_bytes"
+        method == "text" && values.len() == 1 -> "body_text"
+        method == "text" -> "__body_typed_text"
+        method == "form" -> "__body_form"
+        else -> "__body_json"
     }
-    if target.type_name == "Body" && method == "text" && values.len() == 2 {
-        // The text argument is the last value: take it out and push its
-        // conversion back, instead of copying it out of its slot.
+    if method == "text" && values.len() == 2 {
+        // The media type is the last value: take it out and push its text
+        // back, instead of copying it out of its slot.
         source: values.pop() ?? return SemaMethodSpecialCheck{handled: true, value: None}
         values.push(sema_call_http_source_text(source, span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
-    built := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
+    member_type_args := if member == "__body_json" -> [Type]{values[0].ty} else -> [Type]{}
+    built: sema_call_http_core_static(member, args, values, member_type_args, span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
 }
 
