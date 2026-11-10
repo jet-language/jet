@@ -19,7 +19,14 @@
 //   and the parity check: `tool.cases`, each the `args` both programs
 //   run with (and, when given, the `env` variables they run under and the
 //   `exit` code both must give, 0 otherwise) and the `expected` output file
-//   in the entry that both must print byte for byte
+//   in the entry. A case with a `check` (a Jet program in the entry) proves
+//   the job: run with `jet` in the case directory after each program, with
+//   the path of a file holding the program's output, it prints the facts the
+//   job left (files, commits, queue lines, the facts the report states), and
+//   that print must be `expected` byte for byte; a case without one compares
+//   the programs' own output byte for byte. `tool.token_gaps`, when given,
+//   names what closes the twin's token gap (Core API criteria such as
+//   "#5072 c36", syntax ballots such as "D-SH-RUN1")
 //   (Tools/gauntlet/harness/run.mjs runs each program in a fresh copy of the
 //   fixtures; `--entry NAME` runs one entry);
 // - a comparison entry (any other mode) holds its peer programs itself: every
@@ -33,10 +40,12 @@
 //
 // A tool entry switches over when its original moves into the entry's own
 // directory, kept there only as the reference its twin is judged against.
-// The original keeps running until its entry wins every port bar
-// (JUDGE, Tools/gauntlet/PortBars.jet), so `--check` runs that judge on each
-// switched entry the change touches (a file in the entry or its Jet twin)
-// and refuses the change while the entry loses a bar.
+// The original keeps running until its entry passes the port-bar judge
+// (JUDGE, Tools/gauntlet/PortBars.jet: the job, wall time and peak memory
+// decide, beside the reasoning bar; a token gap must name its criterion), so
+// `--check` runs that judge on each switched entry the change touches (a
+// file in the entry or its Jet twin) and refuses the change while the entry
+// loses a bar.
 //
 // Usage (from the repository root):
 //   jet Tools/agent/ScriptPairing.jet --check [--base REV]
@@ -279,6 +288,8 @@ tool_entry: fn(repo: String, name: String, tree: Dyn, found: &Entries) -[FS]> ()
             expected == "" -> problems.push("case {index + 1} names no `expected` output")
             !files.is_file(files.join(repo, "{dir}/{expected}")) -> problems.push("case {index + 1}'s expected output `{dir}/{expected}` does not exist")
         }
+        check: text_field(case, "check")
+        if check != "" && (!check.ends_with(".jet") || !files.is_file(files.join(repo, "{dir}/{check}"))) -> problems.push("case {index + 1}'s check `{dir}/{check}` is not a Jet program")
     }
     loop known in found.pairings {
         if original != "" && known.path == original -> problems.push("`{original}` is already the original of entry `{known.pair.entry}`")
@@ -581,11 +592,11 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
 #Test("a tool entry missing its twin, fixtures or parity check is refused part by part") {
     dir: planted_repo()
     plant(dir, "Tools/count/count.py", "print(3)\n")
-    plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/count/count.py\", \"jet\": \"Tools/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"expected\": \"expected/plain.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/count/count.py\", \"jet\": \"Tools/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"expected\": \"expected/plain.out\", \"check\": \"check.sh\"}}]}}}}\n")
     refused: refusals(dir, added_files(dir, "HEAD") ?? panic(err.message), read_entries(dir))
     assert_eq(refused.len(), 2)
     assert(refused[0].starts_with("Tools/count/count.py: a script in another language with no gauntlet pair; "))
-    assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist")
+    assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist; case 1's check `{ENTRIES_ROOT}/count/check.sh` is not a Jet program")
     files.remove_all(dir) ?? ()
 }
 

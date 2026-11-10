@@ -1,17 +1,27 @@
 #!/usr/bin/env jet
-// The port-bar judge (#5072 c14): whether each tool entry's Jet twin wins
-// every port bar against its original, and so may replace it.
+// The port-bar judge (#5072 c14, c34): whether each tool entry's Jet twin
+// does its original's job at least as fast, and so may replace it.
 //
 //   jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR]
 //
 // A tool entry (Tools/gauntlet/entries/<name>/entry.json, "mode": "tool")
 // names the original as `tool.original` and its Jet twin as `tool.jet`, with
 // the fixtures and parity cases Tools/agent/ScriptPairing.jet describes. Each
-// entry is judged against its own original only, on four bars:
+// entry is judged against its own original only. Performance ranks first:
+// the job, wall time and peak memory decide a switch, with the reasoning bar
+// beside them; source tokens are measured and reported but block a switch
+// only while a gap names no criterion.
 //
 // (1) parity: on every case both programs, each in a fresh copy of the
-//     fixtures, exit with the case's `exit` (0 when it names none) and print
-//     its `expected` file byte for byte.
+//     fixtures, exit with the case's `exit` (0 when it names none) and do the
+//     same job. A case with a `check` (a Jet program in the entry) checks the
+//     job: after each program the judge runs `jet CHECK STDOUT` in the case
+//     directory, STDOUT being the file that holds what the program printed,
+//     and the check must exit 0 and print the case's `expected` file byte for
+//     byte; it prints the facts the job leaves (the files, commits and queue
+//     lines it wrote, the facts its report states), never the program's
+//     wording. A case without a check compares the program's own output with
+//     `expected` byte for byte.
 // (2) speed: N rounds (--runs, default 5) run every case once per side,
 //     interleaved (the original first in even rounds, Jet first in odd
 //     ones), after the parity runs have warmed both. A round's wall time is
@@ -22,14 +32,17 @@
 //     when every original round beats every Jet round Jet loses; any overlap
 //     is inconclusive, which fails the bar too. Jet must win both measures.
 //     The report gives each measure's Jet/original ratio of medians.
-// (3) tokens: the Jet twin's source tokens are at most the original's, by
-//     one written rule per language (TOKEN RULES below).
-// (4) reasoning: the entry's review record REVIEW_FILE scores both programs
+// (3) reasoning: the entry's review record REVIEW_FILE scores both programs
 //     on the fixed CHECKLIST and Jet's total is at least the original's, and
 //     the measured proxies (branches, control nesting depth, and the
 //     record's hand-written helpers a library call would replace) are no
 //     worse for Jet. A missing record, a missing or unknown checklist item,
 //     or an unknown field fails the bar; it never passes by default.
+// (4) tokens: the Jet twin's source tokens against the original's, by one
+//     written rule per language (TOKEN RULES below), always reported. Jet at
+//     or below the original passes; a twin above it passes only when the
+//     entry's `tool.token_gaps` names what closes the gap (each a Core API
+//     criterion such as "#5072 c36" or a syntax ballot such as "D-SH-RUN1").
 //
 // The verdict is PASS only when all four bars hold. Every entry and every bar
 // is judged and reported: one `entry<TAB>bar<TAB>PASS|FAIL<TAB>detail` row
@@ -81,7 +94,7 @@ REVIEW_FILE: "review.json"
 DEFAULT_RUNS: 5
 RUN_TIMEOUT_SECONDS: 600
 OUTPUT_LIMIT: 268435456
-BARS: [String]{"parity", "speed", "tokens", "reasoning"}
+BARS: [String]{"parity", "speed", "reasoning", "tokens"}
 // The fixed reviewer checklist (#5072 c14), each item scored for each program
 // 0 (no), 1 (partly) or 2 (yes): types visible at use, every failure path
 // visible at the call, no hidden global or mutable state, data flows top to
@@ -131,12 +144,14 @@ EnvVar: struct {
     value: String
 }
 
-// One case of an entry: what both programs run with and must give.
+// One case of an entry: what both programs run with and must give; `check`
+// is the entry's Jet program that checks the job, or "".
 Case: struct {
     args: [String]
     env: [EnvVar]
     exit: Int
     expected: String
+    check: String
 }
 
 // A tool entry as the judge reads it; `problems` keep it from being judged.
@@ -147,6 +162,8 @@ Entry: struct {
     twin: String
     fixtures: String
     cases: [Case]
+    // What closes the token gap: Core API criteria and syntax ballots.
+    token_gaps: [String]
     problems: [String]
 }
 
@@ -234,7 +251,7 @@ keys_of: fn(tree: Dyn) -> [String] Never! {
 // being judged.
 read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
     dir: "{ENTRIES_ROOT}/{name}"
-    entry := Entry{name: name.copy(), dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, problems: [String]{}}
+    entry := Entry{name: name.copy(), dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, token_gaps: [String]{}, problems: [String]{}}
     text: files.read(files.join(repo, "{dir}/entry.json")) ?? {
         entry.problems.push("`{dir}/entry.json` cannot be read: {err}")
         return entry
@@ -251,6 +268,12 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
     if entry.original == "" || !files.is_file(files.join(repo, entry.original)) -> entry.problems.push("its original `{entry.original}` does not exist")
     if !entry.twin.ends_with(".jet") || !files.is_file(files.join(repo, entry.twin)) -> entry.problems.push("its Jet twin `{entry.twin}` does not exist")
     if entry.fixtures != "" && !files.is_dir(files.join(repo, "{dir}/{entry.fixtures}")) -> entry.problems.push("its fixtures `{dir}/{entry.fixtures}` are not a directory")
+    if field(tool, "token_gaps") == .Array(gaps) {
+        loop gap in gaps {
+            named: if gap == .Text(written) -> written.copy() else -> ""
+            if named.starts_with("D-") || (named.starts_with("#") && named.contains(" c")) -> entry.token_gaps.push(named) else -> entry.problems.push("its `tool.token_gaps` holds {json.dumps(gap) ?? "a value"}, not a criterion (\"#5072 c36\") or a ballot (\"D-SH-RUN1\")")
+        }
+    }
     listed: if field(tool, "cases") == .Array(items) -> items.copy() else -> [Dyn]{}
     if listed.len() == 0 -> entry.problems.push("it has no `tool.cases`")
     loop index in 0..<listed.len() {
@@ -280,7 +303,9 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
         if !is_null(exit_value) && int_of(exit_value) == None -> entry.problems.push("case {index + 1}'s `exit` is not an integer")
         expected: text_field(item, "expected")
         if expected == "" || !files.is_file(files.join(repo, "{dir}/{expected}")) -> entry.problems.push("case {index + 1}'s expected output `{dir}/{expected}` does not exist")
-        entry.cases.push(Case{args: args, env: env, exit: code, expected: expected})
+        check: text_field(item, "check")
+        if check != "" && (!check.ends_with(".jet") || !files.is_file(files.join(repo, "{dir}/{check}"))) -> entry.problems.push("case {index + 1}'s check `{dir}/{check}` is not a Jet program")
+        entry.cases.push(Case{args: args, env: env, exit: code, expected: expected, check: check})
     }
     entry
 }
@@ -359,6 +384,21 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
     }
     files.remove_all(stats) ?? ()
     Run{code: code, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: wall, peak_bytes: peak_kib * 1024, problem: ""}
+}
+
+// `run` with the facts its job left in `cwd` as its output: what the case's
+// check, the entry's Jet program at `check`, prints when `jet` runs it in
+// `cwd` with the path of a file holding the program's own output.
+checked: fn(run: Run, check: String, jet: String, case: Case, inherited: [EnvVar], cwd: String) -> Run {
+    if run.problem != "" -> return run.copy()
+    printed: "{cwd}.stdout"
+    files.write(printed, run.output) ?? return not_run("the program's output cannot be kept: {err}")
+    spec := process.cmd([jet, check, printed]).cwd(cwd).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
+    loop setting in inherited.concat(case.env) -> spec = spec.env(setting.name, setting.value)
+    receipt: spec.run() ?? return not_run("its check cannot start: {err}")
+    files.remove(printed) ?? ()
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return not_run("its check `{case.check}` fails (exit {receipt.code}): {shown(near(receipt.errors.trim().bytes(), 0))}")
+    Run{code: run.code, output: receipt.output, errors: run.errors, wall_ns: run.wall_ns, peak_bytes: run.peak_bytes, problem: ""}
 }
 
 // `text` quoted on one line.
@@ -1019,9 +1059,16 @@ speed_bar: fn(wall_original: [Int], wall_jet: [Int], peak_original: [Int], peak_
     Bar{name: "speed", pass: wall == .Win && peak == .Win, detail: "{wall_text}; {peak_text}; medians of {wall_jet.len()} interleaved rounds"}
 }
 
-tokens_bar: fn(original: Int, twin: Int, unmeasured: String) -> Bar Never! {
-    if unmeasured != "" -> return Bar{name: "tokens", pass: false, detail: unmeasured.copy()}
-    Bar{name: "tokens", pass: twin <= original, detail: "Jet {twin}, original {original} ({delta(twin - original)}, Jet/original {ratio(twin, original)})"}
+// The tokens bar: Jet at or below the original, or a gap `gaps` names what
+// closes.
+tokens_bar: fn(original: Int, twin: Int, gaps: [String], unmeasured: String) -> Bar {
+    if unmeasured != "" -> return Bar{name: "tokens", pass: false, detail: unmeasured}
+    counts: "Jet {twin}, original {original} ({delta(twin - original)}, Jet/original {ratio(twin, original)})"
+    if {
+        twin <= original -> Bar{name: "tokens", pass: true, detail: counts}
+        gaps.len() > 0 -> Bar{name: "tokens", pass: true, detail: "{counts}; the gap is {gaps.join(", ")}'s"}
+        else -> Bar{name: "tokens", pass: false, detail: "{counts}; the gap names no criterion or ballot (`tool.token_gaps`)"}
+    }
 }
 
 // The reasoning bar from the review record at `path` (None when there is
@@ -1086,7 +1133,9 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     loop index in 0..<entry.cases.len() {
         same := true
         loop side in 0..<2 {
-            run: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), timer)
+            raw: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), timer)
+            check: entry.cases[index].check
+            run: if check == "" -> raw else -> checked(raw, files.join(repo, "{entry.dir}/{check}"), jet, entry.cases[index], inherited, case_dir(work, name, index, side))
             why: run_failure(run, entry.cases[index], expected[index])
             if why != "" {
                 same = false
@@ -1096,7 +1145,7 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
         if same -> identical += 1
     }
     cases: entry.cases.len()
-    parity_detail: if failures.len() == 0 -> "{cases}/{cases} cases identical" else -> "{identical}/{cases} cases identical; {failures.join("; ")}"
+    parity_detail: if failures.len() == 0 -> "{cases}/{cases} cases do the job" else -> "{identical}/{cases} cases do the job; {failures.join("; ")}"
     report.bars.push(Bar{name: "parity", pass: failures.len() == 0, detail: parity_detail})
 
     wall_original := [Int]{}
@@ -1132,9 +1181,9 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     unmeasured: if language == None -> "no token or proxy rule for the original `{entry.original}`'s language" else -> ""
     original_tokens: tokens(original_text, language ?? .Shell)
     twin_tokens: without_tests(tokens(twin_text, .Jet))
-    report.bars.push(tokens_bar(original_tokens.len(), twin_tokens.len(), unmeasured))
     record: "{entry.dir}/{REVIEW_FILE}"
     report.bars.push(reasoning_bar(record, review_at(repo, record), proxies(original_tokens, language ?? .Shell), proxies(twin_tokens, .Jet), unmeasured))
+    report.bars.push(tokens_bar(original_tokens.len(), twin_tokens.len(), entry.token_gaps, unmeasured))
     report
 }
 
@@ -1296,14 +1345,16 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
 }
 
 // Plants tool entry `name` pairing `original` with `twin` on one case that
-// must print "3".
-plant_entry: fn(dir: String, name: String, original: String, twin: String, review: String) -[FS]> () {
-    plant(dir, "{ENTRIES_ROOT}/{name}/entry.json", "{{\"name\": \"{name}\", \"mode\": \"tool\", \"tool\": {{\"original\": \"{original}\", \"jet\": \"{twin}\", \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
+// must print "3", or whose `check` must; `gaps` is its `tool.token_gaps`.
+plant_entry: fn(dir: String, name: String, original: String, twin: String, review: String, check: String{""}, gaps: String{"[]"}) -[FS]> () {
+    checked: if check == "" -> "" else -> ", \"check\": \"check.jet\""
+    plant(dir, "{ENTRIES_ROOT}/{name}/entry.json", "{{\"name\": \"{name}\", \"mode\": \"tool\", \"tool\": {{\"original\": \"{original}\", \"jet\": \"{twin}\", \"token_gaps\": {gaps}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"{checked}}}]}}}}\n")
     plant(dir, "{ENTRIES_ROOT}/{name}/expected/three.out", "3\n")
+    if check != "" -> plant(dir, "{ENTRIES_ROOT}/{name}/check.jet", check)
     if review != "" -> plant(dir, "{ENTRIES_ROOT}/{name}/{REVIEW_FILE}", review)
 }
 
-#Test("a planted entry that wins every bar passes, and each planted loss fails its bar alone") {
+#Test("a planted entry that wins every bar passes, as do a named token gap and a job its check proves, and each planted loss fails its bar alone") {
     dir: files.mkdtemp("port-bars-planted") ?? panic("a temporary directory cannot be made: {err}")
     // Slow and large: half a gigabyte held for 0.4 s.
     plant(dir, "Tools/fx/heavy.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(0.4)\nprint(3)\n")
@@ -1311,16 +1362,24 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant(dir, "Tools/fx/fast.sh", "a=1\nb=2\nc=3\nd=4\ne=5\necho 3\n")
     plant(dir, "Tools/fx/Small.jet", "run: fn() {{ print(3) }}\n")
     plant(dir, "Tools/fx/Big.jet", "run: fn() {{\n    first: 1\n    second: 2\n    third: first + second\n    print(third)\n}}\n")
+    // The same job, a file holding 3, reported in other words; and a wrong job.
+    plant(dir, "Tools/fx/job.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(0.4)\nopen(\"job\", \"w\").write(\"3\\n\")\nprint(\"python wrote the job\")\n")
+    plant(dir, "Tools/fx/Job.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"3\\n\")\n    print(\"done\")\n}}\n")
+    plant(dir, "Tools/fx/WrongJob.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"4\\n\")\n    print(\"python wrote the job\")\n}}\n")
+    check: "use {{\n    files: core.files\n}}\n\nrun: fn() {{ print(files.read(\"job\").trim()) }}\n"
     review: review_json(1, 2, "")
     plant_entry(dir, "pass", "Tools/fx/heavy.py", "Tools/fx/Small.jet", review)
     plant_entry(dir, "parity", "Tools/fx/wrong.py", "Tools/fx/Small.jet", review)
     plant_entry(dir, "speed", "Tools/fx/fast.sh", "Tools/fx/Small.jet", review)
     plant_entry(dir, "tokens", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review)
     plant_entry(dir, "reasoning", "Tools/fx/heavy.py", "Tools/fx/Small.jet", "")
+    plant_entry(dir, "gapped", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review, gaps: "[\"#5072 c36\"]")
+    plant_entry(dir, "job", "Tools/fx/job.py", "Tools/fx/Job.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
+    plant_entry(dir, "wrongjob", "Tools/fx/job.py", "Tools/fx/WrongJob.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
     jet: absolute(process.env_get("JET") ?? "jet")
     work: files.mkdtemp("port-bars-work") ?? panic("a temporary directory cannot be made: {err}")
-    expected: [[String]]{[String]{}, [String]{"parity"}, [String]{"speed"}, [String]{"tokens"}, [String]{"reasoning"}}
-    names: [String]{"pass", "parity", "speed", "tokens", "reasoning"}
+    expected: [[], ["parity"], ["speed"], ["tokens"], ["reasoning"], [], [], ["parity"]]
+    names: ["pass", "parity", "speed", "tokens", "reasoning", "gapped", "job", "wrongjob"]
     loop index in 0..<names.len() {
         report: judge(dir, names[index], jet, 3, work)
         if lost_bars(report) != expected[index] {
@@ -1328,7 +1387,9 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
         }
         assert_eq(lost_bars(report), expected[index])
     }
-    assert_eq(tool_entries(dir) ?? panic(err.message), [String]{"parity", "pass", "reasoning", "speed", "tokens"})
+    assert_eq(tool_entries(dir) ?? panic(err.message), ["gapped", "job", "parity", "pass", "reasoning", "speed", "tokens", "wrongjob"])
+    plant_entry(dir, "badgap", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review, gaps: "[\"soon\"]")
+    assert(read_entry(dir, "badgap").problems.any(problem -> problem.contains("not a criterion")))
     files.remove_all(dir) ?? ()
     files.remove_all(work) ?? ()
 }

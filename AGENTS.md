@@ -93,22 +93,29 @@ files, or one-off run artifacts.
 ## Tooling in other languages
 
 Repository tooling is Jet. New tooling may be written first in another
-language and proven working; then its Jet twin is written and proven to print
-the same output. The pair is a gauntlet entry: an entry under
+language and proven working; then its Jet twin is written, in the best Jet
+that does the job rather than a copy of the original's exact output, and
+proven to do the same job. The pair is a gauntlet entry: an entry under
 `Tools/gauntlet/entries/` with `"mode": "tool"` names the original as
 `tool.original` and the twin as `tool.jet`, and holds the shared fixtures and
-the parity cases with their expected output. The repository keeps running the
-original until the Jet twin wins every port bar (#5072: identical output,
-faster in wall time and peak memory, no more source tokens, and no harder to
-reason about, scored on a fixed checklist in the entry's `review.json`); then
-the repository switches to the Jet twin and keeps the original only as the
-entry's reference in the entry's directory. `Tools/gauntlet/PortBars.jet`
-judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
---check`, which every lane check runs, refuses a change that adds a script in
-another language without its pair, or that switches an entry before it wins
-every bar; browser-executed JavaScript, Nix files, and test and example
-subjects are exempt. `--census` lists every script in another language in the
-checkout and its pair.
+the parity cases with their expected output; a case's `check`, a Jet program
+in the entry, prints the facts the job leaves (the files, commits and queue
+lines it produces, the facts its report states), and both programs must give
+the case's exit status and that expected print. The repository keeps running
+the original until the Jet twin passes the port bars (#5072 c14, c34).
+Performance ranks first: the same job, lower wall time and lower peak memory
+decide, with the reasoning bar beside them (no harder to reason about,
+scored on a fixed checklist in the entry's `review.json`). Source tokens are
+measured and reported; a twin above the original's count blocks a switch
+only while its entry's `tool.token_gaps` names no Core API criterion or
+syntax ballot that closes the gap. Then the repository switches to the Jet
+twin and keeps the original only as the entry's reference in the entry's
+directory. `Tools/gauntlet/PortBars.jet` judges every tool entry on all four
+bars. `Tools/agent/ScriptPairing.jet --check`, which every lane check runs,
+refuses a change that adds a script in another language without its pair,
+or that switches an entry before it passes every bar; browser-executed
+JavaScript, Nix files, and test and example subjects are exempt. `--census`
+lists every script in another language in the checkout and its pair.
 
 ## Greenfield cutover
 
