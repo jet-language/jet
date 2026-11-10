@@ -7,7 +7,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     jet_backend.[X64Executable]
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverLoweringInputs, JetDriverVerbOutput]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverComptimeInputRecord, JetDriverLoweringInputs, JetDriverVerbOutput]
     jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
@@ -33,7 +33,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     key := ""
     if result.internal_problem == None && result.complete {
         if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
-        key = jet_cli_build_cache_key(file, name, options, snapshot) ?? ""
+        key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
         if key == "" {
             if verbose -> log = "{log}[build] cache off -> this compiler, its runtime or its Core sources can't be identified\n"
         } else {
@@ -133,10 +133,12 @@ jet_cli_build_store_off: fn(verbose: Bool, reason: String) -> String Never! {
 
 // The store key of `name`'s executable: this compiler (its identity, else its
 // file's), the runtime pack it links, the Core sources it compiles, the build
-// options and host, and every source of the authorized snapshot, each part
-// length-framed and hashed together. None when the compiler, its runtime or
-// its Core sources can't be identified.
-jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Env]> String? Never! {
+// options and host, every source of the authorized snapshot and every
+// comptime input the compile read (`comptime_inputs`: an edited
+// `embed_file` asset is a new key), each part length-framed and hashed
+// together. None when the compiler, its runtime or its Core sources can't be
+// identified.
+jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot, comptime_inputs: [JetDriverComptimeInputRecord]) -[FS, Env]> String? Never! {
     parts := [String]{"jet-build-binary-v1", JET_VERSION, name, build_options_key(options), "{cli_sys.arch()}-{cli_sys.name()}"}
     compiler: if jet_cli_compiler_identity() == {
         .Val(identity) -> identity
@@ -164,6 +166,10 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
         }
     }
     loop dependency in snapshot.script_dependencies -> parts.push("{dependency.name}={dependency.content_hash}")
+    loop input in comptime_inputs {
+        parts.push("comptime-input:{input.file}")
+        parts.push(input.sha256)
+    }
     framed: loop part in parts -> "{part.len()}:{part}"
     Val(sha256_hex(framed.join("\n")))
 }

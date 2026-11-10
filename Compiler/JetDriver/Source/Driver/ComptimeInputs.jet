@@ -22,9 +22,11 @@ use {
 }
 
 // One locked comptime input: its path relative to the embedding file's
-// directory and the SHA-256 of its bytes.
+// directory, the file read (that directory joined with the path) and the
+// SHA-256 of its bytes.
 JetDriverComptimeInputRecord: struct {
     path: String
+    file: String
     sha256: String
 }
 
@@ -51,10 +53,17 @@ jet_driver_comptime_input_fail: fn(what: String, why: String, fix: String, span:
     JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0955", Val(span), what, why, fix)}
 }
 
-jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>?, path: String, bytes: [U8]) Never! {
+jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>?, base_dir: String, path: String, bytes: [U8]) Never! {
     log: recorder ?? return
+    file: if base_dir == "" -> path.copy() else -> "{base_dir}/{path}"
     permit: log.guard_edit()
-    permit.value.records.push(JetDriverComptimeInputRecord{path: path, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
+    permit.value.records.push(JetDriverComptimeInputRecord{path: path, file: file, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
+}
+
+// Whether `bytes` are still the bytes the compile read for `record`: a
+// rebuild's test of a comptime input it watches (JetCli `jet dev`).
+jet_driver_comptime_input_unchanged: fn(record: JetDriverComptimeInputRecord, bytes: [U8]) -> Bool Never! {
+    comptime_inputs_crypto.sha256(bytes).hex() == record.sha256
 }
 
 impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
@@ -66,7 +75,7 @@ impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
     comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
         if builtin == "find" -> return jet_driver_comptime_find(self, path, span)
         bytes: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
-        jet_driver_comptime_input_record(self.log, path, bytes)
+        jet_driver_comptime_input_record(self.log, self.base_dir, path, bytes)
         jet_driver_comptime_input_value(builtin, path, bytes, span)
     }
 }
@@ -114,7 +123,7 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, glob: String, spa
     strings := [TComptimeValue]{}
     loop relative in found {
         bytes: adapter.inputs.read_rooted(adapter.base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{relative}`", "{err.message} (matched while expanding `{glob}`)", "check the path — it is relative to the file's own directory", span))
-        jet_driver_comptime_input_record(adapter.log, relative, bytes)
+        jet_driver_comptime_input_record(adapter.log, adapter.base_dir, relative, bytes)
         strings.push(TComptimeValue.String{value: relative})
     }
     Ok(TComptimeValue.List{values: strings})

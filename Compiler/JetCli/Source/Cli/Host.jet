@@ -48,6 +48,8 @@ use {
         JetDriverCompileRequest,
         JetDriverGeneratedModule,
         JetDriverCompileResult,
+        JetDriverComptimeInputRecord,
+        jet_driver_comptime_input_unchanged,
         JetDriverDocModule,
         JetDriverForeignLinkFacts,
         JetDriverLoweringInputs,
@@ -3612,6 +3614,7 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
             cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
             hot_noted = true
         }
+        read := [JetDriverComptimeInputRecord]{}
         compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
         if compiled.move() == {
             .Refused(refusal) -> {
@@ -3619,11 +3622,19 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
                 if first -> return JetDriverVerbOutput{stdout: "", stderr: if configured -> refusal.stderr else -> "", exit_code: refusal.exit_code}
                 if configured -> cli_term.eprint(refusal.stderr)
             }
-            .Checked(result, inputs, snapshot) -> if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+            .Checked(result, inputs, snapshot) -> {
+                read = result.comptime_inputs.copy()
+                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+            }
         }
         first = false
+        // The inputs' stamp is taken before their bytes are checked, so an
+        // edit made after the check still moves it.
+        inputs_stamp: jet_cli_dev_inputs_stamp(read)
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
-        loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)
+        if jet_cli_dev_inputs_current(read) {
+            loop jet_cli_dev_stamp(root, config.watch) == stamp && jet_cli_dev_inputs_stamp(read) == inputs_stamp -> cli_time.sleep(200ms)
+        }
         if child == {
             .Memory(pid) -> x64_process_stop(pid)
             .File(running) -> {
@@ -3725,6 +3736,33 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
         if modified > latest -> latest = modified
     }
     "{count}:{latest}"
+}
+
+// A change stamp over the comptime inputs a build read (`read`, files outside
+// the package's .jet sources and `d.watch` paths, such as an `embed_file`
+// asset): their latest modification time and how many of them exist, as
+// jet_cli_dev_stamp.
+jet_cli_dev_inputs_stamp: fn(read: [JetDriverComptimeInputRecord]) -[FS]> String Never! {
+    latest := 0
+    count := 0
+    loop record in read {
+        info: cli_files.stat(record.file) ?? next
+        count += 1
+        modified: info.modified.to_unix_ns() ?? next
+        if modified > latest -> latest = modified
+    }
+    "{count}:{latest}"
+}
+
+// Whether every comptime input in `read` still holds the bytes the build
+// read; an input edited while the build compiled (or since removed) is not,
+// and `jet dev` rebuilds at once.
+jet_cli_dev_inputs_current: fn(read: [JetDriverComptimeInputRecord]) -[FS]> Bool Never! {
+    loop record in read {
+        bytes: cli_files.read_bytes(record.file) ?? return false
+        if !jet_driver_comptime_input_unchanged(record, bytes) -> return false
+    }
+    true
 }
 
 // Every file under `directory`.

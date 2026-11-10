@@ -730,6 +730,11 @@ JetDriverCompileResult: struct {
     // A compile through assembly: the encoded JetCommandSchema record its
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
     command_record: [U8]{[U8]{}}
+    // Every comptime input the compile read (`embed_file`, `embed_bytes`,
+    // `find`), in read order, when the host logged them (JetCli Request.jet
+    // jet_cli_compile_executable): the `jet build` store key and `jet dev`'s
+    // change test cover each, so editing one rebuilds.
+    comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
 }
 
 // The `allocator:` policy of the entry package of `load`

@@ -44,6 +44,7 @@ use {
         JetDriverCoreSource,
         JetDriverCoreSourceReader,
         JetDriverComptimeInputLog,
+        JetDriverComptimeInputRecord,
         JetDriverHostFacts,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
@@ -1563,7 +1564,9 @@ jet_cli_compile_executable_file: fn(file: String, entry: String?, color: Bool, t
 // jet_cli_compile_prepared for the native executable route under the build
 // `options`: their selected profile is the front end's (`$build.profile`, its
 // package.jet settings); `entry` selects the function the program starts at
-// (None: the package's own entry); `input_log` as there. The settings the
+// (None: the package's own entry); `input_log` as there, else a log of this
+// compile's own: either way the result lists the comptime inputs it read
+// (JetDriverCompileResult.comptime_inputs). The settings the
 // package's `build: fn` contributes are recorded and folded first
 // (jet_cli_contributed_request); `color` renders that step's refusal.
 jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool) -> JetCLIExecutableCompiled {
@@ -1572,8 +1575,10 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
         .Prepared(request, snapshot) -> {
             selected := request
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
-            // copy: the caller keeps its handle on the one shared log.
-            selected.comptime_input_log = input_log.copy()
+            // copy: the caller keeps its handle on the one shared log, and
+            // this compile keeps its own to read the records back.
+            log: input_log.copy() ?? shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+            selected.comptime_input_log = Val(log.copy())
             if options.profile != "" -> selected.profile = options.profile
             selected.artifact_build = options.command == "build"
             // An OS-less build (`os: web`) folds `$build.os` on its own OS,
@@ -1602,9 +1607,16 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)
             front.compile.compiler_threads = compiler_threads
+            front.compile.comptime_inputs = jet_cli_comptime_inputs_read(log)
             JetCLIExecutableCompiled.Checked{result: front.compile.move(), inputs: front.inputs.move(), snapshot: snapshot}
         }
     }
+}
+
+// The comptime inputs `log` recorded, in read order.
+jet_cli_comptime_inputs_read: fn(log: Shared<JetDriverComptimeInputLog>) -> [JetDriverComptimeInputRecord] Never! {
+    permit: log.guard_read()
+    permit.value.records.copy()
 }
 
 // How many source files the snapshot authorizes, over every root.

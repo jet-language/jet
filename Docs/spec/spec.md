@@ -528,15 +528,15 @@ a use that must own it copies only the part it takes. The retired `@NAME`
 spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 
-`embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]`
-embeds raw bytes, and `find("glob") -> [String]` returns sorted relative paths.
-`find` accepts the std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`.
-They are the sanctioned build-time I/O operations inside a compile-time binding;
-other comptime evaluation is pure.
+`embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]` embeds raw
+bytes, and `find("glob") -> [String]` returns sorted relative paths. `find` accepts the
+std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`. They are the sanctioned build-time
+I/O operations inside a compile-time binding; other comptime evaluation is pure.
 Paths and globs are string literals resolved relative to the embedding file, never
 absolute and never escaping the project with `..` (E0957). Missing or unreadable
-input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched
-file records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1).
+input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched file
+records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1) and is an input of
+the build identity: editing it makes `jet build` rebuild, not reuse a stored binary, and `jet dev` rerun.
 A Core library file embeds files beside it in the toolchain's Core tree. They
 are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
 
