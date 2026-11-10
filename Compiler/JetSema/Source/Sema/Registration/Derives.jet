@@ -27,6 +27,7 @@ use {
         Diagnostic,
         DiagnosticLabel,
         DistinctDef,
+        EffectRowEntry,
         EnumDef,
         EnumLitArg,
         Expr,
@@ -2350,6 +2351,38 @@ sema_computed_field_getter_function: fn(func: Func) -> Bool Never! {
     func.compiler_generated && func.name.starts_with("__computed_")
 }
 
+// A formula that only reads values (sibling fields, literals, operators)
+// makes a getter with the empty effect row (`-[]>`), so a contract may read
+// the field. A call or a member read anywhere in it (another type's computed
+// field may be a call) leaves the getter's effects undeclared; so does a
+// sibling computed field whose own formula does. `depth` stops a cycle, which
+// registration reports on its own.
+sema_computed_formula_reads_only: fn(formula: Expr, fields: [Field], depth: Int) -> Bool Never! {
+    if formula == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Absent(_, _) -> true
+        .Ident(name, _, _) -> {
+            loop field in fields {
+                if field.name != name -> next
+                sibling: field.computed ?? return true
+                if depth >= fields.len() -> return false
+                return sema_computed_formula_reads_only(sibling, fields, depth + 1)
+            }
+            true
+        }
+        .Str(parts, _, _) -> loop part in parts {
+            if part == .Interp(_, _) -> break false
+        } ?? true
+        .Paren(value, _, _) -> sema_computed_formula_reads_only(value, fields, depth)
+        .Present(value, _, _) -> sema_computed_formula_reads_only(value, fields, depth)
+        .Unary(_, operand, _, _) -> sema_computed_formula_reads_only(operand, fields, depth)
+        .Binary(_, left, right, _, _) -> sema_computed_formula_reads_only(left, fields, depth) && sema_computed_formula_reads_only(right, fields, depth)
+        .CompareChain(operands, _, _, _, _) -> loop operand in operands {
+            if !sema_computed_formula_reads_only(operand, fields, depth) -> break false
+        } ?? true
+        else -> false
+    }
+}
+
 // Each computed struct field `name: T -> formula` becomes its generated
 // getter method `__computed_name(self) -> T`, whose formula reads the
 // sibling fields it names as `self.<field>`; a read of `value.name` checks
@@ -2387,6 +2420,10 @@ sema_derive_computed_getters: fn(items: &[Item]) {
                     getter.return_type = Val(field.ty.copy())
                     getter.return_type_span = Val(field.ty_span)
                     getter.body = [Stmt]{Stmt.Return{value: Val(sema_inline_rewrite_expr(rewrite, formula)), span: field.name_span}}
+                    if sema_computed_formula_reads_only(formula, definition.fields, 0) {
+                        getter.declared_effects = Val([EffectRowEntry]{})
+                        getter.is_pure = true
+                    }
                     getters.push(getter)
                 }
             }

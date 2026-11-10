@@ -1,0 +1,16 @@
+// A computed field whose formula only reads values may appear in a contract;
+// one whose formula calls a function is not known pure, so the contract
+// can't read it (E0139), as with a direct call of that function.
+Pair: struct {
+    left: Int
+    right: Int
+    sum: Int -> left + right
+    twice: Int -> sum * 2
+    label: String -> describe(left)
+}
+
+describe: fn(value: Int) -> String { "value {value}" }
+
+#Pre(pair.sum > 0 && pair.twice > 0, "positive") show_sum: fn(pair: Pair) { print(pair.sum) }
+
+#Pre(pair.label != "", "labeled") show_label: fn(pair: Pair) { print(pair.label) }
