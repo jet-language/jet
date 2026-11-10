@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98875,
+    "rev": 98876,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76049,7 +76049,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T16:33:52.613Z",
+      "updated": "2026-11-10T16:36:05.864Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -185891,13 +185891,13 @@
       "explainer": "Words used here. The public surface is everything another package can call or name. A version bump is how a library signals change: major means breaking, minor means added, patch means fixed. An effect is a power like reading the clock.",
       "story": "Ana edits a helper that her library's public greeting calls, and it starts reading the clock. Under A, her next jet check shows the changed line in package.api, and publish names the release 2.0.0.",
       "inWild": "// Elm computes the version from the API diff:\n$ elm bump\nThis is a MAJOR change. Bumping from 1.0.0 to 2.0.0.",
-      "detail": "What this ballot decides. When the public surface is compared, and who picks the version. The surface rows themselves already exist.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Sema's PublicApi.jet renders each public item as one row, and a function's row carries its solved effects. jet registry publish diffs those rows against the registry's snapshot of the last release. A breaking change under a minor or patch bump is E1218.\n\nProbe v1 and v2 keep greeting's written signature, and v2's body reads the clock. jet check on v2 prints ok. jet review v1.jet v2.jet ends with verdict authority widened and lists widened: effect:greeting, but only when someone runs it.\n\nGaps in the rows. Function and method rows both carry solved effects: methods go through the same row builder (PublicApi.jet:311-330). Only a trait requirement row carries written effects, since it has no body. No row carries an inferred error set or a public marker, so those changes pass the publish gate.\n\nCensus on dev. The repository has 2,490 package.jet files, 237 of them outside tests and Examples. It has 14 committed .api files, all of them plugin fixture caches.\n\nHistory. An opt-in API freeze once existed: library { api: stable } with drift error E0912. It is retired, and its snapshot survives only as the publish-time diff. A differs in three ways: no opt-in field, the file is a rendered view under D-DEVR-CLAIM1=A, and only breaking rows stop a check.\n\nWhat A does. Each package with a public item has a package.api file beside package.jet, in the .api row format that publish already writes. jet check renders the surface and compares it with package.api.\n\nLike a lock file. jet check writes added and fixed rows into package.api itself and prints a note, so new public functions need no extra step. A breaking row stops the check until jet check --accept-api, so a broken promise is always a deliberate act. jet check --locked, for CI, refuses any difference, so an uncommitted file cannot slip through.\n\nThat flag is new for check. Today --locked works with build, fetch, jobs, run and inspect, and jet check --locked is E2102. A gives check the same meaning: refuse any difference from a committed file.\n\nRows that depend on the target carry their #if condition, so one file covers every target. After a toolchain upgrade, rows changed by the compiler alone are labelled so in the note. A narrowed effect or error set counts as fixed, not breaking, because no caller can break.\n\nThe rows grow to the whole promise. Every function and method row carries its solved error set and its public markers.\n\nCost per check, measured. On a synthetic library with 1,000 public functions and 100 structs, jet check takes 0.29 s median and jet doc takes 1.37 s. Publish renders its rows from a separate Doc-mode compile (Publish.jet:502-525). A renders them from the check's own checked items, so it adds one pass over public items, not a second compile.\n\nComputed versions. jet registry publish compares package.api with the last release's snapshot. Any breaking row makes a major bump, any added row a minor bump, and otherwise a patch. Before 1.0, a breaking row bumps the minor number.\n\nPublish writes the computed version into package.jet. The author may raise the bump, for example jet registry publish --major for a behaviour change the rows cannot see, but never lower it. Under D-CORE-HEADER1=A, a root that states one version for its members takes the largest bump among them.\n\nRatified decisions. D-DEVR-CLAIM1=A makes API snapshots receipts and committed ledgers rendered views, byte-compared in CI. package.api is that rendered view. D-LIB-EXPORT1=C already makes the frozen public surface the source of the version check.\n\nD-EFFTYPE-GRANT1=A stops a consumer's upgrade that needs more powers. A is the author-side twin: the author sees the change before publishing it. D-STRUCT-LIFE1=A's #Deprecated keeps an old item alive, so it stays an added row, not a removed one.\n\nBeginner path. A script or app with no public items never sees package.api. A first library gets the file written by its first jet check, with a note saying to commit it. Expert path. The rows are plain text, so a reviewer reads the promise change line by line.\n\nDownsides of A, and what the design does about them. A breaking surface edit needs an accept step. That step is the point: the error lists the breaking rows and names the one command, and editor code actions run it. Added and fixed rows need no step.\n\nWhat remains. Some bumps come out larger than an author would choose, for example a major bump for one new error case. That is the promise the rows describe; #Deprecated and added variants keep most changes compatible.\n\nOther options. B keeps today's gate at publish time. C adds the committed file but keeps the chosen version, as Kotlin's API validator and TypeScript's API Extractor do. D computes the version at publish with no committed file, as Elm's bump and cargo-semver-checks do.\n\nTheir best cases. B costs nothing now. C shows every change in review. D removes the version argument. Their costs: B finds a widened effect only at publish. C still lets an author pick a wrong version until publish. D shows nothing during review.",
+      "detail": "This vote chooses when library API drift is reported and how the minimum release version is chosen. A is proposed, not implemented.\n\nA stores package.api as a rendered view of the canonical API receipt, not a second hand-maintained contract. Scope follows public library outputs, including workspace members and multiple library entries. Public-by-default functions inside an executable do not by themselves turn it into a library.\n\nA check renders rows from its checked items. Added or proven compatible changes update the view with a note. Breaking changes need --accept-api. Locked checks are read-only and refuse missing, stale or mismatched views. Concurrent checks must not truncate each other's output; failed or partial checks never replace the last complete receipt.\n\nPublish rechecks the actual source and compares it against the immutable last released receipt. Accepting a local baseline cannot erase an unpublished breaking change. The rendered file must match the fresh receipt before publication. Compute the minimum bump relative to the selected release line; the author may raise it for behavior changes the rows cannot detect. The first release uses the package's declared starting version.\n\nInclude all public names, types, solved effects and errors, relevant markers and layout contracts. Adding an enum or error variant is breaking when callers can exhaustively match it. Narrowing a row is compatible only where the language's assignability and observable contracts prove it; never promise that every exact-type or reflected use survives.\n\nA native check does not prove other targets. The receipt records target and configuration coverage. A complete publish check gathers the declared supported matrix into the canonical view and refuses missing coverage. Merely printing an #if condition cannot prove unchecked target-specific bodies.\n\nCompiler upgrades record compiler identity and row-format identity. Compare releases with a common understood schema; an uncomparable old receipt is not silently classified as patch. Retired syntax gets no teaching diagnostic or jet fix rewrite.\n\nThe existing row builder shares solved effects between functions and methods. The check-versus-doc timing is not A's incremental cost: doc does different work, and A does not exist yet. Actual per-check and multi-target costs remain unmeasured.\n\nC is a strong alternative: the same early drift gate with an author-selected version and an enforced minimum at publish. It supports release planning without allowing a too-small bump. D lacks a committed view but can still produce a review report against the released receipt. None of these choices proves compatibility for behavior omitted from API rows.",
       "options": [
         {
           "key": "A",
           "name": "Committed API file and computed version",
           "detail": "jet check compares the surface with package.api; publish computes the version from the difference.",
-          "technical": "package.api in the existing .api row format, kept like a lock file. jet check writes added and fixed rows from its own checked items; a breaking row is a new registered error until --accept-api; --locked, extended to check, refuses any difference. Rows add solved error sets, public markers and #if conditions. Publish: breaking major, added minor, else patch; before 1.0 breaking bumps minor; the author may raise, never lower.",
+          "technical": "Render package.api from the one API receipt for library outputs. Locked checks are read-only; partial checks never update it. Publish compares freshly checked source with the immutable last release, not the accepted local baseline. Include the declared target matrix and reject missing coverage. Compute a minimum bump; authors may raise it for behavior changes.",
           "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (A): jet check stops: greeting's row changed, breaking.\n//   fn greeting(name: String) String -[Time]>   (jet inspect rights: inferred Time)\n// jet check --accept-api updates package.api; publish names it 2.0.0.\n// Today (probe v2): jet check prints ok."
         },
         {
@@ -185911,7 +185911,7 @@
           "key": "C",
           "name": "Committed file, chosen version",
           "detail": "package.api is checked by jet check; the author still writes the version.",
-          "technical": "A's file and rows; publish keeps E1218 against the written version.",
+          "technical": "The same receipt, committed view and early drift gate as A. Authors select release timing and version; publish enforces the computed minimum. This is a real release-planning benefit, not permission to ship a wrong bump.",
           "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (C): jet check stops as in A; the author writes 2.0.0."
         },
         {
@@ -185947,7 +185947,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A catches a widened effect or error at the edit, shows it in review, and ends the version argument. The rows and the snapshot format already exist.",
+        "why": "A makes declared API changes visible during editing and computes a minimum version from released evidence. Behavior outside those rows still requires author review.",
         "gains": [
           "Promise changes show at the edit.",
           "Effects and errors are part of the promise.",
@@ -185960,7 +185960,7 @@
           },
           {
             "loss": "Some bumps are larger than an author would pick.",
-            "mitigation": "#Deprecated and added variants keep most changes compatible."
+            "mitigation": "Classify compatibility by actual language rules, including exhaustive enums and exact types. Authors may raise the minimum for behavior changes; no compatibility shim is added."
           },
           {
             "loss": "Every check renders and compares the public rows.",
@@ -185974,21 +185974,21 @@
           },
           {
             "key": "C",
-            "reason": "C keeps the version argument."
+            "reason": "C preserves deliberate version selection with the same enforced minimum; A automates that selection unless the author raises it."
           },
           {
             "key": "D",
-            "reason": "D shows nothing during review."
+            "reason": "D can generate review diffs, but has no committed API view checked during ordinary edits."
           }
         ],
-        "tradeoff": "An accept step per breaking surface edit, for promises that never change unseen."
+        "tradeoff": "An accept step for breaking API edits, with behavior outside the rows still requiring review."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Two claims failed and were fixed: method rows already carry solved effects (PublicApi.jet:327-330), and jet check --locked is E2102 today, not an existing flag. The per-check cost is now measured."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Corrected local-versus-release baselines, target coverage, executable scope, enum/narrowing compatibility, unmatched timing claims and C's release-planning benefit."
       },
       "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). In D-API-SURFACE1/probes run jet check v2.jet and jet review v1.jet v2.jet. Time check against jet doc with gen_lib.mjs and $JET_SCRATCH_ROOT/lanes/BallotLead/out/timeit.sh. Run jet check --locked on any file. The census uses git ls-files.",
       "surface": {
@@ -186057,7 +186057,7 @@
               "No version argument."
             ],
             "losses": [
-              "Unseen in review."
+              "No committed API view."
             ],
             "proposed": {
               "code": "jet registry publish   // 2.0.0"
@@ -186088,10 +186088,10 @@
             },
             {
               "key": "D",
-              "reason": "Unseen in review."
+              "reason": "No committed view, though review reports remain possible."
             }
           ],
-          "tradeoff": "An accept step per breaking edit, for promises that never change unseen."
+          "tradeoff": "Visible API edits; behavior outside the rows still needs review."
         }
       },
       "draft": false,
@@ -186111,8 +186111,8 @@
           "option": "A",
           "loss": "Every check does more work.",
           "attempts": [
-            "Render rows from the check's own items instead of publish's second Doc-mode compile; jet doc on 1,000 functions is 1.37 s against check's 0.29 s.",
-            "Skip files with no public item: scripts and apps never render rows."
+            "Reuse the current check's items and canonical receipt; do not launch a second compiler.",
+            "Apply the gate to public library outputs, not every public-by-default executable function."
           ],
           "result": "Reduced to one pass over public items in libraries."
         },
@@ -186120,8 +186120,8 @@
           "option": "A",
           "loss": "Some computed bumps are larger than an author would pick.",
           "attempts": [
-            "Count a narrowed effect or error set as fixed, not breaking.",
-            "Keep old items alive with #Deprecated, so they stay added rows, not removed ones."
+            "Treat narrowing as compatible only where assignability and observable contracts permit it.",
+            "Compute the minimum against immutable released evidence; local acceptance never resets release history."
           ],
           "result": "Reduced; what remains is the promise the rows describe."
         },
@@ -186141,7 +186141,7 @@
             "Keep E1218 at publish, which refuses a wrong bump.",
             "Print a suggested bump in the check note."
           ],
-          "result": "Reduced, not removed: the version argument stays."
+          "result": "C preserves deliberate release planning while enforcing the same minimum bump at publication."
         },
         {
           "option": "D",
@@ -186150,14 +186150,14 @@
             "Have jet review compare against the registry snapshot.",
             "Print the computed bump at publish time."
           ],
-          "result": "Not removed: no committed file means no diff in review."
+          "result": "D lacks a committed view, but can generate a source-to-release diff during review; it is not inherently invisible."
         }
       ],
       "reports": [
         {
           "title": "API surface in every check: row audit, cost measurement and adversarial review",
           "path": "Docs/audits/2026-11-10-api-surface-review.md",
-          "note": "Method rows already carry solved effects; jet check --locked is E2102; check 0.29 s against doc 1.37 s on 1,000 functions; probes v1/v2; census of package.jet and .api files; peers."
+          "note": "Independent check/review/locked probes and row-source review; corrected receipt authority, release baseline, target matrix, compatibility edges and unmeasured incremental cost."
         },
         {
           "title": "Elm: elm bump and enforced semantic versioning",
@@ -200126,6 +200126,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:36:05.864Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-API-SURFACE1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:33:52.613Z",
       "by": "Main",
