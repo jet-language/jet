@@ -1,0 +1,18 @@
+# A module's metadata are the fields of its core.meta Module record: the
+# compiler fills name, file, doc and package; a body's opening field lines set
+# category and maturity. `pricing.category` reads a field, a module passes as a
+# Module, and a module argument to a generic module (`billing<pricing>`) is
+# that Module value in the instance, the same at O0, O1 and O2.
+fixture: module_metadata_reads_as_a_module_value/input
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "3\nbilling\nPrice rules for the shop.\npricing/module.jet\nshop\n0.3.0\nrun.jet\nOld discount rules, kept for one release.\npricing (billing, Tested)\ndiscount (billing, Experimental)\n2\npricing in billing\npricing (billing, Tested)\ntiers (volume, Tested)\n6\n"
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "3\nbilling\nPrice rules for the shop.\npricing/module.jet\nshop\n0.3.0\nrun.jet\nOld discount rules, kept for one release.\npricing (billing, Tested)\ndiscount (billing, Experimental)\n2\npricing in billing\npricing (billing, Tested)\ntiers (volume, Tested)\n6\n"
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "3\nbilling\nPrice rules for the shop.\npricing/module.jet\nshop\n0.3.0\nrun.jet\nOld discount rules, kept for one release.\npricing (billing, Tested)\ndiscount (billing, Experimental)\n2\npricing in billing\npricing (billing, Tested)\ntiers (volume, Tested)\n6\n"

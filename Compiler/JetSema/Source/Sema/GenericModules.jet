@@ -1190,6 +1190,14 @@ sema_genmod_value_name: fn(alias: String, name: String) -> String {
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
 
+// Whether a type argument's spelling names a module: a lowercase name, which
+// no type has.
+sema_genmod_names_module: fn(name: String) -> Bool Never! {
+    if name == "" || name.contains(".") || name.contains("::") -> return false
+    first: name.bytes()[0]
+    first >= U8{97} && first <= U8{122}
+}
+
 sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSource, binding: SemaGenericModuleBinding, enums: [String:Bool]) -> SemaGenericModuleExpansion {
     template: source.definition
     rewrite := sema_inline_rewrite_empty()
@@ -1211,6 +1219,13 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     }
     rewrite.values = source.source_values
     loop (index, name) in binding.value_names -> rewrite.values[name] = binding.value_actuals[index]
+    // A module argument (`billing<pricing>`) read as a value is that module,
+    // so it passes as its Module record (ModuleMeta.jet).
+    loop (index, name) in binding.type_names {
+        if binding.type_actuals[index] == .Named(actual) {
+            if sema_genmod_names_module(actual) -> rewrite.values[name] = Expr.Ident{name: actual, span: Span{start: 0, end: 0}, id: AST_NODE_GENERATED}
+        }
+    }
     declarations := [Item]{}
     loop item in source.source_items -> sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
     // Template constants specialize in declaration order; each folded value

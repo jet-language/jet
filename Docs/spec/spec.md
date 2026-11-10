@@ -2611,12 +2611,21 @@ trait, tag, protocol, or constant. A constant is declared like any other item,
 `use limits.[MAX_ITEMS]` (3A). A `use` inside an inline-module body follows the
 same rule.
 
-A module is not a value. Binding, passing, returning, storing or interpolating
-a module, such as `m: text` or `show(lib.inner)`, reports **E0629**. A
-function the module offers is a value: `f: text.shout` is the function, as
-`shout` is after `use text.shout`.
+A module is a value: its `core.meta` `Module` record. `m: text` binds the
+`Module` of `text` and `show(lib.inner)` passes that of `lib.inner`. The
+compiler fills `name`, `file` (from the package root), `doc` (the `///`
+comment at the top of `module.jet`, or above an inline module) and `package`
+(its package's `Package`). A module body may open with field lines that set
+the rest, `maturity`, `category` and `deprecated`, before any binding:
+`category: "billing"`. A field line is checked against its field's type, and
+one that sets a compiler-filled field reports **E0111**. `pricing.category`
+reads a field, and a module argument to a generic module, as in
+`billing<pricing>`, reads as that module's `Module` in the instance. A Core
+module has no record, so binding or passing one, such as `m: math` after
+`use core.math`, reports **E0629**. A function the module offers is a value:
+`f: text.shout` is the function, as `shout` is after `use text.shout`.
 
-A type is not a value either: binding, passing or printing a type, such as
+A type is not a value: binding, passing or printing a type, such as
 `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
 read a compile-time fact of it such as `Rock.$fields`.
 

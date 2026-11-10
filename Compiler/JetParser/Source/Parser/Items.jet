@@ -1970,7 +1970,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                 field_markers := member_modifiers.markers
                 field_pub := member_modifiers.is_pub
                 field_package_pub := member_modifiers.is_package_pub
-                field_name: parser_struct_field_name(state)
+                field_name: parser_field_name(state, "in a struct field")
                 parser_expect(state, TOKEN_COLON, "`:` after a struct field name")
                 field_type: parser_parse_type(state, 0)
                 computed := Expr?{None}
@@ -2034,16 +2034,16 @@ parser_apply_struct_markers: fn(state: &JetParserState, value: &StructDef, marke
     value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(markers) else -> None
 }
 
-// A struct field name; a keyword followed by `:` names a field too (a
-// marker's `use` argument).
-parser_struct_field_name: fn(state: &JetParserState) -> Token {
+// A struct field name, or a record literal's: a keyword followed by `:`
+// names a field too (a marker's `use` argument, `Deprecated{use: …}`).
+parser_field_name: fn(state: &JetParserState, context: String) -> Token {
     token: parser_current(state)
     if token.kind != TOKEN_IDENT && token.kind != TOKEN_KW_TAG && parser_kind_at(state, 1) == TOKEN_COLON && parser_is_keyword_token(state, token) {
         parser_bump(state)
         spelling: parser_text(state, token)
         return parser_spelled_token(state, TOKEN_IDENT, token.span, spelling)
     }
-    parser_expect_name(state, "in a struct field")
+    parser_expect_name(state, context)
 }
 
 parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> EnumDef {

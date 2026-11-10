@@ -810,20 +810,27 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
 }
 
 // `bank.open` or `math.inner.RATE` read as a value, not called: a member
-// function or constant names its member identity, and a `pub use`
-// re-export names its owner. Any other member is E0608, and the read is
-// left as written. None when `base` names no inline module, or when the
-// member is itself a module (no value).
+// function or constant names its member identity, a `pub use` re-export
+// names its owner, and a field of the module's Module record (`bank.category`)
+// reads its record. Any other member is E0608, and the read is left as
+// written. A member that is itself a module reads as its record. None when
+// `base` names no inline module, or the member module has no record.
 sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, member: String, span: Span, node: Int) -> Expr? Never! {
     segments := [NamedSpan]{}
     if !sema_inline_receiver_path(base, segments) || sema_inline_is_local(rewrite, segments[0].name) -> return None
     path: (loop segment in segments -> segment.name).join(".")
     surface: sema_inline_surface(rewrite, path) ?? return None
-    if sema_inline_surface(rewrite, "{path}.{member}") != None -> return None
+    if sema_inline_surface(rewrite, "{path}.{member}") == .Val(nested) {
+        if nested.constants.get(SEMA_MODULE_META) == None -> return None
+        return Val(Expr.Ident{name: sema_inline_member_name(nested.path, SEMA_MODULE_META), span: span, id: node})
+    }
     if sema_inline_private_step(rewrite, segments) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
     if surface.reexports.get(member) == .Val(target) {
         if target.qualified -> return Val(Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: AST_NODE_GENERATED}, member: target.member, span: span, id: node})
         return Val(Expr.Ident{name: sema_inline_member_name(target.module_alias, target.member), span: span, id: node})
+    }
+    if surface.functions.get(member) == None && surface.constants.get(member) == None && surface.constants.get(SEMA_MODULE_META) != None {
+        return Val(Expr.Field{base: Expr.Ident{name: sema_inline_member_name(surface.path, SEMA_MODULE_META), span: span, id: AST_NODE_GENERATED}, member: member, span: span, id: node})
     }
     if surface.functions.get(member) == None && surface.constants.get(member) == None {
         rewrite.diagnostics.push(sema_error("E0608", segments[segments.len() - 1].span, "`{member}` is not defined in module `{surface.path}`", "check the module body for the function or constant you're reading", "make sure the member name is spelled correctly"))
@@ -885,8 +892,11 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
             if !sema_inline_is_local(rewrite, name) {
                 if rewrite.qualified.get(name) == .Val(target) -> return Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: node}, member: target.member, span: span, id: AST_NODE_GENERATED}
                 if rewrite.aliases.get(name) == .Val(generated) -> return Expr.Ident{name: generated, span: span, id: node}
-                // A module is no value: Rust's name lookup has no `bank`.
-                if sema_inline_surface(rewrite, name) != None -> rewrite.diagnostics.push(sema_unknown_name(name, span))
+                // A module named as a value is its Module record.
+                if sema_inline_surface(rewrite, name) == .Val(surface) {
+                    if surface.constants.get(SEMA_MODULE_META) != None -> return Expr.Ident{name: sema_inline_member_name(surface.path, SEMA_MODULE_META), span: span, id: node}
+                    rewrite.diagnostics.push(sema_unknown_name(name, span))
+                }
             }
             // copy: the rewrite walks the module program by borrowed payload views (Jet has no
             // consuming match), so an expression the rewrite leaves alone is copied into the

@@ -2122,7 +2122,7 @@ parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> Parsed
                 if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF -> break
                 next
             }
-            name_token: parser_expect_name(state, "for a record field")
+            name_token: parser_field_name(state, "for a record field")
             value := Expr.Ident{name: parser_value(state, name_token), span: name_token.span, id: parser_node_id(state)}
             if parser_current_kind(state) == TOKEN_COLON {
                 parser_bump(state)

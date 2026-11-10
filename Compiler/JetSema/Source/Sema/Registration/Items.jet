@@ -583,6 +583,9 @@ SemaRegistrationModuleInput: struct {
     // The module's source text (Rust `Module::source`). A declared text block
     // hands the text inside its braces to its rule.
     source: String{""}
+    // Filled by the driver: the module's file from its package root and its
+    // package, which its Module record names (ModuleMeta.jet).
+    meta: SemaModuleMetaSource{SemaModuleMetaSource{}}
 }
 
 SemaForeignImportBinding: struct {
@@ -2722,6 +2725,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     if module_row.package_identity == "" || module_row.module_identity == "" || module_row.module_name == "" || module_row.module_path == "" || module_row.source_file == "" {
         diagnostics.push(sema_error_optional("E0003", None, "a declaration registry row is missing source identity", "package, module, display path, and source identity remain separate semantic inputs", "provide the loader's canonical package, module, display-path, and source-file identities"))
     }
+    // A module's field lines become its Module record before casing would
+    // read them as constants. Core source carries no record.
+    if !module_row.module_identity.starts_with("<corelib>/") -> sema_module_meta_lower(module_row.program, module_row.declared_module, owned.meta, module_row.source, diagnostics)
     // Identifier casing is checked on the parsed source before
     // any declaration is registered or rewritten.
     sema_casing_program(module_row.program, diagnostics)
@@ -4311,6 +4317,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         if package_policies.get(prepared_inputs[index].package_identity) == None -> package_policies[prepared_inputs[index].package_identity] = sema_policy_package_declarations(prepared_inputs, prepared_inputs[index].package_identity, diagnostics)
         imported_templates.push(sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, prepared_inputs[index].module_identity))
     }
+    // A module carries its Module record only when a source reads it as a
+    // value or its body sets a field; the reads span every input.
+    sema_module_meta_mark_reads(prepared_inputs)
     // Only modules declaring a module alias or a generic module keep their
     // programs as written for the alias check after registration.
     written_inputs: sema_generic_modules_written(prepared_inputs)
@@ -4434,11 +4443,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     }
     // A lowered inline module's Core member import reads a file-level Core
     // alias that shares the scoped declaration's span (InlineModules.jet
-    // sema_inline_core_imports); the alias binds the loaded Core module it names.
+    // sema_inline_core_imports), and a module's Module record reads core.meta
+    // through its generated alias (ModuleMeta.jet); each alias binds the
+    // loaded Core module it names.
     loop hoisted_module in 0..<graph.modules.len() {
         hoisted := [ImportDecl]{}
         loop declaration in graph.modules[hoisted_module].program.imports {
-            if sema_inline_core_alias_import(declaration) -> hoisted.push(declaration)
+            if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) -> hoisted.push(declaration)
         }
         loop declaration in hoisted {
             if declaration.kind == .Module(name, _) {
@@ -4495,7 +4506,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         loop import_index in 0..<import_count {
             declaration := graph.modules[module_index].program.imports[import_index]
             found: edge_spans.get("{graph.modules[module_index].module_identity}|{declaration.span.start}|{declaration.span.end}") != None
-            if !found {
+            if !found && !sema_module_meta_import(declaration) {
                 sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }
         }

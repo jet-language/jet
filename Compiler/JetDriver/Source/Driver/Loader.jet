@@ -111,6 +111,8 @@ use {
         sema_script_entry,
         sema_source_words,
         sema_source_wanted_words,
+        sema_module_meta_wanted,
+        sema_module_meta_field_lines,
         sema_unknown_module_alias,
     ]
     jet_pkg_model.[
@@ -2446,10 +2448,11 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
 }
 
 // The top-level names one package file contributes to its
-// package namespace, with their declaring spans.
-jet_driver_namespace_item_names: fn(items: [Item]) -> [NamedSpan] Never! {
+// package namespace, with their declaring spans, from item `from` on.
+jet_driver_namespace_item_names: fn(items: [Item], from: Int) -> [NamedSpan] Never! {
     names := [NamedSpan]{}
-    loop item in items {
+    loop (index, item) in items {
+        if index < from -> next
         if item == {
             .Func(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .Struct(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
@@ -2467,6 +2470,13 @@ jet_driver_namespace_item_names: fn(items: [Item]) -> [NamedSpan] Never! {
         }
     }
     names
+}
+
+// The first item of `module_row` that declares a name: a file module's
+// leading field lines set its Module record (sema_module_meta_field_lines).
+jet_driver_namespace_first_item: fn(module_row: JetDriverLoadedModule) -> Int Never! {
+    if module_row.declared_module == "" -> return 0
+    sema_module_meta_field_lines(module_row.program.items)
 }
 
 // The source bytes of one default (a parameter default or
@@ -2783,7 +2793,7 @@ jet_driver_bind_package_namespaces: fn(
             build_entry: loop item in modules[module_index].program.items {
                 if jet_driver_item_is_build_entry(item) -> break true
             } ?? false
-            loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
+            loop declared in jet_driver_namespace_item_names(modules[module_index].program.items, jet_driver_namespace_first_item(modules[module_index])) {
                 if (named_entry && declared.name == "run") || declared.name == role_command || (build_entry && declared.name == "build") {
                     member_private.push(declared.name)
                     next
@@ -2812,7 +2822,7 @@ jet_driver_bind_package_namespaces: fn(
         // A library package has no `run: fn`, not even in a `run.jet` home.
         if package.outputs.library && !package.outputs.executable {
             loop module_index in members {
-                loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
+                loop declared in jet_driver_namespace_item_names(modules[module_index].program.items, jet_driver_namespace_first_item(modules[module_index])) {
                     if declared.name != "run" -> next
                     unit: source_units[modules[module_index].source_unit_index]
                     diagnostics.push(jet_driver_diagnostic_at_source("E0625", Val(declared.span), unit.path, 0, "a library package can't declare `run: fn`", "a package is one namespace: an executable package has one `run: fn`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none.", "move the program into its own package or a loose file that uses this library, or make this package an executable."))
@@ -4042,7 +4052,7 @@ jet_driver_inline_module_declares: fn(items: [Item], owner: String, member: Stri
 // Whether `items`, a module's top level, declare `member`: an item or a
 // nested module.
 jet_driver_items_declare: fn(items: [Item], member: String) -> Bool Never! {
-    loop named in jet_driver_namespace_item_names(items) {
+    loop named in jet_driver_namespace_item_names(items, 0) {
         if named.name == member -> return true
     }
     loop item in items {
@@ -4931,6 +4941,21 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             jet_driver_reach_open(reach, "core.prelude")
             prelude_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if prelude_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    pending.push(index)
+                }
+            }
+        }
+        // A file module and each inline module body may carry a core.meta
+        // Module record (sema_module_meta_lower), even when the source never
+        // imports core.meta; which ones do is known only once every source
+        // is loaded, so core.meta loads for any of them.
+        if !is_core && sema_module_meta_wanted(program.items, declared_modules.get(source_unit_index) ?? "") {
+            if !bare_modules.contains("core.meta") -> bare_modules.push("core.meta")
+            jet_driver_reach_open(reach, "core.meta")
+            meta_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.meta", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if meta_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)

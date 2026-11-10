@@ -4189,6 +4189,15 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     }
     // The ambient `input`, when no binding shadows it: the program's lines.
     if unresolved_index == None && name == "input" -> return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
+    // A module named as a value is its Module record (ModuleMeta.jet).
+    if unresolved_index != None && sema_expr_core_module_alias_visible(name, scopes) {
+        if program.registration_graph == .Val(graph) {
+            if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
+                read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, context, diagnostics)
+                if read.handled -> return read.value
+            }
+        }
+    }
     value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
         if !sema_has_error_since(diagnostics, diagnostics_before) {
             if {

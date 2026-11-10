@@ -1,0 +1,354 @@
+// A module is a value: its core.meta `Module` record. A module body's first
+// lines may set the fields a module owns (`category: "billing"`), before any
+// binding, each checked against its field type; the compiler fills the name,
+// the file (from the package root), the `///` comment and the package.
+// Lowering moves those field lines into one generated constant per module,
+// `__jet_module`, before casing, so they are never read as constants. A file
+// module declared by `pricing: module` carries its own; an inline
+// `pricing: module { … }` body carries one its lowering lifts like any
+// member constant. `pricing.category` reads a field of that record and
+// `pricing` named as a value reads the record. A module carries its record
+// only when its body sets a field or some source of the compile reads it as
+// a value (sema_module_meta_value_reads).
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    CodeModule,
+    Diagnostic,
+    Expr,
+    ExprField,
+    ImportDecl,
+    ImportKind,
+    Item,
+    Program,
+    Span,
+    StrPart,
+    Type,
+    ast_const,
+]
+
+// The generated constant holding a module's record.
+SEMA_MODULE_META: "__jet_module"
+
+// The package a module's `package` field names, as the loader read its
+// manifest.
+SemaModulePackage: struct {
+    name: String{""}
+    version: String{"0.0.0"}
+    edition: String?{None}
+    log: String?{None}
+}
+
+// What the loader knows of a module's source: its file from the package
+// root and its package; and the names of the compile's modules some source
+// reads as a value (sema_module_meta_mark_reads).
+SemaModuleMetaSource: struct {
+    file: String{""}
+    package: SemaModulePackage{SemaModulePackage{}}
+    reads: [String:Bool]{[String:Bool]{}}
+}
+
+// The file-level alias the generated records name core.meta through.
+sema_module_meta_alias: fn() -> String Never! {
+    sema_inline_generated_path("meta.core.meta")
+}
+
+// Whether `declaration` is the core.meta import the lowering adds;
+// registration binds it to the loaded core.meta module.
+sema_module_meta_import: fn(declaration: ImportDecl) -> Bool Never! {
+    if declaration.kind == .Module(name, _) -> return name == "core.meta" && declaration.alias == sema_module_meta_alias()
+    false
+}
+
+// Whether a source of `items` may carry a Module record: a file module
+// (`declared_module` is the dotted path that declared it), or a file with an
+// inline module body. The loader loads core.meta for exactly these.
+sema_module_meta_wanted: fn(items: [Item], declared_module: String) -> Bool Never! {
+    if declared_module != "" -> return true
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if definition.body != None -> return true
+        }
+    }
+    false
+}
+
+// A field line: an immutable lowercase `name: value` binding. Only the
+// leading run of a module body is field lines.
+sema_module_meta_field_line: fn(item: Item) -> Bool Never! {
+    if item == .Const(constant) {
+        if constant.mutable || constant.is_comptime || constant.is_persist || constant.name == "" -> return false
+        if constant.ty == .Val(.Named(type_name)) {
+            if type_name == "__OutputDefaults" -> return false
+        }
+        first: constant.name.bytes()[0]
+        return first >= U8{97} && first <= U8{122}
+    }
+    false
+}
+
+// The number of field lines `items` starts with.
+sema_module_meta_field_lines: fn(items: [Item]) -> Int Never! {
+    count := 0
+    loop item in items {
+        if !sema_module_meta_field_line(item) -> break
+        count += 1
+    }
+    count
+}
+
+// Whether the compiler fills field `name`, so a field line can't set it.
+sema_module_meta_compiler_field: fn(name: String) -> Bool Never! {
+    name == "name" || name == "file" || name == "doc" || name == "package"
+}
+
+sema_module_meta_text: fn(text: String, span: Span) -> Expr Never! {
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED}
+}
+
+sema_module_meta_field: fn(name: String, value: Expr, span: Span) -> ExprField Never! {
+    ExprField{name: name, name_span: span, value: value}
+}
+
+// One `///` line's text, or None for any other line.
+sema_module_meta_doc_line: fn(line: String) -> String? Never! {
+    trimmed: line.trim()
+    if !trimmed.starts_with("///") -> return None
+    rest: String.from_bytes(trimmed.bytes()[3..<trimmed.bytes().len()]) ?? ""
+    if rest.starts_with(" ") -> return Val(String.from_bytes(rest.bytes()[1..<rest.bytes().len()]) ?? "")
+    Val(rest)
+}
+
+// The `///` comment at the top of a file: its first lines that are not blank.
+sema_module_meta_file_doc: fn(source: String) -> String Never! {
+    lines := [String]{}
+    loop line in source.split("\n") {
+        if lines.len() == 0 && line.trim() == "" -> next
+        text: sema_module_meta_doc_line(line) ?? break
+        lines.push(text)
+    }
+    lines.join("\n")
+}
+
+// The `///` comment directly above the line holding byte `at`; marker lines
+// (`#FX(…)`) between the comment and the binding are passed over.
+sema_module_meta_doc_above: fn(source: String, at: Int) -> String Never! {
+    bytes: source.bytes()
+    limit: if at < bytes.len() -> at else -> bytes.len()
+    line_start := limit
+    loop line_start > 0 && bytes[line_start - 1] != (U8{10}) -> line_start -= 1
+    above: String.from_bytes(bytes[0..<line_start]) ?? return ""
+    lines: above.split("\n").to_list()
+    collected := [String]{}
+    index := lines.len() - 1
+    // The text before the binding's line ends in a newline: its last part is empty.
+    if index >= 0 && lines[index] == "" -> index -= 1
+    loop index >= 0 {
+        line: lines[index]
+        if sema_module_meta_doc_line(line) == .Val(text) {
+            collected.push(text)
+            index -= 1
+            next
+        }
+        if collected.len() == 0 && line.trim().starts_with("#") {
+            index -= 1
+            next
+        }
+        break
+    }
+    collected.reverse()
+    collected.join("\n")
+}
+
+// The `package` field's record.
+sema_module_meta_package: fn(package: SemaModulePackage, span: Span) -> Expr Never! {
+    fields := [ExprField]{
+        sema_module_meta_field("name", sema_module_meta_text(package.name, span), span),
+        sema_module_meta_field("version", sema_module_meta_text(package.version, span), span),
+    }
+    if package.edition == .Val(edition) -> fields.push(sema_module_meta_field("edition", sema_module_meta_text(edition, span), span))
+    if package.log == .Val(log) -> fields.push(sema_module_meta_field("log", sema_module_meta_text(log, span), span))
+    Expr.StructLit{type_name: "Package", type_args: [Type]{}, import_ns: Val(sema_module_meta_alias()), as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
+}
+
+// The generated constant of a module named `name` whose body starts with
+// `items`: the record of the compiler's fields and the field lines, which
+// leave the body. Setting a compiler-filled field is E0111.
+sema_module_meta_record: fn(items: &[Item], name: String, doc: String, source: SemaModuleMetaSource, span: Span, diagnostics: &[Diagnostic]) {
+    fields := [ExprField]{
+        sema_module_meta_field("name", sema_module_meta_text(name, span), span),
+        sema_module_meta_field("file", sema_module_meta_text(source.file, span), span),
+        sema_module_meta_field("doc", sema_module_meta_text(doc, span), span),
+        sema_module_meta_field("package", sema_module_meta_package(source.package, span), span),
+    }
+    count: sema_module_meta_field_lines(items)
+    loop index in 0..<count {
+        if items[index] == .Const(line) {
+            if sema_module_meta_compiler_field(line.name) {
+                diagnostics.push(sema_error("E0111", line.name_span, "`{line.name}` of module `{name}` is set by the compiler", "a module's name, file, doc and package come from its source and its package, so a field line can't set them", "remove the `{line.name}:` line"))
+                next
+            }
+            // copy: the field line leaves the body; its value keeps its span for the field type check.
+            fields.push(ExprField{name: line.name, name_span: line.name_span, value: line.value.copy()})
+        }
+    }
+    record := ast_const(SEMA_MODULE_META, span, span, Expr.StructLit{type_name: "Module", type_args: [Type]{}, import_ns: Val(sema_module_meta_alias()), as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED})
+    record.is_pub = true
+    // The field lines leave the body; every other item follows the record.
+    kept := [Item]{Item.Const{value: record}}
+    // copy: `items` is the caller's borrowed body, rebuilt in place.
+    loop index in count..<items.len() -> kept.push(items[index].copy())
+    items = kept.move()
+}
+
+// Whether module `name`, whose body is `items`, carries a record: its body
+// sets a field, or a source reads it as a value.
+sema_module_meta_has_record: fn(items: [Item], name: String, reads: [String:Bool]) -> Bool Never! {
+    sema_module_meta_field_lines(items) > 0 || reads.get(name) != None
+}
+
+// Whether a module of `definition`'s tree, itself included, carries a record.
+sema_module_meta_tree_has_record: fn(definition: CodeModule, reads: [String:Bool]) -> Bool Never! {
+    if definition.body == .Val(body) {
+        if sema_module_meta_has_record(body, definition.name, reads) -> return true
+        loop item in body {
+            if item == .CodeModule(child) {
+                if sema_module_meta_tree_has_record(child, reads) -> return true
+            }
+        }
+    }
+    false
+}
+
+// Give each inline module body of `items` that carries a record, nested ones
+// included, its record. True when any record was added.
+sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) -> Bool {
+    added := false
+    loop index in 0..<items.len() {
+        updated := CodeModule?{None}
+        if items[index] == .CodeModule(definition) {
+            if !sema_module_meta_tree_has_record(definition, meta_source.reads) -> next
+            body := definition.body ?? next
+            _ := sema_module_meta_inline(body, meta_source, text, diagnostics)
+            if sema_module_meta_has_record(body, definition.name, meta_source.reads) -> sema_module_meta_record(body, definition.name, sema_module_meta_doc_above(text, definition.span.start), meta_source, definition.name_span, diagnostics)
+            // copy: the module is rebuilt around its lowered body.
+            module_item := definition.copy()
+            module_item.body = Val(body.move())
+            updated = Val(module_item.move())
+        }
+        items[index] = Item.CodeModule{value: updated ?? next}
+        added = true
+    }
+    added
+}
+
+// Lower the field lines of module `program` into its Module records: the
+// file's own when it is a file module, and each inline module body's.
+// `text` is the module's source text; the caller passes no Core source.
+sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) {
+    if !sema_module_meta_wanted(program.items, declared_module) -> return
+    added := sema_module_meta_inline(program.items, meta_source, text, diagnostics)
+    span: Span{start: 0, end: 0}
+    if declared_module != "" {
+        segments: declared_module.split(".").to_list()
+        name: segments[segments.len() - 1]
+        if sema_module_meta_has_record(program.items, name, meta_source.reads) {
+            sema_module_meta_record(program.items, name, sema_module_meta_file_doc(text), meta_source, span, diagnostics)
+            added = true
+        }
+    }
+    if !added -> return
+    program.imports.push(ImportDecl{kind: ImportKind.Module{name: "core.meta", span: span}, alias: sema_module_meta_alias(), alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
+}
+
+// The inline module bodies of `items`, nested ones included, by name.
+sema_module_meta_names: fn(items: [Item], names: &[String:Bool]) Never! {
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if definition.body == .Val(body) {
+                names[definition.name.copy()] = true
+                sema_module_meta_names(body, names)
+            }
+        }
+    }
+}
+
+sema_module_meta_word_byte: fn(code: Int) -> Bool Never! {
+    sema_inline_is_alphanumeric(code) || code == 95
+}
+
+sema_module_meta_space: fn(code: Int) -> Bool Never! {
+    code == 32 || code == 9 || code == 10 || code == 13
+}
+
+// Whether the module name ending at byte `end` is read as a value. A call
+// (`pricing.total()`), a member (`pricing.RATE`, `pricing.Entry`), a
+// declaration or label (`pricing: module`) and an import
+// (`use pricing.[total]`) read no record; a compiler-filled field
+// (`pricing.name`) does, and so does any other use (`audit(pricing)`,
+// `billing<pricing>`).
+sema_module_meta_value_at: fn(bytes: [U8], end: Int) -> Bool Never! {
+    at := end
+    loop at < bytes.len() && sema_module_meta_space(Int.from_u8(bytes[at])) -> at += 1
+    if at >= bytes.len() -> return true
+    following: Int.from_u8(bytes[at])
+    if following == 58 || following == 40 -> return false
+    if following != 46 -> return true
+    member_end := at + 1
+    loop member_end < bytes.len() && sema_module_meta_word_byte(Int.from_u8(bytes[member_end])) -> member_end += 1
+    member: String.from_bytes(bytes[at + 1..<member_end]) ?? return false
+    if !sema_module_meta_compiler_field(member) -> return false
+    after := member_end
+    loop after < bytes.len() && sema_module_meta_space(Int.from_u8(bytes[after])) -> after += 1
+    after >= bytes.len() || Int.from_u8(bytes[after]) != 40
+}
+
+// Each of `modules` that `text` reads as a value (sema_module_meta_value_at)
+// joins `reads`. A `//` comment reads nothing; a string may, which only
+// gives a module a record it doesn't use.
+sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[String:Bool]) Never! {
+    bytes: text.bytes()
+    index := 0
+    loop index < bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 {
+            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            next
+        }
+        if !sema_module_meta_word_byte(code) {
+            index += 1
+            next
+        }
+        start: index
+        loop index < bytes.len() && sema_module_meta_word_byte(Int.from_u8(bytes[index])) -> index += 1
+        word: String.from_bytes(bytes[start..<index]) ?? next
+        if modules.get(word) == None || reads.get(word) != None -> next
+        if sema_module_meta_value_at(bytes, index) -> reads[word] = true
+    }
+}
+
+// Give each input's meta the names of the compile's modules some source
+// reads as a value, so only those modules, and those whose bodies set a
+// field, carry a record. A record is read across files (`lib.inner` from
+// another file of the package), so every source is scanned for every
+// module. Core declares no record and reads none.
+sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
+    names := [String:Bool]{}
+    loop input in inputs {
+        if input.module_identity.starts_with("<corelib>/") -> next
+        if input.declared_module != "" {
+            segments: input.declared_module.split(".").to_list()
+            names[segments[segments.len() - 1].copy()] = true
+        }
+        sema_module_meta_names(input.program.items, names)
+    }
+    if names.len() == 0 -> return
+    reads := [String:Bool]{}
+    loop input in inputs {
+        if input.module_identity.starts_with("<corelib>/") -> next
+        sema_module_meta_value_reads(input.source, names, reads)
+    }
+    if reads.len() == 0 -> return
+    loop index in 0..<inputs.len() {
+        if !inputs[index].module_identity.starts_with("<corelib>/") -> inputs[index].meta.reads = reads.copy()
+    }
+}
