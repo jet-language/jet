@@ -91,6 +91,7 @@ const COMMAND_FLAGS = {
       'group', 'ballotMode', 'shortAuthorizedBy', 'draft'),
     update: payload('title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
       'ballotMode', 'shortAuthorizedBy', 'ready'),
+    report: by('path', 'url', 'title', 'note', 'remove'),
     ratify: by('outcome', 'comment', 'quote', 'expectRev'),
     reopen: by(),
     delete: by(),
@@ -723,6 +724,35 @@ function cmdDecision(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
       return out(flags, `updated decision ${result.id}${p.ready ? ' — ballot-ready' : ''}`, result);
     }
+    case 'report': {
+      // Link a report (a Tower doc or an https source) to a ballot, or unlink one.
+      const s = store.load();
+      const d = s.decisions.find(x => x.id === id);
+      if (!d) throw new TowerError('E_NOT_FOUND', `no decision ${id}`);
+      let reports = [...(d.reports || [])];
+      if (typeof flags.remove === 'string') {
+        const key = flags.remove.trim();
+        if (!reports.some(r => (r.path || r.url) === key)) throw new TowerError('E_NOT_FOUND', `${id} links no report ${key}`);
+        reports = reports.filter(r => (r.path || r.url) !== key);
+      } else {
+        const path = typeof flags.path === 'string' ? flags.path.trim() : '';
+        const url = typeof flags.url === 'string' ? flags.url.trim() : '';
+        if (typeof flags.title !== 'string' || (!path && !url))
+          throw new TowerError('E_USAGE', 'decision report needs --title and one of --path Docs/… or --url https://…, or --remove PATH|URL');
+        if (path) {
+          const root = projectRoot(store.dataDir) || process.cwd();
+          let isFile = false;
+          try { isFile = statSync(resolve(root, path)).isFile(); } catch { /* missing */ }
+          if (!isFile) throw new TowerError('E_NOT_FOUND', `report ${path} is not a file in this checkout; add it with tower docs add first`);
+        }
+        const entry = { title: flags.title, ...(path ? { path } : { url }), ...(typeof flags.note === 'string' ? { note: flags.note } : {}) };
+        const key = path || url;
+        const at = reports.findIndex(r => (r.path || r.url) === key);
+        if (at >= 0) reports[at] = entry; else reports.push(entry);
+      }
+      const { result } = store.mutate((st) => db.updateDecision(st, id, { reports }, by));
+      return out(flags, `${id} links ${(result.reports || []).length} report(s)`, result);
+    }
     case 'ratify': {
       const decision = store.load().decisions.find(d => d.id === id);
       if (decision && (decision.group === 'acceptance' || decision.id.startsWith('D-ACCEPT-'))) {
@@ -741,7 +771,7 @@ function cmdDecision(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteDecision(s, id, by));
       return out(flags, `deleted decision ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/scaffold/add/update/ratify/reopen/delete`);
+    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/scaffold/add/update/report/ratify/reopen/delete`);
   }
 }
 
