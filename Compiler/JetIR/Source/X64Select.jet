@@ -1704,6 +1704,34 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int, op: IROp) Never! {
     x64_mov_rr(e.code, X64_RDX, X64_R11)
 }
 
+// The Div or Rem at `at` of a nonnegative dividend n (IR_OVERFLOW_NONNEG) by
+// the positive constant d. The shifted high product is the quotient: no +1
+// rounds it toward zero, as a negative n would need. n stays in its own
+// register (its home, else r11). A Div's quotient is stored from rdx. A
+// Rem's n - q * d is computed as -d * q + n into dst's own register when
+// that is not n's (else rdx), with no copy of n or of the result.
+ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int) Never! {
+    n: ir_x64_use(e, m, f, al, f.a[at], X64_R11)
+    magic: ir_x64_magic(d)
+    x64_mov_rr(e.code, X64_RAX, n)
+    x64_mov_ri(e.code, X64_RCX, magic.multiplier)
+    x64_imul_wide(e.code, X64_RCX)
+    if magic.add -> x64_alu_rr(e.code, X64Alu.Add, X64_RDX, n)
+    if magic.shift > 0 -> x64_shift_ri(e.code, X64Shift.Sar, X64_RDX, magic.shift)
+    if f.op[at] == .Div -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
+    home: ir_x64_home_reg(m, f, al, f.dst[at], X64_RDX)
+    target := if home == n -> X64_RDX else -> home
+    if x64_fits_i32(d) {
+        x64_imul_rri(e.code, target, X64_RDX, 0 - d)
+    } else {
+        target = X64_RDX
+        x64_mov_ri(e.code, X64_RCX, 0 - d)
+        x64_imul_rr(e.code, X64_RDX, X64_RCX)
+    }
+    x64_alu_rr(e.code, X64Alu.Add, target, n)
+    ir_x64_store(e, m, f, al, f.dst[at], target)
+}
+
 ir_x64_division_symbol: fn(op: IROp) -> String Never! {
     if op == {
         .Div -> "jet_int_div"
@@ -2010,13 +2038,17 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     }
     k: ir_x64_power_of_two(al, f.b[at])
     division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    // A proven nonnegative Int dividend (IR_OVERFLOW_NONNEG) divides as an
+    // unsigned one: no correction toward zero.
+    nonneg: f.c[at] == IR_OVERFLOW_NONNEG
     if k > 0 && division {
         // A 2^k divisor is neither 0 nor -1: no stop can happen. A shift or
         // a mask works in dst's own register, with no copy through rax.
-        in_place: !ty.signed || op == .FloorDiv || op == .Mod
+        signed: ty.signed && !nonneg
+        in_place: !signed || op == .FloorDiv || op == .Mod
         reg: if in_place -> ir_x64_home_reg(m, f, al, f.dst[at], X64_RAX) else -> X64_RAX
         ir_x64_load(e, m, f, al, f.a[at], reg)
-        ir_x64_power_division(e, op, ty.signed, k, reg)
+        ir_x64_power_division(e, op, signed, k, reg)
         return ir_x64_store(e, m, f, al, f.dst[at], reg)
     }
     if op == .Rem || op == .Mod {
@@ -2026,6 +2058,7 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     magic: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
     if magic != 0 {
         // Neither is the divisor 0 or -1.
+        if nonneg && magic > 0 && (op == .Div || op == .Rem) -> return ir_x64_nonneg_magic_division(e, m, f, al, at, magic)
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
         ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
@@ -2227,7 +2260,7 @@ ir_x64_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
     ty: ir_x64_type(m, f, f.a[at])
     if ty.kind == {
         .Int -> {
-            if f.c[at] == IR_OVERFLOW_WRAP -> return ir_x64_word_binary(e, m, f, al, tables, at, IRX64Shape{kind: .Word, size: 8, align: 8, signed: true, bits: 64})
+            if ir_overflow_wraps(f.c[at]) -> return ir_x64_word_binary(e, m, f, al, tables, at, IRX64Shape{kind: .Word, size: 8, align: 8, signed: true, bits: 64})
             ir_x64_int_binary(e, m, f, al, at)
         }
         .Float | .Float32 -> ir_x64_float_binary(e, m, f, al, at, ty)
@@ -2446,7 +2479,7 @@ ir_x64_select_safe: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int)
     if !arithmetic && op != .Div && op != .FloorDiv && op != .Shl && op != .Shr -> return false
     if f.a[at] < 0 || f.b[at] < 0 || f.dst[at] < 0 -> return false
     ty: ir_x64_type(m, f, f.a[at])
-    if ty.kind != .Word && !(ty.kind == .Int && f.c[at] == IR_OVERFLOW_WRAP) -> return false
+    if ty.kind != .Word && !(ty.kind == .Int && ir_overflow_wraps(f.c[at])) -> return false
     if op == {
         .Add | .Sub | .Mul -> f.c[at] == IR_OVERFLOW_WRAP && !(op == .Mul && !ty.signed && ir_x64_bits(ty) == 64)
         .BitAnd | .BitOr | .BitXor -> true

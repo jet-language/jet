@@ -1397,6 +1397,51 @@ ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     assert_eq(f.c[step], IR_OVERFLOW_WRAP)
 }
 
+// count() counts i from 0 up to 10 and divides i, then i - 10, by 7. Both
+// divisions wrap (inline operands, a positive divisor); only those of the
+// nonnegative i are IR_OVERFLOW_NONNEG, which X64Select divides with no
+// correction toward zero.
+#Test("the inline Int facts mark a division of a nonnegative dividend IR_OVERFLOW_NONNEG") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("count", "test:count.jet::count", "", "count.jet", 1)
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    seven: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    ten: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    quotient: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    remainder: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    back: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    signed: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, seven, 7, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    div: ir_emit(g, IROp.Div, quotient, i, seven, IR_OVERFLOW_TRAP, 4)
+    rem: ir_emit(g, IROp.Rem, remainder, i, seven, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Sub, back, i, ten, IR_OVERFLOW_TRAP, 4)
+    below: ir_emit(g, IROp.Div, signed, back, seven, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    _ := ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
+    f: m.functions[0]
+    assert_eq(f.c[div], IR_OVERFLOW_NONNEG)
+    assert_eq(f.c[rem], IR_OVERFLOW_NONNEG)
+    assert_eq(f.c[below], IR_OVERFLOW_WRAP)
+}
+
 // parse (the generated CLI parser) calls unknown, shared and callback, and
 // takes callback's address; unknown calls usage; run calls shared. The
 // parser, unknown and usage (only cold callers) are cold; shared (run calls

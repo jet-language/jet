@@ -1,0 +1,48 @@
+// A dividend the ranges prove nonnegative (a counter from 0 and its product
+// by a positive constant) divides by a constant divisor with no correction
+// toward zero: by a multiply, by a 2^k shift or mask, and by divisors at both
+// edges of the 32-bit immediate range. Each of `/%`, `%` and `%%` must agree
+// with the same division by a divisor known only at run time.
+by_values: fn(n: Int, divisors: [Int]) -> [Int] {
+    out := [Int]{}
+    loop d in divisors {
+        out.push(n /% d)
+        out.push(n % d)
+        out.push(n %% d)
+    }
+    out
+}
+
+run: fn() {
+    divisors: [Int]{3, 7, 8, 641, 2147483647, 2147483648, 4611686018427387903}
+    small_divisors: [Int]{7, 8, 1000003}
+    mismatches := 0
+    small_mismatches := 0
+    checked := 0
+    total := 0
+    loop i in 0..<4000 {
+        n: i * 2147483659
+        got: [Int]{
+            n /% 3, n % 3, n %% 3,
+            n /% 7, n % 7, n %% 7,
+            n /% 8, n % 8, n %% 8,
+            n /% 641, n % 641, n %% 641,
+            n /% 2147483647, n % 2147483647, n %% 2147483647,
+            n /% 2147483648, n % 2147483648, n %% 2147483648,
+            n /% 4611686018427387903, n % 4611686018427387903, n %% 4611686018427387903,
+        }
+        if got != by_values(n, divisors) -> mismatches += 1
+        small: [Int]{
+            i /% 7, i % 7, i %% 7,
+            i /% 8, i % 8, i %% 8,
+            i /% 1000003, i % 1000003, i %% 1000003,
+        }
+        if small != by_values(i, small_divisors) -> small_mismatches += 1
+        total += i /% 7 + i % 8 + n % 641
+        checked += 1
+    }
+    print(checked)
+    print(mismatches)
+    print(small_mismatches)
+    print(total)
+}

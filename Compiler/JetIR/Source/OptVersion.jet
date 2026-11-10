@@ -496,7 +496,7 @@ ir_version_gain: fn(m: IRModule, f: IRFunction, k: Int) -> Bool Never! {
     compare: op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
     if !arithmetic && !compare -> return false
     if f.a[k] < 0 || m.types[f.slot_type[f.a[k]]].kind != .Int -> return false
-    f.c[k] != IR_OVERFLOW_WRAP
+    !ir_overflow_wraps(f.c[k])
 }
 
 // The Int slots the innermost loop `at` (its End `end`; its region from

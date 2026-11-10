@@ -51,7 +51,9 @@
 // the plain instruction, for such a division no divisor checks, and for
 // such a shift no count check, so no jet_rt_fixed_shift_stop; the trap poll
 // after a word operation or the division, which nothing can reach now,
-// goes). An Int Add, Sub or Mul of inline operands
+// goes); such an Int Div or Rem of a nonnegative dividend is marked
+// IR_OVERFLOW_NONNEG instead (X64Select drops its negative-dividend
+// correction). An Int Add, Sub or Mul of inline operands
 // whose result may not be inline is marked IR_OVERFLOW_OPERANDS (X64Select
 // tests only the result), and one with a single operand proven inline
 // IR_OVERFLOW_LEFT or IR_OVERFLOW_RIGHT (X64Select skips that operand's
@@ -962,7 +964,8 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             // no larger than the dividend. (A word division keeps its
             // divisor checks: X64Select skips them for an Int only.)
             if !r.exact[left] || !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
-            f.c[at] = IR_OVERFLOW_WRAP
+            nonneg: a.known && a.lo >= 0 && (f.op[at] == .Div || f.op[at] == .Rem)
+            f.c[at] = if nonneg -> IR_OVERFLOW_NONNEG else -> IR_OVERFLOW_WRAP
             rewritten += 1
             ir_range_drop_point(f, trap, at + 1)
             next

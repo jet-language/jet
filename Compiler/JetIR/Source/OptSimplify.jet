@@ -270,7 +270,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         l: left ?? 0
         r: right ?? 0
         if has_l && has_r && !bitwise && !identity_only {
-            value: ir_opt_fold_value(ty, op, l, r, f.c[at] != IR_OVERFLOW_WRAP) ?? next
+            value: ir_opt_fold_value(ty, op, l, r, !ir_overflow_wraps(f.c[at])) ?? next
             ir_opt_set_const(f, at, value)
             report.folded += 1
             changed += 1
