@@ -1,0 +1,34 @@
+# D-FIELD-READONLY1=A (#6468 c3): a computed field is read like a field and never written, even
+# by its own module; the module edits the stored field it reads. Sema refuses every write form
+# before the owner's mutability, so `jet check`, `jet run` and `jet build` report E0339 and
+# never reach lowering; the reads and the stored-field write agree on every execution tier.
+fixture: computed_field_writes_are_refused_and_stored_writes_run_on_every_tier
+step: jet check --json refused.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0339"] #= 5
+json: stdout doc $.reports[?code="E0205"] #= 0
+step: jet run refused.jet
+exit: nonzero
+stderr: ~ "is a computed field on `Lock` — it can't be assigned" # E0339 for `lock.path = …`
+stderr: ~ "is a computed field on `Lock` — it can't be updated" # E0339 for `lock.count += 1`
+stderr: ~ "is a computed field on `Lock` — it can't be lent for writing" # E0339 for `edit(lock.path)`
+stderr: !~ "compiler fault" # sema refuses before lowering
+step: jet build refused.jet
+exit: nonzero
+stderr: ~ "E0339" # the build reports the same refusal
+stderr: !~ "compiler fault" # sema refuses before lowering
+step default: jet run stored.jet
+exit: 0
+stdout: = "/tmp/app.lock:13\n/tmp/next.lock\n14\n"
+step o0: jet run --optimize=none stored.jet
+exit: 0
+stdout: == default
+step o1: jet run --optimize=basic stored.jet
+exit: 0
+stdout: == default
+step o2: jet run --optimize=full stored.jet
+exit: 0
+stdout: == default
+step release: jet run --release stored.jet
+exit: 0
+stdout: == default

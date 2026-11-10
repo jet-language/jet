@@ -8234,11 +8234,13 @@ sema_compute_module_owns_site: fn(module_result: SemaGraphModuleResult, span: Sp
 
 // #3708: a function whose failure contract sema may infer. No contract was
 // written, and nothing else owns its return protocol (the Rust reference's
-// `failure_inference_candidate`).
+// `failure_inference_candidate`). A computed field's generated getter is the
+// user's formula, so its failures are inferred like a written method's: a
+// read of `path: String -> stored_path` is no failure source.
 sema_failure_inference_candidate: fn(func: Func) -> Bool Never! {
     if !sema_failure_contract_is_default(func.return_type) -> return false
     if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
-    !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
+    (!func.compiler_generated || sema_computed_field_getter_function(func)) && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
 
 // #3708 "Every function has the structured Error

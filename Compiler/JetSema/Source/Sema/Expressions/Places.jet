@@ -167,6 +167,8 @@ sema_expression_place_below_element: fn(expr: Expr) -> Bool Never! {
 sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
+    // A computed field has no storage to give away.
+    if sema_expression_refuse_computed_place(checked, "taken", environment, program, scopes, diagnostics) -> return None
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, true) -> return None
     // A field below an element (`items[i].tags.move()`): the element keeps
     // owning its fields, so the value can only be a copy, spelled `.copy()`.
@@ -230,6 +232,8 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     context.suppress_partial_move_root_read = previous_root_read
     checked: checked_value ?? return None
     convention: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
+    // A computed field has no storage to lend for writing.
+    if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, diagnostics) -> return None
     // (Rust `Expr::Place`): a subrange of a declared view
     // takes its write window from the view's own access; a `View<T>` never
     // lends one.
@@ -720,6 +724,14 @@ sema_expression_rows_view: fn(base: Expr, member: String, span: Span, ty: Type, 
 // of its generated getter (Registration `sema_derive_computed_getters`).
 // None for a stored field or any other base.
 sema_expression_computed_field_read: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Expr? {
+    if sema_expression_computed_field_named(ty, member, false, environment, program, scopes) == None -> return None
+    Val(Expr.MethodCall{receiver: base.copy(), method: sema_computed_field_getter(member), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
+}
+
+// The computed field of the struct `ty` that `member` names, or whose
+// generated getter it names when `getter` is set. None for a stored field,
+// an unknown member or a base that is no struct.
+sema_expression_computed_field_named: fn(ty: Type, member: String, getter: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String? {
     owner_name := ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(name) -> owner_name = name
@@ -729,11 +741,63 @@ sema_expression_computed_field_read: fn(base: Expr, member: String, span: Span, 
     owner: sema_expression_type_symbol(scopes, environment, program, owner_name) ?? return None
     definition: sema_scope_declaration_struct(environment, program, owner.id) ?? return None
     loop field in definition.fields {
-        if field.name != member -> next
+        named: if getter -> sema_computed_field_getter(field.name) == member else -> field.name == member
+        if !named -> next
         if field.computed == None -> return None
-        return Val(Expr.MethodCall{receiver: base.copy(), method: sema_computed_field_getter(member), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
+        return Val(field.name)
     }
     None
+}
+
+// A computed field has no storage, so nothing writes it,
+// not even its own module: no assignment or compound assignment, no write
+// window or write argument and no take reaches it, directly or through a
+// field, element or range below it. A read stays its getter's value.
+SemaComputedPlace: struct {
+    owner: Type
+    member: String
+    span: Span
+}
+
+// The first computed step of the checked write place `place`: a stored-field
+// projection that names a computed field (an assignment target) or a read of
+// a computed getter the place runs through. None when the place has storage.
+sema_expression_computed_place: fn(place: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaComputedPlace? {
+    if place.kind == {
+        .Field(receiver, field) -> {
+            if sema_expression_computed_field_named(receiver.ty, field.name, false, environment, program, scopes) == .Val(member) -> return Val(SemaComputedPlace{owner: receiver.ty.copy(), member: member, span: place.span})
+            return sema_expression_computed_place(receiver, environment, program, scopes)
+        }
+        .MethodCall(receiver, method, _, _) -> {
+            member: sema_expression_computed_field_named(receiver.ty, method.name, true, environment, program, scopes) ?? return None
+            return Val(SemaComputedPlace{owner: receiver.ty.copy(), member: member, span: place.span})
+        }
+        .Index(base, _, _, _, _, _) | .Slice(base, _, _, _, _) -> return sema_expression_computed_place(base, environment, program, scopes)
+        .TryWithContext(inner, _, _, _, _, _) -> return sema_expression_computed_place(inner, environment, program, scopes)
+        .Try(value, _, _) | .Borrow(value, _) | .Move(value) -> return sema_expression_computed_place(value, environment, program, scopes)
+        else -> return None
+    }
+}
+
+// E0339 when the checked write place `place` runs through a computed field
+// (sema_expression_computed_place); `action` names the write. True when
+// reported.
+sema_expression_refuse_computed_place: fn(place: TExpr, action: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    found: sema_expression_computed_place(place, environment, program, scopes) ?? return false
+    shown: type_name(found.owner)
+    diagnostics.push(sema_error("E0339", found.span, "`{found.member}` is a computed field on `{shown}` — it can't be {action}", "`{found.member}` is declared `{found.member} -> …`: its value always comes from that formula, so it has no storage to write, lend for writing or take", "change the stored field its formula reads, or call a method of `{shown}` that does"))
+    true
+}
+
+// E0339 for a checked method call that writes its receiver (the receiver
+// frame noted `&`) when that receiver is a computed place. True when reported.
+sema_expression_refuse_computed_receiver: fn(call: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if call.kind == {
+        .MethodCall(receiver, _, _, _) | .BuiltinMethod(receiver, _, _) -> return sema_expression_refuse_computed_place(receiver, "lent for writing", environment, program, scopes, diagnostics)
+        .TryWithContext(inner, _, _, _, _, _) -> return sema_expression_refuse_computed_receiver(inner, environment, program, scopes, diagnostics)
+        .Try(inner, _, _) -> return sema_expression_refuse_computed_receiver(inner, environment, program, scopes, diagnostics)
+        else -> return false
+    }
 }
 
 // The stable keys of the terminal fact report; mirrors TERMINAL_FACTS in

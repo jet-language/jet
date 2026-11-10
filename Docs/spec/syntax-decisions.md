@@ -22,6 +22,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `:=` | mutable binding |
 | `use { … } / use alias: path` | import block (#6542): one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
+| `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `#` | attached marker; #[A, B] stacks |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
@@ -1315,13 +1316,28 @@ are readable by bare name inside `expr`). `#Memo` is the explicit retained
 form: the first read keeps its answer, and a write to any stored sibling in
 its dependency graph drops that answer. Both forms are unsettable: the field
 is absent from a `Type{ … }` literal's required/allowed field list (E0339 if
-provided), and direct assignment (`s.field = v`, `s.field++`) is also E0339. A
+provided), and no write reaches it (E0339, D-FIELD-READONLY1 below). A
 cycle among computed-field formulas, including self-reference, is E0338.
 Codegen: not a Rust struct member — a synthesized inherent getter method
 instead; every read routes to a call of it. `#Patchable` (D-PATCH1) excludes a
 computed field from `T.Patch` and from `apply`/`diff`/`merge`. `#Codable` encode
 calls the getter (the field appears in the wire output); decode never reads
 into it.
+
+**D-FIELD-READONLY1=A — read-only fields are computed getters over `priv`
+storage** *(ratified 2026-11-09, card #6468)*: no new syntax. A field that every
+module reads but only its own module changes is a public computed field over a
+`priv` stored one, `priv stored_path: String` beside `path: String ->
+stored_path`. Nothing writes a computed field, not even its own module: an
+assignment or compound assignment (`lock.path = …`, `s.count += 1`), a write
+loan (`edit(lock.path)` to a `&` parameter, a method that writes its
+receiver) and a take (`lock.path.move()`) are each E0339, directly or through
+a field, element or range below it (`h.lock.path = …`, `s.items[0] = …`). The
+check runs before the owner's mutability, so a computed target reports E0339
+whether its owner is immutable or mutable. Provider code edits the stored
+field. A read is an ordinary materialized getter result, and consuming that
+result stays legal. A literal that sets a computed field is E0339 and still
+reports the first `priv` field it omits (E0605).
 
 **D-QUAL3 — Unit families**: `#UnitFamily(Currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);

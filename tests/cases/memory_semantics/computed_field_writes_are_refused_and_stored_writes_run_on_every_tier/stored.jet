@@ -1,0 +1,25 @@
+Lock: struct {
+    priv stored_path: String
+    path: String -> stored_path
+    size: Int -> stored_path.len()
+
+    rename: fn(&self, next: String) {
+        self.stored_path = next
+    }
+}
+
+describe: fn(lock: Lock) -> String Never! {
+    "{lock.path}:{lock.size}"
+}
+
+keep: fn(text: &&String) -> Int {
+    text.len()
+}
+
+run: fn() {
+    lock := Lock{stored_path: "/tmp/app.lock"}
+    print(describe(lock))
+    lock.rename("/tmp/next.lock")
+    print(lock.path)
+    print(keep(lock.path))
+}

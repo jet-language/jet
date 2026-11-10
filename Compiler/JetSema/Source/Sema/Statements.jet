@@ -6633,6 +6633,10 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
         if !sema_has_error_since(diagnostics, place_diagnostics) && context.incomplete_reasons.len() == place_reasons -> sema_check_unsupported(context, "the assignment place at offset {op_span.start} checked to no place without a report")
         return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 3")
     }
+    // A computed field has no storage to assign. This is
+    // decided before the place's mutability, so it is the one report.
+    write: if op == None -> "assigned" else -> "updated"
+    if sema_expression_refuse_computed_place(place, write, environment, program, scopes, diagnostics) -> return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment computed field")
     // A stored view field keeps the owner relationship it was constructed
     // with; assigning it a new view would change that public provenance.
     if target == .Field(_, view_field, view_field_span) && program.registration_graph == .Val(view_graph) {

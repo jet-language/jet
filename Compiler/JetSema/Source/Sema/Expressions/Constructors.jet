@@ -601,6 +601,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     // Each written field's declaration index; fields are mostly written in
     // declaration order, so the one after the previous match is tried first.
     positions := [Int]{}
+    computed_written := false
     loop source in fields {
         found := -1
         next_index: if positions.len() == 0 -> 0 else -> positions[positions.len() - 1] + 1
@@ -627,7 +628,8 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         // read, so a struct literal can never give it a value.
         if struct_def.fields[found].computed != None {
             diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
-            return None
+            computed_written = true
+            next
         }
         // Only the type's own module writes a `priv` field, so a literal
         // elsewhere cannot forge a value whose invariant that field carries.
@@ -641,6 +643,19 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         }
         supplied[found] = true
         positions.push(found)
+    }
+    // A literal that sets a computed field is refused, and it still names the
+    // first `priv` field it leaves out: a forged handle (`FileLock{path: …}`)
+    // reports both.
+    if computed_written {
+        loop (index, field) in struct_def.fields {
+            if supplied[index] || field.computed != None -> next
+            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, context.compiler_generated, environment, program) {
+                diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
+                return None
+            }
+        }
+        return None
     }
     // Rust `check_struct_lit`: supplied fields are checked (and their moves
     // recorded) in the order they are written, then omitted fields take their

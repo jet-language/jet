@@ -564,6 +564,16 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
+        // A write parameter edits its argument's storage and a marked take
+        // gives it away; a computed field has none, so it is never lent.
+        if parameter.convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked_value, "lent for writing", environment, program, scopes, diagnostics) {
+            complete = false
+            next
+        }
+        if args[index].convention == AccessConvention.Move && sema_expression_refuse_computed_place(checked_value, "taken", environment, program, scopes, diagnostics) {
+            complete = false
+            next
+        }
         // E0205 (Rust `check_direct_call`): a write `SharedGuard` parameter
         // edits through the guard, so only a `guard_edit()` lease or the
         // caller's own write binding may enter it.
