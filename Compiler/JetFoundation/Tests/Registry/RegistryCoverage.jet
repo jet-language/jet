@@ -2,7 +2,7 @@
 // against the Jet registries that replaced the Rust ones.
 use {
     registry_coverage_files: core.files
-    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, JET_BUILD_OPTIONS, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, TARGET_OS_ALL, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read, target_os_key, target_os_name, target_os_named]
+    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, JET_BUILD_OPTIONS, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, TARGET_CAPABILITY_ALL, TARGET_OS_ALL, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, jet_target_capability_name, jet_target_machine_hosted, jet_target_provider_facts_json, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read, target_os_key, target_os_name, target_os_named]
 }
 
 registry_coverage_is_snake_case: fn(name: String) -> Bool Never! {
@@ -341,4 +341,61 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
         assert_eq(row.values.join(" "), expected.join(" "))
     }
     assert(found, "the build option table has no `os` row")
+}
+
+// Each TargetCapability case is listed once in TARGET_CAPABILITY_ALL (the
+// exhaustive match fails to compile when a case is added), and that list is
+// the Target build fact plane: the registered rows, the Prelude/Facts.jet
+// declarations and the provider dossier name the same capabilities in order.
+#Test("target capabilities and the target fact plane are one vocabulary") {
+    cases := 0
+    names := [String]{}
+    loop capability in TARGET_CAPABILITY_ALL {
+        listed := 0
+        loop candidate in TARGET_CAPABILITY_ALL {
+            if candidate == capability -> listed += 1
+        }
+        assert_eq(listed, 1)
+        names.push(jet_target_capability_name(capability))
+        cases += if capability == {
+            .Allocator -> 1
+            .Memory -> 1
+            .Atomic64 -> 1
+            .MMIO -> 1
+            .Hardware -> 1
+            .TimeWall -> 1
+            .TimeMonotonic -> 1
+            .TimeZoneData -> 1
+            .TimeSleep -> 1
+            .Entropy -> 1
+            .Scheduler -> 1
+            .IORead -> 1
+            .IOWrite -> 1
+            .Panic -> 1
+            .PanicReport -> 1
+            .Startup -> 1
+        }
+    }
+    assert_eq(cases, 16)
+    registered := [String]{}
+    loop row in REGISTRATION_FACT_ROWS {
+        if row.target == RegistrationFactTarget.Build && registry_coverage_has(row.gates, "provider") -> registered.push(row.name)
+    }
+    assert_eq(registered.join(" "), names.join(" "))
+    source: registry_coverage_files.read("Compiler/Prelude/Facts.jet") ?? panic("read Compiler/Prelude/Facts.jet: {err}")
+    declared := [String]{}
+    loop line in source.split("\n") {
+        if !line.starts_with("fact ") || !line.contains("$gates: [provider") -> next
+        parts: line.split("$name: \"").to_list()
+        if parts.len() < 2 -> next
+        declared.push(parts[1].split("\"").to_list()[0])
+    }
+    assert_eq(declared.join(" "), names.join(" "))
+    dossier := [String]{}
+    facts: jet_target_provider_facts_json(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"))
+    loop part in facts.split("{{\"capability\":\"") {
+        if part.starts_with("[") -> next
+        dossier.push(part.split("\"").to_list()[0])
+    }
+    assert_eq(dossier.join(" "), names.join(" "))
 }

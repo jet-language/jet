@@ -193,10 +193,13 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 // Rust-computed oracle: CLI-37/identity_oracle.py extracts unmodified Rust
 // TargetMachine::provider_identity, board constructors, facts; rustc
-// CARGO_PKG_VERSION=0.0.1. No Jet values fed to the oracle.
-#Test("every_canonical_profile_matches_rust_provider_identity_and_layout") {
+// CARGO_PKG_VERSION=0.0.1. No Jet values fed to the oracle. The layout
+// identities are still the oracle's; the provider identities were re-pinned
+// when the provider dossier gained the Target.Memory and Target.Panic facts,
+// which the Rust dossier never wrote.
+#Test("every_canonical_profile_has_its_pinned_provider_identity_and_layout") {
     names: JET_DRIVER_TARGET_MACHINE_NAMES
-    identities: [String]{"91827d8e6430e513281c1200b53ff3ec3bef6829af294db02f8299258b9f814a", "a3176d68cdb96a507ab6427d4997aaecb088baa891ad126260737503029e1d4f", "1caa69c38f4fa8fa2c04f9ebe057830c1df020d90e78ae2d69b917f5b418c18d", "5c4637bc8753186471f3c7aa0c338957df243b7bc6f79eb2567f08a88e8ab05c", "d1f16e8bda37e80c3b9156b08516f0eac1a03a8db686d82c451eaa17f6420474", "576249bc8759bb94fecd9179640c856a4b362ae72ff5de3d60e39b4bcb3a3333"}
+    identities: [String]{"c94eeeb976bd7f2aa6397a9c91d541b25f7cef20cffe4e2e236c4c3e3d1edd55", "91fc8913343bc89281090c627489c6652ae4f59d9d82f37cbb67c021176633b3", "8d9efa77f1dec207dbe66f3c30a013c451d073a67760aa12b5a8708ca7f59c7a", "a87a55733ee77be932d10a98b3033e5209deef8fe377ab848f69cac8ab085bdb", "dda8d67fcb7f23e568d5a7450f748b0d8f620339d0de70ede60fc7e963e61d9c", "2b2d619d122cdc33b386b8a15c43bcac46fb10cf795241288cbd88938292dd81"}
     layouts: [String]{"91a97cc8bacffd938bb13162c2d3e4c0bc8db6dff133b96de5c84e5b922ae1cd", "efd3d02a0853cad8c076a0fa6c46ffd0c1612f49ebaf16c3ad599889ec5d0752", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "4967f3046b6afcb4470ab962221dd242835cbe81133eea0c2a95dd24c129bf19", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "b6d20f41f9c6b9bd94c3239ffcda1a15252d2054e88e04c0626a301c2e81f8d4"}
     loop index in 0..<names.len() {
         machine: jet_driver_target_machine_by_name(names[index], "0.0.1") ?? panic("canonical target missing")
@@ -589,4 +592,31 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     assert_eq(jet_target_active_os_name(jet_target_machine_hosted("aarch64-apple-darwin", "0.0.1"), "linux"), "MacOS")
     assert_eq(jet_target_active_os_name(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), "macos"), "Linux")
     assert_eq(jet_target_active_os_name(jet_target_machine_hosted("riscv64gc-unknown-unknown", "0.0.1"), "windows"), "Windows")
+}
+
+// Target.Memory and Target.Panic are declared capabilities: a hosted machine
+// provides both, a no-OS machine provides them only through a RAM region and
+// an explicit panic policy, and a use that requires them is checked.
+#Test("memory_and_panic_are_checked_target_capabilities") {
+    assert(jet_target_machine_provides_capability(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), .Memory))
+    assert(jet_target_machine_provides_capability(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), .Panic))
+    machine := target_test_valid_machine()
+    assert(jet_target_machine_provides_capability(machine, .Memory))
+    assert(jet_target_machine_provides_capability(machine, .Panic))
+    usage := jet_target_machine_use_default()
+    usage.required_capabilities = [TargetCapability]{.Memory, .Panic}
+    errors: jet_target_machine_validate(machine, usage)
+    assert(!errors.contains(.MissingTargetCapability{capability: "Target.Memory"}))
+    assert(!errors.contains(.MissingTargetCapability{capability: "Target.Panic"}))
+    bare := target_test_valid_machine()
+    bare.memory = [MemoryRegion]{jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx)}
+    bare.allocator = .Unspecified
+    bare.panic = .Unspecified
+    assert(!jet_target_machine_provides_capability(bare, .Memory))
+    assert(!jet_target_machine_provides_capability(bare, .Panic))
+    missing: jet_target_machine_validate(bare, usage)
+    assert(missing.contains(.MissingTargetCapability{capability: "Target.Memory"}))
+    assert(missing.contains(.MissingTargetCapability{capability: "Target.Panic"}))
+    assert_eq(jet_target_capability_name(.Memory), "Target.Memory")
+    assert_eq(jet_target_capability_name(.Panic), "Target.Panic")
 }
