@@ -6602,14 +6602,21 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         }
         if !dsl_args_valid {
             header_span := args_span ?? span
+            // The marker rules check the header against the block's registered
+            // signature first (E0930); a header they already rejected is not
+            // reported a second time.
+            registry_reported := false
+            loop diagnostic in diagnostics {
+                if diagnostic.code == "E0930" && diagnostic.span == .Val(reported) && reported.start >= span.start && reported.end <= header_span.end -> registry_reported = true
+            }
             expected := if name == {
-                "SQL" -> "`#SQL {{ … }}` or `#SQL<Row> {{ … }}`"
+                "SQL" -> "`#SQL {{ … }}` or `#SQL(Row) {{ … }}`"
                 "HTML" -> "`#HTML {{ … }}`"
                 else -> "the declared checked text-block header"
             }
-            diagnostics.push(sema_error("E0617", header_span, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}"))
+            if !registry_reported -> diagnostics.push(sema_error("E0617", header_span, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}"))
         }
-        // `#SQL<Row>`'s row header is a declared type position: a name that
+        // `#SQL(Row)`'s row header is a declared type position: a name that
         // resolves to no type is E0119 at the header.
         if dsl_args_valid && name == "SQL" && args.len() == 1 && args[0] == .Ident(row_name, row_span, _) && program.registration_graph == .Val(graph) {
             generic_names: loop parameter in environment.generic_params -> parameter.name
