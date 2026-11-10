@@ -1,0 +1,56 @@
+// List.sort_by by key and by comparator, and sort_by_desc, on 65536 items in
+// random, descending and ascending order: each result is in order, each key
+// is computed once, and the comparator runs at most n * log2(n) times. A
+// quadratic sort would make about two billion comparisons here.
+N: 65536
+LOG2_N: 16
+
+random_items: fn() -> [Int] {
+    xs := [Int]{}
+    seed := 12345
+    loop _ in 0..<N {
+        seed = (seed * 1103515245 + 12345) %% 2147483648
+        xs.push(seed)
+    }
+    xs
+}
+
+shapes: fn() -> [(name: String, items: [Int])] {
+    descending := [Int]{}
+    loop i in 0..<N -> descending.push(N - i)
+    ascending := [Int]{}
+    loop i in 0..<N -> ascending.push(i)
+    [(name: String, items: [Int])]{(name: "random", items: random_items()), (name: "descending", items: descending), (name: "ascending", items: ascending)}
+}
+
+in_order: fn(xs: [Int], up: Bool) -> Bool {
+    loop i in 1..<xs.len() {
+        if up && xs[i - 1] > xs[i] -> return false
+        if !up && xs[i - 1] < xs[i] -> return false
+    }
+    true
+}
+
+run: fn() {
+    loop shape in shapes() {
+        by_compare := shape.items.copy()
+        compares := 0
+        by_compare.sort_by((a: Int, b: Int) -> {
+            compares += 1
+            a <=> b
+        })
+        by_key := shape.items.copy()
+        keys := 0
+        by_key.sort_by((x: Int) -> {
+            keys += 1
+            x
+        })
+        desc := shape.items.copy()
+        desc_keys := 0
+        desc.sort_by_desc((x: Int) -> {
+            desc_keys += 1
+            x
+        })
+        print("{shape.name}: comparator sorted {in_order(by_compare, true)}, at most n log2 n comparisons {compares <= N * LOG2_N}; key sorted {in_order(by_key, true)}, one key per item {keys == N}; descending sorted {in_order(desc, false)}, one key per item {desc_keys == N}")
+    }
+}

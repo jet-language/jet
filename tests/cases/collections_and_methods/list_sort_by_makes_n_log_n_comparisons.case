@@ -1,0 +1,20 @@
+# List.sort_by is O(n log n) on the JetIR route, on O0, O1 and O2 (#5976 c10):
+# by comparator it makes at most n * log2(n) comparisons on 65536 random,
+# descending and ascending items, by key (and sort_by_desc) it computes one
+# key per item, and every result is in order.
+fixture: list_sort_by_makes_n_log_n_comparisons.fixture
+step o0: jet run main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty
+step o2: jet run --optimize=full main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty
