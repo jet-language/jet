@@ -21,6 +21,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row lists Env, but the program also reads the clock.
 - [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: a file with no package block may use every effect nothing denies.
 - [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `&T` write, `&&T` move/take — and the call site mirrors it.
+- [DependencyUpgrade](Effects/DependencyUpgrade/) — A dependency upgrade that does more: the package writes no effect rows, `.jet/lock` records each dependency's row, and `jet build --locked` refuses an upgrade that reads files, naming the call path.
 - [Determinism](Effects/Determinism.jet)
 - [EffectAuthority](Effects/EffectAuthority.jet) — `#FX(…) { … }` restricts a block to a fixed authority set: only those listed may be used inside, directly or through any call it reaches.
 - [EffectDeclarations](Effects/EffectDeclarations.jet)

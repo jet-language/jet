@@ -1,0 +1,35 @@
+# A beginner's dependency upgrade: the package writes no effect rows and no
+# grants, only its dependency on greeter. `jet fetch` writes `.jet/lock`, and
+# the first build records greeter's inferred effect row there. Version 0.2.0
+# of greeter reads a file, so `jet build --locked` refuses the upgrade (E3513)
+# at the function that reads and prints the call path to it; a plain build
+# names the path and records the wider row. The flow is the same on every
+# tier, so the oracle is the one tier-independent run. A refused build names
+# the file by its full path, spelled `{work}/` for the folder it ran in.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: NO_COLOR=1
+step: jet fetch
+exit: 0
+file: .jet/lock ~ "greeter" # the lock names the dependency
+step: jet run run.jet
+exit: 0
+stdout: = DependencyUpgrade.out
+step: jet build run.jet
+exit: 0
+file: .jet/lock !~ "FS.Read" # the first row reaches nothing
+write: Greeter/package.jet DependencyUpgrade.greeter.package.v2.template
+write: Greeter/greeter.jet DependencyUpgrade.greeter.v2.template
+step: jet build --locked run.jet
+exit: 1
+stdout: empty
+stderr: = DependencyUpgrade.err.out
+file: .jet/lock !~ "FS.Read" # a locked build writes no lock
+step: jet build run.jet
+exit: 0
+stderr: ~ "note: `greeter` now reaches `FS.Read` through greeter::greet → greeter::load; `.jet/lock` records its wider effect row" # a plain build names the path
+file: .jet/lock ~ "FS.Read" # the wider row is recorded
+file: package.jet !~ "authority" # still no grant line
+step: jet build --locked run.jet
+exit: 0
+stderr: !~ "now reaches" # the recorded row covers it
