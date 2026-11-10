@@ -49,10 +49,6 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
-| `compiler.advanced.register` | explicit opt-in provider registration for declared targets |
-| `compiler.advanced.register_expansion` | explicit opt-in call-expansion provider registration |
-| `compiler.advanced.register_specialization` | explicit opt-in specialization provider registration |
-| `compiler.advanced.session` | authorized session within a registered provider |
 | `-[…]` | effect row on a callable |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
@@ -3726,6 +3722,9 @@ workspace/build control, and existing-program rewrites use an authorized
 `compiler.advanced` session. Changes are explicit, checked against affected
 callers, atomic, and reported by a complete transformation receipt. They do
 not expose mutable compiler AST nodes or manufacture inferred facts.
+*Superseded by D-META-LADDER1=A (ratified 2026-11-09, #6129):* compiler
+control is the one root-only `Compiler` value under the Meta effects; the
+`compiler.advanced.*` spellings are removed.
 
 **D-META-OPTIN2=A — Approved root-package metaprogramming opt-in** *(ratified
 2026-09-21)*: standard mode includes read-only facts and additive `Generated`
@@ -3733,6 +3732,9 @@ publication. Advanced providers require `metaprogramming: unrestricted` in the
 approved root package and explicit target registration from root preparation.
 Import alone grants no provider or session. This opt-in does not grant host
 permissions.
+*Superseded by D-META-LADDER1=A (ratified 2026-11-09, #6129):* the Meta
+effects follow the rule of every effect, and only the root package's build
+function receives the `Compiler` value (`b.compiler(app)`).
 
 **D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
 subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,

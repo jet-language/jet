@@ -308,19 +308,15 @@ Standard metadata inspection is read-only. The syntax ledger reserves
 existing `Generated` value. Generation cannot replace an existing body,
 signature, or type.
 
-More powerful operations have separate names and grants:
-
-- `compiler.advanced.register` registers an explicitly declared provider;
-- `compiler.advanced.register_expansion` registers a call-expansion provider;
-- `compiler.advanced.register_specialization` registers a specialization
-  provider; and
-- `compiler.advanced.session` opens a session only inside an authorized,
-  registered provider.
-
-The operation schema accepts typed `Generated` values, providers, opaque
-identities, and metadata records. An advanced compiler grant is not a
-filesystem, process, FFI, network, or secret permission. Those authorities
-remain on their own effect and package-policy rails.
+More powerful operations are effects, not a separate opt-in. The `Meta`
+effects in `core.compiler` (`Generate`, `Include`, `Rewrite`, `Types` and
+`Raw`) are allowed unless a row denies them, and reading the program needs
+none. Operations above checked generation also need the `Compiler` value,
+which only the root package's own build source makes (`b.compiler(app)`); a
+dependency can't make one, and a function that receives it acts for the root.
+A Meta effect is not a filesystem, process, FFI, network, or secret
+permission. Those authorities remain on their own effect and package-policy
+rails.
 
 ## Design boundary
 
