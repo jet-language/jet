@@ -423,7 +423,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.remove_all(dir) ?? panic("cleanup")
 }
 
-#Test("envelope canonical archive rejects a same size write with a restored mtime") {
+#Test("envelope canonical archive rejects a same size replacement with a restored mtime") {
     if !sys.is_unix() -> return
     dir: pkg_test_envelope_scratch("restored-mtime")
     file: files.join(dir, "payload")
@@ -434,18 +434,24 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     expected_mtime: (files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime")
     marker: "{dir}.changed"
     files.remove(marker).drop("a stale marker may be absent")
+    // The same-size replacement and its restored mtime are made before the
+    // walk, since the hook may only touch files (`-[FS]>`); the hook swaps it
+    // in, which only the open file's change time and link count reveal.
+    replacement: "{dir}.replacement"
+    files.write(replacement, "BBBB") ?? panic("write replacement")
+    pkg_test_run([String]{"touch", "-r", stamp, replacement})
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
         react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
             if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened -> return
             files.write(marker, "") ?? panic("marker")
-            files.write(file, "BBBB") ?? panic("rewrite")
-            pkg_test_run([String]{"touch", "-r", stamp, file})
+            files.rename(replacement, file) ?? panic("rewrite")
             assert_eq((files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime"), expected_mtime)
         }
     }
     assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove(marker).drop("cleanup")
+    files.remove(replacement).drop("the hook moved it into place")
     files.remove_all(dir) ?? panic("cleanup")
 }
 

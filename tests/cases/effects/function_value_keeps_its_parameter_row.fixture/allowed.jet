@@ -1,0 +1,22 @@
+// Function values that fit their parameter's effect row are accepted: a pure
+// lambda, a printing lambda where `IO` is allowed, a lambda that can't stop
+// where `Panic` is denied, and a stopping lambda where `-[]>` admits stops.
+apply: fn(n: Int, f: fn(Int) -[]> Int) -> Int { f(n) }
+
+apply_io: fn(n: Int, f: fn(Int) -[IO]> Int) -> Int { f(n) }
+
+stop_apply: fn(n: Int, f: fn(Int) -[!Panic]> Int) -> Int { f(n) }
+
+calm: fn(n: Int) -> Int { n + 1 }
+
+run: fn() {
+    a: apply(2, (m: Int) -> m * 2)
+    b: apply_io(3, (m: Int) -> {
+        print("io {m}")
+        m
+    })
+    c: stop_apply(4, (m: Int) -> m + 1)
+    d: stop_apply(5, calm)
+    e: apply(6, (m: Int) -> if m < 0 -> panic("negative") else -> m)
+    print("{a} {b} {c} {d} {e}")
+}

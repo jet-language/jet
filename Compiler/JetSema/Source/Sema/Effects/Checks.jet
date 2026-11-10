@@ -210,12 +210,31 @@ sema_effect_source_display: fn(path: String) -> String Never! {
     if parts.len() == 0 -> path else -> parts[parts.len() - 1]
 }
 
-// A named function value in a slot with a closed effect bound: the value took
-// the slot's bound (sema_function_value_type), so `callee`'s own row is held
-// to `bound` once every row is solved (E0747 at `span`).
+// A named function value in a slot with a closed effect row: the value took
+// the slot's row (sema_function_value_type), so `callee`'s own row is held
+// to `bound` and kept clear of `denied` once every row is solved (E0747 at
+// `span`).
 SemaEffectCallbackBound: struct {
     callee: String
+    row: SemaEffectCallbackRow
+    span: Span
+}
+
+// A closed callback row: the effects it allows and the ones it denies
+// (`fn(Int) -[IO, !Panic]> Int` allows IO and denies Panic).
+SemaEffectCallbackRow: struct {
     bound: [String]
+    denied: [String]
+}
+
+// A lambda in a slot with a closed effect row: the lambda's own row, its call
+// facts and what its body walk charges, held to the slot's row once every row
+// is solved (E0747 at `span`).
+SemaEffectLambdaBound: struct {
+    direct: [String]
+    call_edges: [String]
+    maximal: Bool
+    row: SemaEffectCallbackRow
     span: Span
 }
 
@@ -315,8 +334,10 @@ SemaEffectNode: struct {
     // `{module}|{trait}` of the trait this method implements
     // (sema_effect_trait_cap_key), "" for any other function.
     trait_key: String{""}
-    // The bounded callback slots this body fills with named functions.
+    // The bounded callback slots this body fills with named functions and
+    // with lambdas.
     callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
+    lambda_bounds: [SemaEffectLambdaBound]{[SemaEffectLambdaBound]{}}
     // This function's type parameters, its owner type's first, and the
     // owner type's parameters in the order its type arguments bind them.
     type_params: [String]{[String]{}}
@@ -1969,36 +1990,100 @@ sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], node_by_key:
     }
 }
 
-// A named function read whose value type carries a closed effect row records
-// that row against the function's node. A function read under its own
-// declared row passes trivially; one that took a callback slot's bound is
-// the obligation sema_effect_check_callback_bounds settles.
-sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, callee: String, ty: Type, span: Span) {
+// The closed effect row of a function-typed slot, or None for no row, an
+// open row (`-[..E]>`), or a row that is already its own error.
+sema_effect_callback_row: fn(ty: Type) -> SemaEffectCallbackRow? {
     if ty == .Fn(_, _, bound, _, _, _) {
-        row: bound ?? return
-        if sema_effect_node_index(node_by_key, callee) == None -> return
-        names := [String]{}
+        row: bound ?? return None
+        parsed := SemaEffectCallbackRow{bound: [String]{}, denied: [String]{}}
         loop entry in row {
-            if entry.name.starts_with("..") -> return
-            if entry.name.starts_with("!") -> next
+            if entry.name.starts_with("..") -> return None
+            denial: entry.name.starts_with("!")
+            raw: if denial -> entry.name.removeprefix("!") else -> entry.name
             // An unknown or positive `Panic` entry is already its own error;
             // the bound it spoils holds no callback to account.
-            effect_name: sema_effect_parse_name(entry.name) ?? return
-            if sema_effect_root(effect_name) == "Panic" -> return
-            _ := sema_effect_set_add(names, effect_name)
+            effect_name: sema_effect_parse_name(raw) ?? return None
+            if denial {
+                // A memory denial is proved over memory events (E0921), not
+                // over rows, so a callback row does not hold it.
+                if sema_effect_root(effect_name) != "Mem" -> sema_effect_set_add(parsed.denied, effect_name)
+                next
+            }
+            if sema_effect_root(effect_name) == "Panic" -> return None
+            _ := sema_effect_set_add(parsed.bound, effect_name)
         }
-        nodes[node_index].callback_bounds.push(SemaEffectCallbackBound{callee: callee, bound: names, span: span})
+        return Val(parsed)
     }
+    None
 }
 
-// E0747: a function's contract is its declared row (or `-[]>`); an
-// undeclared function is judged by its solved row.
+// A named function read whose value type carries a closed effect row records
+// that row against the function's node. A function read under its own
+// declared row passes trivially; one that took a callback slot's row is
+// the obligation sema_effect_check_callback_bounds settles.
+sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, callee: String, ty: Type, span: Span) {
+    row: sema_effect_callback_row(ty) ?? return
+    if sema_effect_node_index(node_by_key, callee) == None -> return
+    nodes[node_index].callback_bounds.push(SemaEffectCallbackBound{callee: callee, row: row, span: span})
+}
+
+// A lambda whose value type carries a closed effect row (the row of the slot
+// it fills, or its own written row) records its own row: its call facts, and
+// what a walk of its body charges (loops, value reads, stops), on a node
+// appended to `nodes` for the walk and removed again.
+sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
+    row: sema_effect_callback_row(ty) ?? return
+    // copy: the lambda node starts from its owner's facts and spans; the
+    // owner node stays in the graph.
+    lambda_node := nodes[node_index].copy()
+    lambda_node.key = "{nodes[node_index].key}#lambda@{lambda.source_span.start}"
+    lambda_node.direct = [String]{}
+    lambda_node.direct_spans = [TEffectSpan]{}
+    lambda_node.call_edges = [String]{}
+    lambda_node.maximal = false
+    lambda_node.maximal_span = None
+    lambda_node.callback_bounds = [SemaEffectCallbackBound]{}
+    lambda_node.lambda_bounds = [SemaEffectLambdaBound]{}
+    nodes.push(lambda_node)
+    lambda_index: nodes.len() - 1
+    sema_effect_merge_lambda(nodes, lambda_index, lambda)
+    ignored := [Diagnostic]{}
+    sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: lambda_index}, nodes, facts, ignored, caller, tree, lambda)
+    walked := nodes.pop() ?? panic("the lambda's row node left the graph")
+    nodes[node_index].lambda_bounds.push(SemaEffectLambdaBound{direct: walked.direct.move(), call_edges: walked.call_edges.move(), maximal: walked.maximal, row: row, span: span})
+}
+
+// E0747: a named function's contract is its declared row (or `-[]>`); an
+// undeclared function is judged by its solved row. A denial is judged by the
+// solved row, which holds the deny-only rights (`Panic`, `Mem`); one the
+// function's own row already denies is its own E0749.
 sema_effect_check_callback_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node_index: Int, diagnostics: &[Diagnostic]) {
     loop obligation in nodes[node_index].callback_bounds {
         target: sema_effect_node_index(node_by_key, obligation.callee) ?? next
         row: if nodes[target].has_declared_row || nodes[target].is_pure -> nodes[target].declared else -> solved[target]
-        over: sema_effect_uncovered(row, obligation.bound)
-        if over.len() > 0 -> diagnostics.push(sema_effect_callback_diagnostic(over, obligation.bound, obligation.span))
+        over: sema_effect_uncovered(row, obligation.row.bound)
+        if over.len() > 0 -> diagnostics.push(sema_effect_callback_diagnostic(over, obligation.row.bound, obligation.span))
+        denied := [String]{}
+        loop name in sema_effect_covered(solved[target], obligation.row.denied) {
+            if sema_effect_covered([String]{name}, nodes[target].prohibited).len() == 0 -> sema_effect_set_add(denied, name)
+        }
+        if denied.len() > 0 -> diagnostics.push(sema_effect_callback_denied_diagnostic(denied, obligation.row, obligation.span))
+    }
+    loop obligation in nodes[node_index].lambda_bounds {
+        inferred := obligation.direct.copy()
+        if obligation.maximal -> sema_effect_set_union(inferred, authority_grantable_roots())
+        loop edge in obligation.call_edges {
+            if edge == "__jet_panic__" {
+                sema_effect_set_add(inferred, "Panic")
+                next
+            }
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            sema_effect_set_union(inferred, solved[target])
+        }
+        over: sema_effect_uncovered(inferred, obligation.row.bound)
+        if over.len() > 0 -> diagnostics.push(sema_effect_callback_diagnostic(over, obligation.row.bound, obligation.span))
+        denied: sema_effect_covered(inferred, obligation.row.denied)
+        if denied.len() > 0 -> diagnostics.push(sema_effect_callback_denied_diagnostic(denied, obligation.row, obligation.span))
     }
 }
 
@@ -2429,6 +2514,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         .Lambda(value) -> {
             sema_effect_merge_lambda(nodes, node_index, value)
             sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: node_index}, nodes, facts, diagnostics, caller, tree, value)
+            sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)
             return false
         }
         .StrLit(parts) -> {
@@ -2729,6 +2815,16 @@ sema_effect_check_scope_bounds: fn(marker: String, parsed: SemaEffectScopeBounds
         valid = false
     }
     valid
+}
+
+// `e0747` for a denial: the callback reaches an effect its parameter's row
+// denies (`fn(…) -[!Panic]>`), which no grant can lift.
+sema_effect_callback_denied_diagnostic: fn(denied: [String], row: SemaEffectCallbackRow, span: Span) -> Diagnostic {
+    denied_list: sema_effect_show(denied)
+    entries := row.bound.copy()
+    loop name in row.denied -> entries.push("!{name}")
+    diagnostic: sema_error("E0747", span, "this callback uses the effect `{denied_list}`, which the parameter doesn't allow", "the parameter is `fn(…) -[{sema_effect_show(entries)}]>`, which denies `{denied_list}`", "pass a callback that can't reach `{denied_list}`, or remove the denial from the parameter's row")
+    diagnostic_with_rights(diagnostic, "invocation", [String]{}, [String]{}, None)
 }
 
 // `e0747`: the callback's effects against its parameter's invocation row.
@@ -3453,7 +3549,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
     }
     loop node_index in 0..<nodes.len() {
-        if nodes[node_index].callback_bounds.len() == 0 -> next
+        if nodes[node_index].callback_bounds.len() == 0 && nodes[node_index].lambda_bounds.len() == 0 -> next
         callback_diagnostics := [Diagnostic]{}
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
@@ -4077,9 +4173,15 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
         }
         .LambdaBody(node_index) -> {
             // A lambda body's value reads and stops are the enclosing node's,
-            // as its calls are the enclosing node's edges.
+            // as its calls are the enclosing node's edges; so are the bounded
+            // callback slots it fills.
             sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
             sema_effect_record_stop(nodes, node_index, node)
+            if node.kind == {
+                .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
+                .Lambda(value) -> sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)
+                else -> {}
+            }
             Val(walk)
         }
     }
