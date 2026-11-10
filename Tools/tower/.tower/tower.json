@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98797,
+    "rev": 98798,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75961,7 +75961,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T15:49:33.438Z",
+      "updated": "2026-11-10T15:54:26.579Z",
       "updatedBy": "Main",
       "criteriaLastN": 171
     },
@@ -187896,13 +187896,13 @@
       "cardId": "c0oev2ib",
       "group": "language",
       "title": "A foreign effect names its library, as FFI.C(\"sqlite3\"), and a binding may declare the effects each function uses",
-      "situation": "When Jet calls a C library it cannot see what the C code does, so it assumes the call may do anything. A package that writes a list of allowed effects therefore cannot call any C library without allowing every effect.\n\nA grant also cannot tell two C libraries apart: allowing C allows all of them. This ballot lets a grant name one library, and lets a binding say which effects each of its functions uses. Keeping today's rule is option B.",
+      "situation": "When Jet calls a C library it cannot see what the C code does. A package allow row now treats that call as the one effect FFI.C, so listing FFI.C lets a package call C.\n\nA function row or a package deny row still treats the call as reaching every effect. So a function marked -[IO]> cannot call even a pure C function, and denying FS refuses it.\n\nA grant also cannot tell two C libraries apart. This ballot lets a grant name one library, and lets a binding say which effects each of its functions uses. Keeping today's rule is option B.",
       "gist": "Should a foreign effect name its library, and may a binding declare which effects each foreign function uses?",
       "lesson": "When Jet calls C code, it cannot see what that code does, so today it assumes anything. This vote decides whether a grant can name one C library instead of all of C. It also lets a binding state what each function touches.",
       "explainer": "Words used here. A binding is the #Import block that gives C functions Jet signatures. An effect is something a call does to the world, such as reading files. A row is the list of effects a call may use.\n\nA grant allows effects, either for the package's own code or for one dependency. A written allow list is a ceiling: code may use only what it lists.",
-      "story": "Lee's app lists its allowed effects and uses SQLite through a small binding. Today the build refuses until he allows every effect. Under A he writes the two effects SQLite uses on its functions, and the app's list stays short. A new image decoder later needs its own line, and review sees it.",
+      "story": "Lee's app lists its allowed effects and uses SQLite through a small binding. Today his app may allow FFI.C, but its denial of Net refuses every SQLite call. Under A he writes the two effects SQLite uses on its functions, and the denial holds. A new image decoder later needs its own line, and review sees it.",
       "inWild": "// Deno names each foreign library in its permission:\n$ deno run --allow-ffi=./libsqlite3.so app.ts",
-      "detail": "What this ballot decides. How a grant names one foreign library, and how a binding states what each foreign function does. Where a library runs is D-FFI-PLACE1=A's foreign field and is not reopened.\n\nToday, on the t6c compiler (dev 76955986d0). Probe native copies Examples/Interop/FFI/NativeC, which binds a C library through #Import c.nativeffi, with allow: [FFI, IO, Mem.Alloc]. jet inspect rights stops with E0749: run reaches Browser, DB, Env, Exec, FS, GPU, Log, Meta, Net, Rand, Secret and Time.\n\nThe note says why: run calls a C binding no descriptor owns, so the call reaches every effect. Probe named narrows allow to FFI.C and gets the same E0749, with FFI added to the list. So today a package with a written allow row must allow every root to call any C binding.\n\nCore's own bindings, such as the SQLite engine and TLS, are not open-world: their public functions declare rows such as -[DB]>. A user binding cannot. Probe declared writes negate: fn(value: I32) -[FS]> I32 in an #Import block and gets E0003, expected = before the C symbol.\n\nProbe e1221_named_ffi writes allow: [FFI.C(\"nativeffi\")] and gets E1221: allow names a right without an argument. D-EFFECT-ARGS1=A, ratified, gives rows, grants and denials one spelling for effect arguments, so this is unbuilt rather than unruled.\n\nCensus on dev, over Core, Compiler, Jetpack, Tools, Examples and tests. 119 #Import c. blocks in 118 files, none with a written row, since the parser refuses one. 58 c@ dependencies in 56 files. 1,088 allow lists name FFI, in 1,085 files, mostly test fixtures; none changes meaning under A, because bare FFI and FFI.C keep covering every library.\n\nWhat A does, part one: the library name. A call through #Import c.sqlite3 carries FFI.C(\"sqlite3\"). The name is the dependency's key in deps, the same key D-FFI-PLACE1's foreign field and D-EFFTYPE-GRANT1's grants field use. Two bindings of one library under one key share the name.\n\nA grant may list FFI.C(\"sqlite3\"), and the bare FFI.C still covers every C library, as FFI covers FFI.C today. A ceiling may deny one library with !FFI.C(\"sqlite3\"). The name is compared by equality under D-DECL-TYPES1=A; it is not a folder or host scope, so D-EFFECT-ARGS1's covers rule never applies.\n\nWhat A does, part two: declared rows. An #Import function may write its row with the ordinary arrow, exec: fn(sql: String) -[FS.Read, FS.Write]> Int. That is the spelling Core's bindings and every Jet function already use, so hover, docs and jet inspect rights show it the same way.\n\nA call through a function with a written row carries FFI.C(\"sqlite3\") plus that row, not every effect. A function without a written row keeps today's whole row, so no binding changes meaning. A declared row of [] says the C code touches nothing outside memory, as a pure math library would.\n\nCallbacks. When a binding takes a Jet function value, the call also carries that function's row, because the C code may call it. So a declared row never hides what a callback does.\n\nHow the declared row is trusted. Under D-FFI-PLACE1=A's .Sandbox, the sandbox gets host imports only for the declared row, so the row is enforced. Under .InProgram or .OwnProcess the row is a claim with its basis, as D-FFI-CONTRACT1=A requires, and jet inspect rights marks it trusted, naming the binding line.\n\nGrants for published bindings. A package that wraps a C library is an ordinary dependency. Under D-EFFTYPE-GRANT1=A, jet add reads its declared rows and writes its grant line, such as sqlite: [FFI.C(\"sqlite3\"), FS]. An upgrade that adds a library or widens a row stops with the call path.\n\nWhat must exist first. Allow, deny and grant lists must accept effect arguments, as D-EFFECT-ARGS1=A and D-DECL-TYPES1=A already rule; dev rejects them with E1221. #Import functions must accept the row arrow; dev rejects it with E0003. A records both as build work, not new law.\n\nBeginner path. A beginner who binds one library writes nothing new; FFI.C keeps working, and a package with no allow list is unchanged. Expert path. Name each library in grants, and write a row on each foreign function to drop the whole-row guess.\n\nDownsides of A, and what the design does about them. A declared row on an in-program library is a claim, not a proof. jet inspect rights marks it trusted and names its line, and .Sandbox turns it into enforcement with no code change.\n\nA wrong claim is the binder's bug, as a wrong #Unsafe block is today. jet audit foreign lists every written row beside the library's place, so a reviewer sees each claim that no sandbox enforces.\n\nWhat remains. Grants grow one line per library. jet add writes that line when it adds the dependency, under D-EFFTYPE-GRANT1=A.\n\nOther options. B keeps one effect per language and the whole row. C names the library but adds no declared row. D adds declared rows but no library name.\n\nTheir best cases. B adds nothing. C is the smallest change that separates libraries. D lets an allow-listed package call C without allowing everything. Their costs: B and C keep the every-effect refusal on any allow-listed package. D cannot tell two C libraries apart in a grant.",
+      "detail": "What this ballot decides. How a grant names one foreign library, and how a binding states what each foreign function does. Where a library runs is D-FFI-PLACE1=A's foreign field and is not reopened.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). The package allow check changed on 2026-11-10 (d80fbffd3b, card #6281). A call through a C binding with no descriptor now has the effect FFI.C. Probe native, with allow: [FFI, IO, Mem.Alloc], and probe named, with allow: [FFI.C, IO, Mem.Alloc], both print native-c-ok.\n\nTwo checks still treat that call as reaching every effect. Probe ceiling calls C negate from flip: fn(n: I32) -[IO]> I32 and gets E0740, listing every root. Probe deny allows FFI.C and denies FS, and its call to negate gets E0749 for FS.\n\nCore's own bindings, such as the SQLite engine and TLS, are not open-world: their public functions declare rows such as -[DB]>. A user binding cannot. Probe declared writes negate: fn(value: I32) -[FS]> I32 in an #Import block and gets E0003, expected = before the C symbol.\n\nProbe e1221_named_ffi writes allow: [FFI.C(\"nativeffi\")] and gets E1221: allow names a right without an argument. D-EFFECT-ARGS1=A, ratified, gives rows, grants and denials one spelling for effect arguments, so this is unbuilt rather than unruled.\n\nCensus on dev, over Core, Compiler, Jetpack, Tools, Examples and tests. 121 #Import c. blocks in 120 files, none with a written row, since the parser refuses one. 58 c@ dependencies in 56 files. 303 deny rows in 118 files. 1,088 allow lists name FFI, in 1,085 files, mostly test fixtures; none changes meaning under A, because bare FFI and FFI.C keep covering every library.\n\nWhat A does, part one: the library name. A call through #Import c.sqlite3 carries FFI.C(\"sqlite3\"). The name is the dependency's key in deps, the same key D-FFI-PLACE1's foreign field and D-EFFTYPE-GRANT1's grants field use. Two bindings of one library under one key share the name.\n\nA grant may list FFI.C(\"sqlite3\"), and the bare FFI.C still covers every C library, as FFI covers FFI.C today. A ceiling may deny one library with !FFI.C(\"sqlite3\"). The name is compared by equality under D-DECL-TYPES1=A; it is not a folder or host scope, so D-EFFECT-ARGS1's covers rule never applies.\n\nWhat A does, part two: declared rows. An #Import function may write its row with the ordinary arrow, exec: fn(sql: String) -[FS.Read, FS.Write]> Int. That is the spelling Core's bindings and every Jet function already use, so hover, docs and jet inspect rights show it the same way.\n\nA call through a function with a written row carries FFI.C(\"sqlite3\") plus that row, not every effect. A function without a written row keeps today's whole row, so no binding changes meaning. A declared row of [] says the C code touches nothing outside memory, as a pure math library would. With it, probe ceiling's flip and probe deny's call both check clean.\n\nCallbacks. When a binding takes a Jet function value, the call also carries that function's row, because the C code may call it. So a declared row never hides what a callback does.\n\nHow the declared row is trusted. Under D-FFI-PLACE1=A's .Sandbox, the sandbox gets host imports only for the declared row, so the row is enforced. Under .InProgram or .OwnProcess the row is a claim with its basis, as D-FFI-CONTRACT1=A requires, and jet inspect rights marks it trusted, naming the binding line.\n\nGrants for published bindings. A package that wraps a C library is an ordinary dependency. Under D-EFFTYPE-GRANT1=A, jet add reads its declared rows and writes its grant line, such as sqlite: [FFI.C(\"sqlite3\"), FS]. An upgrade that adds a library or widens a row stops with the call path.\n\nWhat must exist first. Allow, deny and grant lists must accept effect arguments, as D-EFFECT-ARGS1=A and D-DECL-TYPES1=A already rule; dev rejects them with E1221. #Import functions must accept the row arrow; dev rejects it with E0003. A records both as build work, not new law.\n\nBeginner path. A beginner who binds one library writes nothing new; FFI.C keeps working, and a package with no allow list is unchanged. Expert path. Name each library in grants, and write a row on each foreign function to drop the whole-row guess.\n\nDownsides of A, and what the design does about them. A declared row on an in-program library is a claim, not a proof. jet inspect rights marks it trusted and names its line, and .Sandbox turns it into enforcement with no code change.\n\nA wrong claim is the binder's bug, as a wrong #Unsafe block is today. jet audit foreign lists every written row beside the library's place, so a reviewer sees each claim that no sandbox enforces.\n\nWhat remains. Grants grow one line per library. jet add writes that line when it adds the dependency, under D-EFFTYPE-GRANT1=A.\n\nOther options. B keeps one effect per language and the whole row. C names the library but adds no declared row. D adds declared rows but no library name.\n\nTheir best cases. B adds nothing. C is the smallest change that separates libraries. D lets a function row or a deny row sit beside a pure C call. Their costs: B and C keep the every-effect reach under function rows and deny rows. D cannot tell two C libraries apart in a grant.",
       "options": [
         {
           "key": "A",
@@ -187915,7 +187915,7 @@
           "key": "B",
           "name": "One effect per language",
           "detail": "FFI.C covers every C library; a foreign call gets the whole row.",
-          "technical": "No change. An allow-listed package must allow every root to call any user C binding (E0749).",
+          "technical": "No change. An allow row's FFI.C covers every C library. Function rows (E0740) and deny rows (E0749) treat each undescribed C call as reaching every effect.",
           "code": "// package.jet: deps: { sqlite3: c@\"vendor/sqlite\" }\nuse c: c.sqlite3\n\n#Import c.sqlite3: module {\n    libversion: fn() -> String = \"sqlite3_libversion\"\n    exec: fn(sql: String) -> Int = \"jet_sqlite_exec\"\n}\n\nrun: fn() {\n    print(c.libversion())\n}\n// Today (B): run's row holds every effect; an allow list must name them all."
         },
         {
@@ -187936,7 +187936,7 @@
       "comparisons": [
         {
           "lang": "Deno",
-          "note": "The FFI permission can name each library file.",
+          "note": "--allow-ffi and --deny-ffi take library paths; a loaded library can still do anything.",
           "code": "--allow-ffi=./libsqlite3.so"
         },
         {
@@ -187953,7 +187953,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A grant names one library, and a written row replaces the every-effect guess, so an allow-listed package can call C at all. Under the sandbox that row is enforced.",
+        "why": "A grant names one library, and a written row replaces the every-effect guess, so a function row or a deny row can sit beside a C call. Under the sandbox that row is enforced.",
         "gains": [
           "Each C library needs its own grant, and an upgrade adding one stops with a named line.",
           "A written row replaces the whole row, in the spelling every Jet function uses.",
@@ -187972,27 +187972,27 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "B lets one grant cover every C library and keeps the every-effect refusal."
+            "reason": "B lets one grant cover every C library, and function rows and deny rows still refuse any C call."
           },
           {
             "key": "C",
-            "reason": "C keeps the whole row on every call, so allow lists still refuse C."
+            "reason": "C keeps the whole row on every call, so function rows and deny rows still refuse C."
           },
           {
             "key": "D",
             "reason": "D cannot tell two C libraries apart in a grant."
           }
         ],
-        "tradeoff": "One grant line per library, for foreign calls you can tell apart and bound."
+        "tradeoff": "One grant line per library, for foreign calls a grant can tell apart and bound."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. The every-root allow refusal was a defect fixed on 2026-11-10 (d80fbffd3b); allow-listed packages now call C with FFI.C. The every-effect reach remains under function rows and deny rows (probes ceiling, deny), which A's declared rows remove."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) on PATH, in $JET_SCRATCH_ROOT/lanes/BallotFix/probes/fe/native run jet inspect rights run.jet (E0749). In probes/fe/named run jet run . (E0749). In probes/fe/declared run jet run . (E0003). In probes/fe/bugs/e1221_named_ffi run jet check . (E1221). The census commands are in census_fe.sh. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). In D-FFI-EFFECTS1/probes: native and named print native-c-ok with jet run .; ceiling gets E0740; deny gets E0749; declared gets E0003; bugs/e1221_named_ffi gets E1221 with jet check. The allow rule change is commit d80fbffd3b. The census uses git grep -c over Core, Compiler, Jetpack, Tools, Examples and tests.",
       "surface": {
         "gist": "Should a foreign effect name its library, and may a binding declare which effects each foreign function uses?",
         "lesson": "When Jet calls C code, it cannot see what that code does, so today it assumes anything. This vote decides whether a grant can name one C library, and lets a binding state what each function touches.",
@@ -188093,12 +188093,87 @@
               "reason": "Libraries look alike."
             }
           ],
-          "tradeoff": "A grant line per library, for foreign calls you can tell apart."
+          "tradeoff": "A grant line per library, for foreign calls a grant can tell apart."
         }
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:47:16.190Z"
+      "created": "2026-11-10T03:47:16.190Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "An in-program written row is a claim, not a proof.",
+          "attempts": [
+            "Under D-FFI-PLACE1=A's .Sandbox, give the module host imports only for the written row, so the row is enforced.",
+            "Elsewhere, mark the row trusted in jet inspect rights and list it in jet audit foreign beside the library's place."
+          ],
+          "result": "Reduced: enforced under .Sandbox and visible everywhere else; Deno documents the same limit for --allow-ffi."
+        },
+        {
+          "option": "A",
+          "loss": "Grants grow one line per library.",
+          "attempts": [
+            "Keep bare FFI.C covering every library, so nothing old changes meaning (1,088 allow lines).",
+            "Have jet add write the grant line from the binding's declared rows under D-EFFTYPE-GRANT1=A."
+          ],
+          "result": "Reduced to one written line, which jet add produces."
+        },
+        {
+          "option": "A",
+          "loss": "A callback passed to C could hide effects behind a declared row.",
+          "attempts": [
+            "Trust the declared row alone; the callback's effects would then be lost.",
+            "Add the row of every Jet function value the call passes."
+          ],
+          "result": "Removed by the second attempt."
+        },
+        {
+          "option": "B",
+          "loss": "Function rows and deny rows refuse any C call (probes ceiling and deny).",
+          "attempts": [
+            "Wrap the C call in an unmarked function; the reach still flows up to the row.",
+            "Drop the deny row or widen the function row to every root."
+          ],
+          "result": "Not removed: both workarounds give up the check."
+        },
+        {
+          "option": "C",
+          "loss": "The whole row stays on every call.",
+          "attempts": [
+            "Deny by library, as !FFI.C(\"sqlite3\").",
+            "Describe Core-style bindings with a descriptor."
+          ],
+          "result": "Not removed for user bindings."
+        },
+        {
+          "option": "D",
+          "loss": "A grant cannot tell two C libraries apart.",
+          "attempts": [
+            "Review the deps list instead of the grant.",
+            "Use jet audit foreign to list libraries."
+          ],
+          "result": "Not removed: an upgrade adding a library passes the grant."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Foreign effects: allow-rule fix, ceiling and deny probes, adversarial review",
+          "path": "Docs/audits/2026-11-10-ffi-effects-review.md",
+          "note": "a0.0.43: allow: [FFI.C] now runs C (d80fbffd3b); function rows (E0740) and deny rows (E0749) still see every effect; declared-row arrow is E0003, FFI.C(lib) is E1221; census; Deno, Java peers."
+        },
+        {
+          "title": "Deno permissions: --allow-ffi and --deny-ffi",
+          "url": "https://docs.deno.com/runtime/reference/permissions/"
+        },
+        {
+          "title": "Deno security: native libraries escape the sandbox",
+          "url": "https://docs.deno.com/runtime/fundamentals/security/"
+        },
+        {
+          "title": "JEP 454: Foreign Function and Memory API (--enable-native-access)",
+          "url": "https://openjdk.org/jeps/454"
+        }
+      ]
     },
     {
       "id": "D-FILE-STATEMENTS1",
@@ -199210,6 +199285,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T15:54:26.579Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-FFI-EFFECTS1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T15:49:33.438Z",
       "by": "Main",
