@@ -65,6 +65,8 @@ use {
         MarkerCallArg,
         Measure,
         MeasureRule,
+        MetaAttr,
+        MetaField,
         sema_casing_pascal_words,
         NamedSpan,
         NamedType,
@@ -575,8 +577,9 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         .Shared(inner) -> Type.Shared{inner: sema_inline_rewrite_type(rewrite, inner)}
         .Option(inner) -> Type.Option{inner: sema_inline_rewrite_type(rewrite, inner)}
         .FixedList(inner, len) -> Type.FixedList{elem: sema_inline_rewrite_type(rewrite, inner), len: sema_inline_rewrite_measure(rewrite, len)}
-        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inline_rewrite_type(rewrite, inner)}
+        // A user tag declared in the module body renames with the module's
+        // other nominals (`#Marked T` -> `#complete_use_Marked T`).
+        .Tagged(marker, inner) -> Type.Tagged{marker: sema_inline_rewrite_tag_marker(rewrite, marker), inner: sema_inline_rewrite_type(rewrite, inner)}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
         .Map(key, key_span, value) -> Type.Map{key: sema_inline_rewrite_type(rewrite, key), key_span: key_span.copy(), value: sema_inline_rewrite_type(rewrite, value)}
         .Result(ok, err) -> Type.Result{ok: sema_inline_rewrite_type(rewrite, ok), err: sema_inline_rewrite_type(rewrite, err)}
@@ -611,6 +614,18 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         // consuming match), so an unchanged type kind is copied into the rebuilt program, while the
         // caller's program keeps the original.
         else -> ty.copy()
+    }
+}
+
+sema_inline_rewrite_tag_marker: fn(rewrite: SemaInlineRewrite, marker: TagMarker) -> TagMarker Never! {
+    if marker == {
+        .User(name) -> {
+            if rewrite.types.get(name) == .Val(.Named(mapped)) -> return TagMarker.User{name: mapped}
+            // copy: `name` is a payload of read parameter `marker`, which keeps the original
+            TagMarker.User{name: name.copy()}
+        }
+        // copy: an internal tag never renames; read parameter `marker` keeps the original
+        .Internal(_) -> marker.copy()
     }
 }
 
@@ -1076,6 +1091,8 @@ sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -
     updated := binding
     updated.ty = sema_inline_rewrite_optional_type(rewrite, binding.ty)
     updated.init = sema_inline_rewrite_expr(rewrite, binding.init)
+    updated.markers = sema_inline_rewrite_markers(rewrite, binding.markers)
+    updated.meta = sema_inline_rewrite_meta(rewrite, binding.meta)
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
@@ -1225,6 +1242,24 @@ sema_inline_rewrite_markers: fn(rewrite: &SemaInlineRewrite, markers: [Marker]) 
     mapped
 }
 
+// `#Meta(category: label)` inside a template reads the instance's value
+// arguments like any other expression of the module.
+sema_inline_rewrite_meta: fn(rewrite: &SemaInlineRewrite, meta: MetaAttr?) -> MetaAttr? Never! {
+    present: meta ?? return None
+    updated := present
+    fields := [MetaField]{}
+    loop field in present.fields {
+        if field == {
+            .Category(value, span) -> fields.push(MetaField.Category{value: sema_inline_rewrite_expr(rewrite, value), span: span})
+            .Maturity(value, span) -> fields.push(MetaField.Maturity{value: sema_inline_rewrite_expr(rewrite, value), span: span})
+            .Unknown(name, value, span) -> fields.push(MetaField.Unknown{name: name, value: sema_inline_rewrite_optional_expr(rewrite, value), span: span})
+            .Tunable(span) -> fields.push(MetaField.Tunable{span: span})
+        }
+    }
+    updated.fields = fields
+    Val(updated)
+}
+
 sema_inline_rewrite_clauses: fn(rewrite: &SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
     mapped := [ContractClause]{}
     loop clause in clauses {
@@ -1268,6 +1303,7 @@ sema_inline_rewrite_func: fn(rewrite: &SemaInlineRewrite, function: Func) -> Fun
     updated.params = sema_inline_rewrite_params(rewrite, function.params)
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
     updated.markers = sema_inline_rewrite_markers(rewrite, function.markers)
+    updated.meta = sema_inline_rewrite_meta(rewrite, function.meta)
     updated.pre = sema_inline_rewrite_clauses(rewrite, function.pre)
     updated.post = sema_inline_rewrite_clauses(rewrite, function.post)
     updated.body = sema_inline_rewrite_stmts(rewrite, function.body)
@@ -1475,6 +1511,8 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 mapped := definition
                 mapped.value = sema_inline_rewrite_expr(visible, definition.value)
                 mapped.ty = sema_inline_rewrite_optional_type(visible, definition.ty)
+                mapped.markers = sema_inline_rewrite_markers(visible, definition.markers)
+                mapped.meta = sema_inline_rewrite_meta(visible, definition.meta)
                 kept_rewritten.push(Item.Const{value: mapped})
             }
             else -> kept_rewritten.push(inner)

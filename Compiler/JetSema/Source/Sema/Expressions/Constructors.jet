@@ -2332,6 +2332,13 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? return None
             return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
         }
+        // A scalar head reached through a type parameter (`T{ value }` in a
+        // generic module body, `T` = Int): the parser read `{ value }` as a
+        // field shorthand before types were known; it is the one-expression body.
+        .Fields(fields) -> if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
+            // copy: `fields` is a payload of read parameter `body`, which keeps the original
+            return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         else -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, diagnostics)

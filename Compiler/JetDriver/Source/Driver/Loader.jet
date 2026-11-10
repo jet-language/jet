@@ -4067,14 +4067,16 @@ jet_driver_inline_module_declares: fn(items: [Item], owner: String, member: Stri
     false
 }
 
-// Whether `items`, a module's top level, declare `member`: an item or a
-// nested module.
+// Whether `items`, a module's top level, declare `member`: an item, a
+// nested module, a module template or a module alias.
 jet_driver_items_declare: fn(items: [Item], member: String) -> Bool Never! {
     loop named in jet_driver_namespace_item_names(items, 0) {
         if named.name == member -> return true
     }
     loop item in items {
         if item == .CodeModule(code_module) && code_module.name == member -> return true
+        if item == .GenericModule(template) && template.name == member -> return true
+        if item == .ModuleAlias(alias) && alias.name == member -> return true
     }
     false
 }

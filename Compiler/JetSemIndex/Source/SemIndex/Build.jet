@@ -15,6 +15,7 @@ use {
         Binding,
         CallArg,
         CallablePolicy,
+        CodeModule,
         DeriveBodyItem,
         EffectRowEntry,
         Expr,
@@ -2155,26 +2156,41 @@ semindex_exported: fn(item: Item) -> String? Never! {
     name
 }
 
-// `SymbolDB::finalize_index` instance rows.
+// `SymbolDB::finalize_index` instance rows. An instance expanded inside a
+// module body (a template's nested module) is a row too.
 semindex_instances: fn(modules: [JetDriverDocModule]) -> [SemInstance] {
     output := [SemInstance]{}
     loop doc_module in modules {
-        loop item in doc_module.items {
-            if item == .CodeModule(code_module) {
-                identity: code_module.instance_identity ?? next
-                exported := [String]{}
-                if code_module.body == .Val(body) {
-                    loop nested in body {
-                        if semindex_exported(nested) == .Val(name) -> exported.push(name)
-                    }
+        loop code_module in semindex_instance_modules(doc_module.items) {
+            identity: code_module.instance_identity ?? next
+            exported := [String]{}
+            if code_module.body == .Val(body) {
+                loop nested in body {
+                    if semindex_exported(nested) == .Val(name) -> exported.push(name)
                 }
-                applications: loop application in identity.applications -> SemInstanceApplication{name: application.name, module_path: application.source_module, semantic_identity: application.semantic_identity, span: application.span}
-                arguments: loop key in identity.argument_keys -> semindex_hex(key)
-                output.push(SemInstance{name: code_module.name, module_path: doc_module.path, fingerprint: identity.fingerprint, full_key_hex: semindex_hex(identity.full_key), template_definition_id: identity.definition_id, template_span: identity.template_span, arguments: arguments, argument_values: identity.argument_values, argument_provenance: identity.argument_provenance, applications: applications, exported_members: exported})
             }
+            // Every application is spelled in the module holding the instance.
+            applications: loop application in identity.applications -> SemInstanceApplication{name: application.name, module_path: doc_module.path, semantic_identity: application.semantic_identity, span: application.span}
+            arguments: loop key in identity.argument_keys -> semindex_hex(key)
+            output.push(SemInstance{name: code_module.name, module_path: doc_module.path, fingerprint: identity.fingerprint, full_key_hex: semindex_hex(identity.full_key), template_definition_id: identity.definition_id, template_span: identity.template_span, arguments: arguments, argument_values: identity.argument_values, argument_provenance: identity.argument_provenance, applications: applications, exported_members: exported})
         }
     }
     output
+}
+
+// The module instances among `items` and inside their module bodies, in
+// source order.
+semindex_instance_modules: fn(items: [Item]) -> [CodeModule] {
+    found := [CodeModule]{}
+    loop item in items {
+        if item == .CodeModule(code_module) {
+            if code_module.instance_identity != None -> found.push(code_module.copy())
+            if code_module.body == .Val(body) {
+                loop nested in semindex_instance_modules(body) -> found.push(nested)
+            }
+        }
+    }
+    found
 }
 
 semindex_output_kind: fn(kind: OutputKind) -> String Never! {
@@ -2396,17 +2412,15 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
     }
     semindex_import_alias_defs(db, modules)
     loop doc_module in modules {
-        loop item in doc_module.items {
-            if item == .CodeModule(instance) {
-                identity: instance.instance_identity ?? next
-                semantic: "instance:{identity.fingerprint}"
-                loop application in identity.applications {
-                    present := false
-                    loop definition in db.defs {
-                        if definition.identity == semantic && definition.def_span.start == application.span.start && definition.def_span.end == application.span.end && definition.module_path == application.source_module -> present = true
-                    }
-                    if !present -> db.defs.push(SemDef{identity: application.semantic_identity, name: application.name, qualified_name: application.name, def_span: application.span, module_path: application.source_module, kind: SemKind.Module})
+        loop instance in semindex_instance_modules(doc_module.items) {
+            identity: instance.instance_identity ?? next
+            semantic: "instance:{identity.fingerprint}"
+            loop application in identity.applications {
+                present := false
+                loop definition in db.defs {
+                    if definition.identity == semantic && definition.def_span.start == application.span.start && definition.def_span.end == application.span.end && definition.module_path == doc_module.path -> present = true
                 }
+                if !present -> db.defs.push(SemDef{identity: application.semantic_identity, name: application.name, qualified_name: application.name, def_span: application.span, module_path: doc_module.path, kind: SemKind.Module})
             }
         }
     }

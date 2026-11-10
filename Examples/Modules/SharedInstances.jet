@@ -1,0 +1,32 @@
+// Equal applications of one template share one instance.
+//
+// `first: boxes<Int>(3)` and `again: boxes<Int>(1 + 2)` fold to the same
+// arguments, so they name one module: `first.Box` and `again.Box` are one
+// type, and a box made through one alias opens through the other. A forward
+// alias (`forward: again`) is that instance too. `other: boxes<Int>(4)` has a
+// different value argument, so it is an instance of its own.
+boxes: module<T>(limit: Int) {
+    Box: struct {
+        priv value: T
+    }
+
+    make: fn(value: T) -> Box { Box{value: value} }
+
+    open: fn(box: Box) -> T { box.value }
+
+    limit_of: fn() -> Int { limit }
+}
+
+first: boxes<Int>(3)
+again: boxes<Int>(1 + 2)
+other: boxes<Int>(4)
+forward: again
+
+run: fn() {
+    made: first.make(41)
+    print(again.open(made))
+    print(forward.open(first.make(1)))
+    print(first.limit_of())
+    print(again.limit_of())
+    print(other.limit_of())
+}
