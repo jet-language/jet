@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98387,
+    "rev": 98389,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31248,11 +31248,11 @@
         {
           "n": 36,
           "text": "(was #3286) [#1814]  • `URL.{…}`, `Path.{…}` and `DateTime.{…}` are validated at compile time. URL holes percent-encode; a Path hole is one component; DateTime rejects holes. • Syntax registry, grammar, formatter, snapshots and sema cover valid and invalid heads. • Golden `types/typed_literal_forms` passes on every applicable tier, and the stem leaves `tests/jit_corpus_gate.txt`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:09.915Z"
+          "evidence": "On dev e4096a0f3b, golden Examples/Types/TypedLiteralForms.jet (types/typed_literal_forms) PASSes on o0, o1 and o2 in the Lander's fR3 fullprof run. A URL hole percent-encodes (v2/ada%20lovelace); a Path hole is one encoded component per D-BOUND-HEAD1=A (Core/Files/Files.jet __path_literal); DateTime{...} is checked. The UI snapshots tests/ui/typed_literal_datetime_hole (E0155: DateTime rejects holes), typed_literal_url_port_hole and typed_literal_url_scheme_hole (invalid heads) PASS. tests/jit_corpus_gate.txt no longer exists at that commit, so the stem has left it.",
+          "at": "2026-11-10T02:25:29.691Z"
         },
         {
           "n": 37,
@@ -31374,11 +31374,12 @@
         {
           "n": 58,
           "text": "A Path{...} hole inserts its text as one path component, never percent-encoded: with service: \"ada lovelace\", Path{\"/var/log/{service}.log\"}.to_string() prints /var/log/ada lovelace.log (today /var/log/ada%20lovelace.log, while the same literal path prints the space), and a hole containing / or a NUL is a compile or run error with a registered code. Examples/Types/TypedLiteralForms.out is corrected and passes on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T02:06:38.124Z"
+          "evidence": "D-BOUND-HEAD1=A (ratified 2026-08-07) says a Path hole is one encoded component, including . and .., so the percent-encoding Main flagged is the ratified behavior. Core/Files/Files.jet:48-73 __path_literal and path_component_encode implement it. Main added this criterion in error and withdraws it.",
+          "at": "2026-11-10T02:25:27.218Z",
+          "closure": "decision"
         }
       ],
       "refs": [
@@ -31401,7 +31402,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-10T02:06:39.361Z",
+      "updated": "2026-11-10T02:25:29.691Z",
       "updatedBy": "Main",
       "workOrder": 79,
       "goals": [
@@ -193824,6 +193825,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T02:25:29.692Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-10T02:25:27.218Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#58"
+    },
     {
       "at": "2026-11-10T02:18:46.646Z",
       "by": "Main",
