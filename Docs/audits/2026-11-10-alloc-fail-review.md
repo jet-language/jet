@@ -66,3 +66,19 @@ where a handler sits on the call or the function's contract names `AllocError`? 
 - A handler on the call decides whether it can fail. Hover marks it.
 - A callee that does not name AllocError still stops inside.
 - Out-of-tree callers of `try_` names get a generic error until D-LANG-MIGRATE1 is decided.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independent evidence | Verdict |
+|---|---|---|
+| A's recovery works today | Reran a01-a08: twins succeed, plain handled push E0405, contract success case succeeds, fixed try_alloc prints 7 -1, context value E0003, plain capacity E0311, map fallback -1 then 1. | Fails as recovery proof; successful pushes establish no forced-failure cleanup. |
+| One allocation contract covers every callee | A is lexical; callees and cleanup have their own contracts. | Fails as a whole-call-tree promise; stopping boundaries now explicit. |
+| Every signature naming any convertible Err opts in | A broad default Err would silently select recovery in ordinary code. | Fails; opt-in is explicit AllocError admission after alias/union resolution, not a broad conversion. Nested lambdas have their own contracts. |
+| A handler can always select AllocError | Map.add already returns Option, and existing fallible operations have their own errors. | Fails generally; preserve existing handler meaning, use an AllocError-contract helper where necessary. |
+| Cleanup is automatically safe | Error construction, moved arguments, partial aggregates and secondary allocation failure can leak or double-drop. | Holds only with allocation-free failure transfer, exactly-once cleanup and fail-nth tests across tiers. |
+| C must pass an allocator explicitly | D-ALLOC-SITE1 is a separate ratified selection rule. Uniform failure types do not require changing it. | Fails; strengthened C keeps the existing context allocator. |
+| B is necessarily two mechanisms | D-ALLOCFAIL1=A describes one raw primitive with distinct stopping and fallible wrappers. | Fails as a runtime claim; B has a larger surface, not necessarily duplicate allocation machinery. |
+
+Read D-ALLOCFAIL1=A, D-ALLOC-SITE1=A and D-RESOURCE-LIMIT1=A directly, plus Rust Vec and C++ bad_alloc references. The original census was not repeated and is not used to prove coverage or a halved total API.
+
+Conditional agreement with A after forced-failure safety proof; C is a strong uniform-typing alternative. No new option was needed. Do not post success-only probes as recovery proof, whole-call-tree recovery, or a zero-cost claim.
