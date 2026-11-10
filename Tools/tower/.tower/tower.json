@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98804,
+    "rev": 98805,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63259,8 +63259,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T14:26:25.341Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-10T16:10:38.797Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
       ],
@@ -190994,13 +190994,13 @@
       "cardId": "c0iuv3zr",
       "group": "library",
       "title": "Byte streams gain read_into, which appends what arrives to a caller-owned buffer, so a steady read loop allocates nothing",
-      "situation": "Every read from a network connection hands back a fresh piece of memory holding the bytes. The runtime fills its own reusable block, then copies the bytes into a new list for the caller. The web server and the encrypted-connection reader then append that list to a buffer they already own.\n\nSo each read asks for memory and copies twice. We recommend A: a read form that appends straight into a buffer the caller owns, so a steady read loop stops asking for memory.",
+      "situation": "Every read from a network connection hands back a fresh piece of memory holding the bytes. The runtime fills its own reusable block, then copies the bytes into a new list for the caller. The web server and the encrypted-connection reader then append that list to a buffer they already own.\n\nSo each read asks for memory and copies twice. The recommendation is A: a read form that appends straight into a buffer the caller owns, so a steady read loop stops asking for memory.",
       "gist": "Should byte streams gain read_into, which appends what arrives to a buffer the caller owns, so steady reads allocate nothing?",
-      "lesson": "Reading from a network connection today hands you a fresh piece of memory each time. Busy servers read thousands of times a second. This vote decides whether Jet adds a way to read into memory you already have.",
-      "explainer": "Words used here. A buffer is a byte list you keep and reuse. A short read returns fewer bytes than the limit. Allocation is asking for new memory.",
+      "lesson": "Reading from a network connection today hands back a fresh piece of memory each time. Busy servers read thousands of times a second. This vote decides whether Jet adds a way to read into memory the program already holds.",
+      "explainer": "Words used here. A buffer is a byte list a program keeps and reuses. A short read returns fewer bytes than the limit. Allocation is asking for new memory.",
       "story": "Ana's proxy forwards traffic in a loop. Under A, she keeps one buffer, clears it after each forward, and the loop asks for no new memory once it has warmed up.",
       "inWild": "// Go: Read fills a slice the caller owns.\nn, err := conn.Read(buf)",
-      "detail": "What this ballot decides. Whether byte streams get a read form that writes into a caller's buffer, and its shape. read(limit) stays.\n\nToday, with the t6c compiler on dev 76955986d0. Probe r02 reads a local TCP pair in a loop of server.read(4096) and prints read 4. Probe r03 calls server.read_into(buffer, 4096) and gets E0102, TCPStream has no method read_into.\n\nWhere the cost is. net_tcp_read_result in Compiler/JetRuntime/Source/NetHandleRoutes.jet:67-118 now reuses a per-stream read block (net_read_buffer_take, :175). It still allocates a 48-byte scratch per call (:78). net_read_publish_bytes (:208-211) allocates an exact-size list and copies the bytes into it.\n\nThe hot callers on dev. Core/Http/Server.jet:1217 and 1226, Core/Http/Client.jet:735 and 746, Core/Net/Tls.jet:1093 and Core/Net/Net.jet:287. Tls.jet:1095 extends its own rx buffer with each result, the exact append A performs in place.\n\nThe per-stream block reuse that an earlier draft called pending has landed on dev. It removed the limit-sized allocation, but the exact-size list and its copy remain, so D's internal-reuse path is already spent.\n\nWhat A does. n: stream.read_into(buffer, limit) appends at most limit bytes to the end of buffer and returns the count, 0 at end of stream. A limit below 1 is an invalid-input error, so 0 always means end of stream. A deadline form, read_into(buffer, limit, deadline:), matches read's.\n\nIt takes buffer by & as the parameter declares, so the call passes plain buffer. Bytes go straight from the socket into buffer's spare room, and the read's scratch lives with the stream. The list grows only when that room is short. TCP, Unix and TLS streams and file readers get the same method.\n\nClear already keeps a byte list's room when the list is not shared (Compiler/JetIR/Source/BuildExpr.jet:3095-3099). So a loop that clears buffer after use stops allocating after the first reads. If the loop hands the bytes somewhere that keeps them, clear gives buffer fresh room; the kept bytes need their own memory anyway.\n\nPrecedent. Core's encoders already read this way through a private core.encoding.__read_into, used by Csv.jet, Stream.jet and Xml.jet. A makes the same move public, without that helper's empty-list rule.\n\nRatified decisions. A fits D-FREESTAND-ALLOCAPI1=A, which prefers caller-owned buffers in Core. It keeps D-NETIO-CONTRACT1=A and D-NETIO-CONTRACT2=B: the Reader trait keeps exactly read, and read_into is an inherent method.\n\nBeginner path. Keep writing chunk: stream.read(4096); nothing changes. Expert path. Hold one buffer and call read_into in the loop; the HTTP server and TLS reader switch the same way.\n\nDownsides of A, and what the design does about them. Generic Reader code cannot call read_into. The four hot stream types cover the measured callers, and a trait default can follow later without breaking them.\n\nWhat remains. A buffer that is never cleared keeps growing. That is the caller's list, visible in their code, and the limit caps each read.\n\nOther options. B fills from index 0 up to the buffer's length, as TlsLead first drafted and as Go does. C adds read_into to the Reader trait for every Core byte source. D adds nothing and relies on internal reuse.\n\nTheir best cases. B matches Go and Rust slices. C makes middleware generic. D adds no surface. Their costs: B needs a zero-filled buffer, which Core can only build by pushing bytes, and appenders still copy. C amends D-NETIO-CONTRACT2's trait law. D keeps one allocation and copy per read.",
+      "detail": "What this ballot decides. Whether byte streams get a read form that writes into a caller's buffer, and its shape. read(limit) stays.\n\nToday, with the a0.0.43 compiler (dev c460ba91e5). Probe r02 reads a local TCP pair in a loop of server.read(4096) and prints read 4. Probe r03 calls server.read_into(buffer, 4096) and gets E0102, TCPStream has no method read_into.\n\nWhere the cost is. net_tcp_read_result in Compiler/JetRuntime/Source/NetHandleRoutes.jet:67-118 now reuses a per-stream read block (net_read_buffer_take, :175). It still allocates a 48-byte scratch per call (:78). net_read_publish_bytes (:208-211) allocates an exact-size list and copies the bytes into it.\n\nThe hot callers on dev. Core/Http/Server.jet:1217 and 1226, Core/Http/Client.jet:735 and 746, Core/Net/Tls.jet:1104 and Core/Net/Net.jet:287. Tls.jet:1106 extends its own rx buffer with each result, the exact append A performs in place.\n\nThe per-stream block reuse that an earlier draft called pending has landed on dev. It removed the limit-sized allocation, but the exact-size list and its copy remain, so D's internal-reuse path is already spent.\n\nMeasured on a0.0.43, built programs, five runs each. 100,000 rounds of a 4,096-byte write and read on a local TCP pair take 1.09 s median (m1), about 11 µs a round. Appending each chunk to a held buffer, as TLS does, measures the same within noise (m2, 0.98 s).\n\nCopying a 4,096-byte list 100,000 times takes 0.026 s median (m3), about 0.26 µs. So the list and copy A removes are about 2% of a local read round. Peak memory stayed near 14.5 MB in every run.\n\nThe case for A is therefore a loop that asks for no memory, which D-FREESTAND-ALLOCAPI1=A asks of Core and which devices need. It is not raw speed.\n\nWhat A does. n: stream.read_into(buffer, limit) appends at most limit bytes to the end of buffer and returns the count, 0 at end of stream. A limit below 1 is an invalid-input error, so 0 always means end of stream. A deadline form, read_into(buffer, limit, deadline:), matches read's.\n\nIt takes buffer by & as the parameter declares, so the call passes plain buffer. Bytes go straight from the socket into buffer's spare room, and the read's scratch lives with the stream. The list grows only when that room is short. TCP, Unix and TLS streams and file readers get the same method.\n\nClear already keeps a byte list's room when the list is not shared (Compiler/JetIR/Source/BuildExpr.jet:3093-3117). So a loop that clears buffer after use stops allocating after the first reads. If the loop hands the bytes somewhere that keeps them, clear gives buffer fresh room; the kept bytes need their own memory anyway.\n\nPrecedent. Core's encoders already read this way through a private core.encoding.__read_into, used by Csv.jet, Stream.jet and Xml.jet. A makes the same move public, without that helper's empty-list rule.\n\nRatified decisions. A fits D-FREESTAND-ALLOCAPI1=A, which prefers caller-owned buffers in Core. It keeps D-NETIO-CONTRACT1=A and D-NETIO-CONTRACT2=B: the Reader trait keeps exactly read, and read_into is an inherent method.\n\nBeginner path. Keep writing chunk: stream.read(4096); nothing changes. Expert path. Hold one buffer and call read_into in the loop; the HTTP server and TLS reader switch the same way.\n\nDownsides of A, and what the design does about them. Generic Reader code cannot call read_into. The four hot stream types cover the measured callers, and a trait default can follow later without breaking them.\n\nWhat remains. A buffer that is never cleared keeps growing. That is the caller's list, visible in their code, and the limit caps each read.\n\nOther options. B fills from index 0 up to the buffer's length, as TlsLead first drafted and as Go does. C adds read_into to the Reader trait for every Core byte source. D adds nothing and relies on internal reuse.\n\nTheir best cases. B matches Go and Rust slices. C makes middleware generic. D adds no surface. Their costs: B needs a zero-filled buffer, which Core can only build by pushing bytes, and appenders still copy. C amends D-NETIO-CONTRACT2's trait law. D keeps one allocation and copy per read.",
       "options": [
         {
           "key": "A",
@@ -191039,7 +191039,7 @@
         },
         {
           "lang": "Rust",
-          "note": "read fills a slice; read_buf appends into spare room.",
+          "note": "read fills a slice; tokio's read_buf appends into spare room.",
           "code": "stream.read_buf(&mut buf).await?"
         },
         {
@@ -191066,6 +191066,10 @@
           {
             "loss": "A loop that keeps the bytes it reads still allocates.",
             "mitigation": "Only when the bytes are kept, and kept bytes need their own memory under every option."
+          },
+          {
+            "loss": "The speed gain is small: about 2% of a local read round (m1, m3).",
+            "mitigation": "The gain claimed is a read loop that asks for no memory, not speed."
           }
         ],
         "whyNot": [
@@ -191089,12 +191093,12 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Measured on a0.0.43, the list and copy A removes cost about 0.26 µs of an 11 µs local read round, so A is argued as allocation-free, not faster. TLS lines moved to 1104 and 1106, and owner-addressed wording is removed."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/ri run: r02 prints read 4, r03 is E0102. Outputs are in probes/ri/out6. Read Compiler/JetRuntime/Source/NetHandleRoutes.jet:67-118 and :208-211, and Compiler/JetIR/Source/BuildExpr.jet:3095-3117. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-NET-READINTO1/probes: r02 prints read 4, r03 is E0102. Build probes/cost with probe.sh VERB build. Run each .jet/build binary five times with rtime.py: m1 about 1.09 s, m2 about 0.98 s, m3 about 0.026 s. Read NetHandleRoutes.jet:67-118 and :175-211, and BuildExpr.jet:3093-3117.",
       "surface": {
         "gist": "Should byte streams gain read_into, which appends what arrives to a buffer the caller owns, so steady reads allocate nothing?",
-        "lesson": "Reading from a network connection today hands you a fresh piece of memory each time. Busy servers read thousands of times a second. This vote decides whether Jet adds a way to read into memory you already have.",
+        "lesson": "Reading from a network connection today hands back a fresh piece of memory each time. Busy servers read thousands of times a second. This vote decides whether Jet adds a way to read into memory the program already holds.",
         "trio": {
           "current": {
             "note": "Each read returns a new list.",
@@ -191102,7 +191106,7 @@
           },
           "wild": {
             "lang": "Go",
-            "note": "Read fills a slice you own.",
+            "note": "Read fills a caller-owned slice.",
             "code": "n, err := conn.Read(buf)"
           }
         },
@@ -191110,7 +191114,7 @@
           {
             "key": "A",
             "name": "Append",
-            "gist": "Append into your buffer.",
+            "gist": "Append into a held buffer.",
             "gains": [
               "No allocation once warm.",
               "Trait unchanged."
@@ -191197,7 +191201,91 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:47:38.767Z"
+      "created": "2026-11-10T03:47:38.767Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "Generic Reader code cannot call read_into.",
+          "attempts": [
+            "Add it to the Reader trait (option C); that amends D-NETIO-CONTRACT2=B's trait law.",
+            "Put it on the four hot stream types now; a trait default built on read can follow without breaking them."
+          ],
+          "result": "Reduced: every listed hot caller is on a concrete stream type."
+        },
+        {
+          "option": "A",
+          "loss": "A loop that keeps the bytes it reads still allocates.",
+          "attempts": [
+            "Share the read block with the kept bytes; then the next read overwrites them.",
+            "Let clear keep the room only for a sole owner (BuildExpr.jet:3093-3117), so kept bytes get fresh room."
+          ],
+          "result": "Not removable: kept bytes need their own memory under every option."
+        },
+        {
+          "option": "A",
+          "loss": "0 could mean end of stream or a limit of 0.",
+          "attempts": [
+            "Return an Option for end of stream.",
+            "Make a limit below 1 an invalid-input error, so 0 always means end of stream."
+          ],
+          "result": "Removed by the second attempt."
+        },
+        {
+          "option": "A",
+          "loss": "The 48-byte scratch per read (NetHandleRoutes.jet:78) would keep allocating.",
+          "attempts": [
+            "Allocate it on the stack of the runtime call.",
+            "Keep it with the stream, beside the reused read block (:175-205)."
+          ],
+          "result": "Removed: the scratch lives with the stream."
+        },
+        {
+          "option": "B",
+          "loss": "Needs a zero-filled buffer and appenders still copy.",
+          "attempts": [
+            "Add a public with_capacity; a07 in D-ALLOC-FAIL1 shows it is compiler-internal today.",
+            "Return the filled prefix as a view."
+          ],
+          "result": "The copy for appenders stays."
+        },
+        {
+          "option": "C",
+          "loss": "Amends D-NETIO-CONTRACT2's exact trait members.",
+          "attempts": [
+            "Add it as a default method only.",
+            "Gate it behind a second trait."
+          ],
+          "result": "The second attempt is A plus a trait; the law still changes."
+        },
+        {
+          "option": "D",
+          "loss": "One list allocation and copy per read remain.",
+          "attempts": [
+            "Reuse the read block, which dev already does (:83, :113).",
+            "Hand back a view into the read block; it would be overwritten by the next read."
+          ],
+          "result": "Not removed: the reuse path is spent, and m3 shows the remaining cost."
+        }
+      ],
+      "reports": [
+        {
+          "title": "read_into review: cost measured, code cited and adversarial review",
+          "path": "Docs/audits/2026-11-10-net-readinto-review.md",
+          "note": "r02/r03 on a0.0.43; m1-m3 measure an 11 µs local read round against 0.26 µs for the list and copy A removes (about 2%); A is argued as allocation-free; Tls.jet:1104/1106; Go, Rust read_buf and Java NIO sources."
+        },
+        {
+          "title": "Go io.Reader",
+          "url": "https://pkg.go.dev/io#Reader"
+        },
+        {
+          "title": "Rust tokio AsyncReadExt::read_buf: appends into spare room",
+          "url": "https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.read_buf"
+        },
+        {
+          "title": "Java ReadableByteChannel.read(ByteBuffer)",
+          "url": "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/channels/ReadableByteChannel.html"
+        }
+      ]
     },
     {
       "id": "D-NO-WARNINGS1",
@@ -199706,6 +199794,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:10:38.797Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-NET-READINTO1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:06:10.952Z",
       "by": "Main",
