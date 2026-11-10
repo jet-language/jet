@@ -2242,7 +2242,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     loop site in state.share_found -> share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) -> complete = false
-    sema_lint_inferred_never_return(func, updated, program, scopes, diagnostics)
+    sema_lint_inferred_never_return(func, owner_id.key, updated, program, diagnostics)
     sema_function_header_external_target(func, diagnostics, diagnostics_start)
     // Rust `check_value_block` over the body: a value body reports E0114 when
     // it can reach its end without a value.

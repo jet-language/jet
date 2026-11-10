@@ -1136,6 +1136,14 @@ for the complete report shape and fixes. (S36)
 type expected at that expression. Native adapters pass those facts to the
 shared stop renderer; backend carrier names are not source type names.
 
+A function diverges when no path of its body returns to its caller: every
+path ends in `panic`, `#Todo`, a `loop` with no `break`, or a call of a
+function that diverges. The compiler decides this once per bundle as a least
+fixed point, so a public function that only calls a private helper that
+panics diverges too, while functions that only call each other do not. A
+public diverging function whose return type does not say `Never` gets the
+advisory **L2421** (D-NEVER1=C, D-NEVER2=B).
+
 ### Cleanup at a process stop
 
 An explicit stop runs active cleanup before the process ends. `defer close(...)`
