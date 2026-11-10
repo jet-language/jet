@@ -3645,7 +3645,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if layout.handled -> return layout
-    sema_call_ui_backend_lint(receiver_value, method, args, span, environment, program, scopes, diagnostics)
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if stream.handled -> return stream
     process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -3970,6 +3969,9 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) -> return None
     if method == "routes" -> sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, diagnostics)
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" -> sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, diagnostics)
+    // Core declares the UI backends' `set_focus_group`, so its focus-ring lint
+    // runs ahead of the declared-method check, not among the builtin routes.
+    sema_call_ui_backend_lint(receiver_value, method, args, method_span, environment, program, scopes, diagnostics)
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
