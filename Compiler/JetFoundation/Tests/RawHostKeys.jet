@@ -54,7 +54,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     assert(files.members.contains("compiler_link_held"))
     assert(!files.members.contains("__link_held"))
     assert(core_call("core.files", "compiler_link_held") == None)
-    read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"}
+    read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__reader_line_bytes"}
     loop member in read_members {
         row: core_call("core.files", member) ?? panic("file read leaf is registered")
         assert(row.effect_kind == Val("FS") && row.effect_leaf == Val("FS.Read"))
@@ -64,7 +64,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
         row: core_call("core.files", member) ?? panic("file write leaf is registered")
         assert(row.effect_kind == Val("FS") && row.effect_leaf == Val("FS.Write"))
     }
-    inspect_members: [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"}
+    inspect_members: [String]{"__path_windows", "__atomic_pid", "__reader_path"}
     loop member in inspect_members {
         row: core_call("core.files", member) ?? panic("file inspection leaf is registered")
         assert(row.effect_kind == None && row.effect_leaf == None)

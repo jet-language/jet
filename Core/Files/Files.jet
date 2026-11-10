@@ -18,6 +18,7 @@ use {
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
     access_codes.[access_check, advice_code, map_advice_code]
+    scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
 }
 // core.files — one filesystem surface.
 //
@@ -2629,27 +2630,113 @@ scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError!
     Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
 }
 
+// One read root of a file scope. Only an `FS.Read:<path>` right names one,
+// so a bare `FS.Read` never becomes an ambient file-system handle.
+ScopeRoot: struct {
+    encoded: [U8]
+    absolute: Bool
+}
+
+// The read roots and the held, no-follow read behind a file scope: not part
+// of the files surface.
+priv scope_reads: module {
+    // The scope's read roots, in the authority's sorted right order.
+    // `FS.Read:repo` is the working directory; a root with a `..` part names none.
+    scope_roots: fn(scope: FileScope, platform: host_path.PathPlatform) -> [ScopeRoot] Never! {
+        roots := [ScopeRoot]{}
+        loop right in core.plugin.__authority_to_wire(scope.authority).split("\n") {
+            if !right.starts_with("FS.Read:") -> next
+            root: right.removeprefix("FS.Read:")
+            if root == "" -> next
+            if root == "repo" {
+                roots.push(ScopeRoot{encoded: ".".bytes(), absolute: false})
+                next
+            }
+            path: host_path.from_text(root, platform)
+            if scope_has_parent(path) -> next
+            absolute: host_path.is_absolute(path)
+            roots.push(ScopeRoot{encoded: path.encoded, absolute: absolute})
+        }
+        roots
+    }
+
+    scope_has_parent: fn(path: host_path.OSPath) -> Bool Never! {
+        cursor := host_path.components(path)
+        loop {
+            part: host_path.next(path, cursor) ?? break
+            if part.kind == .ParentDir -> return true
+        }
+        false
+    }
+
+    scope_part_name: fn(path: host_path.OSPath, part: host_path.PathComponent, requested: String) -> String IOError! {
+        bytes := [U8]{}
+        loop i in part.span.start..<part.span.end -> bytes.push(path.encoded[i])
+        Ok(String.from_bytes(bytes) ?? return Err(scope_denied(requested)))
+    }
+
+    scope_input_error: fn(requested: String, why: String) -> IOError Never! {
+        IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(requested), os_code: None, cause: Val(why)})
+    }
+
+    // Read `relative` (normalized by scope_relative) below `root`. The root and
+    // every part below it are opened from their held parent without following a
+    // link, and the bytes come from that same opened regular file.
+    scope_read_at: fn(root: ScopeRoot, relative: String, platform: host_path.PathPlatform, requested: String) -[FS.Read]> [U8] IOError! {
+        directories := [Directory]{}
+        directories.push(open_directory(if root.absolute -> "/" else -> "."))
+        root_path: host_path.OSPath{encoded: root.encoded, platform: platform}
+        cursor := host_path.components(root_path)
+        loop {
+            part: host_path.next(root_path, cursor) ?? break
+            if part.kind == .Prefix -> return Err(scope_denied(requested))
+            if part.kind == .Normal {
+                name: scope_part_name(root_path, part, requested)
+                directories.push(directories[directories.len() - 1].open_directory(name))
+            }
+        }
+        parts: relative.split(if platform == .Windows -> "\\" else -> "/").to_list()
+        loop index in 0..<(parts.len() - 1) {
+            directories.push(directories[directories.len() - 1].open_directory(parts[index]))
+        }
+        reader := directories[directories.len() - 1].open(parts[parts.len() - 1])
+        opened: reader.stat()
+        if !opened.is_file -> return Err(scope_input_error(requested, "file authority input is not a regular file"))
+        if opened.links != 1 -> return Err(scope_input_error(requested, "file authority input has multiple hard links"))
+        bytes := [U8]{}
+        loop {
+            chunk: reader.read(65536)
+            if chunk.len() == 0 -> break
+            bytes.extend(chunk)
+        }
+        after: reader.stat()
+        if after.id != opened.id || after.size != bytes.len() {
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(requested), os_code: None, cause: Val("file changed while reading")}))
+        }
+        Ok(bytes)
+    }
+}
+
 scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     file_fault("FS.Read", .Read, path)
     platform: file_path_platform()
     requested: host_path.from_text(path, platform)
     absolute: host_path.is_absolute(requested)
-    roots: core.files.__scope_roots(scope)
     last := scope_denied(path)
-    loop index in 0..<roots.len() {
+    loop root in scope_roots(scope, platform) {
         relative := Val(requested)
         if absolute {
             relative = None
-            if roots[index].absolute {
-                root: host_path.OSPath{encoded: roots[index].encoded, platform: platform}
-                if host_path.strip_prefix_span(requested, root) == .Val(extent) {
+            if root.absolute {
+                root_path: host_path.OSPath{encoded: root.encoded, platform: platform}
+                if host_path.strip_prefix_span(requested, root_path) == .Val(extent) {
                     relative = Val(host_path.owned_span(requested, extent))
                 }
             }
         }
         if relative == .Val(selected) {
             relative_text: scope_relative(selected, path)
-            if core.files.__scope_read_at(scope, index, relative_text, path) == {
+            if scope_read_at(root, relative_text, platform, path) == {
                 .Err(error) -> last = error
                 .Ok(bytes) -> {
                     text: String.from_bytes(bytes) ?? return Err(io_err("read", path, file_utf8_error(bytes)))
@@ -2659,6 +2746,40 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
         }
     }
     Err(last)
+}
+
+#Test("a file scope reads only below its FS.Read roots and never through a link") {
+    platform: file_path_platform()
+    root: mktemp("file-scope-read")
+    create_dir_all(join(root, "inner")) ?? panic("scope root")
+    write(join(root, "inner/note.txt"), "scoped") ?? panic("scope file")
+    symlink(join(root, "inner/note.txt"), join(root, "link.txt")) ?? panic("scope link")
+    here: scope(Authority.from_rights(["FS.Read:{root}", "FS.Read:a/../b", "FS.Read"]))
+    roots: scope_roots(here, platform)
+    assert_eq(roots.len(), 1)
+    assert(roots[0].absolute)
+    assert(scope_has_parent(host_path.from_text("a/../b", platform)))
+    assert(!scope_has_parent(host_path.from_text("a/b", platform)))
+    assert_eq(scope_part_name(host_path.from_text("ab", platform), host_path.PathComponent{kind: .Normal, span: host_path.span(0, 2)}, "ab") ?? panic("part name"), "ab")
+    assert_eq(scope_read_at(roots[0], "inner/note.txt", platform, "note") ?? panic("held read"), "scoped".bytes())
+    assert_eq(here.read(join(root, "inner/note.txt")) ?? panic("absolute read inside the root"), "scoped")
+    assert_eq(scoped_read(here, join(root, "inner/note.txt")) ?? panic("scoped read inside the root"), "scoped")
+    if scoped_read(here, join(root, "link.txt")) == {
+        .Ok(_) -> panic("a scoped read followed a link")
+        .Err(_) -> {}
+    }
+    if here.read("/etc/hostname") == {
+        .Ok(_) -> panic("a scoped read left its root")
+        .Err(error) -> if error == {
+            .PermissionDenied(context) -> assert_eq(context.cause, Val("path is outside the granted FS.Read root"))
+            .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("outside the root is PermissionDenied")
+        }
+    }
+    if scope_input_error("x", "why") == {
+        .PermissionDenied(context) -> assert_eq(context.cause, Val("why"))
+        .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("scope input errors are PermissionDenied")
+    }
+    remove_all(root) ?? panic("cleanup file scope")
 }
 
 // std::str::Utf8Error's exact Display text; scoped reads used from_utf8,
