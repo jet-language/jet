@@ -90872,6 +90872,160 @@
       "completedAt": "2026-11-07T10:49:41.063Z",
       "questions": [],
       "retiredAt": "2026-11-10T10:49:49.362Z"
+    },
+    {
+      "id": "c0swo1p3",
+      "num": 6645,
+      "title": "core.files: exists() is true for a broken symlink",
+      "body": "files.exists(path) follows the link target's existence inconsistently: on a symlink whose target is missing it returns true. The contract must state whether exists follows links, and the code must match it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "8583f858a0 made files.exists follow a final link, and core_files_metadata_predicates_follow_links_and_keep_errors_false passes in vb13. Still missing for c1: a doc comment on Core/Files/Files.jet exists and lexists stating the rule, a lexists assertion on the broken link (true), and an O2 (--release) step; the case covers only jet run and jet build. Queued to PortsLead-2 after #6664."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case creates a symlink to a missing target: files.exists follows the link and returns false, and the link-level query (the Core API that does not follow links) returns true. The rule is stated in the core.files doc comment. Passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "8583f858a0 made files.exists follow a final link. 1cac917708 adds doc comments on Core/Files/Files.jet exists (follows the link, so a broken link is false) and lexists (the link itself), a lexists assertion on the broken link in tests/cases/core_files_foundations/core_files_metadata_predicates_follow_links_and_keep_errors_false.case, and a jet build --release step with checked stdout beside jet run (O0) and jet build (O1). The case PASSes (PortsLead-2, s1 of HEAD) and passed on O0 and O1 in Main batch vb13.",
+          "at": "2026-11-07T10:55:37.817Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:25.991Z",
+      "updated": "2026-11-07T10:55:39.783Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:55:39.783Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T11:01:18.361Z"
+    },
+    {
+      "id": "c005c3wh",
+      "num": 6664,
+      "title": "Core coverage ratchet red on dev: 296 untested Core functions missing from core-coverage-ratchet.json",
+      "body": "TestSystemLead-2 found this while porting the coverage gate (ca0a7d1fc8). jet Tools/agent/CoreCoverage.jet --check exits 1 on dev, and so did the old node script: 296 Core functions have no test and are not listed in the committed ratchet, so VerifyFull's core-coverage row is red. Rewriting the ratchet to list them would bless a regression.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "dca47438a1 landed the user-callable rule (ratchet 4825 to 4002; --check prints 'excluded: 853 declarations (64 extern, 789 reserved __ names)'; CoreCoverage #Tests 16/16), and 53edc3789a made 2 core.data helpers private (untested 32 to 20). In the lander: the chacha20 and sha/load crypto helpers made private; they aren't exported items (UnknownCoreItem), the public route is xchacha20poly1305_*, the 2 crypto KAT cases PASS and the 6 Examples/Crypto goldens pass on o0-o2 (untested 20 to 8). Remaining: #Tests for 8 public functions."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "PortsLead-2 landings: d4534c678a (10 ui.host ime/drag_drop/shortcuts helpers made private, 88 to 78), e23b797ef8 (Ui/Host.jet helpers made private, and provider_record_fields tested through web_build/ui_host_provider_answers_are_core_owned, 78 to 74), 19875cde22 (13 core.compute ad_* helpers made private, 74 to 61). Queued in the lander: the user-callable rule in CoreCoverage.jet, under which reserved dunder hooks (789) and C externs (64) leave the denominator, with an excluded line in --check; the ratchet goes 4825 to 4002, never up, and untested 61 to 32. Also queued: core.data quantile_select and rank_order made private (32 to 20). Remaining: crypto helpers, then #Tests for 8 real API functions."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "763e3d3b74 (PortsLead-2): 208 ratchet entries re-keyed 1:1 after the ^ to && ownership respelling (192 respelled only; 16 had a changed signature, but the module holds one function of that name, and all 16 are listed in the commit). The total is 4825 before and after, and the module+name multiset is identical, so the ratchet was not raised. CoreCoverage --check now lists 88 untested. Those are new helpers split out of tested functions; next come private-only-when-no-outside-caller commits and #Tests by module. Keys stay signature text: name-based keys would be a design change."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/CoreCoverage.jet --check exits 0 on dev: each of the 296 functions either gains a #Test or golden that exercises it, or is removed as dead Core, and the ratchet file only shrinks (it is never rewritten upward).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Dev HEAD 1cac917708, exported and checked with seed a0_032 (PortsLead-2): jet Tools/agent/CoreCoverage.jet --check exits 0 with 0 untested lines; 'total: 6165 public functions; 3410 uncovered'; 'excluded: 1438 declarations outside the user-callable surface (64 extern, 585 in compiler-private parts, 789 reserved __ names)'; 'Core coverage ratchet OK: every untested function is listed'. The ratchet only went down, 4825 to 4002 to 3410, never up. Commits: 763e3d3b74 (208 entries re-keyed 1:1), d4534c678a, e23b797ef8, 19875cde22, 53edc3789a, 64631225ff (helpers made private only when nothing outside their module calls them), dca47438a1 and 2605935bcc (rule: externs, reserved __ names and compiler-private part members are not user-callable; prelude type aliases), 24f17ec4b6 (new cases for CBORError.kind_name, ScreenPoint.new, WorldDelta.new and SourceLocation.display). UnsafeRatchet --check rc 0 (1342 regions).",
+          "at": "2026-11-07T10:55:34.826Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T08:50:40.290Z",
+      "updated": "2026-11-07T10:55:36.533Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:55:36.533Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T11:01:18.361Z"
+    },
+    {
+      "id": "c0qclgcg",
+      "num": 6673,
+      "title": "Lander precommit does not run the unsafe ratchet check: Core edits that shift #Unsafe lines land with Docs/spec/safety.md stale",
+      "body": "Found by PortsLead-2: 53edc3789a (Core/Data/Data.jet) and 64631225ff (Core/Crypto/Crypto.jet) moved 16 audited #Unsafe regions, and the lander precommit (jet Tools/agent/Land.jet precommit) admitted both with the unsafe ratchet in Docs/spec/safety.md stale. PortsLead-2's next #6664 commit refreshes it (UnsafeRatchet.jet --update, 1342 regions, a line-number-only diff). The precommit must run UnsafeRatchet.jet --check whenever a commit touches a file with #Unsafe regions, or always if that's cheap, and it must run CoreCoverage.jet --check when Core changes, so neither ratchet can go red on dev unnoticed. Check whether the old node precommit ran these and the Land.jet port dropped them (a #6035 c68 regression).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/Land.jet precommit refuses a patch that leaves UnsafeRatchet.jet --check or CoreCoverage.jet --check red: a seeded patch that shifts an #Unsafe line without refreshing safety.md is refused, and so is one that adds an untested public Core function; the same patch with the refresh or a test is admitted.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "13cbf10241 and 076e5a8799: jet Tools/agent/Land.jet precommit runs Tools/agent/UnsafeRatchet.jet --check and Tools/agent/CoreCoverage.jet --check with the seed on every commit, and on failure shows the last 40 lines of output (the verdict). The live lander's precommit got the same loop, and these commits landed through it. Refuse row: a tree with one safety.md #Unsafe line shifted (Crypto 1258:5 to 1257:5) and app.canonical_providers removed from the coverage ratchet exits 1 with 'unsafe ratchet: baseline … has stale generated rows', 'untested: app canonical_providers … (Core/App/App.jet:91)' and PRECOMMIT FAILED. Admit row: the restored tree gives 'ratchet … UnsafeRatchet.jet ok', 'ratchet … CoreCoverage.jet ok' and PRECOMMIT OK (exit 0). LaneCheck Land.jet CHECK OK; Land.jet #Tests 9/9. The old precommit never ran either ratchet (the gap predates the port).",
+          "at": "2026-11-07T11:00:41.299Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:46:06.219Z",
+      "updated": "2026-11-07T11:00:43.060Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T11:00:43.060Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T11:01:18.361Z"
     }
   ]
 }
