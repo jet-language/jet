@@ -323,7 +323,7 @@ sema_comptime_reflection_marker_info: fn(marker: Marker, registry: SemaScopeMemb
         source_type: if argument_parameter == .Val(value) -> value.source_type else -> "Value"
         args.push(sema_comptime_reflection_struct("MarkerArgInfo", [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: argument_name}},
-            SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: source_type}},
+            SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: source_type}},
             SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_marker_argument_value(argument, source_type, registry)},
         }))
     }
@@ -658,7 +658,7 @@ sema_comptime_reflection_layout_field_info: fn(name: String, ty: Type, target: J
     size: if facts == .Val(value) -> value.size else -> None
     sema_comptime_reflection_struct("LayoutFieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
-        SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(ty)}},
         SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(offset)},
         SemaComptimeReflectionField{name: "size", value: sema_comptime_reflection_layout_optional(size)},
         SemaComptimeReflectionField{name: "target", value: TComptimeValue.String{value: target.triple}},
@@ -816,7 +816,7 @@ sema_comptime_reflection_field_info: fn(
 ) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
-        SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(ty)}},
         SemaComptimeReflectionField{name: "index", value: TComptimeValue.Int{value: index}},
         SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(markers, registry)}},
@@ -1309,7 +1309,7 @@ sema_comptime_reflection_enum_variant_info: fn(definition: EnumDef, variant: Var
     }
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: variant.name}},
-        SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: sema_comptime_reflection_enum_variant_type(variant.payload)}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: sema_comptime_reflection_enum_variant_type(variant.payload)}},
         SemaComptimeReflectionField{name: "index", value: TComptimeValue.Int{value: index}},
         SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: fields}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(variant.serde_markers, registry)}},

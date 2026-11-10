@@ -1038,7 +1038,7 @@ sema_derive_prep_if_selected: fn(expansion: &SemaDeriveExpansion, cond: Expr, co
     expanded: sema_derive_expand_expr(expansion, cond)
     if expansion.failure != None -> return false
     value: sema_derive_static_value(expansion, expanded) ?? {
-        sema_derive_fail(expansion, sema_error("E0956", cond_span, "a `comptime if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$ty == T.$name`"))
+        sema_derive_fail(expansion, sema_error("E0956", cond_span, "a `comptime if` condition in a derive template is not a known-time value", "derive template conditions compare reflected facts and literals already in the template scope", "compare reflected facts such as `T.$kind == \"enum\"` or `field.$type == T.$name`"))
         return false
     }
     if value == .Bool(selected) -> return selected
@@ -1785,7 +1785,7 @@ sema_derive_type_text: fn(ty: Type) -> String {
 }
 
 sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool) -> CtValue {
-    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("ty", sema_derive_type_text(ty)), NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}})
+    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("type", sema_derive_type_text(ty)), NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}})
 }
 
 sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], base: String?) -> CtValue {
@@ -1828,7 +1828,7 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
         }
         variants.push(sema_derive_ct_struct("FieldInfo", [NamedCtValue]{
             sema_derive_ct_str("name", variant.name),
-            sema_derive_ct_str("ty", ty),
+            sema_derive_ct_str("type", ty),
             NamedCtValue{name: "index", value: CtValue.Int{value: index}},
             NamedCtValue{name: "fields", value: CtValue.List{values: payload}},
             NamedCtValue{name: "is_pub", value: CtValue.Bool{value: definition.is_pub}},

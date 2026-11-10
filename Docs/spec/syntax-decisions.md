@@ -3634,12 +3634,12 @@ grammar).
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
 `.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
-the field list; each field carries `.name`/`.ty`/`.markers`/
+the field list; each field carries `.name`/`.type`/`.markers`/
 `.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
 is the leaf and `.path()` is the canonical path.
 
 The one registered reflection field row is the law for both views. Comptime
-keeps the row's `name`, `ty`, marker facts, visibility, and source span because
+keeps the row's `name`, `type`, marker facts, visibility, and source span because
 those facts guide generated source before execution. Runtime keeps the same
 field names and order and projects each stored field as a typed `Value`; it
 keeps `type_name`, `path`, and display text because those facts describe the

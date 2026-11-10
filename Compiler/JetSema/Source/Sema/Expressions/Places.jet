@@ -512,6 +512,12 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             return sema_expr_expected_owned(core_value, expected, environment, program, diagnostics)
         }
     }
+    // A reflected record names its type `type`, never `ty`.
+    if owner_name != "" && member == "ty" && core_record_field(owner_name, "type") != None {
+        renamed: sema_error("E0302", span, "`{owner_name}` has no field `ty`", "a reflected record names its type `type`, as `field.type`", "write `.type`")
+        diagnostics.push(diagnostic_with_edit(renamed, TextEdit{span: Span{start: span.end - member.len(), end: span.end}, new_text: "type"}))
+        return None
+    }
     if sema_fact_read_unknown_member(member, span) == .Val(unknown) {
         diagnostics.push(unknown)
         return None
