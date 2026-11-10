@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98807,
+    "rev": 98809,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50218,6 +50218,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Defect found by the D-WS-ROUTE1 review (probe w04, a0.0.43): the http serve loop is serial, against D-HTTP-SERVER2=A. Report: Docs/audits/2026-11-10-ws-route-review.md."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. c1 and c5 now name http.serve and web.app().serve(). c6 names its proof case. c9 merged into c8 (D-G9-3); the Tower DataTree resident proof in c8 was the Node Tower and is dropped. c10's proof case (http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient) is known-failing under #4260 (G5: how a printed HTTP error reads), so c10 closes after #4260."
@@ -50319,6 +50324,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:22:33.720Z"
+        },
+        {
+          "n": 11,
+          "text": "The serve loop is concurrent, as ratified D-HTTP-SERVER2=A requires: handler concurrency is bounded by the task scheduler, with its 10k total and 256-per-IP limits answered by 503. Today Core/Http/Server.jet:262-289 and :295 serve one request at a time: D-WS-ROUTE1 probe w04 holds one WebSocket open for 400 ms, and a GET sent at 50 ms is answered at 400 ms. A two-client case proves that the second request is answered while the first is held, on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T16:16:07.087Z"
         }
       ],
       "refs": [
@@ -50341,12 +50355,12 @@
       "parentId": "c086hhzb",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-09T20:17:39.607Z",
+      "updated": "2026-11-10T16:16:08.778Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0w1f3xa",
@@ -199878,6 +199892,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:16:08.778Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T16:16:07.087Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04es5yq",
+      "note": "#11 The serve loop is concurrent, as ratified D-HTTP-SERVER2=A r"
+    },
     {
       "at": "2026-11-10T16:15:51.879Z",
       "by": "Main",
