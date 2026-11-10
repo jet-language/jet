@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98344,
+    "rev": 98347,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39713,6 +39713,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Finding 2026-11-09 (G1Lead-3, StoreCache lease fix): Jetpack's run() wait sends SIGKILL to the child's whole process group. Triage whether that matches the process-group contract for a normal wait; tests also must not hard-code /bin/sleep, which this host does not have."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c1: Examples/features/io/process_ -> Examples/Systems/Process."
@@ -39905,7 +39910,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-09T20:48:13.024Z",
+      "updated": "2026-11-10T01:07:53.254Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -67318,6 +67323,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T14:33:52.142Z"
+        },
+        {
+          "n": 19,
+          "text": "A Close value read out of self or out of a struct field is a move: after `lease := self` in a method, or after a field is consumed while its struct stays in scope, the original no longer holds the resource, and it closes exactly once when the moved value drops. A case proves that a FileLock taken this way is released before the next statement that probes it, on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T01:07:49.180Z"
         }
       ],
       "refs": [],
@@ -67329,10 +67343,10 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-09T19:54:13.256Z",
+      "updated": "2026-11-10T01:07:49.180Z",
       "updatedBy": "Main",
       "goals": [],
-      "criteriaLastN": 18
+      "criteriaLastN": 19
     },
     {
       "id": "c0jwqaa5",
@@ -101277,15 +101291,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Comparing a resource optional with None (`lock != None` where lock is FileLock?) checks and runs on O0, O1 and O2 instead of an ICE in ir.build (unlowered); a case pins it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T01:07:51.145Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T22:39:37.102Z",
-      "updated": "2026-11-08T22:39:37.102Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-10T01:07:51.145Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     },
     {
       "id": "c018v880",
@@ -193993,6 +194018,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T01:07:53.254Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T01:07:51.145Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0e4cn5v",
+      "note": "#1 Comparing a resource optional with None (`lock != None` wher"
+    },
+    {
+      "at": "2026-11-10T01:07:49.180Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00e9u2p",
+      "note": "#19 A Close value read out of self or out of a struct field is a"
+    },
     {
       "at": "2026-11-10T01:01:36.002Z",
       "by": "Main",
