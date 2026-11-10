@@ -2512,7 +2512,10 @@ function toolCommand(script) {
 // twin (`tool.jet`), both paths under `root` (the repository), with the
 // case's `args` and `env` (variables added to the harness environment); each
 // must exit with the case's `exit` (0 when it names none) and print the
-// case's `expected` file byte for byte. Every run starts in its own fresh
+// case's `expected` file byte for byte. A `jetBin` given as a path is also the
+// `jet` the scripts run: its directory goes first on PATH and it is $JET,
+// which the dev shell's `jet` runs (a case's `env` may still set either); a
+// bare name is left to the caller's PATH. Every run starts in its own fresh
 // copy, under `workDir`, of the entry's `tool.fixtures` directory (an empty
 // directory when it has none; symbolic links are copied as they are, so a
 // relative one still points inside the copy), so a tool that writes files
@@ -2531,6 +2534,8 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
   };
   if (issues.length) return { name: entry.name, original: tool.original ?? null, jet: tool.jet ?? null, status: "broken", reason: issues.join("; "), cases: [], provenance };
   const fixtures = typeof tool.fixtures === "string" ? path.join(dir, tool.fixtures) : null;
+  const named = jetBin.includes(path.sep) ? path.resolve(jetBin) : null;
+  const inner = named === null ? {} : { PATH: `${path.dirname(named)}${path.delimiter}${process.env.PATH ?? ""}`, JET: named };
   const programs = {
     original: toolCommand(path.join(root, tool.original)),
     jet: [jetBin, path.join(root, tool.jet)],
@@ -2552,7 +2557,7 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
       await fs.rm(cwd, { recursive: true, force: true });
       if (fixtures === null) await fs.mkdir(cwd, { recursive: true });
       else await fs.cp(fixtures, cwd, { recursive: true, verbatimSymlinks: true });
-      const result = await runProcess(cwd, [...command, ...args], { env });
+      const result = await runProcess(cwd, [...command, ...args], { env: { ...inner, ...env } });
       const reason = result.code !== exitCode
         ? `exit ${result.code}, not ${exitCode}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
         : mismatch(expected, result.stdout);

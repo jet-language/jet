@@ -310,3 +310,26 @@ test("a tool case's env reaches both runs and its exit is the code both must giv
     assert.match(strict.cases[0].original.reason, /^exit 3, not 0/);
   });
 });
+
+test("the jet a tool case's scripts run is the --jet-bin compiler", stagedEntryTestOptions, async () => {
+  await withScratch("tool-inner-jet", async (root) => {
+    const { entryDir, entry } = await writeToolEntry(root, { twinOutput: "" });
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "import { execFileSync } from 'node:child_process';\nprocess.stdout.write(execFileSync('jet', ['probe']));\n");
+    // The compiler the harness runs under, which runs the dev shell.
+    let shellJet = null;
+    for (const directory of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+      if (shellJet === null && await fs.access(path.join(directory, "jet"), fs.constants.X_OK).then(() => true, () => false)) shellJet = path.join(directory, "jet");
+    }
+    assert.notEqual(shellJet, null, "no jet on PATH");
+    // The named compiler: it runs the dev shell with the harness's own jet,
+    // answers `jet probe` with its $JET, and run as the twin asks the `jet`
+    // on PATH, as the original does.
+    const jetBin = path.join(root, "bin", "jet");
+    await fs.mkdir(path.dirname(jetBin), { recursive: true });
+    await fs.writeFile(jetBin, `#!/bin/sh\ncase "$1" in\n  */JetEnv.jet) exec ${JSON.stringify(shellJet)} "$@" ;;\n  probe) printf 'inner %s\\n' "$JET"; exit 0 ;;\nesac\nexec jet probe\n`);
+    chmodSync(jetBin, 0o755);
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), `inner ${jetBin}\n`);
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
+  });
+});

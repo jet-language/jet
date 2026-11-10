@@ -58,7 +58,9 @@ the day's full report. These files are gitignored, and
 
 The harness measures the admitted Jet compiler: `--jet-bin`, else `$JET`, else `jet`
 on PATH, run in place beside its runtime pack. Run and dev tiers execute inside the
-compiler process, so measure an optimized self-hosted build, not a debug one.
+compiler process, so measure an optimized self-hosted build, not a debug one. A tool
+entry's cases run with that compiler's directory first on PATH and as `$JET`, so the
+`jet` an original or its twin starts is the one measured.
 Use snapshot-only history unless the owner approves a different policy.
 
 ## Seed and close
