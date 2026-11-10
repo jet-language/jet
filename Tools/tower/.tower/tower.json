@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98675,
+    "rev": 98677,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56754,7 +56754,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T11:23:18.144Z",
+      "updated": "2026-11-10T11:49:53.484Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -63145,6 +63145,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-10T03:52:07.883Z"
+        },
+        {
+          "n": 111,
+          "text": "(Found 2026-11-10 by BallotFix, probe lc/l06 on dev 76955986d0) civil_tzif reads the TZif footer (the POSIX TZ rule string after the last transition), so times past the zone's last listed transition follow the rule: time.zone(\"America/New_York\") shows EDT (UTC-4) in July 2045, not EST. Proof: a golden over a zone whose table ends before the queried date, in summer and in winter, on O0/O1/O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-10T11:50:20.976Z"
         }
       ],
       "refs": [],
@@ -63155,12 +63164,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T11:26:55.162Z",
+      "updated": "2026-11-10T11:50:20.976Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 110
+      "criteriaLastN": 111
     },
     {
       "id": "c0h4r83r",
@@ -194741,6 +194750,236 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-10T10:43:36.997Z"
+    },
+    {
+      "id": "D-SCRIPT-LOCAL-CLOCK1",
+      "cardId": "c0qe89cl",
+      "group": "other",
+      "title": "Give Core the host's time zone, and let format selectors take a computed number",
+      "situation": "Jet aims for scripts that are no longer than the tools they replace. A trace viewer written for Node has 915 words, and the shortest faithful Jet version has 1000. Most of the gap is a header that shows the time of day.\n\nNode asks the machine for its time zone in one call, while each Jet script must find the zone by hand. A smaller part is that a padded column cannot take its width from the data. Unpadded hours are already decided, so this ballot asks only about the zone and computed widths.",
+      "gist": "Should Core tell a program the machine's time zone, and should format selectors accept a computed number?",
+      "lesson": "A time zone turns an instant into a wall-clock time. The host zone is the one the machine is set to. A script that shows the time to a person wants it, while a program that must print the same everywhere names its zone.",
+      "explainer": "Today a Jet script finds the host zone itself. It reads the TZ variable, else the system zone link, else it uses UTC. Even with the decided unpadded-hour code, that lookup costs the twin 29 words, and every such script repeats it.\n\nUnder A, time.host_zone() returns the machine's zone, and an instant's in_host_zone() shows it there. Both declare that they read the environment and files, as zone(name) already does. The header becomes one interpolation.\n\nThe host rule is the one glibc and Go use. An unset TZ means the system setting, and an empty TZ means UTC. A set TZ loses one leading colon, then names a zone, or a zone file when it starts with a slash. Anything that does not resolve gives the zone named UTC.\n\nUnder A, every selector number may also be any Int expression: Pad, PadLeft, Fixed, Grouped, Sci, Percent and Hex. A negative number acts as zero. So a column as wide as its longest entry uses the selector, as fixed columns already do.\n\nB adds the zone but keeps literal selector numbers. C adds only host_zone(), so callers write in_zone(time.host_zone()). D adds nothing and leaves the twin at 942 words.",
+      "story": "Lee ports a watch-mode trace viewer from Node. Its header shows the wall-clock time, and the Jet version needs a zone lookup by hand to print 6:09:27 AM. Under A the header is one interpolation, and the column sized by the data is one selector.",
+      "inWild": "// JavaScript: the host's zone and locale\nnew Date().toLocaleTimeString()            // \"6:09:27 AM\" in en-US\n\n# Python 3 on glibc\ndatetime.now().astimezone().strftime(\"%-I:%M:%S %p\")\n\n// Go: time.Local is TZ, else the system zone file, else UTC\ntime.Now().Format(\"3:04:05 PM\")\n\n// Java: Local types are zone-free, so the host zone is systemDefault\nZonedDateTime.now(ZoneId.systemDefault())\n\n// Python: computed widths in a format spec\nf\"{kind:<{width}} {count:>7}\"",
+      "detail": "Counts are whitespace-separated words, the gauntlet's source metric. The original viewer has 915. Compact.jet, the twin built from existing forms, has 1000. Projected.jet, with the A spellings, has 908. B gives 912 and C gives 908. The review's variants are in the lane's probes/lc/counts folder.\n\nThe no-pad flag is not on this ballot. The ratified one-percent-code ruling already gives every numeric code the GNU flag, so %-I prints 6. With that flag and nothing else, the twin has 942 words, and that is D.\n\nFrom 942, the host zone saves 30 words and the computed width saves 4. Computed widths alone give 938. So the zone is the part that closes the gap, and the width supplies the slack.\n\nDev does not have the flag yet. On the t6c compiler, format and strftime copy %-I through as text, and format_checked refuses it. The twin reaches its count only after that ratified work lands, under every option.\n\nSelectors today. {word:Pad(width)} and {x:Fixed(digits)} are refused with 'Expected width inside :Pad( )'. The parser's one number reader serves all seven numbered selectors, so A widens them together. The IR builder already passes the number as an operand of the helper call. A literal stays a constant, so existing output does not change.\n\nThe change touches the parser's number reader, the selector's tree node, the source formatter, the tree dump and the IR builder. Every tier runs that IR, so the tiers agree, as the selector ruling requires. The pad helpers already treat a zero or negative width as no padding, and a probe confirms it.\n\nZones today. zone(name) refuses a leading colon and any absolute path, and knows no POSIX rule string. The twin's hand rule picks the system zone when TZ is empty, but Node, glibc and Go use UTC. A uses UTC there, so the twin matches the original in one more case.\n\nLimits common to every option. A POSIX rule string in TZ gives UTC, where glibc and Node honor it. Day and month names are English, where Node follows the host locale. Selector padding counts characters, not terminal columns.\n\nA Core defect the review found, outside this ballot. zone(name) reads a TZif table but not the rule footer at its end. So New York shows standard time in July 2045, where Node and date show daylight time. The fix needs a POSIX rule reader, and TZ rule strings would then work for free.\n\nCensus on dev. Ten lines in eight files pass a computed width to a pad call, mostly package-tool tables. Selector numbers appear on 103 lines in 36 files, all literals. Four lines call in_zone, and one reads the system zone link by hand.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Host zone and computed selector numbers",
+          "detail": "Add time.host_zone() -[Env, FS.Read]> Zone and DateTime.in_host_zone() -[Env, FS.Read]> ZonedDateTime. Let every selector number take any Int expression.",
+          "technical": "host_zone() applies the host rule, then zone(name) or a direct zone-file read. in_host_zone() is in_zone(host_zone()). Web asks the browser's Intl zone, and Windows maps its zone setting to the IANA name with the CLDR table. Selector numbers parse as expressions, check as Int and run after the value. The twin projects to 908.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind:Pad(width)} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "B",
+          "name": "Host zone; selector numbers stay literal",
+          "detail": "A without computed selector numbers. Columns sized by the data keep writing pad_end(width, \" \").",
+          "technical": "The twin projects to 912 of 915, three words of slack. The selector parser does not change.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind.pad_end(width, \" \")} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "C",
+          "name": "Host zone function only, plus computed selector numbers",
+          "detail": "Add time.host_zone() and computed selector numbers, with no in_host_zone() shortcut. Callers write in_zone(time.host_zone()).",
+          "technical": "One fewer method on DateTime. The count equals A's, 908, because a dotted chain is one word. The longer chain is what most callers would write.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_zone(time.host_zone()).format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind:Pad(width)} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "D",
+          "name": "No new Core; keep finding the zone by hand",
+          "detail": "Scripts keep the TZ and system-link lookup. With the decided no-pad flag it is a 29-word function. The twin stays at 942 against 915.",
+          "technical": "No API is added. Every script that shows local time repeats the lookup, and the hand rule picks the system zone for an empty TZ, unlike its peers.",
+          "code": "name := (sys.get(\"TZ\") ?? \"\").remove_prefix(\":\")\nif name == \"\" -> name = (files.read_link(\"/etc/localtime\") ?? \"\").split_once(\"zoneinfo/\")?.after ?? \"UTC\"\ntime.now().in_zone(time.zone(name) ?? time.utc()).format(\"%-I:%M:%S %p\")\nlines.push(\"{row.kind.pad_end(width, \" \")} {count:PadLeft(7)}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "Date methods use the host zone. toLocaleTimeString also uses the host locale, so its text varies by machine. This is the original's spelling.",
+          "code": "new Date().toLocaleTimeString()"
+        },
+        {
+          "lang": "Go",
+          "note": "time.Local is TZ, else the system zone file, else UTC, and an empty TZ is UTC. That is A's rule. Layouts spell the unpadded hour as 3.",
+          "code": "time.Now().Format(\"3:04:05 PM\")"
+        },
+        {
+          "lang": "Java",
+          "note": "LocalDate and LocalTime are zone-free, as Jet's are, so the host zone is named systemDefault rather than local.",
+          "code": "ZonedDateTime.now(ZoneId.systemDefault())"
+        },
+        {
+          "lang": "Rust (chrono)",
+          "note": "Local::now() reads the host zone. %-I is the GNU no-pad flag Jet has already adopted.",
+          "code": "chrono::Local::now().format(\"%-I:%M:%S %p\")"
+        },
+        {
+          "lang": "Python",
+          "note": "astimezone() with no argument uses the host zone. Format specs take computed widths.",
+          "code": "datetime.now().astimezone().strftime(\"%-I:%M:%S %p\")\nf\"{kind:<{width}}\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Showing the clock in the machine's zone is ordinary script work, and every peer does it in one call. Jet already has zones and patterns, and lacks only the host lookup. A computed column width is the normal table case, and the selector path already passes its number at run time.",
+        "gains": [
+          "The twin projects to 908 of 915 words.",
+          "One host rule for every script, the same as glibc and Go, including an empty TZ.",
+          "Columns sized by the data use the selector form, and so do computed decimal places.",
+          "The names avoid Local, which Jet's zone-free LocalDate and LocalTime already use."
+        ],
+        "losses": [
+          {
+            "loss": "in_host_zone() output depends on the machine. This cannot be removed, because it is the feature.",
+            "mitigation": "Its effects say so. Tests set TZ through the test kit's environment overlay, and code that must not vary names its zone."
+          },
+          {
+            "loss": "A misspelled TZ quietly gives UTC, as in glibc, Go and Node.",
+            "mitigation": "The zone's name then reads UTC, so a caller can check it. zone(name) returns the error for callers who want one."
+          },
+          {
+            "loss": "Windows needs a table from its zone names to IANA names.",
+            "mitigation": "It is the CLDR table that ICU and .NET use, shipped and updated with the embedded zone data."
+          },
+          {
+            "loss": "A computed width can be very large and build a very long string.",
+            "mitigation": "pad_end accepts the same widths today, so the selector adds no new case."
+          },
+          {
+            "loss": "908 leaves 7 words of slack.",
+            "mitigation": "It is measured on the real twin, and the gauntlet's source row catches a regression."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It saves the parser change but leaves 3 words of slack and keeps the longer pad call for columns sized by the data."
+          },
+          {
+            "key": "C",
+            "reason": "Same count, but callers write the longer in_zone(time.host_zone()) chain for the commonest case."
+          },
+          {
+            "key": "D",
+            "reason": "The twin stays at 942, each script repeats the lookup, and the hand rule mishandles an empty TZ."
+          }
+        ],
+        "tradeoff": "Two names and one parser widening close the gap. The cost that cannot be removed is that host time differs between machines, which is what was asked for."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotFix. BallotFix, which did not write this ballot, probed every claim with the t6c compiler on dev 76955986d0 and re-measured each option's word count. It dropped the already-ratified no-pad flag, fixed the empty-TZ and zone-path rules, renamed away from Local and widened every numbered selector together."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/lc run. Expected: l01 gives E0003 on Pad(width), and l02 prints %-I as text while format_checked refuses it. l03 pads nothing for widths 0 and -3. l04 refuses the colon form, the path form and the rule string, and l06 shows 07:00 for July 2045.\n\nRun probes/lc/tz.sh for the hand rule against Node under six TZ values. Empty TZ differs: the hand rule gives 06:09:27 and Node gives 11:09:27. Run wc -w on probes/lc/counts: A 908, B 912, C 908, DFlag 942, DPad 938. Then run Tools/agent/ballots/Validate.jet on this payload.\n\nAcceptance under A: TZ unset, empty, with a colon, as a path, unknown, and with no system link. Every selector with a computed, zero and negative number on O0, O1, O2 and web. The twin at or below 915 words with both fixtures identical.",
+      "surface": {
+        "gist": "Should Core tell a program the machine's time zone, and should format selectors accept a computed number?",
+        "lesson": "The Jet twin's last extra words are a hand-written host-zone lookup and two pad calls. Peers spell each in one call.",
+        "trio": {
+          "current": {
+            "note": "942 words with the decided no-pad flag; 29 of them find the host zone by hand.",
+            "code": "name := (sys.get(\"TZ\") ?? \"\").remove_prefix(\":\")\ntime.now().in_zone(time.zone(name) ?? time.utc()).format(\"%-I:%M:%S %p\")"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Host zone by the same rule; unpadded hour in the layout.",
+            "code": "time.Now().Format(\"3:04:05 PM\")"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Host zone and computed selector numbers",
+            "gist": "host_zone(), in_host_zone() and :Pad(width).",
+            "gains": [
+              "Projects to 908 of 915."
+            ],
+            "losses": [
+              "Host-dependent output, marked by effects."
+            ],
+            "proposed": {
+              "code": "{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}\n{row.kind:Pad(width)}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Host zone only",
+            "gist": "A, but selector numbers stay literal.",
+            "gains": [
+              "No parser change."
+            ],
+            "losses": [
+              "Projects to 912; 3 words of slack."
+            ],
+            "proposed": {
+              "code": "{row.kind.pad_end(width, \" \")}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Zone function only",
+            "gist": "host_zone() and computed numbers, no in_host_zone().",
+            "gains": [
+              "One fewer method."
+            ],
+            "losses": [
+              "Longer chain at every call."
+            ],
+            "proposed": {
+              "code": "{time.now().in_zone(time.host_zone()).format(\"%-I:%M:%S %p\")}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "No new Core",
+            "gist": "Keep the hand-written lookup.",
+            "gains": [
+              "No new API."
+            ],
+            "losses": [
+              "The twin stays at 942."
+            ],
+            "proposed": {
+              "code": "local_clock()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Peers read the host clock in one call. Jet lacks only the host lookup and a computed width.",
+          "gains": [
+            "Closes the count at 908 of 915 with identical output."
+          ],
+          "losses": [
+            {
+              "loss": "Output depends on the host zone, which cannot be removed.",
+              "mitigation": "Env and FS.Read effects mark it, and tests pin TZ."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Less slack, longer pad call."
+            },
+            {
+              "key": "C",
+              "reason": "Longer chain for the common case."
+            },
+            {
+              "key": "D",
+              "reason": "The twin stays at 942."
+            }
+          ],
+          "tradeoff": "Two small peer-standard additions against one host-dependent call."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T11:49:53.484Z"
     }
   ],
   "questions": [
@@ -197813,6 +198052,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T11:50:20.976Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iuv3zr",
+      "note": "#111 (Found 2026-11-10 by BallotFix, probe lc/l06 on dev 76955986"
+    },
+    {
+      "at": "2026-11-10T11:49:53.484Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SCRIPT-LOCAL-CLOCK1",
+      "note": "Give Core the host's time zone, and let format selectors take a computed number"
+    },
     {
       "at": "2026-11-10T11:46:27.063Z",
       "by": "Main",
