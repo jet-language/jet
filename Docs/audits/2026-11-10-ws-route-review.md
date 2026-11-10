@@ -62,3 +62,21 @@ fake response.
 
 - The mux gains a second handler type and one more route marker.
 - TLS connections cannot upgrade under any option.
+
+## Different-family review (GPT, 2026-11-10)
+
+Independent results: w01 prints `echo:ping`; w02 is E0102; w03 prints `handler checks`; w04 prints GET answered at 400 ms. These show today's behavior and a handler body, not an implemented A.
+
+| Claim | Attack, evidence and repair | Verdict |
+|---|---|---|
+| A's handler needs no unused response | w01 and w03 independently run. The current server discards the reply after the upgrade claim; origin/dev Http.jet:271-277 and Server.jet:1159-1196 confirm the state. | Holds as a proposal; not implemented registration. |
+| A fixes concurrency | Read ratified D-HTTP-SERVER2=A and reproduced w04. Concurrency is already required for all options. | Fails as an A-only benefit. |
+| Refusing TLS at bind designs away the TLS problem | Http.jet's claim cell owns a plain descriptor, not TLS. A secure server is still impossible if refused earlier. | Fails. All options must repair the shared transport ownership; no insecure-only release is authorized. |
+| One more route type is harmless | GET collisions, HEAD fallback, middleware and shutdown were unspecified. | Holds only with exact conflict rules, no HEAD upgrade, pre-handshake auth/Origin policy, and server-supervised upgraded lifetimes. |
+| Every error closes with 1011 | A peer may already be closed, or a protocol error may prescribe another code. | Fails. Preserve protocol codes and closed state; 1011 applies to application failures while writable. |
+| B/C/D exhaust the strong alternatives | Axum's on_upgrade returns a real response and an owned callback; FastAPI uses an explicit socket route. Neither requires a fake post-upgrade HTTP response. | Fails. Added E: one typed response-or-upgrade outcome, clean-cutover all handlers. |
+| OpenAPI describes the socket | A GET 101 operation can describe the HTTP handshake, not messages sent later. | Holds within stated limits; wording narrowed. |
+
+Read the cited ratifications directly: D-HTTP-SERVER2=A, D-HTTP-ROUTE-EXPOSE1=A, D-WS1=B and D-HTTPDEPTH1=A. Read origin/dev Server and Http plus Axum and FastAPI sources. The earlier census is historical, not independently remeasured or used in this recommendation.
+
+Agree with repaired A for explicit socket routes. E is stronger for mixed HTTP/socket handlers and has a real whole-handler migration cost. No performance advantage was measured. Do not post TLS refusal as a fix or w03 as end-to-end proof.
