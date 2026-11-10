@@ -8,6 +8,9 @@ package: {
         regex: .Library{ entry: regex }
     }
 }
+use {
+    prefilter.[needle_absent]
+}
 
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
@@ -93,6 +96,7 @@ Regex: struct {
     priv groups: Int
     priv names: [String]
     priv needle: [U8]
+    priv needle_text: String
     priv prefix: [U8]
     priv dfa: Dfa
 }
@@ -254,6 +258,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     groups: p.groups,
     names: p.names,
     needle: scalars_utf8(facts.best),
+    needle_text: String.from_bytes(scalars_utf8(facts.best)) ?? "",
     prefix: scalars_utf8(facts.prefix),
     dfa: no_dfa(),
     }
@@ -264,10 +269,28 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
 is_match: fn(pattern: Regex, text: String) -> Bool Never! {
     word: literal_text(pattern)
     if word != "" -> return text.contains(word)
+    if needle_absent(pattern, text) -> return false
     exists(pattern, text.bytes(), false, false)
 }
 
-full_match: fn(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), true, true) }
+full_match: fn(pattern: Regex, text: String) -> Bool Never! {
+    if needle_absent(pattern, text) -> return false
+    exists(pattern, text.bytes(), true, true)
+}
+
+// The needle prefilter behind every String entry point, not part of the
+// regex surface.
+priv prefilter: module {
+    /// Whether the literal every match contains (`needle`, empty when there
+    /// is none) is missing from `text`, so nothing matches. String's
+    /// `contains` runs the runtime's substring search over the text in place,
+    /// before any entry point copies the text into bytes or runs the DFA over
+    /// it. A pattern with a literal (`status=5\d\d`) rejects most lines of a
+    /// log at that speed.
+    needle_absent: fn(re: Regex, text: String) -> Bool Never! {
+        re.needle_text != "" && !text.contains(re.needle_text)
+    }
+}
 
 /// Whether any match exists: the DFA answers when it can, else the scan.
 exists: fn(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Bool Never! {
@@ -288,6 +311,7 @@ purge: fn() RegexError! {
 find: fn(pattern: Regex, text: String) -> String? Never! {
     word: literal_text(pattern)
     if word != "" -> return if text.contains(word) -> Val(word) else -> None
+    if needle_absent(pattern, text) -> return None
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, false, false, 1)
     if runs.len() == 0 -> return None
@@ -315,6 +339,7 @@ find_all: fn(pattern: Regex, text: String) -> [String] Never! {
         loop _ in 0..<text.count(word) -> out.push(word.copy())
         return out
     }
+    if needle_absent(pattern, text) -> return out
     raw: text.bytes()
     loop run in scan(pattern, raw, false, false, false, false, -1) -> out.push(slice(raw, run.start, run.end))
     out
@@ -330,8 +355,9 @@ literal_text: fn(re: Regex) -> String Never! {
 }
 
 matches: fn(pattern: Regex, text: String) -> [Match] Never! {
-    raw: text.bytes()
     out := [Match]{}
+    if needle_absent(pattern, text) -> return out
+    raw: text.bytes()
     chars := CharCursor{byte: 0, count: 0}
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, -1) {
         m: make_match(pattern, raw, run, chars)
@@ -343,8 +369,8 @@ matches: fn(pattern: Regex, text: String) -> [Match] Never! {
 split: fn(pattern: Regex, text: String) -> [String] Never! { split_limit(pattern, text, 0) }
 
 split_limit: fn(pattern: Regex, text: String, n: Int) -> [String] Never! {
+    if n == 1 || needle_absent(pattern, text) -> return [String]{text}
     raw: text.bytes()
-    if n == 1 -> return [String]{text}
     limit := -1
     if n > 1 -> limit = n - 1
     out := [String]{}
@@ -423,6 +449,7 @@ group_by_reference: fn(m: Match, raw: [U8], from: Int, to: Int) -> String Never!
 replace_first: fn(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, true) }
 
 replace_n: fn(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String Never! {
+    if needle_absent(pattern, text) -> return text.copy()
     raw: text.bytes()
     limit := -1
     if first_only -> limit = 1
@@ -2076,6 +2103,7 @@ impl CharCursor {
 }
 
 find_match: fn(pattern: Regex, text: String) -> Match? Never! {
+    if needle_absent(pattern, text) -> return None
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, pattern.groups > 0, false, 1)
     if runs.len() == 0 -> return None

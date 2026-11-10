@@ -1,0 +1,33 @@
+// #6087 c2: every String entry point of core.regex first asks whether the
+// text holds the literal every match contains (the needle), and answers "no
+// match" without copying the text or running the DFA when it does not. The
+// answers are the engine's own on texts with and without the needle: a
+// prefix needle, an inner needle, an alternation's common prefix, a
+// multi-byte needle, anchors, a capture, and a pattern with no needle.
+use rx: core.regex
+
+show: fn(label: String, pattern: String, texts: [String]) {
+    re: rx.compile(pattern) ?? panic("{pattern} compiles")
+    loop text in texts {
+        found: if rx.find(re, text) == {
+            .Val(word) -> "[{word}]"
+            .None -> "none"
+        }
+        first: if rx.match(re, text) == {
+            .Val(m) -> "{m.start}..{m.end} groups {m.groups}"
+            .None -> "none"
+        }
+        print("{label} '{text}': is {rx.is_match(re, text)} full {rx.full_match(re, text)} find {found} match {first}")
+        print("    all {rx.find_all(re, text)} matches {rx.matches(re, text).len()} split {rx.split(re, text)} replace '{rx.replace(re, text, "<$0>")}' first '{rx.replace_first(re, text, "#")}'")
+    }
+}
+
+run: fn() {
+    show("prefix", "status=5\\d\\d ms=(\\d+)", [String]{"", "status=200 ms=4", "status=503 ms=17", "a status=500 ms=1 status=599 ms=22", "status=5", "status=5xx ms=3"})
+    show("inner", "\\d+kg\\b", [String]{"12kg", "12 kg", "kg", "3kg and 40kg", "5kgs"})
+    show("alt", "(foobar|foobaz)\\d", [String]{"foobar1", "foobaz2 foobar3", "fooba", "foo bar1"})
+    show("utf8", "é+(\\w)", [String]{"café", "éé9", "e9", "naïve ééx"})
+    show("anchored", "^id=(\\d+)$", [String]{"id=42", "xid=42", "id=", "id=7 "})
+    show("none", "[a-c]+\\d", [String]{"ab1", "zz9", ""})
+    show("split", ", *", [String]{"a, b,c", "abc", ""})
+}
