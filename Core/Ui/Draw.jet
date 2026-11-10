@@ -741,31 +741,8 @@ draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height
     levels := [Int]{}
     loop row in box.top..<box.bottom -> levels.push(axis_rgba(first, last, (Float{row} + 0.5 - rec.y) / rec.height))
     span: box.right - box.left
-    opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
-    if {
-        opaque && span * (box.bottom - box.top) * BULK_SHARE >= target.width * target.height -> {
-            starts := [Int]{}
-            counts := [Int]{}
-            picks := [Int]{}
-            rows := [[U8]]{}
-            shown := -1
-            loop k in 0..<levels.len() {
-                if levels[k] < 0 -> next
-                if levels[k] != shown {
-                    rows.push(solid_row(levels[k], span))
-                    shown = levels[k]
-                }
-                starts.push(((box.top + k) * target.width + box.left) * 4)
-                counts.push(span * 4)
-                picks.push(rows.len() - 1)
-            }
-            stitch(target, starts, counts, picks, rows)
-        }
-        else -> {
-            loop k in 0..<levels.len() {
-                if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
-            }
-        }
+    loop k in 0..<levels.len() {
+        if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
     }
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> next
@@ -792,38 +769,19 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
     opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
     // Opaque, one row of the levels copied to every row (a column on a tie
     // takes black here and its own pixels below); translucent, blended.
-    line := [U8]{}
     if opaque {
+        line := [U8]{}
         loop level in levels -> push_rgba(line, max_int(level, 0))
-    }
-    if {
-        opaque && span * (box.bottom - box.top) * BULK_SHARE >= target.width * target.height -> {
-            starts := [Int]{}
-            counts := [Int]{}
-            picks := [Int]{}
-            loop row in box.top..<box.bottom {
-                starts.push((row * target.width + box.left) * 4)
-                counts.push(span * 4)
-                picks.push(0)
-            }
-            stitch(target, starts, counts, picks, [[U8]]{line})
+        loop row in box.top..<box.bottom {
+            start: (row * target.width + box.left) * 4
+            target.pixels.__fill(start, start + span * 4, line)
         }
-        opaque -> {
-            loop row in box.top..<box.bottom {
-                at := (row * target.width + box.left) * 4
-                loop byte in line {
-                    target.pixels[at] = byte
-                    at += 1
-                }
-            }
-        }
-        else -> {
-            loop row in box.top..<box.bottom {
-                at := (row * target.width + box.left) * 4
-                loop level in levels {
-                    if level >= 0 -> blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
-                    at += 4
-                }
+    } else {
+        loop row in box.top..<box.bottom {
+            at := (row * target.width + box.left) * 4
+            loop level in levels {
+                if level >= 0 -> blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
+                at += 4
             }
         }
     }
@@ -1193,46 +1151,8 @@ extent_of: fn(image: Image) -> Extent {
     Extent{width: image.width, height: image.height}
 }
 
-// Opaque paint covering at least 1 / BULK_SHARE of the image goes through
-// `stitch`; smaller or translucent paint stores pixel by pixel. A stitch
-// copies the whole image at about a quarter of a store's cost per pixel.
-BULK_SHARE: 4
-
-// Paints the runs as `fill` does. One primitive's runs share a color and
-// come row by row, left to right, so opaque runs covering much of the image
-// stitch in one pass.
+// Paints the runs as `fill` does.
 paint: fn(target: &Image, runs: [Run]) {
-    if runs.len() == 0 || target.pixels.len() != target.width * target.height * 4 -> return
-    rgba: runs[0].rgba
-    area := 0
-    widest := 0
-    same := true
-    loop run in runs {
-        area += run.width * run.height
-        widest = max_int(widest, run.width)
-        if run.rgba != rgba -> same = false
-    }
-    if same && rgba.bit_and(255) == 255 && area * BULK_SHARE >= target.width * target.height {
-        starts := [Int]{}
-        counts := [Int]{}
-        picks := [Int]{}
-        end := 0
-        ordered := true
-        loop run in runs {
-            loop row in run.y..<(run.y + run.height) {
-                start: (row * target.width + run.x) * 4
-                if start < end -> ordered = false
-                starts.push(start)
-                counts.push(run.width * 4)
-                picks.push(0)
-                end = start + run.width * 4
-            }
-        }
-        if ordered {
-            stitch(target, starts, counts, picks, [[U8]]{solid_row(rgba, widest)})
-            return
-        }
-    }
     loop run in runs -> fill(target, run.x, run.y, run.width, run.height, run.rgba, false)
 }
 
@@ -1255,37 +1175,14 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     green: div255((rgba >> 16).bit_and(255) * alpha + 127)
     blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
     if replace || alpha == 255 {
-        if (right - left) * (bottom - top) * BULK_SHARE >= target.width * target.height {
-            starts := [Int]{}
-            counts := [Int]{}
-            picks := [Int]{}
-            loop row in top..<bottom {
-                starts.push((row * target.width + left) * 4)
-                counts.push((right - left) * 4)
-                picks.push(0)
-            }
-            stitch(target, starts, counts, picks, [[U8]]{solid_row((red << 24) + (green << 16) + (blue << 8) + alpha, right - left)})
+        // One in-place range fill per row, or one for rows the full width
+        // spans: a copy of the pixel, then the filled bytes doubling.
+        pixel: [U8]{U8{red}, U8{green}, U8{blue}, U8{alpha}}
+        if left == 0 && right == target.width {
+            target.pixels.__fill(top * target.width * 4, bottom * target.width * 4, pixel)
             return
         }
-        r8: U8{red}
-        g8: U8{green}
-        b8: U8{blue}
-        a8: U8{alpha}
-        // The pixels move into a local for the stores and back after:
-        // stores through `target` cost several times as much.
-        pixels := target.pixels
-        target.pixels = [U8]{}
-        loop row in top..<bottom {
-            at := (row * target.width + left) * 4
-            loop _ in left..<right {
-                pixels[at] = r8
-                pixels[at + 1] = g8
-                pixels[at + 2] = b8
-                pixels[at + 3] = a8
-                at += 4
-            }
-        }
-        target.pixels = pixels
+        loop row in top..<bottom -> target.pixels.__fill((row * target.width + left) * 4, (row * target.width + right) * 4, pixel)
         return
     }
     // over's sums, the source's bytes hoisted; x / 255 is
@@ -1309,24 +1206,6 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
         }
     }
     target.pixels = pixels
-}
-
-// Rebuilds the pixels with the first counts[k] bytes of rows[picks[k]] at
-// each byte offset starts[k] (ascending, disjoint, inside the image) and
-// every other byte as it was. Each piece is one list copy, so a large opaque
-// paint costs a pass over the image at copy speed instead of a store per
-// byte.
-stitch: fn(target: &Image, starts: [Int], counts: [Int], picks: [Int], rows: [[U8]]) {
-    out := [U8]{}
-    at := 0
-    loop k in 0..<starts.len() {
-        start: starts[k]
-        if start > at -> out.extend(target.pixels[at..<start].copy())
-        if counts[k] == rows[picks[k]].len() -> out.extend(rows[picks[k]].copy()) else -> out.extend(rows[picks[k]][0..<counts[k]].copy())
-        at = start + counts[k]
-    }
-    if at < target.pixels.len() -> out.extend(target.pixels[at..<target.pixels.len()].copy())
-    target.pixels = out
 }
 
 // `count` pixels of the packed color, built by doubling.
@@ -2547,10 +2426,10 @@ checks_20x10: fn() -> Image {
     gen_image_checked(20, 10, 3, 2, color(10, 20, 30, 40), color(200, 100, 50, 255))
 }
 
-#Test("raster opaque paint over much of the image stitches the same bytes") {
+#Test("raster opaque paint writes the bytes the reference paints") {
     extent: Extent{width: 20, height: 10}
-    // 15 x 7 of 20 x 10 is past the stitch share, 2 x 2 is not; the line from
-    // the bottom right runs right to left and does not stitch.
+    // Large and small opaque rectangles, a circle, lines run either way and a
+    // translucent cover.
     pieces: [[Run]]{
         rec_runs(extent, int_rectangle(3, 2, 15, 7), 0x112233FF),
         rec_runs(extent, int_rectangle(3, 2, 2, 2), 0x112233FF),
@@ -2576,6 +2455,31 @@ checks_20x10: fn() -> Image {
     assert_eq(image_words(cleared), image_words(gen_image_color(20, 10, color(1, 2, 3, 0))))
     assert_eq(solid_row(0x01020304, 3), [U8]{1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4})
     assert_eq(solid_row(0x01020304, 0).len(), 0)
+}
+
+#Test("a range fill clamps its window and repeats its pattern in place") {
+    bytes := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    bytes.__fill(1, 11, [U8]{1, 2, 3})
+    assert_eq(bytes, [U8]{0, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1})
+    bytes.__fill(-4, 2, [U8]{7, 8, 9})
+    assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 3, 1})
+    // An empty window and an empty pattern write nothing.
+    bytes.__fill(9, 4, [U8]{5})
+    bytes.__fill(3, 30, [U8]{})
+    assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 3, 1})
+    bytes.__fill(9, 40, [U8]{6, 6, 6, 6})
+    assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 6, 6})
+    words := [Int]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    words.__fill(-3, 7, [Int]{1, 2, 3})
+    assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 0, 0})
+    words.__fill(8, 20, [Int]{4, 5})
+    assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 4, 5})
+    // Owned elements: each replaced one is dropped and the pattern lent.
+    names := [String]{"a", "b", "c", "d", "e"}
+    pattern: [String]{"x", "yz"}
+    names.__fill(1, 4, pattern)
+    assert_eq(names, [String]{"a", "x", "yz", "x", "e"})
+    assert_eq(pattern, [String]{"x", "yz"})
 }
 
 triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
