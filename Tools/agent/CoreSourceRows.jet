@@ -734,7 +734,7 @@ TERM_WAITS: [String]{
     "binwrite", "progress", "read_key", "__terminal8_line", "__terminal8_write_stdout", "__terminal8_write_stderr", "__terminal8_mode_enter", "__terminal8_mode_leave", "__terminal8_read_all", "__terminal8_read_until", "__terminal8_key_bytes",
 }
 NET_WAITS: [String]{
-    "__resolve_ordered",
+    "__resolve_ordered", "socket_addr", "socket_addrs",
     "__tcp_accept", "__tcp_connect", "__tcp_connect_addr", "__tcp_connect_timeout", "__tcp_connect_happy",
     "__tcp_reply",
     "__udp_send_to", "__udp_recv_from", "__udp_send_bytes_to", "__udp_receive",
@@ -812,7 +812,7 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
         "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
         "core.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
         "core.service" -> if member == "state_store" || SERVICE_READS.contains(member) || SERVICE_WRITES.contains(member) -> Val("FS") else -> when_listed(member, SERVICE_SLEEPS, "Time")
-        "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
+        "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
@@ -866,6 +866,8 @@ call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
         "core.files" -> if FILES_READS.contains(member) -> Val("FS.Read") else -> when_listed(member, FILES_WRITES, "FS.Write")
         "core.term" -> when_listed(member, TERM_WAITS, "Time.Wait")
         "core.net.tls" -> when_listed(member, TLS_WAITS, "Time.Wait")
+        // A WebSocket connect and upgrade both wait on the handshake.
+        "core.net.ws" -> Val("Time.Wait")
         "core.http.client" -> when_listed(member, HTTP_CLIENT_WAITS, "Time.Wait")
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
         "core.http.server" -> when_listed(member, HTTP_SERVER_WAITS, "Time.Wait")

@@ -127,7 +127,7 @@ SRVRecord: struct {
     weight: Int
 }
 
-gethostname: fn() -[Env, FS]> String Never! {
+gethostname: fn() -[Env, FS.Read]> String Never! {
     environment: core.sys.get("HOSTNAME") ?? ""
     if environment.len() > 0 -> return environment
     contents: core.files.read("/etc/hostname") ?? return "localhost"

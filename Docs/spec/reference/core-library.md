@@ -1427,8 +1427,8 @@ fragments, missing hosts, and other schemes before the provider handshake.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `connect(url)` | `WsConn !WsError` | Validate and dial a cleartext WebSocket URL. |
-| `upgrade(request)` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
+| `connect(url) -[Net, Time.Wait]>` | `WsConn !WsError` | Validate and dial a cleartext WebSocket URL. |
+| `upgrade(request) -[Net, Time.Wait]>` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `!WsError` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage !WsError` | Receive a text, binary, or close message. |
 | `conn.close(code, reason)` | `!WsError` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
@@ -5012,7 +5012,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 
 | Signature | Result | Description |
 |---|---|---|
-| `gethostname() -[Env]> String` | text | Read the local host name. |
+| `gethostname() -[Env, FS.Read]> String` | text | Read the local host name: `$HOSTNAME`, else `/etc/hostname`. |
 | `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
 | `socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] !NetError` | addresses | Every address the host names, in resolver order. |

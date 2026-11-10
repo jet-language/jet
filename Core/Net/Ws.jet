@@ -21,7 +21,7 @@ WsError: enum {
 // URL and handshake shape before crossing the typed boundary. Control bytes
 // and spaces are refused in the text as written: parsing percent-encodes
 // them, which would carry a hostile URL through to the handshake.
-connect: fn(url_text: String) -> WsConn WsError! {
+connect: fn(url_text: String) -[Net, Time.Wait]> WsConn WsError! {
     loop byte in url_text.bytes() {
         if byte <= (U8{32}) || byte == (U8{127}) -> return Err(WsError.InvalidURL)
     }
@@ -35,7 +35,7 @@ connect: fn(url_text: String) -> WsConn WsError! {
     core.net.ws.__connect(url.unparse(parsed))
 }
 
-upgrade: fn(request: HTTPRequest) -> WsConn WsError! {
+upgrade: fn(request: HTTPRequest) -[Net, Time.Wait]> WsConn WsError! {
     if request.method() != "GET" -> return Err(WsError.InvalidHandshake)
     upgrade_header: request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(upgrade_header, "websocket") -> return Err(WsError.InvalidHandshake)
