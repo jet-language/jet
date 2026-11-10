@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98944,
+    "rev": 98947,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-10T16:31:52.956Z"
+    "completionCursor": "2026-11-10T18:38:38.960Z"
   },
   "epochs": [
     {
@@ -56541,6 +56541,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "D-EMBED-WALK1 is on the board (it unblocks c28). The draft recommends A; a different-family review added option E (computed embeds with literal globs) and recommends A only conditionally (E meets c28 with less change). The review gave 22 claim verdicts; the audit lands as Docs/audits/2026-11-10-embed-walk-review.md. Gaps under every option, for c28 to clear before the cutover: (1) jet run keeps a cached find-only program after its first match appears, because an empty find leaves no file-log record (ScriptCache.jet:530); (2) no lock record for a comptime find plus embed_file, and a build fn lock misses b.find and b.embed reads; (3) jet dev misses new non-.jet and toolchain: files (Host.jet:3718-3750); (4) Assemble rebase_embeds handles only literal embed_file; (5) no comptime value cache (about 3.3 s of CPU per compile for the 12 views against 1 s for the generator)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Owner instruction 2026-11-10 ~13:40, verbatim: \"Also since we already measured, feel free to update all the scripts just to DO what we want them to do, not to match byte identical to the peers. That should help cut some bloat required to mimic exactly using jet native. Just write them with best possible jet.\" Applied: the measurement against the originals is recorded (the logs above and the PortBars runs of 2026-11-10). From now on each Jet tool is written in the best Jet that does the job, and its fixtures check the job (exit status, the files, commits and queue lines it produces, and the facts its report states), not byte-identical text from the original. Mimicry code (JS UTF-16 clipping, `\\s` collapse, Object.entries order, truthiness and template display, `$(...)` newline rules, unquoted word splitting) is deleted. c34 and c35 are edited to match."
         },
         {
@@ -57063,7 +57068,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T18:37:08.835Z",
+      "updated": "2026-11-10T19:14:18.899Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -197197,6 +197202,347 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-10T15:24:07.694Z"
+    },
+    {
+      "id": "D-EMBED-WALK1",
+      "cardId": "c0qe89cl",
+      "group": "tooling",
+      "title": "Build-time reads of walked and data-named files",
+      "situation": "Card #5072 c28 moves five generated Core-declaration tables into build-time code. That code must read files named by a directory walk or by another file's text. On a0.0.43, find returns paths, but embed_file and embed_bytes accept literals only (E0957). A parent import outside a script's authorized root also fails (E0602).\n\nWe recommend A: accept build-time String arguments for the existing reads and find, without widening their file authority. E is the smaller change: computed embeds, literal globs. Both cover c28. The ratified toolchain: direction stands; neither proposal works on the seed yet.",
+      "gist": "Should existing build-time reads accept computed paths, and should find accept computed globs too?",
+      "lesson": "Jet can embed files while compiling. Today their paths must be literals. A table builder needs to read files named by a walk or by another file. This vote picks that read rule. Recording every read in .jet/lock is required but not working on the seed.",
+      "explainer": "A build-time read is embed_file or embed_bytes inside #run. find(glob) returns sorted paths. A data-named read gets its path from another file. toolchain: is the ratified prefix for compiler packages reading toolchain sources. Proposed examples use #run; seed probes use comptime. The lock is a required output, not an access grant or a sandbox.",
+      "story": "Lee keeps recipes in Markdown files. Under A she writes loop path in find(\"recipes/*.md\") -> embed_file(path). A new file joins the next build's table. The same code works under E, whose glob stays literal. A path outside the existing authority is rejected.",
+      "inWild": "// Zig: a constant-string value, not necessarily a source literal.\nconst text = @embedFile(name);\n// Go: literal bounds, then computed reads inside the embedded FS.\n//go:embed recipes/*.md\nvar recipes embed.FS",
+      "detail": "A amends D-CTIO1's literal clause and the literal-glob restriction. E changes only the embeds. Neither reopens D-EMBED-TOOLCHAIN1=A. Relative paths remain relative to the embedding file, not the package root. toolchain: keeps its ratified authority check. No absolute path, parent component, symlink escape or ambient file API is enabled.\n\nIndependent seed runs confirm E0957 for computed text, bytes and find arguments; sorted results; empty matches; and E0955 for invalid UTF-8 text and symlinks. b.find and b.embed already accept computed String values. The former's literal-only diagnostic is misleading, not an AST literal check.\n\nThe traced generator input set has 284 files (19.4 MB), including 42 runtime units and 13 syntax files. Literal-embed adaptations produced matching hashes for CoreCallRows and all twelve views. These are host-only probes, not the five-table package cutover or a cross-target proof. The report records cold-build costs; no option has an end-to-end implementation benchmark.\n\nImplementation is more than deleting sema's literal check. Today's typed host call stores a String and IR emits ConstText. Sema must check a build-time String expression and own the evaluated path-law check. IR lowers checked operations; the rooted host transport remains the security backstop. Preserve the Core-reader authority boundary rather than silently granting Core find.\n\nAll options need per-read digests, sorted glob membership including empty results, correct invalidation and watches, and target/toolchain-aware identity. Reusing bytes is a proposed bounded evaluation snapshot, not an existing cache. Key it by root, embedding directory and normalized path. Detect concurrent changes rather than mixing different file versions. Lock diffs show reads after execution; untrusted builds still need external isolation.\n\nThe option examples are same-derivation sketches: core_source_rows, pick and core_call_records stand for shared parser work, not new APIs. The complete executable derivation probes use literal embeds because the seed cannot implement any proposed option. The generated baseline stays until the chosen mechanism, shared parser and all cutover proofs pass.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Computed embeds and globs",
+          "detail": "embed_file, embed_bytes and find accept build-time String values. Apply the existing path law to the value. No new name.",
+          "technical": "Sema checks the argument type, phase and common normalized path law, including evaluated values. Typed calls and IR carry the argument expression instead of ConstText. Evaluation invokes sema-owned validation before rooted transport. E0957 quotes a rejected value; E0955 covers read or UTF-8 failure. Beginner: existing literal embeds. Expert: data-derived paths and globs. The complete record, watch and snapshot contract in the report applies.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Content globs",
+          "detail": "embed_files(glob) returns [(path: String, text: String)]; embed_files_bytes(glob) returns [(path: String, bytes: [U8])]. Patterns and scalar embeds stay literal-only.",
+          "technical": "Two names need D-PRELUDE-LAW1 admission. Both bulk calls must use the same canonical reader and path law, not duplicate file policy (I8). A static bound is a real review benefit. Data-named reads select from a superset. Invalid UTF-8 fails the text call with E0955; bytes require no UTF-8. Sorted results and empty matches follow find. Beginner: scalar embed, then a content glob. Expert: choose a bounded source set.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: embed_files(\"toolchain:Core/*/Runtime/**/*.jet\")\n    sources: embed_files(\"toolchain:Core/**/*.jet\")\n    owned: loop row in core_source_rows(core) -> pick(sources, \"toolchain:{row.path}\")\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Computed reads bounded by find",
+          "detail": "Computed embeds must match a literal find already executed in the same evaluation. Literal embeds keep their existing authority.",
+          "technical": "Track normalized matched identities, not bare path spellings. Reject an unmatched computed read with E0957. This adds authority state and call-order dependence, not another reader. Beginner: literal embeds. Expert: run a bounding find before computed reads. The example's Core bound may include files it never uses. Reusing bytes can remove repeated I/O but not the order rule.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    bound: find(\"toolchain:Core/**/*.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Declared input ceiling",
+          "detail": "package.jet declares comptime_inputs globs. Computed reads and walks must stay inside that ceiling; literals retain today's rule. Reading code is A's.",
+          "technical": "A new manifest key contributes to package identity. Reject values outside the ceiling with E0957. The ceiling is distinct from the actual read set and need not change for every new file. Beginner: literal embeds need no field. Expert: choose a narrow ceiling. Costs: another authority surface, manifest maintenance, and wider restrictions if authors use broad roots to avoid maintenance.",
+          "code": "// Compiler/JetFoundation/package.jet, proposed field:\ncomptime_inputs: [\"toolchain:Compiler/Prelude/*\", \"toolchain:Core/**\", \"toolchain:Compiler/JetFoundation/Data/Syntax/*\"]\n\nCORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Computed embeds; literal globs",
+          "detail": "embed_file and embed_bytes accept build-time String values. find keeps its literal-only argument. This covers the same c28 program as A.",
+          "technical": "Use A's checked expression, rooted reader and recording contract for embeds without widening find's source restriction. Beginner: existing literal embeds. Expert: data-named embeds work directly; a data-named walk needs a broad literal find and filtering. This is the smallest semantic expansion the traced generator requires. It does not add C's matched-set requirement.",
+          "code": "// Identical to A for this program: its globs are already literal.\nCORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "The implementation resolves a constant-string value and rejects an embed outside the module path. This is a source comparison, not a local Zig execution.",
+          "code": "const text = @embedFile(name);"
+        },
+        {
+          "lang": "Go",
+          "note": "Literal package-relative patterns bound an embed.FS. Computed names read inside it. Patterns exclude parent components and symlinks; empty matches fail. Source comparison only.",
+          "code": "//go:embed recipes/*.md\nvar recipes embed.FS\ntext, err := recipes.ReadFile(\"recipes/\" + name)"
+        },
+        {
+          "lang": "Cargo",
+          "note": "A build script is a cached host program. It can derive table literals directly, not only emit include_str! calls. Authors declare invalidation paths. Source comparison only.",
+          "code": "// build.rs\nprintln!(\"cargo::rerun-if-changed=recipes\");\n// Read, derive, and write the table under OUT_DIR."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps one value-argument rule across existing operations and matches the computed-value build host. E is equally sufficient for c28 and changes less. Prefer A for consistency, not because these tables prove a need for computed globs. This recommends a direction, not implementation approval.",
+        "gains": [
+          "One argument rule for literal, walked and data-named paths.",
+          "No new ambient name.",
+          "No superset read is required just to authorize a computed embed."
+        ],
+        "losses": [
+          {
+            "loss": "Shared blocker under A-E: an empty find-only program is cached by jet run and misses its first added member.",
+            "mitigation": "Reproducer: probes/empty_glob.sh. Record and revalidate empty membership before cache reuse; c25 and the cutover must cover this."
+          },
+          {
+            "loss": "Data-named reads are not visible from source alone before execution.",
+            "mitigation": "Required lock rows expose the set after a successful build. They are not a pre-execution allowlist; untrusted builds need external isolation."
+          },
+          {
+            "loss": "Wrong computed paths fail during evaluation rather than literal checking.",
+            "mitigation": "Sema owns language checking; the host independently enforces file authority. Codegen only lowers checked operations."
+          },
+          {
+            "loss": "Ratified literal rules, their tests and explanations change.",
+            "mitigation": "Update every affected caller and test in one cutover, including positive computed-path and negative computed-escape cases."
+          },
+          {
+            "loss": "Glob tracking, bootstrap authority and target parity remain unproven for the proposed mechanism.",
+            "mitigation": "Require the report's acceptance matrix before cutover. Do not describe planned fixes as shipped behavior."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A real static bound and useful bulk operation, but two names and possible superset reads. Sharing policy can satisfy I8; the toolchain ballot does not ban B."
+          },
+          {
+            "key": "C",
+            "reason": "A real source ceiling, but mutable authority state and a call-order rule."
+          },
+          {
+            "key": "D",
+            "reason": "A useful manifest ceiling, but another policy surface. The ceiling and actual reads are different facts, not duplication by definition."
+          },
+          {
+            "key": "E",
+            "reason": "Equally sufficient and smaller for c28. A avoids differing rules for computed paths and globs; that consistency gain is not a performance claim."
+          }
+        ],
+        "tradeoff": "Uniform computed arguments, in return for learning the actual read set after execution. E offers a smaller change."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: EmbedWalkReview; independent seed probes and matched-output derivations corrected b.find, constant-only IR, repeated reads, lock and I8 claims, and added option E; see the audit for unproven cutover requirements."
+      },
+      "checkInstructions": "Run w01-w08, w05_glob_add.sh, probes/review.sh, probes/lifecycle.sh and probes/empty_glob.sh with a0.0.43. Empty-glob run returns 0/0/0 across first addition/removal, while build returns 0/1/0. This blocks every option's cutover.\n\nFrom the pinned dev tree run census.sh, cost/trace.sh, cost/sum.sh and cost/mk.sh, then c0-c4 and cost/cost_time.sh. A-E are proposed sketches, not runnable implementations. The report gives the required cutover matrix. Validate with jet Tools/agent/ballots/Validate.jet <payload>.",
+      "surface": {
+        "gist": "Should embeds accept computed paths, and should find accept computed globs too?",
+        "lesson": "Today file paths must be literal. Table builders need paths from walks and data. This vote changes the read rule, not file authority. The required lock recording is not working yet.",
+        "trio": {
+          "current": {
+            "note": "A found path is refused.",
+            "code": "loop p in find(\"in/*.txt\") -> embed_file(p) // E0957"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "A constant-string value.",
+            "code": "const text = @embedFile(name);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Computed paths and globs",
+            "gist": "Accept computed arguments on existing calls.",
+            "gains": [
+              "One rule, no new names."
+            ],
+            "losses": [
+              "Reads known after execution."
+            ],
+            "proposed": {
+              "code": "embed_file(path)\nfind(glob)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Content globs",
+            "gist": "Literal globs return paths and content.",
+            "gains": [
+              "A visible static bound."
+            ],
+            "losses": [
+              "Two new names."
+            ],
+            "proposed": {
+              "code": "embed_files(\"recipes/*.md\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Found paths only",
+            "gist": "A prior literal find bounds computed reads.",
+            "gains": [
+              "Source-level ceiling."
+            ],
+            "losses": [
+              "An order rule."
+            ],
+            "proposed": {
+              "code": "bound: find(\"recipes/**\")\nembed_file(path) // must match bound"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Declared ceiling",
+            "gist": "The manifest bounds computed reads.",
+            "gains": [
+              "Authority visible before execution."
+            ],
+            "losses": [
+              "Another policy surface."
+            ],
+            "proposed": {
+              "code": "comptime_inputs: [\"recipes/**\"]"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Computed embeds only",
+            "gist": "Read computed paths; keep find patterns literal.",
+            "gains": [
+              "Covers c28 with less change."
+            ],
+            "losses": [
+              "Computed globs still refused."
+            ],
+            "proposed": {
+              "code": "embed_file(path) // find stays literal"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One value rule across existing calls. E covers these tables equally well with less change.",
+          "gains": [
+            "No new names.",
+            "File authority stays bounded."
+          ],
+          "losses": [
+            {
+              "loss": "Reads seen after execution.",
+              "mitigation": "Lock diffs aid review, not isolation."
+            },
+            {
+              "loss": "Implementation gaps remain.",
+              "mitigation": "Require sema checks, recording, watches and target parity before cutover."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A real bound, but two names."
+            },
+            {
+              "key": "C",
+              "reason": "Adds an order rule."
+            },
+            {
+              "key": "D",
+              "reason": "Adds manifest policy."
+            },
+            {
+              "key": "E",
+              "reason": "Smaller change; less uniform argument rules."
+            }
+          ],
+          "tradeoff": "Uniform arguments, not a proved speedup."
+        }
+      },
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "No source-only bound for data-derived reads.",
+          "attempts": [
+            "Require a prior literal find: C gives a ceiling but adds an order rule.",
+            "Declare an input ceiling: D gives pre-execution review but adds manifest policy."
+          ],
+          "result": "Not removed by A. Lock diffs help after execution; external isolation remains necessary for untrusted builds."
+        },
+        {
+          "option": "A",
+          "loss": "Repeated read and hash work.",
+          "attempts": [
+            "Reuse a bounded per-evaluation byte snapshot keyed by full authority identity.",
+            "Keep independent reads and reject changed inputs rather than mixing versions."
+          ],
+          "result": "Implementation choice still open. The existing log stores no reusable bytes; no removed-cost claim is made."
+        },
+        {
+          "option": "A",
+          "loss": "Assemble cannot discover computed package-relative assets with a text scan.",
+          "attempts": [
+            "For toolchain reads, retain the selected toolchain and prove assembled-package membership.",
+            "For package-relative assets, use checked input identities rather than guessing paths from text."
+          ],
+          "result": "Open acceptance requirement. JET_TOOLCHAIN_ROOT alone does not prove authorization, and not every option needs the same staging implementation."
+        },
+        {
+          "option": "B",
+          "loss": "Two new public names.",
+          "attempts": [
+            "One mode-taking name reduces names but adds a mode.",
+            "Implement bulk and scalar operations over one reader to avoid duplicated policy."
+          ],
+          "result": "Public surface cost remains; I8 compliance is possible, not automatically forbidden."
+        },
+        {
+          "option": "C",
+          "loss": "Order-dependent matched-set authority.",
+          "attempts": [
+            "Predeclare the bound independently of execution: becomes a declaration policy like D.",
+            "Reuse matched bytes: removes extra reads, not the order rule."
+          ],
+          "result": "Remains. A typed bound could remove ambient order state but would require a separately specified API."
+        },
+        {
+          "option": "D",
+          "loss": "Another authority surface in package.jet.",
+          "attempts": [
+            "Infer it from find calls: becomes C and loses manifest review.",
+            "Default to all already-authorized files: becomes A and loses the narrow ceiling."
+          ],
+          "result": "Remains. A broad stable ceiling lowers maintenance but weakens restriction."
+        },
+        {
+          "option": "E",
+          "loss": "Different argument rules for find and embeds.",
+          "attempts": [
+            "Allow computed globs as well: becomes A.",
+            "Filter a broad literal find: preserves E but reads a superset."
+          ],
+          "result": "Remains for data-named walks. The c28 example does not incur it."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Build-time walked-file reads: independent adversarial review",
+          "path": "Docs/audits/2026-11-10-embed-walk-review.md",
+          "note": "Independent seed probes and matched-output adapted derivations; host-only costs and unproven cutover requirements are stated separately."
+        },
+        {
+          "title": "Zig @embedFile",
+          "url": "https://ziglang.org/documentation/master/#embedFile"
+        },
+        {
+          "title": "Zig embed implementation",
+          "url": "https://github.com/ziglang/zig/blob/master/src/Sema.zig"
+        },
+        {
+          "title": "Go embed rules",
+          "url": "https://github.com/golang/go/blob/master/src/embed/embed.go"
+        },
+        {
+          "title": "Cargo build scripts",
+          "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed"
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T19:14:17.698Z"
     }
   ],
   "questions": [
@@ -200269,6 +200615,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T19:14:18.899Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T19:14:17.698Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-EMBED-WALK1",
+      "note": "Build-time reads of walked and data-named files"
+    },
+    {
+      "at": "2026-11-10T18:38:38.960Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-10T18:38:38.960Z"
+    },
     {
       "at": "2026-11-10T18:37:08.835Z",
       "by": "Main",
