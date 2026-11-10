@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98630,
+    "rev": 98632,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75048,11 +75048,11 @@
         {
           "n": 58,
           "text": "(was #4214) Decide whether current law can express a user trait implemented for `Pair<T>` only when `T: Priced`. Record the answer with a golden, or file a ballot for the missing form. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T19:06:50.670Z"
+          "evidence": "Answer recorded: current law cannot express a trait implemented for Pair<T> only when T: Priced. Probes on the t6c compiler (dev 76955986d0): `impl Pair<T: Priced>.Describe` is E0003; a bare impl calling price is E0901; a method-level <T: Priced> is a fresh parameter, giving E0904; a struct-level bound is unconditional. The missing form is filed as ballot D-IMPL-COND1 (head bound, trailing when clause, or a wrapper type), source $JET_SCRATCH_ROOT/lanes/G1Lead-4/D-IMPL-COND1.json.",
+          "at": "2026-11-10T10:43:39.128Z"
         },
         {
           "n": 59,
@@ -75649,7 +75649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T10:40:22.959Z",
+      "updated": "2026-11-10T10:43:39.128Z",
       "updatedBy": "Main",
       "criteriaLastN": 153
     },
@@ -194630,6 +194630,184 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-10T03:48:17.201Z"
+    },
+    {
+      "id": "D-IMPL-COND1",
+      "cardId": "c0oev2ib",
+      "group": "other",
+      "title": "How should a trait be implemented for Pair<T> only when T has another trait?",
+      "situation": "A generic type such as Pair<T> holds values of any type T. Sometimes a trait makes sense for Pair<T> only when T can do something itself. For example, a pair can describe its total price only when each half has a price. Jet has no way to say this today. An impl block names the type bare, and its methods cannot add a bound to the type's T. The workaround is a separate wrapper type. This ballot picks where that condition is written, or decides that Jet keeps the wrapper.",
+      "gist": "Where should Jet write a condition such as 'only when T is Priced' on a trait impl for a generic type?",
+      "lesson": "A trait is a set of methods a type promises to have. An impl block keeps that promise for one type. A generic type like Pair<T> works for any T. A conditional impl keeps the promise only for some T, such as every T that is Priced. Calling the method on another Pair is an error at the call.",
+      "explainer": "Today, impl Pair.Describe { … } promises Describe for every Pair. Inside it, a method may use only what every T can do. So calling self.left.price() fails with E0901, because not every T has price.\n\nWriting the bound in the head, impl Pair<T: Priced>.Describe, fails with E0003: an impl names the type bare. Adding <T: Priced> to the method makes a new T that has nothing to do with the pair's T, so the call fails with E0904.\n\nPutting the bound on the type, Pair: struct<T: Priced>, works, but then every Pair needs a Priced T. A Pair<Int> could no longer exist.\n\nOption A writes the condition in the impl head: impl Pair<T: Priced>.Describe { … }. The head names the type's own parameter and adds a bound to it. Inside the block, T is Priced, so self.left.price() checks.\n\nOption B keeps the bare head and adds a trailing clause: impl Pair.Describe when T: Priced { … }. The meaning is the same as A, with a different spelling.\n\nOption C adds nothing. A program writes a wrapper type, PricedPair<T: Priced>, and implements Describe on it. Callers wrap a Pair before they describe it.\n\nUnder A and B a call on a Pair whose T is not Priced is an error at the call. p.describe() on a Pair<Int> reports E0905, the type doesn't implement the required trait, naming Describe and the unmet bound Int: Priced. The same error stops show(p) when show needs Describe.\n\nOverlap. Two impls of one trait for one type may not both apply to the same T. A bare impl Pair.Describe and a conditional impl Pair<T: Priced>.Describe overlap for every Priced T, so having both is E0908, a duplicate trait impl. Two conditional impls with different bounds also overlap, because one T could meet both bounds. So they are E0908 too.\n\nThe orphan rule does not change. The module must own the trait or the type, exactly as for a bare impl.",
+      "story": "Rosa has a Pair<T> type for two items in a shopping cart. She wants pairs of priced items to describe their total, and her generic show function to accept them. Jet tells her an impl names the type bare. Her only choice today is a second type that wraps every Pair she wants to show.",
+      "inWild": "// Rust: the bound sits on the impl's own parameter.\nimpl<T: Priced> Describe for Pair<T> {\n    fn describe(&self) -> String { format!(\"pair costs {}\", self.left.price() + self.right.price()) }\n}\n\n// Swift: conditional conformance.\nextension Pair: Describe where T: Priced {\n    func describe() -> String { \"pair costs \\(left.price() + right.price())\" }\n}\n\n-- Haskell: an instance context.\ninstance Priced t => Describe (Pair t) where\n    describe (Pair l r) = \"pair costs \" ++ show (price l + price r)\n\n// Sources: Rust reference, Implementations, Generic implementations (doc.rust-lang.org/reference/items/implementations.html).\n// Swift SE-0143, Conditional conformances (github.com/swiftlang/swift-evolution/blob/main/proposals/0143-conditional-conformances.md).\n// Haskell 2010 report, section 4.3.2, Instance declarations (haskell.org/onlinereport/haskell2010/haskellch4.html).",
+      "detail": "Probes were run on dev 76955986d0 with the t6c compiler, as #6281 c58 asks. The files are p/c58/a.jet, b.jet and c.jet in the G1Lead-4 lane.\n\nProbe a writes impl Pair<T: Priced>.Describe and gets E0003: impl Pair takes no type parameters. The why text says an impl of a generic type names the type bare.\n\nProbe b writes impl Pair.Describe with a describe method that calls self.left.price(). It gets E0901: calling price needs Priced.\n\nProbe c adds <T: Priced> to the describe method. The method's T is a fresh parameter, so p.describe() gets E0904: Jet can't figure out what T should be.\n\nA bound on the type, Pair: struct<T: Priced>, holds for every Pair, so it does not express only when.\n\nSo the answer to c58 is that current law cannot express a conditional impl. This ballot is the missing form that c58 names.\n\nWhat is the same in A and B. Sema reads the bound on the impl head's parameter as a condition on the impl row. Bound satisfaction, sema_type_bound_satisfied_nominal, then also checks the impl's own bounds against the actual type arguments. Method lookup on a Pair<Int> receiver finds the row, checks the condition and reports E0905 when it fails.\n\nCoherence. Two impl rows of one trait whose targets resolve to one nominal overlap unless their conditions can never both hold. Jet cannot prove two traits are disjoint, so any pair of rows overlaps and E0908 reports the second. A bare row is a row with no condition.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The bound goes in the impl head",
+          "detail": "impl Pair<T: Priced>.Describe { … } implements Describe for every Pair whose T is Priced. Inside the block, T is Priced. The bare head impl Pair.Describe still means every Pair. A call on a Pair<Int> is E0905, and a bare and a conditional impl of one trait together are E0908.",
+          "technical": "The parser accepts type parameters with bounds after the target in an impl head and stores them on ImplDef. E0003's 'takes no type parameters' text stays for a head that repeats parameters with no bound. The names must match the type's own parameters, in order, or E0003 names the expected list.\n\nRegistration records the bounds on the impl row. Bound satisfaction and method lookup check them against the actual type arguments, and a failure is E0905. Coherence treats every pair of impl rows of one trait for one nominal as overlapping, so a second one is E0908. The formatter prints the head as written.",
+          "code": "Priced: trait { price: fn(self) -> Int }\nDescribe: trait { describe: fn(self) -> String }\nPair: struct<T> {\n    left: T\n    right: T\n}\n\nimpl Pair<T: Priced>.Describe {\n    describe: fn(self) -> String { \"pair costs {self.left.price() + self.right.price()}\" }\n}\n\nApple: struct { cents: Int }\nimpl Apple.Priced { price: fn(self) -> Int { self.cents } }\n\nshow: fn<T: Describe>(value: T) -> String { value.describe() }\n\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(p))                        // pair costs 7\n    n: Pair<Int>{left: 1, right: 2}\n    // n.describe() is E0905: Pair<Int> does not implement Describe, because Int is not Priced\n}"
+        },
+        {
+          "key": "B",
+          "name": "A trailing when clause",
+          "detail": "impl Pair.Describe when T: Priced { … } has the same meaning as A. The head stays bare, and the condition follows it as a clause. Calls, overlap and errors are the same as under A.",
+          "technical": "The parser accepts a when clause after the impl head, as a list of bounds on the target type's parameters. Names must be the type's own parameters, or E0003 names them. Registration, bound satisfaction, method lookup, E0905 and E0908 are the same as under A. The formatter prints the clause on the head line.",
+          "code": "Priced: trait { price: fn(self) -> Int }\nDescribe: trait { describe: fn(self) -> String }\nPair: struct<T> {\n    left: T\n    right: T\n}\n\nimpl Pair.Describe when T: Priced {\n    describe: fn(self) -> String { \"pair costs {self.left.price() + self.right.price()}\" }\n}\n\nApple: struct { cents: Int }\nimpl Apple.Priced { price: fn(self) -> Int { self.cents } }\n\nshow: fn<T: Describe>(value: T) -> String { value.describe() }\n\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(p))                        // pair costs 7\n    n: Pair<Int>{left: 1, right: 2}\n    // n.describe() is E0905: Pair<Int> does not implement Describe, because Int is not Priced\n}"
+        },
+        {
+          "key": "C",
+          "name": "No conditional impls; use a wrapper type",
+          "detail": "Jet keeps today's rule. A program declares a wrapper, PricedPair<T: Priced>, and implements Describe on it. Callers wrap a Pair before they describe it. E0003 keeps its current text, and its fix names the wrapper.",
+          "technical": "No compiler change except the teaching. E0003 for a bounded impl head gains a fix that names the wrapper form. The c58 golden records the wrapper as the answer.",
+          "code": "Priced: trait { price: fn(self) -> Int }\nDescribe: trait { describe: fn(self) -> String }\nPair: struct<T> {\n    left: T\n    right: T\n}\n\nPricedPair: struct<T: Priced> { pair: Pair<T> }\nimpl PricedPair.Describe {\n    describe: fn(self) -> String { \"pair costs {self.pair.left.price() + self.pair.right.price()}\" }\n}\n\nApple: struct { cents: Int }\nimpl Apple.Priced { price: fn(self) -> Int { self.cents } }\n\nshow: fn<T: Describe>(value: T) -> String { value.describe() }\n\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(PricedPair<Apple>{pair: p}))   // pair costs 7\n    n: Pair<Int>{left: 1, right: 2}\n    // PricedPair<Int>{pair: n} is an error: Int is not Priced\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The bound sits on the impl's own type parameter, as in option A.",
+          "code": "impl<T: Priced> Describe for Pair<T> {\n    fn describe(&self) -> String { format!(\"{}\", self.left.price() + self.right.price()) }\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "Conditional conformance uses a trailing where clause, as in option B.",
+          "code": "extension Pair: Describe where T: Priced {\n    func describe() -> String { \"\\(left.price() + right.price())\" }\n}"
+        },
+        {
+          "lang": "Haskell",
+          "note": "An instance context names the condition before the instance head.",
+          "code": "instance Priced t => Describe (Pair t) where\n    describe (Pair l r) = show (price l + price r)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts the condition where the type is named, next to the parameter it limits. It reads like a generic function's bound, which Jet already writes as <T: Priced>, so there is nothing new to learn.",
+        "gains": [
+          "Pairs of priced items describe themselves with no wrapper type.",
+          "The bound looks the same as a generic function's bound.",
+          "A call on the wrong Pair gets one clear error at the call."
+        ],
+        "losses": [
+          {
+            "loss": "The impl head grows a new form.",
+            "mitigation": "The form is the one generic functions already use, and the bare head keeps its meaning."
+          },
+          {
+            "loss": "Two impls of one trait with different bounds cannot coexist.",
+            "mitigation": "E0908 names both impls, and one impl can test the case inside its body."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A when clause is a second way to write a bound, while Jet writes every other bound inside angle brackets."
+          },
+          {
+            "key": "C",
+            "reason": "A wrapper type is boilerplate at every call, and it is the workaround this ballot exists to remove."
+          }
+        ],
+        "tradeoff": "One more form in the impl head, for conditional impls that read like every other bound."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Where should Jet write 'only when T is Priced' on a trait impl for Pair<T>?",
+        "lesson": "An impl block makes a type keep a trait's promise. A conditional impl keeps it only for some T, such as every T that is Priced. Calling the method on another Pair is an error at the call.",
+        "trio": {
+          "current": {
+            "note": "Today the impl head must be bare, so the method can't use price.",
+            "code": "impl Pair<T: Priced>.Describe { … }   // E0003: impl Pair takes no type parameters\nimpl Pair.Describe {\n    describe: fn(self) -> String { \"{self.left.price()}\" }   // E0901: price needs Priced\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust puts the bound on the impl's own parameter.",
+            "code": "impl<T: Priced> Describe for Pair<T> {\n    fn describe(&self) -> String { format!(\"{}\", self.left.price()) }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The bound goes in the impl head",
+            "gist": "impl Pair<T: Priced>.Describe, written like a generic function's bound.",
+            "gains": [
+              "Reads like every other bound in Jet.",
+              "No wrapper type."
+            ],
+            "losses": [
+              "A new form in the impl head."
+            ],
+            "proposed": {
+              "code": "impl Pair<T: Priced>.Describe {\n    describe: fn(self) -> String { \"pair costs {self.left.price() + self.right.price()}\" }\n}\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(p))      // pair costs 7\n    // Pair<Int>{left: 1, right: 2}.describe() is E0905\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A trailing when clause",
+            "gist": "impl Pair.Describe when T: Priced, with the same meaning as A.",
+            "gains": [
+              "The head stays bare."
+            ],
+            "losses": [
+              "A second way to write a bound."
+            ],
+            "proposed": {
+              "code": "impl Pair.Describe when T: Priced {\n    describe: fn(self) -> String { \"pair costs {self.left.price() + self.right.price()}\" }\n}\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(p))      // pair costs 7\n    // Pair<Int>{left: 1, right: 2}.describe() is E0905\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No conditional impls; use a wrapper type",
+            "gist": "Keep today's rule and write a wrapper type such as PricedPair.",
+            "gains": [
+              "No compiler change."
+            ],
+            "losses": [
+              "Every caller must wrap the pair first.",
+              "A second type for one idea."
+            ],
+            "proposed": {
+              "code": "PricedPair: struct<T: Priced> { pair: Pair<T> }\nimpl PricedPair.Describe {\n    describe: fn(self) -> String { \"pair costs {self.pair.left.price() + self.pair.right.price()}\" }\n}\nrun: fn() {\n    p: Pair<Apple>{left: Apple{cents: 3}, right: Apple{cents: 4}}\n    print(show(PricedPair<Apple>{pair: p}))   // pair costs 7\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A writes the condition next to the parameter it limits, the same way a generic function writes its bound.",
+          "gains": [
+            "Priced pairs describe themselves with no wrapper.",
+            "One clear error when T is not Priced."
+          ],
+          "losses": [
+            {
+              "loss": "A new form in the impl head.",
+              "mitigation": "It is the bound form generic functions already use."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It adds a second way to write a bound."
+            },
+            {
+              "key": "C",
+              "reason": "A wrapper is the boilerplate this ballot removes."
+            }
+          ],
+          "tradeoff": "One more head form, for conditional impls that read like every other bound."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-10T10:43:36.997Z"
     }
   ],
   "questions": [
@@ -197702,6 +197880,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T10:43:39.128Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-10T10:43:36.997Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-IMPL-COND1",
+      "note": "How should a trait be implemented for Pair<T> only when T has another trait?"
+    },
     {
       "at": "2026-11-10T10:40:22.959Z",
       "by": "Main",
