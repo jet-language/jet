@@ -139,14 +139,9 @@ Job: struct {
     limits: Value{none}
     after: Value{[]}
     parallel: Value{none}
-
-    impl Marker {
-        sites: [.Function]
-    }
-}
-
-Every: struct {
-    schedule: Duration | String
+    // The schedule: a positive Duration cadence or a daily
+    // UTC "HH:MM" time.
+    every: Duration | String{none}
 
     impl Marker {
         sites: [.Function]
@@ -159,23 +154,11 @@ Replayable: struct {
     }
 }
 
-WasmExport: struct {
-    impl Marker {
-        sites: [.Function]
-    }
-}
-
+// `#State(S)` requires S; `#State(A -> B)` moves A (`_` at
+// entry) to B, the arrow binding `to`.
 State: struct {
     state: State
-
-    impl Marker {
-        sites: [.Function, .Method]
-    }
-}
-
-Transition: struct {
-    from: State
-    to: State
+    to: State{none}
 
     impl Marker {
         sites: [.Function, .Method]
@@ -366,15 +349,6 @@ Layout: struct {
     }
 }
 
-RenameAll: struct {
-    case: NamingCase
-
-    impl Marker {
-        sites: [.Type]
-        owns_menu: true
-    }
-}
-
 DenyUnknownFields: struct {
     impl Marker {
         sites: [.Type]
@@ -401,8 +375,11 @@ Redact: struct {
     }
 }
 
+// A string renames one field or variant (keeping the
+// projection arguments below); a NamingCase (`.Camel`) on a type sets the
+// wire casing of all its fields or variants.
 Rename: struct {
-    name: String
+    name: String | NamingCase
     json: String{none}
     cbor: String{none}
     csv: String{none}
@@ -415,7 +392,7 @@ Rename: struct {
     layout: String{none}
 
     impl Marker {
-        sites: [.Field, .Variant]
+        sites: [.Field, .Variant, .Type]
     }
 }
 
@@ -441,27 +418,14 @@ Doc: struct {
     }
 }
 
-// Opts a `#CLI` required value field out of positional filling: without it,
-// required scalars fill from bare argv in declaration order; with it, only
-// `--field` is accepted.
-Flag: struct {
-    impl Marker {
-        sites: [.Field]
-    }
-}
-
-// A one-letter alias for a `#CLI` field.
-Short: struct {
-    name: String
-
-    impl Marker {
-        sites: [.Field]
-    }
-}
-
-// The environment fallback for a `#CLI` value field.
-Env: struct {
-    name: String
+// The one `#CLI` field marker. `flag_only: true` keeps a required
+// value field off bare positional input; `short:` is a one-letter alias and
+// `env:` the environment fallback. Command input beats the environment, which
+// beats the typed default.
+Arg: struct {
+    flag_only: Bool{false}
+    short: String{none}
+    env: String{none}
 
     impl Marker {
         sites: [.Field]
@@ -586,13 +550,11 @@ Reactive: struct {
     }
 }
 
+// `#Off` erases a statement or block from every build; `#Off(.Release)` only
+// from release builds. Either body is type-checked in every build.
 Off: struct {
-    impl Marker {
-        sites: [.Statement, .Block]
-    }
-}
+    build: BuildCondition{none}
 
-DebugOnly: struct {
     impl Marker {
         sites: [.Statement, .Block]
     }

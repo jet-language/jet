@@ -2,11 +2,11 @@ Reservation: struct {
     state { Pending, Confirmed }
     guest: String
 
-    #Transition(_, Pending) book: fn(guest: String) -> Reservation {
+    #State(_ -> Pending) book: fn(guest: String) -> Reservation {
         return Reservation{guest: guest.copy()}
     }
 
-    #Transition(Pending, Confirmed) pay: fn(self: &&Reservation) -> Reservation {
+    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation {
         return self
     }
 

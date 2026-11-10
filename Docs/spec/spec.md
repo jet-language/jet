@@ -735,8 +735,10 @@ that declaration's own site (`.Trait`, `.Impl`, `.Module`); no Prelude marker
 accepts `.Trait`, so a marker on a trait is E0355.
 
 `#Off <stmt>` parses and type-checks one statement but emits no code in any
-build. `#DebugOnly <stmt>` type-checks in every build and emits only in debug or
-dev builds. Names introduced inside either marker are scoped to that marker body.
+build. `#Off(.Release) <stmt>` type-checks in every build and is erased only in
+release builds (the `release` and `hardened` profiles); the condition menu is
+closed (D-OFF-RELEASE1). Two `#Off` forms on one statement are E0344. Names
+introduced inside either form are scoped to that marker body.
 The registered build-profile fact is `$build.profile`; bare `build.profile` is
 not a user-typeable comptime value (D-CANVASSTATE1).
 
@@ -809,7 +811,7 @@ D-VALIDATE-DECODE1=B).
 
 For a concrete `#PublishedSchema` type that derives `Decode` and has migration
 blocks, decode first tries the current shape. If that fails, it compares the
-wire key set (after any `#Rename`/`#RenameAll` treatment) with historical shapes
+wire key set (after any field `#Rename` and type `#Rename(.Case)` treatment) with historical shapes
 from newest to oldest, rewrites the first match forward in source order, and
 decodes the current shape. The `rename` operation moves a
 key, `remove` drops it, `add` evaluates its default, and `change` decodes,
@@ -4955,8 +4957,8 @@ into typed input with one parameter whose type is a `#CLI` struct:
 ```jet
 #CLI
 ServeArgs: struct {
-    #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
-    #Short("v") verbose: Bool
+    #[Doc("port to listen on"), Arg(env: "PORT")] port: Int{3000}
+    #Arg(short: "v") verbose: Bool
     config: String?
 }
 
@@ -4967,8 +4969,8 @@ run: fn(args: ServeArgs) {
 
 `#CLI` is a sibling derive of `#Codable`. `#Doc` on a struct describes the
 program, on a field describes its option, and on a callable member describes
-its command. Descriptions preserve embedded line breaks. `#Short` and `#Env`
-are field markers. `#CLI(Standard)` additionally registers
+its command. Descriptions preserve embedded line breaks. `#Arg(flag_only:,
+short:, env:)` is the one command-input field marker (D-CLI-ARG1). `#CLI(Standard)` additionally registers
 `--verbose`/`-v`, `--quiet`/`-q`, `--color=auto|always|never`, and `--version`.
 Plain `#CLI` always registers `--help`.
 
@@ -4983,8 +4985,8 @@ and serves the returned App; it does not change the CLI schema
 ### Field mapping
 
 Each supported `#CLI` field maps to exactly one long flag. Required scalar
-fields also fill bare positional values in declaration order unless `#Flag`
-opts that field out. Named input wins over a positional value. The supported
+fields also fill bare positional values in declaration order unless
+`#Arg(flag_only: true)` opts that field out. Named input wins over a positional value. The supported
 shapes are:
 
 | Field shape | Named form | Bare form | Missing value |
@@ -4992,21 +4994,21 @@ shapes are:
 | `Bool` | `--name` | none | `false` |
 | `?T` for a supported scalar | `--name VALUE` | none | `None` |
 | scalar with `{expr}` | `--name VALUE` | none | `expr` |
-| required scalar with `#Flag` | `--name VALUE` | rejected | runtime `core.args` error |
+| required scalar with `#Arg(flag_only: true)` | `--name VALUE` | rejected | runtime `core.args` error |
 | other supported scalar | `--name VALUE` | declaration-order positional | runtime `core.args` error |
 
 Supported scalar types are `Int`, including inline ranges, `Float`, `Bool`,
 `String`, and `Path`. A map, closure, list, or nested `#CLI` struct is E1305.
 Field names convert underscores to dashes. Every field accepts its named form.
-`#Flag` on a bool, optional, or defaulted field is E1309. Declaration order is
+`#Arg(flag_only: true)` on a bool, optional, or defaulted field is E1309. Declaration order is
 part of the command interface and is represented in the checked `CLISchema`.
 A field named `help` collides with generated `--help` and is E1306.
 
-`#Short("n")` adds `-n` to the long form and must be one unique ASCII letter.
-`#Env("PORT")` is read only when command input is absent. The precedence is
-command input, then environment, then field default. Invalid or duplicate
-short names are E1318; field markers outside a `#CLI` struct and `#Env` on a
-presence-only bool are E1319. Nested `#CLI` structs are deliberately not
+`#Arg(short: "n")` adds `-n` to the long form and must be one unique ASCII
+letter. `#Arg(env: "PORT")` is read only when command input is absent. The
+precedence is command input, then environment, then field default. Invalid or
+duplicate short names are E1318; `#Arg` outside a `#CLI` struct and
+`env:` on a presence-only bool are E1319. Nested `#CLI` structs are deliberately not
 supported in this contract; grouped prefix decoding would require its own
 shape and diagnostics (D-CLI-GLOBAL1, D-CLI-POS1).
 

@@ -52,12 +52,6 @@ sema_migration_remove: fn(values: [String], value: String) -> [String] Never! {
     result
 }
 
-sema_migration_rename_all: fn(definition: StructDef) -> String? {
-    marker := sema_checked_marker(definition.serde_markers, "RenameAll")
-    if marker == None -> return None
-    sema_checked_marker_text(marker ?? panic("checked RenameAll marker disappeared"))
-}
-
 sema_migration_wire_name: fn(style: String?, name: String) -> String Never! {
     sema_checked_wire_case(style, name)
 }
@@ -73,7 +67,7 @@ sema_migration_json_key: fn(definition: StructDef, style: String?, name: String)
 }
 
 sema_migration_canonical_shape: fn(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
-    style := sema_migration_rename_all(definition)
+    style := sema_checked_rename_case(definition.serde_markers)
     names := [SemaMigrationFieldName]{}
     current := [String]{}
     skipped := [String]{}

@@ -107,7 +107,7 @@ parser_parse_inbody_marker: fn(state: &JetParserState) -> Marker? {
             parser_add_fatal_code(state, "E0931", parser_cover(hash.span, value.span), "`#{marker_name}: false` is not a signed auto-derive trait", "`false` rejects compiler generation only for structurally auto-derived traits", "write `#{marker_name}: true`, or use `false` with an auto-derived trait")
         }
     } else if value.kind == TOKEN_LPAREN {
-        parsed: parser_parse_marker_args(state)
+        parsed: parser_parse_marker_args(state, false)
         args = parsed.args
         labels = parsed.labels
     } else {

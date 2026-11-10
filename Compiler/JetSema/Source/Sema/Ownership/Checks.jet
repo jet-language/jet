@@ -4867,7 +4867,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: &SemaOwnershipState, b
                 // copy: `step_stmt` is a payload of the read statement list; the one-statement list owns this one
                 if step == .Val(step_stmt) -> sema_ownership_collect_evaluated_stmt_accesses(state, [Stmt]{step_stmt.copy()}, mode, loop_bound, nested, scopes, events, checks)
             }
-            // An `#Off` or `#DebugOnly` body never reaches the release runtime.
+            // An `#Off` or `#Off(.Release)` body never reaches the release runtime.
             .Switched(marker, switched_body, _) -> {
                 if !sema_authority_switched_erased(marker.name) {
                     body_bound := bound.copy()

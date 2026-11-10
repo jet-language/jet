@@ -1428,6 +1428,9 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     // declared to its unknown-job report, and a selectable one's word is
     // refused with the fix (IRJob stripped).
     release: options.profile == "release"
+    // A release build erases `#Off(.Release)` code: the
+    // `release` and `hardened` profiles, and a custom profile named release.
+    checks.release = release || options.profile == "hardened"
     loop job in inputs.jobs {
         stripped: release && !job.shipped
         if !stripped -> checks.declared_jobs.push(job.name.copy())

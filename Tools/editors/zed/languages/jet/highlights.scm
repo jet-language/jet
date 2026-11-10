@@ -26,7 +26,7 @@
 (type_identifier) @type
 (primitive_type) @type.builtin
 
-; Applied rules (#Test, #Transition(A, B), #[Codable], @allow) and $facts
+; Applied rules (#Test, #State(A -> B), #[Codable], @allow) and $facts
 (attribute) @attribute
 (lower_attribute) @attribute
 (meta_name) @variable.special
@@ -51,7 +51,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add as change client derive distinct effect enum extern fact fn impl migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
+; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Unsafe add as change client derive distinct effect enum extern fact fn impl migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
 [
   "derive"
   "enum"
@@ -99,7 +99,7 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Allow Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport
+; marker.rule: ABI Allow Arg Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Equatable Error FFI FX Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename Replayable Root SQL Scalar Scrub Shared Shield SingleUse Skip State Static Target Test Todo Track Transact Undo UnitFamily Unsafe Untagged
 ; take: &&
 ; sigil: # $ & ... : := :> <:
 ; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> <> == > >= >> >>= ? ?. ?? | |> ||

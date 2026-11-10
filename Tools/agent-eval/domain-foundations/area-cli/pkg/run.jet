@@ -25,7 +25,7 @@ ignored: fn(path: String, patterns: [String]) -> Bool {
 
 #CLI(Standard)
 Notes: struct {
-    #[Doc("directory for the notes store"), Env("NOTES_CONFIG")] config_dir: String{"notes-config"}
+    #[Doc("directory for the notes store"), Arg(env: "NOTES_CONFIG")] config_dir: String{"notes-config"}
 
     #Doc("write one note to the config directory")
     add: fn(self, title: String, body: String) {
@@ -127,7 +127,7 @@ Notes: struct {
     }
 }
 
-#[Job(.Dev), Doc("refresh the local notes index"), Every(1s)]
+#[Job(.Dev, every: 1s), Doc("refresh the local notes index")]
 refresh: fn() {
     print("job=refresh")
 }

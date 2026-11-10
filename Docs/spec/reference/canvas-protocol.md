@@ -353,7 +353,7 @@ The `jet.canvas.edit` operation set is:
 | `add_pattern_arm` | Graph/node spans and `pattern`; appends a checked pattern arm. |
 | `edit_pattern_arm` | Graph and pattern spans plus `pattern`; replaces an arm pattern, then formats and checks. |
 | `remove_pattern_arm` | Graph and pattern spans; removes an arm, but not the last remaining arm. |
-| `toggle_switch_state` | Graph/node spans; removes an existing `#Off`/`#DebugOnly` marker or adds `#Off` to a checked statement. |
+| `toggle_switch_state` | Graph/node spans; removes an existing `#Off`/`#Off(.Release)` marker or adds `#Off` to a checked statement. |
 | `append_multi_input` | Node spans and optional `element`; appends a list-literal element. |
 | `remove_multi_input_element` | Node and element spans; removes one element and its adjacent separator. |
 | `insert_call` | `graph_id`, `callee`, `args`, optional binding and pin/wire fields; inserts an ordinary Jet call. |

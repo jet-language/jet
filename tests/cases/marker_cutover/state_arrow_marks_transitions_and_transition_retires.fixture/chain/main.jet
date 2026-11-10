@@ -1,0 +1,12 @@
+Door: struct {
+    state { Closed, Open }
+}
+
+impl Door {
+    #State(_ -> Closed) new: fn() -[]> Door { Door{} }
+    #State(Closed -> Open -> Closed) cycle: fn(self: &&Door) -[]> Door { self }
+}
+
+run: fn() {
+    _: Door.new()
+}

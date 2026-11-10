@@ -1,0 +1,51 @@
+# #4284 c13 (#4297): a job's schedule is the `every:` argument of `#Job`, a
+# positive Duration cadence or a daily "HH:MM" time. `jet jobs` lists each
+# cadence, a bad cadence is E0926 at the argument, and the standalone
+# `#Every` marker is retired (E0927).
+fixture: job_every_schedules_and_every_marker_retires.fixture
+env: NO_COLOR=1
+step check: jet check
+cwd: project
+exit: 0
+step run: jet run
+cwd: project
+exit: 0
+stdout: = "pruned\nbacked up\nmanual\n"
+stderr: empty
+step jobs: jet jobs
+cwd: project
+exit: 0
+stdout: ~ "prune   [dev] (every 5min)" # the Duration cadence
+stdout: ~ "backup  [dev] Back up nightly (every day 03:00)" # the daily time
+stdout: ~ "manual  [dev]\n" # no schedule
+step format: jet check format/main.jet
+exit: 1
+stderr: ~ "This daily schedule isn't a plain `\"HH:MM\"` time" # a daily time is HH:MM
+stderr: ~ "--> main.jet:1:13" # located at the argument
+stderr: ~ "jet-lang.dev/e/E0926" # the schedule code
+step hour: jet check hour/main.jet
+exit: 1
+stderr: ~ "This daily schedule's hour is out of range" # 24:00 is not a time
+stderr: ~ "--> main.jet:1:13" # located at the argument
+stderr: ~ "jet-lang.dev/e/E0926" # the schedule code
+step negative: jet check negative/main.jet
+exit: 1
+stderr: ~ "A job schedule must be known at compile time" # a negated duration is not a literal cadence
+stderr: ~ "--> main.jet:1:13" # located at the argument
+stderr: ~ "jet-lang.dev/e/E0926" # the schedule code
+step unit: jet check unit/main.jet
+exit: 1
+stderr: ~ "This duration's unit isn't a recognized schedule cadence" # px is not a Time unit
+stderr: ~ "--> main.jet:1:14" # located at the unit
+stderr: ~ "jet-lang.dev/e/E0926" # the schedule code
+step zero: jet check zero/main.jet
+exit: 1
+stderr: ~ "A schedule interval must be a positive duration" # 0ms never becomes due
+stderr: ~ "--> main.jet:1:14" # located at the unit
+stderr: ~ "jet-lang.dev/e/E0926" # the schedule code
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "`#Every` isn't a known applied rule" # the standalone marker is retired
+stderr: ~ "--> main.jet:1:8" # located at the retired marker
+stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "1 problem found" # one diagnostic only

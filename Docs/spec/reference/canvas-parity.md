@@ -83,7 +83,7 @@ graph gesture. The coverage labels mean:
 - [Stmt::Reactive] status=readonly effect registration, source edits.
 - [Stmt::Shield] status=readonly cancellation-shield region, source edits.
 - [Stmt::Switched] status=graph statement-state node with a source-backed
-  `#Off` or `#DebugOnly` marker toggle and nested source edits (D-CANVASSTATE1).
+  `#Off` or `#Off(.Release)` marker toggle and nested source edits (D-CANVASSTATE1).
 - [Stmt::Region] status=readonly lifetime region, source edits.
 - [Stmt::Policy] status=graph scoped policy region with declared keys in the
   title, nested-body projection, and source edits.
@@ -103,7 +103,7 @@ graph gesture. The coverage labels mean:
 - [Stmt::DeferClose] status=readonly resource cleanup, source edits.
 
 `Stmt::Switched` is the AST representation for both statement markers. `#Off`
-and `#DebugOnly` are marker data, not separate `Stmt` variants; Canvas must not
+and `#Off(.Release)` are marker data, not separate `Stmt` variants; Canvas must not
 present them as separate enum rows. Likewise, an `if` statement is represented
 by the relevant graph projection and does not add another statement enum variant
 to this matrix.

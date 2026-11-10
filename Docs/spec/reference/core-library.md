@@ -3352,8 +3352,9 @@ The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 A parser returns a `Dyn` (or a format-specific document). A typed codec
 maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 `#Decode` derive the typed encode/decode routes; field attributes such as
-`#Rename`, `#Skip`, `#Flatten`, `#RenameAll`, `#DenyUnknownFields`,
-`#Discriminant`, and `#Untagged` describe the wire shape. Unknown fields are
+`#Rename`, `#Skip`, `#Flatten`, `#DenyUnknownFields`, `#Discriminant`, and
+`#Untagged` describe the wire shape; `#Rename(.Camel)` on a type sets the
+casing of every field or variant. Unknown fields are
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
 an unrelated type.

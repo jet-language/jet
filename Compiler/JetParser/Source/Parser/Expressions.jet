@@ -1051,8 +1051,8 @@ parser_parse_marker_value: fn(state: &JetParserState, depth: Int, allow_struct_l
             parser_add_fatal_code(state, "E0349", head_span, "`#Meta` attaches to a binding or function", "`#Meta` is a tooling fact about a named source item; expressions do not carry it", "move `#Meta(...)` before a binding or function, or remove it")
             return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(state)}, span: head_span}
         }
-        "Off" | "DebugOnly" -> {
-            parser_add_fatal_code(state, "E0343", head_span, "`#{name}` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#{name} <statement>`")
+        "Off" -> {
+            parser_add_fatal_code(state, "E0343", head_span, "`#Off` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#Off <statement>` or `#Off(.Release) <statement>`")
             return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(state)}, span: head_span}
         }
         "Todo" -> return ParsedExpr{expr: Expr.Todo{span: head_span, expected_type: None, id: parser_node_id(state)}, span: head_span}

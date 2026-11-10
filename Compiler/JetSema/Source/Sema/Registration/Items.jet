@@ -17,13 +17,12 @@ use {
         ConstDef,
         DeclID,
         DeclTable,
+        MARKER_ARG,
         MARKER_CLI,
         MARKER_DEPRECATED,
         MARKER_DOC,
-        MARKER_ENV,
         MARKER_FLATTEN,
-        MARKER_RENAME_ALL,
-        MARKER_SHORT,
+        MARKER_RENAME,
         MARKER_SKIP,
         decl_id_index,
         decl_table_add,
@@ -3190,10 +3189,11 @@ SemaRegistrationCLIFieldKind: enum {
 
 // Rust `validate_cli_items`: every `#CLI` program struct of the module, in item
 // order. A struct that is not `#CLI` may carry neither a callable member
-// (E1345) nor `#Short`/`#Env` (E1319). A `#CLI` struct's fields each map to one
-// flag (E1305), keep `#Flag` meaningful (E1309), derive distinct flags beside
-// the reserved `--help`/`--allow`/`--deny` (E1306), use one-letter distinct
-// short names (E1318), and keep `#Env` off presence flags (E1319). Its methods
+// (E1345) nor `#Arg` (E1319). A `#CLI` struct's fields each map to one flag
+// (E1305), keep `#Arg(flag_only: true)` meaningful (E1309), derive distinct
+// flags beside the reserved `--help`/`--allow`/`--deny` (E1306), use
+// one-letter distinct `short:` names (E1318), and keep `env:` off presence
+// flags (E1319). Its methods
 // and bound members are commands with one namespace (E1344), read-only
 // receivers (E1347), and callable shapes (E1345), and are not allowed on a
 // Codable struct (E1346).
@@ -3208,7 +3208,7 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 loop binding in definition.cli_bindings -> diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member is only valid inside a `#CLI` program struct"))
                 loop field in definition.fields {
                     loop marker in field.serde_markers {
-                        if marker.name == MARKER_SHORT || marker.name == MARKER_ENV -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
+                        if marker.name == MARKER_ARG -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Arg` describes a generated command input, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
                     }
                 }
                 next
@@ -3225,9 +3225,9 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                     diagnostics.push(sema_error("E1305", field.name_span, "field `{field.name}` has no CLI flag mapping ({type_name(field.ty)})", "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested `#[CLI]` structs and other collection/closure types don't).", "change the field to a supported type, or drop it from the `#[CLI]` struct"))
                     next
                 }
-                flag_marker: sema_registration_cli_marker(field.serde_markers, "Flag")
-                if flag_marker == .Val(marker) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
-                    diagnostics.push(sema_error("E1309", marker.name_span, "`#[Flag]` on `{field.name}` has nothing to opt out of", "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `#[Flag]`, or make the field a required scalar without a `{{expr}}` default"))
+                flag_only: sema_registration_cli_arg_option(field.serde_markers, "flag_only")
+                if flag_only == .Val(value) && sema_registration_cli_true(value) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
+                    diagnostics.push(sema_error("E1309", expr_span(value), "`#Arg(flag_only: true)` on `{field.name}` has nothing to opt out of", "`flag_only: true` keeps a required value field off bare positional input. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `flag_only: true`, or make the field a required scalar without a `{{expr}}` default"))
                 }
                 flag: sema_checked_field_shape_names(definition, field).args
                 if seen_flags.get(flag) != None {
@@ -3236,9 +3236,9 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 seen_flags[flag] = true
                 sema_registration_cli_short_name(field, seen_shorts, diagnostics)
                 if kind == SemaRegistrationCLIFieldKind.Flag {
-                    env_marker: sema_registration_cli_marker(field.serde_markers, "Env")
-                    if env_marker == .Val(marker) && sema_registration_cli_marker_string(marker) != None {
-                        diagnostics.push(sema_registration_e1319(MARKER_ENV, field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
+                    env_option: sema_registration_cli_arg_option(field.serde_markers, "env")
+                    if env_option == .Val(value) && sema_registration_cli_literal(value) != None {
+                        diagnostics.push(sema_registration_e1319("Arg(env:)", field.name, "a `Bool` command field is a presence flag, while `env:` lowers to a value option.", "remove `env:`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", expr_span(value)))
                     }
                 }
             }
@@ -3290,16 +3290,12 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-// E1318: the field's first `#Short` marker, when its argument is one literal
-// string, is one ASCII letter that no earlier field (or the standard pack)
-// already selects.
+// E1318: the field's `#Arg(short:)`, when it is one literal string, is one
+// ASCII letter that no earlier field (or the standard pack) already selects.
 sema_registration_cli_short_name: fn(field: Field, seen: &[String:String], diagnostics: &[Diagnostic]) {
-    marker_value: sema_registration_cli_marker(field.serde_markers, "Short")
-    if marker_value == None -> return
-    marker: marker_value
-    short_value: sema_registration_cli_marker_string(marker)
-    if short_value == None -> return
-    short: short_value
+    value: sema_registration_cli_arg_option(field.serde_markers, "short") ?? return
+    short: sema_registration_cli_literal(value) ?? return
+    span: expr_span(value)
     bytes: short.bytes()
     letter := false
     if bytes.len() == 1 {
@@ -3307,12 +3303,12 @@ sema_registration_cli_short_name: fn(field: Field, seen: &[String:String], diagn
         letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
     }
     if !letter {
-        diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Short(\"p\")`"))
+        diagnostics.push(sema_error("E1318", span, "`#Arg(short: \"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Arg(short: \"p\")`"))
         return
     }
     previous: seen.get(short)
     seen[short] = field.name
-    if previous == .Val(first) -> diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `#Short` value"))
+    if previous == .Val(first) -> diagnostics.push(sema_error("E1318", span, "`#Arg(short: \"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `short:` value"))
 }
 
 // E1344: a command word may name neither a root flag nor another command. A
@@ -3412,6 +3408,46 @@ sema_registration_cli_marker: fn(markers: [Marker], name: String) -> Marker? {
     None
 }
 
+// The written option of a field's `#Arg(flag_only:, short:,
+// env:)` bound to `name`, by label or by position.
+sema_registration_cli_arg_option: fn(markers: [Marker], name: String) -> Expr? {
+    marker: sema_registration_cli_marker(markers, MARKER_ARG) ?? return None
+    parameters: [String]{"flag_only", "short", "env"}
+    loop index in 0..<marker.args.len() {
+        bound := if index < parameters.len() -> parameters[index] else -> ""
+        if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(label) -> bound = label.name
+        if bound != name -> next
+        if marker.args[index] == .Expr(value) -> return Val(value)
+        return None
+    }
+    None
+}
+
+// An `#Arg` option's one literal string.
+sema_registration_cli_literal: fn(value: Expr) -> String? {
+    if value == .Str(parts, _, _) && parts.len() == 1 {
+        if parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}
+
+sema_registration_cli_true: fn(value: Expr) -> Bool Never! {
+    if value == .Bool(written, _, _) -> return written
+    false
+}
+
+// Whether the field's `#Arg` says `flag_only: true`.
+sema_registration_cli_arg_flag_only: fn(markers: [Marker]) -> Bool Never! {
+    value: sema_registration_cli_arg_option(markers, "flag_only") ?? return false
+    sema_registration_cli_true(value)
+}
+
+// The `#Arg` option's text (`short:` or `env:`), when it is one literal string.
+sema_registration_cli_arg_text: fn(markers: [Marker], name: String) -> String? {
+    value: sema_registration_cli_arg_option(markers, name) ?? return None
+    sema_registration_cli_literal(value)
+}
+
 // Rust `classify_cli_field`: `Bool` is a flag; `T?` of a CLI scalar is an
 // optional option; any other CLI scalar is a defaulted or required option.
 sema_registration_cli_field_kind: fn(field: Field) -> SemaRegistrationCLIFieldKind? {
@@ -3473,7 +3509,7 @@ sema_registration_cli_marker_string: fn(marker: Marker) -> String? {
 }
 
 // (Rust `validate_serde_items`): on every type that derives a codec
-// explicitly, a container `#RenameAll(style)` names one of the closed casing
+// explicitly, a container `#Rename(.Case)` names one of the closed casing
 // styles (E2409), `#Flatten` needs a struct-typed field (E2408), every
 // encoded or decoded field or payload needs a wire form (E2411), and every
 // decoded anonymous union needs one distinct outer wire shape per member
@@ -3528,17 +3564,30 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-// E2409 (Rust `validate_serde_items`): the container casing menu. A style
-// that is not a name or text is the marker signature's problem (E0930).
+// E2409 (Rust `validate_serde_items`): the container casing menu
+// on a type. `#Rename` there takes a NamingCase word; an unknown
+// word, a plain name or a string there is refused. An argument that is
+// neither a name nor text is the marker signature's problem (E0930).
 sema_registration_serde_rename_all: fn(markers: [Marker], diagnostics: &[Diagnostic]) {
     loop marker in markers {
-        if marker.name != MARKER_RENAME_ALL -> next
-        style: sema_checked_marker_text(marker) ?? next
-        if sema_checked_wire_style_valid(Val(style)) -> next
-        span := marker.span
-        if marker.args.len() > 0 && marker.args[0] == .Expr(argument) -> span = expr_span(argument)
-        row: diagnostic_registry_row("E2409") ?? panic("E2409 has no registry row")
-        diagnostics.push(sema_error("E2409", span, row.what.replace("{{style}}", style), row.why.replace("{{style}}", style), row.fix.replace("{{style}}", style)))
+        if marker.name != MARKER_RENAME || marker.negated || marker.args.len() == 0 -> next
+        if marker.args[0] == .Expr(argument) {
+            written := ""
+            if argument == {
+                .EnumLit(_, name, _, _, _, _, _) -> {
+                    if sema_checked_wire_style_valid(sema_checked_rename_case_word(marker)) -> next
+                    written = ".{name}"
+                }
+                .Ident(name, _, _) -> written = name.copy()
+                .Str(_, _, _) -> {
+                    text: sema_checked_marker_text(marker) ?? next
+                    written = "\"{text}\""
+                }
+                else -> next
+            }
+            row: diagnostic_registry_row("E2409") ?? panic("E2409 has no registry row")
+            diagnostics.push(sema_error("E2409", expr_span(argument), row.what.replace("{{style}}", written), row.why.replace("{{style}}", written), row.fix.replace("{{style}}", written)))
+        }
     }
 }
 

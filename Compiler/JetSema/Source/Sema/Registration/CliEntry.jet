@@ -286,9 +286,9 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
         flag: sema_checked_field_shape_names(definition, field).args
         name: sema_cli_entry_text(flag)
         help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}"
-        short: sema_cli_entry_marker_text(field.serde_markers, "Short") ?? ""
-        env: sema_cli_entry_marker_text(field.serde_markers, "Env") ?? ""
-        flag_only: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        short: sema_registration_cli_arg_text(field.serde_markers, "short") ?? ""
+        env: sema_registration_cli_arg_text(field.serde_markers, "env") ?? ""
+        flag_only: sema_registration_cli_arg_flag_only(field.serde_markers)
         slot: root.len()
         source: if direct -> "__v{slot}" else -> "__jet_cli_args.__cli_value(__parsed, {name})"
         explicit: if direct -> "__x{slot}" else -> "__jet_cli_args.__cli_explicit(__parsed, {name})"

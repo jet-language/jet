@@ -3,8 +3,8 @@ Flow: struct {
     state { Start, Done, Cancelled, Orphan }
 }
 impl Flow {
-    #Transition(_, Start) start: fn() -[]> Flow { return Flow{} }
-    #Transition(Start, Done) done: fn(self: &&Flow) -[]> Flow { return self }
-    #Transition(Start, Cancelled) cancel: fn(self: &&Flow) -[]> Flow { return self }
+    #State(_ -> Start) start: fn() -[]> Flow { return Flow{} }
+    #State(Start -> Done) done: fn(self: &&Flow) -[]> Flow { return self }
+    #State(Start -> Cancelled) cancel: fn(self: &&Flow) -[]> Flow { return self }
 }
     run: fn() {}

@@ -20,7 +20,7 @@ use {
 // generated command help page.
 #CLI(Standard)
 CLI: struct {
-    #[Doc("directory for the CLI config file"), Env("CLI_CONFIG_DIR")] config_dir: String{"cli-config"}
+    #[Doc("directory for the CLI config file"), Arg(env: "CLI_CONFIG_DIR")] config_dir: String{"cli-config"}
 
     #Doc("run every library part once with deterministic fixtures")
     demo: fn(self) {
@@ -121,7 +121,7 @@ run_all: fn(config_root: String) {
     refresh()
 }
 
-#[Job(.Dev), Doc("refresh the CLI battery fixture"), Every(1h)]
+#[Job(.Dev, every: 1h), Doc("refresh the CLI battery fixture")]
 refresh: fn() {
     print("job=refresh")
 }

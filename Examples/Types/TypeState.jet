@@ -5,8 +5,8 @@
 //
 //   Reservation: struct { state { Pending, Confirmed, CheckedIn } ... }
 //
-//   #Transition(_, Pending)  book: fn(...)     -- entry: value starts in `Pending`
-//   #Transition(Pending, Confirmed) pay: fn(self) R -> …  -- advances the state
+//   #State(_ -> Pending)  book: fn(...)     -- entry: value starts in `Pending`
+//   #State(Pending -> Confirmed) pay: fn(self) R -> …  -- advances the state
 //   #State(Confirmed) check_in: fn(self)         -- valid only in `Confirmed`
 //
 // Calling an operation in the wrong state is the compile error E0150 (see the ui
@@ -27,13 +27,13 @@ Workflow: struct {
 }
 
 impl Workflow {
-    #Transition(_, Pending) begin: fn() -> Workflow { Workflow{} }
+    #State(_ -> Pending) begin: fn() -> Workflow { Workflow{} }
 
-    #Transition(Pending, Success) succeed: fn(self: &&Workflow) -> Workflow { self }
+    #State(Pending -> Success) succeed: fn(self: &&Workflow) -> Workflow { self }
 
-    #Transition(Pending, Failure) fail: fn(self: &&Workflow) -> Workflow { self }
+    #State(Pending -> Failure) fail: fn(self: &&Workflow) -> Workflow { self }
 
-    #Transition(Pending, Cancelled) cancel: fn(self: &&Workflow) -> Workflow { self }
+    #State(Pending -> Cancelled) cancel: fn(self: &&Workflow) -> Workflow { self }
 
     #State(Success) success_report: fn(self) -> String { "success" }
 
@@ -48,13 +48,13 @@ Session: struct {
 }
 
 impl Session {
-    #Transition(_, Open) open: fn() -> Session { Session{} }
+    #State(_ -> Open) open: fn() -> Session { Session{} }
 
-    #Transition(Open, Open) heartbeat: fn(self: &&Session) -> Session { self }
+    #State(Open -> Open) heartbeat: fn(self: &&Session) -> Session { self }
 
-    #Transition(Open, Closed) close: fn(self: &&Session) -> Session { self }
+    #State(Open -> Closed) close: fn(self: &&Session) -> Session { self }
 
-    #Transition(Closed, Reopened) reopen: fn(self: &&Session) -> Session { self }
+    #State(Closed -> Reopened) reopen: fn(self: &&Session) -> Session { self }
 
     #State(Reopened) audit: fn(self) -> String { "reopened" }
 }
@@ -65,14 +65,14 @@ Unseeded: struct {
 }
 
 impl Unseeded {
-    #Transition(Raw, Done) finish: fn(self: &&Unseeded) -> Unseeded { self }
+    #State(Raw -> Done) finish: fn(self: &&Unseeded) -> Unseeded { self }
 }
 
 impl Reservation {
     // Entry transition: a fresh booking starts life in `Pending`.
-    #Transition(_, Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
+    #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
 
-    #Transition(Pending, Confirmed) pay: fn(self: &&Reservation) -> Reservation {
+    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
         // value (`&&self` — a move), matching the ratified mechanism: a fn takes the old
         // state and returns the next. Calling `pay` on anything but a pending
@@ -81,7 +81,7 @@ impl Reservation {
         return self
     }
 
-    #Transition(Confirmed, CheckedIn) check_in: fn(self: &&Reservation) -> Reservation {
+    #State(Confirmed -> CheckedIn) check_in: fn(self: &&Reservation) -> Reservation {
         // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self

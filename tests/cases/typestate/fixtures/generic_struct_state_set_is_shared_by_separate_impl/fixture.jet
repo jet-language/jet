@@ -5,10 +5,10 @@ Box: struct<T> {
 }
 
 impl Box {
-    #Transition(_, Empty) new: fn(value: &&T) -[]> Box<T> {
+    #State(_ -> Empty) new: fn(value: &&T) -[]> Box<T> {
         return Box<T>{ value: value }
     }
-    #Transition(Empty, Full) fill: fn(self: &&Box<T>) -[]> Box<T> {
+    #State(Empty -> Full) fill: fn(self: &&Box<T>) -[]> Box<T> {
         return self
     }
 }

@@ -64,5 +64,5 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 - [WebCompute](Web/WebCompute.jet)
 - [WebComputeWebGPU](Web/WebComputeWebGPU.jet) — Browser-owned WebGPU compute stays on the shared compute surface while the JS adapter awaits queue submission and readback.
 - [WebHello](Web/WebHello.jet)
-- [WebWASMCallback](Web/WebWASMCallback.jet) — JS event callback invokes a #WasmExport bridge (JS -> Wasm inside a browser-style handler), proving callback + compute round-trip.
+- [WebWASMCallback](Web/WebWASMCallback.jet) — JS event callback invokes a #Export(wasm) bridge (JS -> Wasm inside a browser-style handler), proving callback + compute round-trip.
 - [WebWASMIntExport](Web/WebWASMIntExport.jet) — Scalar Int Wasm export with a loop-shaped body.

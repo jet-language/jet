@@ -1,24 +1,24 @@
 // Schedule-as-code.
-// `#Every(…)` is a directive marker on a `#Job fn`: one
+// `#Job(every: …)` gives a job its schedule: one
 // declaration feeds `jet dev` (runs due jobs in the dev loop), the service
-// runtime, and a jetos timer projection. `#Every(2h)` takes a
+// runtime, and a jetos timer projection. `every: 2h` takes a
 // duration literal from the canonical Time family (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`);
-// `#Every("03:00")` takes a daily wall-clock time. A `#Job fn` with no `#Every(…)` is a plain
+// `every: "03:00"` takes a daily UTC wall-clock time. A `#Job fn` with no `every:` is a plain
 // manually-invoked job (`jet run <this-file> -- manual_only`).
 //
 // Calling a `#Job fn` directly remains an ordinary function call; the schedule
 // only changes when a runtime consumer invokes it automatically. The service
 // runtime and jetos consumers use the same checked schedule metadata.
-#[Job(.Dev), Every(5min)]
+#Job(.Dev, every: 5min)
 prune_sessions: fn() { print("pruning sessions") }
 
-#[Job(.Dev), Every(2h)]
+#Job(.Dev, every: 2h)
 refresh_indexes: fn() { print("refreshing indexes") }
 
-#[Job(.Dev), Every(1d)]
+#Job(.Dev, every: 1d)
 compact_archive: fn() { print("compacting archive") }
 
-#[Job(.Dev), Every("03:00")]
+#Job(.Dev, every: "03:00")
 nightly_backup: fn() { print("running nightly backup") }
 
 #Job(.Ship) manual_only: fn() { print("ran manually") }

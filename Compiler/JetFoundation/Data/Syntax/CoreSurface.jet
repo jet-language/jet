@@ -150,12 +150,9 @@ FACT_ROOT_HERE: "$here"
 FACT_ROOT_CALLER: "$caller"
 
 /// (ratified 2026-07-09): statement switch-off attribute.
-/// `#Off <stmt>` parses and type-checks the statement, then emits no code.
+/// `#Off <stmt>` parses and type-checks the statement, then emits no code;
+/// `#Off(.Release) <stmt>` emits it in every build but a release build.
 MARKER_OFF: "Off"
-
-/// (ratified 2026-07-09): debug-only statement attribute.
-/// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
-MARKER_DEBUG_ONLY: "DebugOnly"
 
 /// (ratified 2026-07-09): tooling metadata attribute for
 /// bindings, top-level consts, and functions.
@@ -517,11 +514,6 @@ KW_REACTIVE: "Reactive"
 /// AND the per-function bucket override (the retired bare `#Wasm`/`#JS`
 /// spellings). Sema validates it against inferred `Browser` effects.
 MARKER_TARGET: "Target"
-
-/// Export this WASM function to the generated JS loader. A
-/// different job (export surface) from the `#Target(Wasm|JS)` partition
-/// family above — leaves it untouched.
-MARKER_WASM_EXPORT: "WasmExport"
 
 /// `#Target(JS)` argument spelling.
 WEB_BUCKET_JS: "JS"

@@ -1,9 +1,9 @@
-// Facts from an `#Off` or `#DebugOnly` body stay inside it: a name it binds
+// Facts from an `#Off` or `#Off(.Release)` body stay inside it: a name it binds
 // is free again afterwards, a value it reads is not captured or consumed, and
 // the statements around it type and run as if it were absent (the debug body
 // still runs in a debug build).
 traced: fn(value: Int) -> Int {
-    #DebugOnly print("traced {value}")
+    #Off(.Release) print("traced {value}")
     value + 1
 }
 
@@ -14,19 +14,19 @@ run: fn() {
     }
     hidden: 2
     print("hidden {hidden}")
-    #DebugOnly if true {
+    #Off(.Release) if true {
         scratch: 3
         print("debug {scratch}")
     }
     scratch: 4
     print("scratch {scratch}")
     names := ["ada", "lin"]
-    #DebugOnly print("names {names.len()}")
+    #Off(.Release) print("names {names.len()}")
     names.push("kay")
     print(names)
     total := 0
     add: (n: Int) -> {
-        #DebugOnly print("adding {n}")
+        #Off(.Release) print("adding {n}")
         n * 2
     }
     loop n in [1, 2, 3] -> total += add(n)

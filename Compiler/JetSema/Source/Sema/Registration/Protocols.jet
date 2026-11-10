@@ -1,7 +1,7 @@
 // (`expand_module_protocols`): a `protocol Name { … }` declares an ordered
 // message exchange. Before registration it becomes two `#SingleUse` handle
 // structs, `Name.Client` and `Name.Server`, with one state per exchange step,
-// and `#Transition` impl methods: the sending side's `message(self, fields…)`
+// and `#State(A -> B)` impl methods: the sending side's `message(self, fields…)`
 // and the receiving side's `recv_message(self)`. The fragment goes through the
 // ordinary front end; one that does not parse is E0153 at the protocol's name.
 use {
@@ -86,7 +86,7 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     out.push("#SingleUse Client: struct {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
     out.push("#SingleUse Server: struct {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
     out.push("impl {client} {{\n")
-    out.push("    #Transition(_, S0) client: fn() -> {client} {{ {{_token: 0}} }}\n\n")
+    out.push("    #State(_ -> S0) client: fn() -> {client} {{ {{_token: 0}} }}\n\n")
     loop (index, message) in declaration.messages {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
@@ -97,7 +97,7 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     }
     out.push("}}\n\n")
     out.push("impl {server} {{\n")
-    out.push("    #Transition(_, S0) server: fn() -> {server} {{ {{_token: 0}} }}\n\n")
+    out.push("    #State(_ -> S0) server: fn() -> {server} {{ {{_token: 0}} }}\n\n")
     loop (index, message) in declaration.messages {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
@@ -115,15 +115,15 @@ sema_protocol_send_method: fn(handle: String, states: [String], index: Int, mess
     to: states[index + 1]
     fields: sema_protocol_fields(message)
     suffix: if fields == "" -> "" else -> ", {fields}"
-    if terminal -> return "    #Transition({from}, {to}) {message.name}: fn(self: &&{handle}{suffix}) {{}}\n\n"
-    "    #Transition({from}, {to}) {message.name}: fn(self: &&{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    #State({from} -> {to}) {message.name}: fn(self: &&{handle}{suffix}) {{}}\n\n"
+    "    #State({from} -> {to}) {message.name}: fn(self: &&{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_recv_method: fn(handle: String, states: [String], index: Int, message: ProtocolMessage, terminal: Bool) -> String Never! {
     from: states[index]
     to: states[index + 1]
-    if terminal -> return "    #Transition({from}, {to}) recv_{message.name}: fn(self: &&{handle}) {{}}\n\n"
-    "    #Transition({from}, {to}) recv_{message.name}: fn(self: &&{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    #State({from} -> {to}) recv_{message.name}: fn(self: &&{handle}) {{}}\n\n"
+    "    #State({from} -> {to}) recv_{message.name}: fn(self: &&{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_fields: fn(message: ProtocolMessage) -> String Never! {

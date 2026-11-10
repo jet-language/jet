@@ -11,7 +11,7 @@ partition below is not built yet. Web diagnostics are registered in
 
 The ratified decisions are D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, and
 D-DOMGEN1. Per-function partition pins use `#Target(JS)` and `#Target(Wasm)`;
-`#WasmExport` marks a Wasm entry called from generated JavaScript.
+`#Export(wasm)` marks a Wasm entry called from generated JavaScript (D-EXPORT-WASM1).
 
 ## Build and inspect
 
@@ -72,7 +72,7 @@ The hybrid boundary is:
 The bridge accepts ABI-safe scalars, `String`, lists, maps, and explicitly
 codable values. A value whose representation is not part of that boundary must
 be represented or rejected; it is not copied through a guessed JavaScript or
-Wasm layout. `#WasmExport` makes a selected Wasm entry callable from generated
+Wasm layout. `#Export(wasm)` makes a selected Wasm entry callable from generated
 JavaScript. `web.manifest.json` records module-to-bucket assignments for the
 loader and `--explain-partition`.
 

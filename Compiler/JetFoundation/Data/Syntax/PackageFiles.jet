@@ -396,7 +396,7 @@ LAYOUT_COLUMNAR: "columnar"
 MARKER_RECEIPT: "Receipt"
 
                                                   // Per-field attributes (= A), written `#[…]` before a field.
-MARKER_RENAME: "Rename" // #[Rename("wire_key")]
+MARKER_RENAME: "Rename" // #[Rename("wire_key")] on a field or variant, #Rename(.Camel) on a type
 
 MARKER_SKIP: "Skip" // #[Skip]
 
@@ -404,9 +404,7 @@ MARKER_DEFAULT: "Default" // #[Default] / #[Default(expr)]
 
 MARKER_FLATTEN: "Flatten" // #[Flatten]
 
-                                            // Container attributes (7/8), written `#[…]` before a struct/enum.
-MARKER_RENAME_ALL: "RenameAll" // #[RenameAll(camel)]
-
+                                            // Container attributes, written `#[…]` before a struct/enum.
 MARKER_DENY_UNKNOWN_FIELDS: "DenyUnknownFields"
 
 /// Serde's internal discriminant field is not a
@@ -414,17 +412,6 @@ MARKER_DENY_UNKNOWN_FIELDS: "DenyUnknownFields"
 MARKER_TAG: "Discriminant"
 
 MARKER_UNTAGGED: "Untagged" // #[Untagged]
-
-                                              // (= C) RenameAll casing keywords — closed typed menu, own-case args.
-RENAME_ALL_CAMEL: "camel"
-
-RENAME_ALL_SNAKE: "snake"
-
-RENAME_ALL_PASCAL: "pascal"
-
-RENAME_ALL_KEBAB: "kebab"
-
-RENAME_ALL_SCREAMING: "screaming"
 
 // ── Maturity metadata values (ratified 2026-07-12) ──────────
 // Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
@@ -507,7 +494,7 @@ JET_KEYWORD_LIST: [String]{
     KW_SHARED,
     // Transactions (–): `#Transact(name) { … }`
     KW_TRANSACT,
-    // Schedule-as-code (card #505): `#Job fn` — `#Every(…)`
+    // Schedule-as-code (card #505): `#Job fn` — `#Job(every: …)`
     // stays out of this list, matching MARKER_TARGET/MARKER_META (paren-arg
     // config markers aren't bare completion words).
     KW_JOB,
@@ -518,7 +505,6 @@ JET_KEYWORD_LIST: [String]{
     // `#Scrub(Tag)` come from the applied-rule registry.
     // Typestate
     KW_STATE,
-    KW_TRANSITION,
     KW_STATE_DECL,
     // Session/protocol types
     KW_PROTOCOL,

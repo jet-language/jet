@@ -66,7 +66,7 @@ sema_cli_schema_struct: fn(graph: SemaRegistrationGraph, entry_items: [Item], ty
 
 // The inputs of `definition`'s stored fields (CliEntry.jet
 // sema_cli_entry_spec): a required value fills the next position unless
-// `#Flag` keeps it a flag.
+// `#Arg(flag_only: true)` keeps it a flag.
 sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
     inputs := [CLIInputSchema]{}
     positional := 0
@@ -74,7 +74,7 @@ sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
         if field.computed != None -> next
         kind: sema_registration_cli_field_kind(field) ?? next
         flag: sema_checked_field_shape_names(definition, field).args
-        flag_only: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        flag_only: sema_registration_cli_arg_flag_only(field.serde_markers)
         at := U16?{None}
         shape: if kind == {
             .Flag -> CLIInputShape.Flag
@@ -91,8 +91,8 @@ sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
         inputs.push(CLIInputSchema{
             field: field.name.copy(),
             flag: flag.copy(),
-            short: sema_cli_entry_marker_text(field.serde_markers, "Short"),
-            env: sema_cli_entry_marker_text(field.serde_markers, "Env"),
+            short: sema_registration_cli_arg_text(field.serde_markers, "short"),
+            env: sema_registration_cli_arg_text(field.serde_markers, "env"),
             help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}",
             metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
             shape: shape,

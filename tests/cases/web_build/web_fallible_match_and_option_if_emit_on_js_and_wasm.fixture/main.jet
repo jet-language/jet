@@ -47,14 +47,14 @@ wasm_make_opt: fn(flag: Bool) -> Int? {
     if flag -> return .Val(3)
     return .None
 }
-#WasmExport
+#Export(wasm)
 wasm_classify: fn(flag: Bool) -> Int {
     if wasm_make_result(flag) == {
         .Ok(n) -> return n
         .Err(_) -> return -1
     }
 }
-#WasmExport
+#Export(wasm)
 wasm_maybe: fn(flag: Bool) -> Int {
     x: wasm_make_opt(flag)
     if x == .None { return 0 }
@@ -66,7 +66,7 @@ wasm_make_toggle: fn(flag: Bool) -> Toggle {
     if flag { return .On }
     return .Off
 }
-#WasmExport
+#Export(wasm)
 wasm_matches_and: fn(flag: Bool) -> Int {
     x: wasm_make_opt(flag)
     toggle: wasm_make_toggle(flag)

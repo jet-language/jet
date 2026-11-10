@@ -5,13 +5,13 @@ Reservation: struct {
 }
 
 impl Reservation {
-    #Transition(_, Pending) book: fn(guest: String) -[]> Reservation {
+    #State(_ -> Pending) book: fn(guest: String) -[]> Reservation {
         return Reservation{ guest: guest.copy() }
     }
-    #Transition(Pending, Confirmed) pay: fn(self: &&Reservation) -[]> Reservation {
+    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -[]> Reservation {
         return self
     }
-    #Transition(Confirmed, CheckedIn) check_in: fn(self: &&Reservation) -[]> Reservation {
+    #State(Confirmed -> CheckedIn) check_in: fn(self: &&Reservation) -[]> Reservation {
         return self
     }
     #State(CheckedIn) room_key: fn(self) -[]> String {

@@ -716,9 +716,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             }
             ir_list_walk(m, p, b, label, variable, variable_two, collection, step, by_value, body, span)
         }
-        // A scope whose marker lowers to nothing: its body runs as a plain
-        // scope.
-        .DebugOnly(body, _) -> ir_stmts(m, p, b, body)
+        // An `#Off(.Release)` body runs as a plain scope in every build but
+        // a release build, which emits no code for it.
+        .DebugOnly(body, _) -> {
+            if !p.checks.release -> ir_stmts(m, p, b, body)
+        }
         .Live(body, _) -> ir_live(m, p, b, body)
         .Unsafe(gate, body) -> ir_unsafe_scope(m, p, b, gate, body)
         .UnsafeBlock(gate, body, _) -> ir_unsafe_scope(m, p, b, gate, body)

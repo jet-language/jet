@@ -122,7 +122,7 @@ PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,
 (2026-09-30): the rule covers every word of every type-like name, not only a
 leading word — `MIRType`, `TIRExpr`, `SourceAST`, `TaskID`, `UINode`.
 Glued compounds (`HTTPHeader`); underscore only between touching capital runs
-(`HTTP_API`). Coined contractions stay words: `Wasm`, `WasmExport`,
+(`HTTP_API`). Coined contractions stay words: `Wasm`,
 `Bindgen`. No PascalCase aliases; a word-cased acronym in a type-like
 declaration or type position gets E0358 with a `jet fix` edit (markers:
 E0927).
@@ -383,27 +383,38 @@ module rules above; a file with both is E0621; a file with neither is a library
 (E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
 meaning on every tier.
 
-**D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
-2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
+**D-CLI-POS1=A — positional by default, `#Arg(flag_only: true)` to opt out**
+*(ratified 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
 flag-only. Every field still accepts its named `--field` spelling; when both the
 named form and a bare value appear for the same field, the named value wins.
-`#Flag` on a required value field removes it from positional filling (expert
-opt-out for secrets and similar). `#Flag` on a Bool / optional / defaulted
-field is E1309. Declaration order of required value fields is
+`#Arg(flag_only: true)` on a required value field removes it from positional
+filling (expert opt-out for secrets and similar). `flag_only: true` on a Bool /
+optional / defaulted field is E1309. Declaration order of required value fields is
 part of the command interface; the always-available named spelling keeps scripts
-stable across reorders. Help lists positionals before flags. Registry row: the
-`Flag` struct of `Compiler/Prelude/Markers.jet`.
+stable across reorders. Help lists positionals before flags. The option lives on
+`#Arg` (D-CLI-ARG1).
 
 **D-CLI-FIELD-MARKERS1=A — per-field short names and environment fallbacks**
-*(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Short("n")`
-for a one-letter alias and `#Env("PORT")` for an environment fallback. Both
+*(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Arg(short: "n")`
+for a one-letter alias and `#Arg(env: "PORT")` for an environment fallback. Both
 rules use the existing field marker list and lower to the existing `core.args`
 builder. Explicit command input wins over the environment, and the environment
 wins over the field `{expr}` default. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
-Typed-CLI markers with no builder mapping are E1319. Registry rows: the
-`Short` and `Env` structs of `Compiler/Prelude/Markers.jet`.
+Typed-CLI markers with no builder mapping are E1319. The options live on
+`#Arg` (D-CLI-ARG1).
+
+**D-CLI-ARG1=A — one `#Arg` marker carries a command field's options**
+*(Tower #4294)*: `#Arg(flag_only: Bool{false}, short: String?, env: String?)`
+replaces the separate `#Flag`, `#Short("n")` and `#Env("NAME")` field markers.
+Options are written by label (`#Arg(short: "p", env: "PORT")`) or in that
+parameter order, and each keeps its old meaning and diagnostic: `flag_only:
+true` where nothing opts out is E1309, a bad or repeated `short:` is E1318,
+and `#Arg` outside a `#CLI` struct or `env:` on a presence-only `Bool` is
+E1319. `#Flag`, `#Short` and `#Env` are retired with no alias; they are
+unknown markers (E0927). Registry row: the `Arg` struct of
+`Compiler/Prelude/Markers.jet`.
 
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `run: fn(args: T)` is
@@ -418,7 +429,7 @@ directly imported module.
 **D-CLI-GLOBAL1=E — one program struct owns root flags and commands** *(ratified
 2026-08-10, Tower #1858)*: use one `#CLI` struct for a multi-command program.
 Scalar fields are root/shared flags and are valid before or after the command.
-Their precedence is command input > `#Env` > field default. Callable members
+Their precedence is command input > `#Arg(env:)` > field default. Callable members
 are commands: a method receives read-only `self`, and a member binding
 `name = function` binds an existing function. A bound function may receive
 the program struct as its first read-only parameter; remaining command
@@ -1584,9 +1595,16 @@ suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in one
 `state { A, B, C }` section inside their named `struct` body;
-`#State(S) m: fn(self)` requires state S; `#Transition(From, To) fn` advances
+`#State(S) m: fn(self)` requires state S; `#State(From -> To) fn` advances
 it (`_` from-state = entry constructor). Wrong-state call E0150; markers erase
 in codegen. Ordering falls out of the transition graph.
+
+**D-STATE-ARROW1=A** *(card #4302)*: the transition marker is
+`#State(From -> To)`, one marker for both typestate facts. `From` may be `_`
+(the entry constructor); `To` may not. One arrow only: a chain
+`#State(A -> B -> C)` is a parse error at the second arrow, and `#State(_)`,
+`#State(A, B)` and `#State(A, to: B)` are E0930. The former
+`#Transition(From, To)` spelling is retired and is the unknown marker E0927.
 
 **D-STATE-TERMINAL1=A** *(card #2184)*: a checked state with no outgoing
 transition is a valid terminal state. The compiler stores `terminal: true` only
@@ -2454,8 +2472,9 @@ D-VERDICT-732-1)*: on `#`: `MustUse`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Comparable`
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
 purity to the empty function-effect row (`f: fn(Int) -[]> Int`). Field-level wire markers
-use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
-`DenyUnknownFields`, `Discriminant`, `Untagged`.
+use `#`: `Rename`, `Skip`, `Default`, `Flatten`,
+`DenyUnknownFields`, `Discriminant`, `Untagged`; a type's casing is
+`#Rename(.Camel)` (D-RENAME-CASE1).
 
 **S82 — One placement law** *(D-SHAPE2/D-ATTR2/D-VERDICT-732-1; rewritten by
 D-MARK-FORM1=A, ratified 2026-08-05, card #1455)*: a marker, or one `#[A, B]`
@@ -2581,10 +2600,11 @@ outcome itself is unchanged: `#Static` gives the constant an address, `#Inline`
 copies it into use sites.
 
 **D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
-type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`
-parses and type-checks the statement in every build, emits in debug/dev builds,
-and strips from release output. Both attach to statements only; item position is
-E0342, expression position is E0343, and doubled switch attributes are E0344.
+type-checks the statement, then emits no code in every build. `#Off(.Release) <stmt>`
+(D-OFF-RELEASE1=A, which retires `#DebugOnly`) parses and type-checks the
+statement in every build, emits in debug/dev builds, and is erased in release
+builds. Both attach to statements only; item position is E0342, expression
+position is E0343, and two `#Off` forms on one statement are E0344.
 Names introduced inside the marker body do not escape. Bare `build.profile` is
 not a user-typeable comptime value; the registered fact spelling is
 `$build.profile` (D-BUILD-FACT3=A).
@@ -2636,8 +2656,16 @@ use the same Display path. `.raw()` still extracts the unchanged numeric value.
 #498)*: `#Target(…)` is the only target-partition spelling, for every axis —
 `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, `#Target(OS.Linux)`. The
 bare `#Wasm` and `#JS` markers are removed from the grammar (ordinary
-unknown-marker errors, no teaching residue). `#WasmExport` is a different
-job (export surface) and is untouched.
+unknown-marker errors, no teaching residue). The Wasm export surface is a
+different job; it is spelled `#Export(wasm)` (D-EXPORT-WASM1).
+
+**D-EXPORT-WASM1=A — `#Export(wasm)` replaces `#WasmExport`** *(ratified,
+card #4296)*: `#Export(wasm)` on a function marks the Wasm entry that
+generated JavaScript calls. It lowers to exactly what `#WasmExport` did: the
+same JS bridge, manifest entry and Wasm bucket, with no extra
+`#Target(Wasm)`. `#Export(c)` keeps the native Library export contract
+unchanged. `#WasmExport` is retired with no teaching residue: it is an
+unknown marker (E0927).
 
 **D-BLOCKPLANE1=A — expert regions are `#` blocks** *(ratified by owner
 2026-07-12, card #512)*: the three keyword regions join the marker
@@ -4604,8 +4632,9 @@ binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
 `encode`/`decode` verbs over `Dyn`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
-`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`,
-`#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
+`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`;
+a type's `#Rename(.Camel|.Snake|.Pascal|.Kebab|.Screaming)` (E2409,
+D-RENAME-CASE1). Enum wire:
 externally tagged default, single-value variants bare; `#Discriminant("type")`
 internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
 keys ignored by default;
@@ -4613,6 +4642,17 @@ keys ignored by default;
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
+
+**D-RENAME-CASE1 = A** *(Shipped, #4284 c16 / #4300)*: `#Rename` is the one
+wire-rename marker. Its first argument is a string or a `NamingCase`
+(`.Camel`, `.Snake`, `.Pascal`, `.Kebab`, `.Screaming`). A string renames one
+field or variant and keeps the projection arguments `json:`, `cbor:`, `csv:`,
+`toml:`, `yaml:`, `xml:`, `args:`, `env:`, `db:` and `layout:`. A
+`NamingCase` on a struct or enum sets the wire casing of every field or
+variant that has no string `#Rename` of its own: `#[Codable, Rename(.Camel)]`.
+On a type that derives a codec, a casing word outside the menu, a plain
+name or a string is E2409. `#RenameAll` is retired: the marker is unknown
+(E0927) and gets no teaching diagnostic.
 
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
@@ -7487,10 +7527,10 @@ stock entry fallback, so a root `run: fn` there is both. A `run.jet` below the
 package root is ordinary source.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
-#505)*: `#Every(…)` is a directive marker on a `#Job fn`
-(D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1); the
-canonical Time family also accepts `2h` and `1d`;
-`#Every("03:00")` takes a daily wall-clock time; both are
+#505; spelling superseded by D-JOB-EVERY1)*: a schedule is a directive on a
+`#Job fn` (D-JPK-TASKRUN1). `#Job(every: 5min)` takes a duration literal
+(D-UNITLIT1); the canonical Time family also accepts `2h` and `1d`;
+`#Job(every: "03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
 due jobs in the dev loop, the service runtime (D-SERVICE1) schedules
 them in production, a jetos generation projects them as timer units.
@@ -7499,10 +7539,16 @@ runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
 
 *Shipped 2026-07-12 (card #505, slice 2)*: `#Job fn` (D-JPK-TASKRUN1) and
-`#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
+the schedule parse, placement-check, and value-check (E0926); `jet
 dev`'s watch loop runs due jobs on their own schedule (UTC for
-`#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
+`"HH:MM"` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
+
+**D-JOB-EVERY1** *(card #4297, carried by #4284)*: `#Job` gains
+`every: Duration | String = none` beside its other options and replaces the
+standalone `#Every(…)` marker entirely. A positive Duration cadence and a
+daily UTC `"HH:MM"` time keep their meaning and checks (E0926); `#Every` is
+an unknown applied rule (E0927) and E0925 is retired.
 
 *Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C; narrowed by D-JOB-NAMES1=A)*: reserved-name reject on `#Job fn
 run|dev|build|test|help|version` (E0928); `jet run <entry> -- <name>` dispatches an
@@ -7514,7 +7560,7 @@ D-SERVICE1's typed builder has since shipped: `service.tree(…)` promotes ordin
 functions into named workers and groups, so a schedule now has somewhere to go.
 D-TYPE2-TIME1 supplies the ordinary typed `Duration` and Instant carriers, and
 the service path consumes them directly. It must still not reinterpret raw
-extras as `#Every` or add a second scheduler.
+extras as a schedule or add a second scheduler.
 
 **D-JOB-SUBCMD1=C**: D-JOB-SUBCMD1=C is wired
 through one Prelude job-scope selector. `jet run <entry> -- <name>`, `jet dev`,

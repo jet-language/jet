@@ -13,8 +13,10 @@ use {
         ItemTemplateLoop,
         Marker,
         MarkerCallArg,
+        MARKER_STATE,
         MarkerDecl,
         MarkerDeclParam,
+        STATE_ARROW_LABEL,
         Span,
         StructDef,
         TextEdit,
@@ -49,6 +51,7 @@ use {
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
         TOKEN_RPAREN,
+        TOKEN_UNIFIED_ARROW,
         TOKEN_SEMI,
         Token,
     ]
@@ -367,7 +370,8 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
         args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
         if parser_current_kind(state) == TOKEN_LPAREN {
-            args = parser_parse_marker_args(state)
+            arrow: parser_value(state, name) == MARKER_STATE
+            args = parser_parse_marker_args(state, arrow)
             if state.position > 0 -> end = parser_lookahead(state, -1).span
         }
         markers.push(Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(start, end), ct: None})
@@ -401,8 +405,10 @@ parser_check_signed_marker: fn(state: &JetParserState, bang_start: Int, name: To
 
 // Rust `marker_call_arg`: a marker argument is an ordinary (optionally
 // labeled) call argument or an effect row `-[Effects]>`, which keeps its own
-// carrier until sema checks the rule's effect slot.
-parser_parse_marker_args: fn(state: &JetParserState) -> ParsedMarkerArgs {
+// carrier until sema checks the rule's effect slot. With `arrow` (`#State`),
+// `A -> B` is two arguments: B carries STATE_ARROW_LABEL,
+// which no written label can spell.
+parser_parse_marker_args: fn(state: &JetParserState, arrow: Bool) -> ParsedMarkerArgs {
     parser_expect(state, TOKEN_LPAREN, "`(` before marker arguments")
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
@@ -426,9 +432,21 @@ parser_parse_marker_args: fn(state: &JetParserState) -> ParsedMarkerArgs {
                 close: parser_expect(state, TOKEN_GT, "`>` after the effect row")
                 args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
             } else {
-                // A marker value is read, never written or taken.
-                argument: parser_parse_expression(state, 1, 2)
+                // A marker value is read, never written or taken. A `#State`
+                // name is never a struct literal or a bare `name -> body` lambda.
+                argument: if arrow -> parser_parse_expression_no_struct_lit(state, 2) else -> parser_parse_expression(state, 1, 2)
                 args.push(MarkerCallArg.Expr{value: argument.expr})
+                // A chain `A -> B -> C` keeps every step; the `#State`
+                // applicator refuses any shape but one step (E0930).
+                if arrow && label == None {
+                    loop parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
+                        arrow_token: parser_bump(state)
+                        labels.push(label)
+                        to: parser_parse_expression_no_struct_lit(state, 2)
+                        args.push(MarkerCallArg.Expr{value: to.expr})
+                        label = Val(CallLabel{name: STATE_ARROW_LABEL, span: arrow_token.span})
+                    }
+                }
             }
             labels.push(label)
             if parser_current_kind(state) == TOKEN_RPAREN -> break

@@ -23,10 +23,10 @@ use jet_foundation.[
     BodyIfCond,
     BodyPattern,
     BodyTree,
-    MARKER_DEBUG_ONLY,
     MARKER_META,
     MARKER_OFF,
     MARKER_TRACK,
+    Marker,
     NodeKind,
     body_each_if_cond_child,
     body_each_node_kind_child,
@@ -9466,21 +9466,22 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         .Switched(marker, body, span) -> {
             if {
-                marker.name == MARKER_OFF || marker.name == MARKER_DEBUG_ONLY -> {
+                marker.name == MARKER_OFF -> {
+                    release_only: sema_switch_off_release_only(marker)
                     erased_scope_mark: sema_scope_mark(scopes)
                     erased_state := sema_ownership_state_snapshot(state)
                     erased_mark: sema_check_context_mark(context)
                     checked: sema_check_statements(body, return_type, environment, program, scopes, erased_state, tail_store, context, diagnostics, loop_depth)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if marker.name == MARKER_DEBUG_ONLY -> sema_check_context_rollback_keep_expr_ids(context, erased_mark) else -> sema_check_context_rollback(context, erased_mark)
+                    if release_only -> sema_check_context_rollback_keep_expr_ids(context, erased_mark) else -> sema_check_context_rollback(context, erased_mark)
                     sema_scope_rollback(scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {
                             complete = false
                             loop reason in erased_reasons -> sema_check_unsupported(context, reason)
                         }
-                        marker.name == MARKER_DEBUG_ONLY -> {
+                        release_only -> {
                             output.push(TStmt.DebugOnly{body: checked.value, span: span})
                         }
                     }
@@ -9578,4 +9579,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         else -> {}
     }
     complete
+}
+
+// `#Off(.Release)` names the one entry of the closed build
+// condition menu, so its body runs in every build but a release build; a bare
+// `#Off` erases its body from every build. The marker registry has already
+// checked the argument against `BuildCondition` (Prelude Markers.jet).
+sema_switch_off_release_only: fn(marker: Marker) -> Bool Never! {
+    if marker.args.len() != 1 -> return false
+    if marker.args[0] == .Expr(value) {
+        if value == {
+            .EnumLit(_, variant, _, _, _, _, _) -> return variant == "Release"
+            .Field(_, member, _, _) -> return member == "Release"
+            .Ident(name, _, _) -> return name == "Release"
+            else -> {}
+        }
+    }
+    false
 }

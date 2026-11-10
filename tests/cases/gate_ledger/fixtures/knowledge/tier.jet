@@ -11,9 +11,9 @@ Reservation: struct {
 }
 
 impl Reservation {
-    #Transition(_, Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
+    #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
 
-    #Transition(Pending, Confirmed) pay: fn(self: &&Reservation) -> Reservation { self }
+    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation { self }
 }
 
 #Scrub(Input) clean: fn(raw: #Input String) -> String { raw.copy() }

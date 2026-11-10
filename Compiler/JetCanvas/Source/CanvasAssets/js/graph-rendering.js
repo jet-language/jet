@@ -292,7 +292,7 @@
   }
 
   function nodeStateBadge(node) {
-    return ((node && node.badges) || []).find((badge) => badge === "#Off" || badge === "#DebugOnly") || "";
+    return ((node && node.badges) || []).find((badge) => badge === "#Off" || badge === "#Off(.Release)") || "";
   }
 
   function nodeBadgeText(node) {

@@ -301,7 +301,7 @@ sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagn
         }
         if owner == sema_registration_core_builtin_task_name() || sema_state_graph_contains(declared, owner) -> next
         loop method in methods {
-            if method.state_requires != None || method.state_transition != None -> diagnostics.push(sema_error("E0159", method.span, "`{owner}` has a `#State` or `#Transition` marker but no `state {{ … }}` section", "markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected", "add one `state {{ Name, … }}` section inside `{owner}: struct`, or remove the typestate marker"))
+            if method.state_requires != None || method.state_transition != None -> diagnostics.push(sema_error("E0159", method.span, "`{owner}` has a `#State` marker but no `state {{ … }}` section", "markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected", "add one `state {{ Name, … }}` section inside `{owner}: struct`, or remove the typestate marker"))
         }
     }
     diagnostics

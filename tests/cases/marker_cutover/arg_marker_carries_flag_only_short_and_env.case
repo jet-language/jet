@@ -1,0 +1,55 @@
+# #4284 c11 (#4294): one `#Arg(flag_only:, short:, env:)` marker carries a
+# command field's options. A written flag beats the environment, which beats
+# the default; `flag_only: true` keeps a required value field off bare
+# positional input. Misuse is refused at the argument, and the retired
+# `#Flag`, `#Short` and `#Env` markers are unknown (E0927).
+fixture: arg_marker_carries_flag_only_short_and_env.fixture
+env: NO_COLOR=1
+step default: jet run main.jet -- --token t -n ada
+exit: 0
+stdout: = "port=3000 token=t name=ada\n"
+step short: jet run main.jet -- -p 8080 --token t -n ada
+exit: 0
+stdout: = "port=8080 token=t name=ada\n"
+step env: jet run main.jet -- --token t -n ada
+env: ARG_CASE_PORT=9090
+exit: 0
+stdout: = "port=9090 token=t name=ada\n"
+step flag_beats_env: jet run main.jet -- -p 8080 --token t -n ada
+env: ARG_CASE_PORT=9090
+exit: 0
+stdout: = "port=8080 token=t name=ada\n"
+step positional: jet run main.jet -- --token t ada
+exit: 0
+stdout: = "port=3000 token=t name=ada\n"
+step flag_only: jet run main.jet -- t ada
+exit: 2 # `token` is flag-only, so the second bare word has no field
+stderr: ~ "unexpected argument: `ada`" # only `name` takes bare input
+step help: jet run main.jet -- --help
+exit: 0
+stdout: ~ "Usage: main name [options]" # only `name` is positional; `token` is flag-only
+stdout: ~ "-p, --port PORT          port to listen on [default: 3000] [precedence: flag > env > default] [env: ARG_CASE_PORT]" # short, env and precedence
+stdout: ~ "--token TOKEN            value for --token (required)" # flag-only and required
+stdout: ~ "-n, --name NAME          value for --name (required)" # positional `short:` alias
+step misuse: jet check misuse/main.jet
+exit: 1
+stderr: ~ "`#Arg(flag_only: true)` on `verbose` has nothing to opt out of" # a Bool is already flag-only
+stderr: ~ "--> main.jet:3:10" # located at the flag_only argument
+stderr: ~ "jet-lang.dev/e/E1309" # redundant flag_only
+stderr: ~ "`#Arg(short: \"pp\")` is not a one-letter option" # a short option is one letter
+stderr: ~ "--> main.jet:4:17" # located at the short argument
+stderr: ~ "jet-lang.dev/e/E1318" # invalid short name
+stderr: ~ "`#Arg(env:)` has no CLI mapping for field `quiet`" # a Bool flag has no env value
+stderr: ~ "--> main.jet:5:15" # located at the env argument
+stderr: ~ "jet-lang.dev/e/E1319" # unmapped env
+stderr: ~ "3 problems found" # every misuse is reported
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "`#Flag` isn't a known applied rule" # retired
+stderr: ~ "--> main.jet:3:6" # located at `#Flag`
+stderr: ~ "`#Short` isn't a known applied rule" # retired
+stderr: ~ "--> main.jet:4:6" # located at `#Short`
+stderr: ~ "`#Env` isn't a known applied rule" # retired
+stderr: ~ "--> main.jet:5:6" # located at `#Env`
+stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "3 problems found" # one diagnostic per retired marker

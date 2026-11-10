@@ -21,8 +21,6 @@ use jet_foundation.[
     MARKER_REACTIVE,
     MARKER_STATE,
     MARKER_TARGET,
-    MARKER_TRANSITION,
-    MARKER_WASM_EXPORT,
     Marker,
     NamedType,
     Program,
@@ -310,13 +308,13 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 // which the body checker reads as the function's arithmetic policy
 // (sema_function_arithmetic_policy); the marker row itself adds nothing.
 // The descriptive rules are read by their own passes, never by the body
-// check: `#Job` and its `#Every` schedule by the job artifact and name
+// check: `#Job` and its `every:` schedule by the job artifact and name
 // checks (Jobs.jet), `#Doc` by the job and CLI schema docs, `#Deprecated`
 // by the lifecycle pass (Edition.jet), `#Scalar` by Core usage, `#Meta` by
 // the marker rules, and `#Policy` by the policy wrappers and the call
 // routes that apply them (CallablePolicies.jet).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post" || name == "Job" || name == "Every" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
 }
 
 // (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
@@ -380,16 +378,16 @@ sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -
         // Kernel.jet checks. `#Memo` is checked by sema_check_memoized_function
         // (E0939/E0940) and the effect pass (E0938); its result cache is the
         // body's memo facts (sema_function_header_memo_config). A
-        // `#Target(JS|Wasm)` or `#WasmExport` marker is the parsed
+        // `#Target(JS|Wasm)` or `#Export(wasm)` marker is the parsed
         // `function.web_marker`, which WebPartition.jet checks. A
-        // `#State`/`#Transition` marker is the parsed
+        // `#State(S)` or `#State(A -> B)` marker is the parsed
         // `function.state_requires`/`state_transition`, which StateFacts.jet
         // validates and Typestate.jet checks at each call. An
         // `#Allow(jet.LintName, "why")` is a lint allowance over the body
         // (LintAllowances.jet), validated by MarkerRules. A `#DevPanel` panel is
         // an ordinary Jet body; the devtools publication gate
         // (Calls/Devtools.jet) reads the marker to find the panel's state.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || ((marker.name == MARKER_TARGET || marker.name == MARKER_WASM_EXPORT) && function.web_marker != None) || (marker.name == MARKER_STATE && function.state_requires != None) || (marker.name == MARKER_TRANSITION && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
+        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || (marker.name == MARKER_STATE && (function.state_requires != None || function.state_transition != None)) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next

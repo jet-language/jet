@@ -48,6 +48,7 @@ use jet_foundation.[
     ProtocolDecl,
     RuleSite,
     SerdeWireShape,
+    STATE_ARROW_LABEL,
     Span,
     StateDecl,
     Stmt,
@@ -1501,6 +1502,15 @@ jfmt_fmt_inbody_marker: fn(f: &JetFmt, m: Marker) {
 // The `(args)` of a marker, nothing when it has none. An in-body line's
 // arguments start after its `:`, which the source lookup skips.
 jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
+    // `#State(A -> B)` prints its arrow, not a comma list.
+    if m.args.len() == 2 && m.arg_labels.len() == 2 && m.arg_labels[1] == .Val(arrow) && arrow.name == STATE_ARROW_LABEL {
+        jfmt_write(f, "(")
+        jfmt_fmt_marker_call_arg(f, m.args[0])
+        jfmt_write(f, " -> ")
+        jfmt_fmt_marker_call_arg(f, m.args[1])
+        jfmt_write(f, ")")
+        return
+    }
     if m.args.len() > 0 {
         jfmt_write(f, "(")
         source: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
@@ -1654,9 +1664,17 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
 }
 
 // Rust `Registry::callable_marker_needs_line_break`: the rows that keep the
-// established readable layout on their own line above `fn`.
-jfmt_callable_marker_needs_line_break: fn(name: String) -> Bool Never! {
-    name == "Meta" || name == "Unsafe" || name == "FFI" || name == "Target" || name == "WasmExport"
+// established readable layout on their own line above `fn`, the web bridge
+// `#Export(wasm)` among them (`#Export(c)` stays on the `fn` line).
+jfmt_callable_marker_needs_line_break: fn(marker: Marker) -> Bool Never! {
+    name: marker.name
+    if name == "Export" {
+        if marker.args.len() == 1 && marker.args[0] == .Expr(value) {
+            if value == .Ident(argument, _, _) -> return argument == "wasm"
+        }
+        return false
+    }
+    name == "Meta" || name == "Unsafe" || name == "FFI" || name == "Target"
 }
 
 // Rust `rsplit_once('{')` then `rsplit_once('}')`: does the declared body
@@ -1683,7 +1701,7 @@ jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     if above.len() == 1 {
         jfmt_write(f, "#")
         jfmt_fmt_marker(f, above[0])
-        if jfmt_callable_marker_needs_line_break(above[0].name) {
+        if jfmt_callable_marker_needs_line_break(above[0]) {
             jfmt_newline(f)
         } else {
             jfmt_write(f, " ")

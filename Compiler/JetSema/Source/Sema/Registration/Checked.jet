@@ -191,6 +191,35 @@ sema_checked_marker_text: fn(marker: Marker) -> String? {
     }
 }
 
+// A type's `#Rename(.Camel)` sets the wire casing of its
+// fields or variants. The style is the casing menu's word (`camel`); a
+// NamingCase the menu doesn't know comes back as written so E2409 can name
+// it. None when the type has no casing `#Rename`.
+sema_checked_rename_case: fn(markers: [Marker]) -> String? {
+    loop marker in markers {
+        if marker.name != "Rename" || marker.negated -> next
+        return sema_checked_rename_case_word(marker)
+    }
+    None
+}
+
+sema_checked_rename_case_word: fn(marker: Marker) -> String? {
+    if marker.args.len() == 0 -> return None
+    if marker.args[0] == .Expr(expression) {
+        if expression == .EnumLit(_, name, _, _, _, _, _) {
+            return if name == {
+                "Camel" -> Val("camel")
+                "Snake" -> Val("snake")
+                "Pascal" -> Val("pascal")
+                "Kebab" -> Val("kebab")
+                "Screaming" -> Val("screaming")
+                else -> Val(name.copy())
+            }
+        }
+    }
+    None
+}
+
 sema_checked_marker_text_label: fn(marker: Marker, label: String) -> String? {
     loop index in 0..<marker.arg_labels.len() {
         if marker.arg_labels[index] == .Val(value) {
@@ -293,9 +322,7 @@ sema_checked_shape_names: fn(name: String) -> TShapeFieldNames Never! {
 }
 
 sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
-    style := String?{None}
-    rename_all: sema_checked_marker(definition.serde_markers, "RenameAll")
-    if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
+    style: sema_checked_rename_case(definition.serde_markers)
     rename: sema_checked_marker(field.serde_markers, "Rename")
     shared := sema_checked_wire_case(style, field.name)
     if rename == .Val(marker) -> shared = sema_checked_marker_text(marker) ?? shared
@@ -315,23 +342,24 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
             layout: sema_checked_marker_text_label(rename_marker, "layout"),
         }
     }
-    env_marker: sema_checked_marker(field.serde_markers, "Env")
-    if env_marker == .Val(marker) {
-        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: sema_checked_marker_text(marker) ?? names.env, db: names.db, layout: names.layout}
+    // `#Arg(env:)` names the field's environment fallback.
+    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) {
+        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: env, db: names.db, layout: names.layout}
     }
     names
 }
 
 sema_checked_serde_attribute: fn(marker: Marker) -> TSerdeAttribute? {
     kind: if marker.name == {
-        "RenameAll" -> Val(TSerdeAttributeKind.RenameAll)
+        "Rename" -> Val(TSerdeAttributeKind.RenameAll)
         "Discriminant" | "Tag" -> Val(TSerdeAttributeKind.Tag)
         "Untagged" -> Val(TSerdeAttributeKind.Untagged)
         "DenyUnknownFields" -> Val(TSerdeAttributeKind.DenyUnknownFields)
         else -> None
     }
     kind_value: kind ?? return None
-    TSerdeAttribute{kind: kind_value, value: sema_checked_marker_text(marker), span: marker.span}
+    value: if kind_value == .RenameAll -> sema_checked_rename_case_word(marker) else -> sema_checked_marker_text(marker)
+    TSerdeAttribute{kind: kind_value, value: value, span: marker.span}
 }
 
 sema_checked_serde_attributes: fn(markers: [Marker]) -> [TSerdeAttribute] Never! {
@@ -2404,9 +2432,7 @@ sema_checked_variant_cell_guards: fn(variant: Variant, diagnostics: &[Diagnostic
 
 sema_checked_variants: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: EnumDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TVariant] {
     variants := [TVariant]{}
-    style := String?{None}
-    rename_all: sema_checked_marker(definition.serde_markers, "RenameAll")
-    if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
+    style: sema_checked_rename_case(definition.serde_markers)
     loop (index, variant) in definition.variants {
         duplicate: loop previous in 0..<index {
             if definition.variants[previous].name == variant.name -> break true

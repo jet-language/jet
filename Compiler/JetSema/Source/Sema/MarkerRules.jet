@@ -19,6 +19,7 @@ use jet_foundation.[
     MarkerDeclParam,
     Program,
     RuleSite,
+    STATE_ARROW_LABEL,
     Span,
     Stmt,
     Symbol,
@@ -173,6 +174,7 @@ sema_marker_rules_type_kind: fn(ty: Type) -> TAppliedRuleArgKind Never! {
     if ty == .Union(members) {
         has_string := false
         has_duration := false
+        has_naming_case := false
         loop member in members {
             if member == Type.String {
                 has_string = true
@@ -180,9 +182,15 @@ sema_marker_rules_type_kind: fn(ty: Type) -> TAppliedRuleArgKind Never! {
             if member == (Type.Named{name: "Duration"}) {
                 has_duration = true
             }
+            if member == (Type.Named{name: "NamingCase"}) {
+                has_naming_case = true
+            }
         }
         if has_string && has_duration && members.len() == 2 {
             return TAppliedRuleArgKind.DurationOrString
+        }
+        if has_string && has_naming_case && members.len() == 2 {
+            return TAppliedRuleArgKind.StringOrMenu
         }
     }
     TAppliedRuleArgKind.Ident
@@ -471,6 +479,9 @@ sema_marker_rules_label: fn(marker: Marker, index: Int) -> String? {
         return None
     }
     if marker.arg_labels[index] == .Val(label) {
+        // `#State(A -> B)`'s arrow binds B to the next
+        // parameter, as a positional argument does.
+        if label.name == STATE_ARROW_LABEL -> return None
         return Val(label.name)
     }
     None
@@ -644,6 +655,12 @@ sema_marker_rules_names_item: fn(argument: Expr, source_type: String) -> Bool {
         if op == UnOp.Not -> return sema_marker_rules_names_item(operand, "")
     }
     argument == .Ident(_, _, _) || argument == .Field(_, _, _, _) || argument == .EnumLit(_, _, _, _, _, _, _)
+}
+
+// A closed-menu word is written as a variant (`.Camel`); a bare name is a
+// value, so `#Rename(FIELD_NAME)` reads the constant and must be a String.
+sema_marker_rules_names_menu_word: fn(argument: Expr) -> Bool {
+    argument == .EnumLit(_, _, _, _, _, _, _)
 }
 
 sema_marker_rules_argument_path: fn(expression: Expr) -> String? {
@@ -1001,7 +1018,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
         observe := true
         unit_argument := argument == .UnitLit(_, _, _, _, _, _, _)
         if {
-            !declared && (binding.kind == TAppliedRuleArgKind.Ident || (binding.kind == TAppliedRuleArgKind.Any && marker.name != "Default") || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
+            !declared && (binding.kind == TAppliedRuleArgKind.Ident || (binding.kind == TAppliedRuleArgKind.Any && marker.name != "Default") || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
                 observe = false
             }
             !declared && binding.kind == TAppliedRuleArgKind.Bool && marker.name == MARKER_META && argument == .Ident(name, _, _) && name == "tunable" -> {
@@ -1034,6 +1051,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                     .Bool -> observation.ty == (Val(Type.Bool))
                     .Int -> observation.ty == (Val(Type.Int))
                     .DurationOrString -> unit_argument || observation.ty == (Val(Type.String)) || observation.ty == (Val(Type.Named{name: "Duration"}))
+                    .StringOrMenu -> sema_marker_rules_names_menu_word(argument) || observation.ty == (Val(Type.String))
                     .EffectRoots -> argument == .ListLit(_, _, _)
                 }
             }
@@ -1476,7 +1494,7 @@ sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool N
         return false
     }
     if site == (Val(RuleSite.Function)) && (marker.name == "Import" || marker.name == "Export") {
-        return sema_marker_c_argument(marker)
+        return sema_marker_c_argument(marker) || sema_marker_is_wasm_export(marker)
     }
     if site == (Val(RuleSite.Module)) && marker.name == "Import" && marker.args.len() == 0 {
         return true
@@ -1488,6 +1506,16 @@ sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool N
 // `Sema::Guest::is_guest_export_marker`).
 sema_marker_is_guest_export: fn(marker: Marker) -> Bool Never! {
     !marker.negated && marker.name == "Export" && sema_marker_c_argument(marker)
+}
+
+// `#Export(wasm)` is the JS-to-Wasm bridge entry, parsed as
+// `function.web_marker` (WebPartition.jet checks it).
+sema_marker_is_wasm_export: fn(marker: Marker) -> Bool Never! {
+    if marker.negated || marker.name != "Export" || marker.args.len() != 1 -> return false
+    if marker.args[0] == .Expr(value) {
+        if value == .Ident(name, _, _) -> return name == "wasm"
+    }
+    false
 }
 
 sema_marker_c_argument: fn(marker: Marker) -> Bool Never! {

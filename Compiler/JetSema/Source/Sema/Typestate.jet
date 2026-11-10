@@ -1,6 +1,6 @@
 // The typestate flow check (A value moves through the
 // states its owner declares: `#State(S)` on a method or free function needs its
-// receiver (or first argument) in `S`, and `#Transition(From, To)` needs `From`
+// receiver (or first argument) in `S`, and `#State(From -> To)` needs `From`
 // and leaves `To`. Each body is walked once, statement by statement, with the
 // state of every tracked local. Calling an operation in the wrong state is
 // E0150; an untracked local stays silent. Where two paths meet, a local keeps
@@ -112,8 +112,8 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
     }
 }
 
-// Rust `check_func_state`: `self` starts in the state its own `#State` or
-// `#Transition` marker names, so a chain of self-transitions checks.
+// Rust `check_func_state`: `self` starts in the state its own `#State(S)` or
+// `#State(A -> B)` marker names, so a chain of self-transitions checks.
 sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, owner: String?, bodies: [FnBody]) Never! {
     walk.states = [String:String]{}
     walk.typed = false

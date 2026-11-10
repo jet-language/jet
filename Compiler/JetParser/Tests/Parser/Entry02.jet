@@ -87,21 +87,19 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     } ?? false)
 }
 #Test("named_rule_arguments_bind_by_signature_without_reordering_source") {
-    src: "#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]\nwork: fn() {{}}\n"
+    src: "#[Pre(message: \"positive\", condition: x > 0), Meta(maturity: .Hardened, tunable: false)]\nwork: fn(x: Int) {{}}\n"
     p: entry02_program(src)
     f: entry02_func(p, "work")
-    transition: f.state_transition ?? panic("bound transition")
-    assert(transition.from == (Val("Open")))
-    assert(transition.to == "Closed")
+    assert(f.pre.len() == 1)
     assert(f.maturity == (Val(.Hardened)))
     meta: f.meta ?? panic("meta")
     assert(!(loop field in meta.fields { if field == .Tunable(_) -> break true } ?? false))
     found := false
     loop marker in f.markers {
-        if marker.name == "Transition" {
+        if marker.name == "Pre" {
             labels := [String?]{}
             loop label in marker.arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
-            assert(labels == [String?]{Val("to"), Val("from")})
+            assert(labels == [String?]{Val("message"), Val("condition")})
             found = true
             break
         }
@@ -118,25 +116,51 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
         }
     }
     assert(found_family)
-    assert(entry02_format(src).contains("#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]"))
-    _: entry02_diag(entry02_errors("#Transition(to: Closed, Open)\nwork: fn() {{}}\n"), "E0930")
+    assert(entry02_format(src).contains("#[Pre(message: \"positive\", condition: x > 0), Meta(maturity: .Hardened, tunable: false)]"))
+    _: entry02_diag(entry02_errors("#Pre(message: \"positive\", x > 0)\nwork: fn(x: Int) {{}}\n"), "E0930")
 }
 #Test("marker_stack_fix_preserves_reordered_named_arguments") {
-    ds: entry02_errors("#Transition(to: Closed, from: Open)\n#Meta(maturity: .Tested, category: \"state\")\nwork: fn() {{}}\n")
+    ds: entry02_errors("#Pre(message: \"positive\", condition: x > 0)\n#Meta(maturity: .Tested, category: \"state\")\nwork: fn(x: Int) {{}}\n")
     edit: entry02_diag(ds, "E0999").edit ?? panic("marker stack edit")
-    assert(edit.new_text == "#[Transition(to: Closed, from: Open), Meta(maturity: .Tested, category: \"state\")]")
+    assert(edit.new_text == "#[Pre(message: \"positive\", condition: x > 0), Meta(maturity: .Tested, category: \"state\")]")
+}
+// `#State(A -> B)` is the transition, its to-state carried
+// under the arrow label; `_` is only the entry from-state.
+#Test("state_arrow_marker_parses_the_transition_and_rejects_other_shapes") {
+    src: "#State(_ -> Open)\nopen: fn() {{}}\n#State(Open -> Closed)\nclose: fn() {{}}\n#State(Closed)\nread: fn() {{}}\n"
+    p: entry02_program(src)
+    entry: entry02_func(p, "open").state_transition ?? panic("entry transition")
+    assert(entry.from == None)
+    assert(entry.to == "Open")
+    close_fn: entry02_func(p, "close")
+    step: close_fn.state_transition ?? panic("transition")
+    assert(step.from == (Val("Open")))
+    assert(step.to == "Closed")
+    labels := [String?]{}
+    loop label in close_fn.markers[0].arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
+    assert(labels == [String?]{None, Val("->")})
+    required: entry02_func(p, "read").state_requires ?? panic("required state")
+    assert(required.name == "Closed")
+    formatted: entry02_format(src)
+    assert(formatted.contains("#State(_ -> Open)"))
+    assert(formatted.contains("#State(Open -> Closed)"))
+    assert(entry02_errors("#State(Open -> Closed -> Gone)\nwork: fn() {{}}\n").len() > 0)
+    _: entry02_diag(entry02_errors("#State(_)\nwork: fn() {{}}\n"), "E0930")
+    _: entry02_diag(entry02_errors("#State(Open -> _)\nwork: fn() {{}}\n"), "E0930")
+    _: entry02_diag(entry02_errors("#State(Open, to: Closed)\nwork: fn() {{}}\n"), "E0930")
+    _: entry02_diag(entry02_errors("#State(Open, Closed)\nwork: fn() {{}}\n"), "E0930")
 }
 #Test("argument_marker_stack_fix_keeps_payloads_and_order") {
-    ds: entry02_errors("#Codable\n#RenameAll(camel)\nParticle: struct {{ x: Float }}\n")
-    assert((entry02_diag(ds, "E0999").edit ?? panic("machine-applicable stack edit")).new_text == "#[Codable, RenameAll(camel)]")
+    ds: entry02_errors("#Codable\n#Rename(.Camel)\nParticle: struct {{ x: Float }}\n")
+    assert((entry02_diag(ds, "E0999").edit ?? panic("machine-applicable stack edit")).new_text == "#[Codable, Rename(.Camel)]")
 }
 #Test("adjacent_marker_stacks_share_one_ordered_e0999_rewrite") {
     loop testcase in [
-        (source: "#Job\n#Every(1s)\ntick: fn() {{}}\n", expected: "#[Job, Every(1s)]"),
+        (source: "#Job(every: 1s)\n#Doc(\"tick\")\ntick: fn() {{}}\n", expected: "#[Job(every: 1s), Doc(\"tick\")]"),
         (source: "use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nadd: fn() {{ \"\"\"void add(void) {{}}\"\"\" }}\n", expected: "#[Unsafe(\"register ABI\"), FFI(c)]"),
         (source: "#Target(Web)\n#HTML(\"index.html\")\nmain: fn() {{}}\n", expected: "#[Target(Web), HTML(\"index.html\")]"),
         (source: "#PubFile\n#NoPrelude\nmain: fn() {{}}\n", expected: "#[PubFile, NoPrelude]"),
-        (source: "#Codable\n#RenameAll(camel)\nParticle: struct {{ x: Float }}\n", expected: "#[Codable, RenameAll(camel)]")
+        (source: "#Codable\n#Rename(.Camel)\nParticle: struct {{ x: Float }}\n", expected: "#[Codable, Rename(.Camel)]")
     ] {
         expected: testcase.expected
         ds: entry02_errors(testcase.source)

@@ -32,6 +32,7 @@ mrc_placeholder: fn(kind: TAppliedRuleArgKind, source_type: String, menus: [TApp
         .Int -> "1"
         .Bool -> "true"
         .DurationOrString -> "1s"
+        .StringOrMenu -> "\"x\""
         .Ident -> "x"
         .Any -> "1"
         .EffectRoots -> "[FS.Write]"
@@ -58,15 +59,12 @@ mrc_spelling: fn(rule: TAppliedRule, menus: [TAppliedRuleArgumentMenu]) -> Strin
     first: if rule.name == {
         "Scrub" -> "X"
         "Undo" -> "inverse"
-        "Short" -> "\"p\""
-        "Env" -> "\"PORT\""
         "FX" -> "IO"
         "Target" -> "Web"
         "Pre" | "Post" -> "true"
         else -> ""
     }
     if first != "" -> args[0] = first
-    if rule.name == "Every" -> return "#[Job, Every({args.join(", ")})]"
     "#{rule.name}({args.join(", ")})"
 }
 

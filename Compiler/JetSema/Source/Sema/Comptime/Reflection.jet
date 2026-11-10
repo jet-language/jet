@@ -30,6 +30,7 @@ use jet_foundation.[
     NamedType,
     ParamZone,
     Program,
+    STATE_ARROW_LABEL,
     Span,
     Stmt,
     StrPart,
@@ -219,7 +220,8 @@ sema_comptime_reflection_marker_rule: fn(registry: SemaScopeMembersMarkerRegistr
 }
 
 sema_comptime_reflection_marker_parameter: fn(rule: SemaComptimeReflectionMarkerRule, marker: Marker, source_index: Int) -> SemaComptimeReflectionMarkerParam? {
-    if source_index < marker.arg_labels.len() && marker.arg_labels[source_index] == .Val(label) {
+    // The `#State` arrow label binds positionally, like no label.
+    if source_index < marker.arg_labels.len() && marker.arg_labels[source_index] == .Val(label) && label.name != STATE_ARROW_LABEL {
         loop parameter in rule.params {
             if parameter.name == label.name -> return Val(parameter)
         }
