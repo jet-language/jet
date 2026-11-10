@@ -71,3 +71,6 @@ buffer the caller holds, so a steady read loop asks for no memory.
 - Generic Reader code cannot call `read_into` until a trait default follows.
 - Kept bytes need their own memory under every option.
 - The speed gain is about 2% of a local read round.
+- Per AGENTS.md, A arrives with a paired two-program cell (a `read(4096)` loop against the same loop with
+  `read_into`) in the canonical manifest, recording wall time, allocations per read and peak memory.
+  Ratification waits until `read_into` strictly beats `read` on that pair.
