@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98520,
+    "rev": 98524,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75667,6 +75667,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Rulings on G1Lead-3 g6b1 (2026-11-09):\n- c142 is obsolete (greenfield cutover).\n- c137 is narrowed to the diagnostic; no new API.\n- c145 keeps E1102 under D-CONC-CROSS1, with a better reason and span.\n- c139 waits on the narrowing rule (D-MATH-NARROW1, posted 2026-11-09, and D-TYPE2-EXACT1).\n- c149 (Atomic<Int> sendability) and c64 are owner design calls for a later ballot.\n- c136 (Mem.Alloc(above:) enforcement) and c146 (foreign-call effects checked against allow) are flagged as new enforcement mechanisms. They stay open until the ratified meaning of the row is confirmed: if the syntax is ratified, enforcing it is a defect fix."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "c41 fails today (probe on seed a0_042, from dev e4096a0f3b): a flat 1024-arm literal match (if n == { 0 -> .. 1023 -> .., else -> -1 }) is refused with E1403: 'This code nests 257 levels deep; the limit is 256' at the match head, on O0, O1 and O2. Root: the AST has no match node. The arms reach sema as a nested Expr.If else-chain (Compiler/JetFoundation/Source/AST/Expressions.jet:11 has only If), so every arm costs one sema_enter_source_nesting level (JetSema Expressions.jet:6141) and one recursive frame. Fix at the root: treat an else-if or arm chain as one nesting level and walk it with an iterative worklist in sema, lowering and IR. This is the same root as #5971 c38. Proof row: a generated 256-arm and 1024-arm match case printing the same total on O0, O1 and O2."
         },
         {
@@ -76656,12 +76661,12 @@
         },
         {
           "n": 137,
-          "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) User code can call `[String].with_capacity(n)` and `[U8].with_capacity(4096)`; today they give E0107 and \"Nothing named `U8` exists here\". A case covers both.",
+          "text": "(Found by AgreedBallots, seed a0_042) `[String].with_capacity(n)` and `[U8].with_capacity(4096)` report the real problem: `[T]` has no with_capacity, and the Fix names the existing List<T>.try_with_capacity. Today they say \"Nothing named `String`\" or \"Nothing named `U8`\". UI snapshots cover both. No new API: a [T].with_capacity spelling would be an owner-gated API ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T03:51:41.828Z"
+          "at": "2026-11-10T04:41:53.108Z"
         },
         {
           "n": 138,
@@ -76702,11 +76707,12 @@
         {
           "n": 142,
           "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) The retired `prep {}` form reports its own retirement diagnostic naming the replacement, not E0119 \"no type called prep\".",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T03:51:50.606Z"
+          "evidence": "Greenfield cutover (AGENTS.md) removes old spellings with no retirement readers. `prep` is an ordinary identifier, and E0388 is Retired in the spec, so there is no prep-specific diagnostic to add.",
+          "at": "2026-11-10T04:41:51.204Z",
+          "closure": "obsolete"
         },
         {
           "n": 143,
@@ -76728,12 +76734,12 @@
         },
         {
           "n": 145,
-          "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) #Kernel ineligibility has its own diagnostic code, points at the offending statement rather than the marker, and names the real reason (a local allocation is not a race-free straight-line body).",
+          "text": "(Found by AgreedBallots, seed a0_042) #Kernel ineligibility keeps E1102, as D-CONC-CROSS1 requires, but points at the offending statement and names the real reason: a local allocation in a kernel body is refused because it allocates, not as a race. A UI snapshot pins it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T03:51:56.056Z"
+          "at": "2026-11-10T04:41:55.076Z"
         },
         {
           "n": 146,
@@ -76780,7 +76786,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-10T03:58:23.321Z",
+      "updated": "2026-11-10T04:41:56.967Z",
       "updatedBy": "Main",
       "criteriaLastN": 149
     },
@@ -200316,6 +200322,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T04:41:56.967Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oev2ib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T04:41:55.076Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oev2ib",
+      "note": "#145: Ruling (Main): D-CONC-CROSS1 keeps E1102 for kernel proof crossings; was: (Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) #Kernel ineligibility has its own diagnostic code, points at the offending statement rather than the marker, and n"
+    },
+    {
+      "at": "2026-11-10T04:41:53.108Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oev2ib",
+      "note": "#137: Ruling (Main): no new API; fix the diagnostic; was: (Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) User code can call `[String].with_capacity(n)` and `[U8].with_capacity(4096)`; today they give E0107 and \"Nothing "
+    },
+    {
+      "at": "2026-11-10T04:41:51.204Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#142"
+    },
     {
       "at": "2026-11-10T04:35:51.741Z",
       "by": "Main",
