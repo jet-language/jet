@@ -320,7 +320,8 @@ SemaEffectNode: struct {
     // owner type's parameters in the order its type arguments bind them.
     type_params: [String]{[String]{}}
     owner_params: [String]{[String]{}}
-    // Calls through a type parameter (sema_effect_resolve_type_params).
+    // Calls through a type parameter; once sema_effect_resolve_type_params
+    // has run, also those a call forwards from a callee's parameters.
     param_dispatches: [SemaEffectParamDispatch]{[SemaEffectParamDispatch]{}}
     // Calls that bind type parameters, and what they reach through them.
     instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}}
@@ -2257,6 +2258,13 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
             loop dispatch in open[callee] -> sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, span)
         }
     }
+    // A function's row leaves out what its parameters' bindings do, so a
+    // discarded call of it is not proven pure (sema_effect_check_discarded).
+    slot := 0
+    loop rows in open.move() {
+        nodes[slot].param_dispatches = rows
+        slot += 1
+    }
 }
 
 // The instance reaches of `node` with each target's solved row.
@@ -3951,6 +3959,9 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
         if !fact.discarded -> next
         callee: fact.callee ?? next
         node_index: sema_effect_node_index(node_by_key, callee.key) ?? next
+        // What the call binds the callee's type parameters to does its own
+        // work (`measure(Square{…})` runs `Square::area`).
+        if nodes[node_index].param_dispatches.len() > 0 -> next
         if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
         discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
     }
