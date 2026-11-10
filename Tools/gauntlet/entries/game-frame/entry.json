@@ -30,15 +30,15 @@
     }
   },
   "authoring": {
-    "jet": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Draws through the core.ui software rasterizer on a headless window (ui.headless, clear_background, draw_rectangle on each Frame, load_image_from_screen for the capture); no foreign code. core.ui's draw_text draws anti-aliased Atkinson Hyperlegible Next, so the rail carries the 5x7 font and draws each glyph column's vertical runs with draw_rectangle, as the other rails do. The headless window also records an FNV-1a checksum of every frame, which the hand-written rails do not."},
-    "rust": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a Vec<u8> canvas with the same clip, blend, font and vertical glyph runs; capture via std::env::var_os."},
-    "python": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Pure Python over a bytearray canvas: opaque fills use slice assignment, translucent fills use per-(source, alpha) bytes.translate tables over strided channel slices. NumPy is not available in the host toolchain."},
-    "c": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The matched peer is a hand-written C rasterizer with the same algorithm: GPU-backed C game libraries have no headless software path."},
-    "zig": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
-    "node": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
+    "jet": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Draws through the core.ui software rasterizer on a headless window (ui.headless, clear_background, draw_rectangle on each Frame, load_image_from_screen for the capture); no foreign code. core.ui's draw_text draws anti-aliased Atkinson Hyperlegible Next, so the rail carries the 5x7 font and draws each glyph column's vertical runs with draw_rectangle, as the other rails do. The headless window also records an FNV-1a checksum of every frame, which the hand-written rails do not."},
+    "rust": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a Vec<u8> canvas with the same clip, blend, font and vertical glyph runs; capture via std::env::var_os."},
+    "python": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Pure Python over a bytearray canvas: opaque fills use slice assignment, translucent fills use per-(source, alpha) bytes.translate tables over strided channel slices. NumPy is not available in the host toolchain."},
+    "c": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The matched peer is a hand-written C rasterizer with the same algorithm: GPU-backed C game libraries have no headless software path."},
+    "zig": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
+    "node": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
   },
   "rewrite_provenance": {
-    "worker": "NativeRaylib-1",
+    "worker": "G1Lead-3",
     "variant": "jet",
     "changed": "Added the games.frame cell: a 1200-frame 2D game scene on Jet's native software rasterizer, with five matched rails implementing the same rasterizer by hand.",
     "matched": "All rails draw the same rectangles with the same clip and core.ui's premultiplied per-channel src-over blend, the same 5x7 font split into the same vertical runs, print the same counts, and write byte-identical PAM captures (final frame sha256 6b545f4606039d6419abc3242bfb26ef2a5bda5b9bed491d85e9cf2ef88f69e3).",

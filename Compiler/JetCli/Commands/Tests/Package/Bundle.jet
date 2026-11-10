@@ -110,6 +110,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     assert_eq(bundle_test_parse_error([String]{"--target=alien"}), "unknown package target `alien`")
     assert_eq(bundle_test_parse_error([String]{"--kind=Desktop"}), "unknown package kind `Desktop`")
     assert_eq(bundle_test_parse_error([String]{"--icon-format=jpeg"}), "unknown icon format `jpeg`")
+    assert_eq(bundle_test_parse_error([String]{"--renderer=opengl"}), "unknown package renderer `opengl`")
     bad: [String]{"0", "-1", "4294967296", "999999999999999999999999999999999", "1_0", " 1", "+"}
     loop value in bad -> assert_eq(bundle_test_parse_error([String]{"--icon-size={value}"}), "`--icon-size` must be a positive integer")
     assert_eq(bundle_test_parse_error([String]{"--cook="}), "`--cook-mode` needs a value")
@@ -121,6 +122,8 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     options: bundle_test_options([String]{"--game", "--phase=build", "--export", "--run", "--deploy", "--export=store", "--cook=fast", "--clean", "--run-now", "--dry-run=false"})
     assert(options.kind == BundleKind.Game)
     assert_eq(options.phase ?? panic("phase"), "build,export,run,deploy")
+    assert_eq(bundle_test_options([String]{"--renderer=ui"}).renderer ?? panic("renderer"), "ui")
+    assert_eq(bundle_test_options([String]{"--renderer", "headless"}).renderer ?? panic("renderer"), "headless")
     assert_eq(options.export_preset ?? panic("preset"), "store")
     assert_eq(options.cook_mode ?? panic("cook"), "fast")
     assert(options.force_clean && options.run_now && options.dry_run)

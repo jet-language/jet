@@ -185,7 +185,11 @@ jet_cli_bundle_parse_args: fn(args: [String]) -> JetCLIBundleOptions JetCLIBundl
             "--profile" -> options.profile = Val(jet_cli_bundle_option_value(args, index, flag, inline))
             "--phase" -> options.phase = Val(jet_cli_bundle_option_value(args, index, flag, inline))
             "--backend" -> options.backend = Val(jet_cli_bundle_option_value(args, index, flag, inline))
-            "--renderer" -> options.renderer = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--renderer" -> {
+                value: jet_cli_bundle_option_value(args, index, flag, inline)
+                if value != "headless" && value != "ui" -> return Err(jet_cli_bundle_error("unknown package renderer `{value}`"))
+                options.renderer = Val(value)
+            }
             "--cook" | "--cook-mode" -> options.cook_mode = Val(jet_cli_bundle_option_value(args, index, "--cook-mode", inline))
             "--export" -> {
                 if inline != None -> options.export_preset = Val(jet_cli_bundle_option_value(args, index, "--export-preset", inline))
@@ -218,7 +222,7 @@ jet_cli_bundle_parse_args: fn(args: [String]) -> JetCLIBundleOptions JetCLIBundl
 
 // Rust package_help.
 jet_cli_bundle_help: fn() -> String Never! {
-    "jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>] [<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--renderer <headless|raylib>] [--backend <aot>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <size>] [--publisher <name>] [--description <text>] [--update-channel <channel> --update-url <url>]"
+    "jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>] [<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--renderer <headless|ui>] [--backend <aot>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <size>] [--publisher <name>] [--description <text>] [--update-channel <channel> --update-url <url>]"
 }
 
 // Rust ensure_regular_game_file.
