@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98801,
+    "rev": 98802,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76986,7 +76986,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-10T12:52:33.495Z",
+      "updated": "2026-11-10T16:03:04.060Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -185442,13 +185442,13 @@
       "explainer": "Words used here. An allocation is a request for memory, such as a list growing. AllocError is Core's error for a refused one. A contract is the part of a signature that names the errors a function can fail with. A handler is ?? or an arm table on a call.",
       "story": "Rin writes firmware with a fixed memory pool. Today she must remember try_push, try_reserve and try_insert, and a plain push slips in and stops the device. Under A her function names AllocError once, and every push in it reports failure as a value.",
       "inWild": "// Rust: a twin beside each operation, as Jet has today.\nlet mut rows = Vec::new();\nrows.try_reserve(n)?;   // Err(TryReserveError) instead of an abort",
-      "detail": "What this ballot decides. How code asks for allocation failure as a value. The AllocError type, the hosted stop when nobody asks, and the allocator choice of D-ALLOC-SITE1=A are unchanged.\n\nToday, on the t6c compiler (dev 76955986d0). Probe a01 uses try_with_capacity and try_push, and String's try_push, and prints loaded 3 then abc. Probe a06 asks a 40-byte fixed allocator for 7 then 9 bytes with try_alloc and prints 7 -1, the second refused as a value.\n\nProbe a02 writes a handler on a plain push and gets E0405, ?? only works on a fallible value, not Unit. Probe a03 already compiles a function whose contract names AllocError around plain pushes and prints loaded 3; today those pushes would still stop on failure. Probe a04's heap budget prints grew 100.\n\nProbe a05 puts a #Context(allocator: …) block in value position and gets E0003, because D-ALLOC-SITE1's block value is not built. Probe a07 calls [String].with_capacity from a user file and gets E0311, whose fix offers only List.try_with_capacity; the plain form is compiler-internal.\n\nThe rule under A. Each allocating operation has one spelling: push, reserve, insert, with_capacity, new and alloc. A plain call fails as an AllocError value in exactly two places, both visible in the source.\n\nFirst, at a handled call. A ?? or an arm table written on the allocating call itself makes that call fallible, as its try_ twin is today. This is what a device needs at one site.\n\nSecond, in a function whose contract names AllocError. That body is the one scope: every allocating operation in it fails as a value, and the failure propagates by the ordinary rule. A call to another function whose contract names AllocError propagates too.\n\nEverywhere else a failed allocation stops the program with today's report, under D-RESOURCE-LIMIT1=A. Callees whose contracts do not name AllocError keep that stop inside them, so no function changes meaning because of who calls it.\n\nResults that are already optional. Map.add allocates and returns the old value as an Option, so m.add(k, v) ?? x already means something: no old value. Under A a bare ?? there keeps that meaning and never catches refused memory, so no existing line changes. Such an operation becomes fallible only inside a contract that names AllocError.\n\nWhat counts inside that contract. Every allocation in the body, named or implicit: list and map literals, text interpolation and concatenation, and closure captures. A refused allocation leaves the value it was growing unchanged, as try_push does today. jet inspect lists each fallible point in the body, so none is hidden.\n\nWhy this stays sound. Whether a call can fail is known from its own line and its own function's signature, never from the caller's context. Each function compiles once. Cleanup on the early return is the ordinary error route's, the same as for any other error.\n\nBeginners never see it. Core declares the one conversion from AllocError to Err, so a library function that names AllocError can be called from a plain run. An unhandled one ends the program with the same report as today's stop.\n\nCensus on dev, code lines over Core, Compiler, Jetpack, Tools, Examples and tests. try_ allocation calls: try_alloc 30, try_push 27, try_with_capacity 22, try_new 7 and try_reserve 6, 92 in all. jet fix rewrites each to the plain name with its handler kept, the same meaning under A. 72 lines in 53 files put ?? on an add call; under A their meaning is unchanged.\n\nWhat A removes. Core's twin family, its docs and its signature rows go. D-FREESTAND-ALLOCAPI1=A's T ! AllocError result now belongs to a handled plain call.\n\nBeginner path. Write push; if memory runs out, the program stops with a report. Expert path. Write ?? on the call that must recover, or name AllocError in a function's contract to make its whole body report failure.\n\nDownsides of A, and what the design does about them. A handler now changes whether a call can fail, which a reader might miss. Hover marks a handled allocating call as fallible here. A ?? on a call that can never fail stays an error, as E0405 is today.\n\nA library function that allocates but does not name AllocError still stops inside, so a device cannot recover through it. That is today's rule for every plain call. The library can name AllocError in its contract without adding a second function, and jet inspect lists the stopping callees.\n\nMap.add at a single site. A device that must recover from one add, and not the whole function, moves that add into a small function whose contract names AllocError. jet fix writes it from the existing try_insert form, which has no uses on dev today.\n\nWhat remains. A function that names AllocError checks each allocation, the check its twins made. Functions that do not name it keep the abort path and pay nothing new.\n\nOther options. B keeps the twins. C is Zig's: every allocating call can fail and the allocator is passed in. D is a dynamic #Context scope: any allocation inside, in any callee, fails as a value. E is Swift's and Go's: allocation failure always stops, and devices use budgets and fixed capacity.\n\nTheir best cases. B is built and explicit. C never hides an allocation. D reaches callees that never planned for it. E is the simplest language. Their costs: B doubles every allocating API. C marks every call. D makes every function carry a failure path, and a callee's ! Never contract would be untrue inside it.\n\nE leaves a device no way to recover from a refused allocation, which D-ALLOCFAIL1 exists to give it.",
+      "detail": "What this ballot decides. How code asks for allocation failure as a value. The AllocError type, the hosted stop when nobody asks, and the allocator choice of D-ALLOC-SITE1=A are unchanged.\n\nToday, on the a0.0.43 compiler (dev c460ba91e5). Probe a01 uses try_with_capacity and try_push, and String's try_push, and prints loaded 3 then abc. Probe a06 asks a 40-byte fixed allocator for 7 then 9 bytes with try_alloc and prints 7 -1, the second refused as a value.\n\nProbe a02 writes a handler on a plain push and gets E0405, ?? only works on a fallible value, not Unit. Probe a03 already compiles a function whose contract names AllocError around plain pushes and prints loaded 3; today those pushes would still stop on failure. Probe a04's heap budget prints grew 100.\n\nProbe a05 puts a #Context(allocator: …) block in value position and gets E0003, because D-ALLOC-SITE1's block value is not built. Probe a07 calls [String].with_capacity from a user file and gets E0311, whose fix offers only List.try_with_capacity; the plain form is compiler-internal.\n\nThe rule under A. Each allocating operation has one spelling: push, reserve, insert, with_capacity, new and alloc. A plain call fails as an AllocError value in exactly two places, both visible in the source.\n\nFirst, at a handled call. A ?? or an arm table written on the allocating call itself makes that call fallible, as its try_ twin is today. This is what a device needs at one site.\n\nSecond, in a function whose contract names AllocError. That body is the one scope: every allocating operation in it fails as a value, and the failure propagates by the ordinary rule. A call to another function whose contract names AllocError propagates too.\n\nEverywhere else a failed allocation stops the program with today's report, under D-RESOURCE-LIMIT1=A. Callees whose contracts do not name AllocError keep that stop inside them, so no function changes meaning because of who calls it.\n\nResults that are already optional. Map.add allocates and returns the old value as an Option, so m.add(k, v) ?? x already means something: no old value. Probe a08 prints first -1, second 1. Under A a bare ?? there keeps that meaning and never catches refused memory, so no existing line changes. Such an operation becomes fallible only inside a contract that names AllocError.\n\nWhat counts inside that contract. Every allocation in the body, named or implicit: list and map literals, text interpolation and concatenation, and closure captures. A refused allocation leaves the value it was growing unchanged, as try_push does today. jet inspect lists each fallible point in the body, so none is hidden.\n\nWhy this stays sound. Whether a call can fail is known from its own line and its own function's signature, never from the caller's context. Each function compiles once. Cleanup on the early return is the ordinary error route's, the same as for any other error.\n\nBeginners never see it. Core declares the one conversion from AllocError to Err, so a library function that names AllocError can be called from a plain run. An unhandled one ends the program with the same report as today's stop.\n\nCensus on dev, Jet code lines over Core, Compiler, Jetpack, Tools, Examples and tests, comments excluded. 53 lines call a try_ allocation form: 31 with ?? on the call, 13 with ?, 2 matched in place and 7 bound, returned or ignored. The earlier count of 92 also counted Tower JSON and comments.\n\nThe commit that deletes the twins rewrites those 53 lines in the tree. A ?? or match on the call keeps its meaning as written. A ? or a returned result sits in a function whose contract names AllocError, so rule two keeps it. The few bound results become a match on the call.\n\nNo jet fix rewrite and no teaching diagnostic is added for the retired try_ names, under D-TEACH-RECONCILE1=A and the owner's rule pending D-LANG-MIGRATE1. 69 Jet lines in 51 files put ?? on an add call; under A their meaning is unchanged.\n\nWhat A removes. Core's twin family, its docs and its signature rows go. D-FREESTAND-ALLOCAPI1=A's T ! AllocError result now belongs to a handled plain call.\n\nBeginner path. Write push; if memory runs out, the program stops with a report. Expert path. Write ?? on the call that must recover, or name AllocError in a function's contract to make its whole body report failure.\n\nDownsides of A, and what the design does about them. A handler now changes whether a call can fail, which a reader might miss. Hover marks a handled allocating call as fallible here. A ?? on a call that can never fail stays an error, as E0405 is today.\n\nA library function that allocates but does not name AllocError still stops inside, so a device cannot recover through it. That is today's rule for every plain call. The library can name AllocError in its contract without adding a second function, and jet inspect lists the stopping callees.\n\nMap.add at a single site. A device that must recover from one add, and not the whole function, moves that add into a small function whose contract names AllocError. The helper is three lines, and try_insert has no uses on dev, so no existing line needs it.\n\nWhat remains. A function that names AllocError checks each allocation, the check its twins made. Functions that do not name it keep the abort path and pay nothing new.\n\nOther options. B keeps the twins. C is Zig's: every allocating call can fail and the allocator is passed in. D is a dynamic #Context scope: any allocation inside, in any callee, fails as a value. E is Swift's and Go's: allocation failure always stops, and devices use budgets and fixed capacity.\n\nTheir best cases. B is built and explicit. C never hides an allocation. D reaches callees that never planned for it. E is the simplest language. Their costs: B doubles every allocating API. C marks every call. D makes every function carry a failure path, and a callee's ! Never contract would be untrue inside it.\n\nE leaves a device no way to recover from a refused allocation, which D-ALLOCFAIL1 exists to give it.",
       "options": [
         {
           "key": "A",
           "name": "One spelling; fails where asked",
           "detail": "A plain allocating call fails as an AllocError value when a handler sits on it or when its function's contract names AllocError. Otherwise it stops as today. The try_ twins go.",
-          "technical": "Reverses D-ALLOCFAIL1=A's twin family; keeps AllocError, its raw entry point and E0402. Fallibility is lexical: handled call or AllocError in the enclosing contract. Core declares AllocError -> Err. jet fix rewrites the 52 try_ calls. Hover and jet inspect show fallible sites and stopping callees.",
+          "technical": "Reverses D-ALLOCFAIL1=A's twin family; keeps AllocError, its raw entry point and E0402. Fallibility is lexical: handled call or AllocError in the enclosing contract. Core declares AllocError -> Err. The deleting commit rewrites the 53 try_ code lines in the tree; the retired names get no jet fix rewrite or teaching. Hover and jet inspect show fallible sites and stopping callees.",
           "code": "use mem: core.mem\n\n// The contract names AllocError, so every allocation in this body is fallible\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)   // a failed push returns Err(AllocError)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {(load(3) ?? [Int]{}).len()}\")\n    s := \"ab\"\n    s.push(\"c\") ?? panic(\"no memory\")   // a handler at the call makes it fallible\n    print(s)\n}\n// Proposed (A): loaded 3, abc. Probe a03 runs load today; probe a02's handled push is E0405."
         },
         {
@@ -185522,7 +185522,11 @@
           },
           {
             "loss": "One add on a map recovers only inside a contract that names AllocError.",
-            "mitigation": "A three-line helper does it, jet fix writes it, and no line on dev needs it today."
+            "mitigation": "A three-line helper does it, and no line on dev needs it today."
+          },
+          {
+            "loss": "Code outside the tree that calls try_push stops compiling with a generic unknown-method error.",
+            "mitigation": "The tree is rewritten in the deleting commit; any teaching for retired names waits on D-LANG-MIGRATE1."
           }
         ],
         "whyNot": [
@@ -185550,9 +185554,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. A's jet fix rewrite of the retired try_ names broke D-TEACH-RECONCILE1=A and the owner's rule, so the tree is rewritten in the deleting commit instead. The census, which counted Tower JSON, is now 53 Jet lines broken down by form."
       },
-      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/af run; outputs are in probes/af/out6. The census runs git grep -ohE on '\\.try_(alloc|with_capacity|push|new|reserve|insert)\\(' and git grep -cE on '\\.add\\([^)]*\\) *\\?\\?' over Core, Compiler, Jetpack, Tools, Examples and tests. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-ALLOC-FAIL1/probes for a01 to a08. The census runs git grep on '\\.try_(alloc|with_capacity|push|new|reserve)\\(' and '\\.add\\([^)]*\\) *\\?\\?' over *.jet files in Core, Compiler, Jetpack, Tools, Examples and tests, with comment lines dropped.",
       "surface": {
         "gist": "Should the try_ twins go, so a plain allocating call fails as a value wherever the code handles it or declares AllocError?",
         "lesson": "Adding to a list needs memory, and memory can run out. Most programs should stop with a report; a device must recover. Today Jet has two names per operation, one for each need. This vote decides whether one name can do both.",
@@ -185676,7 +185680,109 @@
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-10T03:46:53.621Z"
+      "created": "2026-11-10T03:46:53.621Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "A handler now decides whether a call can fail, which a reader might miss.",
+          "attempts": [
+            "Require a separate marker on fallible calls; that brings back a second spelling.",
+            "Hover marks a handled allocating call as fallible, and a ?? on a call that can never fail stays E0405 (a02)."
+          ],
+          "result": "Reduced to a visible handler on the call's own line."
+        },
+        {
+          "option": "A",
+          "loss": "m.add(k, v) ?? x could start catching refused memory (a08 shows ?? already means no old value).",
+          "attempts": [
+            "Let ?? catch both; 69 existing lines would change meaning silently.",
+            "Keep a bare ?? on an already optional result meaning what it means today; such calls are fallible only inside an AllocError contract."
+          ],
+          "result": "Removed by the second attempt; no existing line changes."
+        },
+        {
+          "option": "A",
+          "loss": "The twins' 53 in-tree callers must move.",
+          "attempts": [
+            "Ship a jet fix rewrite of try_ names; that is barred by D-TEACH-RECONCILE1=A and the owner's rule.",
+            "Rewrite the 53 lines in the deleting commit: 31 ?? and 2 matches keep their form, 13 ? and the returned results sit under AllocError contracts."
+          ],
+          "result": "Removed in the tree; code outside it gets a generic error, which is the named loss."
+        },
+        {
+          "option": "A",
+          "loss": "A callee that does not name AllocError still stops inside.",
+          "attempts": [
+            "Make every callee fallible inside the contract (option D); its ! Never contract would become untrue.",
+            "Let the library name AllocError in its contract with no twin, and have jet inspect list the stopping callees."
+          ],
+          "result": "Reduced to a library choice, as today."
+        },
+        {
+          "option": "A",
+          "loss": "Implicit allocations could fail unseen inside a contract.",
+          "attempts": [
+            "Exclude literals and interpolation; then a contract body could still stop.",
+            "Count every allocation, named or implicit, and list each fallible point in jet inspect."
+          ],
+          "result": "Removed: none is hidden."
+        },
+        {
+          "option": "B",
+          "loss": "Every allocating API has a twin.",
+          "attempts": [
+            "Generate the twins from one declaration.",
+            "Document only the plain form."
+          ],
+          "result": "Reduced in Core's source, not in the API users read."
+        },
+        {
+          "option": "C",
+          "loss": "Every allocating call is marked and takes an allocator.",
+          "attempts": [
+            "Default the allocator from #Context.",
+            "Elide the mark where the caller cannot fail."
+          ],
+          "result": "The first attempt reverses D-ALLOC-SITE1=A's design back toward A."
+        },
+        {
+          "option": "D",
+          "loss": "Every function carries a failure path, and ! Never contracts become untrue inside the scope.",
+          "attempts": [
+            "Exempt functions marked Never!.",
+            "Report the scope's reach in jet inspect."
+          ],
+          "result": "Not removed: the exemption breaks the scope's promise."
+        },
+        {
+          "option": "E",
+          "loss": "A device cannot recover from a refused allocation.",
+          "attempts": [
+            "Use D-STACKBOUND1=A heap budgets (a04 prints grew 100).",
+            "Use fixed-capacity lists."
+          ],
+          "result": "Reduced, not removed: the device still stops when the budget is wrong."
+        }
+      ],
+      "reports": [
+        {
+          "title": "One spelling per allocating operation: probes, census by form and adversarial review",
+          "path": "Docs/audits/2026-11-10-alloc-fail-review.md",
+          "note": "a01-a08 on a0.0.43; 53 try_ Jet lines (31 ??, 13 ?, 2 match, 7 other), not 92; 69 add ?? lines; jet fix rewrite replaced by an in-tree rewrite under D-TEACH-RECONCILE1=A; Rust, Zig, C++, Go sources."
+        },
+        {
+          "title": "Rust Vec::try_reserve",
+          "url": "https://doc.rust-lang.org/std/vec/struct.Vec.html#method.try_reserve"
+        },
+        {
+          "title": "Zig language reference: choosing an allocator",
+          "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
+        },
+        {
+          "title": "C++ std::bad_alloc",
+          "url": "https://en.cppreference.com/w/cpp/memory/new/bad_alloc"
+        }
+      ]
     },
     {
       "id": "D-API-SURFACE1",
@@ -199498,6 +199604,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T16:03:04.060Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ALLOC-FAIL1",
+      "note": ""
+    },
     {
       "at": "2026-11-10T16:01:01.974Z",
       "by": "Main",
