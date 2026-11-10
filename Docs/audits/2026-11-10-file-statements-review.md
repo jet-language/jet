@@ -10,12 +10,12 @@ no `#!` line? Dev already does this; Main ruled it ahead of the vote in dev 9d06
 
 ## Finding that changed the ballot
 
-**`defer` is refused in a top-level body.** `defer close(b)` runs in `run: fn`: probe f19 with `close(b)`
-prints `closed 4`, `closed 3`. As a top-level line, the same code (f13) fails with E0003,
-"`defer` is not a Jet word". The cause:
+**`defer` is refused in a top-level body.** The original f19 uses `close(^b)` and fails; it is not the valid run-body comparison.
+The different-family section below supplies and runs a valid `defer close(b)` pair.
+Top-level defer reports "`defer` is not a Jet word". The cause:
 
-- `Compiler/JetParser/Source/Parser/Entry.jet:942-945`: the top-level loop calls
-  `parser_unknown_top_word_ahead` before it reaches the statement parser (`:946-949`).
+- At the origin/dev snapshot read for this review, `Compiler/JetParser/Source/Parser/Entry.jet:930-937` calls
+  `parser_unknown_top_word_ahead` before the ordinary statement parser.
 - `Compiler/JetParser/Source/Parser/Statements.jet:1743-1745`: an identifier followed by another word is
   reported as an unknown word. `defer close` matches.
 - The block path knows the word: `Statements.jet:113` (`word == "defer"`) and `:528`
@@ -41,11 +41,11 @@ uses `close(^`.
 | f11 | a function reads a body local | E0107 |
 | f12 | early return | stops after `limit 3` |
 | **f14** (new) | a lone binding never makes a program | check ok; run E0101 |
-| **f15 / f16** (new) | a body failure matches run | identical report "in run", both exit 70 |
+| **f15 / f16** (new) | a body failure matches run | same E3001 message and exit 70; distinct source locations |
 | **f17** (new) | `jet test` never runs the body | `double doubles: pass`; `BODY RAN` absent; `jet run` prints it |
 | **f18** (new) | forward call to a later function | `hi Ada` |
-| **f20** (new) | scope-end cleanup of body locals on early return | `closed 4`, `closed 3`, same as f19 |
-| **f13 / f19** (new) | `defer` in a body against run | **E0003 in the body**; works in run |
+| **f20** (new) | scope-end cleanup of body locals on early return | `closed 4`, `closed 3`, also observed in review6-defer-run |
+| **f13 / f19** (original) | invalid-caret cleanup pair | both fail; use review6-defer-body/run for the valid comparison |
 | imp | import of a statement file | E0620 |
 | cyc | use cycle | E0604 |
 
@@ -88,3 +88,23 @@ not decoded, since the host has no `strings` or `size`.
 
 A stray statement runs when its lone file is run by name; before, that file failed with E0101. A function
 cannot read a lower-case body local; E0107 offers a parameter or an ALL_CAPS constant. Both are by design.
+
+## Different-family review (GPT, 2026-11-10)
+
+| Claim | Attack and independently checked evidence | Verdict |
+|---|---|---|
+| Bare statements work | Reran every f01-f20 file, import and cycle probes on a0.0.43. Bare/shebang/tally bodies run; mixed entry E0621; declaration-only and binding-only run E0101; body-local access E0107; imported body E0620; cycle E0604. | Holds for exercised native paths. |
+| Binding-only and declaration-only files check | Ran check on f01, f04 and f14: all pass. | Holds; a binding alone does not select an entry. |
+| Test discovery runs no body | Ran `jet test f17_test_body.jet`: one test passes with no BODY RAN; direct run prints BODY RAN. | Holds. |
+| Body panic reports are identical | f15 and f16 both exit 70/E3001 with the same message, but source files, lines and indentation differ. | Holds only for code/message/exit semantics, not byte-identical reports. |
+| f19 proves defer works in run | f19 contains `close(^b)` and is E0003. New `review6-defer-run.jet` uses valid `defer close(b)` and closes 4 then 3. The otherwise equivalent `review6-defer-body.jet` is E0003 at defer. | Original evidence fails; valid pair now establishes the top-level parser defect. |
+| Cited parser location is current | Read origin/dev Entry and Statements: Entry guard is :930-937, Statements recognizes defer at :113/:528 and parses it at :1633; unknown-top-word test is :1743. | Old Entry :942 citation fails for this snapshot; corrected. |
+| Equal output and binary size prove complete body equivalence | Twenty examples and equal file length do not prove all control flow, error/cleanup paths or tiers. No new build-size check was run. | Fails as full proof; keep complete parity as an implementation requirement. |
+| Files, pipes and one-liners share body rules | Ran -e print, -e value and piped print: hi, 3, piped. | Holds for these forms; final-value echo is a distinct -e host behavior. |
+| A means no startup effects | Read D-ENTRY-EXPLICIT2=A, D-SCRIPT-TOPLEVEL1=A and D-FFI-COMPTIME2=A directly. The later foreign-constant ruling keeps a startup fallback. | Fails broadly; A forbids application-body execution on import, not all library initialization. |
+| C's global lock makes startup safe | The draft itself admits a foreign cross-thread callback can deadlock. A build listing does not prevent that. | Fails; replaced with per-library state publication, nonblocking in-progress failure and refusal of unproved callback/blocking initializer edges. |
+| B is worse because dev accepts A | Existing code cannot decide an owner-only design choice. B's visible script intent is a real strength. | Fails as framing; compare mandatory ceremony, not current implementation inertia. |
+
+Read C# top-level statements, Python import/cache semantics, Swift SE-0343 and Go's specification independently. C# is the closest entry-wrapper precedent; it is not proof of Jet behavior. Existing numeric census is historical and not independently remeasured.
+
+Agree with repaired A. No option added. Its remaining costs—accidental direct execution and binding reclassification—are real. Do not post the f19 caret form as working, byte-identical panic reports, complete tier parity, binary-size proof, or a no-startup-effects claim.
