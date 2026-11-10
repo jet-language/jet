@@ -17,6 +17,7 @@ use {
         TExprType,
         StmtKind,
         compiler_transfer_rows,
+        foundation_named_type,
         type_table_intern,
         Call,
         CallArg,
@@ -5771,6 +5772,15 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
 }
 
 sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // `[T].with_capacity(n)` writes a list type where a receiver value goes.
+    // A list type is not a static owner, so name the `List` static rather
+    // than report `T` as an unknown value (E0107).
+    if receiver == .ListLit(elements, _, _) && elements.len() == 1 {
+        if elements[0] == .Ident(element, _, _) && sema_expr_names_list_element_type(element, scopes) {
+            diagnostics.push(sema_error("E0311", method_span, "`[{element}]` has no `{method}`", "`[{element}]` before `.` is a list type, and a list type has no static methods; list statics belong to `List`", "write `List.try_with_capacity(n) ?? …` where `[{element}]` is the expected type, for an empty list with room for n items, or `[{element}]{{…}}` for a list of values"))
+            return None
+        }
+    }
     // `expect(value).snapshot()` is the snapshot assertion builtin, unless a
     // local or function named `expect` shadows it.
     if method == "snapshot" && receiver == .Call(call, _) {
@@ -5849,6 +5859,14 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, scopes, state, diagnostics)
     }
     checked
+}
+
+// Whether `name`, written alone inside `[…]` before `.`, spells a type: a
+// type binding in scope or a primitive. A value binding of that name keeps
+// the ordinary one-element list literal.
+sema_expr_names_list_element_type: fn(name: String, scopes: SemaScopeTable) -> Bool Never! {
+    if sema_scope_resolve_index(scopes, name) == .Val(index) -> return scopes.bindings[index].symbol.kind == SymbolKind.Type
+    foundation_named_type(name) != (Type.Named{name: name})
 }
 
 // Whether the plain call `receiver.method(args)` resolves to a method that

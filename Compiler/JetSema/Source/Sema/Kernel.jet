@@ -135,6 +135,18 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
         .Index(_, _, span, _, _) | .Slice(_, _, _, _, span, _) -> return Val(SemaKernelFailure{obligation: "statically proved bounds", span: span})
         .Lambda(lambda, _) -> return Val(SemaKernelFailure{obligation: "no captures", span: lambda.span})
         .CallValue(_, _, span, _) -> return Val(SemaKernelFailure{obligation: "closed calls", span: span})
+        // A collection literal builds new storage on the worker; that, not a
+        // race, is what keeps the body from being a proved kernel.
+        .TypedLit(head, body, span, _) -> {
+            fixed: if head == .Val(ty) -> sema_effect_is_fixed_list(ty) else -> false
+            collection: if body == {
+                .Elements(_) | .Entries(_) | .ByteText(_) -> true
+                else -> false
+            }
+            if collection && !fixed -> return Val(SemaKernelFailure{obligation: "an allocation-free body: this literal allocates new collection storage", span: span})
+            return Val(SemaKernelFailure{obligation: "race-free straight-line body", span: span})
+        }
+        .MapLit(_, span, _) -> return Val(SemaKernelFailure{obligation: "an allocation-free body: this literal allocates new collection storage", span: span})
         else -> return Val(SemaKernelFailure{obligation: "race-free straight-line body", span: expr_span(expression)})
     }
 }

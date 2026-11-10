@@ -66,7 +66,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
 
 #Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {
     manifest: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [FS] }}\n", "package.jet") ?? panic("authority holds")
-    entries: [PackageEffects]{PackageEffects{name: "netdep", effects: [String]{"Net"}, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: Val(Span{start: 4, end: 12})}}
+    entries: [PackageEffects]{PackageEffects{name: "netdep", effects: [String]{"Net"}, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, maximal_chain: [String]{}, boundary_span: Val(Span{start: 4, end: 12})}}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     diagnostic: diagnostics[0]

@@ -15,6 +15,11 @@ TEffectFacts: struct {
     // Where this function's own body made its row maximal (a call with no
     // known body), when it did.
     maximal_span: Span?{None}
+    // Whether this body (or a lambda in it) calls a C binding no descriptor
+    // owns: an open-world call whose effects the checker cannot see. A
+    // written `allow` row or a package budget refuses it (Jetpack
+    // EffectBudget); a dynamically selected call, also maximal, is not one.
+    foreign_open: Bool{false}
     // The functions this body takes as values (a named function read, a
     // trait-object dispatch's implementations), which it may call later through
     // the value. They are not calls, so they never widen this row; the

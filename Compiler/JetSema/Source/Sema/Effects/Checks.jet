@@ -286,6 +286,8 @@ SemaEffectNode: struct {
     call_edges: [String]
     maximal: Bool
     maximal_span: Span?
+    // TEffectFacts.foreign_open.
+    foreign_open: Bool{false}
     declared: [String]
     prohibited: [String]
     has_declared_row: Bool
@@ -1532,6 +1534,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         node.maximal = true
         node.maximal_span = Val(function.source_span)
     }
+    node.foreign_open = function.effects.foreign_open
     node.display_key = "{function.module_name}::{function.name}"
     node.source_display = sema_effect_source_display(function.source_file)
     node.chain_name = sema_effect_chain_name(function)
@@ -1679,9 +1682,12 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
         }
         sema_effect_node_add_direct(nodes, node_index, effect_name, fact.span)
         sema_effect_record_memory_open(nodes, node_index, fact.span, "foreign function body")
-        if fact.foreign_opaque && !nodes[node_index].maximal {
-            nodes[node_index].maximal = true
-            nodes[node_index].maximal_span = Val(fact.span)
+        if fact.foreign_opaque {
+            nodes[node_index].foreign_open = true
+            if !nodes[node_index].maximal {
+                nodes[node_index].maximal = true
+                nodes[node_index].maximal_span = Val(fact.span)
+            }
         }
         return
     }
@@ -1960,6 +1966,7 @@ sema_effect_merge_lambda: fn(nodes: &[SemaEffectNode], node_index: Int, lambda: 
         nodes[node_index].maximal = true
         nodes[node_index].maximal_span = Val(lambda.source_span)
     }
+    if lambda.effects.foreign_open -> nodes[node_index].foreign_open = true
 }
 
 sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: BodyNode) Never! {
@@ -2977,7 +2984,7 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
 }
 
 sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges, module_writes: node.module_writes}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, foreign_open: node.foreign_open, value_edges: node.value_edges, module_writes: node.module_writes}
 }
 
 // Rust `e1264`: the span is the first entry of the declared effect row, or
@@ -3198,6 +3205,16 @@ sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], node_by_key: NameRows, 
     found
 }
 
+// A heap allocation `!Mem.Alloc(above: N)` cannot size: an "alloc" event that
+// is not the companion of the arena reservation counted at the same site.
+sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> Bool Never! {
+    if event.kind != "alloc" -> return false
+    loop other in node.memory_events {
+        if other.kind == "arena" && other.span.start == event.span.start && other.span.end == event.span.end -> return false
+    }
+    true
+}
+
 // Rust `arena_bound`: the proven arena bytes `index` can reserve, with the
 // event that witnesses the total, or the finding that stops the proof.
 sema_effect_arena_bound: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
@@ -3216,6 +3233,9 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], node_by_key: NameRows
     total := 0
     witness := SemaMemoryFinding?{None}
     loop event in sema_effect_memory_sorted_events(node.memory_events) {
+        // A heap allocation has no proven size, so a byte bound cannot hold
+        // over it; the arena reservation at the same site is counted instead.
+        if sema_effect_unsized_alloc(node, event) -> return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
         if event.kind != "arena" -> next
         bytes: event.bytes ?? return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
         executions: event.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(event.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, path, total))
@@ -3231,6 +3251,13 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], node_by_key: NameRows
         if called -> next
         reach_visiting := (loop _ in nodes -> false)
         if sema_effect_may_reach_arena(nodes, node_by_key, target, reach_visiting) -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
+        // With no arena below it, the callee's multiplicity does not matter:
+        // any heap allocation it reaches breaks the bound.
+        if sema_effect_memory_search(nodes, node_by_key, target, "alloc") == .Val(found) {
+            full := path.copy()
+            loop step in found.path -> full.push(step)
+            return sema_effect_arena_failure(SemaMemoryFinding{event: found.event, owner: found.owner, open: found.open, path: full, used: total})
+        }
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
         target: sema_effect_node_index(node_by_key, call.callee) ?? next
@@ -3253,7 +3280,10 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
     path_text: finding.path.join(" -> ")
     if finding.event == .Val(event) {
         owner: nodes[finding.owner]
-        arena: if bounded -> "; the proven path total is {finding.used} bytes" else -> ""
+        arena := ""
+        if bounded {
+            arena = if event.kind == "alloc" -> "; sema proves no byte size for this heap allocation, so it cannot be counted against the bound" else -> "; the proven path total is {finding.used} bytes"
+        }
         return sema_error("E0921", event.span, "{event.operation} at {owner.source_display} violates the effective `{fact}` declared at {declared_at}", "{owner.source_display} is reachable through {path_text} from code governed by `{fact}`{arena}; declaration provenance: {provenance}; operation provenance: {owner.name} in {owner.source_display}", "remove or replace the incompatible operation, seal the target set, or move the call outside this denial")
     }
     open: finding.open ?? SemaMemoryOpen{span: denial.span, source: declared_at, reason: "memory proof is incomplete"}

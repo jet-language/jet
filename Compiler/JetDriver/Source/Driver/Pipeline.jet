@@ -4472,7 +4472,10 @@ JetDriverPackageEffectRows: struct {
 // dependency, so a grant to it is not undone at its caller, and a row names
 // the package whose code reaches the effect. As for the application's
 // required effects (jet_driver_required_effects), an open-world call's
-// maximal row is a ceiling fact, not a reached effect.
+// maximal row is a ceiling fact, not a reached effect. Only a call of a C
+// binding no descriptor owns (TEffectFacts.foreign_open) marks the summary
+// `maximal`, which a written `allow` row or budget refuses; a dynamically
+// selected call is checked where the selected body is.
 jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String: Span]) -> JetDriverPackageEffectRows? {
     root: load.packages[jet_driver_entry_package_index(load) ?? return None]
     // Each dependency's name, by its source root and by its package identity.
@@ -4588,7 +4591,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 edges.push(edge.copy())
             }
         }
-        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: edges.move(), maximal: false}
+        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: edges.move(), maximal: function.effects.foreign_open}
         solved[sites[index]] = if reached[index] -> local[index].copy() else -> function.effects.direct.copy()
     }
     entry_module: module_rows.get(load.entry_module_identity) ?? rows[entry_row]

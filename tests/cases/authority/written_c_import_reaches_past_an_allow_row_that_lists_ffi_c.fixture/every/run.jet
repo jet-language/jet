@@ -1,0 +1,15 @@
+// The row lists every root, so the C call is inside it.
+package: {
+    name: "every"
+    authority: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Meta, Net, Rand, Secret, Time] }
+}
+
+use c: c.c
+#Import c.c: module {
+    getpid: fn() -> I32 = "getpid"
+}
+
+run: fn() {
+    pid: c.getpid()
+    print("pid>0={pid > I32{0}}")
+}
