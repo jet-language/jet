@@ -69,8 +69,10 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.
+- [GeneratingMarker](Reflection/GeneratingMarker.jet) — A marker that writes code types its template `-[Meta.Generate]>`, the row of `Marker.expand`.
 - [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct without `#Layout` reports the bytes the compiler chose for it.
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.
+- [ReadOnlyLint](Reflection/ReadOnlyLint.jet) — A read-only lint is a marker whose `expand` row is `-[]>`: it reads the marked type and may warn, but writes no code.
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.
 - [ReflectValue](Reflection/ReflectValue.jet) — `reflect.of(x)` — the runtime reflection floor.
 - [UserRuleBody](Reflection/UserRuleBody.jet) — A source rule with a body adds an ordinary method.

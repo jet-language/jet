@@ -5996,6 +5996,31 @@ AmbiguousCall: struct {
     }
 }
 
+MarkerRowOutsideContract: struct {
+    marker: String
+    entry: String
+
+    impl Diagnostic {
+        code: "E0774"
+        meaning: "A marker's `expand` row names an effect outside `Marker.expand`'s row, `Meta.Generate`"
+        what: fn(self) -> String { "`{self.entry}` in `{self.marker}`'s template row is outside `Marker.expand`'s row" }
+        why: fn(self) -> String { "A marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect" }
+        fix: fn(self) -> String { "Remove `{self.entry}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads" }
+    }
+}
+
+MarkerGeneratesOutsideRow: struct {
+    marker: String
+
+    impl Diagnostic {
+        code: "E0775"
+        meaning: "A marker's template writes declarations, but its `expand` row has no `Meta.Generate`"
+        what: fn(self) -> String { "`{self.marker}`'s template writes declarations, but its row has no `Meta.Generate`" }
+        why: fn(self) -> String { "A template whose row is `-[]>` only reads the program, so it may reject or warn but not add code" }
+        fix: fn(self) -> String { "Write `-[Meta.Generate]>` on `{self.marker}`'s `expand`, or remove the declarations its template writes" }
+    }
+}
+
 LiveQueryFootprintConflict: struct {
     key: String
     registered: String

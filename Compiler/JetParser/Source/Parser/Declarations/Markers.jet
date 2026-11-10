@@ -6,6 +6,7 @@ use {
         AccessConvention,
         CallLabel,
         DeriveBodyItem,
+        EffectRowEntry,
         Expr,
         FactDecl,
         Item,
@@ -150,12 +151,20 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
 }
 
 // `expand: fn(self, target: Target) { … }`: the marker's template, which the
-// compiler expands with the marked item bound to `target`.
+// compiler expands with the marked item bound to `target`. A row written
+// before the body, `-[Meta.Generate]>` or `-[]>`, narrows the template's.
 parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl) -> Span {
     start: parser_bump(state)
     name: parser_expect_name(state, "after `fn` in `impl Marker`")
     method: parser_value(state, name)
     params: parser_parse_param_list(state)
+    row := [EffectRowEntry]?{None}
+    row_span := Span?{None}
+    if parser_current_kind(state) == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET {
+        row_start: parser_current(state).span
+        row = Val(parser_parse_effect_arrow_row(state))
+        row_span = Val(parser_cover(row_start, parser_lookahead(state, -1).span))
+    }
     signature: parser_cover(start.span, parser_lookahead(state, -1).span)
     shaped: method == "expand" && params.len() == 2 && params[0].name == "self" && params[0].convention == AccessConvention.Read && params[1].name == "target" && params[1].convention == AccessConvention.Read && params[1].ty == Type.Named{name: "Target"} && parser_current_kind(state) == TOKEN_LBRACE
     if !shaped {
@@ -172,6 +181,8 @@ parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl)
         return span
     }
     declaration.body = Val(body)
+    declaration.row = row
+    declaration.row_span = row_span
     span
 }
 

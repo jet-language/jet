@@ -92,6 +92,10 @@ vocabulary](vocabulary.md).
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
+  The template's row is `Meta.Generate`, which `expand` may write as
+  `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
+  but writes no declaration (E0775). Reading the program needs no effect,
+  and any other row entry is E0774 (D-META-LADDER1=A).
   A fixed named group instead is a field-less marker struct whose block sets
   `group: #[Inline, Scalar]`; it has at least two members and no parameters,
   and expands through the same

@@ -1,0 +1,20 @@
+// The metaprogramming effects: the compiler operations library code running
+// inside the compiler may perform. Reading the program needs no Meta effect,
+// so a read-only lint's row is `-[]>`; a marker or derive that writes checked
+// declarations is `-[Meta.Generate]>`, and replacing a declaration's body is
+// `Meta.Rewrite`. Adding a type from text checks `Generate`, `Types` and `Raw`
+// together. The bare `#FX` lists no machine effect: host work keeps its own
+// machine effects and gates.
+// The form is that of Compiler/Prelude/Effects.jet, and
+// Tools/agent/CoreSourceRows.jet reads it into the compiler after
+// Core/Effects/Effects.jet.
+#FX
+Meta: enum {
+    Generate
+    Include
+    Rewrite
+    Types
+    Raw
+
+    impl Effect {}
+}

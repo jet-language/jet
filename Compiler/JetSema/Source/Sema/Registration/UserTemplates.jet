@@ -16,6 +16,7 @@ use jet_foundation.[
     DeriveBodyItem,
     DeriveDef,
     Diagnostic,
+    EffectRowEntry,
     Func,
     ImplConstValue,
     ImplDef,
@@ -364,11 +365,16 @@ sema_user_derive_expand_module: fn(graph: &SemaRegistrationGraph, module_index: 
 // change or shadow a written (or earlier generated) member.
 
 // A marker application's rule body, with the `Diagnostic` impls of the rule's
-// declaring module that its `reject(value)` may raise.
+// declaring module that its `reject(value)` may raise, and whether its row
+// lets it write declarations.
 SemaUserRule: struct {
     body: [DeriveBodyItem]
     reports: [SemaDeriveReport]
+    generates: Bool
 }
+
+// The effect a template needs to write declarations.
+META_GENERATE: "Meta.Generate"
 
 sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaUserRule? {
     resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
@@ -390,7 +396,37 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, m
             }
         }
     }
-    Val(SemaUserRule{body: body, reports: reports})
+    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row)})
+}
+
+// `Marker.expand`'s row is `Meta.Generate`; a template that writes its own
+// row may write code only when that row names it.
+sema_user_rule_row_generates: fn(row: [EffectRowEntry]?) -> Bool Never! {
+    entries: row ?? return true
+    loop entry in entries {
+        if entry.name == META_GENERATE -> return true
+    }
+    false
+}
+
+// Each entry of a written template row is `Meta.Generate` or a denial: the
+// template runs inside the compiler, which reading needs no effect for.
+sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop declaration in sema_marker_module_declarations(items, "", false) {
+        entries: declaration.row ?? next
+        loop entry in entries {
+            if entry.name == META_GENERATE || entry.name.starts_with("!") -> next
+            diagnostics.push(sema_error("E0774", entry.span, "`{entry.name}` in `{declaration.name}`'s template row is outside `Marker.expand`'s row", "a marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect", "remove `{entry.name}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads"))
+        }
+    }
+}
+
+// A template whose row lacks `Meta.Generate` may reject or warn, not write
+// declarations.
+sema_user_rule_row_admits: fn(rule: SemaUserRule, marker: String, span: Span, expanded: [Item], diagnostics: &[Diagnostic]) -> Bool {
+    if rule.generates || expanded.len() == 0 -> return true
+    diagnostics.push(sema_error("E0775", span, "`{marker}`'s template writes declarations, but its row has no `Meta.Generate`", "a template whose row is `-[]>` only reads the program, so it may reject or warn but not add code", "write `-[Meta.Generate]>` on `{marker}`'s `expand`, or remove the declarations its template writes"))
+    false
 }
 
 // A struct's or enum's `impl Diagnostic { … }` written inside its body is the
@@ -480,6 +516,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
                 info: type_info ?? next
                 expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
             }
         }
@@ -492,6 +529,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 info: sema_user_template_function_info(function) ?? next
                 expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 loop expanded_item in expanded -> generated.push(expanded_item)
             }
         }
@@ -508,6 +546,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
         marker: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, rule.reports, Val(block.site), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, block.name, block.site, expanded, diagnostics) -> next
         loop expanded_item in expanded -> generated.push(expanded_item)
     }
 }
@@ -634,6 +673,7 @@ sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span
 sema_user_rule_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
+    sema_user_rule_row_check(graph.modules[module_index].program.items, diagnostics)
     sema_user_rule_collect_module(graph, module_index, generated, diagnostics)
     sema_user_template_register(graph, module_index, generated, diagnostics)
 }
