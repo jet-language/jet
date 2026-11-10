@@ -49,7 +49,7 @@ use {
     pem: __core_crypto_pem
     pkparse: __core_crypto_pkparse
     core.encoding.[Dyn]
-    core.crypto.[Secret]
+    core.crypto.[Secret, X25519SecretKey, X25519PublicKey, SigningKey, Hasher, Sealed, WrappedKey, Digest256]
 }
 
 // ---------------------------------------------------------------------------
@@ -3856,6 +3856,82 @@ ct_base64_decoded: fn(bytes: [U8]) -> Int Never! {
     }
 }
 
+/// The length of what core.crypto's envelope opens of `box` for `identity`;
+/// 0 for a refused one.
+ct_envelope_opened: fn(identity: X25519SecretKey, box: Sealed) -> Int {
+    opened: core.crypto.privatedecrypt(identity, box) ?? return 0
+    opened.len()
+}
+
+/// The length of the key core.crypto unwraps of `wrapped` for `holder`; 0 for
+/// a refused one.
+#Unsafe("a timing run's test key, used for that run only") ct_key_unwrapped: fn(holder: X25519SecretKey, wrapped: WrappedKey) -> Int {
+    key: core.crypto.unwrap(holder, wrapped) ?? return 0
+    key.bytes.len()
+}
+
+/// The length of core.crypto's X25519 shared secret of the private key
+/// `secret` and `peer`; 0 for a refused one.
+#Unsafe("a timing run's test key, used for that run only") ct_shared: fn(secret: [U8], peer: X25519PublicKey) -> Int {
+    key: X25519SecretKey.from_bytes(secret) ?? return 0
+    shared: core.crypto.x25519(key, peer) ?? return 0
+    shared.bytes.len()
+}
+
+/// The length of core.crypto's Ed25519 signature of `msg` by the seed `seed`.
+ct_signed: fn(seed: [U8], msg: [U8]) -> Int {
+    key: SigningKey.from_bytes(seed) ?? return 0
+    sig: core.crypto.sign(key, msg) ?? return 0
+    sig.bytes.len()
+}
+
+/// The first byte of core.crypto's PBKDF2-HMAC-SHA256 of `password`.
+ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
+    out: core.crypto.pbkdf2_hmac(password, salt, 2, 32) ?? return 0
+    Int.from_u8(out[0])
+}
+
+// Argon2id (core.crypto `password_hash`) is left out: from the second half
+// of its first pass it indexes memory by block contents by design (RFC 9106
+// section 3.4), so its time depends on the password; the emission check
+// lists it as expected.
+#Test("dudect: core.crypto's envelope open, key unwrap, X25519, Ed25519 signing, digests, hex and PBKDF2 take as long on fixed and random secrets") {
+    r := CtRand{s: U64{53}}
+    identity: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("identity")
+    holder: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("holder")
+    holder_public: core.crypto.x25519_public(holder) ?? panic("holder public key")
+    // A one-byte input picks the envelope (of a random plaintext) and the
+    // wrapped key (a random one): the fixed class always gets the same one,
+    // the random class any of 32.
+    boxes := [Sealed]{}
+    wraps := [WrappedKey]{}
+    loop _ in 0..<32 {
+        boxes.push(core.crypto.privateencrypt(identity, ct_bytes(r, 64)) ?? panic("envelope seal"))
+        wraps.push(core.crypto.wrap(Secret.from_bytes(ct_bytes(r, 32)), holder_public) ?? panic("wrap"))
+    }
+    msg: ct_bytes(r, 64)
+    salt: ct_bytes(r, 16)
+    #Unsafe("timing runs on test keys, each used for its run only") {
+        loop box in boxes -> assert_eq(ct_envelope_opened(identity, box), 64)
+        loop wrapped in wraps -> assert_eq(ct_key_unwrapped(holder, wrapped), 32)
+        assert_eq(ct_shared(ct_bytes(r, 32), holder_public), 32)
+        assert_eq(ct_signed(ct_bytes(r, 32), msg), 64)
+        ct_dudect("core.crypto envelope open, plaintext", 400, 1, ct_bytes(r, 1), (x) -> ct_envelope_opened(identity, boxes[Int.from_u8(x[0]) %% 32]))
+        ct_dudect("core.crypto key unwrap, key", 400, 1, ct_bytes(r, 1), (x) -> ct_key_unwrapped(holder, wraps[Int.from_u8(x[0]) %% 32]))
+        ct_dudect("core.crypto X25519, private key", 600, 1, ct_bytes(r, 32), (x) -> ct_shared(x, holder_public))
+        ct_dudect("core.crypto Ed25519 sign, seed", 400, 1, ct_bytes(r, 32), (x) -> ct_signed(x, msg))
+    }
+    ct_dudect("core.crypto SHA-1", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha1(x).bytes()[0]))
+    ct_dudect("core.crypto SHA-224", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha224(x).bytes()[0]))
+    ct_dudect("core.crypto SHA-384", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha384(x).bytes()[0]))
+    ct_dudect("core.crypto SHA-512", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha512(x).bytes[0]))
+    ct_dudect("core.crypto SHA3-256", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha3_256(x).bytes()[0]))
+    ct_dudect("core.crypto SHA3-512", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.sha3_512(x).bytes()[0]))
+    ct_dudect("core.crypto BLAKE3", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(core.crypto.blake3(x).bytes[0]))
+    ct_dudect("core.crypto hex", 5000, 8, ct_bytes(r, 32), (x) -> Int.from_u8(Digest256{bytes: x}.hex().bytes()[0]))
+    ct_dudect("core.crypto PBKDF2-HMAC-SHA256, password", 2000, 1, ct_bytes(r, 32), (x) -> ct_pbkdf2(x, salt))
+}
+
 // ---------------------------------------------------------------------------
 // Constant time: the emission check's entry
 // ---------------------------------------------------------------------------
@@ -3952,6 +4028,44 @@ ct_rsa_key: fn() -> rsa.RSAContext {
     cbc := ct_cbc_layer(ct_bytes(r, 48), ct_bytes(r, 64))
     sealed12: ct_record_seal(cbc, ct_bytes(r, 64), 16)
     assert_eq(ct_cbc_open(cbc.tpool[1], sealed12, [U8]{}), 64)
+    // RSA-PSS signing, a TLS 1.3 CertificateVerify's.
+    pss: rsa.rsa_rsassa_pss_sign_no_mode_check(ctx, rng, Val(hashes.Md.SHA256), ct_bytes(r, 32)) ?? panic("RSA-PSS sign: {err}")
+    assert_eq(pss.len(), 128)
+    // core.crypto's own paths beside the expert ones above: the envelope
+    // (X25519, HKDF-SHA256, XChaCha20-Poly1305) sealed to and opened by a
+    // test identity, a key wrapped and unwrapped, Ed25519 signing, X25519,
+    // HMAC, HKDF and PBKDF2, each digest over secret bytes with its hex
+    // (SHA-256 through the Hasher, as HMAC and HKDF run it), secret equality
+    // and Argon2id password hashing.
+    identity: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("identity")
+    boxed: core.crypto.privateencrypt(identity, plain) ?? panic("envelope seal")
+    assert_eq((core.crypto.privatedecrypt(identity, boxed) ?? panic("envelope open")).len(), 64)
+    holder: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("holder")
+    holder_public: core.crypto.x25519_public(holder) ?? panic("holder public key")
+    wrapped: core.crypto.wrap(Secret.from_bytes(ct_bytes(r, 32)), holder_public) ?? panic("wrap")
+    assert_eq((core.crypto.unwrap(holder, wrapped) ?? panic("unwrap")).bytes.len(), 32)
+    signer: SigningKey.from_bytes(ct_bytes(r, 32)) ?? panic("signer")
+    assert_eq((core.crypto.sign(signer, plain) ?? panic("sign")).bytes.len(), 64)
+    assert_eq((core.crypto.x25519(identity, holder_public) ?? panic("x25519")).bytes.len(), 32)
+    assert_eq(core.crypto.hmac_sha256(key, plain).len(), 32)
+    assert_eq((core.crypto.hkdf_sha256(key, aad, aad, 42) ?? panic("hkdf")).bytes.len(), 42)
+    assert_eq((core.crypto.pbkdf2_hmac(key, aad, 2, 40) ?? panic("pbkdf2")).len(), 40)
+    assert_eq(core.crypto.sha1(plain).bytes().len(), 40)
+    assert_eq(core.crypto.sha224(plain).bytes().len(), 56)
+    assert_eq(core.crypto.sha384(plain).bytes().len(), 96)
+    assert_eq(core.crypto.sha512(plain).hex().bytes().len(), 128)
+    assert_eq(core.crypto.sha3_224(plain).bytes().len(), 56)
+    assert_eq(core.crypto.sha3_256(plain).bytes().len(), 64)
+    assert_eq(core.crypto.sha3_384(plain).bytes().len(), 96)
+    assert_eq(core.crypto.sha3_512(plain).bytes().len(), 128)
+    assert_eq(core.crypto.blake3(plain).hex().bytes().len(), 64)
+    hasher := Hasher.new()
+    hasher.update(plain)
+    assert_eq(hasher.digest().bytes().len(), 64)
+    password: Secret.from_bytes(ct_bytes(r, 16))
+    assert(!core.crypto.constant_time_equal(password, Secret.from_bytes(ct_bytes(r, 16))))
+    stored: core.crypto.password_hash_with_salt(password, ct_bytes(r, 16)) ?? panic("password hash")
+    assert(stored.text.bytes().len() > 0)
 }
 
 // ---------------------------------------------------------------------------
