@@ -3930,3 +3930,327 @@ ct_rsa_key: fn() -> rsa.RSAContext {
         assert_eq(ct_opened(vec_expert_xchacha_open(key, xiv, aad, xsealed)), 64)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Constant time: dudect timing of the paths the emission check does not enter
+// ---------------------------------------------------------------------------
+//
+// The tests below time the secret inputs the tests above hold fixed (the
+// ECDSA nonce, the ECDH peer point, the RSA key), the bitsliced AES and the
+// portable GHASH that a host with AES-NI and PCLMULQDQ never runs, and what
+// TLS builds on the primitives: AEAD key set-up and sealing, HKDF and the
+// TLS 1.3 key schedule, the TLS 1.2 PRF and Finished, HMAC_DRBG, the record
+// layer's ssl_decrypt_buf, and Bignum's exp_mod and gcd_modinv_odd. They are
+// timed only; ct_entry above stays the emission check's entry.
+
+/// ECDSA signing with a fixed key whose nonce generator is seeded from
+/// `seed`, so the nonce k is the secret that varies.
+ct_ecdsa_nonce: fn(id: ecp.GroupID, key: [U8], hash: [U8], seed: [U8]) -> Int {
+    grp: ecp.group_load(id) ?? return 0
+    d: bn.read_binary(ct_scalar(key)) ?? return 0
+    nonces := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(nonces, seed)
+    blind := vec_rng()
+    sig: ecdsa.ecdsa_sign_blinded(grp, d, hash, nonces, blind) ?? return 0
+    ct_opened(Val(bn.write_binary(sig.s, key.len()) ?? return 0))
+}
+
+#Test("dudect: ECDSA signing on P-256 and P-384 takes as long on fixed and random nonces") {
+    r := CtRand{s: U64{43}}
+    key256: ct_bytes(r, 32)
+    h256: ct_bytes(r, 32)
+    assert_eq(ct_ecdsa_nonce(.Secp256r1, key256, h256, ct_bytes(r, 32)), 32)
+    ct_dudect("P-256 ECDSA sign, nonce", 400, 1, ct_bytes(r, 32), (x) -> ct_ecdsa_nonce(.Secp256r1, key256, h256, x))
+    key384: ct_bytes(r, 48)
+    h384: ct_bytes(r, 48)
+    assert_eq(ct_ecdsa_nonce(.Secp384r1, key384, h384, ct_bytes(r, 32)), 48)
+    ct_dudect("P-384 ECDSA sign, nonce", 200, 1, ct_bytes(r, 32), (x) -> ct_ecdsa_nonce(.Secp384r1, key384, h384, x))
+}
+
+/// `count` uncompressed points of curve `id`, each the public key of a fresh
+/// private key: the peer points of the variable-base ECDH runs.
+ct_points: fn(id: ecp.GroupID, size: Int, count: Int) -> [[U8]] {
+    rng := vec_rng()
+    out := [[U8]]{}
+    loop _ in 0..<count {
+        pair: ecp.gen_key(id, rng) ?? panic("gen_key {id}: {err}")
+        out.push(ecp.point_write_binary(pair.grp, pair.q, .Uncompressed, 1 + 2 * size) ?? panic("point {id}: {err}"))
+    }
+    out
+}
+
+#Test("dudect: X25519, P-256 and P-384 ECDH take as long on fixed and random peer points") {
+    r := CtRand{s: U64{47}}
+    x25519_key: ct_bytes(r, 32)
+    assert_eq(ct_opened(vec_ecdh(.Curve25519, x25519_key, ct_bytes(r, 32))), 32)
+    ct_dudect("X25519 ECDH, peer point", 600, 1, ct_bytes(r, 32), (x) -> ct_opened(vec_ecdh(.Curve25519, x25519_key, x)))
+    // A one-byte input picks the peer point: the fixed class always gets
+    // the same one, the random class any of 32.
+    p256: ct_points(.Secp256r1, 32, 32)
+    p256_key: ct_scalar(ct_bytes(r, 32))
+    loop p in p256 -> assert_eq(ct_opened(vec_ecdh(.Secp256r1, p256_key, p)), 32)
+    ct_dudect("P-256 ECDH, peer point", 400, 1, ct_bytes(r, 1), (x) -> ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int.from_u8(x[0]) %% 32])))
+    p384: ct_points(.Secp384r1, 48, 32)
+    p384_key: ct_scalar(ct_bytes(r, 48))
+    loop p in p384 -> assert_eq(ct_opened(vec_ecdh(.Secp384r1, p384_key, p)), 48)
+    ct_dudect("P-384 ECDH, peer point", 200, 1, ct_bytes(r, 1), (x) -> ct_opened(vec_ecdh(.Secp384r1, p384_key, p384[Int.from_u8(x[0]) %% 32])))
+}
+
+ct_rsa_pss_sign: fn(der: [U8], hash: [U8]) -> Int {
+    rng := vec_rng()
+    ctx := pkparse.pk_parse_key(der, None, rng) ?? return 0
+    sig: pk.pk_sign_ext(.RSASSAPSS, ctx, Val(hashes.Md.SHA256), hash, 1024, rng) ?? return 0
+    sig.len()
+}
+
+/// The private keys of the Wycheproof RSA-2048 PKCS#1 signing groups that
+/// share one shape: two 1024-bit primes and e = 65537, five keys. The other
+/// three groups have e = 3 and primes of about 1365 and 683 bits. A key's
+/// shape sets its signing time (the CRT halves run at the primes' sizes, the
+/// fault check at e's), so the key tests vary the secret values at one shape.
+ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
+    out := [[U8]]{}
+    loop g in vec_items(vec_wycheproof("rsa_pkcs1_2048_sig_gen"), "testGroups") {
+        der: vec_wy_hex(g, "privateKeyPkcs8")
+        ctx := pkparse.pk_parse_key(der, None, vec_rng()) ?? panic("an RSA-2048 test key parses")
+        e: rsa.rsa_export(ctx.rsa, .E) ?? panic("E")
+        p: rsa.rsa_export(ctx.rsa, .P) ?? panic("P")
+        q: rsa.rsa_export(ctx.rsa, .Q) ?? panic("Q")
+        if bn.bitlen(p) == 1024 && bn.bitlen(q) == 1024 && bn.cmp_int(e, 65537) == 0 -> out.push(der)
+    }
+    out
+}
+
+#Test("dudect: RSA-2048 PKCS#1 v1.5 and PSS signing take as long on fixed and random keys, and PSS on fixed and random hashes") {
+    keys: ct_rsa_keys()
+    assert_eq(keys.len(), 5)
+    pss_keys: keys.copy()
+    pss_hash_keys: keys.copy()
+    r := CtRand{s: U64{53}}
+    // A one-byte input picks the key: the fixed class always gets the same
+    // one, the random class any of the five.
+    hash: ct_bytes(r, 32)
+    pss_hash: hash.copy()
+    loop k in keys {
+        assert_eq(ct_rsa_sign(k, hash), 256)
+        assert_eq(ct_rsa_pss_sign(k, hash), 256)
+    }
+    ct_dudect("RSA-2048 sign, key", 200, 1, ct_bytes(r, 1), (x) -> ct_rsa_sign(keys[Int.from_u8(x[0]) %% keys.len()], hash))
+    ct_dudect("RSA-2048 PSS sign, key", 200, 1, ct_bytes(r, 1), (x) -> ct_rsa_pss_sign(pss_keys[Int.from_u8(x[0]) %% pss_keys.len()], pss_hash))
+    ct_dudect("RSA-2048 PSS sign, hash", 200, 1, ct_bytes(r, 32), (x) -> ct_rsa_pss_sign(pss_hash_keys[0], x))
+}
+
+/// Whole blocks of `blocks` through the bitsliced AES rounds alone, which
+/// run wherever the host leaf does not.
+ct_aes_portable: fn(key: [U8], blocks: [U8]) -> [U8] Never! {
+    k: cipher.aes_key(key, false) ?? return [U8]{}
+    iv := cipher.zero_bytes(16)
+    out := [U8]{}
+    cipher.blocks_portable(k, cipher.ECB_ENC, iv, blocks, 0, blocks.len() /% 16, out)
+    out
+}
+
+/// GHASH of `data` on the Jet carry-less multiply alone, under the hash
+/// subkey of the AES key `key`.
+ct_ghash_portable: fn(key: [U8], data: [U8]) -> [U8] Never! {
+    k: aead.gcm_key(cipher.aes_key(key, false) ?? return [U8]{})
+    y := cipher.zero_bytes(16)
+    aead.ghash_portable(k.g, y, data, 0, data.len() /% 16)
+    y
+}
+
+#Test("dudect: the bitsliced AES and the portable GHASH take as long on fixed and random keys and data") {
+    // FIPS-197 C.3's AES-256 block, and the GHASH of GCM test case 2 (the
+    // zero key's ciphertext block, then its length block).
+    assert_eq(ct_aes_portable(vec_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), vec_hex("00112233445566778899aabbccddeeff")), vec_hex("8ea2b7ca516745bfeafc49904b496089"))
+    assert_eq(ct_ghash_portable(cipher.zero_bytes(16), vec_hex("0388dace60b6a392f328c2b971b2fe7800000000000000000000000000000080")), vec_hex("f38cbb1ad69223dcc3457ae5b6b0f885"))
+    r := CtRand{s: U64{67}}
+    blocks: ct_bytes(r, 64)
+    aes_key: ct_bytes(r, 32)
+    ghash_data: ct_bytes(r, 64)
+    ghash_key: ct_bytes(r, 16)
+    ct_dudect("bitsliced AES-256, key", 3000, 2, ct_bytes(r, 32), (x) -> Int.from_u8(ct_aes_portable(x, blocks)[0]))
+    ct_dudect("bitsliced AES-256, data", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(ct_aes_portable(aes_key, x)[0]))
+    ct_dudect("portable GHASH, key", 3000, 2, ct_bytes(r, 16), (x) -> Int.from_u8(ct_ghash_portable(x, ghash_data)[0]))
+    ct_dudect("portable GHASH, data", 3000, 2, ct_bytes(r, 64), (x) -> Int.from_u8(ct_ghash_portable(ghash_key, x)[0]))
+}
+
+#Test("dudect: AES-GCM and ChaCha20-Poly1305 key set-up and sealing take as long on fixed and random keys and plaintexts") {
+    r := CtRand{s: U64{71}}
+    iv: ct_bytes(r, 12)
+    aad: ct_bytes(r, 13)
+    plain: ct_bytes(r, 64)
+    key: ct_bytes(r, 32)
+    iv2: iv.copy()
+    aad2: aad.copy()
+    plain2: plain.copy()
+    iv3: iv.copy()
+    aad3: aad.copy()
+    iv4: iv.copy()
+    aad4: aad.copy()
+    key4: key.copy()
+    gcm: vec_gcm_seal(key, iv, aad, plain) ?? panic("GCM seal failed")
+    assert_eq(ct_opened(vec_gcm_open(key, iv, aad, gcm)), 64)
+    chacha: vec_chacha_seal(key, iv, aad, plain) ?? panic("ChaCha20-Poly1305 seal failed")
+    assert_eq(ct_opened(vec_chacha_open(key, iv, aad, chacha)), 64)
+    ct_dudect("AES-256-GCM key and seal", 3000, 2, ct_bytes(r, 32), (x) -> ct_opened(vec_gcm_seal(x, iv, aad, plain)))
+    ct_dudect("ChaCha20-Poly1305 key and seal", 3000, 2, ct_bytes(r, 32), (x) -> ct_opened(vec_chacha_seal(x, iv2, aad2, plain2)))
+    ct_dudect("AES-256-GCM seal, plaintext", 3000, 2, ct_bytes(r, 64), (x) -> ct_opened(vec_gcm_seal(key, iv3, aad3, x)))
+    ct_dudect("ChaCha20-Poly1305 seal, plaintext", 3000, 2, ct_bytes(r, 64), (x) -> ct_opened(vec_chacha_seal(key4, iv4, aad4, x)))
+}
+
+/// The TLS 1.3 key schedule from an early secret to a handshake traffic key:
+/// the handshake secret over a fixed (EC)DHE secret, the client handshake
+/// traffic secret and its AES-128 key (RFC 8446 7.1 and 7.3).
+ct_tls13_schedule: fn(early: [U8], shared: [U8], transcript: [U8]) -> [U8] {
+    handshake: keys13.ssl_tls13_evolve_secret(.SHA256, Val(early.copy()), shared) ?? return [U8]{}
+    traffic: keys13.ssl_tls13_derive_secret(.SHA256, handshake, "c hs traffic".bytes(), transcript, keys13.SSL_TLS1_3_CONTEXT_HASHED, 32) ?? return [U8]{}
+    keys13.ssl_tls13_hkdf_expand_label(.SHA256, traffic, "key".bytes(), [U8]{}, 16) ?? [U8]{}
+}
+
+#Test("dudect: HKDF, the TLS 1.3 key schedule and the TLS 1.2 PRF and Finished take as long on fixed and random secrets") {
+    // RFC 8448 3's client handshake key: from the early secret, the ECDHE
+    // secret and the ClientHello..ServerHello transcript hash.
+    early: vec_hex("33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a")
+    ecdhe: vec_hex("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d")
+    hello: vec_hex("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8")
+    assert_eq(ct_tls13_schedule(early, ecdhe, hello), vec_hex("dbfaa693d1762c5b666af5d950258d01"))
+    r := CtRand{s: U64{73}}
+    salt: ct_bytes(r, 32)
+    info: ct_bytes(r, 16)
+    salt2: salt.copy()
+    info2: info.copy()
+    shared: ct_bytes(r, 32)
+    transcript: ct_bytes(r, 32)
+    session_hash: ct_bytes(r, 32)
+    finished_hash: ct_bytes(r, 48)
+    assert_eq(ct_opened(hashes.hkdf(.SHA256, salt, shared, info, 32)), 32)
+    assert_eq(ct_opened(hashes.hkdf(.SHA384, salt, finished_hash, info, 48)), 48)
+    assert_eq(ssl_tls_prf_generic(.SHA256, shared, "extended master secret".bytes(), session_hash, 48).len(), 48)
+    ct_dudect("HKDF-SHA-256", 3000, 2, ct_bytes(r, 32), (x) -> ct_opened(hashes.hkdf(.SHA256, salt, x, info, 32)))
+    ct_dudect("HKDF-SHA-384", 3000, 2, ct_bytes(r, 48), (x) -> ct_opened(hashes.hkdf(.SHA384, salt2, x, info2, 48)))
+    ct_dudect("TLS 1.3 key schedule", 2000, 1, ct_bytes(r, 32), (x) -> Int.from_u8(ct_tls13_schedule(x, shared, transcript)[0]))
+    ct_dudect("TLS 1.2 PRF, extended master secret", 2000, 1, ct_bytes(r, 32), (x) -> Int.from_u8(ssl_tls_prf_generic(.SHA256, x, "extended master secret".bytes(), session_hash, 48)[0]))
+    ct_dudect("TLS 1.2 PRF, Finished", 2000, 1, ct_bytes(r, 48), (x) -> Int.from_u8(ssl_tls_prf_generic(.SHA384, x, "client finished".bytes(), finished_hash, 12)[0]))
+}
+
+/// HMAC_DRBG seeded with `seed`, and the 32 bytes it generates first.
+ct_drbg: fn(seed: [U8]) -> [U8] {
+    g := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(g, seed)
+    none := ecp.NoRNG{}
+    drbg.hmac_drbg_random(g, none, 32) ?? [U8]{}
+}
+
+#Test("dudect: HMAC_DRBG seeding and generation take as long on fixed and random seeds") {
+    r := CtRand{s: U64{79}}
+    assert_eq(ct_drbg(ct_bytes(r, 48)).len(), 32)
+    ct_dudect("HMAC_DRBG-SHA-256", 3000, 2, ct_bytes(r, 48), (x) -> Int.from_u8(ct_drbg(x)[0]))
+}
+
+/// A TLS 1.3 record layer under fixed AES-128-GCM traffic keys: transform 0
+/// is the server's, which seals, and 1 the client's, which opens.
+ct_record_layer: fn() -> ssldefs.SSLContext {
+    ssl := ssldefs.SSLContext{}
+    r := CtRand{s: U64{83}}
+    keys: keys13.SSLKeySet{client_write_key: ct_bytes(r, 16), server_write_key: ct_bytes(r, 16), client_write_iv: ct_bytes(r, 12), server_write_iv: ct_bytes(r, 12), key_len: 16, iv_len: 12}
+    server: ssldefs.ssl_transform_alloc(ssl)
+    keys13.ssl_tls13_populate_transform(ssl, server, ssldefs.SSL_IS_SERVER, suites.TLS1_3_AES_128_GCM_SHA256, keys) ?? panic("server transform: {err}")
+    client: ssldefs.ssl_transform_alloc(ssl)
+    keys13.ssl_tls13_populate_transform(ssl, client, ssldefs.SSL_IS_CLIENT, suites.TLS1_3_AES_128_GCM_SHA256, keys) ?? panic("client transform: {err}")
+    assert(server == 0 && client == 1)
+    ssl
+}
+
+/// The first application-data record of `plain` the server seals: room for
+/// the 5-byte header, then the ciphertext and its tag.
+ct_record_seal: fn(ssl: &ssldefs.SSLContext, plain: [U8]) -> [U8] {
+    buf := ssldefs.ssl_zeros(5 + plain.len() + 64)
+    ssldefs.ssl_copy_into(buf, 5, plain, 0, plain.len())
+    rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 5, buf_len: buf.len() - 5, data_offset: 0, data_len: plain.len(), cid_len: 0}
+    rng := vec_rng()
+    sslmsg.ssl_encrypt_buf(ssl.tpool[0], rec, buf, rng) ?? panic("seal: {err}")
+    ssldefs.ssl_bytes_of(buf, 0, 5 + rec.data_len)
+}
+
+/// ssl_decrypt_buf on the client of `sealed` with its tag replaced by `tag`:
+/// the plaintext length, or the error code.
+ct_record_open: fn(sealed: [U8], tag: [U8]) -> Int {
+    ssl := ct_record_layer()
+    buf := sealed.copy()
+    ssldefs.ssl_copy_into(buf, buf.len() - tag.len(), tag, 0, tag.len())
+    rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}
+    if sslmsg.ssl_decrypt_buf(ssl.tpool[1], rec, buf) == .Err(e) -> return ssldefs.ssl_error_code(e)
+    rec.data_len
+}
+
+#Test("dudect: the TLS 1.3 record layer refuses a forged record tag in the same time wherever it differs") {
+    r := CtRand{s: U64{89}}
+    ssl := ct_record_layer()
+    sealed: ct_record_seal(ssl, ct_bytes(r, 64))
+    mac: ct_take(sealed, sealed.len() - 16, 16)
+    assert_eq(ct_record_open(sealed, mac), 64)
+    assert(ct_record_open(sealed, ct_last_flipped(mac)) < 0)
+    ct_dudect("TLS 1.3 ssl_decrypt_buf", 3000, 1, ct_last_flipped(mac), (x) -> ct_record_open(sealed, x))
+}
+
+/// exp_mod of the fixed `base` by the secret exponent `e` modulo the P-256
+/// prime.
+ct_exp_mod: fn(grp: ecp.EcpGroup, base: bn.Mpi, e: [U8]) -> Int {
+    x: bn.read_binary(e) ?? return 0
+    rr := bn.mpi()
+    out: bn.exp_mod(base, x, grp.p, rr) ?? return 0
+    ct_opened(Val(bn.write_binary(out, 32) ?? return 0))
+}
+
+/// The inverse of the secret `a`, nonzero and below the P-256 order by
+/// ct_scalar, modulo that order.
+ct_modinv: fn(grp: ecp.EcpGroup, a: [U8]) -> Int {
+    x: bn.read_binary(ct_scalar(a)) ?? return 0
+    got: bn.gcd_modinv_odd(x, grp.n, true) ?? return 0
+    ct_opened(Val(bn.write_binary(got.i, 32) ?? return 0))
+}
+
+#Test("dudect: Bignum exp_mod and gcd_modinv_odd take as long on fixed and random secrets") {
+    r := CtRand{s: U64{101}}
+    grp: ecp.group_load(.Secp256r1) ?? panic("P-256: {err}")
+    order: ecp.group_load(.Secp256r1) ?? panic("P-256: {err}")
+    base: bn.read_binary(ct_scalar(ct_bytes(r, 32))) ?? panic("base: {err}")
+    assert_eq(ct_exp_mod(grp, base, ct_bytes(r, 32)), 32)
+    assert_eq(ct_modinv(order, ct_bytes(r, 32)), 32)
+    ct_dudect("exp_mod, exponent", 1000, 1, ct_bytes(r, 32), (x) -> ct_exp_mod(grp, base, x))
+    ct_dudect("gcd_modinv_odd, value", 2000, 1, ct_bytes(r, 32), (x) -> ct_modinv(order, x))
+}
+
+// The soak tier: the elliptic-curve and RSA runs above, whose few hundred
+// samples find only a gross leak, over ten times the samples. It runs with
+// JET_DUDECT_SOAK=1 only, as it takes minutes.
+#Test("dudect soak tier (JET_DUDECT_SOAK=1): ECDH, ECDSA and RSA signing over ten times the samples") {
+    if (core.sys.get("JET_DUDECT_SOAK") ?? "") != "1" {
+        print("dudect soak tier: not run; set JET_DUDECT_SOAK=1 to run it")
+        return
+    }
+    r := CtRand{s: U64{97}}
+    base := [U8]{9}
+    loop _ in 1..<32 -> base.push(U8{0})
+    ct_dudect("X25519 ECDH (soak)", 6000, 1, ct_bytes(r, 32), (x) -> ct_opened(vec_ecdh(.Curve25519, x, base)))
+    g256: ct_generator(.Secp256r1, 32)
+    ct_dudect("P-256 ECDH (soak)", 4000, 1, ct_scalar(ct_bytes(r, 32)), (x) -> ct_opened(vec_ecdh(.Secp256r1, ct_scalar(x), g256)))
+    g384: ct_generator(.Secp384r1, 48)
+    ct_dudect("P-384 ECDH (soak)", 2000, 1, ct_scalar(ct_bytes(r, 48)), (x) -> ct_opened(vec_ecdh(.Secp384r1, ct_scalar(x), g384)))
+    p256: ct_points(.Secp256r1, 32, 32)
+    p256_key: ct_scalar(ct_bytes(r, 32))
+    ct_dudect("P-256 ECDH, peer point (soak)", 4000, 1, ct_bytes(r, 1), (x) -> ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int.from_u8(x[0]) %% 32])))
+    h256: ct_bytes(r, 32)
+    ct_dudect("P-256 ECDSA sign (soak)", 4000, 1, ct_bytes(r, 32), (x) -> ct_ecdsa_sign(.Secp256r1, x, h256))
+    h384: ct_bytes(r, 48)
+    ct_dudect("P-384 ECDSA sign (soak)", 2000, 1, ct_bytes(r, 48), (x) -> ct_ecdsa_sign(.Secp384r1, x, h384))
+    nonce_key: ct_bytes(r, 32)
+    nonce_hash: ct_bytes(r, 32)
+    ct_dudect("P-256 ECDSA sign, nonce (soak)", 4000, 1, ct_bytes(r, 32), (x) -> ct_ecdsa_nonce(.Secp256r1, nonce_key, nonce_hash, x))
+    keys: ct_rsa_keys()
+    first: keys[0].copy()
+    rsa_hash: ct_bytes(r, 32)
+    ct_dudect("RSA-2048 sign (soak)", 2000, 1, ct_bytes(r, 32), (x) -> ct_rsa_sign(first, x))
+    ct_dudect("RSA-2048 sign, key (soak)", 2000, 1, ct_bytes(r, 1), (x) -> ct_rsa_sign(keys[Int.from_u8(x[0]) %% keys.len()], rsa_hash))
+}
