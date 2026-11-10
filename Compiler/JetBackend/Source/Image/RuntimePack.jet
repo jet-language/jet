@@ -163,6 +163,40 @@ link_pack_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first:
     }
 }
 
+// Name every function and object of a kept section, so the program link's
+// `.symtab` (StaticLink.jet link_write_sections) lets profilers and
+// debuggers name the runtime's internal code: each named local of an input
+// and each localized definition. A relocation names a section-local callee
+// through its section symbol, so those would otherwise be left unnamed and
+// their samples would fall to the preceding named symbol. Names that
+// relocations already added keep their index.
+link_pack_name_kept: fn(c: &LinkContext, p: &LinkPack) Never! {
+    loop obj in 0..<c.obj_name.len() {
+        b: c.obj_buffer[obj].copy()
+        loop k in 1..<c.obj_first_global[obj] {
+            at: link_sym_at(c, obj, k)
+            info: link_u8(c.bufs, b, at + 4)
+            kind: info.bit_and(15)
+            if kind != 1 && kind != 2 -> next
+            name_offset: link_u32(c.bufs, b, at)
+            if name_offset == 0 -> next
+            s: link_sym_shndx(c, obj, k)
+            if s < 0 -> next
+            out: link_pack_out(c, p, s)
+            if out < 0 -> next
+            _ := link_pack_local(p, c.obj_first_symbol[obj] + k, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), kind, out, link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+        }
+    }
+    loop f in 0..<c.g_name.len() {
+        if c.g_kind[f] != LINK_G_FILE || c.g_alias[f] >= 0 || p.exports.get(f) != None -> next
+        s: c.g_section[f].copy()
+        if s < 0 -> next
+        out: link_pack_out(c, p, s)
+        if out < 0 -> next
+        _ := link_pack_local(p, -1 - f, c.g_name[f].copy(), link_pack_sym_type(c, s), out, c.g_value[f].copy(), c.g_size[f].copy())
+    }
+}
+
 // The name a kept section carries in the pack: what classification and
 // init-array ordering read (Image/StaticLink.jet link_class, link_priority).
 link_pack_section_name: fn(c: LinkContext, class: Int, s: Int) -> String Never! {
@@ -311,6 +345,7 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         if cie >= 0 -> link_put32(eh, out + 4, out + 4 - (eh_out.get(cie) ?? 0))
     }
     eh_rel_end: p.r_off.len()
+    link_pack_name_kept(c, p)
     eh_index: if eh.len() > 0 -> next_index else -> -1
     if eh.len() > 0 -> next_index += 1
     if eh_rel_end > eh_rel_first -> next_index += 1

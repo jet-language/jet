@@ -163,7 +163,11 @@ runtime objects and explicit extra roots. The Jet object writer publishes
 checked exports as globals and private functions as locals. Undefined symbols,
 hidden/internal definitions and implementation names do not become export
 roots; C archive members pulled to satisfy exports remain private dependencies.
-Rust-mangled symbols and Rust allocator providers are rejected. A pack requires
+Rust-mangled symbols and Rust allocator providers are rejected. Every named
+function and object of a kept section keeps its name in the pack as a local,
+including one a relocation reaches only through its section symbol, so a
+program's `.symtab` names the runtime's internal code for profilers and
+debuggers. A pack requires
 a standalone runtime object, never just archives.
 The `LinkPackRoots` row of `Tools/agent/CompilerRegistries.jet`
 (`Compiler/JetBackend/Tests/LinkPackRoots.fixture`) exercises this boundary
