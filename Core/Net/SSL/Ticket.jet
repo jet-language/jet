@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_ticket.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the session ticket keys.
 //
 // A port of mbedtls 3.6.7's ssl_ticket.c under the default
@@ -91,7 +93,7 @@ ssl_ticket_random: fn(ctx: &SSLTicketContext, n: Int) -> [U8] ssldefs.SSLError! 
 
 // A fresh name and key for keys[index] (ssl_ticket_gen_key). The key's
 // lifetime is the tickets' lifetime when it is made.
-ssl_ticket_gen_key: fn(ctx: &SSLTicketContext, index: Int) ssldefs.SSLError! -[Time]> {
+ssl_ticket_gen_key: fn(ctx: &SSLTicketContext, index: Int) ssldefs.SSLError! {
     ctx.keys[index].generation_time = ssldefs.ssl_time()
     ctx.keys[index].lifetime = ctx.ticket_lifetime
     ctx.keys[index].name = ssl_ticket_random(ctx, SSL_TICKET_KEY_NAME_BYTES) ?? return Err(err)
@@ -166,7 +168,7 @@ ssl_ticket_key_open: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], sealed: [U8]) ->
 // Make the other key active, with a fresh name and key, once the active
 // key's lifetime is over or its time is in the future
 // (ssl_ticket_update_keys). A key with lifetime 0 never expires.
-ssl_ticket_update_keys: fn(ctx: &SSLTicketContext) ssldefs.SSLError! -[Time]> {
+ssl_ticket_update_keys: fn(ctx: &SSLTicketContext) ssldefs.SSLError! {
     lifetime: ctx.keys[ctx.active].lifetime
     if lifetime == 0 -> return
     current_time: ssldefs.ssl_time()
@@ -180,7 +182,7 @@ ssl_ticket_update_keys: fn(ctx: &SSLTicketContext) ssldefs.SSLError! -[Time]> {
 /// key, its tickets and itself living `lifetime` seconds
 /// (mbedtls_ssl_ticket_rotate). The name gives its first 4 bytes and the
 /// key its first key_bits / 8; shorter ones are Cipher(BadInputData).
-ssl_ticket_rotate: fn(ctx: &SSLTicketContext, name: [U8], k: [U8], lifetime: Int) ssldefs.SSLError! -[Time]> {
+ssl_ticket_rotate: fn(ctx: &SSLTicketContext, name: [U8], k: [U8], lifetime: Int) ssldefs.SSLError! {
     idx: 1 - ctx.active
     // C's key context before setup has key length 0 and no cipher.
     bitlen: ssl_ticket_key_bits(ctx.keys[idx])
@@ -201,7 +203,7 @@ ssl_ticket_rotate: fn(ctx: &SSLTicketContext, name: [U8], k: [U8], lifetime: Int
 /// ChaCha20-Poly1305, of at most 256 key bits) and the lifetime of its
 /// tickets in seconds, and make both keys (mbedtls_ssl_ticket_setup).
 /// BadInputData for any other cipher.
-ssl_ticket_setup: fn(ctx: &SSLTicketContext, rng: &&drbg.HMACDrbg, info: layer.CipherInfo, lifetime: Int) ssldefs.SSLError! -[Time]> {
+ssl_ticket_setup: fn(ctx: &SSLTicketContext, rng: &&drbg.HMACDrbg, info: layer.CipherInfo, lifetime: Int) ssldefs.SSLError! {
     mode: info.mode
     if mode != .GCM && mode != .CCM && mode != .ChaChaPoly -> return Err(.BadInputData)
     if info.key_bits > 8 * SSL_TICKET_MAX_KEY_BYTES -> return Err(.BadInputData)
@@ -217,7 +219,7 @@ ssl_ticket_setup: fn(ctx: &SSLTicketContext, rng: &&drbg.HMACDrbg, info: layer.C
 /// first if it has expired; the ticket and its lifetime hint
 /// (mbedtls_ssl_ticket_write). A session that serializes past 65535 bytes
 /// gives an empty ticket, as C's write gives tlen 0 with no error.
-ssl_ticket_write: fn(ctx: &SSLTicketContext, session: ssldefs.SSLSession) -[Time]> ssldefs.SSLTicketWritten ssldefs.SSLError! {
+ssl_ticket_write: fn(ctx: &SSLTicketContext, session: ssldefs.SSLSession) -> ssldefs.SSLTicketWritten ssldefs.SSLError! {
     if ctx.rng == None -> return Err(.BadInputData)
     ssl_ticket_update_keys(ctx) ?? return Err(err)
     a: ctx.active
@@ -259,7 +261,7 @@ ssl_ticket_select_key: fn(ctx: SSLTicketContext, buf: [U8]) -> Int Never! {
 /// BadInputData for a malformed one, SessionTicketExpired for one under a
 /// key no longer held or older than its key's lifetime, InvalidMac for one
 /// that does not authenticate.
-ssl_ticket_parse: fn(ctx: &SSLTicketContext, buf: [U8]) -[Time]> ssldefs.SSLSession ssldefs.SSLError! {
+ssl_ticket_parse: fn(ctx: &SSLTicketContext, buf: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
     if ctx.rng == None -> return Err(.BadInputData)
     len: buf.len()
     if len < SSL_TICKET_MIN_LEN -> return Err(.BadInputData)
@@ -315,12 +317,12 @@ ssl_ticket_free: fn(ctx: &SSLTicketContext) Never! {
     ctx.rng = None
 }
 
-ssl_ticket_write_locked: fn(ctx: Shared<SSLTicketContext>, session: ssldefs.SSLSession) -[Time]> ssldefs.SSLTicketWritten ssldefs.SSLError! {
+ssl_ticket_write_locked: fn(ctx: Shared<SSLTicketContext>, session: ssldefs.SSLSession) -> ssldefs.SSLTicketWritten ssldefs.SSLError! {
     guard := ctx.guard_edit()
     ssl_ticket_write(guard.value, session)
 }
 
-ssl_ticket_parse_locked: fn(ctx: Shared<SSLTicketContext>, buf: [U8]) -[Time]> ssldefs.SSLSession ssldefs.SSLError! {
+ssl_ticket_parse_locked: fn(ctx: Shared<SSLTicketContext>, buf: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
     guard := ctx.guard_edit()
     ssl_ticket_parse(guard.value, buf)
 }

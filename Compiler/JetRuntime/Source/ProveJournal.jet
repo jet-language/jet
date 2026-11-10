@@ -203,8 +203,9 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     got
 }
 
-// Core/Http/Client.jet `__client_once` (its c.mbedtls import): 0 outside
-// `jet prove`, 1 capture, 2 replay (diverged included).
+// Core/Net/Tls.jet's `__host_prove_mode` row, which Core/Http/Client.jet
+// `__client_once` reads: 0 outside `jet prove`, 1 capture, 2 replay
+// (diverged included).
 #Export(c) jet_prove_net_mode: fn() -> I64 {
     root: prove_journal_root
     if (root == I64{0}) -> return I64{0}
@@ -223,9 +224,9 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 }
 
 // A replay traces the hop's request (`Q`, u64 LE length, the `length` bytes
-// `data` lends) and serves the next `N` record: 1 with its bytes' address
-// and length stored in the `out` and `out_length` words (the loaded records
-// stay put for the run), 0 once the run diverged.
+// `data` lends) and serves the next `N` record: 1 with a copy of its bytes
+// stored in the `out` and `out_length` words, which the caller's [u8] owns
+// (the `__host_prove_take` row's Option<[u8]>), 0 once the run diverged.
 #Export(c) jet_prove_net_take: fn(data: I64, length: I64, out: I64, out_length: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0} || length < I64{0}) -> return I64{0}
@@ -244,12 +245,34 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     found := I64{0}
     if (served >= I64{0}) {
         records: trap_word(wrapping(root + I64{24}))
-        trap_store(out, wrapping(records + served + PROVE_JOURNAL_HEAD))
-        trap_store(out_length, rt_prove_le(wrapping(records + served + I64{9})))
+        rt_prove_net_bytes_out(wrapping(records + served + PROVE_JOURNAL_HEAD), rt_prove_le(wrapping(records + served + I64{9})), out, out_length)
         found = I64{1}
     }
     sync_mutex_unlock(root)
     found
+}
+
+// Copy `length` journal bytes at `source` into a fresh list allocation of
+// native U8 elements, as compiler_fs_bytes_take returns a read: the caller's
+// list owns it and frees it with jet_rt_free_8. An empty record allocates
+// nothing and stores address 0.
+rt_prove_net_bytes_out: fn(source: I64, length: I64, out: I64, out_length: I64) {
+    data := I64{0}
+    if (length != I64{0}) {
+        if (RT_HOST_U8_STRIDE == I64{1}) {
+            data = jet_rt_alloc_8(length)
+            rt_text_bytes_copy(data, source, length)
+        } else {
+            data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+            at := I64{0}
+            loop at < length {
+                host_u8_put(data, at, rt_text_byte(wrapping(source + at)))
+                at += I64{1}
+            }
+        }
+    }
+    trap_store(out, data)
+    trap_store(out_length, length)
 }
 
 // The next record when it is a `kind` read (or its failed lowercase twin)

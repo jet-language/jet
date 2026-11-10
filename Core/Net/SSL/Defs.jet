@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (include/mbedtls/ssl.h, library/ssl_misc.h, library/error.c, the error codes of include/mbedtls/*.h); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the SSL/TLS engine's constants, error and state.
 //
 // A port of the declarations mbedtls 3.6.7's TLS stack shares (ssl.h and
@@ -30,6 +32,13 @@ use {
     x509: __core_crypto_x509
     x509crt: __core_crypto_x509crt
     x509crl: __core_crypto_x509crl
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    ecdsa: __core_crypto_ecdsa
+    rsa: __core_crypto_rsa
+    pem: __core_crypto_pem
+    des: __core_crypto_des
+    pkcs5: __core_crypto_pkcs5
     suites: __core_net_ssl_ciphersuites
 }
 
@@ -604,6 +613,316 @@ SSLError: enum {
     Callback(Int)
 }
 
+/// The MBEDTLS_ERR_SSL_* code of `e`, or the code of the layer underneath
+/// that mbedtls returns unchanged; RandomFailed is
+/// MBEDTLS_ERR_ERROR_GENERIC_ERROR, as mbedtls's own generators report.
+ssl_error_code: fn(e: SSLError) -> Int Never! {
+    if e == {
+        .CryptoInProgress -> -0x7000
+        .FeatureUnavailable -> -0x7080
+        .BadInputData -> -0x7100
+        .InvalidMac -> -0x7180
+        .InvalidRecord -> -0x7200
+        .ConnEOF -> -0x7280
+        .DecodeError -> -0x7300
+        .NoRNG -> -0x7400
+        .NoClientCertificate -> -0x7480
+        .UnsupportedExtension -> -0x7500
+        .NoApplicationProtocol -> -0x7580
+        .PrivateKeyRequired -> -0x7600
+        .CAChainRequired -> -0x7680
+        .UnexpectedMessage -> -0x7700
+        .FatalAlertMessage -> -0x7780
+        .UnrecognizedName -> -0x7800
+        .PeerCloseNotify -> -0x7880
+        .BadCertificate -> -0x7A00
+        .ReceivedNewSessionTicket -> -0x7B00
+        .CannotReadEarlyData -> -0x7B80
+        .ReceivedEarlyData -> -0x7C00
+        .CannotWriteEarlyData -> -0x7C80
+        .CacheEntryNotFound -> -0x7E80
+        .AllocFailed -> -0x7F00
+        .HwAccelFailed -> -0x7F80
+        .HwAccelFallthrough -> -0x6F80
+        .BadProtocolVersion -> -0x6E80
+        .HandshakeFailure -> -0x6E00
+        .SessionTicketExpired -> -0x6D80
+        .PKTypeMismatch -> -0x6D00
+        .UnknownIdentity -> -0x6C80
+        .InternalError -> -0x6C00
+        .CounterWrapping -> -0x6B80
+        .WaitingServerHelloRenego -> -0x6B00
+        .HelloVerifyRequired -> -0x6A80
+        .BufferTooSmall -> -0x6A00
+        .WantRead -> -0x6900
+        .WantWrite -> -0x6880
+        .Timeout -> -0x6800
+        .ClientReconnect -> -0x6780
+        .UnexpectedRecord -> -0x6700
+        .NonFatal -> -0x6680
+        .IllegalParameter -> -0x6600
+        .ContinueProcessing -> -0x6580
+        .AsyncInProgress -> -0x6500
+        .EarlyMessage -> -0x6480
+        .UnexpectedCID -> -0x6000
+        .VersionMismatch -> -0x5F00
+        .BadConfig -> -0x5E80
+        .CertificateVerificationWithoutHostname -> -0x5D80
+        .CorruptionDetected -> -0x006E
+        .GenericError -> -0x0001
+        .RandomFailed -> -0x0001
+        .Cipher(c) -> layer_code(c)
+        .PK(p) -> pk_code(p)
+        .X509(x) -> x509_code(x)
+        .ECP(x) -> ecp_code(x)
+        .DHM(d) -> dhm_code(d)
+        .Mpi(m) -> mpi_code(m)
+        .Callback(n) -> n
+    }
+}
+
+// The mbedtls error code of each crypto layer's error. mbedtls 3.6.7
+// returns a negative int: a high-level code (0x1000 and up) plus, when a
+// lower layer failed under it, that layer's low-level code. The enums of the
+// ported layers carry the same information as a payload; these functions
+// fold it back into C's int, as mbedtls_strerror reads it, for
+// ssl_error_code and core.net.tls's messages. The values are those of
+// bignum.h, asn1.h, oid.h, ecp.h, rsa.h, base64.h, pem.h, cipher.h, aes.h,
+// gcm.h, ccm.h, chachapoly.h, chacha20.h, des.h, pkcs5.h, pkcs12.h, pk.h,
+// x509.h and dhm.h.
+
+/// MBEDTLS_ERR_MPI_*.
+mpi_code: fn(e: bn.MpiError) -> Int Never! {
+    if e == {
+        .BadInput -> -0x4
+        .InvalidCharacter -> -0x6
+        .BufferTooSmall -> -0x8
+        .NegativeValue -> -0xA
+        .DivisionByZero -> -0xC
+        .NotAcceptable -> -0xE
+        .AllocFailed -> -0x10
+        .Random -> -0x3C
+        .FileIO -> -0x2
+    }
+}
+
+/// An optional MPI failure's code, 0 for none.
+opt_mpi_code: fn(e: bn.MpiError?) -> Int Never! {
+    if e == .Val(m) -> return mpi_code(m)
+    0
+}
+
+/// MBEDTLS_ERR_ASN1_*, or the code of the failure an ASN.1 callback or
+/// MPI read stopped with.
+asn1_code: fn(e: asn1.ASN1Error) -> Int Never! {
+    if e == {
+        .OutOfData -> -0x60
+        .UnexpectedTag -> -0x62
+        .InvalidLength -> -0x64
+        .LengthMismatch -> -0x66
+        .InvalidData -> -0x68
+        .BufTooSmall -> -0x6C
+        .Stopped(c) -> c
+        .Mpi(m) -> mpi_code(m)
+    }
+}
+
+/// An optional ASN.1 failure's code, 0 for none.
+opt_asn1_code: fn(e: asn1.ASN1Error?) -> Int Never! {
+    if e == .Val(a) -> return asn1_code(a)
+    0
+}
+
+/// MBEDTLS_ERR_OID_NOT_FOUND, 0 for none.
+opt_oid_code: fn(e: oids.OIDError?) -> Int Never! {
+    if e == .Val(_) -> return -0x2E
+    0
+}
+
+/// MBEDTLS_ERR_ECP_*.
+ecp_code: fn(e: ecp.EcpError) -> Int Never! {
+    if e == {
+        .BadInput -> -0x4F80
+        .BufferTooSmall -> -0x4F00
+        .FeatureUnavailable -> -0x4E80
+        .VerifyFailed -> -0x4E00
+        .AllocFailed -> -0x4D80
+        .RandomFailed -> -0x4D00
+        .InvalidKey -> -0x4C80
+        .SigLenMismatch -> -0x4C00
+        .Mpi(m) -> mpi_code(m)
+    }
+}
+
+/// ECDSA's codes: the ECP failure, or a bad signature encoding as
+/// MBEDTLS_ERR_ECP_BAD_INPUT_DATA plus the ASN.1 failure.
+ecdsa_code: fn(e: ecdsa.ECDSAError) -> Int Never! {
+    if e == {
+        .Ecp(x) -> ecp_code(x)
+        .BadEncoding(a) -> asn1_code(a) - 0x4F80
+    }
+}
+
+/// MBEDTLS_ERR_RSA_* plus the MPI or ASN.1 failure under it.
+rsa_code: fn(e: rsa.RSAError) -> Int Never! {
+    if e == {
+        .BadInput(m) -> -0x4080 + opt_mpi_code(m)
+        .InvalidPadding -> -0x4100
+        .KeyGenFailed(m) -> -0x4180 + opt_mpi_code(m)
+        .KeyCheckFailed(m) -> -0x4200 + opt_mpi_code(m)
+        .PublicFailed(m) -> -0x4280 + opt_mpi_code(m)
+        .PrivateFailed(m) -> -0x4300 + opt_mpi_code(m)
+        .VerifyFailed -> -0x4380
+        .OutputTooLarge -> -0x4400
+        .RNGFailed -> -0x4480
+        .Mpi(m) -> mpi_code(m)
+        .Asn1(a) -> asn1_code(a)
+    }
+}
+
+/// MBEDTLS_ERR_BASE64_INVALID_CHARACTER, 0 for none.
+opt_base64_code: fn(e: pem.Base64Error?) -> Int Never! {
+    if e == .Val(_) -> return -0x2C
+    0
+}
+
+/// MBEDTLS_ERR_DES_INVALID_INPUT_LENGTH; a key of the wrong length, which
+/// C's fixed-size arrays cannot express, is MBEDTLS_ERR_ERROR_GENERIC_ERROR.
+des_code: fn(e: des.DESError) -> Int Never! {
+    if e == {
+        .InvalidInputLength -> -0x0032
+        .InvalidKeyLength -> -0x0001
+    }
+}
+
+/// MBEDTLS_ERR_PEM_* plus the Base64 failure under it, or the cipher's.
+pem_code: fn(e: pem.PEMError) -> Int Never! {
+    if e == {
+        .NoHeaderFooterPresent -> -0x1080
+        .InvalidData(b) -> -0x1100 + opt_base64_code(b)
+        .InvalidEncIV -> -0x1200
+        .UnknownEncAlg -> -0x1280
+        .PasswordRequired -> -0x1300
+        .PasswordMismatch -> -0x1380
+        .BadInputData -> -0x1480
+        .DES(d) -> des_code(d)
+        .AESInvalidInputLength -> -0x0022
+    }
+}
+
+/// MBEDTLS_ERR_CIPHER_*, or the code of the cipher module under it.
+layer_code: fn(e: layer.CipherLayerError) -> Int Never! {
+    if e == {
+        .FeatureUnavailable -> -0x6080
+        .BadInputData -> -0x6100
+        .InvalidPadding -> -0x6200
+        .FullBlockExpected -> -0x6280
+        .AuthFailed -> -0x6300
+        .AESInvalidInputLength -> -0x0022
+        .GCMBadInput -> -0x0014
+        .CCMBadInput -> -0x000D
+        .ChaChaPolyBadState -> -0x0054
+        .ChaCha20BadInput -> -0x0051
+    }
+}
+
+/// MBEDTLS_ERR_PKCS5_* plus the ASN.1 failure under it.
+pkcs5_code: fn(e: pkcs5.PBEError) -> Int Never! {
+    if e == {
+        .BadInput -> -0x2F80
+        .InvalidFormat(inner) -> -0x2F00 + opt_asn1_code(inner)
+        .FeatureUnavailable -> -0x2E80
+        .PasswordMismatch -> -0x2E00
+        .Cipher(c) -> layer_code(c)
+    }
+}
+
+/// MBEDTLS_ERR_PKCS12_* plus the ASN.1 failure under it.
+pkcs12_code: fn(e: pkcs5.PBEError) -> Int Never! {
+    if e == {
+        .BadInput -> -0x1F80
+        .InvalidFormat(inner) -> -0x1E80 + opt_asn1_code(inner)
+        .FeatureUnavailable -> -0x1F00
+        .PasswordMismatch -> -0x1E00
+        .Cipher(c) -> layer_code(c)
+    }
+}
+
+/// MBEDTLS_ERR_PK_* plus the failure under it, or the lower layer's.
+pk_code: fn(e: pk.PKError) -> Int Never! {
+    if e == {
+        .TypeMismatch -> -0x3F00
+        .BadInput -> -0x3E80
+        .KeyInvalidVersion -> -0x3D80
+        .KeyInvalidFormat(a) -> -0x3D00 + opt_asn1_code(a)
+        .KeyInvalidFormatEcp(x) -> -0x3D00 + ecp_code(x)
+        .UnknownPKAlg -> -0x3C80
+        .PasswordRequired -> -0x3C00
+        .PasswordMismatch -> -0x3B80
+        .InvalidPubkey(a) -> -0x3B00 + opt_asn1_code(a)
+        .InvalidAlg(a) -> -0x3A80 + opt_asn1_code(a)
+        .UnknownNamedCurve -> -0x3A00
+        .FeatureUnavailable -> -0x3980
+        .SigLenMismatch -> -0x3900
+        .BufferTooSmall -> -0x3880
+        .RSA(x) -> rsa_code(x)
+        .Ecp(x) -> ecp_code(x)
+        .ECDSA(x) -> ecdsa_code(x)
+        .Asn1(a) -> asn1_code(a)
+        .Oid(_) -> -0x2E
+        .PEM(x) -> pem_code(x)
+        .PKCS5(x) -> pkcs5_code(x)
+        .PKCS12(x) -> pkcs12_code(x)
+    }
+}
+
+/// MBEDTLS_ERR_X509_* plus the failure under it, or the lower layer's.
+x509_code: fn(e: x509.X509Error) -> Int Never! {
+    if e == {
+        .FeatureUnavailable(o) -> -0x2080 + opt_oid_code(o)
+        .UnknownOid -> -0x2100
+        .InvalidFormat(a) -> -0x2180 + opt_asn1_code(a)
+        .InvalidVersion(a) -> -0x2200 + opt_asn1_code(a)
+        .InvalidSerial(a) -> -0x2280 + opt_asn1_code(a)
+        .InvalidAlg(a) -> -0x2300 + opt_asn1_code(a)
+        .InvalidAlgOid(_) -> -0x2300 - 0x2E
+        .InvalidName(a) -> -0x2380 + opt_asn1_code(a)
+        .InvalidDate(a) -> -0x2400 + opt_asn1_code(a)
+        .InvalidSignature(a) -> -0x2480 + opt_asn1_code(a)
+        .InvalidExtensions(a) -> -0x2500 + opt_asn1_code(a)
+        .UnknownVersion -> -0x2580
+        .UnknownSigAlg(o) -> -0x2600 + opt_oid_code(o)
+        .SigMismatch -> -0x2680
+        .CertVerifyFailed(_) -> -0x2700
+        .CertUnknownFormat -> -0x2780
+        .BadInput -> -0x2800
+        .BufferTooSmall -> -0x2980
+        .FatalError -> -0x3000
+        .Callback(code) -> code
+        .Asn1(a) -> asn1_code(a)
+        .PK(x) -> pk_code(x)
+        .PEM(x) -> pem_code(x)
+        .OID(o) -> opt_oid_code(Val(o))
+    }
+}
+
+/// MBEDTLS_ERR_DHM_* plus the MPI or ASN.1 failure under it, or the PEM
+/// layer's.
+dhm_code: fn(e: dhm.DHMError) -> Int Never! {
+    if e == {
+        .BadInput -> -0x3080
+        .ReadParamsFailed(m) -> -0x3100 + mpi_code(m)
+        .MakeParamsFailed(m) -> -0x3180 + opt_mpi_code(m)
+        .ReadPublicFailed(m) -> -0x3200 + mpi_code(m)
+        .MakePublicFailed(m) -> -0x3280 + opt_mpi_code(m)
+        .CalcSecretFailed(m) -> -0x3300 + mpi_code(m)
+        .InvalidFormat(a) -> -0x3380 + asn1_code(a)
+        .SetGroupFailed(m) -> -0x3580 + mpi_code(m)
+        .Mpi(m) -> mpi_code(m)
+        .PEM(p) -> pem_code(p)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Records, transforms and sessions.
 
@@ -731,29 +1050,29 @@ SSLPskResult: struct {
 
 /// Look up a cached session by ID (mbedtls_ssl_cache_get_t).
 SSLCacheGet: struct {
-    call: fn([U8]) -[Time]> SSLSession SSLError!
+    call: fn([U8]) -[Net]> SSLSession SSLError!
 }
 
 /// Store a session under its ID (mbedtls_ssl_cache_set_t).
 SSLCacheSet: struct {
-    call: fn([U8], SSLSession) -[Time]> Bool SSLError!
+    call: fn([U8], SSLSession) -[Net]> Bool SSLError!
 }
 
 /// The server's SNI callback: what to use for this server name
 /// (f_sni).
 SSLSniCallback: struct {
-    call: fn([U8]) -[Time]> SSLHsOverride SSLError!
+    call: fn([U8]) -[Net]> SSLHsOverride SSLError!
 }
 
 /// The server's PSK callback: the key for this identity (f_psk).
 SSLPskCallback: struct {
-    call: fn([U8]) -[Time]> SSLPskResult SSLError!
+    call: fn([U8]) -[Net]> SSLPskResult SSLError!
 }
 
 /// The server's certificate selection callback, run after the
 /// ClientHello is parsed: what to use for this handshake (f_cert_cb).
 SSLCertCallback: struct {
-    call: fn(SSLClientHelloInfo) -[Time]> SSLHsOverride SSLError!
+    call: fn(SSLClientHelloInfo) -[Net]> SSLHsOverride SSLError!
 }
 
 /// What a certificate callback learns of the ClientHello: the SNI name
@@ -766,13 +1085,13 @@ SSLClientHelloInfo: struct {
 /// Write a DTLS HelloVerifyRequest cookie for a client's transport ID
 /// (f_cookie_write).
 SSLCookieWrite: struct {
-    call: fn([U8]) -[Time]> [U8] SSLError!
+    call: fn([U8]) -[Net]> [U8] SSLError!
 }
 
 /// Check a returned cookie against the client's transport ID
 /// (f_cookie_check).
 SSLCookieCheck: struct {
-    call: fn([U8], [U8]) -[Time]> Bool SSLError!
+    call: fn([U8], [U8]) -[Net]> Bool SSLError!
 }
 
 /// A written session ticket: the ticket and its lifetime hint in seconds.
@@ -783,12 +1102,12 @@ SSLTicketWritten: struct {
 
 /// Seal a session into a ticket (mbedtls_ssl_ticket_write_t).
 SSLTicketWrite: struct {
-    call: fn(SSLSession) -[Time]> SSLTicketWritten SSLError!
+    call: fn(SSLSession) -[Net]> SSLTicketWritten SSLError!
 }
 
 /// Open a ticket back into its session (mbedtls_ssl_ticket_parse_t).
 SSLTicketParse: struct {
-    call: fn([U8]) -[Time]> SSLSession SSLError!
+    call: fn([U8]) -[Net]> SSLSession SSLError!
 }
 
 /// One exported secret (mbedtls_ssl_export_keys_t's arguments).
@@ -802,7 +1121,7 @@ SSLExportedKey: struct {
 
 /// Receive each secret the handshake derives (f_export_keys).
 SSLExportKeys: struct {
-    call: fn(SSLExportedKey) -[Time]> Bool Never!
+    call: fn(SSLExportedKey) -[Net]> Bool Never!
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,12 +1496,16 @@ ssl_wipe: fn(buf: &[U8]) Never! {
 // ---------------------------------------------------------------------------
 // Clocks.
 
-/// Seconds since the epoch (mbedtls_time).
-ssl_time: fn() -[Time]> Int Never! { core.time.now_utc().to_timestamp() }
+/// Seconds since the epoch (mbedtls_time), 0 before it. The wall clock is
+/// core.net.tls's host row, so a handshake needs Net alone.
+ssl_time: fn() -> Int Never! {
+    sample: core.net.tls.__host_wall_sample()
+    if sample.before_epoch -> 0 else -> sample.seconds
+}
 
 /// Milliseconds of the monotonic clock (mbedtls_ms_time, which reads
 /// CLOCK_BOOTTIME or CLOCK_MONOTONIC).
-ssl_ms_time: fn() -[Time]> Int Never! { core.time.instant().start_ns /% 1000000 }
+ssl_ms_time: fn() -> Int Never! { core.time.__clock_mono_ns() /% 1000000 }
 
 // ---------------------------------------------------------------------------
 // Pools: C's session and transform pointers.

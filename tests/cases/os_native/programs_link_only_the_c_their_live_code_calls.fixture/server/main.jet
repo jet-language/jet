@@ -1,5 +1,4 @@
-// A core.http.server program: the server module declares mbedtls for TLS,
-// but this program serves plain HTTP only, so it links no C.
+// A core.http.server program that serves plain HTTP only, so it links no C.
 use core.[files, http.server, net]
 
 // The defined symbols of this executable's `.symtab` and the ones at its
@@ -66,6 +65,6 @@ run: fn() (HTTPError | IOError | NetError)! {
     print("routes ready")
     facts: link_facts()
     print("entry is __jet_start: {facts.entry.contains("__jet_start")}")
-    names: [String]{"__libc_start_main", "pthread_create", "mbedtls_ssl_setup"}
+    names: [String]{"__libc_start_main", "pthread_create"}
     loop name in names -> print("defines {name}: {facts.defined.get(name) != None}")
 }

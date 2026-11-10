@@ -566,9 +566,9 @@ thread_libc_detach := I64{0}
 // the C closure's libc running entry(start) on a stack of `bytes` and
 // stores its id at `word` (link_thread_create, over musl's pthread_create),
 // and join(id, 0) and detach(id) are musl's pthread_join and pthread_detach.
-// From then on thread_spawn starts those threads: the linked C (a vendored
-// library such as mbedTLS, a user closure) can run on any Jet thread, and it
-// needs musl's own state for that thread (FS TLS: errno,
+// From then on thread_spawn starts those threads: the linked C (a user
+// closure) can run on any Jet thread, and it needs musl's own state for that
+// thread (FS TLS: errno,
 // pthread_self, the recursive mutexes' owner) and musl's libc.need_locks,
 // which pthread_create sets and malloc and stdio lock on. A raw clone gives
 // a thread neither.

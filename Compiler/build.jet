@@ -7,21 +7,12 @@
 // pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet this build
 // made lowers the runtime, and no C compiler runs. The pack carries no C or
 // libc: a program's C closure links the musl sysroot of jet's C toolchain
-// pack (JetCli ForeignLink.jet). The `vendored-c` step, the one C the build
-// still compiles, puts Core's vendored mbedtls archive beside the pack
-// (Toolchain/VendoredC.jet) with the machine's C compiler and archiver; it
-// goes when mbedtls is Jet (#6694).
+// pack (JetCli ForeignLink.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
     "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
     "provenance.json", "native.key",
-}
-// Core's vendored C libraries, in the order native.key records their
-// archives, and the files of each beside the pack.
-VENDORED_C: [String]{"mbedtls"}
-VENDORED_C_FILES: [String]{
-    "foreign/mbedtls/libmbedtls.a", "foreign/mbedtls/LICENSE", "foreign/mbedtls/VERSION",
 }
 // The runtime's folder, then the IR builder, optimizer and selector, the
 // x86-64 encoder, object writer and linker, and the WebAssembly selector and
@@ -39,7 +30,7 @@ PRELUDE_COPIES: [String]{
 KEYWORD_SOURCES: [String]{"JetLexer/Data/Lexer/Keywords.jet", "JetLexer/Source/Lexer/Tokens.jet", "JetLexer/Source/Lexer/Terminators.jet"}
 
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run the source generators with jet, and compile Core's vendored C with the machine's C toolchain") {
+    #Impure("run the source generators and the runtime pack step with jet") {
         prelude: b.run("prelude-sources", b.jet(), ["Exec", "FS"])
         prelude.arg("run")
         prelude.arg("--allow=FS")
@@ -58,21 +49,6 @@ build: fn(b: Build) -[Exec, FS]> {
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
         jet: b.add_executable("jet", ["JetCli/run.jet"], [prelude, keywords])
-        cc: b.probe("cc", "find_program", "cc")
-        ar: b.probe("ar", "find_program", "ar")
-        vendored: b.run("vendored-c", b.jet(), ["Exec", "FS"])
-        vendored.arg("run")
-        vendored.arg("--allow=Exec,FS")
-        vendored.input("Toolchain/VendoredC.jet")
-        vendored.arg("--")
-        vendored.file(b.found(cc), flag: "--cc=")
-        vendored.file(b.found(ar), flag: "--ar=")
-        vendored.file(b.dependency("mbedtls"), flag: "--mbedtls=")
-        vendored.input("JetCli/Source/Cli/native-c-policy.tsv", flag: "--policy=")
-        vendored.arg("--out={RUNTIME_DIR}/foreign")
-        loop file in VENDORED_C_FILES -> vendored.writes("{RUNTIME_DIR}/{file}")
-        recipe: vendored.output("JetCli/.jet/build/vendored-c.recipe", flag: "--recipe=")
-        vendored.timeout(10min)
         runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
         runtime.arg("run")
         runtime.arg("--allow=Env,Exec,FS")
@@ -81,13 +57,11 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.arg("pack")
         runtime.file(b.host(jet), flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
-        loop lib in VENDORED_C -> runtime.input("{RUNTIME_DIR}/foreign/{lib}/lib{lib}.a", flag: "--archive=")
-        runtime.file(recipe, flag: "--vendored=")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")
         runtime.timeout(10min)
-        toolchain: b.add_install("toolchain", [], [vendored, runtime], [jet])
+        toolchain: b.add_install("toolchain", [], [runtime], [jet])
         b.default(toolchain)
     }
 }

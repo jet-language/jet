@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_tls.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: session and context serialization.
 //
 // A port of mbedtls 3.6.7's session and context serialization in
@@ -386,7 +388,7 @@ ssl_tls12prf_from_cs: fn(ciphersuite_id: Int) -> hashes.Md? Never! {
 /// without its header, the randoms, the connection IDs, the bad-MAC count,
 /// the anti-replay window, datagram packing, the outgoing record counter,
 /// the MTU and the chosen ALPN protocol.
-ssl_context_save: fn(ssl: &ssldefs.SSLContext) -[Time]> [U8] ssldefs.SSLError! {
+ssl_context_save: fn(ssl: &ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
     if !sslmsg.ssl_is_handshake_over(ssl) -> return Err(.BadInputData)
     if ssl.has_handshake -> return Err(.BadInputData)
     if ssl.transform < 0 || ssl.session < 0 -> return Err(.BadInputData)

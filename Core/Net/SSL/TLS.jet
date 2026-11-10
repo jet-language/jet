@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_tls.c, library/ssl_misc.h); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the SSL/TLS engine's shared handshake code.
 //
 // A port of mbedtls 3.6.7's ssl_tls.c, with the inline helpers of
@@ -154,7 +156,7 @@ ssl_handshake_params_init: fn() -> ssldefs.SSLHandshake Never! {
 
 /// Start a handshake (ssl_handshake_init): a fresh negotiated transform
 /// and session, the handshake state reset and the transcript restarted.
-ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! -[Time]> {
+ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! {
     if ssl.transform_negotiate >= 0 {
         ssldefs.ssl_transform_wipe(ssl.tpool[ssl.transform_negotiate])
         ssl.tpool[ssl.transform_negotiate] = ssldefs.SSLTransform{valid: true}
@@ -181,13 +183,13 @@ ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! -[Time]> {
 
 /// The cookie writer a DTLS server has until one is configured
 /// (ssl_cookie_write_dummy).
-ssl_cookie_write_dummy: fn(cli_id: [U8]) -[Time]> [U8] ssldefs.SSLError! {
+ssl_cookie_write_dummy: fn(cli_id: [U8]) -> [U8] ssldefs.SSLError! {
     Err(.FeatureUnavailable)
 }
 
 /// The cookie checker a DTLS server has until one is configured
 /// (ssl_cookie_check_dummy).
-ssl_cookie_check_dummy: fn(cookie: [U8], cli_id: [U8]) -[Time]> Bool ssldefs.SSLError! {
+ssl_cookie_check_dummy: fn(cookie: [U8], cli_id: [U8]) -> Bool ssldefs.SSLError! {
     Err(.FeatureUnavailable)
 }
 
@@ -233,7 +235,7 @@ ssl_conf_version_check: fn(conf: ssldefs.SSLConfig) ssldefs.SSLError! {
 
 /// Set a context up to use `conf` (mbedtls_ssl_setup). The context takes
 /// the configuration over, where C keeps a pointer to the caller's.
-ssl_setup: fn(ssl: &ssldefs.SSLContext, conf: &&ssldefs.SSLConfig) ssldefs.SSLError! -[Time]> {
+ssl_setup: fn(ssl: &ssldefs.SSLContext, conf: &&ssldefs.SSLConfig) ssldefs.SSLError! {
     ssl.conf = conf
     ssl.has_conf = true
     ssl_conf_version_check(ssl.conf) ?? return Err(err)
@@ -252,7 +254,7 @@ ssl_setup: fn(ssl: &ssldefs.SSLContext, conf: &&ssldefs.SSLConfig) ssldefs.SSLEr
 /// (mbedtls_ssl_session_reset_msg_layer). `partial` keeps the datagram
 /// being read and the bad-MAC count, for a DTLS client reconnecting from
 /// the same port.
-ssl_session_reset_msg_layer: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! -[Time]> {
+ssl_session_reset_msg_layer: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! {
     sslmsg.ssl_set_timer(ssl, 0)
     sslmsg.ssl_reset_in_pointers(ssl)
     sslmsg.ssl_reset_out_pointers(ssl)
@@ -294,7 +296,7 @@ ssl_session_reset_msg_layer: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! 
 /// callbacks (mbedtls_ssl_session_reset_int); see
 /// ssl_session_reset_msg_layer for `partial`, which also keeps the
 /// client's transport ID.
-ssl_session_reset_int: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! -[Time]> {
+ssl_session_reset_int: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! {
     sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HELLO_REQUEST)
     ssl.tls_version = ssl.conf.max_tls_version
     ssl_session_reset_msg_layer(ssl, partial)
@@ -314,7 +316,7 @@ ssl_session_reset_int: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! -[Time
 }
 
 /// mbedtls_ssl_session_reset.
-ssl_session_reset: fn(ssl: &ssldefs.SSLContext) Never! -[Time]> { ssl_session_reset_int(ssl, false) }
+ssl_session_reset: fn(ssl: &ssldefs.SSLContext) Never! { ssl_session_reset_int(ssl, false) }
 
 /// Free what the handshake holds (mbedtls_ssl_handshake_free): its
 /// secrets are wiped, its buffered and in-flight messages and its TLS 1.3
@@ -361,7 +363,7 @@ ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// Use the timer, or stop using it (mbedtls_ssl_set_timer_cb with
 /// mbedtls_timing's callbacks or none); it starts canceled.
-ssl_set_timer_cb: fn(ssl: &ssldefs.SSLContext, enabled: Bool) Never! -[Time]> {
+ssl_set_timer_cb: fn(ssl: &ssldefs.SSLContext, enabled: Bool) Never! {
     ssl.timer.enabled = enabled
     sslmsg.ssl_set_timer(ssl, 0)
 }
@@ -1303,7 +1305,7 @@ ssl_chk_buf_read: fn(ssl: &ssldefs.SSLContext, cur: Int, end: Int, need: Int) ss
 }
 
 /// Send a fatal alert where C ignores whether it could be sent.
-ssl_send_fatal_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, message: Int, rng: &R) Never! -[Time]> {
+ssl_send_fatal_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, message: Int, rng: &R) Never! {
     sslmsg.ssl_send_alert_message(ssl, ssldefs.SSL_ALERT_LEVEL_FATAL, message, rng) ?? ()
 }
 
@@ -1312,7 +1314,7 @@ ssl_send_fatal_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, message: Int, rng: &R
 
 // Flush what is pending, and go on sending a DTLS flight being sent
 // (ssl_prepare_handshake_step).
-ssl_prepare_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_prepare_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_flush_output(ssl) ?? return Err(err)
     if sslmsg.ssl_is_dtls(ssl) && ssl.handshake.retransmit_state == ssldefs.SSL_RETRANS_SENDING {
         sslmsg.ssl_flight_transmit(ssl, rng) ?? return Err(err)
@@ -1321,7 +1323,7 @@ ssl_prepare_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldef
 
 // The step for the endpoint and protocol version, C's dispatch in
 // mbedtls_ssl_handshake_step: BadInputData for an endpoint that is neither.
-ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT {
         if ssl.state == ssldefs.SSL_HELLO_REQUEST {
             sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_HELLO)
@@ -1341,7 +1343,7 @@ ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
 /// Perform one step of the handshake (mbedtls_ssl_handshake_step). A step
 /// that fails with a fatal alert pending sends it, and fails with the
 /// alert's reason.
-ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if !ssl.has_conf || !ssl.has_handshake || ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return Err(.BadInputData)
     ssl_prepare_handshake_step(ssl, rng) ?? return Err(err)
     sslmsg.ssl_handle_pending_alert(ssl, rng) ?? return Err(err)
@@ -1356,7 +1358,7 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 
 /// Perform the handshake to its end (mbedtls_ssl_handshake). DTLS needs the
 /// timer (ssl_set_timer_cb).
-ssl_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if sslmsg.ssl_is_dtls(ssl) && !ssl.timer.enabled -> return Err(.BadInputData)
     loop ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
@@ -1365,7 +1367,7 @@ ssl_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -
 }
 
 // Write a HelloRequest (ssl_write_hello_request).
-ssl_write_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_write_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     ssl.out_msglen = 4
     ssl.out_msgtype = ssldefs.SSL_MSG_HANDSHAKE
     ssl.out_buf[ssl.out_msg] = ssldefs.ssl_byte(ssldefs.SSL_HS_HELLO_REQUEST)
@@ -1374,7 +1376,7 @@ ssl_write_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 
 /// Start a renegotiation on the client, or on the server once the client
 /// asked for one (mbedtls_ssl_start_renegotiation).
-ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     ssl_handshake_init(ssl)
     // RFC 6347 4.2.2: the HelloRequest has message_seq 0, so the
     // ServerHello that answers it has 1.
@@ -1388,7 +1390,7 @@ ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 
 /// Ask for a renegotiation, or go on with one (mbedtls_ssl_renegotiate): a
 /// server sends a HelloRequest, a client starts the handshake.
-ssl_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
         if !sslmsg.ssl_is_handshake_over(ssl) -> return Err(.BadInputData)
@@ -1408,7 +1410,7 @@ ssl_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError!
 /// (mbedtls_ssl_resend_hello_request). Without an enforced limit it is
 /// resent for as many records as the retransmission timeout takes to
 /// double from its minimum to its maximum.
-ssl_resend_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_resend_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if ssl.conf.renego_max_records < 0 {
         ratio := ssl.conf.hs_timeout_max /% ssl.conf.hs_timeout_min + 1
         doublings := 1
@@ -1775,7 +1777,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
 
 /// Write the Certificate message (mbedtls_ssl_write_certificate): none for
 /// a ciphersuite without certificates or a client not asked for one.
-ssl_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if !suites.ssl_ciphersuite_uses_srv_cert(cs) {
         sslmsg.ssl_handshake_increment_state(ssl)
@@ -1808,7 +1810,7 @@ ssl_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSL
 
 // Parse the Certificate message into `chain` (ssl_parse_certificate_chain).
 // In a client's renegotiation the server's certificate may not change.
-ssl_parse_certificate_chain: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_parse_certificate_chain: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], rng: &R) ssldefs.SSLError! {
     m: ssl.in_msg
     hdr: sslmsg.ssl_hs_hdr_len(ssl)
     if ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE || ssldefs.ssl_u8(ssl.in_buf, m) != ssldefs.SSL_HS_CERTIFICATE {
@@ -1922,7 +1924,7 @@ ssl_parse_certificate_coordinate: fn(ssl: &ssldefs.SSLContext, cs: suites.SSLCip
 /// Read and verify the peer's Certificate message
 /// (mbedtls_ssl_parse_certificate); the authentication mode is the SNI
 /// callback's if it set one.
-ssl_parse_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_parse_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     authmode: if ssl.handshake.sni_authmode != ssldefs.SSL_VERIFY_UNSET -> ssl.handshake.sni_authmode else -> ssl.conf.authmode
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if ssl_parse_certificate_coordinate(ssl, cs, authmode) {
@@ -1972,7 +1974,7 @@ ssl_handshake_wrapup_free_hs_transform: fn(ssl: &ssldefs.SSLContext) Never! {
 /// End the handshake (mbedtls_ssl_handshake_wrapup): the negotiated session
 /// becomes current and, when new, is offered to the session cache. A DTLS
 /// endpoint keeps the handshake while its last flight may be resent.
-ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! -[Time]> {
+ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
     resume: ssl.handshake.resume
     if ssl.renego_status == ssldefs.SSL_RENEGOTIATION_IN_PROGRESS {
         ssl.renego_status = ssldefs.SSL_RENEGOTIATION_DONE
@@ -2011,7 +2013,7 @@ ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! -[Time]> {
 /// Write the Finished message, switching to the negotiated transform
 /// (mbedtls_ssl_write_finished). DTLS keeps the previous epoch to resend
 /// the flight with.
-ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_update_out_pointers(ssl, ssl.transform_negotiate)
     buf := ssl_calc_finished(ssl, ssl.conf.endpoint) ?? return Err(err)
     hash_len: 12
@@ -2054,7 +2056,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 }
 
 /// Read and check the peer's Finished message (mbedtls_ssl_parse_finished).
-ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     buf := ssl_calc_finished(ssl, ssl.conf.endpoint.bit_xor(1)) ?? return Err(err)
     if sslmsg.ssl_read_record(ssl, true, rng) == {
         .Err(e) -> {
@@ -2384,15 +2386,17 @@ ssl_verify_alert: fn(verify_result: Int) -> Int Never! {
 }
 
 // The X.509 check of `chain` against the SNI callback's CAs and CRLs if it
-// set any, else the configuration's; the failure, None for none.
-ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U8]?, vrfy: x509crt.X509VerifyCallback?) -[Time]> x509.X509Error? Never! {
+// set any, else the configuration's, at ssl_time's UTC date; the failure,
+// None for none.
+ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U8]?, vrfy: x509crt.X509VerifyCallback?) -> x509.X509Error? Never! {
     // The CRLs and profile are read before the CA list's write window.
     profile := ssl.conf.cert_profile
     sni_crl := ssl.handshake.sni_ca_crl.copy()
     conf_crl := ssl.conf.ca_crl.copy()
+    now: x509.x509_time_gmtime(ssldefs.ssl_time())
     if &ssl.handshake.sni_ca_chain == {
         .Val(c) -> {
-            if x509crt.x509_crt_verify_with_profile(chain, c, sni_crl, profile, cn, vrfy) == {
+            if x509crt.x509_crt_verify_with_profile_at(chain, c, sni_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
                 else -> return None
             }
@@ -2401,7 +2405,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
     }
     if &ssl.conf.ca_chain == {
         .Val(c) -> {
-            if x509crt.x509_crt_verify_with_profile(chain, c, conf_crl, profile, cn, vrfy) == {
+            if x509crt.x509_crt_verify_with_profile_at(chain, c, conf_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
                 else -> return None
             }
@@ -2409,7 +2413,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
         None -> {}
     }
     empty := [x509crt.X509Crt]{}
-    if x509crt.x509_crt_verify_with_profile(chain, empty, conf_crl, profile, cn, vrfy) == {
+    if x509crt.x509_crt_verify_with_profile_at(chain, empty, conf_crl, profile, cn, vrfy, now) == {
         .Err(e) -> Val(e)
         else -> None
     }
@@ -2419,7 +2423,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
 /// the X.509 check against the CAs, the SNI callback's if it set any, then
 /// the curve of a TLS 1.2 EC key and the key usages. The result is in the
 /// negotiated session's verify_result; a failure sends its alert.
-ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chain: &[x509crt.X509Crt], ciphersuite_info: suites.SSLCiphersuite?, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chain: &[x509crt.X509Crt], ciphersuite_info: suites.SSLCiphersuite?, rng: &R) ssldefs.SSLError! {
     sn: ssl.session_negotiate
     if authmode == ssldefs.SSL_VERIFY_NONE {
         ssl.spool[sn].verify_result = 0

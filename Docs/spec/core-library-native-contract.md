@@ -846,18 +846,17 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
-`core.net.tls` has no native carriers or handles. `Core/Net/Tls.jet` is plain
-Core source over the vendored Mbed TLS 3.6 closure (`c.[mbedtls]`,
-`Core/Vendor/Mbedtls`, version and sha256 in its `VERSION` file). The
-`jet_tls.c` shim only binds an Mbed TLS context to the borrowed nonblocking
-descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
-trust selection, hostname checks, version bounds, ALPN, readiness waits,
-deadlines, close_notify, the verified peer identity and every error message are
-Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
-The closure is built with Mbed TLS's threading layer on
-(`MBEDTLS_THREADING_C`, `MBEDTLS_THREADING_PTHREAD` over musl's mutexes), so
-handshakes on different task threads share PSA's key slots and global state
-safely.
+`core.net.tls` has no native carriers or handles and binds no C.
+`Core/Net/Tls.jet` is plain Core source over the Jet TLS engine (the
+`Core/Net/SSL` parts, translated from Mbed TLS 3.6.7 under Apache-2.0, over the
+`Core/Crypto` parts). The engine reads and writes records through in-memory
+buffers; `Core/Net/Tls.jet` moves those bytes over the connected `TCPStream`,
+which stays the socket's owner for the stream's lifetime. Trust selection,
+hostname checks, version bounds, ALPN, readiness waits, deadlines,
+close_notify, the verified peer identity and every error message are Jet. Each
+connection owns its engine state and its HMAC_DRBG (SHA-256) generator, seeded
+from the host entropy source, so handshakes on different task threads share no
+state.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and

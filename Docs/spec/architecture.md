@@ -152,7 +152,7 @@ runtime's own calls and function addresses, one per line. A lifecycle hook
 that can reach one runs whenever the program keeps one of its guard
 storages, so the exports that can reach such a storage are listed too; the
 receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
-(`jet-native-runtime/v3`) and every pack reader verifies it. `jet build`
+(`jet-native-runtime/v4`) and every pack reader verifies it. `jet build`
 selects a program's inline RC updates without the lock prefix only when
 that receipt was read, neither the program nor its `main` calls an export it
 names, every foreign C call is a vetted libc leaf, and the program has no
@@ -195,18 +195,14 @@ runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
 run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
-(`Image/Loader.jet`). The step runs no C compiler or archiver: Core's
-vendored mbedtls archive (`foreign/<lib>/`) beside the pack is
-the `vendored-c` step's (`Compiler/Toolchain/VendoredC.jet`), which the
-`runtime` step checks for Rust symbols and records; the pack packages no C
-platform archives, which a program with C takes from jet's C toolchain pack
-(foreign C, below). The key hashes the source inventory, checked ABI,
-lifecycle, backend inputs and the vendored archives. The accompanying
-`provenance.json` records each input digest, the pack and image digests and
-zero Rust or LLVM-generated Jet objects, with the vendored archives listed
-separately.
+(`Image/Loader.jet`). The step runs no C compiler or archiver, and the pack
+packages no C platform archives, which a program with C takes from jet's C
+toolchain pack (foreign C, below). The key (`jet-native-runtime/v4`) hashes
+the source inventory, checked ABI, thread receipt, lifecycle and backend
+inputs. The accompanying `provenance.json` records each input digest, the
+pack and image digests and zero Rust or LLVM-generated Jet objects.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
-lifecycle, vendored C recipe and compiler executable. Neither the consumer program
+lifecycle and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced
 pack without checking or compiling the runtime again; changed producer inputs
 rebuild it. Reuse requires held regular-file reads, matching object/pack/image/ABI
@@ -1539,17 +1535,10 @@ arguments use C-width temporary slots followed by native writeback.
 SQLite is Jet source: `core.db` runs on the Jet port of SQLite 3.45.0 in
 `Core/Db/Engine`, written against the amalgamation `libsqlite3-sys` 0.28.0
 bundles and that crate's Linux build options, never a system SQLite.
-Core's vendored C (`Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is built: the `vendored-c` step of `jet build Compiler`
-(`Compiler/Toolchain/VendoredC.jet`), the one C the build still compiles,
-builds the library with the host C compiler under the native C policy and
-installs `jet-runtime/foreign/<lib>/lib<lib>.a` (with its LICENSE and VERSION)
-beside the pack. The `runtime` step runs no C compiler: it checks that
-archive, and its digest is part of the runtime key and the vendored
-sources, flags and C compiler identity part of the pack recipe. The step goes
-when Mbed TLS is Jet. A Core `c.<lib>` import links that archive, so neither jet's
-self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
-C a package declares itself is compiled at link time. User foreign
+`core.net.tls` binds no C either: its TLS engine and cryptography are Jet
+(`Core/Net/SSL`, `Core/Crypto`). Core links no C of its own, so neither jet's
+self-compile nor a Core program needs a C compiler, and `jet build Compiler`
+compiles no C; only C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.

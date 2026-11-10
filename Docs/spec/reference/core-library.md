@@ -5146,8 +5146,9 @@ Two address classes are distinct:
 ### `core.net.tls` — TLS stream wrapper
 
 `core.net.tls` upgrades a connected TCP stream to a verified TLS 1.2/1.3
-stream. It is Jet source over the vendored Mbed TLS 3.6 engine; configuration
-carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
+stream. It is Jet source over the Jet TLS engine (Core/Net/SSL, translated from
+Mbed TLS 3.6.7); configuration carriers are validated before network use. See
+[`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
 
 | Signature | Result | Description |
 |---|---|---|

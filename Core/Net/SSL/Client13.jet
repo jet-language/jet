@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_tls13_client.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the TLS 1.3 client.
 //
 // A port of mbedtls 3.6.7's ssl_tls13_client.c under the default
@@ -324,7 +326,7 @@ ssl_tls13_write_binder: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, psk_typ
 /// 4.2.11). A ticket's age is obfuscated with its ticket_age_add; the
 /// ticket lifetime, which ssl_prepare_client_hello checked the age
 /// against, is at most 7 days, so the age fits 32 bits.
-ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -[Time]> (len: Int, binders_len: Int) ssldefs.SSLError! {
+ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> (len: Int, binders_len: Int) ssldefs.SSLError! {
     p := buf
     l_binders_len := 0
     if ssl_tls13_get_configured_psk_count(ssl) == 0 -> return Ok((len: 0, binders_len: 0))
@@ -546,7 +548,7 @@ ssl_tls13_server_hello_illegal: fn(ssl: &ssldefs.SSLContext) -> ssldefs.SSLError
 // version, our session ID echoed, a ciphersuite we offered (a
 // HelloRetryRequest's, after one), no compression and the extensions the
 // message may carry. A ServerHello's random is kept.
-ssl_tls13_parse_server_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, is_hrr: Bool) ssldefs.SSLError! -[Time]> {
+ssl_tls13_parse_server_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, is_hrr: Bool) ssldefs.SSLError! {
     p := buf
     hs_msg_type: if is_hrr -> ssldefs.SSL_TLS1_3_HS_HELLO_RETRY_REQUEST else -> ssldefs.SSL_HS_SERVER_HELLO
     // legacy_version, random, the legacy_session_id_echo length at
@@ -662,7 +664,7 @@ ssl_tls13_postprocess_server_hello_keys: fn<R: RNG>(ssl: &ssldefs.SSLContext, rn
 // After a HelloRetryRequest: the record layer is reset, the key share we
 // offered dropped for one over the group it asked for, and its
 // ciphersuite kept for the ServerHello to match (ssl_tls13_postprocess_hrr).
-ssl_tls13_postprocess_hrr: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! -[Time]> {
+ssl_tls13_postprocess_hrr: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
     ssltls.ssl_session_reset_msg_layer(ssl, false)
     ssl_tls13_reset_key_share(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
@@ -676,7 +678,7 @@ ssl_tls13_postprocess_hrr: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! -[Time
 // HelloRetryRequest's transcript restarts from the ClientHello's hash,
 // and middlebox compatibility sends a ChangeCipherSpec before the second
 // ClientHello.
-ssl_tls13_process_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_process_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     body: gen13.ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_SERVER_HELLO, rng) ?? return Err(err)
     buf: body.buf
     end: body.buf + body.len
@@ -746,7 +748,7 @@ ssl_tls13_parse_encrypted_extensions: fn(ssl: &ssldefs.SSLContext, buf: Int, end
 // handshake's ciphersuite, in place of a ticket's, which only early data
 // would need. A PSK exchange has no certificates: the server's Finished
 // comes next, and the session counts as verified.
-ssl_tls13_process_encrypted_extensions: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_process_encrypted_extensions: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     body: gen13.ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_ENCRYPTED_EXTENSIONS, rng) ?? return Err(err)
     ssl_tls13_parse_encrypted_extensions(ssl, body.buf, body.buf + body.len) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
@@ -807,7 +809,7 @@ ssl_tls13_parse_certificate_request: fn(ssl: &ssldefs.SSLContext, buf: Int, end:
 // (ssl_tls13_process_certificate_request). The next message is read and
 // kept: a CertificateRequest is parsed, anything else is the server's
 // Certificate step's (ssl_tls13_certificate_request_coordinate).
-ssl_tls13_process_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_process_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_read_record(ssl, false, rng) ?? return Err(err)
     ssl.keep_current_message = 1
     if ssl.in_msgtype == ssldefs.SSL_MSG_HANDSHAKE && ssldefs.ssl_u8(ssl.in_buf, ssl.in_msg) == ssldefs.SSL_HS_CERTIFICATE_REQUEST {
@@ -824,7 +826,7 @@ ssl_tls13_process_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng:
 // The MBEDTLS_SSL_SERVER_FINISHED step (ssl_tls13_process_server_finished):
 // the server's Finished, then the application keys; middlebox
 // compatibility sends a ChangeCipherSpec before our flight.
-ssl_tls13_process_server_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_process_server_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     gen13.ssl_tls13_process_finished_message(ssl, rng) ?? return Err(err)
     if keys13.ssl_tls13_compute_application_transform(ssl) == {
         .Ok(_) -> {}
@@ -840,7 +842,7 @@ ssl_tls13_process_server_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R)
 // (ssl_tls13_write_client_certificate): outbound traffic switches to the
 // handshake keys; a CertificateRequest is answered with our chain, and a
 // CertificateVerify follows when it is not empty.
-ssl_tls13_write_client_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_write_client_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_set_outbound_transform(ssl, ssl.handshake.transform_handshake)
     non_empty_certificate_msg := false
     if ssl.handshake.client_auth != 0 {
@@ -857,7 +859,7 @@ ssl_tls13_write_client_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 // The MBEDTLS_SSL_CLIENT_FINISHED step (ssl_tls13_write_client_finished):
 // our Finished, then the resumption master secret over the transcript
 // through it.
-ssl_tls13_write_client_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_write_client_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     gen13.ssl_tls13_write_finished_message(ssl, rng) ?? return Err(err)
     keys13.ssl_tls13_compute_resumption_master_secret(ssl) ?? return Err(err)
     sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_FLUSH_BUFFERS)
@@ -920,7 +922,7 @@ ssl_tls13_parse_new_session_ticket: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
 // Hash.length) and the key exchange modes we allow as its flags; false
 // when its lifetime of 0 says to discard it
 // (ssl_tls13_postprocess_new_session_ticket, RFC 8446 4.6.1).
-ssl_tls13_postprocess_new_session_ticket: fn(ssl: &ssldefs.SSLContext, ticket_nonce: Int, ticket_nonce_len: Int) -[Time]> Bool ssldefs.SSLError! {
+ssl_tls13_postprocess_new_session_ticket: fn(ssl: &ssldefs.SSLContext, ticket_nonce: Int, ticket_nonce_len: Int) -> Bool ssldefs.SSLError! {
     s: ssl.session
     if ssl.spool[s].ticket_lifetime == 0 -> return Ok(false)
     ssl.spool[s].ticket_reception_time = ssldefs.ssl_ms_time()
@@ -939,7 +941,7 @@ ssl_tls13_postprocess_new_session_ticket: fn(ssl: &ssldefs.SSLContext, ticket_no
 // (ssl_tls13_process_new_session_ticket). The session may not be
 // exported while it is updated; a ticket kept is signaled with
 // ReceivedNewSessionTicket.
-ssl_tls13_process_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_process_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     body: gen13.ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_NEW_SESSION_TICKET, rng) ?? return Err(err)
     ssl.spool[ssl.session].exported = 1
     nonce: ssl_tls13_parse_new_session_ticket(ssl, body.buf, body.buf + body.len) ?? return Err(err)
@@ -959,7 +961,7 @@ ssl_tls13_process_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: 
 /// and MBEDTLS_SSL_CLIENT_HELLO states are ssl_handshake_step_endpoint's,
 /// which handles them before dispatching here: the ClientHello's part
 /// uses this one.
-ssl_tls13_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_tls13_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     state: ssl.state
     if state == ssldefs.SSL_SERVER_HELLO -> return ssl_tls13_process_server_hello(ssl, rng)
     if state == ssldefs.SSL_ENCRYPTED_EXTENSIONS -> return ssl_tls13_process_encrypted_extensions(ssl, rng)

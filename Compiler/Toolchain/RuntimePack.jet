@@ -2,14 +2,14 @@
 // The Jet runtime pack beside a hosted compiler, made by Compiler/build.jet's
 // `runtime` step, and the runtime's one-namespace unit.
 //
-//   jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --archive=FILE...
-//       --vendored=FILE --out=DIR --identity=FILE
+//   jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --out=DIR
+//       --identity=FILE
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT --check
 //
 // Paths are relative to the Compiler package (the step's working folder;
 // `--root`, default the working directory, for `unit`). Every path the pack
-// records is the checkout's (Compiler/..., Core/Vendor/...), so the pack is
+// records is the checkout's (Compiler/...), so the pack is
 // the same wherever the package sits.
 //
 // `pack` lowers Compiler/JetRuntime/sources.list and lifecycle.list as one
@@ -17,20 +17,15 @@
 // the object, the prelinked pack and image, and the web partition. Jet's
 // linker binds that object alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and no `nm`: the step reads
-// the symbol tables of every object and archive it makes itself and refuses
+// the symbol tables of every object it makes itself and refuses
 // Rust symbols (rust_problem). The `--tree` folders are the runtime's and
 // its producer's sources: the IR builder, optimizer and selector, the x86-64
 // encoder, object writer and linker, and the WebAssembly selector and
 // encoder of the web partition. Their files make up the pack's identity.
 //
 // The pack carries no C, libc or compiler runtime archive, and the step runs
-// no C compiler or archiver. Core's vendored mbedtls is compiled beside it
-// by the `vendored-c` step (Toolchain/VendoredC.jet), into
-// OUT/foreign/<lib>/lib<lib>.a: each `--archive` is one, checked for Rust
-// symbols like the pack, and `--vendored` holds their recipe; the archive
-// digests are part of native.key and both are in provenance.json
-// (vendored_c). A program's C closure takes libc from jet's C toolchain pack
-// (Compiler/JetCli ForeignLink.jet).
+// no C compiler or archiver. A program's C closure takes libc from jet's C
+// toolchain pack (Compiler/JetCli ForeignLink.jet).
 //
 // The pack's files land in OUT, and OUT/native.key holds its content
 // identity. FILE gets JET's identity: the version of the running jet's
@@ -60,7 +55,7 @@ use {
     term: core.term
 }
 
-USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --archive=FILE... --vendored=FILE --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
+USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
 // The checkout folder of the Compiler package, which every recorded path names.
 PACKAGE: "Compiler"
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
@@ -189,28 +184,9 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String
     ""
 }
 
-// Appends every symbol name of the ELF object, or of each object member of
-// the ar archive, `b` (the file `what`) to `names`; the first problem, else "".
-symbol_names: fn(b: [U8], what: String, names: &[String]) -> String {
-    if b.len() < 8 || String.from_bytes_lossy(b.slice(0, 8)) != "!<arch>\n" -> return elf_symbol_names(b, 0, b.len(), what, names)
-    at := 8
-    loop at < b.len() {
-        if at + 60 > b.len() -> return "{what} ends inside a member header"
-        header: String.from_bytes_lossy(b.slice(at, at + 60))
-        if !header.ends_with("`\n") -> return "{what} has a malformed member header at byte {at}"
-        member: header.slice(0..<16).trim()
-        size: Int.parse(header.slice(48..<58).trim()) ?? return "{what} has a malformed member size at byte {at}"
-        data: at + 60
-        if size < 0 || data + size > b.len() -> return "{what} has a truncated member `{member}`"
-        // The symbol index and the long-name table are not objects.
-        if member != "/" && member != "//" && member != "/SYM64/" {
-            problem: elf_symbol_names(b, data, data + size, "{what}({member})", names)
-            if problem != "" -> return problem
-        }
-        at = data + size + size % 2
-    }
-    ""
-}
+// Appends every symbol name of the ELF object `b` (the file `what`) to
+// `names`; the problem, else "".
+symbol_names: fn(b: [U8], what: String, names: &[String]) -> String { elf_symbol_names(b, 0, b.len(), what, names) }
 
 // A Rust runtime input or Rust symbol in `path`, else "".
 rust_problem: fn(path: String) -> String {
@@ -236,8 +212,6 @@ no_rust: fn(path: String) {
     if problem != "" -> fail(problem)
 }
 
-text_array: fn(items: [String]) -> Dyn { Dyn.Array(loop item in items -> Dyn.Text(item.copy())) }
-
 inventory_value: fn(found: Inventory) -> Dyn {
     rows: loop row in found.files -> Dyn.Object([String: Dyn]{"path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})
     Dyn.Object([String: Dyn]{"sha256": Dyn.Text(found.sha256.copy()), "files": Dyn.Array(rows)})
@@ -247,28 +221,26 @@ compact: fn(value: Dyn) -> String { json.dumps(value) ?? fail("cannot render JSO
 
 sha256_json: fn(value: Dyn) -> String { crypto.sha256(compact(value).bytes()).hex() }
 
-// The recipe the pack is a function of (format jet-native-runtime-recipe/v2).
-pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: String, vendor: String) -> String {
+// The recipe the pack is a function of (format jet-native-runtime-recipe/v3).
+pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: String) -> String {
     sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime-recipe/v2"),
+        "format": Dyn.Text("jet-native-runtime-recipe/v3"),
         "source": Dyn.Text(source.copy()),
         "backend": Dyn.Text(backend.copy()),
         "lifecycle": Dyn.Text(lifecycle.copy()),
         "compiler": Dyn.Text(compiler.copy()),
-        "vendored": Dyn.Text(vendor.copy()),
     }))
 }
 
-// The pack's content identity, native.key (format jet-native-runtime/v3).
-pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, vendor: [String]) -> String {
+// The pack's content identity, native.key (format jet-native-runtime/v4).
+pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String) -> String {
     sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime/v3"),
+        "format": Dyn.Text("jet-native-runtime/v4"),
         "source": Dyn.Text(source.copy()),
         "abi": Dyn.Text(abi.copy()),
         "threads": Dyn.Text(threads.copy()),
         "backend": Dyn.Text(backend.copy()),
         "lifecycle": Dyn.Text(lifecycle.copy()),
-        "vendored": text_array(vendor),
     }))
 }
 
@@ -317,17 +289,15 @@ copy_into: fn(from: String, to: String) {
     files.copy(from, to) ?? fail("cannot copy `{from}` to `{to}`: {err}")
 }
 
-// `--name=value` flags; `--tree` and `--archive` may repeat.
+// `--name=value` flags; `--tree` may repeat.
 Flags: struct {
     values: [String: String]
     trees: [String]
-    archives: [String]
 }
 
 parse_flags: fn(args: [String]) -> Flags {
     values := [String: String]{}
     trees := [String]{}
-    archives := [String]{}
     loop arg in args {
         if !arg.starts_with("--") || !arg.contains("=") -> fail(USAGE)
         pair: arg.removeprefix("--").partition("=")
@@ -336,14 +306,10 @@ parse_flags: fn(args: [String]) -> Flags {
             trees.push(pair.tail.copy())
             next
         }
-        if pair.head == "archive" {
-            archives.push(pair.tail.copy())
-            next
-        }
         if values.get(pair.head) != None -> fail("--{pair.head} is given twice")
         values[pair.head] = pair.tail.copy()
     }
-    Flags{values: values, trees: trees, archives: archives}
+    Flags{values: values, trees: trees}
 }
 
 flag: fn(flags: Flags, name: String) -> String {
@@ -357,7 +323,7 @@ absolute: fn(path: String) -> String {
 
 pack: fn(args: [String]) {
     flags: parse_flags(args)
-    known: [String]{"jet", "vendored", "out", "identity"}
+    known: [String]{"jet", "out", "identity"}
     loop entry in flags.values {
         if !known.contains(entry.key) -> fail("unknown flag --{entry.key}\n{USAGE}")
     }
@@ -370,7 +336,6 @@ pack: fn(args: [String]) {
     version: running.partition("#").head
     if !version.contains("@") -> fail("JET_COMPILER_IDENTITY `{running}` names no `name@version`")
     tool: Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out"))}
-    vendored: vendored_c(flags, tool.out)
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources: runtime_sources(manifest)
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
@@ -386,13 +351,13 @@ pack: fn(args: [String]) {
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
     compiler_sha256: sha256_file(tool.jet)
-    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256, vendored.recipe)
+    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256)
     // The step's folder, not /tmp: the runtime build's files outgrow a small
     // temporary file system.
     work: files.join(root, ".runtime-pack")
     files.remove_all(work) ?? ()
     files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
-    build(tool, vendored, work, source, backend, lifecycle, compiler_sha256, recipe)
+    build(tool, work, source, backend, lifecycle, compiler_sha256, recipe)
     files.remove_all(work) ?? ()
     files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
 }
@@ -407,7 +372,7 @@ keep_issues: fn(work: String, out: String) {
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.
-build: fn(tool: Toolchain, vendored: VendoredC, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, compiler_sha256: String, recipe: String) {
+build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, compiler_sha256: String, recipe: String) {
     library: files.join(work, "library")
     _ := compose_unit(tool.root, library, [String]{})
     prefix: files.join(work, "jet_runtime_jet")
@@ -461,7 +426,7 @@ build: fn(tool: Toolchain, vendored: VendoredC, work: String, source: Inventory,
     thread_names: loop name in thread_rows if name != "" -> name.copy()
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(name -> !exports.contains(name)) -> fail("runtime thread receipt names a symbol the checked exports lack")
     threads_sha256: sha256_file("{prefix}.threads")
-    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, loop row in vendored.archives -> row.sha256.copy())
+    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256)
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
     copy_into("{prefix}.o", files.join(out, "jet_runtime_jet.o"))
@@ -472,7 +437,7 @@ build: fn(tool: Toolchain, vendored: VendoredC, work: String, source: Inventory,
     copy_into(image, files.join(out, "jet_runtime.image"))
     copy_into("{web}.wasm", files.join(out, "jet_runtime.wasm"))
     copy_into("{web}.wasm.tsv", files.join(out, "jet_runtime.wasm.tsv"))
-    fields := [String: Dyn]{
+    fields: [String: Dyn]{
         "backend": Dyn.Text("jet-native"),
         "runtimeKey": Dyn.Text(key.copy()),
         "objectSha256": Dyn.Text(sha256_file("{prefix}.o")),
@@ -489,51 +454,10 @@ build: fn(tool: Toolchain, vendored: VendoredC, work: String, source: Inventory,
         "compilerSha256": Dyn.Text(compiler_sha256.copy()),
         "recipeSha256": Dyn.Text(recipe.copy()),
     }
-    fields["vendoredC"] = Dyn.Object([String: Dyn]{
-        "recipeSha256": Dyn.Text(vendored.recipe.copy()),
-        "archives": Dyn.Array(loop row in vendored.archives -> Dyn.Object([String: Dyn]{"name": Dyn.Text(row.name.copy()), "path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})),
-    })
     provenance: Dyn.Object(fields)
     text: "{json.to_string_pretty(provenance) ?? fail("cannot render the provenance: {err}")}\n"
     files.write(files.join(out, "provenance.json"), text) ?? fail("cannot write the provenance: {err}")
     files.write(files.join(out, "native.key"), "{key}\n") ?? fail("cannot write native.key: {err}")
-}
-
-// Core's vendored C beside the pack, which the `vendored-c` step
-// (Toolchain/VendoredC.jet) compiled into OUT/foreign/<lib>/lib<lib>.a. It
-// goes, with its `--archive` and `--vendored` flags and the `vendored` rows
-// of the recipe, identity and provenance, when mbedtls is Jet (#6694).
-
-// One vendored library's archive as the pack records it.
-ForeignArchive: struct {
-    name: String
-    path: String
-    sha256: String
-}
-
-VendoredC: struct {
-    // The sha256 of the vendored C recipe (format jet-vendored-c/v1).
-    recipe: String
-    archives: [ForeignArchive]
-}
-
-// The `--vendored` recipe and each `--archive`, in order, which must be
-// OUT/foreign/<lib>/lib<lib>.a and hold no Rust symbol.
-vendored_c: fn(flags: Flags, out: String) -> VendoredC {
-    recipe_path: flag(flags, "vendored")
-    recipe: (files.read(recipe_path) ?? fail("cannot read `{recipe_path}`: {err}")).trim()
-    if recipe.len() != 64 -> fail("`{recipe_path}` holds no vendored C recipe sha256")
-    if flags.archives.len() == 0 -> fail("no --archive names a vendored C archive\n{USAGE}")
-    archives := [ForeignArchive]{}
-    loop given in flags.archives {
-        path: absolute(given)
-        name: files.basename(path).removeprefix("lib").removesuffix(".a")
-        relative: "foreign/{name}/lib{name}.a"
-        if path != files.join(out, relative) -> fail("--archive={given} is not OUT/foreign/<lib>/lib<lib>.a")
-        no_rust(path)
-        archives.push(ForeignArchive{name: name.copy(), path: relative, sha256: sha256_file(path)})
-    }
-    VendoredC{recipe: recipe.copy(), archives: archives}
 }
 
 // The sources sources.list lists, in order.
@@ -727,7 +651,7 @@ run: fn() {
 }
 
 #Test("recipe and identity JSON keep their field order") {
-    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "vendored": text_array([String]{"a", "b"}), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"vendored\":[\"a\",\"b\"],\"n\":0}}")
+    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "source": Dyn.Text("s"), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"source\":\"s\",\"n\":0}}")
 }
 
 #Test("ABI symbols and export names compare sorted") {
@@ -807,38 +731,7 @@ elf_with_symbols: fn(names: [String]) -> [U8] {
     b
 }
 
-// Test input: one ar member header, `name` and `size` space-padded.
-ar_header: fn(name: String, size: Int) -> [U8] {
-    fields: [String]{name.copy(), "0", "0", "0", "644", "{size}"}
-    widths: [Int]{16, 12, 6, 6, 8, 10}
-    out := [U8]{}
-    loop index in 0..<fields.len() {
-        out.extend(fields[index].bytes())
-        loop _ in fields[index].count_bytes()..<widths[index] -> out.push(U8{32})
-    }
-    out.extend("`\n".bytes())
-    out
-}
-
-// Test input: `out` with the ar member `name` holding `data`, padded to an
-// even offset.
-ar_member: fn(out: &[U8], name: String, data: [U8]) {
-    out.extend(ar_header(name, data.len()))
-    out.extend(data.copy())
-    if data.len() % 2 == 1 -> out.push(U8{10})
-}
-
-// Test input: an ar archive holding `members` after a symbol index and a
-// long-name table.
-ar_of: fn(members: [[U8]]) -> [U8] {
-    out := "!<arch>\n".bytes()
-    ar_member(out, "/", [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
-    ar_member(out, "//", "a_member_name_longer_than_sixteen.o/\n".bytes())
-    loop at in 0..<members.len() -> ar_member(out, "/{at * 37}", members[at])
-    out
-}
-
-#Test("the Rust check reads ELF and ar symbol tables itself") {
+#Test("the Rust check reads ELF symbol tables itself") {
     rusty: elf_with_symbols([String]{"jet_main", "_ZN3foo3barE", "__rust_alloc"})
     assert_eq(rust_symbols(rusty, "r.o"), "Rust symbols in r.o:\n_ZN3foo3barE\n__rust_alloc")
     clean: elf_with_symbols([String]{"jet_main", "memcpy", "x_ZN1a"})
@@ -846,16 +739,7 @@ ar_of: fn(members: [[U8]]) -> [U8] {
     names := [String]{}
     assert_eq(symbol_names(clean, "c.o", names), "")
     assert_eq(names, [String]{"jet_main", "memcpy", "x_ZN1a"})
-    odd := clean.copy()
-    odd.push(U8{0})
-    archive: ar_of([[U8]]{odd, rusty.copy()})
-    found := [String]{}
-    assert_eq(symbol_names(archive, "lib.a", found), "")
-    assert_eq(found, [String]{"jet_main", "memcpy", "x_ZN1a", "jet_main", "_ZN3foo3barE", "__rust_alloc"})
-    assert_eq(rust_symbols(archive, "lib.a"), "Rust symbols in lib.a:\n_ZN3foo3barE\n__rust_alloc")
-    assert_eq(rust_symbols(ar_of([[U8]]{clean.copy()}), "lib.a"), "")
     assert_eq(rust_symbols("not an object".bytes(), "x"), "x is not a 64-bit little-endian ELF object")
-    assert_eq(rust_symbols(ar_of([[U8]]{"text".bytes()}), "lib.a"), "lib.a(/0) is not a 64-bit little-endian ELF object")
     truncated: rusty.slice(0, rusty.len() - 8)
     assert_eq(rust_symbols(truncated, "t.o"), "t.o has a malformed section header table")
 }

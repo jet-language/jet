@@ -61,8 +61,8 @@ run: fn() {
     ]) ?? panic("create")
     _inserted: scoped.execute(SQL{"INSERT INTO items (name) VALUES ('one')"}) ?? panic("insert")
     row: scoped.query_one(SQL{"SELECT name FROM items"}) ?? panic("query")
-    name: db.row_value(row, "name") ?? panic("row value")
-    print("name={name.text() ?? panic("text")}")
+    value: db.row_value(row, "name") ?? panic("row value")
+    print("name={value.text() ?? panic("text")}")
     facts: link_facts()
     print("entry is __jet_start: {facts.entry.contains("__jet_start")}")
     names: [String]{"__libc_start_main", "pthread_create", "sqlite3_open_v2"}

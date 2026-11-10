@@ -3,12 +3,12 @@
 # symbols live code references and nothing defines; only the C providers of
 # those declarations are realized (JetCli Host.jet jet_cli_native_executable).
 # A core.data program, a core.db program (its SQLite is Jet) and a plain
-# HTTP core.http.server program (which declares mbedtls) call no C: they
-# link no musl and start at `__jet_start`. A call of a C function no library
-# defines is the program's error (E2105) naming the undefined symbol and its
-# declaration, not an internal compiler error. Each program reads its own
-# `.symtab` (a debug build keeps it), so only the built executables run:
-# under `jet run` /proc/self/exe is jet itself.
+# HTTP core.http.server program call no C: they link no musl and start at
+# `__jet_start`. A call of a C function no library defines is the program's
+# error (E2105) naming the undefined symbol and its declaration, not an
+# internal compiler error. Each program reads its own `.symtab` (a debug
+# build keeps it), so only the built executables run: under `jet run`
+# /proc/self/exe is jet itself.
 requires: os-name:linux
 fixture: programs_link_only_the_c_their_live_code_calls.fixture
 env: NO_COLOR=1

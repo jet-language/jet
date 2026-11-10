@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_cookie.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the DTLS HelloVerifyRequest cookies.
 //
 // A port of mbedtls 3.6.7's ssl_cookie.c under the default
@@ -80,7 +82,7 @@ ssl_cookie_hmac: fn(ctx: SSLCookieContext, time: [U8], off: Int, cli_id: [U8]) -
 
 /// A cookie for the client with transport ID `cli_id`
 /// (mbedtls_ssl_cookie_write).
-ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -[Time]> [U8] ssldefs.SSLError! {
+ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
     cookie := ssldefs.ssl_zeros(4)
     // C keeps the low 32 bits of the time.
     ssldefs.ssl_put_u32(cookie, 0, ssldefs.ssl_time())
@@ -92,7 +94,7 @@ ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -[Time]> [U8] ssldefs.
 /// Whether `cookie` is one this context made for `cli_id` within the
 /// timeout (mbedtls_ssl_cookie_check, true where C returns 0 and false
 /// where it returns -1).
-ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -[Time]> Bool ssldefs.SSLError! {
+ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -> Bool ssldefs.SSLError! {
     if cookie.len() != SSL_COOKIE_LEN -> return Ok(false)
     ref_hmac := if ssl_cookie_hmac(ctx, cookie, 0, cli_id) == {
         .Ok(h) -> h
@@ -109,12 +111,12 @@ ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -[Time]>
     Ok(true)
 }
 
-ssl_cookie_write_locked: fn(ctx: Shared<SSLCookieContext>, cli_id: [U8]) -[Time]> [U8] ssldefs.SSLError! {
+ssl_cookie_write_locked: fn(ctx: Shared<SSLCookieContext>, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
     guard := ctx.guard_edit()
     ssl_cookie_write(guard.value, cli_id)
 }
 
-ssl_cookie_check_locked: fn(ctx: Shared<SSLCookieContext>, cookie: [U8], cli_id: [U8]) -[Time]> Bool ssldefs.SSLError! {
+ssl_cookie_check_locked: fn(ctx: Shared<SSLCookieContext>, cookie: [U8], cli_id: [U8]) -> Bool ssldefs.SSLError! {
     guard := ctx.guard_edit()
     ssl_cookie_check(guard.value, cookie, cli_id)
 }

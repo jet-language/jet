@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_client.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the ClientHello both TLS versions send.
 //
 // A port of mbedtls 3.6.7's ssl_client.c under the default
@@ -155,7 +157,7 @@ SSLClientHelloWritten: struct {
 // RFC 6347 4.2.1). The version field is TLS 1.2's in both versions. The
 // extensions are those of every version proposed, the TLS 1.3
 // pre_shared_key one last; an empty extension list is left out.
-ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, rng: &R) -[Time]> SSLClientHelloWritten ssldefs.SSLError! {
+ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, rng: &R) -> SSLClientHelloWritten ssldefs.SSLError! {
     p := buf
     binders_len := 0
     propose_tls12: ssl.handshake.min_tls_version <= ssldefs.SSL_VERSION_TLS1_2 && ssldefs.SSL_VERSION_TLS1_2 <= ssl.tls_version
@@ -234,7 +236,7 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end:
 
 // The client random: TLS 1.2's starts with the time in seconds
 // (ssl_generate_random, RFC 5246 7.4.1.2); TLS 1.3's is all random.
-ssl_cli_generate_random: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli_generate_random: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     gmt_unix_time_len := 0
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
         ssldefs.ssl_put_u32(ssl.handshake.randbytes, 0, ssldefs.ssl_time())
@@ -253,7 +255,7 @@ ssl_cli_generate_random: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 // random bytes of TLS 1.3 middlebox compatibility. A TLS 1.3 resumption
 // must be to the host the ticket came from; else the session takes the
 // hostname.
-ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sn: ssl.session_negotiate
     if sn < 0 -> return Err(.InternalError)
     if ssl.handshake.resume != 0 && ssl.spool[sn].tls_version == ssldefs.SSL_VERSION_TLS1_3 && ssl.spool[sn].ticket != None {
@@ -311,7 +313,7 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
 /// with the state moved on first so a retried send does not write it
 /// again. Over TLS the PSK binders are computed over the transcript up to
 /// them, and a TLS 1.3 proposal may go on to other states.
-ssl_write_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_write_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     ssl_prepare_client_hello(ssl, rng) ?? return Err(err)
     buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_CLIENT_HELLO)
     buf_len: ssldefs.SSL_OUT_CONTENT_LEN - 4

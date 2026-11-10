@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/x509_crt.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: X.509 certificates.
 //
 // A port of mbedtls 3.6.7's x509_crt.c: Certificate and TBSCertificate
@@ -1203,11 +1205,11 @@ x509_crt_verify_call: fn(callback: X509VerifyCallback, chain: [X509Crt], trust_c
 /// The chain verification builds for `chain` (the leaf first, then any
 /// intermediates) up to one of the trusted roots `trust_ca`, leaf first,
 /// each certificate with its flags under `profile` and the roots' CRLs
-/// `ca_crl`; the leaf's include the name check against `cn` when given
-/// and the profile's check of its key (the chain-building half of
-/// mbedtls_x509_crt_verify_with_profile). BadInput for an empty chain;
-/// FatalError for a chain too long.
-x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?) -> [X509ChainItem] x509.X509Error! {
+/// `ca_crl` at the UTC date `now`; the leaf's include the name check
+/// against `cn` when given and the profile's check of its key (the
+/// chain-building half of mbedtls_x509_crt_verify_with_profile). BadInput
+/// for an empty chain; FatalError for a chain too long.
+x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, now: x509.X509Time) -> [X509ChainItem] x509.X509Error! {
     if chain.len() == 0 -> return Err(.BadInput)
     ee_flags := 0
     if cn == {
@@ -1216,7 +1218,7 @@ x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
     }
     if !x509_profile_check_pk_alg(profile, pk.pk_get_type(chain[0].pk)) -> ee_flags = ee_flags.bit_or(x509.X509_BADCERT_BAD_PK)
     if !x509_profile_check_key(profile, chain[0].pk) -> ee_flags = ee_flags.bit_or(x509.X509_BADCERT_BAD_KEY)
-    items := x509_crt_verify_chain(chain, trust_ca, ca_crl, profile, x509.x509_now())
+    items := x509_crt_verify_chain(chain, trust_ca, ca_crl, profile, now)
     items[0].flags = items[0].flags.bit_or(ee_flags)
     Ok(items)
 }
@@ -1229,7 +1231,13 @@ x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
 /// the flags of the whole chain when any is set; any other error means the
 /// chain could not be examined.
 x509_crt_verify_with_profile: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?) x509.X509Error! {
-    items: x509_crt_verify_items(chain, trust_ca, ca_crl, profile, cn)
+    x509_crt_verify_with_profile_at(chain, trust_ca, ca_crl, profile, cn, vrfy, x509.x509_now())
+}
+
+/// x509_crt_verify_with_profile at the UTC date `now` instead of the
+/// current one; core.net.tls passes its handshake clock's date.
+x509_crt_verify_with_profile_at: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?, now: x509.X509Time) x509.X509Error! {
+    items: x509_crt_verify_items(chain, trust_ca, ca_crl, profile, cn, now)
     flags := 0
     loop k in 0..<items.len() {
         depth: items.len() - 1 - k

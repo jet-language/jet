@@ -871,9 +871,8 @@ pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     remove_tree(built)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
     // s2 builds the toolchain: the jet it builds is s2's bytes at the fixed
-    // point, and the runtime pack beside it is that jet's lowering. Core's
-    // vendored C beside the pack compiles with a host C toolchain, which only
-    // the dev shell supplies until mbedtls is Jet.
+    // point, and the runtime pack beside it is that jet's lowering. It runs
+    // behind the dev shell with no Rust tool on PATH.
     argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "Compiler"})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
     pack: files.join(built, "jet-runtime")

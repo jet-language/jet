@@ -976,8 +976,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     if !passes.build -> return 0
 
     // `jet build Compiler` makes jet and, beside it, the runtime pack that jet
-    // lowers and Core's vendored C, which the host C toolchain the dev shell
-    // supplies compiles (Tools/agent/JetEnv.jet).
+    // lowers, behind the dev shell (Tools/agent/JetEnv.jet).
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
     build_report: "{out}/build-keep-going.tsv"
     built: run_heavy(snap, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")

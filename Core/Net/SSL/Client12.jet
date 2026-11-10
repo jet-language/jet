@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Translated from Mbed TLS 3.6.7 (library/ssl_tls12_client.c); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file.
 // Private Core source part: the TLS 1.2 client handshake.
 //
 // A port of mbedtls 3.6.7's ssl_tls12_client.c under the default
@@ -31,7 +33,7 @@ use {
 }
 
 // Send a fatal alert and give the error to return with it.
-ssl_cli12_fail: fn<R: RNG>(ssl: &ssldefs.SSLContext, alert: Int, reason: ssldefs.SSLError, rng: &R) -[Time]> ssldefs.SSLError Never! {
+ssl_cli12_fail: fn<R: RNG>(ssl: &ssldefs.SSLContext, alert: Int, reason: ssldefs.SSLError, rng: &R) -> ssldefs.SSLError Never! {
     ssltls.ssl_send_fatal_alert(ssl, alert, rng)
     reason.copy()
 }
@@ -151,7 +153,7 @@ ssl_tls12_write_client_hello_exts: fn(ssl: &ssldefs.SSLContext, buf: Int, end: I
 // renegotiation_info: empty on the first handshake, our and the server's
 // last verify data in a renegotiation (ssl_parse_renegotiation_info,
 // RFC 5746 3.4).
-ssl_cli12_parse_renegotiation_info: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_renegotiation_info: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! {
     if ssl.renego_status != ssldefs.SSL_INITIAL_HANDSHAKE {
         vdl: ssl.verify_data_len
         ok := len == 1 + vdl * 2 && ssldefs.ssl_u8(ssl.in_buf, buf) == vdl * 2
@@ -166,14 +168,14 @@ ssl_cli12_parse_renegotiation_info: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: In
 }
 
 // max_fragment_length: the code we asked for (ssl_parse_max_fragment_length_ext).
-ssl_cli12_parse_max_fragment_length_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_max_fragment_length_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! {
     if ssl.conf.mfl_code == ssldefs.SSL_MAX_FRAG_LEN_NONE || len != 1 || ssldefs.ssl_u8(ssl.in_buf, buf) != ssl.conf.mfl_code {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter, rng))
     }
 }
 
 // connection_id: the server's CID, when we offered CIDs (ssl_parse_cid_ext).
-ssl_cli12_parse_cid_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_cid_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! {
     if ssl.conf.transport != ssldefs.SSL_TRANSPORT_DATAGRAM || ssl.negotiate_cid == ssldefs.SSL_CID_DISABLED {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension, rng))
     }
@@ -187,7 +189,7 @@ ssl_cli12_parse_cid_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int
 
 // encrypt_then_mac: empty, and only if we offered it
 // (ssl_parse_encrypt_then_mac_ext).
-ssl_cli12_parse_encrypt_then_mac_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_encrypt_then_mac_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! {
     if ssl.conf.encrypt_then_mac == ssldefs.SSL_ETM_DISABLED || len != 0 {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension, rng))
     }
@@ -196,7 +198,7 @@ ssl_cli12_parse_encrypt_then_mac_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: 
 
 // extended_master_secret: empty, and only if we offered it
 // (ssl_parse_extended_ms_ext).
-ssl_cli12_parse_extended_ms_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_extended_ms_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! {
     if ssl.conf.extended_ms == ssldefs.SSL_EXTENDED_MS_DISABLED || len != 0 {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension, rng))
     }
@@ -205,7 +207,7 @@ ssl_cli12_parse_extended_ms_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, 
 
 // session_ticket: empty, and only if we offered it; a NewSessionTicket
 // follows (ssl_parse_session_ticket_ext).
-ssl_cli12_parse_session_ticket_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_session_ticket_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: Int, rng: &R) ssldefs.SSLError! {
     if ssltls.ssl_conf_get_session_tickets(ssl.conf) == ssldefs.SSL_SESSION_TICKETS_DISABLED || len != 0 {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension, rng))
     }
@@ -214,7 +216,7 @@ ssl_cli12_parse_session_ticket_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, len: In
 
 // ec_point_formats: the first of uncompressed or compressed the server
 // lists becomes the ECDH point format (ssl_parse_supported_point_formats_ext).
-ssl_cli12_parse_supported_point_formats_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_supported_point_formats_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! {
     if len == 0 || ssldefs.ssl_u8(ssl.in_buf, buf) + 1 != len {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
@@ -237,7 +239,7 @@ ssl_cli12_parse_supported_point_formats_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext
 
 // application_layer_protocol_negotiation: one protocol, which must be one
 // of ours (ssl_parse_alpn_ext, RFC 7301 3.1).
-ssl_cli12_parse_alpn_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_alpn_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: Int, rng: &R) ssldefs.SSLError! {
     ours: ssl.conf.alpn_list ?? return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension, rng))
     // The list length, then one name with its length.
     if len < 4 -> return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
@@ -260,7 +262,7 @@ ssl_cli12_parse_alpn_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, len: In
 
 // Keep the cookie of a DTLS HelloVerifyRequest and start over at the
 // ClientHello (ssl_parse_hello_verify_request, RFC 6347 4.2.1).
-ssl_cli12_parse_hello_verify_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_hello_verify_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     hdr: sslmsg.ssl_hs_hdr_len(ssl)
     // The version and the cookie length.
     if hdr + 3 > ssl.in_msglen -> return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
@@ -284,7 +286,7 @@ ssl_cli12_parse_hello_verify_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: 
 // server chose, and its extensions; a resumed session goes on to the
 // server's ChangeCipherSpec (ssl_parse_server_hello). In DTLS a
 // HelloVerifyRequest may come instead.
-ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_read_record(ssl, true, rng) ?? return Err(err)
     if ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE {
         if ssl.renego_status == ssldefs.SSL_RENEGOTIATION_IN_PROGRESS {
@@ -563,7 +565,7 @@ ssl_cli12_verify_signature: fn(key: &pk.PKContext, parts: ssltls.SSLSigAlgParts,
 // the server's signature over them, as the key exchange has them. RSA
 // has none and ECDH takes the certificate's key; PSK and RSA-PSK servers
 // may leave it out (ssl_parse_server_key_exchange, RFC 5246 7.4.3).
-ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     kx: cs.key_exchange
     if kx == .RSA {
@@ -676,7 +678,7 @@ ssl_cli12_dn_hint_is_name: fn(data: [U8], start: Int, end: Int) -> Bool Never! {
 // the certificate types, signature algorithms and distinguished names
 // (ssl_parse_certificate_request, RFC 5246 7.4.4). This side answers with
 // its own certificate whatever the request lists.
-ssl_cli12_parse_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if !suites.ssl_ciphersuite_cert_req_allowed(cs) {
         sslmsg.ssl_handshake_increment_state(ssl)
@@ -720,7 +722,7 @@ ssl_cli12_parse_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
 
 // Read the empty ServerHelloDone (ssl_parse_server_hello_done); in DTLS
 // the server's flight is then complete.
-ssl_cli12_parse_server_hello_done: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_server_hello_done: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_read_record(ssl, true, rng) ?? return Err(err)
     if ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE -> return Err(.UnexpectedMessage)
     if ssl.in_hslen != sslmsg.ssl_hs_hdr_len(ssl) || ssldefs.ssl_u8(ssl.in_buf, ssl.in_msg) != ssldefs.SSL_HS_SERVER_HELLO_DONE {
@@ -737,7 +739,7 @@ ssl_cli12_parse_server_hello_done: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R)
 // identity, or the RSA-encrypted premaster secret, as the key exchange
 // has it, and compute the premaster secret (ssl_write_client_key_exchange,
 // RFC 5246 7.4.7, RFC 4279 2, RFC 4492 5.7).
-ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     kx: cs.key_exchange
     out: ssl.out_msg
@@ -845,7 +847,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
 // asked for a certificate and we sent one (ssl_write_certificate_verify,
 // RFC 5246 7.4.8). The digest is the PRF's, which the server is assumed to
 // accept, as C does.
-ssl_cli12_write_certificate_verify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_write_certificate_verify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     ssltls.ssl_derive_keys(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if !suites.ssl_ciphersuite_cert_req_allowed(cs) || ssl.handshake.client_auth == 0 || ssltls.ssl_own_key_cert(ssl) < 0 {
@@ -883,7 +885,7 @@ ssl_cli12_drop_ticket: fn(s: &ssldefs.SSLSession) Never! {
 
 // Read a NewSessionTicket and keep its ticket for the session; an empty
 // ticket is none (ssl_parse_new_session_ticket, RFC 5077 3.3).
-ssl_cli12_parse_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_cli12_parse_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     sslmsg.ssl_read_record(ssl, true, rng) ?? return Err(err)
     if ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNEXPECTED_MESSAGE, .UnexpectedMessage, rng))
@@ -912,7 +914,7 @@ ssl_cli12_parse_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 
 /// Take one step of the TLS 1.2 client handshake
 /// (mbedtls_ssl_handshake_client_step).
-ssl_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! -[Time]> {
+ssl_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     // Change state now, so that mbedtls_ssl_read_record sees it when DTLS
     // drops an out-of-sequence ChangeCipherSpec.
     if ssl.state == ssldefs.SSL_SERVER_CHANGE_CIPHER_SPEC && ssl.handshake.new_session_ticket != 0 {
