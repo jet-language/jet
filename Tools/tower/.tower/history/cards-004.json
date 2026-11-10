@@ -91026,6 +91026,226 @@
       "completedAt": "2026-11-07T11:00:43.060Z",
       "questions": [],
       "retiredAt": "2026-11-10T11:01:18.361Z"
+    },
+    {
+      "id": "c0txcsfz",
+      "num": 6644,
+      "title": "core.json: decode coerces a JSON string into a scalar field instead of refusing",
+      "body": "json.decode into a struct with an Int, Float or Bool field accepts a JSON string such as \"42\" and converts it, instead of reporting a type mismatch. Decoding must be exact.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case decodes {\"n\": \"42\"} into a struct with n: Int and gets the registered decode type-mismatch error naming the field and the JSON type; {\"n\": 42} still decodes. Passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ab81a33737: tests/cases/encoding_parity/json_typed_decode_refuses_text_for_a_scalar_field_on_every_tier passes. {\"n\": \"42\"} into n: Int is refused with the registered decode type mismatch naming the field and the JSON type, and {\"n\": 42} decodes, on every tier.",
+          "at": "2026-11-07T12:29:56.104Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:23.876Z",
+      "updated": "2026-11-07T12:30:00.348Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T12:30:00.348Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T12:30:52.821Z"
+    },
+    {
+      "id": "c0ngdap0",
+      "num": 6653,
+      "title": "jetpack image: coded errors render Why:/Fix: without the canonical one-space indent",
+      "body": "From #6651. tests/cases/image/environment_image_requires_explicit_service_selection fails on a snapshot mismatch: Jetpack Theme.error_coded (Jetpack/CLI/Source/Commands/ImageCommand.jet:107) renders Why:/Fix: lines without the one-space indent that the canonical diagnostic renderer and the snapshot image_service_projection_e1336.txt use. One renderer should own the layout.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case tests/cases/image/environment_image_requires_explicit_service_selection PASS: jetpack coded errors use the canonical diagnostic layout (one renderer), no snapshot rewritten to the drifted layout.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1b48988238: tests/cases/image/environment_image_requires_explicit_service_selection passes. Jetpack coded errors render in the canonical diagnostic layout.",
+          "at": "2026-11-07T12:29:57.013Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:53.964Z",
+      "updated": "2026-11-07T12:30:02.055Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T12:30:02.055Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T12:30:52.821Z"
+    },
+    {
+      "id": "c023hw48",
+      "num": 6657,
+      "title": "E3510 GeneratedModuleShadows is registered but never emitted",
+      "body": "From #6638 c3 (MechD-3, ffff735682). tests/ui/build_generated_collision pins E0603 because nothing emits E3510 GeneratedModuleShadows. Either the generated-module collision reports E3510 (and the snapshot moves to it) or E3510 leaves the registry (I4: every registered code has an emitter and a snapshot).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "MechD-3 (2026-11-07): nothing can emit E3510 today. Loader.jet ~1646 reports E3502 for a generated module aliasing another source, but generated paths are under .jet/generated/ and the source scan skips dot-directories (Request.jet:420, :1269), so no handwritten source unit can sit at a generated path. The fixture fails earlier with E0603 (run.jet is both build file and importer; the use of ./.jet/generated/... resolves before generation). The only real collision is write_generated: on overwriting a handwritten file (InspectBuild.jet:174-180). An emitter needs a rule for 'handwritten' (exists, bytes differ, sha256 differs from the lock's [[comptime_inputs]] row; but the lock row is written only after targets compile, so a failed build would flag its own output), E3510 at that write site, a --write-generated=on ui directive, and a fixture. Alternative: drop E3510 from the registry and spec.md:5076."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/ui/build_generated_collision snapshots E3510 GeneratedModuleShadows from the generated-module collision (or E3510 is removed from the registry with no remaining reference); diagnostics_snapshots guard PASS.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ed8c4057af: tests/ui/build_generated_collision snapshots E3510 GeneratedModuleShadows from the generated-module collision.",
+          "at": "2026-11-07T12:29:55.197Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:18.913Z",
+      "updated": "2026-11-07T12:29:58.728Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T12:29:58.728Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T12:30:52.822Z"
+    },
+    {
+      "id": "c0lb1p4p",
+      "num": 6670,
+      "title": "LaneCheck cannot check Compiler/Prelude or Compiler/JetRuntime files: it checks them as standalone units",
+      "body": "Tools/agent/LaneCheck.jet checks a touched file's package as a normal unit. Compiler/Prelude is embedded, so checking it alone gives 1539 ReservedDunderName errors in Core.jet, including on untouched files such as CoreSurfaceInventory.jet. Compiler/JetRuntime is assembled by the chain, so checking it alone gives 2874 UnknownFunction os_store_i64 errors across 153 files. Workers editing either tree therefore get CHECK FAILED whether or not their change is good, which makes the receipt meaningless for the two most sensitive trees. Found by TestSystemLead-2 in 332eb41d18 and 83859ebe1c. d16f96e61e skips both in the packages suite for the same reason.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c4 isn't met yet: at dev HEAD 963f74b975 the lander's precommit (looping over Land.jet ratchets with seed a0_033; 10 checks in 23 s) fails Tools/agent/DiagnosticRows.jet --check on Docs/site/dist/e/E-ERR-PROPAGATE and E1206. Diagnostics.jet hasn't changed since 78aa137994, so the output depends on the jet running the generator. TestSystemLead-2 is fixing the root. The other 9 checks pass."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Ruling on c1: option B. The compiler gains a check mode that checks Compiler/Prelude files as generated prelude source (lex_generated plus the same unit context the compiler embeds them in), and LaneCheck uses it once a seed has it. Until then LaneCheck reports a touched Prelude file as unchecked ('needs a seed with the prelude check mode'), never as CHECK OK. The row-DSL inputs (Core.jet, CoreSurfaceInventory.jet, CoreSourceParts.tsv) are checked by their generator --check, which is their real consumer. No baseline-diff gate. c3 added for the duplicated raw-string copies."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "LaneCheck checks a touched Compiler/Prelude file in its embedded mode: an untouched Prelude file gives CHECK OK on dev, and a seeded type error in a Prelude file gives CHECK FAILED naming it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "78aa137994: jet check --prelude checks a Compiler/Prelude source as the embedded prelude, and LaneCheck routes Prelude files to it. With s1: clean Facts.jet and Traits.jet give CHECK OK. A seeded Facts.jet gives 'CHECK FAILED — 1 error(s)' with 'Facts.jet:71:5: Error [jet.ReturnTypeMismatch]'. A seeded Traits.jet reports both its errors (the OwnedTraitRows --check failure and the type error). A seeded marker gives 'Marker #ZzBroken builds no marker rule', and a seeded conversion 'impl ZzNotFamily -> Err is no Core error family conversion'. On a seed with no prelude mode it prints PRELUDE UNCHECKED with rc 1, never CHECK OK. jet test Tools/agent/LaneCheck.jet 4/0.",
+          "at": "2026-11-07T12:13:46.304Z"
+        },
+        {
+          "n": 2,
+          "text": "LaneCheck checks a touched Compiler/JetRuntime file in its assembled mode: an untouched runtime file gives CHECK OK on dev, and a seeded error gives CHECK FAILED.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "8e5de05f9e: Tools/agent/LaneCheck.jet checks a Compiler/JetRuntime path as the unit assembled from sources.list, in Jet with no node step, and maps errors back to source lines. Clean: LaneCheck Compiler/JetRuntime/Source/Alloc.jet gives CHECK OK (rc 0); the shared Compiler/JetBackend/Source/OS/Linux.jet gives CHECK OK in both its package and the unit. Seeded: a ReturnTypeMismatch appended to Alloc.jet gives CHECK FAILED, 1 error in 1 file, at Compiler/JetRuntime/Source/Alloc.jet:1851:5 (rc 1). jet test Tools/agent/LaneCheck.jet: 3 passed.",
+          "at": "2026-11-07T10:53:51.175Z"
+        },
+        {
+          "n": 3,
+          "text": "Each Compiler/Prelude file the compiler embeds has one source: the compiler reads the Prelude file itself at build (or generates the embedded copy with a freshness check), not a hand-kept raw-string copy (today PreludeMarkers.jet MARKER_SOURCE, Registration/PreludeDerives.jet, PreludeUnits.jet and JET_CLI_EFFECT_SOURCE duplicate Markers, Derives, Units and Effects byte for byte).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d44f8a7b0b: the 4 hand-kept Prelude copies (MARKER_SOURCE, SEMA_PRELUDE_DERIVE_SOURCE, SEMA_PRELUDE_ERROR_SOURCE, SEMA_PRELUDE_UNITS_SOURCE) are generated from Compiler/Prelude/{Markers,Derives,Errors,Units}.jet by Tools/agent/PreludeSources.jet --write; CoreSourceRows owns the Effects copy. jet test PreludeSources.jet 2/0; --check: 'prelude sources check passed: 4 copies in 3 files match'. ba015c8b05 puts it in Land.jet's RATCHETS, which precommit runs. Refuse row: a drift line in Units.jet without --write gives 'prelude sources: …PreludeUnits.jet differ from Compiler/Prelude' and PRECOMMIT FAILED (rc 1); reverted, PRECOMMIT OK (rc 0).",
+          "at": "2026-11-07T11:14:29.848Z"
+        },
+        {
+          "n": 4,
+          "text": "Every generator whose output is committed has its --check run by Land.jet precommit: CoreSourceRows, OwnedTraitRows, DiagnosticRows (and any other generator with a --check). A seeded drift in each generator's source without --write is refused at landing, and the restored tree passes. The lander runs Land.jet's own list rather than a second copy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "78aa137994 and e73e147d58. Tools/agent/Land.jet ratchets lists 10 tools (UnsafeRatchet, CoreCoverage, PreludeSources, DiagnosticRows, CoreSourceRows, OwnedTraitRows, VocabularyRows, LexerKeywordRows, CollationTable, RuntimeGenerators). The lander's precommit reads that list from the tree under test and runs each --check in parallel. At dev e73e147d58 with seed a0_033 it gives PRECOMMIT OK, all 10 ok, in 24.5 s. A seeded drift in each generator gives 'PRECOMMIT: Tools/agent/<tool>.jet --check failed (exit 1)' then PRECOMMIT FAILED. DiagnosticRows gives the same verdict on seed and s1, takes its examples only from the ui rows the suite runs (a stray tests/ui/aaa_stray.stderr and tests/ui/.jet/zz.stderr leave '1024 copies match'), and PreludeSources refuses a hand edit anywhere in its 3 generated files. CoreModuleCheck runs as VerifyFull.jet's core-module-check gate.",
+          "at": "2026-11-07T12:30:17.393Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:28:04.053Z",
+      "updated": "2026-11-07T12:30:36.499Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-07T12:30:36.499Z",
+      "questions": [],
+      "retiredAt": "2026-11-10T12:30:52.822Z"
     }
   ]
 }
