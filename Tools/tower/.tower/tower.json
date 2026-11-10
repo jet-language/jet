@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98556,
+    "rev": 98558,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80485,6 +80485,11 @@
         {
           "at": "2026-11-10",
           "by": "Main",
+          "text": "Sizing by G1Lead-3 on 973d760c89. c2 is open on both paths: 96 tasks in libc sleep(1) through #Import c.c delay the quick task 2898 ms on 32 carriers and 11901 ms on 8, and 96 FIFO readers deadlock (rc 124, 60 s timeout), because foreign calls and raw host reads hold the carrier. There is no hand-off today. Plan (runtime-only, no API): a monitor thread is armed only when work is queued and no idle carrier is left. It marks a carrier blocked when the carrier fiber-switch counter and its thread CPU clock have both stood still for ~5-10 ms, then starts one compensation carrier per blocked carrier; extra carriers retire when idle. CPU-bound tasks are not compensated. This costs nothing on the C-call path, so c3 should hold at ≤1.00. Estimate 3-4 h; G1Lead-3 owns it after 6281f."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
           "text": "Worktree cleanup by Main on 2026-11-09 at 22:58. G1Lead-2 is gone, and its four detached worktrees under $JET_SCRATCH_ROOT/lanes/G1Lead-2/{r1,t4,t5,w4} held unlanded work. Each file whose bytes dev c057ea659d does not already hold was saved as a patch against that worktree HEAD, in $JET_SCRATCH_ROOT/lanes/Main/hold/G1Lead-2-{r1,t4,t5,w4}.patch.\n- t4/t5 (base 0f193199cc) and w4 (base 6a06b917cb) carry the program-thread stack work for c6 (Thread.jet, Scheduler.jet, Cli Front/Host, Sema Effects/Checks, the fiber_liveness program_stack(s) cases and the spec text). They wait on ballot D-THREAD-STACK1; whoever builds the ratified option starts from them.\n- r1 (base 6a06b917cb) carries an O0 IR-optimizer trace/lint hook in Cli Host.jet and ir_try_from_or/ir_fallback_reads_error in JetIR BuildExpr.jet (a narrowing conversion?? fallback that never reads the error builds no Result), plus spec text. It is unsubmitted and has no named card; it goes to the #5971/#6700 owner as a candidate SUB.\nThe worktrees are removed after this log."
         },
         {
@@ -80517,11 +80522,11 @@
         {
           "n": 1,
           "text": "r08_child_wait_block.jet prints the quick task's latency under 50 ms on a machine with at least 8 CPUs; the receipt with the command and numbers is logged on this card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T21:41:15.697Z"
+          "evidence": "Main reran this on 2026-11-10 with the compiler built from dev 973d760c89 (t4a) on a 32-CPU machine. The r08 probe ($JET_SCRATCH_ROOT/lanes/G1Lead-3/rp/r08/main.jet) is a rewrite, because the old r08 path and process.run are gone. It starts 96 tasks that each wait on a `sleep 1` child through process.run_spec, waits 100 ms, then spawns and joins one trivial task. Command: jet run main.jet, three runs. Each printed \"quick task done after 0 ms\". G1Lead-3 saw 0 ms with JET_SCHEDULER_THREADS=8. Child waits park the fiber (ProcessExecutionCollect park), so they hold no carrier.",
+          "at": "2026-11-10T05:16:49.528Z"
         },
         {
           "n": 2,
@@ -80596,7 +80601,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-10T03:48:15.273Z",
+      "updated": "2026-11-10T05:16:51.644Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -200317,6 +200322,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-10T05:16:51.645Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-10T05:16:49.528Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ih6z1d",
+      "note": "#1"
+    },
     {
       "at": "2026-11-10T05:07:33.511Z",
       "by": "Main",
