@@ -1,8 +1,9 @@
-// Checked NameLedger and structure slice of GateLedger. Registry/Core views are
-// generated from canonical Facts.jet and Core.jet.
+// Checked NameLedger and structure slice of GateLedger. The structure rows are
+// the `Structure.*` rows of the registration fact table, and the Core view is
+// generated from Core.jet.
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, diagnostic_render_all, name_ledger_from_facts]
+    jet_foundation.[CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_FACT_ROWS, diagnostic_render_all, name_ledger_from_facts]
     jet_sema.[sema_gate_append_structure]
 }
 
@@ -14,15 +15,25 @@ jet_cli_structure_kind: fn(kind: StructureFactKind) -> String Never! {
     }
 }
 
+// The registration row that names a structure fact kind.
 jet_cli_structure_registry: fn(kind: StructureFactKind) -> String Never! {
     leaf: if kind == {
         .Liveness -> "Liveness"
         .Lifecycle -> "Lifecycle"
         .ImportEdge -> "ImportEdge"
     }
-    name: "Structure.{leaf}"
-    loop row in JET_CLI_STRUCTURE_ROWS { if row.name == name -> return row.name }
-    jet_cli_structure_kind(kind)
+    "Structure.{leaf}"
+}
+
+// The `Structure.*` rows of the registration fact table, in table order.
+jet_cli_structure_rows: fn() -> [RegistrationFactRow] Never! {
+    loop row in REGISTRATION_FACT_ROWS if row.name.starts_with("Structure.") -> row
+}
+
+// One Core bootstrap step of the generated Core view.
+JetCLICoreBootstrap: struct {
+    name: String
+    dependencies: [String]
 }
 
 jet_cli_structure_span: fn(span: Span) -> JetCLIStatusValue Never! {
@@ -43,14 +54,14 @@ jet_cli_structure_facts: fn(result: JetDriverCompileResult) -> [StructureFact] N
 jet_cli_structure_report: fn(facts: [StructureFact], ledger: GateLedger, json: Bool) -> String Never! {
     gates: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
     if json {
-        rows: loop row in JET_CLI_STRUCTURE_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates))})
+        rows: loop row in jet_cli_structure_rows() -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates))})
         fact_rows: loop fact in facts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(jet_cli_structure_kind(fact.kind))), jet_cli_status_field("registry", jet_cli_status_text(jet_cli_structure_registry(fact.kind))), jet_cli_status_field("subject", jet_cli_status_text(fact.subject)), jet_cli_status_field("source", jet_cli_status_text(fact.source)), jet_cli_status_field("span", jet_cli_structure_span(fact.span)), jet_cli_status_field("status", jet_cli_status_text(fact.status)), jet_cli_status_field("detail", jet_cli_status_text(fact.detail)), jet_cli_status_field("gate", jet_cli_status_optional_text(fact.gate))})
         gate_rows: loop entry in gates -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("structure")), jet_cli_status_field("scope", jet_cli_status_text(entry.scope)), jet_cli_status_field("source", jet_cli_status_text(entry.source)), jet_cli_status_field("span", jet_cli_structure_span(entry.span ?? Span{start: 0, end: 0})), jet_cli_status_field("subject", jet_cli_status_text(entry.subject)), jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)), jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)), jet_cli_status_field("detail", jet_cli_status_text(entry.detail)), jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance))})
         structure: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("facts", jet_cli_status_array(fact_rows)), jet_cli_status_field("gates", jet_cli_status_array(gate_rows))})
         return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", structure)})}\n"
     }
     output := "structure\n"
-    loop row in JET_CLI_STRUCTURE_ROWS -> output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
+    loop row in jet_cli_structure_rows() -> output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
     output = "{output}facts: {facts.len()}\n"
     if facts.len() == 0 -> output = "{output}  (none in this program)\n"
     loop fact in facts -> output = "{output}  {jet_cli_structure_kind(fact.kind)}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}\n"

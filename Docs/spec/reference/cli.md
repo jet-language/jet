@@ -1168,8 +1168,9 @@ package-export liveness verdicts in source/span/code/name order, with the same
 Core lifecycle markers publish the consumer's site, package-edition status,
 and replacement detail. Once checked modules exist, failed Doc compilations
 retain these facts as well as the earlier resolved import edges.
-The hosted Core/Structure catalog is `Compiler/JetCli/Source/Cli/StructureRegistry.jet`,
-edited directly.
+The structure rows it lists are the `Structure.*` rows of the registration fact
+table (`jet explain` shows each one); a test fails when a structure fact kind
+and those rows disagree.
 
 Offline syntax explanations read `SyntaxDictionaryData.jet`, a Jet-owned
 dictionary of keywords, markers, types, built-ins, operators, and sigils.
