@@ -91847,6 +91847,195 @@
       "completedAt": "2026-11-07T22:41:14.661Z",
       "questions": [],
       "retiredAt": "2026-11-10T23:26:09.478Z"
+    },
+    {
+      "id": "c07rizte",
+      "num": 4306,
+      "title": "Dyn: replace DataTree with Dyn (D-INFER-PRIVATE1=A) and add Bytes and DateTime cases",
+      "body": "Owner ratified D-INFER-PRIVATE1=A on 2026-10-02 and directed (same day): add Bytes and DateTime cases to Dyn. Scope: (1) greenfield cutover: DataTree becomes Dyn everywhere (Core, Compiler/, Examples, Jetpack, tests, docs; Rust reference under the freeze only as far as the cutover requires: no aliases or old spellings kept); ~10k textual uses today (crates 4.1k, Jetpack 1.9k, tests 0.7k, Source 0.6k, Core 0.4k, Docs 0.3k, Examples 0.3k, Compiler 0.1k). (2) Dyn surface per the ballot: dotted field read/insert on mutable bindings, [key]/[i] indexing, automatic wrapping of plain values, Dyn.from(encodable), decode(T) typed extraction with FieldError, run-time-checked arithmetic and comparisons (Int/Float mixing in arithmetic only), no truthiness. (3) New cases Bytes([U8]) and DateTime(instant with offset): codec mapping CBOR byte strings and tag 0/1 date-times natively; TOML offset date-time natively; YAML timestamps; JSON/CSV have no native form: Bytes render as base64 text and DateTime as RFC 3339 text, and typed decode into Bytes/DateTime accepts those texts; canonical JSON follows the same rendering. Equality/hash/canonical bytes defined for both. (4) Goldens per codec and per operation; UI snapshots for new diagnostics. Sequencing: work in a worktree; integrate after stage 1 so the bootstrap tree stays stable.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: every criterion is met; at faa532e09f no DataTree, data_tree_ or DATA_TREE_ name remains in Compiler, Core or Docs/spec (only diagnostics.md:390 records the retirement). Closing."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "eb47eb7277 strftime parity: jet test --optimize=none|basic|full tests/conformance/corpus/core/time/strftime.jet gives 7 passed, 0 failed on each level. Compiler: the seed-built dev d405d4cb6c compiler with table-it (8405a508b0); toolchain root dev 8405a508b0."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "dev eb47eb7277 (Main, G3): Core/Time/Time.jet strftime now formats %S (zero-padded seconds), %p (AM/PM) and %z (+0000, UTC). Before this they printed literally, a defect in the existing API, so no ballot was needed. tests/conformance/corpus/core/time/strftime.jet asserts the three, and its unsupported-directive row now covers only %Q %n %t. Seed a0_034 jet test of the corpus file: 7/7. CoreSourceRows and CoreCoverage --check OK. The O0/O1/O2 parity rerun is queued for the dev s1 batch."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner cut the agent count to 2. CoreCliLead-2 stopped before landing c8. Unlanded: the DataTree->Dyn rename, staged as a one-phase cutover by Rename.jet in $JET_SCRATCH_ROOT/lanes/CoreCliLead (b8/rename; dry run on ff0d89ebc2: 66 files edited, 28 moved, plus a text rule for run-native-codec-file-leaves.mjs:95's DATA_TREE_${kind}). The seed knows none of the renamed names. Re-run Rename.jet on the current HEAD to land it."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 4 criteria from archived #1628: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #4362, #4452, #4456; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Another instance (CP-OUTCOME port, CompW10-OUTCOME): JetErrorReport raw details. DataTree.Object({\"z\": ..., \"a\": ...}) serializes as {\"a\":1.25,\"z\":[null,true,9223372036854775808]} where the Rust reference keeps insertion order {\"z\":[...],\"a\":1.25}. Repro: canonical Tests/Outcome/ErrorReport.jet raw-details test in .agent-worktrees/port-compiler; log ~/.cache/jet-test-scratch/CompW10-OUTCOME/CP-OUTCOME/positive-map-order-diagnostic.log. Test kept gated on #4456."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Another instance (Jetpack JP-REPORT-CUTOVER, 2026-10-03): canonical Report StatusValue.parse goes through Core DataTree, which sorts keys (input {z,a} renders {a,z}); Explain report parse loses Rust's kind-first field order. Byte-order tests kept as gates until the ordered DataTree ruling (#4456)."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Blocked on owner ballot #4456 (D-DATATREE-ORDER): fixing the order requires changing DataTree.Object's payload (public Core API) or making all Maps ordered."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Same root, more consumers (card lane CW10-INI via CardLead-10): DataTree.Object is backed by the frozen JetMap Arc<BTreeMap> (Prelude Core.rs:2681; from_pairs :2689, jet_data_entries_to_map :2699 sort keys), and DataTree.rs:202-217 exposes no ordered-entry access, so the ratified INI writer's input insertion order (like JSON's and the CLI-52/CLI-56 goldens) cannot be produced through the canonical carrier. The fix is one ordered object representation for DataTree (insertion order preserved, deterministic) across all tiers, not per-codec order metadata."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Absorbs #4203 (merge): Keep #4306; carry #4203 nested key/index behavior and S39 friendly-stop/optional-access distinction into replacement Dyn implementation. Evidence: D-DATATREE-PATH1=A; #4306 Dyn greenfield cutover includes key/index reads"
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Absorbs #4304 (dup): Keep insertion-order versus canonical-sort regression in 4306; do not run a second public type change. Evidence: Card 4304 log explicitly folds ordered Object representation and acceptance into Dyn cutover 4306"
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Absorbs #4182 (dup): Same adopted dynamic-value work; #4306 is the complete implementation card, including owner-added Bytes/DateTime. Evidence: #4306 implements D-INFER-PRIVATE1=A Dyn replacing DataTree, all operations and codec/UI goldens"
+        },
+        {
+          "at": "2026-10-02",
+          "by": "Pip",
+          "text": "DynLead handoff 2026-10-02 (paused for jetc performance; worktree .agent-worktrees/dyn-cutover, design ~/.cache/jet-luna/dyn/DESIGN.md, handoff ~/.cache/jet-luna/dyn/LEDGER.md): DataTree->Dyn cutover implemented in both compilers with Bytes/DateTime cases, codec mappings, dotted fields and indexing, auto-wrap, Dyn.from, checked operators, E0170-E0172; #4304 object order folded in; 9 goldens and 5 UI fixtures written. Static review only: nothing built or run. BLOCKING gaps before merge: (1) the new operations run only in AOT code while the JIT and interpreter refuse them: an I9 violation, so the default run tier must get the same meaning before this lands; (2) Core XML (Jet side) does not reject Bytes/DateTime; (3) Jet-side Core object rendering is O(n^2) per object (structural law #4319); (4) E0170 also fires when a Dyn is passed where a Bool is expected. Proofs owed: crate checks, isocheck, dyn goldens, UI blesses, the listed sema and foundation test filters, jit corpus classification rows."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "[#4362] Exact Int: CBOR major-type-0 2^63 decodes, and equal 2^128+1 trees compare equal, with no new numeric variant.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2ce486d9bf + 4eb607de2d: CBOR ints exact to 2^64-1/-2^64; tags 2 and 3 decode to an exact Dyn.Int with no new numeric variant, and a wide Int encodes as a bignum. Golden Examples/Data/Dyn/ExactInt at o0/o1/o2: 2^128+1 decodes, two separate decodes compare equal, equals Dyn.Int(2^128+1), tag 3 and to_bytes round-trip covered. golden Data/ 321/321, cases cbor 22 PASS (3 known-failing #6317, #5454).",
+          "at": "2026-11-07T20:26:56.642Z"
+        },
+        {
+          "n": 2,
+          "text": "[#4452] D-DATATREE-BYTES1=A: a public Bytes case with its CBOR and text-format laws. Every projection and exhaustive match migrates.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "At 4eb607de2d every exhaustive Dyn match with a DateTime arm also has Bytes (Core/Data/Data.jet:3350,3681; Cbor.jet:195; Csv.jet:350; Eetf.jet:563; Encoding.jet:373; Json.jet:730,822,901,1363; Stream.jet:1726; Toml.jet:745; Yaml.jet:453; Review.jet:840; StatusRead.jet:61; TestCompare.jet:148; ErrorReport.jet:240); sema refuses a non-exhaustive match, so they compiling is the proof. Golden Examples/Data/Dyn/BytesDateTime and DecodeBytes pass at o0/o1/o2 (golden Data/ 321/321).",
+          "at": "2026-11-07T20:27:11.195Z"
+        },
+        {
+          "n": 3,
+          "text": "[#4456] D-DATATREE-ORDER1=A: objects keep insertion order with ordered equality and constructors. Language Map order is unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2ce486d9bf: golden Examples/Data/Dyn/ObjectOrder at o0/o1/o2 asserts parsed == built (true), built == flipped (false), equal_unordered, and order kept by Dyn.Object, Dyn.object() and index write.",
+          "at": "2026-11-07T20:27:12.272Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #1628 c1) One datatree_kind remains, in the Jet Prelude; no compile-time, IR-evaluation or tier-specific copy exists [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6f3a2643a0 + e741a67850 (CoreCliLead-2). One source: core.encoding.__dyn_kind (Core/Encoding/Encoding.jet:365). Runtime data_tree_kind_name (Compiler/JetRuntime/Source/Dyn.jet) and web jet_dyn_kind (Compiler/Prelude/Web/Core/Values.js) are generated from its arms by Tools/agent/RuntimeGenerators.jet inside do-not-edit regions. civil_dyn_kind, __decimal_rejected and DynCodec codec_kind are deleted, and compile-time code runs natively on the same runtime, so no comptime or IR copy exists. Main 11-07 on dev 784485df5d+: RuntimeGenerators.jet --check with the a0_033 seed says 'runtime generated tables are current' (rc=0), and a grep of Compiler/ and Core/ finds no other Dyn kind table. Worker evidence: --check red after a hand edit of either generated file, 24/24 tool #Tests, golden Data/Dyn 33/33 including DecodeKinds o0/o1/o2.",
+          "at": "2026-11-07T14:19:29.040Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #1628 c2) The Bytes arm is present in the one copy, and comptime decode reports the same kind as the Prelude [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): Examples/Data/Dyn/DecodeBytes.jet PASS on o0, o1 and o2. Its comptime decodes (AT_BUILD, AT_BUILD_WIRE) print the same Bytes reasons as the run, and the example asserts built == AT_BUILD && read == AT_BUILD_WIRE.",
+          "at": "2026-11-07T16:59:31.945Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #1628 c3) A test decodes a Bytes payload and proves the same text and behavior on O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): Examples/Data/Dyn/DecodeBytes.jet decodes a CBOR Bytes payload to [U8], re-encodes it byte-identically, and PASSes with the same golden output on o0, o1 and o2.",
+          "at": "2026-11-07T16:59:32.891Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #1628 c4) Targeted tests pass, including the decode tests and the diagnostic snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): the decode tests (DecodeBytes golden on o0/o1/o2, encoding_parity cases) pass and the ui snapshot suite has 0 FAIL.",
+          "at": "2026-11-07T16:59:33.798Z"
+        },
+        {
+          "n": 8,
+          "text": "The DataTree spelling is gone: every data_tree_*/DATA_TREE_*/DataTree name in the runtime, RuntimeGenerators, Backend, IR, LSP, Devserver, rows, known-failing lines and Docs/spec becomes its Dyn name in one cutover (Rename.jet), with no alias. Docs/audits, research, proposals and Tools/tower stay untouched. jet check of the compiler and the touched rows pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "f14ce0e216 (DataTree to Dyn, one cutover, 91 files, no alias). git grep DataTree|data_tree_|DATA_TREE_ at 0a8122edeb, excluding Docs/audits, research, proposals and Tools/tower: 2 hits, both prose about the retired name (Docs/spec/diagnostics.md:390 'not restored as an alias', and one case comment). Land.jet census of 574a9fd134 by seed a0_034: compiler check rc=0 rows=0, build rc=0, runtime rc=0, selfcheck rc=0 (receipt b32e7a12...). Touched rows (TestSystemLead-2): dyn_ cases 7 PASS, 3 KF, 3 SKIP-HOST; goldens DynArrayAccepts 3/3, Data/Dyn 42/42; rtgen current.",
+          "at": "2026-11-08T00:32:52.815Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "dyn",
+        "data",
+        "encoding",
+        "owner-directed",
+        "wayfinder:task"
+      ],
+      "parentId": "c0iuv3zr",
+      "needsAcceptance": false,
+      "created": "2026-10-02T18:52:06.045Z",
+      "updated": "2026-11-08T01:59:16.911Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ],
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-08T01:59:16.911Z",
+      "questions": [],
+      "retiredAt": "2026-11-11T01:59:56.434Z"
     }
   ]
 }
