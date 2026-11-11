@@ -408,8 +408,10 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     }
     // A field reached through `Pin<T>` resolves against
     // `T`, read or written in the pinned place; the field's own declared type
-    // is the mark (a `Pin<U>` field comes back as `Pin<U>`).
-    owner_ty: sema_pin_target(base.ty) ?? base.ty.copy()
+    // is the mark (a `Pin<U>` field comes back as `Pin<U>`). A tagged value's
+    // field (`key.limbs` of a `#Secret Key`) resolves on the struct; the
+    // taint check carries the value's tags into the read.
+    owner_ty: sema_expr_unwrap_tag(sema_pin_target(base.ty) ?? base.ty.copy())
     owner_name: if owner_ty == {
         .Named(name) -> name
         .Apply(name, _) -> name

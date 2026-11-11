@@ -812,7 +812,9 @@ A tag inside a type counts as the value's own. The elements' tag of
 a Map's value tag and a tuple field's tag reach every read out of the value,
 a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
 value secret too: `opt ?? d` on it is E0737. A struct field's tag reaches
-every read of that field. Comparing two struct values (`==`, `!=`, `<`, `>`,
+every read of that field. A tagged struct value (`x: #Secret Limbs`) reads
+and writes the struct's declared fields, and each read carries the value's
+tag. Comparing two struct values (`==`, `!=`, `<`, `>`,
 `<=`, `>=` or `<=>`) runs the struct's `equal` or `compare`, which leaves at
 the first field that differs. So it is E0737 when either value carries a
 `.Fixed` tag or its struct type declares one on a field. The derived
