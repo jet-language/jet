@@ -813,8 +813,10 @@ __OpenAPIPattern: struct {
 }
 
 __OpenAPIRoute: struct {
-    // Index into __openapi_methods(), JetOpenApiHttpMethod order.
+    // Index into __openapi_methods(), JetOpenApiHttpMethod order; a custom
+    // method ranks after them all and is `token`, exactly as sent.
     method: Int
+    token: String
     path: String
     names: [String]
     catch_alls: [String]
@@ -827,12 +829,26 @@ __OpenAPIRoute: struct {
 }
 
 // The eight OpenAPI 3.1 Path Item operation fields, then `connect`: 3.1 has no
-// field for CONNECT, so its operation goes under OpenAPI 3.2
-// `additionalOperations` (keyed by the method as sent) and that document says
-// 3.2.0.
+// field for CONNECT or for a custom method, so their operations go under
+// OpenAPI 3.2 `additionalOperations` (keyed by the method as sent) and that
+// document says 3.2.0.
 __openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace", "connect"} }
 
-__openapi_additional_method: fn(method: Int) -> Bool Never! { __openapi_methods()[method] == "connect" }
+__openapi_additional_method: fn(route: __OpenAPIRoute) -> Bool Never! { route.token != "" || __openapi_methods()[route.method] == "connect" }
+
+// A route's method as sent: the upper-case standard name, or the custom
+// token exactly (so `get` and `GET` are two routes).
+__openapi_route_method: fn(route: __OpenAPIRoute) -> String Never! {
+    if route.token != "" -> return route.token.copy()
+    __openapi_methods()[route.method].to_upper()
+}
+
+// The method part of a derived operation id: the Path Item field of a
+// standard method, or `custom_` and the token, which no standard field is.
+__openapi_operation_method: fn(route: __OpenAPIRoute) -> String Never! {
+    if route.token != "" -> return "custom_{route.token}"
+    __openapi_methods()[route.method].copy()
+}
 
 __openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
 
@@ -843,15 +859,14 @@ __openapi_index: fn(values: [String], value: String) -> Int? {
     None
 }
 
-// A method name in any ASCII case.
-__openapi_method: fn(value: String) -> Int? {
-    lower := [U8]{}
-    loop byte in value.bytes() {
-        n: Int.from_u8(byte)
-        lower.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
+// The rank of a method as sent: a standard method is exactly its upper-case
+// name, and any other token (`get` too) is a custom method, ranked last.
+__openapi_method: fn(value: String) -> Int Never! {
+    methods: __openapi_methods()
+    loop index in 0..<methods.len() {
+        if methods[index].to_upper() == value -> return index
     }
-    text: String.from_bytes(lower) ?? return None
-    __openapi_index(__openapi_methods(), text)
+    methods.len()
 }
 
 __openapi_problem: fn(path: String, reason: String) -> String Never! {
@@ -1107,7 +1122,8 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
     value: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
     fields: __openapi_object(value) ?? return Err(err)
     method_text: __openapi_text(fields, "method") ?? return Err(err)
-    rank: __openapi_method(method_text) ?? return Err(__openapi_fault("unsupported OpenAPI HTTP method `{method_text}`"))
+    rank: __openapi_method(method_text)
+    token: if rank == __openapi_methods().len() -> method_text.copy() else -> ""
     pattern_text: __openapi_text(fields, "pattern") ?? return Err(err)
     parsed: __openapi_pattern(pattern_text) ?? return Err(err)
     path: __openapi_text(fields, "path") ?? return Err(err)
@@ -1138,15 +1154,16 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
         .Err(fault) -> { return Err(fault) }
     }
     registered: __openapi_pattern(pattern) ?? return Err(err)
-    if (__openapi_method(method) ?? -1) != rank || registered.key != parsed.key -> return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
-    id: if operation_id == "" -> __openapi_operation_id(rank, parsed.path) else -> operation_id
-    Ok(__OpenAPIRoute{method: rank, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: id, summary: summary, parameters: parameters, body: body, responses: responses, security: security})
+    if method != method_text || registered.key != parsed.key -> return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
+    route := __OpenAPIRoute{method: rank, token: token, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: operation_id, summary: summary, parameters: parameters, body: body, responses: responses, security: security}
+    if route.operation_id == "" -> route.operation_id = __openapi_operation_id(__openapi_operation_method(route), route.path)
+    Ok(route)
 }
 
 // jet_openapi_operation_id_for_path: FNV-1a 64 of
-// `jet-openapi-operation-v1:<method>\0<path>`.
-__openapi_operation_id: fn(method: Int, path: String) -> String Never! {
-    name: __openapi_methods()[method]
+// `jet-openapi-operation-v1:<method>\0<path>`, the method as
+// __openapi_operation_method names it.
+__openapi_operation_id: fn(name: String, path: String) -> String Never! {
     bytes := "jet-openapi-operation-v1:".bytes()
     loop byte in name.bytes() -> bytes.push(byte)
     bytes.push(U8{0})
@@ -1202,6 +1219,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
     routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
         if left.path != right.path -> return left.path <=> right.path
         if left.method != right.method -> return left.method <=> right.method
+        if left.token != right.token -> return left.token <=> right.token
         left.operation_id <=> right.operation_id
     })
     if title == "" || version == "" -> return Err(__openapi_fault("OpenAPI info title and version must not be empty"))
@@ -1216,7 +1234,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         } else {
             operation_ids.push(route.operation_id.copy())
         }
-        key: "{__openapi_methods()[route.method]} {route.path}"
+        key: "{__openapi_route_method(route)} {route.path}"
         if keys.contains(key) {
             errors.push("duplicate OpenAPI route `{key}`")
         } else {
@@ -1280,11 +1298,11 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         methods := [String]{}
         additional := [String]{}
         loop index < routes.len() && routes[index].path == path {
-            name: __openapi_methods()[routes[index].method]
-            if __openapi_additional_method(routes[index].method) {
-                additional.push("{__app_json_string(name.to_upper())}:{__openapi_route_json(routes[index])}")
+            if __openapi_additional_method(routes[index]) {
+                // Keyed by the method as sent: CONNECT, or the custom token.
+                additional.push("{__app_json_string(__openapi_route_method(routes[index]))}:{__openapi_route_json(routes[index])}")
             } else {
-                methods.push("{__app_json_string(name)}:{__openapi_route_json(routes[index])}")
+                methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
             }
             index += 1
         }

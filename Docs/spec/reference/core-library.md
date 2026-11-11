@@ -1400,6 +1400,20 @@ served only for other methods is `405` with `Allow`, an unknown path `404`, and
 registered first runs outermost. Every request carries `x-request-id`: a valid
 incoming value (1–128 visible ASCII bytes) is kept, otherwise one is generated.
 
+A route registers with its method's verb, `mux.get(path, handler)` and the
+other standard methods, or with `mux.custom(token, path, handler)` for any other
+method; `HTTPRouter` and the `#Server.Get(path)` … `#Server.Custom(token,
+path)` marks of a mounted struct take the same forms. A custom method is any
+RFC 9110 token, matched in the exact case it is sent: `get` is not `GET`. Only
+a token that is exactly a standard method is refused, since that method has
+its own verb, and so is a token that is not a method; both refusals are
+E2808. One check decides both: a static token is checked while building, and a
+run-time token (a mux only) when its route registers. A route path is a
+`String` or a `Path`; a `Path{…}` literal hole is one percent-encoded segment,
+and a literal without holes is a static pattern like the same `String`.
+`web.openapi` lists a custom method's operation, like `CONNECT`'s, under the
+OpenAPI 3.2 `additionalOperations` of its path, keyed by the method as sent.
+
 Request framing refuses what HTTP/1.1 forbids: a head over 32 KiB or more than
 100 fields is `431`; a malformed request line, an obsolete folded field, a
 missing or repeated `Host` on HTTP/1.1, `Content-Length` with

@@ -337,6 +337,10 @@ sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statement
     body_id
 }
 
+// A pure check staged at a call site: a checked text literal's
+// `CheckedText.check`, or a static HTTP route method token's core.http
+// check. A Result error refuses the site as `code` with `what` and `fix`;
+// the error's reason is the Why.
 SemaCheckedTextEvaluation: struct {
     module_identity: String
     key: String
@@ -350,6 +354,9 @@ SemaCheckedTextEvaluation: struct {
     reachable_function_keys: [String]
     dependencies: [String]
     span: Span
+    code: String
+    what: String
+    fix: String
 }
 
 SemaComptimeRequest: struct {

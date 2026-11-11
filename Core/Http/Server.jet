@@ -23,51 +23,62 @@ use {
 // entries receive the normalized options.
 
 // Body-less route markers record route facts. Only `mux.mount(value)`
-// exposes the tagged methods of that value's struct.
+// exposes the tagged methods of that value's struct. A route path is text or
+// a `Path`, as at `mux.get(path, handler)`.
 Get: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Post: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Put: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Delete: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Patch: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Head: struct {
-    path: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
     }
 }
 Options: struct {
-    path: String
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+// `#Server.Custom(token, path)`: a route of the custom method `token`, a
+// static String kept in its exact case (core.http `__method_token_check`).
+Custom: struct {
+    token: String
+    path: String | Path
 
     impl Marker {
         sites: [.Method]
@@ -201,6 +212,18 @@ impl HTTPMux {
     // A route whose pattern is a run-time value: its contract
     // (`"pattern":""`) gets its path inputs from the pattern registered.
     __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
+        parsed: __route_parse(pattern)
+        if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+        checked: __route_contract(method, pattern, parsed.segments, contract, at)
+        __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked, at)
+    }
+
+    // `mux.custom(token, pattern, handler)` whose token is a run-time value:
+    // the token passes core.http's one method token check here, at the
+    // registering line, and completes the contract (`"method":""`). A static
+    // token was checked while building and registers as any verb does.
+    __route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
+        if http.__method_token_check(method) == .Err(refused) -> __route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
         parsed: __route_parse(pattern)
         if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
         checked: __route_contract(method, pattern, parsed.segments, contract, at)
@@ -874,9 +897,10 @@ __route_openapi_path: fn(segments: [__HTTPSegment]) -> String Never! {
 
 // A registration's checked contract, completed and checked once
 // (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
-// its path inputs from the pattern registered.
+// its path inputs from the pattern registered, and a run-time custom method's
+// (`"method":""`) gets that method.
 __route_contract: fn(method: String, pattern: String, segments: [__HTTPSegment], contract: String, at: SourceLocation) -> String Never! {
-    completed: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
+    completed: if contract.contains("\"pattern\":\"\"") || contract.contains("\"method\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
     __route_require_contract(method, pattern, completed, at)
     completed
 }
@@ -961,6 +985,7 @@ __route_complete_contract: fn(method: String, pattern: String, segments: [__HTTP
         completed.push(Dyn.Object(members))
     }
     fields = __contract_set(fields, "parameters", Dyn.Array(completed))
+    fields = __contract_set(fields, "method", Dyn.Text(method.copy()))
     fields = __contract_set(fields, "pattern", Dyn.Text(pattern.copy()))
     fields = __contract_set(fields, "path", Dyn.Text(__route_openapi_path(segments)))
     fields = __contract_set(fields, "operation_id", Dyn.Text(""))

@@ -1758,7 +1758,7 @@ jet_driver_comptime_flush: fn(
                     return flushed
                 }
                 why: jet_driver_checked_text_reason(report) ?? "the type's pure `CheckedText.check` method must accept the complete literal body"
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2712", evaluation.span, "this checked text type rejected its body", why, "fix the body so it satisfies the type's declared text grammar"))
+                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, evaluation.code, evaluation.span, evaluation.what, why, evaluation.fix))
                 flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                 return flushed
             }

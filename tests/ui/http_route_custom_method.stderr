@@ -1,0 +1,26 @@
+Error [jet.AmbiguousRoute]: Two routes both match `PURGE /cache`.
+  --> http_route_custom_method.jet:27:9
+    |
+ 27 |     mux.custom("PURGE", "/cache", handle)
+    |         ^^^^^^
+ Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
+ Fix: Remove one registration or use a distinct method and path
+More: jet-lang.dev/e/E2804
+
+Error [jet.AmbiguousRoute]: Two routes both match `PURGE /marked`.
+  --> http_route_custom_method.jet:12:5
+    |
+ 12 |     #Server.Custom("PURGE", "/marked")
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
+ Fix: Remove one registration or use a distinct method and path
+More: jet-lang.dev/e/E2804
+
+Error [jet.RouteMethodTokenRefused]: HTTPRouter custom route method must be a static String
+  --> http_route_custom_method.jet:32:19
+    |
+ 32 |     router.custom(names[0], "/cache", handle)
+    |                   ^^^^^
+ Why: Router and `#Server.Custom` routes are fully checked while building; only a mux takes a run-time method, checked when it registers
+ Fix: Use a literal or compile-time String constant, or register the route on a mux
+More: jet-lang.dev/e/E2808

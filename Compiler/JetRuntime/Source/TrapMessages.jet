@@ -70,14 +70,23 @@ trap_footer_e2805: fn() { trap_write_static(trap_footer_e2805_text()) }
 
 trap_build_footer_e2805: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2805_text()) }
 
+// E2808 Why: A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it.
+// Fix: Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~.
+trap_footer_e2808_text: fn() -> I64 { rt_static_text(" Why: A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it.\n Fix: Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~.\nMore: jet-lang.dev/e/E2808\n") }
+
+trap_footer_e2808: fn() { trap_write_static(trap_footer_e2808_text()) }
+
+trap_build_footer_e2808: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2808_text()) }
+
 trap_coded_registered: fn(code: I64) -> Bool {
-    code == I64{224147288645} || code == I64{228442255941}
+    code == I64{224147288645} || code == I64{228442255941} || code == I64{241327157829}
 }
 
 trap_coded_footer: fn(code: I64) {
     if {
         (code == I64{224147288645}) -> trap_footer_e2804()
-        else -> trap_footer_e2805()
+        (code == I64{228442255941}) -> trap_footer_e2805()
+        else -> trap_footer_e2808()
     }
 }
 

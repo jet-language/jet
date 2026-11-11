@@ -712,6 +712,23 @@ impl Method {
     }
 }
 
+// Why a custom route method token was refused.
+#Error
+__MethodTokenError: struct { reason: String }
+
+// The one check of a custom route method token (`mux.custom(token, …)`,
+// `router.custom` and `#Server.Custom`): the compiler runs it on a static
+// token while building and a mux runs it on a run-time token when the route
+// registers. Any RFC 9110 token is a method, kept in its exact case; only a
+// token that is exactly a standard method is refused, since that method has
+// its own verb.
+__method_token_check: fn(token: String) __MethodTokenError! -[]> {
+    if !valid_method(token) -> return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
+    standard: method_parse(token)
+    if standard != Method.Custom(token.copy()) && method_text(standard) == token -> return Err(__MethodTokenError{reason: "`{token}` is a standard method, which registers with its own verb `{token.lower()}`"})
+    Ok()
+}
+
 impl Method.Display { display: fn(self) -> String { method_text(self) } }
 
 impl Status {
@@ -1223,7 +1240,9 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     // (#4428, #4431). A read as text decodes it then, so a binary upload parses.
     body_raw: slice_b(raw, split, raw.len())
     body: if body_len > 0 -> Body.Bytes(body_raw) else -> Body.Empty
-    Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
+    // The method stays as sent: methods are case-sensitive, so `get` is not
+    // `GET` (the server reads it the same way).
+    Ok(__server_request(parts[0], parts[1], body, fields))
 }
 
 StatusLine: struct {

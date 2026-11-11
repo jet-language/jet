@@ -17,13 +17,16 @@ use jet_foundation.[
     StrPart,
     StructDef,
     SymbolKind,
+    TComptimeValue,
     Type,
     ast_binding,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
     core_enum_variants,
     core_source_receiver_method,
+    diagnostic_registry_row,
     expr_span,
+    type_identity_equal,
     type_name,
 ]
 
@@ -207,7 +210,19 @@ sema_http_route_constant_string: fn(expression: Expr, environment: SemaScopeEnvi
                 return None
             }
         }
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+        // A `Path{…}` literal without holes is static text: Path keeps it,
+        // only turning `\` into `/` (Path.from).
+        .TypedLit(head, body, _, _) -> {
+            if head != (Val(Type.Named{name: "Path"})) -> return None
+            if body == {
+                .Value(value) -> {
+                    text: sema_http_route_constant_string(value, environment, program, scopes) ?? return None
+                    return Val(text.replace("\\", "/"))
+                }
+                .Fields(_) | .Elements(_) | .Entries(_) | .ByteText(_) | .Empty -> { return None }
+            }
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -409,6 +424,22 @@ sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvir
     reason: sema_http_route_pattern_error(pattern) ?? return SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: false}
     diagnostics.push(sema_http_route_invalid_diagnostic(pattern, reason, argument.span))
     SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: true}
+}
+
+// A route path is a String or a `Path` (what a checked `Path{…}` literal
+// builds), registered as its text. Every verb, `router` and `#Server` mark
+// takes its path through this one conversion.
+sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
+        text: sema_call_try_stream_handle_method(argument.expr, checked, "to_string", [CallArg]{}, argument.span, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
+        return text.value
+    }
+    if type_identity_equal(checked.ty, Type.String) -> return Val(checked)
+    compatible: sema_call_type_assignable(Type.String, checked.ty, environment, program) ?? return None
+    if compatible -> return Val(checked)
+    diagnostics.push(sema_type_mismatch(Type.String, checked.ty, argument.span))
+    None
 }
 
 sema_http_route_json_quote: fn(value: String) -> String Never! {
@@ -909,20 +940,69 @@ sema_http_route_find_json_body: fn(body: LambdaBody, request_names: [String]) ->
 }
 
 // The route verbs are the cases of `core.http`'s `Method` enum (`Get` is
-// `mux.get`), except `Custom`, whose token is a run-time value.
+// `mux.get`), except `Custom`, whose token is the custom verb's first
+// argument (sema_http_route_custom_verb).
 sema_http_route_verbs: fn() -> [String] Never! {
     variants: core_enum_variants("Method") ?? [String]{}
     verbs := [String]{}
     loop variant in variants {
-        if variant != "Custom" {
+        if variant != SEMA_HTTP_ROUTE_CUSTOM_CASE {
             verbs.push(variant.lower())
         }
     }
     verbs
 }
 
+SEMA_HTTP_ROUTE_CUSTOM_CASE: "Custom"
+
+// `Method.Custom` as a verb: `mux.custom(token, path, handler)`,
+// `router.custom` and `#Server.Custom(token, path)`.
+sema_http_route_custom_verb: fn() -> String Never! {
+    SEMA_HTTP_ROUTE_CUSTOM_CASE.lower()
+}
+
 sema_http_route_method_name: fn(method: String) -> String Never! {
     method.upper()
+}
+
+// A static custom method token is checked while building by core.http's one
+// method token check, `__method_token_check`, staged as a checked text
+// literal's `check` is; a run-time mux token meets the same check when it
+// registers (`HTTPMux.__route_custom`).
+sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    span: argument.span
+    identity: sema_call_core_module_identity(environment, program, "core.http") ?? return
+    target: sema_call_core_source_target(environment, program, identity, "__method_token_check", [Type]{}, span, true, diagnostics) ?? return
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return
+    result: sema_call_signature_return(target.signature) ?? return
+    text: sema_call_http_core_string(token, span)
+    check: sema_tree_node(sema_call_resolved_type(result, environment, program), TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_call_http_static_tree_arg(text, argument)}}, span)
+    key: target.symbol.id.key
+    evaluation := SemaCheckedTextEvaluation{
+        module_identity: environment.module_identity,
+        key: "{environment.module_identity}::http-method::{span.start}:{span.end}",
+        type_name: "HTTP route method",
+        source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span),
+        source_expression: argument.expr,
+        expression: sema_publish_expression(check, context.arena.tree),
+        ty: check.ty,
+        hardware_use: sema_hardware_empty_use(),
+        reachable_function_keys: [String]{key},
+        dependencies: [String]{},
+        span: span,
+        code: "E2808",
+        what: "HTTP route method `{token}` is refused",
+        fix: (diagnostic_registry_row("E2808") ?? panic("E2808 has no registry row")).fix,
+    }
+    context.comptime_requests.push(SemaComptimeRequest{callee_key: key, module_identity: identity, args: [TComptimeValue]{}, span: span, checked_text: Val(evaluation)})
+}
+
+// The method part of a route's operation id: the lower-case verb of a
+// standard method, or `custom_` and the exact token (web.openapi's
+// __openapi_operation_method).
+sema_http_route_operation_method: fn(method: String, wire: String) -> String Never! {
+    if method == sema_http_route_custom_verb() -> return "custom_{wire}"
+    method.copy()
 }
 
 sema_http_route_operation_id: fn(method: String, path: String) -> String Never! {
@@ -944,7 +1024,10 @@ sema_http_route_operation_id: fn(method: String, path: String) -> String Never! 
     output
 }
 
-sema_http_route_contract: fn(method: String, pattern: String, path_fields: [SemaHTTPRoutePathField], shape: SemaHTTPRouteShape, body_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, is_mux: Bool, line: Int, locals: [SemaHTTPRouteParameter], responses: [SemaHTTPRouteResponse]) -> String? {
+// `method` is the verb (`get`, `custom`), which decides how inputs bind;
+// `wire` is the method as sent (`GET`, `PURGE`), or "" for a run-time custom
+// token, which its mux completes when it registers.
+sema_http_route_contract: fn(method: String, wire: String, pattern: String, path_fields: [SemaHTTPRoutePathField], shape: SemaHTTPRouteShape, body_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, is_mux: Bool, line: Int, locals: [SemaHTTPRouteParameter], responses: [SemaHTTPRouteResponse]) -> String? {
     canonical := ""
     if pattern == "/" -> canonical = "/" else {
         segments := pattern.split("/").to_list()
@@ -1000,7 +1083,7 @@ sema_http_route_contract: fn(method: String, pattern: String, path_fields: [Sema
     }
     if response_json.len() == 0 && !is_mux -> return None
     source := if environment.source_file == "" -> "<source>" else -> environment.source_file
-    Val("{{\"method\":{sema_http_route_json_quote(sema_http_route_method_name(method))},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(method, canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
+    Val("{{\"method\":{sema_http_route_json_quote(wire)},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(sema_http_route_operation_method(method, wire), canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
 }
 
 sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -1008,25 +1091,55 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     receiver_name := sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && receiver_name != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if !sema_http_route_verbs().contains(method) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    literal: if updated_args.len() > 0 -> sema_http_route_check_literal(updated_args[0], environment, program, scopes, diagnostics) else -> SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}
-    if updated_args.len() != 2 {
-        diagnostics.push(sema_call_arity_diagnostic(method, 2, updated_args.len(), false, span))
+    custom: method == sema_http_route_custom_verb()
+    if !custom && !sema_http_route_verbs().contains(method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    // A custom route's first argument is its method token; the path and
+    // handler follow as at every verb.
+    arity: if custom -> 3 else -> 2
+    if updated_args.len() != arity {
+        if updated_args.len() > arity - 2 {
+            _ := sema_http_route_check_literal(updated_args[arity - 2], environment, program, scopes, diagnostics)
+        }
+        diagnostics.push(sema_call_arity_diagnostic(method, arity, updated_args.len(), false, span))
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    path_value: sema_call_http_check_value(updated_args[0], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    token_argument := CallArg?{None}
+    if custom {
+        token_argument = Val(updated_args[0].copy())
+        updated_args = [CallArg]{updated_args[1].copy(), updated_args[2].copy()}
+    }
+    literal: sema_http_route_check_literal(updated_args[0], environment, program, scopes, diagnostics)
+    path_value: sema_http_route_path_value(updated_args[0], environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     dynamic: literal.pattern == None
     pattern: literal.pattern ?? ""
     if dynamic && receiver_name != "HTTPMux" {
-        if !literal.interpolated -> diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
+        if !literal.interpolated -> diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String or Path", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a mux"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !dynamic && sema_expr_place_root_ident(receiver) == .Val(root) {
+    // The method as sent: a standard verb's upper-case name, or the custom
+    // token in its exact case; "" for a run-time token, which only a mux
+    // takes and checks when it registers.
+    wire := sema_http_route_method_name(method)
+    token_value := TExpr?{None}
+    if token_argument == .Val(token_arg) {
+        if sema_http_route_constant_string(token_arg.expr, environment, program, scopes) == .Val(token) {
+            sema_http_route_stage_token_check(token, token_arg, environment, program, context, diagnostics)
+            wire = token
+        } else {
+            if receiver_name != "HTTPMux" {
+                diagnostics.push(sema_error("E2808", token_arg.span, "HTTPRouter custom route method must be a static String", "router and `#Server.Custom` routes are fully checked while building; only a mux takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route on a mux"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            token_value = Val(sema_call_http_check_value(token_arg, Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
+            wire = ""
+        }
+    }
+    if !dynamic && wire != "" && sema_expr_place_root_ident(receiver) == .Val(root) {
         if sema_scope_resolve_index(scopes, root) == .Val(binding_index) {
-            key: "{scopes.bindings[binding_index].symbol.id.key}|{method}|{pattern}"
+            key: "{scopes.bindings[binding_index].symbol.id.key}|{wire}|{pattern}"
             if context.http_routes.contains(key) {
-                diagnostics.push(sema_error("E2804", span, "Two routes both match `{sema_http_route_method_name(method)} {pattern}`.", "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list", "remove one registration or use a distinct method and path"))
+                diagnostics.push(sema_error("E2804", span, "Two routes both match `{wire} {pattern}`.", "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list", "remove one registration or use a distinct method and path"))
             } else {
                 context.http_routes.push(key)
             }
@@ -1164,15 +1277,17 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             .Expr(expression) -> sema_http_route_response_expr(expression, environment, program, scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
             .Block(statements) -> sema_http_route_response_statements(statements, environment, program, scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
         }
-        contract: sema_http_route_contract(method, pattern, path_fields, handler_shape, body_type, environment, program, receiver_name == "HTTPMux", line, handler_shape.params, responses) ?? {
+        contract: sema_http_route_contract(method, wire, pattern, path_fields, handler_shape, body_type, environment, program, receiver_name == "HTTPMux", line, handler_shape.params, responses) ?? {
             diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler has no complete checked endpoint contract", "router registration needs response metadata and serializable path/query/body schemas", "return a typed `HTTPResponse` constructor from every handler path"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        verb: sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_http_route_method_name(method)}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        // A run-time custom token is its own checked value; any other method
+        // is its text as sent.
+        verb: if token_value == .Val(found) -> found else -> sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: wire}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         // The route keeps its checked contract: `web.openapi(mux)` and
         // `web.openapi(router)` render the document from these registrations.
         // A run-time mux pattern's contract is completed from that pattern
-        // when it registers.
+        // when it registers, and a run-time custom method's from that method.
         contract_value: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: contract}}}, span)
         route_args := [TCallArg]{
             sema_call_http_static_tree_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
@@ -1180,7 +1295,11 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             sema_call_http_static_tree_arg(callback, updated_args[1]),
             sema_call_http_static_tree_arg(contract_value, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
         }
-        target: if dynamic -> "__route_dynamic" else -> "__route"
+        target: if {
+            wire == "" -> "__route_custom"
+            dynamic -> "__route_dynamic"
+            else -> "__route"
+        }
         return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     SemaMethodSpecialCheck{handled: true, value: None}

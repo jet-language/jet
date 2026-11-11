@@ -12637,6 +12637,20 @@ DuplicateRoute: struct {
     }
 }
 
+RouteMethodTokenRefused: struct {
+    method: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E2808"
+        stage: [.Compile]
+        detail: true
+        what: fn(self) -> String { "HTTP route method `{self.method}` is refused: {self.reason}." }
+        why: fn(self) -> String { "A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it." }
+        fix: fn(self) -> String { "Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~." }
+    }
+}
+
 UnknownHandler: struct {
     kind: String
     name: String
