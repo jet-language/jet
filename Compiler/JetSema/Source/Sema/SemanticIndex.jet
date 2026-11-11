@@ -1225,6 +1225,11 @@ sema_compiler_index_walk_derive_body: fn(state: &SemaCompilerIndexWalkState, bod
                 sema_compiler_index_walk_expr(state, source, module_path)
                 sema_compiler_index_walk_derive_body(state, nested, module_path)
             }
+            .If(cond, _, then_body, else_body, _) -> {
+                sema_compiler_index_walk_expr(state, cond, module_path)
+                sema_compiler_index_walk_derive_body(state, then_body, module_path)
+                if else_body == .Val(branch) -> sema_compiler_index_walk_derive_body(state, branch, module_path)
+            }
         }
     }
 }

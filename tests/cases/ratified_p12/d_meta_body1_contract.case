@@ -1,0 +1,28 @@
+# Marker bodies (#4276 c7): a marker's `expand` template holds the members it
+# generates. A `name: fn(…)` written directly in the template is a member of
+# the marked type with no nested `impl` (a static one too); a body-level
+# `comptime if … else comptime if … else` expands only its chosen branch, and
+# a template loop writes one member per field. The marker's parameter is a
+# named field read as `self.label`. A direct member that would replace a
+# written one is refused like any generated member.
+fixture: d_meta_body1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_meta_body1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_meta_body1_contract.stdout.expected
+stderr: empty
+step fmt: jet fmt --check main.jet
+exit: 0 # the direct-member template is already formatted
+step collide: jet check collide/main.jet
+exit: 1
+stderr: ~ "Generated member `describe` would change or shadow `describe` on `Point`" # a direct member can't replace a written one
+stderr: ~ "jet-lang.dev/e/E0105" # the generated-collision code
+stderr: ~ "--> main.jet:9:13" # the template's direct member
+stderr: ~ "1 problem found" # one collision

@@ -295,6 +295,11 @@ sema_casing_derive_body: fn(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) 
                 sema_casing_expr(source, diagnostics)
                 sema_casing_derive_body(nested, diagnostics)
             }
+            .If(cond, _, then_body, else_body, _) -> {
+                sema_casing_expr(cond, diagnostics)
+                sema_casing_derive_body(then_body, diagnostics)
+                if else_body == .Val(branch) -> sema_casing_derive_body(branch, diagnostics)
+            }
         }
     }
 }

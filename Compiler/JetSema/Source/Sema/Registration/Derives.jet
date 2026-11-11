@@ -1558,7 +1558,8 @@ sema_derive_expand_item: fn(expansion: &SemaDeriveExpansion, item: Item) -> Item
 
 // Rust `expand_derive_items`: a body-level `name: value` binds a template
 // value; items expand against the current scope; a template loop expands its
-// items once per source value.
+// items once per source value; a template `if` expands only the chosen
+// branch, whose bindings end with it.
 sema_derive_expand_body: fn(expansion: &SemaDeriveExpansion, body: [DeriveBodyItem], out: &[Item]) Never! {
     loop body_item in body {
         if expansion.failure != None -> return
@@ -1602,6 +1603,13 @@ sema_derive_expand_body: fn(expansion: &SemaDeriveExpansion, body: [DeriveBodyIt
                     loop expansion.scope.len() > depth -> _ := expansion.scope.pop()
                     if expansion.failure != None -> return
                 }
+            }
+            .If(cond, cond_span, then_body, else_body, _) -> {
+                chosen: if sema_derive_prep_if_selected(expansion, cond, cond_span) -> then_body else -> else_body ?? [DeriveBodyItem]{}
+                if expansion.failure != None -> return
+                depth: expansion.scope.len()
+                sema_derive_expand_body(expansion, chosen, out)
+                loop expansion.scope.len() > depth -> _ := expansion.scope.pop()
             }
         }
     }

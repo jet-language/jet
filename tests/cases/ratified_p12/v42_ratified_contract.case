@@ -1,0 +1,41 @@
+# The marker law (#4276 c13): one marker shape, two tiers. A package marker
+# reads facts about its target, adds ordinary items (a direct member and a
+# pasted module struct) and rejects code through its own Diagnostic; what it
+# adds is checked like written code and reported at the template line. A
+# package marker that sets a checking setting (`inherits`, `resolution`,
+# `scopes`, `owns_menu`, `companion`) is refused; `sites` and `repeatable`
+# stay its own, and the embedded Prelude's rows (`Policy` sets all three
+# refused settings) alone change checking.
+fixture: v42_ratified_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step run: jet run main.jet
+exit: 0
+stdout: = v42_ratified_contract.stdout.expected
+stderr: empty
+step reject: jet check reject/main.jet
+exit: 1
+stderr: ~ "`Point` has 4 fields" # the package marker rejects through its own Diagnostic
+stderr: ~ "--> main.jet:26:1" # the #Audit use site
+stderr: ~ "1 problem found" # one rejection
+step checked: jet check checked/main.jet
+exit: 1
+stderr: ~ "but `width` returns Int" # the generated member is checked like written code
+stderr: ~ "jet-lang.dev/e/E0113" # the ordinary return-type code
+stderr: ~ "--> main.jet:8:38" # the generated member's body, in the template
+stderr: ~ "1 problem found" # one problem
+step tier: jet check tier/main.jet
+exit: 1
+stderr: ~ "`inherits` changes how the compiler checks code, so `Strict` can't set it" # a package marker can't inherit checking
+stderr: ~ "--> main.jet:8:9" # located at the inherits setting
+stderr: ~ "`resolution` changes how the compiler checks code" # nor set resolution
+stderr: ~ "--> main.jet:9:9" # located at the resolution setting
+stderr: ~ "`scopes` changes how the compiler checks code" # nor set scopes
+stderr: ~ "--> main.jet:10:9" # located at the scopes setting
+stderr: ~ "only Jet's Prelude markers change checking settings" # the Prelude tier alone
+stderr: ~ "jet-lang.dev/e/E0936" # the marker-setting code
+stderr: !~ "main.jet:6:" # sites stays a package marker's own
+stderr: !~ "main.jet:7:" # and so does repeatable
+stderr: ~ "3 problems found" # one per refused setting

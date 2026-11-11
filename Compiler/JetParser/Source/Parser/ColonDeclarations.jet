@@ -21,7 +21,9 @@
 // - In a function body or any other code block, it stays a local function
 //   value. The item block of a build's
 //   `b.generate("name") { … }` holds the generated file's items, so it reads as
-//   a module body.
+//   a module body. The body of a marker's `expand: fn` template inside
+//   `impl Marker { … }` holds the members the marker generates, so it reads
+//   as a container body.
 //
 // A module instance has no keyword either: `int_cache: cache<Int>(32)`. At
 // file scope and in module bodies, a binding whose right-hand side is only a
@@ -132,6 +134,27 @@ parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_DERIVE || head == TOKEN_KW_EXTERN || head == TOKEN_KW_TAG || head == TOKEN_KW_EFFECT -> return PARSER_COLON_FRAME_CONTAINER
     if head == PARSER_COLON_HEAD_COMPTIME_BLOCK && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) -> return frame
     PARSER_COLON_FRAME_CODE
+}
+
+// A statement head's part in a marker declaration: none, the `impl Marker`
+// block, or the `expand` template written in it.
+PARSER_COLON_MARKER_NONE: 0
+PARSER_COLON_MARKER_IMPL: 1
+PARSER_COLON_MARKER_TEMPLATE: 2
+
+// The marker part of the head at `head`: `impl Marker {` opens the marker's
+// settings block, and a `fn expand` head is its template when that block
+// holds it.
+parser_colon_marker_head: fn(tokens: [Token], tables: TokenTables, head: Int) -> Int Never! {
+    if head >= tokens.len() -> return PARSER_COLON_MARKER_NONE
+    name: parser_colon_code_at(tokens, head + 1)
+    if name >= tokens.len() || tokens[name].kind != TOKEN_IDENT -> return PARSER_COLON_MARKER_NONE
+    if tokens[head].kind == TOKEN_KW_IMPL && token_decoded(tables, tokens[name]) == "Marker" {
+        open: parser_colon_code_at(tokens, name + 1)
+        if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE -> return PARSER_COLON_MARKER_IMPL
+    }
+    if tokens[head].kind == TOKEN_KW_FN && token_decoded(tables, tokens[name]) == "expand" -> return PARSER_COLON_MARKER_TEMPLATE
+    PARSER_COLON_MARKER_NONE
 }
 
 // Whether the group opening at `open` holds the arguments of a `.generate(…)`
@@ -417,15 +440,21 @@ parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Boo
 // `tables` spells the tokens' names.
 parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
     tokens := input.move()
-    // Per open delimiter: its frame, and the enclosing statement's head
-    // kind and whether that statement had opened its body.
+    // Per open delimiter: its frame, whether it is an `impl Marker` body,
+    // and the enclosing statement's head kind, its marker part and whether
+    // that statement had opened its body.
     frames := [Int]{}
+    saved_marker_bodies := [Bool]{}
     saved_heads := [Int]{}
+    saved_marker_heads := [Int]{}
     saved_opened := [Bool]{}
     frame := PARSER_COLON_FRAME_MODULE
-    // The current statement's head kind (-1 before it is read) and whether
-    // its first `{` has opened.
+    // Whether the current frame is an `impl Marker` body.
+    marker_body := false
+    // The current statement's head kind (-1 before it is read), its marker
+    // part and whether its first `{` has opened.
     head_kind := -1
+    head_marker := PARSER_COLON_MARKER_NONE
     opened := false
     at_start := true
     // Module instance candidates, and the names this file declares as
@@ -480,29 +509,38 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                     if tokens[at].kind == TOKEN_KW_COMPTIME -> head_kind = PARSER_COLON_HEAD_COMPTIME_BLOCK
                 }
             }
+            head_marker = parser_colon_marker_head(tokens, tables, head)
             opened = false
         }
         current: tokens[index].kind
         if current == TOKEN_LPAREN || current == TOKEN_LBRACKET || current == TOKEN_LBRACE {
             frames.push(frame)
+            saved_marker_bodies.push(marker_body)
             opens.push(index)
             saved_heads.push(head_kind)
+            saved_marker_heads.push(head_marker)
             saved_opened.push(opened)
             if current == TOKEN_LBRACE {
                 body: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
+                if body && marker_body && head_marker == PARSER_COLON_MARKER_TEMPLATE -> frame = PARSER_COLON_FRAME_CONTAINER
                 if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) -> frame = PARSER_COLON_FRAME_MODULE
+                marker_body = body && head_marker == PARSER_COLON_MARKER_IMPL
                 saved_opened[saved_opened.len() - 1] = true
                 at_start = true
             } else {
                 frame = PARSER_COLON_FRAME_GROUP
+                marker_body = false
             }
             head_kind = -1
+            head_marker = PARSER_COLON_MARKER_NONE
             opened = false
         } else if current == TOKEN_RPAREN || current == TOKEN_RBRACKET || current == TOKEN_RBRACE {
             if frames.len() > 0 {
                 frame = frames.pop() ?? PARSER_COLON_FRAME_MODULE
+                marker_body = saved_marker_bodies.pop() ?? false
                 head_kind = saved_heads.pop() ?? -1
+                head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
                 opened = saved_opened.pop() ?? false
             }
             closed = opens.pop() ?? -1
@@ -516,6 +554,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
         } else if current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP {
             at_start = true
             head_kind = -1
+            head_marker = PARSER_COLON_MARKER_NONE
             opened = false
         }
         previous = index

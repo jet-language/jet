@@ -1,5 +1,6 @@
 // A marker that writes code types its template `-[Meta.Generate]>`, the row
 // of `Marker.expand`: it reads the marked type and adds checked declarations.
+// A member written directly in the template joins the marked type.
 // Writing no row means the same. The row may name nothing else, so a
 // template can't reach the file system or the network (E0774).
 Describe: struct {
@@ -9,9 +10,7 @@ Describe: struct {
         expand: fn(self, target: Target) -[Meta.Generate]> {
             tname: target.name
             names: target.fields.len()
-            impl #{tname} {
-                describe: fn(self) -> String { "{tname} has {names} fields" }
-            }
+            describe: fn(self) -> String { "{tname} has {names} fields" }
         }
     }
 }

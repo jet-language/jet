@@ -2603,6 +2603,10 @@ jet_driver_template_default_regions: fn(body: [DeriveBodyItem], module_index: In
         if entry == {
             .Item(item) -> jet_driver_default_regions([Item]{item}, true, module_index, regions)
             .Loop(_, _, _, nested, _) -> jet_driver_template_default_regions(nested, module_index, regions)
+            .If(_, _, then_body, else_body, _) -> {
+                jet_driver_template_default_regions(then_body, module_index, regions)
+                if else_body == .Val(branch) -> jet_driver_template_default_regions(branch, module_index, regions)
+            }
             .Stmt(_) -> {}
         }
     }

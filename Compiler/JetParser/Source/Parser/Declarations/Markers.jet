@@ -34,8 +34,10 @@ use {
         TOKEN_GT,
         TOKEN_HASH,
         TOKEN_IDENT,
+        TOKEN_KW_ELSE,
         TOKEN_KW_ENUM,
         TOKEN_KW_FN,
+        TOKEN_KW_IF,
         TOKEN_KW_IMPL,
         TOKEN_KW_IN,
         TOKEN_KW_LOOP,
@@ -253,7 +255,8 @@ parser_fact_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
 }
 
 // Rust `derive_body_items`: the body is a template, so nested `comptime loop`
-// statements are template loops.
+// statements are template loops and a body-level `comptime if` selects the
+// items of one branch.
 parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(state, TOKEN_LBRACE, "`{{` before a marker body")
     state.derive_template_depth += 1
@@ -263,6 +266,10 @@ parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
         if parser_current_kind(state) == TOKEN_RBRACE -> break
         if parser_template_loop_ahead(state) {
             body.push(parser_marker_template_loop(state))
+            next
+        }
+        if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) {
+            body.push(parser_marker_template_if(state))
             next
         }
         // Visibility words and declaration markers (`#Codable Name: struct …`) on
@@ -324,6 +331,22 @@ parser_parse_template_loop: fn(state: &JetParserState) -> ItemTemplateLoop {
 parser_marker_template_loop: fn(state: &JetParserState) -> DeriveBodyItem {
     parsed: parser_parse_template_loop(state)
     DeriveBodyItem.Loop{var: parsed.var, var_span: parsed.var_span, source: parsed.source, body: parsed.body, span: parsed.span}
+}
+
+// `comptime if cond { … } else comptime if … else { … }` in a template body.
+// Each branch is a template body of its own; an `else comptime if` is an
+// `else` holding one more template `if`.
+parser_marker_template_if: fn(state: &JetParserState) -> DeriveBodyItem {
+    start: parser_bump(state)
+    parser_expect(state, TOKEN_KW_IF, "`if` after `comptime`")
+    condition: parser_parse_expression_no_struct_lit(state, 1)
+    then_body: parser_marker_body(state)
+    else_body := [DeriveBodyItem]?{None}
+    if parser_current_kind(state) == TOKEN_KW_ELSE {
+        parser_bump(state)
+        else_body = Val(if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> [DeriveBodyItem]{parser_marker_template_if(state)} else -> parser_marker_body(state))
+    }
+    DeriveBodyItem.If{cond: condition.expr, cond_span: condition.span, then_body: then_body.move(), else_body: else_body.move(), span: parser_cover(start.span, parser_lookahead(state, -1).span)}
 }
 
 // One `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every

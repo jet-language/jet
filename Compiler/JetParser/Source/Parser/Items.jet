@@ -2936,6 +2936,12 @@ parser_derive_nested_impl_span: fn(body: [DeriveBodyItem]) -> Span? Never! {
             .Loop(_, _, _, nested, _) -> {
                 if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)
             }
+            .If(_, _, then_body, else_body, _) -> {
+                if parser_derive_nested_impl_span(then_body) == .Val(span) -> return Val(span)
+                if else_body == .Val(branch) {
+                    if parser_derive_nested_impl_span(branch) == .Val(span) -> return Val(span)
+                }
+            }
             .Stmt(_) -> {}
         }
     }

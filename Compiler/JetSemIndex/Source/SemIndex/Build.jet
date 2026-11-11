@@ -779,6 +779,11 @@ semindex_derive_body: fn(body: [DeriveBodyItem], nested: Bool, db: &SemDB, ctx: 
                 semindex_expr(source, db, ctx, modules)
                 if nested -> semindex_derive_body(inner, false, db, ctx, modules)
             }
+            .If(cond, _, then_body, else_body, _) -> {
+                semindex_expr(cond, db, ctx, modules)
+                semindex_derive_body(then_body, nested, db, ctx, modules)
+                if else_body == .Val(branch) -> semindex_derive_body(branch, nested, db, ctx, modules)
+            }
         }
     }
 }

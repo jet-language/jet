@@ -714,6 +714,9 @@ DeriveBodyItem: enum {
     Item(value: Item)
     Stmt(value: Stmt)
     Loop(var: String, var_span: Span, source: Expr, body: [DeriveBodyItem], span: Span)
+    // `comptime if cond { … } else { … }`: the template expands only the
+    // chosen branch's items.
+    If(cond: Expr, cond_span: Span, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?, span: Span)
 }
 
 ItemTemplateLoop: struct {

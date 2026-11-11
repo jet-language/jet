@@ -117,6 +117,15 @@ vocabulary](vocabulary.md).
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,
   and any other row entry is E0774 (D-META-LADDER1=A).
+  The template holds the members it generates: on a type or impl site a
+  `name: fn(…)` written directly in `expand` is a member of the marked
+  type, with no nested `impl`, and on a function or block site it is a
+  module item. A body-level `comptime if` expands only its chosen branch,
+  and `comptime loop` writes its items once per value (D-META-BODY1=A).
+  A package marker reads its target, adds checked items and rejects code;
+  only Jet's Prelude markers set the checking settings `scopes`,
+  `inherits`, `resolution`, `owns_menu` and `companion`, which in a
+  package marker are E0936 (D-MARKER-LAW1=A).
   A fixed named group instead is a field-less marker struct whose block sets
   `group: #[Inline, Scalar]`; it has at least two members and no parameters,
   and expands through the same

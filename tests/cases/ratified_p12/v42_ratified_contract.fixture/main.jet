@@ -1,0 +1,41 @@
+// A package marker reads facts about its target, adds ordinary
+// items and may reject the program. Its direct member joins the marked type,
+// and its `#{row}` struct is a module item checked like written code.
+Audit: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            count: target.fields.len()
+            row: "{tname}Row"
+            if count > 3 -> reject(TooWide{name: tname, count: count})
+            #{row}: struct {
+                label: String
+            }
+            audit: fn(self) -> String { "{tname}: {count} fields" }
+        }
+    }
+}
+
+TooWide: struct {
+    name: String
+    count: Int
+
+    impl Diagnostic {
+        what: fn(self) -> String { "`{self.name}` has {self.count} fields" }
+        why: fn(self) -> String { "an audited record keeps at most three fields" }
+        fix: fn(self) -> String { "split `{self.name}` into smaller records" }
+    }
+}
+
+#Audit
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    print(Point{x: 1, y: 2}.audit())
+    print(PointRow{label: "row"}.label)
+}

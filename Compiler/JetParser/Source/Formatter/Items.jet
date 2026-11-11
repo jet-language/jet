@@ -851,7 +851,7 @@ jfmt_fmt_derive_decl: fn(f: &JetFmt, derive_def: DeriveDef) {
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
-    jfmt_fmt_derive_body_items(f, derive_def.body, false)
+    jfmt_fmt_derive_body_items(f, derive_def.body)
     f.indent -= 1
     jfmt_emit_leading(f, derive_def.span.end)
     jfmt_end_template_block(f)
@@ -865,25 +865,22 @@ jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
-    jfmt_fmt_derive_body_items(f, loop_item.body, false)
+    jfmt_fmt_derive_body_items(f, loop_item.body)
     f.indent -= 1
     jfmt_emit_leading(f, loop_item.span.end)
     jfmt_end_template_block(f)
 }
 
 // Format typed derive, marker, and generated-source bodies through their AST.
-// These bodies share one representation, so one walk closes all three. `code`
-// marks an `expand` body, whose functions keep the `fn name(…)` spelling.
-jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem], code: Bool) {
+// These bodies share one representation, so one walk closes all three.
+jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
     loop index in 0..<body.len() {
         body_item: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(f)
         item_start: jfmt_derive_body_item_start(f, body_item)
         jfmt_emit_leading(f, item_start)
         if body_item == {
-            .Item(item) -> {
-                if code && item == .Func(func) -> jfmt_fmt_func_spelled(f, func, true) else -> jfmt_fmt_item(f, item)
-            }
+            .Item(item) -> jfmt_fmt_item(f, item)
             .Stmt(stmt) -> jfmt_fmt_stmt(f, stmt)
             .Loop(var, _, source, inner, _) -> {
                 jfmt_write(f, "comptime loop ")
@@ -893,14 +890,41 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem], code: Bool) {
                 jfmt_write(f, " {{")
                 jfmt_newline(f)
                 f.indent += 1
-                jfmt_fmt_derive_body_items(f, inner, code)
+                jfmt_fmt_derive_body_items(f, inner)
                 f.indent -= 1
                 jfmt_end_template_block(f)
             }
+            .If(cond, _, then_body, else_body, _) -> jfmt_fmt_derive_body_if(f, cond, then_body, else_body)
         }
         item_end: jfmt_derive_body_item_end(f, body_item)
         jfmt_emit_trailing(f, item_end)
         if !f.at_line_start -> jfmt_newline(f)
+    }
+}
+
+// `comptime if cond { … } else { … }` in a template body; an `else` holding
+// one more template `if` prints as `else comptime if`.
+jfmt_fmt_derive_body_if: fn(f: &JetFmt, cond: Expr, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?) {
+    jfmt_write(f, "comptime if ")
+    jfmt_fmt_expr(f, cond, JFMT_PREC_OR_FALLBACK)
+    jfmt_write(f, " {{")
+    jfmt_newline(f)
+    f.indent += 1
+    jfmt_fmt_derive_body_items(f, then_body)
+    f.indent -= 1
+    jfmt_end_template_block(f)
+    if else_body == .Val(branch) {
+        if branch.len() == 1 && branch[0] == .If(inner_cond, _, inner_then, inner_else, _) {
+            jfmt_write(f, " else ")
+            jfmt_fmt_derive_body_if(f, inner_cond, inner_then, inner_else)
+            return
+        }
+        jfmt_write(f, " else {{")
+        jfmt_newline(f)
+        f.indent += 1
+        jfmt_fmt_derive_body_items(f, branch)
+        f.indent -= 1
+        jfmt_end_template_block(f)
     }
 }
 
@@ -913,7 +937,7 @@ jfmt_derive_body_item_start: fn(f: JetFmt, body_item: DeriveBodyItem) -> Int {
     if body_item == {
         .Item(item) -> jfmt_item_span_start(f, item)
         .Stmt(stmt) -> jfmt_stmt_span(stmt).start
-        .Loop(_, _, _, _, span) -> span.start
+        .Loop(_, _, _, _, span) | .If(_, _, _, _, span) -> span.start
     }
 }
 
@@ -921,7 +945,7 @@ jfmt_derive_body_item_end: fn(f: JetFmt, body_item: DeriveBodyItem) -> Int {
     if body_item == {
         .Item(item) -> jfmt_item_span_end(item)
         .Stmt(stmt) -> jfmt_statement_source_end(f, stmt)
-        .Loop(_, _, _, _, span) -> span.end
+        .Loop(_, _, _, _, span) | .If(_, _, _, _, span) -> span.end
     }
 }
 
@@ -1704,11 +1728,7 @@ jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     }
 }
 
-jfmt_fmt_func: fn(f: &JetFmt, func: Func) { jfmt_fmt_func_spelled(f, func, false) }
-
-// `prefix` spells the declaration `fn name(…)`: a statement-position function in
-// a marker's `expand` body, where `name: fn` would read as a binding.
-jfmt_fmt_func_spelled: fn(f: &JetFmt, func: Func, prefix: Bool) {
+jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     jfmt_fmt_callable_markers(f, func.markers)
     // (card #2789), respelled by preserve
     // the build-time callable mark on capability constructors. It sits after
@@ -1719,17 +1739,12 @@ jfmt_fmt_func_spelled: fn(f: &JetFmt, func: Func, prefix: Bool) {
     // body's methods carry no written keyword.
     if !func.is_pub && jfmt_source_priv_before(f, func.name_span.start) -> jfmt_write(f, "priv ")
     if func.is_comptime -> jfmt_write(f, "comptime ")
-    if prefix {
-        jfmt_write(f, "fn ")
-        jfmt_write(f, func.name)
-    } else {
-        if func.external_type == .Val(owner) {
-            jfmt_write(f, owner.name)
-            jfmt_write(f, ".")
-        }
-        jfmt_write(f, func.name)
-        jfmt_write(f, ": fn")
+    if func.external_type == .Val(owner) {
+        jfmt_write(f, owner.name)
+        jfmt_write(f, ".")
     }
+    jfmt_write(f, func.name)
+    jfmt_write(f, ": fn")
     type_source: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, func.type_params, type_source)
     jfmt_write(f, "(")
@@ -2159,7 +2174,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand
         jfmt_write(f, "{{")
         jfmt_newline(f)
         f.indent += 1
-        jfmt_fmt_derive_body_items(f, template, true)
+        jfmt_fmt_derive_body_items(f, template)
         f.indent -= 1
         if expand == .Val(span) -> jfmt_emit_leading(f, span.end)
         jfmt_end_template_block(f)

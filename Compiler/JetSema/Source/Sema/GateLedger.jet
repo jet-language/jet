@@ -202,6 +202,11 @@ sema_gate_template: fn(source: String, body: [DeriveBodyItem], ledger: &GateLedg
                 sema_gate_expression(source, expression, ledger, context)
                 sema_gate_template(source, nested, ledger, context)
             }
+            .If(expression, _, then_body, else_body, _) -> {
+                sema_gate_expression(source, expression, ledger, context)
+                sema_gate_template(source, then_body, ledger, context)
+                if else_body == .Val(branch) -> sema_gate_template(source, branch, ledger, context)
+            }
         }
     }
 }

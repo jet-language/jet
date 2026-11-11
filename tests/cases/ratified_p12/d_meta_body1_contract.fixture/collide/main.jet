@@ -1,0 +1,23 @@
+// A direct member is a member of the marked type, so it may not replace one
+// the type already declares.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            describe: fn(self) -> String { tname }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+
+    describe: fn(self) -> String { "written" }
+}
+
+run: fn() {
+    print(Point{x: 1}.describe())
+}

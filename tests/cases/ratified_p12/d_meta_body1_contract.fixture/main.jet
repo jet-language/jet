@@ -1,0 +1,57 @@
+// A marker's template holds the members it generates. A member
+// written directly in `expand` joins the marked type, with no nested `impl`;
+// a body-level `comptime if` decides which members exist, and a template loop
+// writes one member per field. The marker's parameter is a named field read
+// as `self.label`; its settings are `impl Marker` facts.
+Describe: struct {
+    label: String{"type"}
+
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            count: target.fields.len()
+            kind: self.label
+            describe: fn(self) -> String { "{kind} {tname} has {count} fields" }
+            field_count: fn() -> Int { count }
+            comptime if count > 3 {
+                size: fn(self) -> String { "large" }
+            } else comptime if count > 2 {
+                size: fn(self) -> String { "medium" }
+            } else {
+                size: fn(self) -> String { "small" }
+            }
+            comptime loop field in target.fields {
+                method: "has_{field.name}"
+                #{method}: fn(self) -> Bool { true }
+            }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Describe("record")
+Order: struct {
+    id: Int
+    total: Int
+    paid: Bool
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    order: Order{id: 7, total: 30, paid: true}
+    print(point.describe())
+    print(order.describe())
+    print(point.size())
+    print(order.size())
+    print(Point.field_count())
+    print(Order.field_count())
+    print(point.has_x() && point.has_y())
+    print(order.has_id() && order.has_total() && order.has_paid())
+}
