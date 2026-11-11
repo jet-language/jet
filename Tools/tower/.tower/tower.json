@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99508,
+    "rev": 99509,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75052,6 +75052,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T12:41:34.775Z"
+        },
+        {
+          "n": 183,
+          "text": "A ?? fallback that returns a value built from err.copy() keeps the left side's type. Found by G6Meta on 2026-11-11 (seed-t22, probe ZFactsScratch in lane w5024): in a user module, rows: compiler.query(...) ?? return Answer{failure: Val(err.copy()), ...} leaves rows untyped. rows.zz() reports no method error, and if row == .Program(fact) binds nothing, so fact fails later with E0107. Val(err) or \"{err}\" in the same fallback keep [Fact]. Fix it in sema at the root (an untyped binding must never reach later checks silently), with a case covering the err.copy() form, the method-error form and the pattern-bind form at O0, O1 and O2, and a sweep for other expression forms that lose the left type in a ?? fallback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T16:22:59.623Z"
         }
       ],
       "refs": [],
@@ -75062,9 +75071,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T14:10:05.964Z",
+      "updated": "2026-11-11T16:22:59.623Z",
       "updatedBy": "Main",
-      "criteriaLastN": 182
+      "criteriaLastN": 183
     },
     {
       "id": "c0kyjdtx",
@@ -197553,6 +197562,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T16:22:59.623Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#183 A ?? fallback that returns a value built from err.copy() kee"
+    },
     {
       "at": "2026-11-11T16:16:04.483Z",
       "by": "Main",
