@@ -226,3 +226,26 @@ run: fn() {
     spread: jet_format_source("Meter: struct {{\n\n}}\nNothing: enum {{\n}}\n", false)
     assert_eq(spread.text, "Meter: struct {{}}\n\nNothing: enum {{}}\n")
 }
+
+// A value table whose subject passes a typed literal keeps its table: the
+// literal's `{` inside the call is not the table's, so fmt never rewrites the
+// table as an `if` chain that evaluates the subject once per arm.
+#Test("value_table_subject_with_a_typed_literal_stays_a_table") {
+    source: `P: struct {
+    n: Int
+}
+
+h: fn(p: P) -> Int Err! { Ok(p.n) }
+
+g: fn() -> String {
+    refused: if h(P{n: 1}) == {
+        .Ok(ok) -> "accepted"
+        .Err(error) -> "no"
+    }
+    refused
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+    inline: "g: fn() -> String {{ \"{{if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}}}\" }}\n"
+    assert(fmt_core_stable(inline).contains("if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}"), "a table in an interpolation hole stays a table")
+}

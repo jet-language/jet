@@ -331,14 +331,42 @@ jfmt_dispatch_value_head: fn(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never
     }
 }
 
-// The comparison operator just before the table's `{` in `rest..end`.
+// The comparison operator just before the table's `{` in `rest..end`: the
+// first `{` outside parentheses, brackets and string literals, so a typed
+// literal in the subject's arguments (`if set(.RoundRobin{priority: 1}) == {`)
+// is not taken for the table. `if cond -> { … }` is a braced arm body, not a
+// table. Bytes, not tokens: a table inside an interpolation hole has no
+// tokens of its own.
 jfmt_cmp_op_before_brace: fn(bytes: [U8], rest: Int, end: Int) -> BinOp? Never! {
-    brace: jfmt_bytes_find(bytes, rest, "{{")
-    if brace < 0 || brace >= end -> return None
+    depth := 0
+    brace := -1
+    index := rest
+    loop index < end && index < bytes.len() {
+        byte: bytes[index]
+        if {
+            byte == 34 -> {
+                index += 1
+                loop index < end && index < bytes.len() && bytes[index] != 34 {
+                    if bytes[index] == 92 -> index += 1
+                    index += 1
+                }
+            }
+            byte == 40 || byte == 91 -> depth += 1
+            byte == 41 || byte == 93 -> {
+                depth -= 1
+                if depth < 0 -> return None
+            }
+            byte == 123 && depth == 0 -> {
+                brace = index
+                break
+            }
+        }
+        index += 1
+    }
+    if brace < 0 -> return None
     last := brace
     loop last > rest && (bytes[last - 1] == 32 || bytes[last - 1] == 9 || bytes[last - 1] == 10 || bytes[last - 1] == 13) -> last -= 1
     if {
-        // `if cond -> { … }` is a braced arm body, not a `>` table.
         jfmt_bytes_ends_at(bytes, rest, last, "->") -> None
         jfmt_bytes_ends_at(bytes, rest, last, "==") -> Val(BinOp.Eq)
         jfmt_bytes_ends_at(bytes, rest, last, "!=") -> Val(BinOp.Ne)

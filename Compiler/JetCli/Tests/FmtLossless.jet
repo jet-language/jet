@@ -30,8 +30,8 @@ use {
     jet_lexer.[
         STRING_PART_BYTE, STRING_PART_INTERPOLATION, STRING_PART_TEXT, StringPart, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_BLOCK_COMMENT, TOKEN_OR_OR,
         TOKEN_CHAR, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_EOF, TOKEN_EQ, TOKEN_EQ_EQ, TOKEN_FLOAT,
-        TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_INT, TOKEN_KW_ELSE, TOKEN_KW_ENUM, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_KW_IMPL, TOKEN_KW_LOOP, TOKEN_KW_PUB,
-        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_NULL,
+        TOKEN_GE, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_INT, TOKEN_KW_ELSE, TOKEN_KW_ENUM, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_KW_IMPL, TOKEN_KW_LOOP, TOKEN_KW_PUB,
+        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LE, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_NOT_EQ, TOKEN_NULL,
         TOKEN_PIPE, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_SLASH, TOKEN_STAR, TOKEN_STRING,
         TOKEN_UNIFIED_ARROW, TOKEN_UNIT_NUMBER, Token, TokenTables, lex, token_decoded, token_string_parts,
     ]
@@ -153,9 +153,10 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
     tokens: fl_canonicalize_fn_type_names(fl_canonicalize_control_arrow_bodies(fl_canonicalize_external_methods(fl_canonicalize_static_generic_calls(fl_expand_marker_groups(fl_canonicalize_file_prefix(fl_lex(src, path)))))))
     enum_commas: fl_enum_group_commas(tokens)
     field_commas: fl_declaration_field_commas(tokens)
+    arm_commas: fl_table_arm_commas(tokens)
     kept := [FmtTok]{}
     loop index in 0..<tokens.len() {
-        if enum_commas[index] || field_commas[index] -> next
+        if enum_commas[index] || field_commas[index] || arm_commas[index] -> next
         if tokens[index].kind == TOKEN_SEMI || tokens[index].kind == TOKEN_EOF -> next
         kept.push(tokens[index])
     }
@@ -978,6 +979,37 @@ fl_declaration_field_commas: fn(tokens: [FmtTok]) -> [Bool] {
     ignored
 }
 
+// The `,` between the arms of a pattern table (`if r == { .Val(n) -> n, .None
+// -> 0 }`, or a guard table `if { … }`): the formatter writes it only on a
+// table it keeps on one line, so the separator is optional layout.
+fl_table_arm_commas: fn(tokens: [FmtTok]) -> [Bool] {
+    ignored := [Bool]{}
+    loop _ in 0..<tokens.len() -> ignored.push(false)
+    // One entry per open `{`: -1 for a brace that is not a table, else the
+    // paren and bracket depth at its opening.
+    tables := [Int]{}
+    depth := 0
+    previous := TOKEN_EOF
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
+        if fl_is_comment(kind) -> next
+        if {
+            kind == TOKEN_LBRACE -> {
+                opens_table: previous == TOKEN_KW_IF || previous == TOKEN_EQ_EQ || previous == TOKEN_NOT_EQ || previous == TOKEN_LT || previous == TOKEN_LE || previous == TOKEN_GT || previous == TOKEN_GE
+                tables.push(if opens_table -> depth else -> -1)
+            }
+            kind == TOKEN_RBRACE -> {
+                if tables.len() > 0 -> _ := tables.pop()
+            }
+            kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+            kind == TOKEN_COMMA && tables.len() > 0 && tables[tables.len() - 1] == depth -> ignored[index] = true
+        }
+        previous = kind
+    }
+    ignored
+}
+
 fl_redundant_default_file_alias: fn(canonical: [FmtTok], tokens: [FmtTok], index: Int) -> Bool {
     if index + 1 >= tokens.len() || tokens[index].kind != TOKEN_IDENT || tokens[index].text != FL_KW_AS -> return false
     if canonical.len() == 0 || canonical[canonical.len() - 1].kind != TOKEN_STRING -> return false
@@ -1791,6 +1823,8 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/effect_scope_interpolated_argument.jet",
         "tests/ui/effects/effect_family_case_with_payload.jet",
         "tests/ui/effects/effect_irreversible_body_is_not_a_fact.jet",
+        "tests/ui/effects/fx_cap_memory_bound_is_only_a_denial.jet",
+        "tests/ui/effects/fx_cap_scope_argument_is_plain_text.jet",
         "tests/ui/empty_map_colon_retired.jet",
         "tests/ui/empty_type_argument_list.jet",
         "tests/ui/enum_backing_on_struct.jet",
