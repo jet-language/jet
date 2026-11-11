@@ -1312,9 +1312,11 @@ jfmt_fmt_body_expanded: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_end_block(f)
 }
 
-// Locate the `{ … }` around a lone body statement.
+// Locate the `{ … }` around a lone body statement. An expression statement
+// starts at its leftmost operand (jfmt_expr_start): a method call's own span
+// starts after its receiver.
 jfmt_single_stmt_braces: fn(f: JetFmt, stmt: Stmt) -> JetFmtBraces? Never! {
-    start: jfmt_stmt_start(stmt)
+    start: if stmt == .Expr(expr) -> jfmt_expr_start(expr) else -> jfmt_stmt_start(stmt)
     if start < 0 || start > f.src_bytes.len() -> return None
     brace: jfmt_bytes_rfind(f.src_bytes, start, "{{")
     if brace < 0 -> return None

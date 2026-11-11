@@ -48,7 +48,7 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert_eq(jfmt_structure(arrow), jfmt_structure(braced))
 }
 
-#Test("the dot of None, Val and Ok stays as written") {
+#Test("the dot of None and Val stays as written") {
     source: "pick: fn(x: Int?) -> Int {{\n    if x == {{\n        None -> 0\n        Val(n) -> n\n    }}\n}}\n"
     formatted: jet_format_source(source, false)
     assert(formatted.ok)
@@ -56,6 +56,24 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(formatted.text.contains("        Val(n) -> n\n"))
     dotted: parse_source(source.replace("None ->", ".None ->").bytes()).program
     assert(jfmt_structure(dotted) != jfmt_structure(parse_source(source.bytes()).program))
+}
+
+#Test("a bare Ok or Err pattern takes its dot") {
+    source: "show: fn(result: Int String!) {{\n    if result == {{\n        Ok(n) -> {{ print(n) }}\n        Err(e) -> {{ print(e) }}\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains(".Ok(n) -> "))
+    assert(formatted.text.contains(".Err(e) -> "))
+}
+
+// In a lambda's last place, `loop … -> value` collects a list, so a braced
+// loop body there must keep its braces.
+#Test("a braced method-call loop body keeps its braces") {
+    source: "run: fn() {{\n    serving: task {{\n        loop _ in 0..<9 {{\n            server.serve(a, b)\n        }}\n    }}\n    serving.join()\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("->"))
 }
 
 #Test("a bracketed single import keeps its brackets") {

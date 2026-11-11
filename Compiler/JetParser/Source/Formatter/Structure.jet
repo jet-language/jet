@@ -17,7 +17,7 @@ use {
 // canonical are blanked too, because nothing reads them for meaning: whether
 // a loop body was written after `->` or in braces (`arrow_body`, which sema
 // only saves and restores), the leading dot of a variant pattern
-// (`leading_dot`) other than `None`, `Val` and `Ok` (jfmt_pattern_dot_means),
+// (`leading_dot`) other than `None` and `Val` (jfmt_pattern_dot_means),
 // and grouping parentheses (a `Paren` node stands for its value: the tree
 // already holds the grouping, and sema and lowering look through it).
 // Quoted text is compared as written.
@@ -173,11 +173,11 @@ jfmt_structure_name_byte: fn(byte: U8) -> Bool Never! {
 }
 
 // The variant patterns whose leading dot the checker reads: a dotless `None`
-// or `Val(x)` tests an optional whatever the subject, and `.Ok(…)` on a
-// `T? E!` value is the retired nested spelling (E0392). The formatter keeps
-// their dot as written.
+// or `Val(x)` tests an optional whatever the subject. The formatter keeps
+// their dot as written. Every other bare payload variant, `Ok(x)` included,
+// is E0367 until the formatter writes its dot.
 jfmt_pattern_dot_means: fn(variant: String) -> Bool Never! {
-    variant == "None" || variant == "Val" || variant == "Ok"
+    variant == "None" || variant == "Val"
 }
 
 // Whether the `leading_dot: ` at `at` belongs to a variant pattern whose dot

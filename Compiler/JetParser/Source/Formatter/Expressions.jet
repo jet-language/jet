@@ -2176,9 +2176,8 @@ jfmt_fmt_pattern: fn(f: &JetFmt, pattern: Pattern) {
         .Variant(variant, bindings, leading_dot, _) -> {
             // Leading dot is canonical for variant patterns, except where the
             // dot means something: a dotless `None` and `Val(x)` test an
-            // optional whatever the subject, and `.Ok(…)` on a `T? E!` value
-            // is the retired nested spelling (E0392). Those keep their
-            // spelling (jfmt_structure keeps the bit for them).
+            // optional whatever the subject. Those keep their spelling
+            // (jfmt_structure keeps the bit for them).
             if leading_dot || !jfmt_pattern_dot_means(variant) -> jfmt_write(f, ".")
             jfmt_write(f, variant)
             named := false
