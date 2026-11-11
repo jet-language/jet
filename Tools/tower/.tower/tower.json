@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99510,
+    "rev": 99511,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85676,6 +85676,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T12:37:54.299Z"
+        },
+        {
+          "n": 8,
+          "text": "A cold artifact store opens without per-directory fsync stalls, and the open is traced. Found by G11Speed on 2026-11-11 ($JET_SCRATCH_ROOT/lanes/G11Speed/b30/hang-finding.md): Jetpack/Store/Source/ArtifactStore/Store.jet (~964-971) creates the layout directories cas, ac, lto, locks, leases, quarantine, build-records and records through store_artifact_ensure_dir (Codec.jet:277), which fsyncs the parent after each mkdir. On a busy ext4 that cost 22.55 s across 8 fsyncs in one bench30k build (63 s total), all in an untraced gap between sema.finalize and ir.build; at 4G, 8 of 8 builds stalled. Fix: layout directories are recreated by any later run, so they aren't synced (per Codec.jet's own rule); durable records keep their sync; and a store.open trace span covers the work. Proof: a cold-store jet build of bench30k on the scratch disk ($JET_SCRATCH_ROOT), n=3, shows store.open under 0.5 s in the trace and no untraced gap above 1 s, and the store crash-safety tests still pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T16:24:59.760Z"
         }
       ],
       "refs": [],
@@ -85686,9 +85695,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-11T12:52:20.854Z",
+      "updated": "2026-11-11T16:24:59.760Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c0h114mv",
@@ -197567,6 +197576,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T16:24:59.760Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#8 A cold artifact store opens without per-directory fsync stal"
+    },
     {
       "at": "2026-11-11T16:24:43.640Z",
       "by": "Main",
