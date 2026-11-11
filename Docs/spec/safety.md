@@ -5951,28 +5951,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 113,
+      "line": 116,
       "column": 5,
       "reason": "preserve the shipped decoder's hidden stderr effect at its existing host boundary"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 121,
+      "line": 124,
       "column": 5,
       "reason": "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1243,
+      "line": 1291,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1248,
+      "line": 1296,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -7134,21 +7134,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 587,
+      "line": 585,
       "column": 9,
       "reason": "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command"
     },
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 599,
+      "line": 597,
       "column": 5,
       "reason": "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal"
     },
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerProbe.jet",
-      "line": 98,
+      "line": 88,
       "column": 5,
       "reason": "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death"
     },
@@ -11043,10 +11043,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Csv.jet | 897:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
 | Core | Core/Encoding/Csv.jet | 1055:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 549:9 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Json.jet | 113:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 121:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1243:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1248:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 116:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
+| Core | Core/Encoding/Json.jet | 124:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
+| Core | Core/Encoding/Json.jet | 1291:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1296:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 16:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |
@@ -11212,9 +11212,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 312:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/agent/orchestrator/LaneCommit.jet | 202:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
-| Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
+| Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 121:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
