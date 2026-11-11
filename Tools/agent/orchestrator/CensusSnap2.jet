@@ -199,11 +199,11 @@ run: fn() {
     // Self-check pass: the compiler just built checks the compiler packages, then every Core body, with
     // keep-going, as chain s2 does.
     if ["", "1"].contains(process.env_get_or("CENSUS_SELFCHECK", "")) {
-        loop step in [(package: "Compiler/JetCli", name: "selfcheck"), (package: "Core", name: "selfcheck-core")] {
-            tsv: "{at}/{step.name}-keep-going.tsv"
-            code: pass(jetenv(g, self_jet, Sh{"check --threads 12 {step.package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", tsv).timeout(time.duration_seconds(1200)), "{at}/{step.name}.out", "{at}/{step.name}.err")
+        loop (package, name) in [(package: "Compiler/JetCli", name: "selfcheck"), (package: "Core", name: "selfcheck-core")] {
+            tsv: "{at}/{name}-keep-going.tsv"
+            code: pass(jetenv(g, self_jet, Sh{"check --threads 12 {package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", tsv).timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
             count: rows(tsv)
-            print("{step.name} rc={code} rows={count}")
+            print("{name} rc={code} rows={count}")
             census_errors(g, tsv, 11)
             if code != 0 || count != 0 -> process.exit(1)
         }
