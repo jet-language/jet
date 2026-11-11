@@ -2080,6 +2080,35 @@ sema_effect_merge_lambda: fn(nodes: &[SemaEffectNode], node_index: Int, lambda: 
     }
 }
 
+// Whether `kind` calls a lambda written in this body, such as a local bound
+// to one with `:`. That lambda's effects are already this function's where it
+// is written (sema_effect_merge_lambda), so its call is a known body and adds
+// nothing, not an unknown callee's maximal row.
+sema_effect_local_lambda_call: fn(tree: BodyTree, kind: NodeKind) -> Bool Never! {
+    if kind == .IndirectCall(callee, _, _, _) -> return sema_effect_written_lambda(tree, callee)
+    false
+}
+
+// Whether the node at `value` is a lambda written in this body: the lambda
+// itself, a borrow of one, or a `:` local bound to one. A call that pins its
+// arguments reads its callee through a generated `:` binder local, which is
+// followed the same way.
+sema_effect_written_lambda: fn(tree: BodyTree, value: Int) -> Bool Never! {
+    node: body_node(tree, value)
+    if node.kind == .Lambda(_) -> return true
+    if node.kind == .Borrow(place, _) -> return sema_effect_written_lambda(tree, place)
+    if node.kind == .Local(local) {
+        if local.mutable || local.symbol_id == None -> return false
+        loop statement in tree.stmts {
+            if statement == .Let(bound, _, init, _, _, _) {
+                if bound.symbol_id != local.symbol_id -> next
+                return sema_effect_written_lambda(tree, init)
+            }
+        }
+    }
+    false
+}
+
 sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: BodyNode) Never! {
     // A direct call and a shared global's initializer name their callee's
     // node through the callee's DeclID.
@@ -2647,6 +2676,8 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
     if {
         // The suspended determinism checks record nothing for the call.
         sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
+        // A written lambda's effects are already this function's.
+        sema_effect_local_lambda_call(tree, node.kind) -> {}
         sema_effect_is_call(node.kind) -> {
             // Rust's `Clock.{method}` check runs before the declared method's
             // call is recorded: a pure body reports E3403 and records nothing.

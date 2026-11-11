@@ -1,0 +1,22 @@
+// A `:` local bound to a lambda is a known body: calling it uses the effects
+// its body has, never every effect.
+shout: fn(word: String) {
+    print(word)
+}
+
+direct: fn() -[IO]> Int {
+    step: () -> { print("direct") }
+    step()
+    1
+}
+
+helper: fn() -[IO]> Int {
+    step: (word: String) -> { shout(word) }
+    step("helper")
+    step("again")
+    2
+}
+
+run: fn() {
+    print(direct() + helper())
+}

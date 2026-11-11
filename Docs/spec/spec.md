@@ -2521,10 +2521,14 @@ lists every file-head, module, type and trait cap under a path.
 ### Higher-order and trait effects
 
 A higher-order function's row includes its own body and the effects of function
-values passed at each call. A lambda is walked inline. A directly named
-function contributes its known row. A local, returned, stored, or otherwise
-unknown function value contributes the maximal set, which is conservative and
-sound.
+values passed at each call. A lambda is walked inline, so its effects are the
+function's where it is written. Calling a lambda written in the function's
+body, through a `:` local bound to it, adds nothing more: a `-[IO]>` function
+may call a local lambda that prints. A directly named function contributes its
+known row. A `:=` local, a parameter, a returned, stored, or otherwise unknown
+function value contributes the maximal set, which is conservative and sound;
+so does a call through a local lambda from inside another lambda's body, which
+makes that lambda's own row maximal.
 
 ```jet
 apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }

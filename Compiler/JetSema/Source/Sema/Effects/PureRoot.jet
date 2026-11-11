@@ -70,7 +70,11 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
                 if modules[module_index].call_facts[at].facts.effect_bound == .Val(row) {
                     names: loop entry in row -> entry.name
                     denied = sema_effect_without_deny_only(names).len() > 0
-                } else { denied = !sema_effect_is_compiler_intrinsic(node.kind) }
+                } else {
+                    // A written lambda's call is its body, walked where the
+                    // lambda is written.
+                    denied = !sema_effect_is_compiler_intrinsic(node.kind) && !sema_effect_local_lambda_call(owner.tree, node.kind)
+                }
             } else {
                 // Use the source witnesses already published by the one effect
                 // solver, rather than maintaining another builtin-effect list.

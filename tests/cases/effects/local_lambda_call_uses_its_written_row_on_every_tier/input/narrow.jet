@@ -1,0 +1,17 @@
+// The lambda's own effect is still checked against the caller's row: `IO`
+// is named, and nothing else is.
+wide: fn() -[FS.Read]> Int {
+    step: () -> { print("escaped") }
+    step()
+    1
+}
+
+quiet: fn() -[]> Int {
+    step: () -> { print("escaped") }
+    step()
+    2
+}
+
+run: fn() {
+    print(wide() + quiet())
+}

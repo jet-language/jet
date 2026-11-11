@@ -1,0 +1,40 @@
+# Calling a `:` local bound to a lambda written in the same body uses the
+# lambda's own effects, which are the function's where the lambda is
+# written. Before, an effectful lambda published no row, so its call was an
+# unknown callee with every effect: a `-[IO]>` function that called a
+# printing lambda was E0740 naming every effect. Now the IO function runs
+# the same on every tier, a lambda that calls an inferred helper reaches the
+# helper's row, a narrower row names only `IO`, and a pure function names
+# `print`, not an indirect call.
+fixture: local_lambda_call_uses_its_written_row_on_every_tier/input
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "direct\nhelper\nagain\n3\n" # O0 runs the lambdas
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "direct\nhelper\nagain\n3\n" # O1 runs the lambdas
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "direct\nhelper\nagain\n3\n" # O2 runs the lambdas
+step: jet check narrow.jet
+exit: 1
+stderr: count "Error [" = 2 # wide and quiet
+stderr: ~ "`wide` uses the effect `IO`, which its signature doesn't allow" # only the lambda's own effect
+stderr: !~ "Browser" # never every effect
+stderr: ~ "`quiet` calls the impure function `print`" # the pure report names the lambda's call
+stderr: !~ "indirect call" # the lambda's call is its written body
+step: jet run --optimize=none narrow.jet
+exit: 1
+stderr: ~ "`wide` uses the effect `IO`" # O0 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=basic narrow.jet
+exit: 1
+stderr: ~ "`wide` uses the effect `IO`" # O1 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=full narrow.jet
+exit: 1
+stderr: ~ "`wide` uses the effect `IO`" # O2 refuses it
+stdout: !~ "escaped" # nothing runs
