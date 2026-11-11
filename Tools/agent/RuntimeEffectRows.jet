@@ -1,0 +1,235 @@
+#!/usr/bin/env jet
+// The jet.runtime interface against the Core leaves it replaces (#6615 c4).
+//
+// Each member X of an interface module jet.runtime.M (the generated
+// Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet) replaces the
+// Core leaf core.M.__X: its `dispatcher_row` in Compiler/Prelude/Core.jet and
+// its CoreCallRecord in Compiler/JetFoundation/Source/Registry/CoreCallRows.jet.
+// While both tables carry that leaf, the member's declared row must be the
+// record's effect: its `effect_leaf` when it has one, else its `effect_kind`,
+// else no effect. A leaf one table carries and the other does not is a
+// half-done cutover and a difference too; a leaf neither carries is cut over
+// (or never existed) and has nothing to compare. The report names each member
+// with its export symbol and the record's runtime symbol.
+//
+// Usage (from the repository root): jet Tools/agent/RuntimeEffectRows.jet --check
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
+CORE_CALL_ROWS: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
+DISPATCHER: "Compiler/Prelude/Core.jet"
+USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check"
+
+#Error
+RowsError: struct {
+    message: String
+}
+
+// One interface member: `module_name` is jet.runtime.M.
+InterfaceMember: struct {
+    module_name: String
+    member: String
+    effects: [String]
+    symbol: String
+}
+
+// One CoreCallRecord's effect fields.
+CoreLeaf: struct {
+    module_name: String
+    member: String
+    effect_kind: String?
+    effect_leaf: String?
+    symbol: String
+}
+
+// The text of `key: "…"` in `line`, or None.
+quoted_field: fn(line: String, key: String) -> String? Never! {
+    after: line.partition("{key}: \"")
+    if after.sep == "" -> return None
+    Val(after.tail.partition("\"").head.copy())
+}
+
+// `key: Val("…")` as the quoted text, `key: None` as None.
+optional_field: fn(line: String, key: String) -> String? Never! {
+    after: line.partition("{key}: Val(\"")
+    if after.sep == "" -> return None
+    Val(after.tail.partition("\"").head.copy())
+}
+
+// The entries of the effect row a declaration writes (`-[A, B.c]>`), sorted;
+// none when it writes no row.
+declaration_effects: fn(declaration: String) -> [String] Never! {
+    opened: declaration.partition("-[")
+    if opened.sep == "" -> return [String]{}
+    row: opened.tail.partition("]>").head
+    effects := [String]{}
+    loop entry in row.split(",") {
+        name: entry.strip()
+        if name != "" -> effects.push(name.copy())
+    }
+    effects.sort()
+    effects
+}
+
+interface_members: fn(text: String) -> [InterfaceMember] Never! {
+    members := [InterfaceMember]{}
+    loop line in text.split("\n") {
+        if !line.contains("RuntimeInterfaceRow{{module_name:") -> next
+        module_name: quoted_field(line, "module_name") ?? next
+        member: quoted_field(line, "member") ?? next
+        declaration: quoted_field(line, "declaration") ?? next
+        symbol: quoted_field(line, "symbol") ?? next
+        members.push(InterfaceMember{module_name: module_name, member: member, effects: declaration_effects(declaration), symbol: symbol})
+    }
+    members
+}
+
+core_leaves: fn(text: String) -> [CoreLeaf] Never! {
+    leaves := [CoreLeaf]{}
+    loop line in text.split("\n") {
+        if !line.contains("CoreCallRecord{{module_name:") -> next
+        module_name: quoted_field(line, "module_name") ?? next
+        member: quoted_field(line, "member") ?? next
+        leaves.push(CoreLeaf{
+            module_name: module_name,
+            member: member,
+            effect_kind: optional_field(line, "effect_kind"),
+            effect_leaf: optional_field(line, "effect_leaf"),
+            symbol: quoted_field(line.partition("symbol: ").tail, "name") ?? "",
+        })
+    }
+    leaves
+}
+
+// `core.M __X` for each `dispatcher_row <kind> core.M __X | …` line.
+dispatcher_keys: fn(text: String) -> [String] Never! {
+    keys := [String]{}
+    loop line in text.split("\n") {
+        if !line.starts_with("dispatcher_row ") -> next
+        words: line.partition(" | ").head.split(" ").to_list()
+        if words.len() == 4 -> keys.push("{words[2]} {words[3]}")
+    }
+    keys
+}
+
+// The effect the record gives a call: its leaf, else its kind, else none.
+leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
+    if leaf.effect_leaf == .Val(name) -> return [String]{name.copy()}
+    if leaf.effect_kind == .Val(name) -> return [String]{name.copy()}
+    [String]{}
+}
+
+row_text: fn(effects: [String]) -> String Never! {
+    if effects.len() == 0 -> return "no effect"
+    "-[{effects.join(", ")}]>"
+}
+
+Report: struct {
+    joined: Int
+    differences: [String]
+}
+
+// Every difference between the interface and the Core leaves it replaces.
+differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String]) -> Report Never! {
+    found := [String]{}
+    joined := 0
+    loop member in members {
+        module_name: member.module_name.remove_prefix("jet.runtime.")
+        core_module: "core.{module_name}"
+        leaf_name: "__{member.member}"
+        where: "{member.module_name}.{member.member} ({member.symbol})"
+        has_row: dispatched.contains("{core_module} {leaf_name}")
+        matched := CoreLeaf?{None}
+        loop leaf in leaves {
+            if leaf.module_name == core_module && leaf.member == leaf_name {
+                matched = Val(leaf.copy())
+                break
+            }
+        }
+        leaf: matched ?? {
+            if has_row -> found.push("{where}: {core_module}.{leaf_name} has a dispatcher_row but no CoreCallRecord")
+            next
+        }
+        joined += 1
+        if !has_row -> found.push("{where}: {core_module}.{leaf_name} has a CoreCallRecord but no dispatcher_row")
+        expected: leaf_effects(leaf)
+        if expected.join(",") != member.effects.join(",") -> found.push("{where}: declares {row_text(member.effects)}, but {core_module}.{leaf_name} ({leaf.symbol}) has {row_text(expected)}")
+    }
+    Report{joined: joined, differences: found}
+}
+
+read_text: fn(path: String) -[FS]> String RowsError! {
+    text: files.read(path) ?? return Err(RowsError{message: "cannot read {path}: {err}"})
+    Ok(text)
+}
+
+runtime_effect_rows_main: fn(args: [String]) -[FS, IO]> Int RowsError! {
+    if args.len() != 1 || args[0] != "--check" {
+        term.eprint(USAGE)
+        return Ok(2)
+    }
+    members: interface_members(read_text(INTERFACE) ?? return Err(err))
+    leaves: core_leaves(read_text(CORE_CALL_ROWS) ?? return Err(err))
+    dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
+    if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
+    report: differences(members, leaves, dispatched)
+    found: report.differences
+    if found.len() == 0 {
+        print("runtime-effect-rows: ok ({members.len()} interface functions, {report.joined} joined to a Core leaf, 0 differences)")
+        return Ok(0)
+    }
+    loop line in found -> term.eprint(line)
+    term.eprint("runtime-effect-rows: {found.len()} difference(s) over {members.len()} interface functions ({report.joined} joined to a Core leaf)")
+    Ok(1)
+}
+
+run: fn() {
+    if runtime_effect_rows_main(process.args()) == {
+        .Ok(code) -> {
+            if code != 0 -> process.exit(code)
+        }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+#Test("a declaration's row entries, sorted; no row is no effect") {
+    assert_eq(declaration_effects("sleep_ns: fn(nanos: Int) -[Time.Wait]>").join("|"), "Time.Wait")
+    assert_eq(declaration_effects("f: fn() -[Time, FS.Read]> Int").join("|"), "FS.Read|Time")
+    assert_eq(declaration_effects("g: fn(x: Int) -> Int").len(), 0)
+}
+
+#Test("a member joins core.M.__X; its row must be the record's leaf, else its kind") {
+    members: [InterfaceMember]{
+        InterfaceMember{module_name: "jet.runtime.time", member: "sleep_ns", effects: [String]{"Time.Wait"}, symbol: "__jet_time_dsleep_uns"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "task_timeout", effects: [String]{"Time.Wait"}, symbol: "__jet_time_dtask_utimeout"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "cut", effects: [String]{}, symbol: "__jet_time_dcut"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "half", effects: [String]{}, symbol: "__jet_time_dhalf"},
+    }
+    leaves: [CoreLeaf]{
+        CoreLeaf{module_name: "core.time", member: "__sleep_ns", effect_kind: Val("Time"), effect_leaf: Val("Time.Wait"), symbol: "jet_std_time_sleep_duration_ns"},
+        CoreLeaf{module_name: "core.time", member: "__task_timeout", effect_kind: Val("Time"), effect_leaf: None, symbol: "jet_task_timeout_duration_ns"},
+    }
+    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half"})
+    assert_eq(report.joined, 2)
+    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (__jet_time_dtask_utimeout): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (__jet_time_dtask_utimeout): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (__jet_time_dhalf): core.time.__half has a dispatcher_row but no CoreCallRecord")
+}
+
+#Test("the table rows parse from their generated lines") {
+    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.time\", member: \"sleep_ns\", declaration: \"sleep_ns: fn(nanos: Int) -[Time.Wait]>\", symbol: \"__jet_time_dsleep_uns\"}},"
+    parsed: interface_members(interface)
+    assert_eq(parsed.len(), 1)
+    assert_eq(parsed[0].effects.join("|"), "Time.Wait")
+    record: "    CoreCallRecord{{module_name: \"core.time\", member: \"__sleep_ns\", effect_kind: Val(\"Time\"), effect_leaf: Val(\"Time.Wait\"), symbol: CoreCallSymbol.Prelude{{name: \"jet_std_time_sleep_duration_ns\"}}, coverage: 1}},"
+    leaf: core_leaves(record)
+    assert_eq(leaf.len(), 1)
+    assert_eq(leaf[0].symbol, "jet_std_time_sleep_duration_ns")
+    assert_eq(leaf[0].effect_leaf ?? "", "Time.Wait")
+    assert_eq(dispatcher_keys("dispatcher_row adapter core.time __sleep_ns | CoreCallRecord::new(…)").join("|"), "core.time __sleep_ns")
+}

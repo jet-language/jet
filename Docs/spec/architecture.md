@@ -1616,7 +1616,12 @@ RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
 declaration, or it is E3101. Ordinary C symbols stay ungated. An `#Import(c)`
 has no Jet body, so the effect row it declares is the effect each call
 performs: a caller whose row lacks it is E0740. The `jet.runtime` interface
-modules are `#Import(c)` declarations of this kind (core-library.md).
+modules are `#Import(c)` declarations of this kind (core-library.md). A member
+X of `jet.runtime.M` replaces the Core leaf `core.M.__X`, and
+`Tools/agent/RuntimeEffectRows.jet --check` (a verify-full gate) fails when the
+member's declared row differs from that leaf's CoreCallRecord effect
+(`effect_leaf`, else `effect_kind`) or only one of the leaf's record and
+`dispatcher_row` remains.
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

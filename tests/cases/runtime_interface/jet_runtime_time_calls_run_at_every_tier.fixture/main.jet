@@ -1,0 +1,12 @@
+// A user package calls the runtime's public time functions through
+// `jet.runtime.time`: each call lowers to the runtime export its interface
+// row names, under `jet run` at every optimization level and in a built binary.
+use rt: jet.runtime.time
+
+run: fn() -[IO, Time]> {
+    start: rt.host_monotonic_ns()
+    rt.task_timeout(60000000000)
+    rt.sleep_ns(2000000)
+    elapsed: rt.host_monotonic_ns() - start
+    print("slept at least 2 ms: {elapsed >= 2000000}")
+}
