@@ -691,6 +691,19 @@ PatternParser: struct {
     /// A lookaround after its `(?`: `=` and `!` look ahead, `<=` and `<!`
     /// behind. Its body holds no capture group, so every group of a match
     /// comes from the text the match consumes.
+    ///
+    /// ```jet
+    /// p := PatternParser{cps: decode_all("(?<!x)y".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    /// node: p.parse_look(0, 60, 33) ?? panic("{err.reason}")
+    /// q := PatternParser{cps: decode_all("(?=(a))".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    /// refused := "parsed"
+    /// if q.parse_look(0, 61, 40) == .Err(e) -> refused = "{e.offset}: {e.reason}"
+    /// want: "0: a lookaround holds no capture group; write `(?:…)` inside it"
+    /// p.i // => 6
+    /// p.nodes[node].kind == N_LOOK && p.nodes[node].a == 0 && p.nodes[node].left == p.looks[0] // => true
+    /// p.look_behind[0] && p.look_neg[0] // => true
+    /// refused == want // => true
+    /// ```
     parse_look: fn(&self, open: Int, kind: Int, after: Int) -> Int RegexError! {
         behind: kind == 60
         test: if behind -> after else -> kind
@@ -1731,6 +1744,17 @@ Run: struct {
     caps: [Int]
 }
 
+/// A thread VM for a program of `size` instructions over a text of `hi`
+/// bytes: no thread, edge or match yet, and the lookaround rows it reads.
+///
+/// ```jet
+/// vm: new_vm(3, 9, true, [Bool]{true, false})
+/// unset: vm.seen == filled(3, -1)
+/// vm.spc.len() + vm.tpc.len() + vm.scaps.len() + vm.tcaps.len() // => 32
+/// unset && vm.epoch == 0 && vm.sp == 0 && vm.nt == 0 // => true
+/// vm.m_pc // => -1
+/// vm.hi == 9 && vm.full && vm.looks.len() == 2 && vm.looks[0] // => true
+/// ```
 new_vm: fn(size: Int, hi: Int, full: Bool, looks: [Bool]) -> VM Never! {
     seen: filled(size, -1)
     // Every pc is entered once per epoch and pushes at most two edges, and
@@ -1760,6 +1784,24 @@ new_vm: fn(size: Int, hi: Int, full: Bool, looks: [Bool]) -> VM Never! {
     }
 }
 
+/// Whether the zero-width assertion `kind` holds at byte offset `pos` of a
+/// `text` of `hi` bytes; a lookaround reads its row of `looks`.
+///
+/// ```jet
+/// plain: compile("x") ?? panic("compiles")
+/// lines: compile_with("x", flags(false, true, false)) ?? panic("compiles")
+/// words: "ab cd".bytes()
+/// broken: "a\nb".bytes()
+/// none: [Bool]{}
+/// row: [Bool]{false, true, false}
+/// assert_holds(plain, words, A_WORD, 2, 5, none) // => true
+/// assert_holds(plain, words, A_WORD, 1, 5, none) // => false
+/// assert_holds(plain, words, A_NOT_WORD, 1, 5, none) // => true
+/// assert_holds(lines, broken, A_LINE_START, 2, 3, none) // => true
+/// assert_holds(plain, broken, A_LINE_START, 2, 3, none) // => false
+/// assert_holds(plain, broken, A_TEXT_END, 3, 3, none) // => true
+/// assert_holds(plain, words, A_LOOK, 1, 2, row) // => true
+/// ```
 assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int, looks: [Bool]) -> Bool Never! {
     if kind >= A_LOOK -> return looks[(kind - A_LOOK) * (hi + 1) + pos]
     if kind == A_LINE_START -> return pos == 0 || (re.flags.multiline && text[pos - 1] == (U8{10}))
@@ -1775,6 +1817,17 @@ assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int, looks: [Bo
 /// `k * (text.len() + 1) + offset`; empty for a pattern without one. The
 /// rows are filled in the order the looks close, so a nested look's row is
 /// ready before the look around it reads it.
+///
+/// ```jet
+/// both: compile("(?<=a)b(?=a)") ?? panic("compiles")
+/// rows: look_tables(both, "abac".bytes())
+/// want: [Bool]{false, true, false, true, false, true, false, true, false, false}
+/// accent: compile("(?<=é)x") ?? panic("compiles")
+/// boundaries: look_tables(accent, "éx".bytes())
+/// at_scalars: [Bool]{false, false, true, false}
+/// rows == want // => true
+/// boundaries == at_scalars // => true
+/// ```
 look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
     looks := [Bool]{}
     loop look in 0..<re.look_starts.len() {
@@ -1791,6 +1844,15 @@ look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
 /// linear in the text. A lookbehind's body runs forward from the start and
 /// holds where a match of it ends; a lookahead's body is compiled reversed
 /// and runs back from the end, so it holds where a match of it starts.
+///
+/// ```jet
+/// ahead: compile("a(?=b)") ?? panic("compiles")
+/// row := [Bool]{true}
+/// steps: look_pass(ahead, "abac".bytes(), 0, row)
+/// want: [Bool]{true, false, true, false, false, false}
+/// row == want // => true
+/// steps > 0 // => true
+/// ```
 look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
     hi: text.len()
     base: looks.len()
@@ -1845,6 +1907,13 @@ look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
 
 /// The byte offset where the scalar that ends at `pos` (above 0) starts in
 /// the UTF-8 `text`.
+///
+/// ```jet
+/// text: "aé€".bytes()
+/// prev_boundary(text, 6) // => 3
+/// prev_boundary(text, 3) // => 1
+/// prev_boundary(text, 1) // => 0
+/// ```
 prev_boundary: fn(text: [U8], pos: Int) -> Int Never! {
     at := pos - 1
     loop at > 0 && Int.from_u8(text[at]).bit_and(192) == 128 -> at = at - 1
@@ -2016,6 +2085,18 @@ BACKTRACK_CELLS: 32768
 /// as a later arrival would. So each (instruction, position) pair runs at
 /// most once per call, the same linear bound as the thread VM, with no
 /// thread rows to move at each scalar. `single` starts only at 0.
+///
+/// ```jet
+/// shout: compile("(\\w+)(?=!)") ?? panic("compiles")
+/// said: "hi there!".bytes()
+/// found: backtrack(shout, said, false, false, true, look_tables(shout, said))
+/// bare: backtrack(shout, said, false, false, false, look_tables(shout, said))
+/// only_start: backtrack(shout, said, true, false, true, look_tables(shout, said))
+/// want: [Int]{3, 8, 3, 8}
+/// found.len() == 1 && found[0].start == 3 && found[0].end == 8 && found[0].caps == want // => true
+/// bare.len() == 1 && bare[0].caps.len() == 0 // => true
+/// only_start.len() // => 0
+/// ```
 backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, looks: [Bool]) -> [Run] Never! {
     hi: text.len()
     visited := filled((re.ops.len() * (hi + 1) + 31) >> 5, 0)
@@ -2045,6 +2126,22 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, lo
 /// or -1. `jobs` holds pairs: a branch still to try (pc, position), or a
 /// capture slot to restore (-slot - 1, its earlier position), so `caps` is
 /// back to all -1 when the walk fails.
+///
+/// ```jet
+/// shout: compile("(\\w+)(?=!)") ?? panic("compiles")
+/// said: "hi there!".bytes()
+/// looks: look_tables(shout, said)
+/// visited := filled((shout.ops.len() * (said.len() + 1) + 31) >> 5, 0)
+/// jobs := [Int]{}
+/// caps := filled(4, -1)
+/// from_start: backtrack_from(shout, said, 0, false, true, visited, jobs, caps, looks)
+/// restored: caps == filled(4, -1) && jobs.len() == 0
+/// from_word: backtrack_from(shout, said, 3, false, true, visited, jobs, caps, looks)
+/// from_start // => -1
+/// restored // => true
+/// from_word // => 8
+/// caps[2] == 3 && caps[3] == 8 // => true
+/// ```
 backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: &[Int], jobs: &[Int], caps: &[Int], looks: [Bool]) -> Int Never! {
     hi: text.len()
     width: hi + 1
@@ -2415,4 +2512,69 @@ subn: fn(pattern: Regex, text: String, replacement: String) -> (text: String, co
             n = n * 2
         }
     }
+}
+
+// `jet test` of a Core file runs its #Tests but not its doctests, so this
+// asserts every claim of the lookaround parts' doctests.
+#Test("the lookaround parts answer as their doctests claim") {
+    behind := PatternParser{cps: decode_all("(?<!x)y".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    node: behind.parse_look(0, 60, 33) ?? panic("{err.reason}")
+    assert_eq(behind.i, 6)
+    assert(behind.nodes[node].kind == N_LOOK && behind.nodes[node].a == 0 && behind.nodes[node].left == behind.looks[0])
+    assert(behind.look_behind[0] && behind.look_neg[0])
+    grouped := PatternParser{cps: decode_all("(?=(a))".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    refused := "parsed"
+    if grouped.parse_look(0, 61, 40) == .Err(e) -> refused = "{e.offset}: {e.reason}"
+    assert_eq(refused, "0: a lookaround holds no capture group; write `(?:…)` inside it")
+
+    vm: new_vm(3, 9, true, [Bool]{true, false})
+    assert_eq(vm.seen, filled(3, -1))
+    assert_eq(vm.spc.len() + vm.tpc.len() + vm.scaps.len() + vm.tcaps.len(), 32)
+    assert(vm.epoch == 0 && vm.sp == 0 && vm.nt == 0 && vm.m_pc == -1)
+    assert(vm.hi == 9 && vm.full && vm.looks == [Bool]{true, false})
+
+    plain: compile("x") ?? panic("compiles")
+    lines: compile_with("x", flags(false, true, false)) ?? panic("compiles")
+    words: "ab cd".bytes()
+    broken: "a\nb".bytes()
+    none: [Bool]{}
+    assert(assert_holds(plain, words, A_WORD, 2, 5, none))
+    assert(!assert_holds(plain, words, A_WORD, 1, 5, none))
+    assert(assert_holds(plain, words, A_NOT_WORD, 1, 5, none))
+    assert(assert_holds(lines, broken, A_LINE_START, 2, 3, none))
+    assert(!assert_holds(plain, broken, A_LINE_START, 2, 3, none))
+    assert(assert_holds(plain, broken, A_TEXT_END, 3, 3, none))
+    assert(assert_holds(plain, words, A_LOOK, 1, 2, [Bool]{false, true, false}))
+
+    both: compile("(?<=a)b(?=a)") ?? panic("compiles")
+    assert_eq(look_tables(both, "abac".bytes()), [Bool]{false, true, false, true, false, true, false, true, false, false})
+    accent: compile("(?<=é)x") ?? panic("compiles")
+    assert_eq(look_tables(accent, "éx".bytes()), [Bool]{false, false, true, false})
+    ahead: compile("a(?=b)") ?? panic("compiles")
+    row := [Bool]{true}
+    assert(look_pass(ahead, "abac".bytes(), 0, row) > 0)
+    assert_eq(row, [Bool]{true, false, true, false, false, false})
+
+    text: "aé€".bytes()
+    assert_eq(prev_boundary(text, 6), 3)
+    assert_eq(prev_boundary(text, 3), 1)
+    assert_eq(prev_boundary(text, 1), 0)
+
+    shout: compile("(\\w+)(?=!)") ?? panic("compiles")
+    said: "hi there!".bytes()
+    looks: look_tables(shout, said)
+    found: backtrack(shout, said, false, false, true, looks)
+    assert(found.len() == 1 && found[0].start == 3 && found[0].end == 8)
+    assert_eq(found[0].caps, [Int]{3, 8, 3, 8})
+    bare: backtrack(shout, said, false, false, false, looks)
+    assert(bare.len() == 1 && bare[0].caps.len() == 0)
+    assert_eq(backtrack(shout, said, true, false, true, looks).len(), 0)
+    visited := filled((shout.ops.len() * (said.len() + 1) + 31) >> 5, 0)
+    jobs := [Int]{}
+    caps := filled(4, -1)
+    assert_eq(backtrack_from(shout, said, 0, false, true, visited, jobs, caps, looks), -1)
+    assert_eq(caps, filled(4, -1))
+    assert_eq(jobs.len(), 0)
+    assert_eq(backtrack_from(shout, said, 3, false, true, visited, jobs, caps, looks), 8)
+    assert(caps[2] == 3 && caps[3] == 8)
 }
