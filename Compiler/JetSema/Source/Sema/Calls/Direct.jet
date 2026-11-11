@@ -1142,6 +1142,8 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
     if form.handled -> return form
     transform := sema_call_try_compute_transform(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if transform.handled -> return transform
+    fetched := sema_call_try_comptime_fetch(module_name, member, call.args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if fetched.handled -> return fetched
     live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if live.handled -> return live
     // `reactive.signal/derived/computed/autorun` have no Core call record:

@@ -438,6 +438,11 @@ THostCall: enum {
     // (sema_comptime_input_value_problem). The compiler reads and records the
     // input; it never runs at runtime.
     ComptimeInput(builtin: String, path: TExpr)
+    // `net.fetch(url, sha256: "…")` in comptime code: the Tier-1 pinned
+    // download of its String URL, whose content must hash to the written
+    // SHA-256 (E3413). The compiler fetches and checks it; it never runs at
+    // runtime.
+    ComptimeFetch(url: TExpr, sha256: String)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
@@ -1122,6 +1127,7 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
         .ComptimeInput(_, path) -> visit(path)
+        .ComptimeFetch(url, _) -> visit(url)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }

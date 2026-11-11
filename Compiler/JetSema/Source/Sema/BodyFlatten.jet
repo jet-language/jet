@@ -613,6 +613,7 @@ body_flat_host_call: fn(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_flat_expr(f_path, flat)}
+        .ComptimeFetch(f_url, f_sha256) -> BodyHostCall.ComptimeFetch{url: body_flat_expr(f_url, flat), sha256: f_sha256}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }
@@ -1486,6 +1487,7 @@ body_copy_host_call: fn(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Ne
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_copy_expr(f_value, flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_copy_expr(f_path, flat)}
+        .ComptimeFetch(f_url, f_sha256) -> BodyHostCall.ComptimeFetch{url: body_copy_expr(f_url, flat), sha256: f_sha256}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }

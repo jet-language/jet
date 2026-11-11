@@ -13,6 +13,13 @@
 // the toolchain's own packages may read it (jet_driver_comptime_toolchain_input).
 // A Core file's inputs are files beside it in the toolchain's Core tree, read by
 // the host's Core reader (JetDriverCoreComptimeInputs).
+//
+// `net.fetch(url, sha256:)` in comptime code is the build fetch `b.fetch` runs
+// (jet_driver_build_fetch): a `file://` URL rooted at the embedding file's
+// directory, or an HTTP(S) URL over the request's build HTTP transport, with
+// the same bounds, and its content checked against the pin (E3413). It isn't
+// an input record: the pin is written in the source, so the source's own
+// identity fixes the value, and changed content is E3413, never a new value.
 use {
     jet_foundation.[
         Diagnostic,
@@ -47,6 +54,8 @@ JetDriverComptimeInputLog: struct {
 
 JetDriverComptimeInputs: struct {
     inputs: JetDriverSharedBuildInputs
+    // The request's build HTTP transport, for an HTTP(S) `net.fetch`.
+    http_inputs: JetDriverSharedBuildHTTPInputs?{None}
     base_dir: String
     log: Shared<JetDriverComptimeInputLog>?
     // The physical path of the file doing the embedding, and the toolchain
@@ -57,8 +66,8 @@ JetDriverComptimeInputs: struct {
     impl JetEvalComptimeInputAdapter {
         clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
             // copy: the evaluator forks the adapter for each machine; the forks share the input
-            // transport, the one input log and the one toolchain tree.
-            JetDriverComptimeInputs{inputs: self.inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
+            // transports, the one input log and the one toolchain tree.
+            JetDriverComptimeInputs{inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
         }
         comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
             named: sema_comptime_input_named(path)
@@ -68,6 +77,12 @@ JetDriverComptimeInputs: struct {
             bytes: self.inputs.read_rooted(self.base_dir, named, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{named}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
             jet_driver_comptime_input_record(self.log, self.base_dir, "", named, bytes)
             jet_driver_comptime_input_value(builtin, named, bytes, span)
+        }
+        comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError! {
+            // A comptime fetch is the Tier-1 network input itself, so it needs no
+            // `fn build` row that declares Net.
+            reply: jet_driver_build_fetch(Val(self.inputs), self.http_inputs, true, self.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: url}, BuildSessionValue.Text{value: sha256}}, span)
+            jet_driver_comptime_fetch_value(url, reply, span)
         }
     }
 }
@@ -95,11 +110,28 @@ JetDriverCoreComptimeInputs: struct {
             bytes: reader.read_bytes("{self.base_dir}/{named}") ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{named}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
             jet_driver_comptime_input_value(builtin, named, bytes, span)
         }
+        comptime_fetch: fn(self, url: String, _sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError! {
+            Err(jet_driver_comptime_input_fail("`fetch` can't download `{url}` in Core", "a Core file is part of the toolchain tree, and the toolchain builds without the network", "embed the asset beside the Core file with `embed_file(\"path\")`", span))
+        }
     }
 }
 
 jet_driver_comptime_input_fail: fn(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
     JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0955", Val(span), what, why, fix)}
+}
+
+// The value of a comptime fetch's build reply: the fetched text, or the
+// fetch's own diagnostic (E3413 for a pin its content misses, E3414 for a
+// transport failure) at the call.
+jet_driver_comptime_fetch_value: fn(url: String, reply: BuildSessionReply, span: Span) -> TComptimeValue JetEvalComptimeInputError! {
+    if reply == {
+        .Value(value) -> {
+            if value == .Text(text) -> return Ok(TComptimeValue.String{value: text})
+        }
+        .Failure(error) -> return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry(error.code, Val(span), error.what, error.why, error.fix)})
+        .HostRequest(_, _) -> {}
+    }
+    Err(jet_driver_comptime_input_fail("`fetch` can't download `{url}` here", "this compile has no transport for the URL's scheme", "build the program with `jet build` or `jet run`, which fetch comptime inputs", span))
 }
 
 // One read's record: its name (`prefix`, `toolchain:` for a toolchain read,
@@ -232,8 +264,8 @@ jet_driver_comptime_inputs_for: fn(request: JetDriverCompileRequest, source_file
     if source_file.starts_with("{JET_DRIVER_CORE_SOURCE_ROOT}/") -> return jet_driver_core_comptime_inputs(request.core_sources, source_file)
     inputs: request.build_inputs ?? return None
     physical: jet_driver_physical_path(jet_driver_entry_root_path(request.authorized_sources), source_file)
-    // copy: the adapter shares the request's transport handle; the request keeps its own.
-    Val(JetDriverComptimeInputs{inputs: inputs.copy(), base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log.copy(), file: physical, toolchain: request.toolchain_tree.copy()})
+    // copy: the adapter shares the request's transport handles; the request keeps its own.
+    Val(JetDriverComptimeInputs{inputs: inputs.copy(), http_inputs: request.build_http_inputs.copy(), base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log.copy(), file: physical, toolchain: request.toolchain_tree.copy()})
 }
 
 // The comptime input host of the Core file `source_file` names: the directory

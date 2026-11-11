@@ -3591,6 +3591,8 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     if form.handled -> return SemaMethodSpecialCheck{handled: true, value: form.value}
     transform := sema_call_try_compute_transform(module_name, method, alias, alias_span, args, type_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if transform.handled -> return SemaMethodSpecialCheck{handled: true, value: transform.value}
+    fetched := sema_call_try_comptime_fetch(module_name, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if fetched.handled -> return SemaMethodSpecialCheck{handled: true, value: fetched.value}
     if !nested {
         live := sema_call_try_live(module_name, method, alias, alias_span, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}

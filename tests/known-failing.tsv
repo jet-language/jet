@@ -60,9 +60,6 @@ tests/ui/identifier_casing	#6425	`.Val(BadBind)` (a value slot: PascalCase never
 tests/ui/inline_module_return_type_mismatch	#6425	check not ported: E0080 (reports E0113 with the mangled function name)
 tests/ui/comptime_impure	#4926	E3410 (Tier-2 comptime effect) replaces E3401 and E0107
 tests/ui/pure/pure_fn_comptime_block_is_excluded_from_runtime_check	#4926	E3410 (Tier-2 comptime effect) replaces E3401
-tests/ui/comptime_net_fetch_ok	#6419	unbuilt: comptime core.net.fetch (E1004)
-tests/ui/comptime_net_fetch_bad_hash	#6419	unbuilt: comptime core.net.fetch (E1004); E3413 has no emit site
-tests/ui/comptime_net_fetch_bad_url	#6419	unbuilt: comptime core.net.fetch (E1004); E3414 has no emit site
 tests/ui/runtime_rng_backward	#5010	a stop raised in Core source (RNG.int's __numeric_stop) has no caller location, so E3010 prints no `-->` line
 tests/ui/runtime_e3014	#6366	ir.build unlowered: foreign import requires a checked direct C scalar signature (no IR lowering for extern rust)
 tests/ui/project_module_duplicate	#4275	fixture has no package.jet (E2393), and inside a package an inline `module` declaration is not a project module (E0603, no E0606)
@@ -198,8 +195,6 @@ tests/cases/dev_parts_routine/wrapped_returned_view_fields_match_aot_and_default
 tests/cases/dev_parts_tier_parity/ui_and_web_match_interpreter_default_run_and_aot_web_web_app.case	#5454	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
 tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#5454	`jet build workspace.jet --allow=Exec` exits 1 with E3505 BuildProbeFailed: build actions run only in the bubblewrap sandbox, and none is available to the testkit run, so the member `fn build` entries never execute (#5496)
 tests/cases/gate_ledger/i9_number_grid_repl_keeps_the_inline_range_behavior.case	#5454	`jet repl` is built and exits 0, but piped stdin echoes the numbered `N user>` prompts and prints a "`print` is from `use core.term`" note, so the canonical `ok\nok\n42\n3\n` transcript differs (#4891)
-tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
-tests/cases/net_tls/comptime_fetch_rejects_hardlinks_to_outside_files.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
 tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109 (#5524)
 tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398 (#5525)
 tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case	#5454	c1-c4 pass; c5 `math.hypot(Float{2.0}, F32 ..)` reports E0112 with the generic "`hypot` wants Float … but this is F32" text, not the "Mixing float widths" refusal that pow (c4) renders

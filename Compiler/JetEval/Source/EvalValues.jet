@@ -49,9 +49,11 @@ JetEvalBuildReply: enum {
 
 // The compiler's answer to a Tier-1 comptime input (`embed_file`,
 // `embed_bytes`, `find`) named by a checked literal path relative to the
-// source file being compiled. The driver installs it for comptime evaluation:
-// it owns the rooted, no-follow read, its bounds and the input record. A
-// failure is the diagnostic the read reports (E0955).
+// source file being compiled, and to the pinned `net.fetch(url, sha256:)`.
+// The driver installs it for comptime evaluation: it owns the rooted,
+// no-follow read, the bounded fetch, their bounds and the input record. A
+// failure is the diagnostic the read (E0955) or the fetch (E3413, E3414)
+// reports.
 #Error
 JetEvalComptimeInputError: struct {
     diagnostic: Diagnostic
@@ -60,6 +62,7 @@ JetEvalComptimeInputError: struct {
 JetEvalComptimeInputAdapter: trait {
     clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter
     comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
+    comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError!
 }
 
 // The compiler's answer to a `core.compiler` query (`compiler.lex(source)`,

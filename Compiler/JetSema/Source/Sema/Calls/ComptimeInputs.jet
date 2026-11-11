@@ -13,6 +13,7 @@
 // and records its hash; nothing runs at runtime.
 use jet_foundation.[
     Call,
+    CallArg,
     Diagnostic,
     Expr,
     JET_COMPTIME_TOOLCHAIN_PREFIX,
@@ -114,4 +115,37 @@ sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment
         return None
     }
     Val(checked)
+}
+
+// `net.fetch(url, sha256: "…")`, the one compile-time network operation: a
+// Tier-1 input whose content must hash to the written pin. The URL is a
+// String, a literal or a value the comptime code computes; the pin is a
+// String literal, so the source itself fixes the value. The compiler fetches
+// the URL while it builds (the driver's jet_driver_build_fetch, the fetch
+// `b.fetch` runs), and content that misses the pin is E3413. Another
+// `core.net` member is not handled here.
+sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.net" || member != "fetch" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    failed: SemaDirectSpecialCheck{handled: true, value: None}
+    if scopes.comptime_execution_depth == 0 {
+        diagnostics.push(sema_error("E0956", span, "`net.fetch` is compile-time only", "the compiler downloads the pinned content while building, so it is a value in the program, not a runtime request", "use it in a `comptime` binding, e.g. `DATA: comptime {{ net.fetch(\"https://example.com/data.txt\", sha256: \"…\") }}`"))
+        return failed
+    }
+    pinned := false
+    if args.len() == 2 && args[0].label == None {
+        if args[1].label == .Val(label) -> pinned = label.name == "sha256"
+    }
+    pin := String?{None}
+    if pinned -> pin = sema_comptime_input_literal(args[1].expr)
+    sha256: pin ?? {
+        diagnostics.push(sema_error("E3414", span, "`net.fetch` takes a URL and a literal `sha256:` pin", "a compile-time download is pinned by the content hash written in the source", "write `net.fetch(\"https://example.com/data.txt\", sha256: \"<64 hex digits>\")`"))
+        return failed
+    }
+    url: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    if sema_expr_unwrap_tag(url.ty) != Type.String {
+        diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
+        return failed
+    }
+    node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeFetch{url: url, sha256: sha256}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

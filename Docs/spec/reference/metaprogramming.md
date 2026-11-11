@@ -88,7 +88,7 @@ Compile-time effects are classified by what they can observe:
 | Tier | Allowed work | Reproducibility rule |
 |---|---|---|
 | 0 | Pure Jet values and effect-free Core calls | No external input is read. |
-| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | Inputs and hashes are recorded in `.jet/lock`; equal inputs produce equal values. Each file read is an input of the build identity: editing it rebuilds under `jet build` and reruns under `jet dev`. |
+| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | File inputs and their hashes are recorded in `.jet/lock`, and a fetch's hash is the pin written in the source; equal inputs produce equal values. Each file read is an input of the build identity: editing it rebuilds under `jet build` and reruns under `jet dev`. |
 | 2 | Ambient filesystem, environment, process, clock, random, or unpinned network access | The source uses `#Impure("reason")`, and the build invocation grants `impure`. |
 
 The examples show the Tier 1 boundary: [`embed.jet`](../../../Examples/Metaprogramming/Comptime/Embed.jet)
@@ -99,9 +99,14 @@ relative paths with their input identity. An empty `find` result is still a
 typed empty `[String]`; the comptime tier-parity case
 [`find_empty.jet`](../../../tests/cases/comptime_cli_parity/fixtures/tier_parity_examples_run_through_aot_jit_and_interpreter/comptime_find_empty/find_empty.jet) proves it.
 
-`core.net.fetch(url, sha256:)` is the only Tier 1 network operation. Other
-`core.net` methods are unavailable at compile time (E3412), and a content-hash
-mismatch is E3413.
+`core.net.fetch(url, sha256:)` is the only Tier 1 network operation. It runs
+only at compile time; a runtime call is E0956. The URL is a String, written or
+computed by comptime code, and the `sha256:` pin is a String literal; any
+other shape is E3414. The compiler fetches `file://` (inside the source
+directory), `http://` and `https://` URLs from public destinations only, and
+content that misses the pin is E3413. Because the pin in the source fixes the
+value, the fetch is not recorded in `.jet/lock`. Other `core.net` methods are
+unavailable at compile time (E3412).
 
 A Tier 2 operation does not become acceptable merely because it appears in a
 compile-time expression. A compile-time ambient read needs both the source

@@ -899,14 +899,20 @@ jet_eval_ir_primitive_shape: fn(s: &JetEvalIRState, name: String) -> Int? Never!
 // jet_comptime_input(builtin, path): the value the compiler's comptime input
 // host reads and records for the path's String, a checked literal or the
 // value the comptime code computed, as the IR value of type row `dst_row`.
+// `net.fetch(url, sha256:)` takes the route as ("fetch", url, sha256): the
+// host fetches the URL and checks its content against the pin.
 jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int) -> Int? {
-    if args.len() != 2 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
+    if args.len() != 2 && args.len() != 3 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
     if s.runtime_execution {
         jet_eval_ir_problem(s, "a comptime input reached runtime evaluation")
         return None
     }
     builtin: jet_eval_ir_text(s, args[0]) ?? return None
     path: jet_eval_ir_text(s, args[1]) ?? return None
+    pin := String?{None}
+    if args.len() == 3 {
+        pin = Val(jet_eval_ir_text(s, args[2]) ?? return None)
+    }
     adapter: if s.inputs == {
         .Val(installed) -> installed.clone_input_adapter()
         .None -> {
@@ -914,7 +920,7 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
             return None
         }
     }
-    value: if adapter.comptime_input(builtin, path, s.span) == {
+    value: if jet_eval_ir_comptime_input_read(adapter, builtin, path, pin, s.span) == {
         .Ok(read) -> read
         .Err(error) -> {
             if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: error.diagnostic})
@@ -922,6 +928,13 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
         }
     }
     jet_eval_ir_store_data(s, value, dst_row)
+}
+
+// The comptime input host's answer for one route: the pinned fetch of the
+// URL `path` when `pin` is present, otherwise the read `builtin` names.
+jet_eval_ir_comptime_input_read: fn(adapter: JetEvalComptimeInputAdapter, builtin: String, path: String, pin: String?, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError! {
+    if pin == .Val(sha256) -> return adapter.comptime_fetch(path, sha256, span)
+    adapter.comptime_input(builtin, path, span)
 }
 
 // The IR word of compile-time data of type row `row`, for the shapes a
