@@ -123,6 +123,16 @@ public destinations only, and content that misses the pin is E3413. Because
 the pin in the source fixes the value, the fetch is not recorded in
 `.jet/lock`. Other `core.net` methods are unavailable at compile time (E3412).
 
+`build: fn` reads its inputs through the same calls. `Build` has no `find`,
+`embed` or `fetch` method of its own, and naming one is E0102. Each file and
+glob a build reads lands in `.jet/lock` beside the generated inputs, a file as
+its path and SHA-256, and `jet build --locked` refuses a build whose reads
+drift. A build's `net.fetch` has no lock row, for the same reason as above.
+The [`sprite_atlas.jet`](../../../tests/run/Preparation/comptime/sprite_atlas.jet)
+golden packs the files that `find` lists through a plain helper that calls
+`embed_file` and `embed_bytes`, and the running program reads only the baked
+atlas.
+
 A Tier 2 operation does not become acceptable merely because it appears in a
 compile-time expression. A compile-time ambient read needs both the source
 gate and the command-line grant:

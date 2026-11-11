@@ -1,0 +1,49 @@
+// A sprite atlas packed while compiling. `find` lists the sprite sheets and
+// the plain helper `pack_sprites` reads each one with `embed_file` and the
+// binary palette with `embed_bytes`; all three are ordinary effectful calls
+// (`FS.Read`) that the compiler answers when the prepared constant runs them,
+// recording each file's hash. The running program reads only the baked atlas
+// and never opens a sprite file.
+Sprite: struct {
+    name: String
+    column: Int
+    width: Int
+}
+
+Atlas: struct {
+    sprites: [Sprite]
+    rows: [String]
+    palette: [U8]
+}
+
+ATLAS_HEIGHT: 3
+
+pack_sprites: fn(paths: [String]) -> Atlas {
+    sprites := [Sprite]{}
+    rows := [String]{"", "", ""}
+    loop path in paths {
+        lines: embed_file(path).trim_end().split("\n").to_list()
+        width := 0
+        loop line in lines {
+            if line.len() > width -> width = line.len()
+        }
+        column: rows[0].len()
+        loop index in 0..<ATLAS_HEIGHT {
+            line: if index < lines.len() -> lines[index] else -> ""
+            rows[index] = "{rows[index]}{line.pad_end(width, ".")}|"
+        }
+        sprites.push(Sprite{name: path.replace("sprites/", "").replace(".txt", ""), column: column, width: width})
+    }
+    Atlas{sprites: sprites, rows: rows, palette: embed_bytes("sprites/palette.bin")}
+}
+
+ATLAS: comptime { pack_sprites(find("sprites/*.txt")) }
+
+run: fn() {
+    loop row in ATLAS.rows -> print(row)
+    loop sprite in ATLAS.sprites {
+        print("{sprite.name} at column {sprite.column}, {sprite.width} wide")
+    }
+    palette: loop byte in ATLAS.palette -> "{byte}"
+    print("palette {palette.join(" ")}")
+}
