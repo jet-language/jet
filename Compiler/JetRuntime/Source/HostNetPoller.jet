@@ -245,7 +245,11 @@ net_poller_start: fn(root: I64) {
 }
 #Export(c) jet_socket_ready_raw: fn(state: I64, interest: I64, timeout_ns: I64, error: I64) -> I64 { host_net_ready(state, interest, timeout_ns, host_net_wait_kind(), error) }
 // Wait until `state` is ready for `interest`; `wait_kind` (owned, dropped
-// here) names the wait to the scheduler, the observation and an E3003.
+// here) names the wait to the scheduler, the observation and an E3003. A
+// cancelled process root (a delivered process.on_signal signal) never
+// unwinds, so its wait ends unready as ECANCELED instead of parking, which
+// the routes report as a cancelled network operation (NetRoutes.jet
+// net_route_errno).
 host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) {
@@ -255,6 +259,10 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
     if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_deadline_check(wait_kind) != I64{0}) {
         jet_rt_string_drop(wait_kind)
         return I64{0}
+    }
+    if scheduler_root_cancel_observed() {
+        jet_rt_string_drop(wait_kind)
+        return fd_error(I64{-125}, error)
     }
     root: net_poller_root
     fd_lock(state)
@@ -306,6 +314,7 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) -> break
         if (sync_load(wrapping(waiter + I64{32})) != I64{0} || sync_load(wrapping(waiter + I64{40})) != I64{0}) -> break
+        if scheduler_root_cancel_observed() -> break
         remaining: if (deadline < I64{0}) -> I64{-1} else -> deadline - sync_now_ns()
         if (deadline >= I64{0} && remaining <= I64{0}) -> break
         if (scheduler_yield(wait_kind, net_word(waiter, I64{16}), remaining) != I64{0}) -> break
@@ -315,6 +324,7 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
     jet_rt_string_drop(wait_kind)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (outcome < I64{0}) -> return fd_error(outcome, error)
+    if (outcome == I64{0} && scheduler_root_cancel_observed()) -> return fd_error(I64{-125}, error)
     _ := fd_error(I64{0}, error)
     outcome
 }

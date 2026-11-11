@@ -3641,14 +3641,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetRoutes.jet",
-      "line": 228,
+      "line": 231,
       "column": 9,
       "reason": "the owned terminated host copy truncates at its validated scope suffix"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetRoutes.jet",
-      "line": 546,
+      "line": 549,
       "column": 9,
       "reason": "output lends the C ABI bool result byte, not an eight-byte word"
     },
@@ -3795,42 +3795,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 263,
+      "line": 269,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 336,
+      "line": 342,
       "column": 9,
       "reason": "written under the scheduler root mutex, after every word the handler and dispatcher read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 386,
+      "line": 392,
       "column": 5,
       "reason": "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 390,
+      "line": 396,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 399,
+      "line": 405,
       "column": 5,
       "reason": "rt_sigaction reads the saved four-word action from the hub's table and writes no old action"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 630,
+      "line": 636,
       "column": 9,
       "reason": "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action"
     },
@@ -10699,8 +10699,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 14:5 | "thread-confined native Layout storage owns this aligned word" |
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 78:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutText.jet | 62:5 | "runtime-init (jet_rt_layout_init) runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 228:9 | "the owned terminated host copy truncates at its validated scope suffix" |
-| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 546:9 | "output lends the C ABI bool result byte, not an eight-byte word" |
+| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 231:9 | "the owned terminated host copy truncates at its validated scope suffix" |
+| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 549:9 | "output lends the C ABI bool result byte, not an eight-byte word" |
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 220:13 | "fds lends count initialized exact Int words" |
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 377:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 468:13 | "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec" |
@@ -10721,12 +10721,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 19:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 27:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 51:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 263:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 336:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 386:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 390:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 399:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 630:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 269:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 342:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 392:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 396:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 405:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 636:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 97:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 165:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 181:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |

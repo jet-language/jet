@@ -2,9 +2,9 @@
 // (jet_process_signal_arm_raw) and core.sys.on_interrupt
 // (jet_rt_native_interrupt). Mask bits INT=1, HUP=2, TERM=4. The handler only
 // updates preallocated words (async-signal-safe); a dispatcher thread polls
-// every 10 ms, cancels the process root task control once per delivered
-// signal (Scheduler.jet scheduler_root_task_control) and runs the interrupt
-// handlers once per counted SIGINT.
+// every 10 ms, cancels the process once per delivered signal
+// (process_signal_cancel_process) and runs the interrupt handlers once per
+// counted SIGINT.
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
 rt_process_signal_mark_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
@@ -134,11 +134,17 @@ process_signal_dispatcher_start: fn(state: I64, error: I64) -> I64 {
     process_signal_error(error, jet_rt_string_clone(status))
 }
 
-// Root lookup, then cancel: callback.
-process_signal_cancel_root: fn() {
+// A delivered signal cancels the process: the root task control
+// (Scheduler.jet scheduler_root_task_control), whose wait points then end
+// without parking (a network wait as cancelled, a sleep at once), and every
+// live task (Observe.jet observe_cancel_live_tasks), which unwinds at its
+// wait point. A server serving on the root or in a task stops accepting and
+// returns its report, so the program drains and ends.
+process_signal_cancel_process: fn() {
     control: scheduler_root_task_control()
     scheduler_control_cancel(control)
     scheduler_control_drop(control)
+    if (observe_root != I64{0}) -> observe_cancel_live_tasks()
 }
 
 // jet_process_signal_dispatch: take the pending bits that have a registered
@@ -163,9 +169,9 @@ process_signal_dispatch: fn(state: I64) {
             break
         }
     }
-    if (deliverable.bit_and(I64{4}) != I64{0}) -> process_signal_cancel_root()
-    if (deliverable.bit_and(I64{2}) != I64{0}) -> process_signal_cancel_root()
-    if (deliverable.bit_and(I64{1}) != I64{0}) -> process_signal_cancel_root()
+    if (deliverable.bit_and(I64{4}) != I64{0}) -> process_signal_cancel_process()
+    if (deliverable.bit_and(I64{2}) != I64{0}) -> process_signal_cancel_process()
+    if (deliverable.bit_and(I64{1}) != I64{0}) -> process_signal_cancel_process()
     sync_mutex_unlock(wrapping(state + I64{32}))
 }
 
@@ -300,7 +306,7 @@ process_signal_interrupt_run: fn(closure: I64) -> I64 {
 // bits and, under the hub lock, sends each subscription the ProcessSignal
 // word of every signal it holds (one queued per signal: a signal already
 // waiting in its channel is not queued again, so a channel never holds more
-// than its set) and cancels the root task for an on_signal subscription.
+// than its set) and cancels the process for an on_signal subscription.
 // Bits no subscription holds are dropped.
 rt_signal_mark_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 rt_signal_dispatcher_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
@@ -469,7 +475,7 @@ signal_hub_dispatch: fn(hub: I64) {
                 }
                 index += I64{1}
             }
-            if (sync_load(wrapping(sub + I64{24})) != I64{0}) -> process_signal_cancel_root()
+            if (sync_load(wrapping(sub + I64{24})) != I64{0}) -> process_signal_cancel_process()
         }
         at += I64{1}
     }

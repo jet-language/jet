@@ -263,7 +263,7 @@ __HTTPServerState: struct {
 }
 
 /// A bound listener and its mux. `serve` answers connections until
-/// `shutdown`; the report is the same for every caller.
+/// `shutdown` or a cancelled accept; the report is the same for every caller.
 HTTPServer: struct {
     __state: Shared<__HTTPServerState>
     __listener: TCPListener
@@ -292,7 +292,12 @@ HTTPServer: struct {
                     }
                 }
                 .Err(error) -> {
-                    if !__accept_timed_out(error) {
+                    // A cancelled accept (the serving task's cancel, or the
+                    // process's on a delivered `process.on_signal` signal)
+                    // stops serving as a shutdown does: the report stands.
+                    if __accept_cancelled(error) {
+                        running = false
+                    } else if !__accept_timed_out(error) {
                         failure = Val(HTTPError.IO{operation: "accept: {error}"})
                         running = false
                     }
@@ -356,6 +361,13 @@ __accept_timed_out: fn(error: NetError) -> Bool Never! {
     if error == {
         .Timeout(_) -> true
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
+__accept_cancelled: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .Cancelled(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 

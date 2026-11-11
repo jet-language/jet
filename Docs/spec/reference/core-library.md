@@ -1467,8 +1467,10 @@ belongs to the listener's TLS setup, not to construction.
 `HTTPServer`, panicking when the address cannot be bound.
 
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
-`shutdown(grace)`, where `grace` defaults to zero. Each request is answered
-before the next is accepted, so a
+`shutdown(grace)`, where `grace` defaults to zero, or until its accept is
+cancelled (the serving task's cancel, or a signal `process.on_signal`
+registered), which ends `serve` with its report as a shutdown does. Each
+request is answered before the next is accepted, so a
 shutdown has no in-flight request to cancel. Every caller of `serve` and
 `shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
 completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection
@@ -2552,7 +2554,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.exit(code)` | `Never -[Exec.Exit]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
 | `#Unsafe process.exit_unmapped(code)` | `Never -[Exec.Exit]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
 | `process.fail(code, message)` | `Never -[Exec.Exit, IO, Time.Wait]>` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
-| `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
+| `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is cancelled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is cancelled, so a serving `HTTPServer` returns its report and the program drains to its end. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
 | `ProcessSignal` | type | Closed variants: `Term`, `Hup`, and `Int`, matching the shared signal dispatcher. |

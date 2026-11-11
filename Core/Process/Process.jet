@@ -251,6 +251,10 @@ exec: fn(argv: [String], env: [String: String]{[String: String]{}}) -[Exec, IO, 
     loop {}
 }
 
+/// Cancel the process when `signal` arrives: the entry's waits end without
+/// parking (a network wait as `NetError.Cancelled`, a sleep at once) and every
+/// live task is cancelled, so a serving `HTTPServer` returns its report and
+/// the program drains to its end.
 on_signal: fn(signal: ProcessSignal) Never! -[Exec]> {
     mask: if signal == {
         .Int -> 1

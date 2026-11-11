@@ -1,0 +1,35 @@
+// Card #3173 c40: an artifact that registers `process.on_signal(.Term)`
+// drains on SIGTERM. The entry serves one server, a task serves another and
+// a second task sleeps; the signal ends all three, and the entry prints both
+// reports and ends.
+use {
+    http_server: core.http.server
+    process: core.process
+    term: core.term
+    time: core.time
+}
+
+run: fn() {
+    process.on_signal(.Term)
+    entry_mux: http_server.mux()
+    entry_mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "entry")))
+    entry_server: http_server.bind("127.0.0.1:0", entry_mux) ?? process.fail(2, "bind: {err}")
+    task_mux: http_server.mux()
+    task_mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "task")))
+    task_server: http_server.bind("127.0.0.1:0", task_mux) ?? process.fail(2, "bind: {err}")
+    serving: task { task_server.serve() ?? process.fail(1, "task serve: {err}") }
+    sleeping: task { time.sleep(60s) }
+    print("ready")
+    // A pipe stdout is written when its buffer fills (spec.md print); flush so
+    // the parent sees ready before it signals.
+    ready_out := term.stdout()
+    ready_out.flush() ?? process.fail(1, "flush: {err}")
+    entry_report: entry_server.serve() ?? process.fail(1, "entry serve: {err}")
+    print("entry drained: accepted={entry_report.accepted}")
+    task_report: serving.join() ?? process.fail(1, "the serving task failed")
+    print("task drained: accepted={task_report.accepted}")
+    if sleeping.join() == {
+        .Ok(_) -> print("sleep: finished")
+        .Err(_) -> print("sleep: cancelled")
+    }
+}
