@@ -1,0 +1,59 @@
+// main.jet in the `comptime` spelling, which must mean the same program.
+comptime use {
+    "tables"
+    tables.build_squares
+}
+
+SQUARES: comptime { build_squares(5) }
+
+DEBUG: comptime { false }
+
+CUBES: comptime { tables.build_cubes(3) }
+
+show_mode: fn() {
+    comptime if DEBUG {
+        print("debug")
+    } else {
+        print("release")
+    }
+}
+
+Point: struct { x: Int }
+Size: struct { w: Int }
+
+comptime loop T in [Point, Size] {
+    impl T {
+        kind: fn(self) -> String { "generated" }
+    }
+}
+
+Ring: struct<comptime N: Int> {
+    slots: [Int#N]
+}
+
+ring_size: fn<comptime N: Int>(ring: Ring<N>) -> Int { N }
+
+Rational: struct {
+    numerator: Int
+    denominator: Int
+}
+
+impl Rational.Literal.Int {
+    comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+}
+
+numerator_of: fn(r: Rational) -> Int { r.numerator }
+
+run: fn() {
+    count: comptime { build_squares(4).len() }
+    comptime {
+        if SQUARES.len() > 100 -> panic("the table is too large")
+    }
+    print(SQUARES)
+    print(CUBES)
+    print(count)
+    show_mode()
+    print(Size{w: 1}.kind())
+    print(ring_size(Ring<3>{slots: [Int#3]{1, 2, 3}}))
+    print(numerator_of(6))
+}

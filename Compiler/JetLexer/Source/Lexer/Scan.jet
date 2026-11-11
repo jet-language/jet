@@ -682,6 +682,23 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     next
                 }
             }
+            // `#run`, `#if` and `#loop` ask the compiler to do the work while
+            // building. Each is the one prep token: `#run` is the whole
+            // token, and `#if` and `#loop` keep their keyword after it.
+            if is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) {
+                word_end: scan_identifier_end(source, i + 1)
+                if word_end - i == 4 && next1 == 114 && next2 == 117 && byte_at(source, i + 3) == 110 {
+                    last_code = push_code(facts, K_COMPTIME, start, word_end, false)
+                    i = word_end
+                    next
+                }
+                word: word_kind(source, i + 1, word_end, 0)
+                if word == K_IF || word == K_LOOP {
+                    last_code = push_code(facts, K_COMPTIME, start, start + 1, false)
+                    i += 1
+                    next
+                }
+            }
             last_code = push_code(facts, K_HASH, start, start + 1, false)
             i += 1
             next

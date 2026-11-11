@@ -1,0 +1,26 @@
+# The `#` requests (#4276 c94 part 1): `#run use`, an unbraced
+# `#run` call, name chain and literal, a braced `#run { … }` value, `#if`,
+# `#loop` over declarations, a `<N: Int>` number parameter, a `#run` literal
+# hook and a `#run { … }` statement region. main.jet prints the same lines on
+# every tier as today.jet, the same program in the `comptime` spelling.
+fixture: d_meta_spell1_forms.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step today: jet run today.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty

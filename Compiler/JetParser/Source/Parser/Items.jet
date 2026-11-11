@@ -729,11 +729,16 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
                 }
                 name: parser_expect_name(state, "in a generic parameter list")
                 bounds := [String]{}
+                bound_head := parser_current(state)
                 if parser_current_kind(state) == TOKEN_COLON {
                     parser_bump(state)
+                    bound_head = parser_current(state)
                     bounds = parser_parse_trait_bounds(state, "in a generic trait-bound list", "`]` after generic bounds", "after `:` in a generic parameter")
                 }
-                params.push(TypeParam{name: parser_value(state, name), name_span: name.span, bounds: bounds, prep: None})
+                // `N: Int` is a number parameter: only the core Int makes one.
+                prep := PrepParam?{None}
+                if bounds.len() == 1 && bounds[0] == "Int" -> prep = Val(PrepParam{prep_span: name.span, value_type: "Int", value_type_span: bound_head.span})
+                params.push(TypeParam{name: parser_value(state, name), name_span: name.span, bounds: if prep == None -> bounds else -> [String]{}, prep: prep})
                 if parser_type_close_here(state) -> break
                 if parser_current_kind(state) != TOKEN_COMMA {
                     parser_add_error_here(state, "expected `,` between generic parameters", "type parameter declarations are comma-separated", "add a comma or close the generic list")
@@ -2370,6 +2375,9 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
         } else {
             parser_add_error_code(state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
         }
+    } else if parser_prep_operand_ahead(state, 0) {
+        prepared = true
+        parsed_value = parser_parse_prep_operand(state)
     } else {
         parsed_value = parser_parse_expression(state, 1, 0)
     }

@@ -1334,9 +1334,24 @@ parser_parse_break_statement: fn(state: &JetParserState) -> Stmt {
     Stmt.Break{span: start.span}
 }
 
-// The `comptime` keyword leads a build-time verb when the verb follows it.
+// The prep token (`comptime`, or `#run`, `#if` and `#loop`, which the lexer
+// gives the same token) leads a build-time verb when the verb follows it.
 parser_prep_verb_ahead: fn(state: &JetParserState, offset: Int, verb: Int) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(state, offset + 1) == verb
+}
+
+// `NAME: #run operand` is a prepared value without braces.
+parser_prep_operand_ahead: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+    parser_kind_at(state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(state, offset + 1) != TOKEN_LBRACE && parser_text(state, parser_lookahead(state, offset)) == "#run"
+}
+
+// An unbraced `#run` takes one postfix operand: a call, a name or a
+// literal. Anything larger keeps its braces.
+parser_parse_prep_operand: fn(state: &JetParserState) -> ParsedExpr {
+    head: parser_bump(state)
+    prefix: parser_parse_prefix(state, 1, true, false)
+    operand: parser_parse_postfix(state, prefix, 1, true, false)
+    ParsedExpr{expr: operand.expr, span: parser_cover(head.span, operand.span)}
 }
 
 // `comptime { … }` is the explicit shared-preparation block. It
@@ -1564,6 +1579,13 @@ parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
         parser_add_error_code(state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
         parser_finish_statement(state)
         return Stmt.Val{binding: ast_binding(parser_value(state, name), name.span, false, Expr.Unit{span: span, id: parser_node_id(state)}, Val(sigil.span))}
+    }
+    if !mutable && parser_prep_operand_ahead(state, 0) {
+        operand: parser_parse_prep_operand(state)
+        prepared := ast_binding(parser_value(state, name), name.span, false, operand.expr, Val(sigil.span))
+        prepared.is_comptime = true
+        parser_finish_statement(state)
+        return Stmt.Val{binding: prepared}
     }
     // Bare `name := uninit` — an explicit type must precede the literal body.
     if parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "uninit" {

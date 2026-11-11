@@ -1,0 +1,61 @@
+// Every compiler request spelled with `#`: a build-time import, unbraced and
+// braced values, a branch, a loop of declarations, a number parameter, a
+// literal hook and a statement region.
+#run use {
+    "tables"
+    tables.build_squares
+}
+
+SQUARES: #run build_squares(5)
+
+DEBUG: #run false
+
+CUBES: #run { tables.build_cubes(3) }
+
+show_mode: fn() {
+    #if DEBUG {
+        print("debug")
+    } else {
+        print("release")
+    }
+}
+
+Point: struct { x: Int }
+Size: struct { w: Int }
+
+#loop T in [Point, Size] {
+    impl T {
+        kind: fn(self) -> String { "generated" }
+    }
+}
+
+Ring: struct<N: Int> {
+    slots: [Int#N]
+}
+
+ring_size: fn<N: Int>(ring: Ring<N>) -> Int { N }
+
+Rational: struct {
+    numerator: Int
+    denominator: Int
+}
+
+impl Rational.Literal.Int {
+    #run from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+}
+
+numerator_of: fn(r: Rational) -> Int { r.numerator }
+
+run: fn() {
+    count: #run build_squares(4).len()
+    #run {
+        if SQUARES.len() > 100 -> panic("the table is too large")
+    }
+    print(SQUARES)
+    print(CUBES)
+    print(count)
+    show_mode()
+    print(Size{w: 1}.kind())
+    print(ring_size(Ring<3>{slots: [Int#3]{1, 2, 3}}))
+    print(numerator_of(6))
+}
