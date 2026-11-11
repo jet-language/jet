@@ -2,10 +2,10 @@
 // scopes"). An effect argument names a scope from Core's scope kinds: a
 // folder (`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a
 // device (`GPU("npu")`). Rows, run grants (`--allow`) and denials all decide
-// coverage here, and here asks the runtime's own rule (jet_authority_covers,
-// Compiler/JetRuntime/Source/Authority.jet), the one a running program's
-// Authority and effect scopes answer by. Its three fixed laws keep coverage
-// reflexive and transitive, and it always terminates:
+// coverage here, and here asks the runtime's own rule (jet.runtime.authority
+// `covers`, Compiler/JetRuntime/Source/Authority.jet), the one a running
+// program's Authority and effect scopes answer by. Its three fixed laws keep
+// coverage reflexive and transitive, and it always terminates:
 // - an `FS` argument is a path; it covers by whole components after
 //   normalization, so `templates/` covers `templates/home.html` but not
 //   `templates2/`, `templates/../secret.txt` is `secret.txt`, and a need that
@@ -16,6 +16,10 @@
 // - any other argument covers by equality.
 // A bare effect (`FS.Read`) covers every scoped instance of itself and of its
 // leaves. A scoped effect never covers the bare one.
+
+use {
+    rt_authority: jet.runtime.authority
+}
 
 // An effect name split at its scope argument: `FS.Read("templates/")` is
 // `FS.Read` with scope `templates/`; a name with no quoted argument is bare.
@@ -66,30 +70,10 @@ effect_scope_kind: fn(base: String) -> String Never! {
     "value"
 }
 
-// The runtime's covers rule over two rights' text, which crosses as C
-// strings.
-#[Import(c), Unsafe("the runtime reads the two NUL-terminated rights the call packs and keeps neither")]
-effect_scope_rule_covers: fn(bound: String, need: String) -> Bool = "jet_authority_covers"
-
 // The covers rule: `bound` covers `need` when the bare names cover and, if
-// `bound` names a scope, `need` names one its law covers. A right holding a
-// NUL byte, which no valid scope argument does (effect_scope_argument_valid)
-// and no C string can carry, covers only itself.
+// `bound` names a scope, `need` names one its law covers.
 effect_scope_covers: fn(bound: String, need: String) -> Bool Never! {
-    if bound == need -> return true
-    if effect_scope_has_nul(bound) || effect_scope_has_nul(need) -> return false
-    covered := false
-    #Unsafe("the runtime reads the two NUL-terminated rights the call packs and keeps neither") {
-        covered = effect_scope_rule_covers(bound, need)
-    }
-    covered
-}
-
-effect_scope_has_nul: fn(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        if byte == (U8{0}) -> return true
-    }
-    false
+    rt_authority.covers(bound, need)
 }
 
 // Core's scope publishers, read off their declarations: a top-level

@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1423,
+  "total": 1421,
   "counts": {
-    "Compiler": 748,
+    "Compiler": 746,
     "Core": 176,
     "Docs": 8,
     "Examples": 41,
@@ -1141,20 +1141,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetFoundation/Source/Policy/EffectScope.jet",
-      "line": 71,
-      "column": 1,
-      "reason": "the runtime reads the two NUL-terminated rights the call packs and keeps neither"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetFoundation/Source/Policy/EffectScope.jet",
-      "line": 82,
-      "column": 5,
-      "reason": "the runtime reads the two NUL-terminated rights the call packs and keeps neither"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
       "line": 145,
       "column": 5,
@@ -1709,7 +1695,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Authority.jet",
-      "line": 329,
+      "line": 326,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -10191,14 +10177,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 748 |
+| Compiler | 746 |
 | Core | 176 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 435 |
-| **total** | **1423** |
+| **total** | **1421** |
 
 ### Regions
 
@@ -10335,8 +10321,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1733:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
-| Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 71:1 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
-| Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 82:5 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 176:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -10416,7 +10400,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 24:5 | "place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 29:5 | "place borrows one aligned8 live atomic word; LOCK CMPXCHG orders success and failure SeqCst" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 34:5 | "place borrows one aligned8 live atomic word; LOCK XADD returns the previous wrapping64 value SeqCst" |
-| Compiler | Compiler/JetRuntime/Source/Authority.jet | 329:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Authority.jet | 326:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 28:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ClosureRefs.jet | 9:5 | "the caller's owned reference keeps the aligned closure header live; locked compare-exchange atomically publishes one more owner" |

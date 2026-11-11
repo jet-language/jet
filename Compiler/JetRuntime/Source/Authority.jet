@@ -197,12 +197,9 @@ authority_covers_bytes: fn(held: I64, length: I64, requested: I64, other: I64) -
     if (kind == I64{2}) -> return authority_host_covers(held_scope, held_scope_len, need_scope, need_scope_len)
     held_scope_len == need_scope_len && rt_text_equal_bytes(held_scope, need_scope, held_scope_len)
 }
-// The one covers rule as the C export the compiler's checks call
-// (jet_foundation Policy/EffectScope.jet): whether the NUL-terminated right
-// `held` covers the NUL-terminated right `need`.
-#Export(c) jet_authority_covers: fn(held: I64, need: I64) -> Bool { authority_covers_bytes(held, files_c_len(held), need, files_c_len(need)) }
 // The one covers rule as the jet.runtime.authority binding `covers`
-// (Public/Authority.jet): whether the right `held` covers the right `need`.
+// (Public/Authority.jet), which the compiler's checks call (jet_foundation
+// Policy/EffectScope.jet): whether the right `held` covers the right `need`.
 #Export(c) jet_authority_right_covers: fn(held: I64, need: I64) -> Bool { authority_covers(held, need) }
 authority_narrow_failure: fn(requested: I64) -> I64 {
     length: rt_text_len(requested)
