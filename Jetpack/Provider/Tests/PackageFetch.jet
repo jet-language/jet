@@ -106,3 +106,15 @@
     assert_eq(resolver.versions["alias"].version, "2.0.0")
     assert_eq(resolver.versions.len(), 2)
 }
+
+#Test("fetch resolves a version dependency on a shipped battery to the toolchain's battery and pins it under the batteries source") {
+    toolchain: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet toolchain whose batteries the claim reads")
+    directory: pkg_fetch_battery_dir(toolchain, "backend", "0.1.0") ?? panic("the toolchain ships the backend battery at 0.1.0")
+    assert(directory.ends_with("/Jetpack/Provider/Batteries/backend"), directory)
+    assert(pkg_fetch_battery_dir(toolchain, "backend", "^9.0.0") == None)
+    assert(pkg_fetch_battery_dir(toolchain, "no_such_battery", "0.1.0") == None)
+    source: pkg_fetch_battery_source("backend", "0.1.0", "sha256-0123")
+    assert(LockedPackage{name: "backend", version: "0.1.0", source: source}.is_registry(BATTERIES_SOURCE_NAME))
+    assert_eq(pkg_lock_source_value(source), "{{ registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-0123\", repository = \"embedded:batteries\", authority = \"toolchain\", tier = \"core\", gate-status = \"first-party\" }}")
+    assert_eq(pkg_lock_parse_source(pkg_lock_source_value(source)) ?? panic("the pinned source parses back"), source)
+}

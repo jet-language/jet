@@ -152,7 +152,7 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
             result
         }
         .Git(url, selector) -> pkg_fetch_git_node(verification, roots, context, resolver, name, url, selector, chain)
-        .Registry(requirement) -> pkg_fetch_registry_node(verification, roots, context, resolver, name, requirement, chain)
+        .Registry(requirement) -> if pkg_fetch_battery_dir(resolver.root, name, requirement) == .Val(directory) -> pkg_fetch_battery_node(verification, roots, context, resolver, name, directory, chain) else -> pkg_fetch_registry_node(verification, roots, context, resolver, name, requirement, chain)
         .Foreign(language, reference) -> {
             realization: resolver.foreign.get(name) ?? return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "the provider projection was not produced for this dependency", "provide the pinned hash-verified artifact and generated binding"))
             if realization.language != language || realization.reference != reference -> return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "provider identity disagrees with package.jet", "regenerate the pinned provider projection"))

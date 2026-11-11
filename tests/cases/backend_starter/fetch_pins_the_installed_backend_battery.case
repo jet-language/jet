@@ -1,0 +1,21 @@
+# Card #3173 c21: the starter's service depends on the `backend` battery by
+# version. `jet fetch` resolves that dependency to the battery the toolchain
+# ships, without a registry, and the lock pins its version and content hash
+# beside the path pin of the shared contract. A locked fetch replays those
+# pins, and the service builds against the pinned battery.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Examples/Network/BackendStarter starter
+step fetch: jet fetch
+cwd: starter/Packages/Service
+exit: 0
+stdout: ~ "fetched all dependencies" # every dependency resolved
+file: starter/Packages/Service/.jet/lock ~ "name = \"backend\"\nversion = \"0.1.0\"\nsource = { registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-" # the battery is pinned by version and content hash
+file: starter/Packages/Service/.jet/lock ~ "repository = \"embedded:batteries\", authority = \"toolchain\", tier = \"core\", gate-status = \"first-party\" }" # the pin names the toolchain's batteries
+file: starter/Packages/Service/.jet/lock ~ "name = \"contract\"\nversion = \"0.1.0\"\nsource = { path = \"../Contract\" }" # the shared library is pinned by path
+step locked: jet fetch --locked
+cwd: starter/Packages/Service
+exit: 0
+step build: jet build
+cwd: starter/Packages/Service
+exit: 0

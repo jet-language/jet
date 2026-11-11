@@ -136,7 +136,7 @@ pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: Hangar
                 if package.source != expected_source || package.locked == None -> return Err(pkg_fetch_locked_error(name, "locked git source disagrees with the manifest or has no pinned revision"))
                 pkg_fetch_locked_source(name, package)
             }
-            .Registry(requirement) -> pkg_fetch_locked_registry(verification, roots, root, manifest, lock, package, requirement)
+            .Registry(requirement) -> if package.is_registry(BATTERIES_SOURCE_NAME) -> pkg_fetch_locked_battery(root, package, requirement) else -> pkg_fetch_locked_registry(verification, roots, root, manifest, lock, package, requirement)
             .Foreign(language, reference) -> pkg_fetch_locked_foreign(roots, root, package, language, reference)
         }
         directories[name] = directory

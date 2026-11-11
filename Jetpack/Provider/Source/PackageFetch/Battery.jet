@@ -1,0 +1,74 @@
+// First-party batteries. A version dependency that names a battery the
+// toolchain ships resolves to that battery: the tree `jet build` compiles, not
+// a registry download. The lock pins it under the `batteries` source with its
+// exact version and content hash, and a locked fetch refuses a toolchain
+// whose battery no longer matches that pin.
+
+// The toolchain directory of the first-party batteries.
+PKG_FETCH_BATTERIES_DIR: "Jetpack/Provider/Batteries"
+
+// The toolchain source tree that ships the batteries, found as `jet build`
+// finds it: JET_TOOLCHAIN_ROOT, else the nearest directory at or above
+// `start` that holds a Jet toolchain (`Core/` and `Compiler/Prelude/`).
+pkg_fetch_toolchain_root: fn(start: String) -[FS, Env]> String? Never! {
+    if sys.get("JET_TOOLCHAIN_ROOT") == .Val(root) -> return Val(root)
+    current := start
+    loop {
+        if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) -> return Val(current)
+        parent: files.dirname(current)
+        if parent == "" || parent == current -> return None
+        current = parent
+    }
+}
+
+// The canonical directory of the battery a version dependency `name` with
+// `requirement` names, or None when the toolchain found from `root` ships no
+// battery of that name at a version the requirement matches.
+pkg_fetch_battery_dir: fn(root: String, name: String, requirement: String) -[FS, Env]> String? Never! {
+    toolchain: pkg_fetch_toolchain_root(root) ?? return None
+    directory: files.join(toolchain, "{PKG_FETCH_BATTERIES_DIR}/{name}")
+    if !files.is_file(files.join(directory, PACKAGE_FILE)) -> return None
+    manifest: pkg_fetch_load_manifest(directory, name) ?? return None
+    if manifest.package.name != name -> return None
+    wanted: pkg_fetch_requirement(name, requirement) ?? return None
+    version: publication_parse_semver(manifest.package.version) ?? return None
+    if !publication_matches(wanted, version) -> return None
+    Val(files.canonicalize(directory) ?? return None)
+}
+
+// The lock source of the battery `name` at `version` whose tree hashes to
+// `content_hash`.
+pkg_fetch_battery_source: fn(name: String, version: String, content_hash: String) -> LockSource Never! {
+    LockSource.Registry{
+        registry: BATTERIES_SOURCE_NAME,
+        reference: "{name}#{version}",
+        output: "",
+        source_hash: content_hash,
+        repository: BATTERIES_UPSTREAM,
+        authority: "toolchain",
+        tier: "core",
+        gate_status: "first-party",
+    }
+}
+
+// The graph node of the battery at `directory`: its tree enters the source
+// store like a path dependency's, and the lock pins its version and hash.
+pkg_fetch_battery_node: fn(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, directory: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+    snapshot: pkg_source_snapshot_tree(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    manifest: pkg_fetch_load_manifest(snapshot.path(), name)
+    result: pkg_fetch_source_node(verification, roots, context, resolver, name, pkg_fetch_battery_source(name, manifest.package.version, snapshot.content_hash), None, snapshot, chain)
+    close(snapshot)
+    result
+}
+
+// The source-store directory of the locked battery `package`, after checking
+// that the toolchain still ships exactly the pinned battery.
+pkg_fetch_locked_battery: fn(root: String, package: LockedPackage, requirement: String) -[FS, Env, Time]> String PackageFetchError! {
+    name: package.name
+    directory: pkg_fetch_battery_dir(root, name, requirement) ?? return Err(pkg_fetch_locked_error(name, "this toolchain ships no `{name}` battery matching `{requirement}`"))
+    snapshot: pkg_source_snapshot_tree(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    shipped: snapshot.content_hash
+    close(snapshot)
+    if package.source_hash() != Val(shipped) -> return Err(pkg_fetch_locked_error(name, "this toolchain's `{name}` battery is not the one `.jet/lock` pins"))
+    pkg_fetch_locked_source(name, package)
+}
