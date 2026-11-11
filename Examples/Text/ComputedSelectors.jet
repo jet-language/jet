@@ -3,7 +3,7 @@
 // runs after the value.
 
 note: fn(log: &[String], label: String, n: Int) -> Int {
-    log.push(label)
+    log.push(label.copy()) // copy: the caller keeps its label.
     n
 }
 
@@ -14,13 +14,18 @@ run: fn() {
         if name.len() > width -> width = name.len()
     }
     loop name in names -> print("[{name:Pad(width)}] [{name:PadLeft(width + 2, ".")}]")
-    loop digits in 0..<4 -> print("{3.14159:Fixed(digits)} {1234.567:Grouped(digits)}")
-    half: width / 2
-    print("{255:Hex(half)} {0.125:Percent(half - 3)} {12345.678:Sci(half - 2)} {7:Fixed(half - 3)}")
+    pi: Float{3.14159}
+    total: Float{1234.567}
+    loop digits in 0..<4 -> print("{pi:Fixed(digits)} {total:Grouped(digits)}")
+    half: width /% 2
+    share: Float{0.125}
+    large: Float{12345.678}
+    print("{255:Hex(half)} {share:Percent(half - 3)} {large:Sci(half - 2)} {7:Fixed(half - 3)}")
     shift: -2
-    print("[{"x":Pad(shift)}] [{2.75:Fixed(shift)}] [{255:Hex(shift)}]")
+    rate: Float{2.75}
+    print("[{"x":Pad(shift)}] [{rate:Fixed(shift)}] [{255:Hex(shift)}]")
     log := [String]{}
     text: "[{note(log, "value", 42):PadLeft(note(log, "width", 5))}]"
     print("{text} {log.join(", ")}")
-    print("{3.14159:Fixed(2)}")
+    print("{pi:Fixed(2)}")
 }
