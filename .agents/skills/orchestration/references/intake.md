@@ -158,3 +158,37 @@ runs and one 39-minute full test pass. These rules bind every train:
     previous admit's work directory: only rows whose files changed run again.
     Admit's own new work is the fixed point, the pack and the pinned tool
     checks.
+13. **No reds reach a train.** Before staging, the worker runs every row its
+    `tests` file names on the newest published seed and writes the pass line
+    for each in `msg`. A row that needs the submission's own compiler change
+    is named as such, and the lander runs those rows first on the train's
+    built compiler, returning any red at once. A train that sets a submission
+    aside has paid a whole census and test pass for nothing.
+14. **Direct lands run the guards they reach.** A direct land runs the
+    submission's rows plus every `tests/guards` row whose inputs its paths
+    touch, in shards, before it lands. A guard red found on `dev` later is
+    a lander defect.
+15. **The speed gate.** Every train times the seed's `jet build Compiler`
+    and the built compiler's self-checks in user plus system CPU seconds,
+    with per-phase seconds from the compiler's own trace, beside the
+    previous train's row. A rise over 10% fails the train, and the report
+    names the phases that grew.
+16. **Census by reach, sized to memory.** The census runs check, build and
+    the guard shards at once, then self-checks beside the Jetpack areas. It
+    runs only the areas a submission's paths reach. The area budget is
+    MemAvailable at launch minus 12 GiB, capped at 32 GiB. Each REPORT
+    records every phase's seconds.
+17. **The latency target is 15 minutes.** Each REPORT records, per
+    submission, the minutes from staging to landing, split into inbox wait,
+    gate, census, build, tests, set-aside and land. A submission over 15
+    minutes names the stage that cost it.
+18. **Sweep the cards daily.** Each lane spends 20 minutes a day on every
+    open criterion of its goal's cards. It sends the orchestrator `MEET
+    #card cN: evidence` for each one already met by the code or an existing
+    test, and `DROP #card cN: reason` for each one that's obsolete or
+    superseded (not for one that's merely unmet). The orchestrator records
+    them in batches.
+19. **Speed work names its step.** A speed submission names the step of the
+    compile-speed plan it serves (#5479). Until the language is stable,
+    architectural steps and regression fixes land, and a gain from tuning
+    one function, loop or constant waits.
