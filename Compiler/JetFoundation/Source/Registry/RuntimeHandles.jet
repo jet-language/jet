@@ -558,6 +558,11 @@ ir_runtime_handle_row: fn(name: String) -> Int? Never! {
     ir_key_row(IR_RUNTIME_HANDLE_KEYS, IR_RUNTIME_HANDLE_KEY_ROWS, name)
 }
 
+// The IR type of `MarkerArgInfo.value`, a written marker argument's value: a
+// host word in compile-time code (JetIR ir_compiler_owned_core_fields), which
+// `info.marker(T)` reads its `T` from. No program can name it.
+IR_MARKER_ARG_VALUE: "MarkerArgValue"
+
 // A compiler value with no declaration that build and comptime code hold
 // (the build context and its handles, `Dev`, the ProgramInfo snapshot and
 // its reflection records, the `core.compiler` query results and their
@@ -572,6 +577,7 @@ ir_host_value_name: fn(name: String) -> Bool Never! {
         "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
         "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
         "CompilerLock" | "CompilerLockedPackage" | "CompilerProfileSet" | "CompilerProfile" | "CompilerKeyValue" -> true
+        "MarkerArgValue" -> true
         else -> false
     }
 }

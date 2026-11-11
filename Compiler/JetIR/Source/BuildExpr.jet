@@ -7329,27 +7329,36 @@ ir_comptime_key_value: fn(key: TComptimeKey) -> TComptimeValue Never! {
 }
 
 // A struct (or tuple) constant in fresh frame storage, each member built
-// from its compile-time value. A member the compiler answers from but no
-// program reads (ir_comptime_answered_member) has no slot and is left out.
+// from its compile-time value. A member the compiler answers from
+// (ir_comptime_answered_member) holds its value as a host word only in code
+// the compiler runs (comptime items, build invocations), which hands the
+// record back to the compiler; in the running program it holds 0.
 ir_comptime_struct: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, fields: [TComptimeField], span: Span) -> Int Never! {
     if m.types[row].kind != .Aggregate -> return ir_fail_slot(b, span, "struct constant of {ir_type_name(ty)}")
     storage: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
     loop field in fields {
-        if ir_comptime_answered_member(ty, field.name) -> next
         member: ir_member_of(m, p, b, storage, field.name) ?? return ir_fail_slot(b, span, "struct constant field {field.name}")
-        field_ty: ir_declared_field_type(m, p, ty, field.name) ?? return ir_fail_slot(b, span, "struct constant field {field.name}")
-        value: ir_comptime(m, p, b, field_ty, field.value, span)
-        if ir_failed(b) -> return -1
+        answered: ir_comptime_answered_member(ty, field.name)
+        value := -1
+        if !answered || p.comptime_values || p.invocation {
+            field_ty: ir_declared_field_type(m, p, ty, field.name) ?? return ir_fail_slot(b, span, "struct constant field {field.name}")
+            value = ir_comptime(m, p, b, field_ty, field.value, span)
+            if ir_failed(b) -> return -1
+        }
+        if value < 0 && answered {
+            value = ir_word_const(m, b, 0)
+        }
         if value >= 0 -> ir_member_write(m, p, b, storage, member, value)
     }
     storage
 }
 
-// A written marker argument's `MarkerArgInfo.value`: the compiler keeps it
-// in a folded reflection value to answer `info.marker(T)` (JetSema
-// sema_fact_answered_member), but the record's Core rows lay out only `name`
-// and `type`, so a constant of it has no slot for the value.
+// A written marker argument's `MarkerArgInfo.value`: the compiler answers
+// `info.marker(T)` from it (JetSema sema_fact_answered_member; JetEval
+// jet_eval_reflection_marker_value), but no program reads it, and its type
+// is the marker parameter's, so the IR lays it out as a host word
+// (ir_compiler_owned_core_fields).
 ir_comptime_answered_member: fn(ty: Type, field: String) -> Bool Never! {
     ir_untag(ty) == (Type.Named{name: "MarkerArgInfo"}) && field == "value"
 }

@@ -48,7 +48,10 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
             loop argument in arguments {
                 argument_fields: if argument == .Struct(_, entries) -> entries else -> { next }
                 label: jet_eval_compiler_value_field(argument_fields, "name") ?? next
+                // A record laid out with no value (JetIR ir_comptime_struct)
+                // leaves its parameter to the default.
                 value: jet_eval_compiler_value_field(argument_fields, "value") ?? next
+                if value == .Unit -> next
                 if label == .String(parameter) -> record.push(TComptimeField{name: parameter, value: value})
             }
         }

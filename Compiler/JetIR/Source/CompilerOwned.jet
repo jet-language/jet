@@ -2,6 +2,7 @@
 // This is the only Type -> IR type projection; semantic identity and ABI facts
 // are retained instead of reconstructed by an emitter.
 use jet_foundation.[
+    IR_MARKER_ARG_VALUE,
     Type,
     TypeTupleField,
     core_enum_variant_payload,
@@ -34,8 +35,8 @@ IRCompilerOwnedRecord: struct {
 // program as one row under its bare canonical key, so a field projection on
 // one resolves to that one nominal identity. Field types are read from the
 // Core record rows (`core_record_field`), never guessed. The rows carry no
-// `MarkerArgInfo.value` (its type is computed from the policy rule argument
-// declarations), so neither does this table.
+// `MarkerArgInfo.value` (its type is the marker parameter's, so no program
+// names it); ir_compiler_owned_core_fields adds it as a host word.
 IR_COMPILER_OWNED_CORE_RECORDS: comptime { [IRCompilerOwnedRecord]{
     {name: "PluginFrame", fields: [String]{"function", "component", "offset"}},
     {name: "PluginFault", fields: [String]{"export", "message", "frames"}},
@@ -199,6 +200,10 @@ ir_compiler_owned_core_fields: fn() -> [String:[TypeTupleField]] Never! {
             ty: types[k][f] ?? panic("missing canonical Core field {owner}.{field}")
             row.push(TypeTupleField{name: field.copy(), ty: ty.copy()})
         }
+        // A written marker argument's value: the compiler answers
+        // `info.marker(T)` from it, so compile-time code carries it as a host
+        // word (ir_comptime_struct); elsewhere the word is 0.
+        if owner == "MarkerArgInfo" -> row.push(TypeTupleField{name: "value", ty: Type.Named{name: IR_MARKER_ARG_VALUE}})
         out[owner] = row
     }
     out

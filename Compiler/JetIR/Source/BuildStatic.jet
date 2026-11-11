@@ -394,8 +394,11 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
 // `offset` of `object`, member by member (ir_comptime_struct). `plan` keeps
 // each field position's member, declared type and value row for the next
 // value of the same type; a position naming another field is found again.
+// A member the compiler answers from (ir_comptime_answered_member) is a host
+// word only in code the compiler runs, so its struct is built in code.
 ir_static_struct: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, members: [IRMember], plan: &[IRStaticField], fields: [TComptimeField]) -> Bool Never! {
     loop (position, field) in fields {
+        if ir_comptime_answered_member(ty, field.name) -> return false
         if position >= plan.len() || plan[position].name != field.name {
             found := -1
             loop (index, member) in members {
