@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99047,
+    "rev": 99050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69394,8 +69394,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-10T17:13:18.937Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-11T01:52:10.279Z",
+      "updatedBy": "owner",
       "goals": [
         "G10"
       ],
@@ -89643,6 +89643,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:18:36.645Z"
+        },
+        {
+          "n": 3,
+          "text": "Owner 2026-11-10 ~21:00: \"seems like we rely heavily on env vars ... other languages just use build settings and build flags, not a ton of hidden envvars ... yes we need to fix that\". Main's census on dev c2cecce162: code reads about 140 JET_/JETPACK_ variables (193 names in all), and Docs/spec/reference/environment.md, which calls itself the registry, lists 66 plus 3 wildcard families; 113 read names are on no list. One registry in code holds every environment variable that jet, jetpack, the runtime, Core or a repository tool reads. Each row gives the name, the owning module, its kind (user, automation, maintainer, transport between Jet processes, or test hook), its value type and default, and the flag or setting it overrides. A guard refuses a read of a name that has no row, across Compiler, Core, Jetpack and Tools. environment.md is generated from the registry, with a --check that the lane checks run. Zero unregistered reads.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T01:54:30.801Z"
+        },
+        {
+          "n": 4,
+          "text": "Every user, automation or maintainer behavior control is a CLI flag or a settings key first, and its environment variable only overrides that setting, through the shared flag-to-setting mechanism of c1. The controls include keep-going and its report and skip lists, trace file and trace detail, the optimizer dump, disable, verify and SSA-stress hooks, the GC trace, phase counters and the memory ledger. AGENTS.md, the skills and the repository tools use the flag, not the variable. A cases row per family proves the flag, the setting and the variable have the same effect. The flag and setting spellings are ratified on the D-ENV-SURFACE1 ballot first (owner gate).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T01:54:32.071Z"
         }
       ],
       "refs": [],
@@ -89653,9 +89671,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-09T18:18:51.874Z",
+      "updated": "2026-11-11T01:54:32.071Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 4
     },
     {
       "id": "c00ctwqw",
@@ -199556,6 +199574,17 @@
       "created": "2026-11-09T22:57:19.211Z",
       "answeredAt": "2026-11-09",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q02luk6c",
+      "cardId": "c0r02x8n",
+      "decisionId": "D-SHARED-CYCLE2",
+      "by": "owner",
+      "kind": "question",
+      "text": "confusing, not in plain english. rework",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-11T01:52:10.278Z"
     }
   ],
   "ideas": [
@@ -200412,6 +200441,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T01:54:32.071Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c015yc5v",
+      "note": "#4 Every user, automation or maintainer behavior control is a C"
+    },
+    {
+      "at": "2026-11-11T01:54:30.801Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c015yc5v",
+      "note": "#3 Owner 2026-11-10 ~21:00: \"seems like we rely heavily on env "
+    },
+    {
+      "at": "2026-11-11T01:52:10.279Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q02luk6c",
+      "note": ""
+    },
     {
       "at": "2026-11-11T01:51:52.744Z",
       "by": "Main",
