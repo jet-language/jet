@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99598,
+    "rev": 99599,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -198027,6 +198027,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-11T19:57:49.628Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing06136p6",
+      "note": "Codegen gaps against hand-written machine code (2026-11-11 measurement)"
+    },
+    {
       "at": "2026-11-11T19:57:06.888Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -202454,6 +202461,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing06136p6",
+      "title": "Codegen gaps against hand-written machine code (2026-11-11 measurement)",
+      "body": "# Codegen and runtime gaps against hand-written machine code\n\nMeasured 2026-11-11 14:48–14:51 on a quiet machine (other jobs paused, heavy lock held, CPU 8 pinned). Each wall time is the best of 5, with the compilers interleaved and a b3-against-b3 control. Per-program noise is up to ±4.4%. Every binary printed the expected output. Raw data: `$JET_SCRATCH_ROOT/lanes/G11Speed/poc/gains.md` (tool: `Tools/perf/asm-parity/asm-parity.mjs --candidate`, landed 0e48c3e0d6).\n\n## The prototype result\n\nThe candidate is b3 plus G11Speed-G1: plain retain/release while the process has one thread, and a bounded List length so indexed loops drop their checks.\n\n| | candidate vs b3 |\n|---|---|\n| Time, geometric mean | +1.4%, no gain beyond noise |\n| Peak memory | −0.3% |\n| Binary size | −0.4% |\n| Regressions | sieve +16.8%, regexlogscan +7.5% |\n\nG1 does not land as it stands. b3 against a0.0.44 is also flat (+0.8%).\n\n## Where the gaps are: b3 against the hand-written reference\n\n| program | time × ceiling | Jet RSS KiB | ref RSS KiB | Jet bytes | ref bytes |\n|---|---:|---:|---:|---:|---:|\n| csvtransform | **78.1** | 198,248 | 8,524 | 400,927 | 4,393 |\n| logreport | **18.7** | 264 | 14,132 | 335,919 | 5,629 |\n| wordfreq | **11.3** | 16,776 | 15,200 | 206,415 | 1,669 |\n| embeddeddata | 8.9 | 24,712 | 11,576 | 214,511 | 3,058 |\n| regexlogscan | 8.7 | 1,080 | 41,896 | 648,655 | 3,053 |\n| tensormap | 6.9 | 439,032 | 393,248 | 240,223 | 647 |\n| nbody | 3.8 | 0 | 0 | 152,367 | 2,358 |\n| regexfindall | 3.5 | 8,904 | 4,096 | 198,543 | 1,411 |\n| binparse | 3.2 | 20,616 | 8,452 | 246,191 | 1,376 |\n| sieve | 3.1 | 4,880 | 0 | 116,687 | 1,208 |\n| fft | 2.5 | 788 | 0 | 352,671 | 1,756 |\n| sensorring | 2.3 | 0 | 0 | 119,759 | 1,732 |\n| bulkrename | 1.2 | 1,092 | 2,080 | 748,287 | 1,491 |\n| isum | 1.2 | 79,944 | 78,152 | 114,287 | 632 |\n| collatz | 1.1 | 0 | 0 | 117,423 | 480 |\n| hello | 1.05 | 0 | 0 | 31,439 | 504 |\n| w11fetch | 1.05 | 4,468 | 0 | 4,710,255 | 1,225 |\n| fib | 0.83 | 0 | 0 | 103,823 | 456 |\n| taskfile | 0.77 | 276 | 12,320 | 542,911 | 4,407 |\n| **geometric mean** | **3.30** | | | | |\n\nThe Jet columns are the candidate; b3's numbers are within noise of them. RSS under a few hundred KiB reads 0.\n\n**Size is the widest gap.** Every Jet binary carries a floor of about 30–100 KB, and typical programs are 100–700 KB against 0.5–5 KB by hand.\n\n## Roots found so far\n\nEach comes from a single profile of one benchmark binary.\n\n1. **Store-forwarding stall on short fresh text.** About 52% of wordfreq. The text-validity check and the string hash read the last 8 bytes as one word right after the bytes were written one at a time. Fix: read a tail under 8 bytes byte by byte. Being written as G11Speed-G3; it is general (from_bytes, hashing short keys and fields).\n2. **Atomic reference counts in single-threaded code.** About 17% of csvtransform: string clone is 24.9% of cycles, and 67% of that is `lock xadd`. G1 removed the lock, but its in-flight counter costs as much again. Next: a cheaper sole-thread test.\n3. **Every substring is an owned copy.** In logreport, alloc+free are 20.2%, plus builder, copy and drop: `split_once` copies both halves, so three splits per line copy the rest of the line three times. In csvtransform it is 14.6% plus mem_move. In logreport's `parse_rfc3339` (14.6%), `bytes()` copies and checks the bounds of each byte. Fix: a substring shares its parent's buffer, an internal representation change with no API or syntax change. A design is due before coding: how memory is freed, and how a small slice is kept from pinning a huge parent.\n4. **The binary size floor.** Not yet analyzed: what is linked into hello that hello does not use.\n5. **Redundant integer checks.** Seen in fib's objdump: each Int operation repeats an `add rdx,rdx; jo` small-integer check several times on the same value. Not yet costed.\n\n## Why fib and taskfile beat the \"ceiling\"\n\nBoth references are weaker than Jet, so they are not ceilings yet. AGENTS.md requires the best known technique, so both will be raised.\n\n- **fib (0.83×).** `fib/ref.S` calls itself for every leaf. Jet b3 tests `n < 2` at the call site and skips the call (objdump of `run_fib`), so it makes about half as many calls. The reference is a plain transliteration. The new reference keeps the recursion the cell measures but uses call-site leaf checks and any further unrolling hand asm would use. Jet still pays redundant overflow checks (root 5), so a proper reference should beat it.\n- **taskfile (0.77×).** `taskfile/ref.S` reserves one lazy 4 GiB anonymous mapping and writes areas far apart in it (rows at 32 MiB, text at 96 MiB, keys at 1 GiB, output at 1.5 GiB). With transparent huge pages set to `always`, each touched area likely faults in a zeroed 2 MiB page. It reaches 12,320 KiB RSS against Jet's 276 KiB, and pays it in each of the 6 process steps the cell runs. The page-fault counts are still to be confirmed. The new reference sizes its areas to the input.\n\n## What happens next\n\nG11Speed-2 does these in order:\n1. G3, the short-tail fix.\n2. Raise the fib and taskfile references.\n3. Substrings share their parent's buffer.\n4. A cheap sole-thread test for reference counts.\n5. The sieve and regexlogscan regressions.\n6. The size floor.\n\nIn parallel, `Tools/perf/CodegenCeiling.jet` is a static check, required for any change to codegen or the runtime, so closed gaps cannot reopen (#6414 c15, c30). This briefing is updated as each root is measured.\n",
+      "by": "Main",
+      "created": "2026-11-11T19:57:49.627Z",
+      "sections": []
+    },
     {
       "id": "briefing0hpygkg",
       "title": "Language review: correction (much of the compile-time proposal is already ratified, not built)",
