@@ -8607,6 +8607,21 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-11-11 — D-LAMBDA-SHAPE1=C and D-LAMBDA-STORED1=A** *(card #6251;
+decision card c0rqt0kq, ratified 2026-11-01)*: a lambda is a function
+binding's value without its name, and like every function value it starts
+with `fn`: `nums.filter(fn(n) { n > 2 })`. Its interface after the parameters
+is a named function's (`-> T`, `-[E]>`, `-[E]> T`, `E!`), and a passed lambda
+leaves out the parameter types, effect row and result that the expected
+callable type fixes. A stored lambda writes them as a named function does:
+`square: fn(n: Int) -> Int { n * n }`. The body is always braced and its last
+value is the result, so `return` leaves the lambda and growing a body to two
+lines keeps its head. The arrow lambdas `n -> e` and `(n) -> { … }` retire with
+no teaching diagnostic or `jet fix` rule: once the repository is converted
+they are not Jet. This supersedes S46, D-LAMBDA-INFER1's bare-parameter form
+and D-LAMBDA-IFACE2=A, whose lambdas never wrote a result. Example:
+`tests/cases/core_and_closures/fn_lambda_form_runs_on_every_tier.fixture/main.jet`.
+
 **2026-10-29 — `::` folds as an optimization; `comptime` forces it** *(card
 #6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1; its
 module-level startup fallback is amended by D-MODULE-BUILD1, under which such
