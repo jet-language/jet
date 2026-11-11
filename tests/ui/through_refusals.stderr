@@ -1,0 +1,26 @@
+Error [jet.ThroughUnreachable]: `#Through` has nothing to run on into
+  --> tests/ui/through_refusals.jet:10:38
+    |
+ 10 |         .Square(side) -> return side #Through
+    |                                      ^^^^^^^^
+ Why: This arm always leaves before the end of its body
+ Fix: Remove `#Through`, or move the shared work into a function both arms call
+More: jet-lang.dev/e/E1128
+
+Error [jet.ThroughNextBinding]: `r` is bound by this arm, so an arm before it cannot run on into it
+  --> tests/ui/through_refusals.jet:12:32
+    |
+ 12 |         .Circle(r) -> total += r
+    |                                ^
+ Why: `#Through` on the arm before runs this body without testing this arm's pattern, so `r` holds no value then
+ Fix: Remove `#Through` from the arm before, or read the value without the pattern binding
+More: jet-lang.dev/e/E1127
+
+Error [jet.ThroughUnreachable]: `#Through` has nothing to run on into
+  --> tests/ui/through_refusals.jet:21:26
+    |
+ 21 |         1 -> word("one") #Through
+    |                          ^^^^^^^^
+ Why: This table gives a value, and each arm's value ends its arm
+ Fix: Remove `#Through`, or move the shared work into a function both arms call
+More: jet-lang.dev/e/E1128

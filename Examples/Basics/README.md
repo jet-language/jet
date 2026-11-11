@@ -36,6 +36,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [StringAppend](StringAppend.jet) — `text += piece` appends to a String place: a local, a struct field, a field reached through a list element, or a `&String` parameter.
 - [StructCallWord](StructCallWord.jet) — Calls in record fields preserve fixed-width bits, not exact-Int pointer tags.
 - [StructConstants](StructConstants.jet) — Module-scope `:` constants can hold struct, enum, and list literal data.
+- [Through](Through.jet) — `#Through` after an arm's body runs the next arm's body too, so cases that share a tail write it once.
 - [Tuples](Tuples.jet)
 - [ValueDispatch](ValueDispatch.jet) — Choosing one branch from many: multi-arm `if`.
 - [ValueLoopSearch](ValueLoopSearch.jet) — A search loop states what exhaustion means.

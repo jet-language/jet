@@ -123,13 +123,14 @@ sema_marker_rules_site_name: fn(site: RuleSite) -> String Never! {
         site == RuleSite.Parameter -> "Parameter"
         site == RuleSite.Test -> "Test"
         site == RuleSite.Operation -> "Operation"
-        else -> "Text"
+        site == RuleSite.Text -> "Text"
+        else -> "Arm"
     }
 }
 
 sema_marker_rules_site_value: fn(value: Expr) -> String? {
     name: sema_marker_rules_expr_name(value) ?? return None
-    if name == "Package" || name == "File" || name == "Module" || name == "Function" || name == "Method" || name == "Block" || name == "Statement" || name == "Expression" || name == "Type" || name == "Impl" || name == "Trait" || name == "Declaration" || name == "Constant" || name == "Field" || name == "Variant" || name == "Parameter" || name == "Test" || name == "Operation" || name == "Text" {
+    if name == "Package" || name == "File" || name == "Module" || name == "Function" || name == "Method" || name == "Block" || name == "Statement" || name == "Expression" || name == "Type" || name == "Impl" || name == "Trait" || name == "Declaration" || name == "Constant" || name == "Field" || name == "Variant" || name == "Parameter" || name == "Test" || name == "Operation" || name == "Text" || name == "Arm" {
         return Val(name)
     }
     None

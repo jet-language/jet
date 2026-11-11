@@ -1413,7 +1413,7 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
             .CountedLoop(init, cond, step, inner, span, arrow_body, label) -> out.push(Stmt.CountedLoop{init: init, cond: cond, step: step, body: jfmt_strip_optional_returns_in_body(inner), span: span, arrow_body: arrow_body, label: label})
             .Switch(subject, arms, else_body, span) -> {
                 stripped_arms := [SwitchArm]{}
-                loop arm in arms -> stripped_arms.push(SwitchArm{cond: arm.cond, body: jfmt_strip_optional_returns_in_body(arm.body), span: arm.span})
+                loop arm in arms -> stripped_arms.push(SwitchArm{cond: arm.cond, body: jfmt_strip_optional_returns_in_body(arm.body), span: arm.span, through: arm.through})
                 stripped_else := [Stmt]?{None}
                 if else_body == .Val(inner) -> stripped_else = Val(jfmt_strip_optional_returns_in_body(inner))
                 out.push(Stmt.Switch{subject: subject, arms: stripped_arms.move(), else_body: stripped_else.move(), span: span})

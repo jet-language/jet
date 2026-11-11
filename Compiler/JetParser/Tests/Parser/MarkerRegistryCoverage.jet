@@ -95,6 +95,7 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
         "Parameter" -> return Val("helper: fn({marker} a: Int) {{\n}}\n\nrun: fn() {{\n}}\n")
         "Expression" -> return Val("run: fn() {{\n    value: {marker}\n}}\n")
         "Test" -> return Val("{marker} {{\n    print(\"ok\")\n}}\n\nrun: fn() {{\n}}\n")
+        "Arm" -> return Val("run: fn() {{\n    x: 1\n    if x == {{\n        1 -> print(\"one\") {marker}\n        else -> print(\"other\")\n    }}\n}}\n")
         else -> return None
     }
 }

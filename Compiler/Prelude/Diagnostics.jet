@@ -9210,6 +9210,44 @@ SpecifiedWithoutNumbers: struct {
     }
 }
 
+ThroughLastArm: struct {
+    impl Diagnostic {
+        code: "E1126"
+        stage: [.Parse]
+        meaning: "`#Through` on the last arm of a table"
+        detail: true
+        what: fn(self) -> String { "`#Through` is on the last arm." }
+        why: fn(self) -> String { "`#Through` runs the next arm's body after this one, and the last arm has no next arm." }
+        fix: fn(self) -> String { "Remove `#Through`, or add the arm it should run on into." }
+    }
+}
+
+ThroughNextBinding: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1127"
+        meaning: "A `#Through` run-on body reads a name its own arm's pattern binds"
+        detail: true
+        what: fn(self) -> String { "`{self.name}` is bound by this arm, so an arm before it cannot run on into it." }
+        why: fn(self) -> String { "`#Through` on the arm before runs this body without testing this arm's pattern, so `{self.name}` holds no value then." }
+        fix: fn(self) -> String { "Remove `#Through` from the arm before, or read the value without the pattern binding." }
+    }
+}
+
+ThroughUnreachable: struct {
+    reason: String
+
+    impl Diagnostic {
+        code: "E1128"
+        meaning: "`#Through` on an arm that never reaches the next arm's body"
+        detail: true
+        what: fn(self) -> String { "`#Through` has nothing to run on into." }
+        why: fn(self) -> String { "{self.reason}." }
+        fix: fn(self) -> String { "Remove `#Through`, or move the shared work into a function both arms call." }
+    }
+}
+
 RetiredKernelCrossing: struct {
     impl Diagnostic {
         code: "E1130"

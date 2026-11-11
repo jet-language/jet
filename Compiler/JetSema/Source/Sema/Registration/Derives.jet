@@ -1187,7 +1187,7 @@ sema_derive_expand_arms: fn(expansion: &SemaDeriveExpansion, subject: Expr, arms
         if cond == .PatternTest(test_subject, pattern, test_span, _) {
             cond = Expr.PatternTest{subject: test_subject, pattern: sema_derive_expand_pattern(expansion, pattern, Val(test_subject)), span: test_span, id: AST_NODE_GENERATED}
         }
-        expanded.push(SwitchArm{cond: cond, body: sema_derive_expand_stmts(expansion, arm.body), span: arm.span})
+        expanded.push(SwitchArm{cond: cond, body: sema_derive_expand_stmts(expansion, arm.body), span: arm.span, through: arm.through})
     }
     expanded
 }

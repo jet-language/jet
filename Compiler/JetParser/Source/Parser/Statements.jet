@@ -889,7 +889,10 @@ parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
 // Q2: a dispatch arm body is a braced block or one braceless statement.
 parser_parse_arm_body: fn(state: &JetParserState) -> [Stmt] {
     if parser_current_kind(state) == TOKEN_LBRACE -> return parser_parse_block(state).statements
-    [Stmt]{parser_parse_statement(state)}
+    state.arm_body_depth += 1
+    statement: parser_parse_statement(state)
+    state.arm_body_depth -= 1
+    [Stmt]{statement}
 }
 
 // With the cursor just past `{`, does the body open with an arm (an
@@ -952,6 +955,10 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
         parser_skip_semicolons(state)
         token: parser_current(state)
         if token.kind == TOKEN_RBRACE {
+            // E1126: the last arm has no next arm to run on into.
+            if else_body == None && arms.len() > 0 {
+                if arms[arms.len() - 1].through == .Val(last_through) -> parser_add_error_code(state, "E1126", last_through, "`#Through` is on the last arm", "`#Through` runs the next arm's body after this one, and the last arm has no next arm", "remove `#Through`, or add the arm it should run on into")
+            }
             parser_bump(state)
             break
         }
@@ -963,6 +970,7 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
             parser_bump(state)
             parser_expect_unified_arrow(state, "after `else` in an `if`")
             else_body = Val(parser_parse_arm_body(state))
+            if parser_parse_arm_through(state, token.span.start) == .Val(else_through) -> parser_add_error_code(state, "E1126", else_through, "`#Through` is on the last arm", "`#Through` runs the next arm's body after this one, and the last arm has no next arm", "remove `#Through`, or add the arm it should run on into")
             // E0641: sema reports this arm when the table's subject is a
             // closed set; its edit names the cases the `else` stands for.
             state.else_arms.push(parser_else_arm_span(state, start, open_end, last_arm_end, token.span.start, parser_previous_end(state)))
@@ -972,12 +980,31 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
         condition: parser_parse_if_arm_head(state, subject, pattern_subject, op)
         parser_expect_unified_arrow(state, "after an `if` arm value or condition")
         body: parser_parse_arm_body(state)
-        arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
+        through: parser_parse_arm_through(state, token.span.start)
+        arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}, through: through})
         last_arm_end = parser_previous_end(state)
         // Malformed input that consumed nothing must not retry forever.
         if state.position == arm_position -> parser_bump(state)
     }
     Stmt.Switch{subject: subject, arms: arms.move(), else_body: else_body.move(), span: start}
+}
+
+// `#Through` after an arm's body (`1 -> { a() } #Through`): the marker's
+// span. It is recorded as an Arm-site application, so the marker registry
+// checks it like any other rule; sema runs the next arm's body after this one.
+parser_parse_arm_through: fn(state: &JetParserState, arm_start: Int) -> Span? {
+    if !parser_at_arm_through(state) -> return None
+    name: parser_lookahead(state, 1)
+    hash: parser_bump(state)
+    parser_bump(state)
+    span: parser_cover(hash.span, name.span)
+    marker: Marker{name: "Through", negated: false, name_span: name.span, args: [], arg_labels: [], span: span, ct: None}
+    state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: arm_start, end: span.end}), site: Val(RuleSite.Arm)})
+    Val(span)
+}
+
+parser_at_arm_through: fn(state: &JetParserState) -> Bool {
+    parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value(state, parser_lookahead(state, 1)) == "Through"
 }
 
 // One bare arm head bound to the subject.
@@ -1906,6 +1933,7 @@ parser_finish_statement: fn(state: &JetParserState) {
         return
     }
     if token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF || (token.kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) -> return
+    if state.arm_body_depth > 0 && parser_at_arm_through(state) -> return
     found: parser_describe_token(state, token)
     parser_add_error(state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
 }

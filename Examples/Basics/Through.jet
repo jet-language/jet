@@ -1,0 +1,50 @@
+// `#Through` after an arm's body runs the next arm's body too, so cases that
+// share a tail write it once. The next body runs without the next arm's
+// pattern bindings, so it may read only names both arms can see.
+Level: enum {
+    Debug
+    Info
+    Warn
+    Error
+}
+
+report: fn(level: Level) {
+    if level == {
+        .Error -> print("page the on-call") #Through
+        .Warn -> print("write to the incident log") #Through
+        .Info -> print("write to the main log")
+        .Debug -> print("drop")
+    }
+}
+
+// An arm whose `#Through` comes before `else` runs the `else` body too.
+grade: fn(score: Int) {
+    if score == {
+        100 -> { print("perfect") } #Through
+        else -> print("score {score}")
+    }
+}
+
+run: fn() {
+    report(Level.Error)
+    print("--")
+    report(Level.Warn)
+    print("--")
+    report(Level.Debug)
+    print("--")
+    grade(100)
+    grade(7)
+}
+// --- expected output --------------------------------------------------
+// page the on-call
+// write to the incident log
+// write to the main log
+// --
+// write to the incident log
+// write to the main log
+// --
+// drop
+// --
+// perfect
+// score 100
+// score 7

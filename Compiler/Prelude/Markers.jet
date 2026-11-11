@@ -351,6 +351,17 @@ Specified: struct {
     }
 }
 
+// After a match arm's body, the next arm's body runs too, without the next
+// arm's bindings: `1 -> { a() } #Through`. The last arm has no next arm
+// (E1126), the next body may not read its own arm's bindings (E1127), and an
+// arm that never reaches its end, or one of a table that gives a value, has
+// nothing to run on into (E1128).
+Through: struct {
+    impl Marker {
+        sites: [.Arm]
+    }
+}
+
 DenyUnknownFields: struct {
     impl Marker {
         sites: [.Type]

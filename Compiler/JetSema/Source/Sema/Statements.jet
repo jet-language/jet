@@ -73,6 +73,7 @@ use jet_foundation.[
     ViewSourceProjection,
     ast_binding,
     ast_empty_call_arg_flags,
+    ast_visit_body,
     ast_visit_statement,
     ast_visit_expr,
     ast_empty_lambda_meta,
@@ -1148,7 +1149,7 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
 // Every arm head that tests the dispatch subject reads `replacement` instead.
 sema_stmt_rebind_switch_arms: fn(arms: [SwitchArm], subject_span: Span, replacement: Expr) -> [SwitchArm] {
     rebound := [SwitchArm]{}
-    loop arm in arms -> rebound.push(SwitchArm{cond: sema_expression_if_replace_subject(arm.cond, subject_span, replacement), body: arm.body, span: arm.span})
+    loop arm in arms -> rebound.push(SwitchArm{cond: sema_expression_if_replace_subject(arm.cond, subject_span, replacement), body: arm.body, span: arm.span, through: arm.through})
     rebound
 }
 
@@ -1391,6 +1392,9 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // channels and timers; its heads are not Boolean guards.
     readiness: subjectless_guard && sema_readiness_is_table(arms)
     readiness_table := sema_readiness_table_new()
+    // The diagnostics mark of the first `#Through` arm: a run-on body is
+    // checked again in its own arm, and each finding is reported once.
+    through_from := Int?{None}
     arm_index := 0
     loop arm_index < arms.len() {
         // The arm is read in place (`arms[arm_index]`): binding it copied the
@@ -1441,6 +1445,12 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             if !ends -> complete = false
         }
         sema_single_use_leave_scope(scopes, state, diagnostics)
+        // `#Through`: the next arm's body runs after this one.
+        if arms[arm_index].through == .Val(through) {
+            if through_from == None -> through_from = Val(diagnostics.len())
+            ran_on: if arm_return != None -> sema_stmt_check_through(arms, arm_index, else_body, through, value_tail, branch.value, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_stmt_check_through(arms, arm_index, else_body, through, value_tail, branch.value, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+            if !ran_on -> complete = false
+        }
         branch_path := sema_ownership_fork_path(state, fork)
         sema_ownership_fork_rollback(state, branch_fork)
         sema_ownership_fork_close(state, branch_fork)
@@ -1480,6 +1490,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         checked_else.value = [TStmt]{}
         else_result = Val(checked_value.move())
     }
+    if through_from == .Val(from) -> sema_stmt_through_dedupe(diagnostics, from)
     else_path: sema_ownership_fork_path(state, fork)
     sema_ownership_fork_rollback(state, else_fork)
     sema_ownership_fork_close(state, else_fork)
@@ -1565,6 +1576,86 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     }
     SemaStatementResult{value: sema_stmt_switch_chain(conditions, branches, arms, else_result, span) ?? [TStmt]{}, complete: true}
+}
+
+// `#Through` after arm `index`: the next arm's body (or the `else` body) is
+// checked after this arm's, in a scope of its own so neither arm's bindings
+// reach it, and its statements join `arm_body`. False when it cannot run on:
+// the table gives a value or the arm always leaves (E1128), or the next body
+// reads a name its own arm binds (E1127). The last arm with no `else` is the
+// parser's E1126.
+sema_stmt_check_through: fn(arms: [SwitchArm], index: Int, else_body: [Stmt]?, through: Span, value_tail: Bool, arm_body: &[TStmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> Bool {
+    if value_tail {
+        diagnostics.push(sema_error("E1128", through, "`#Through` has nothing to run on into", "this table gives a value, and each arm's value ends its arm", "remove `#Through`, or move the shared work into a function both arms call"))
+        return false
+    }
+    if !sema_stmt_tree_block_can_fall_through(arm_body) {
+        diagnostics.push(sema_error("E1128", through, "`#Through` has nothing to run on into", "this arm always leaves before the end of its body", "remove `#Through`, or move the shared work into a function both arms call"))
+        return false
+    }
+    if index + 1 < arms.len() {
+        names := [BindName]{}
+        ast_visit_expr(arms[index + 1].cond, (value: Expr) -> sema_stmt_through_bound_names(value, names))
+        if names.len() > 0 {
+            scan := SemaStmtThroughScan{names: [String]{}, found: None}
+            loop bound in names -> scan.names.push(bound.name)
+            ast_visit_body(arms[index + 1].body, (value: Expr) -> sema_stmt_through_note_read(scan, value), false)
+            if scan.found == .Val(read) {
+                diagnostics.push(sema_error("E1127", read.span, "`{read.name}` is bound by this arm, so an arm before it cannot run on into it", "`#Through` on the arm before runs this body without testing this arm's pattern, so `{read.name}` holds no value then", "remove `#Through` from the arm before, or read the value without the pattern binding"))
+                return false
+            }
+        }
+        if !sema_stmt_check_through_body(arms[index + 1].body, through, arm_body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) -> return false
+        // The ran-on arm's own `#Through` runs on again, so a chain of
+        // `#Through` arms runs every body down to the first arm without one.
+        if arms[index + 1].through == .Val(chained) -> return sema_stmt_check_through(arms, index + 1, else_body, chained, value_tail, arm_body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+        return true
+    }
+    if else_body == .Val(body) -> return sema_stmt_check_through_body(body, through, arm_body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    false
+}
+
+sema_stmt_check_through_body: fn(body: [Stmt], through: Span, arm_body: &[TStmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> Bool {
+    sema_scope_enter(scopes, state, "if.through@{through.start}")
+    checked := sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    if !checked.complete -> return false
+    ran_on := checked.value.move()
+    loop statement in ran_on -> arm_body.push(statement)
+    true
+}
+
+// The names a pattern test in an arm's head binds.
+sema_stmt_through_bound_names: fn(value: Expr, names: &[BindName]) Never! {
+    if value == .PatternTest(_, pattern, _, _) -> sema_pattern_test_binding_names(pattern, names)
+}
+
+SemaStmtThroughScan: struct {
+    names: [String]
+    found: NamedSpan?
+}
+
+sema_stmt_through_note_read: fn(scan: &SemaStmtThroughScan, value: Expr) Never! {
+    if scan.found != None -> return
+    if value == .Ident(name, span, _) {
+        if scan.names.contains(name) -> scan.found = Val(NamedSpan{name: name, span: span})
+    }
+}
+
+// A `#Through` run-on body is checked twice, after the arm before it and in
+// its own arm; each finding from `from` on is kept once.
+sema_stmt_through_dedupe: fn(diagnostics: &[Diagnostic], from: Int) Never! {
+    seen := [String:Bool]{}
+    kept := [Diagnostic]{}
+    loop (index, diagnostic) in diagnostics {
+        if index >= from {
+            key: if diagnostic.span == .Val(at) -> "{diagnostic.code}@{at.start}:{at.end}:{diagnostic.what}" else -> "{diagnostic.code}@:{diagnostic.what}"
+            if seen.get(key) != None -> next
+            seen[key] = true
+        }
+        kept.push(diagnostic.copy())
+    }
+    diagnostics = kept
 }
 
 // The subject of `if T == { … }` when it names a type

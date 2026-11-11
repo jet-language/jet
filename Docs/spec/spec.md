@@ -474,6 +474,13 @@ When the subject of `if subject == { … }` is not a plain name — a call or a
 field access, for example — the arms refer to it as `it`, as in
 `it == .Ok(n)`.
 
+`#Through` after a match arm's body runs the next arm's body (or the `else`
+body) after it (D-JAI-SMALL1=A): `.Error -> page() #Through` then
+`.Warn -> log()`. The next body runs in a scope of its own, without either
+arm's pattern bindings. `#Through` on the last arm is E1126; a next body that
+reads a name its own arm's pattern binds is E1127; and `#Through` on an arm
+that always leaves, or in a table that gives a value, is E1128.
+
 Inside a generic function the subject may be a type parameter, making a
 type table: `if T == { Int -> … Point -> … else -> … }`. Each arm names one
 type, a list type as `[U8]`, and is checked with `T` read as that type, including in its result and
