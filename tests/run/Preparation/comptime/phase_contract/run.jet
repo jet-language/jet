@@ -1,0 +1,36 @@
+// The phase contract: `#phase` is the phase of the compiled copy that runs
+// it, never an optimizer choice. `stamp` marks a record with the phase it was
+// made in, so the prepared rows keep `.Preparation`, the build entry's copy of
+// the same helper reads `.Build`, and the program's rows read `.Runtime`.
+// Every tier and both launches of the built program print the same lines:
+// startup never prepares the rows again.
+Tagged: struct {
+    phase: Phase
+    label: String
+    value: Int
+}
+
+stamp: fn(label: String, value: Int) -> Tagged { Tagged{phase: #phase, label: label, value: value} }
+
+phase_name: fn(phase: Phase) -> String {
+    if phase == {
+        .Preparation -> "preparation"
+        .Build -> "build"
+        .Runtime -> "runtime"
+    }
+}
+
+PREPARED: comptime { [Tagged]{stamp("width", 640), stamp("height", 480)} }
+
+build: fn(b: Build) {
+    b.contribute("build_phase", phase_name(#phase))
+    b.contribute("helper_phase", phase_name(stamp("probe", 0).phase))
+}
+
+run: fn() {
+    made_now: stamp("area", PREPARED[0].value * PREPARED[1].value)
+    loop row in PREPARED -> print("{row.label} {row.value} made in {phase_name(row.phase)}")
+    print("{made_now.label} {made_now.value} made in {phase_name(made_now.phase)}")
+    print("the build entry ran in {#build.settings.build_phase}; its helper read {#build.settings.helper_phase}")
+    print("prepared and program rows differ: {PREPARED[0].phase != made_now.phase}")
+}
