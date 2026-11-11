@@ -25,7 +25,7 @@ LOG_STATE_FILTER: I64{88}
 LOG_FIELD_BYTES: I64{32}
 log_state_key := I64{0}
 // The process's level filters below and above the code's
-// (Core/Log/Log.jet __config_load): the package's `log:` field and the
+// (Core/Log/Log.jet, jet.runtime.log config_load): the package's `log:` field and the
 // `--log` flag, which the entry function passes (jet_rt_log_configure), and
 // JET_LOG, which the start reads (jet_rt_log_start). Each is an owned text,
 // or 0 for "", written before any other thread exists.
@@ -160,7 +160,7 @@ log_filter_level_valid: fn(data: I64, first: I64, last: I64) -> Bool {
     valid
 }
 
-// Core's `__config_load(which)`: 0 the package's filter, 1 JET_LOG's, 2 the
+// jet.runtime.log `config_load(which)`: 0 the package's filter, 1 JET_LOG's, 2 the
 // flag's; an owned text.
 #Export(c) jet_log_config_load: fn(which: I64) -> I64 {
     native: jet_int_owned_to_i64(which)

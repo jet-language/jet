@@ -307,9 +307,9 @@ write's failure), the pure `stdio_fault`, `stdout_terminal` and
 failure as an item: `terminal8_line` is
 `(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is
 `(h: Int, w: Int)?`. `jet.runtime.log` holds the calling thread's logging
-cells (`level_load`, `filter_store`, …), `flush`, `process_exit` and
-`span_allocate` (`(id: Int, name: String)`), each `-[Log]>`, and the pure
-`metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
+cells `core.log` is built on (`level_load`, `filter_store`, …), `flush`,
+`process_exit` and `span_allocate` (`(id: Int, name: String)`), each
+`-[Log]>`, and the pure `metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
 `text_cells_*` and `etf_strings_*` that CSV, typed data, `core.sys.decode`
 and ETF decoding enter.
 `jet.runtime.process` holds the signal subscription calls `signal_open`,

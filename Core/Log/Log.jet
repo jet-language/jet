@@ -10,6 +10,7 @@ package: {
 }
 use {
     core: core
+    rt: jet.runtime.log
     internal.[code_level, covering_rank, emit, enabled_for, level_name, level_rank, module_path_valid, parse_filter, render_filter]
 }
 
@@ -104,7 +105,7 @@ redact: fn(key: String) -> LogField Never! {
 }
 
 span: fn(name: String) -[Log]> LogSpan Never! {
-    allocated: core.log.__span_allocate(name)
+    allocated: rt.span_allocate(name)
     LogSpan{id: allocated.id, name: allocated.name}
 }
 
@@ -119,8 +120,8 @@ close: fn(span: LogSpan) Never! -[Log]> { core.log.__span_close(span) }
 set_sink: fn(kind: String, path: String) Never! -[Log]> {
     normalized: ascii_lower(trim(kind))
     if normalized == "stderr" {
-        core.log.__format_store(1)
-        return core.log.__sink_store("")
+        rt.format_store(1)
+        return rt.sink_store("")
     }
     if normalized != "json" && normalized != "jsonl" && normalized != "text" {
         return reject_setting("log.set_sink: unsupported sink kind `{kind}`; the sink is unchanged (supported: stderr, json, jsonl, text)")
@@ -128,19 +129,19 @@ set_sink: fn(kind: String, path: String) Never! -[Log]> {
     if (normalized == "jsonl" || normalized == "text") && trim(path).len() == 0 {
         return reject_setting("log.set_sink: the `{normalized}` sink needs a file path; the sink is unchanged")
     }
-    core.log.__format_store(if normalized == "text" -> 2 else -> 1)
-    core.log.__sink_store(path)
+    rt.format_store(if normalized == "text" -> 2 else -> 1)
+    rt.sink_store(path)
 }
 
 sample_every: fn(n: Int) Never! -[Log]> {
     if n > 0 {
-        core.log.__sample_store(n)
-        core.log.__sample_count_store(0)
+        rt.sample_store(n)
+        rt.sample_count_store(0)
     }
 }
 
 counter: fn(name: String, value: Int) -> LogField Never! {
-    core.log.__metric_publish(name, value)
+    rt.metric_publish(name, value)
     LogField{key: "metric.counter.{name}", value: "{value}", kind: "counter", redacted: false}
 }
 
@@ -174,8 +175,8 @@ setup: fn(spec: String) Never! -[Log]> {
         key: ascii_lower(trim(pair.left))
         value: trim(pair.right)
         if {
-            value.len() == 0 && is_format(key) -> core.log.__format_store(format_code(key))
-            key == "format" && is_format(ascii_lower(value)) -> core.log.__format_store(format_code(ascii_lower(value)))
+            value.len() == 0 && is_format(key) -> rt.format_store(format_code(key))
+            key == "format" && is_format(ascii_lower(value)) -> rt.format_store(format_code(ascii_lower(value)))
             key == "sink" -> {
                 sink: ascii_lower(value)
                 if sink == "stderr" || sink == "stdout" -> set_sink(sink, "") else -> set_sink("jsonl", value)
@@ -202,9 +203,9 @@ reject_setting: fn(message: String) -[Log]> {
     core.log.__record_emit("error", message, [LogField]{})
 }
 
-disable: fn() Never! -[Log]> { core.log.__disabled_store(true) }
+disable: fn() Never! -[Log]> { rt.disabled_store(true) }
 
-flush: fn() Never! -[Log]> { core.log.__flush() }
+flush: fn() Never! -[Log]> { rt.flush() }
 
 /// Whether a record at `level` from the calling module would be written.
 enabled: fn(level: LogLevel, at: SourceLocation{#caller}) -[Log]> Bool Never! {
@@ -243,7 +244,7 @@ FilterPair: struct {
 // level every module has, and FILTER_PER_MODULE means a source names a module.
 FILTER_PER_MODULE: 7
 
-// The sources below the code's levels and above them (`__config_load`).
+// The sources below the code's levels and above them (`rt.config_load`).
 CONFIG_PACKAGE: 0
 CONFIG_ENV: 1
 CONFIG_FLAG: 2
@@ -252,7 +253,7 @@ CONFIG_FLAG: 2
 // log surface.
 priv internal: module {
     enabled_for: fn(rank: Int, path: String) -[Log]> Bool Never! {
-        if core.log.__disabled_load() -> return false
+        if rt.disabled_load() -> return false
         rank >= threshold(path)
     }
 
@@ -268,7 +269,7 @@ priv internal: module {
         core.log.__record_emit(level_name(level), message, tagged)
         if level == .Fatal {
             flush()
-            core.log.__process_exit(1)
+            rt.process_exit(1)
         }
     }
 
@@ -312,15 +313,15 @@ priv internal: module {
 
     // The rank a record of module `path` must reach.
     threshold: fn(path: String) -[Log]> Int Never! {
-        cached: core.log.__level_load()
+        cached: rt.level_load()
         if cached > 0 && cached < FILTER_PER_MODULE -> return cached
         pairs: merged_filter()
         if cached == 0 {
             if pairs.len() == 1 {
-                core.log.__level_store(pairs[0].rank)
+                rt.level_store(pairs[0].rank)
                 return pairs[0].rank
             }
-            core.log.__level_store(FILTER_PER_MODULE)
+            rt.level_store(FILTER_PER_MODULE)
         }
         covering_rank(pairs, path)
     }
@@ -329,7 +330,7 @@ priv internal: module {
     // replaces an earlier pair for the same path.
     merged_filter: fn() -[Log]> [FilterPair] Never! {
         pairs := [FilterPair]{FilterPair{path: "", rank: 2}}
-        texts: [String]{core.log.__config_load(CONFIG_PACKAGE), core.log.__filter_load(), core.log.__config_load(CONFIG_ENV), core.log.__config_load(CONFIG_FLAG)}
+        texts: [String]{rt.config_load(CONFIG_PACKAGE), rt.filter_load(), rt.config_load(CONFIG_ENV), rt.config_load(CONFIG_FLAG)}
         loop text in texts {
             loop pair in parse_filter(text) -> put_pair(pairs, pair.path, pair.rank)
         }
@@ -430,18 +431,18 @@ priv internal: module {
         if path != "" && !module_path_valid(path) {
             return reject_setting("log.set_level: `{path}` is not a dotted module path; the level is unchanged")
         }
-        pairs := parse_filter(core.log.__filter_load())
+        pairs := parse_filter(rt.filter_load())
         put_pair(pairs, path, rank)
-        core.log.__filter_store(render_filter(pairs))
-        core.log.__level_store(0)
+        rt.filter_store(render_filter(pairs))
+        rt.level_store(0)
         operators: [Int]{CONFIG_FLAG, CONFIG_ENV}
         loop source in operators {
-            kept: pair_rank(parse_filter(core.log.__config_load(source)), path)
+            kept: pair_rank(parse_filter(rt.config_load(source)), path)
             if kept > 0 {
                 operator: if source == CONFIG_FLAG -> "--log" else -> "JET_LOG"
                 target: if path == "" -> "every module" else -> "`{path}`"
                 note: "log.set_level({rank_name(rank)}) at {at} for {target} is kept below {operator}, which sets {rank_name(kept)}"
-                if !core.log.__disabled_load() -> core.log.__record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
+                if !rt.disabled_load() -> core.log.__record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
                 return
             }
         }
@@ -693,12 +694,12 @@ time: fn(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int(
 clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
 
 #Test("log level policy uses raw state") {
-    saved_level: core.log.__level_load()
-    saved_filter: core.log.__filter_load()
-    saved_disabled: core.log.__disabled_load()
-    core.log.__filter_store("")
-    core.log.__level_store(0)
-    core.log.__disabled_store(false)
+    saved_level: rt.level_load()
+    saved_filter: rt.filter_load()
+    saved_disabled: rt.disabled_load()
+    rt.filter_store("")
+    rt.level_store(0)
+    rt.disabled_store(false)
     assert(!enabled_for(1, "shop"))
     assert(enabled_for(2, "shop"))
     set_level(.Debug)
@@ -713,9 +714,9 @@ clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.mess
     assert(!enabled_for(2, "shop"))
     disable()
     assert(!enabled_for(6, "shop"))
-    core.log.__filter_store(saved_filter)
-    core.log.__level_store(saved_level)
-    core.log.__disabled_store(saved_disabled)
+    rt.filter_store(saved_filter)
+    rt.level_store(saved_level)
+    rt.disabled_store(saved_disabled)
 }
 
 #Test("log filters take the longest covering module path") {
