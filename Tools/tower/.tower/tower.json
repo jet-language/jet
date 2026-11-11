@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99068,
+    "rev": 99075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55041,8 +55041,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-11T01:55:30.217Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-11T02:21:56.239Z",
+      "updatedBy": "Main",
       "goals": [
         "G6"
       ],
@@ -55066,6 +55066,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Correction to the previous log: the new criteria are c8 (the hooks) and c9 (the paired perf cell), not c7 and c8."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -55196,7 +55201,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-11T02:21:38.636Z",
+      "updated": "2026-11-11T02:22:00.348Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -69241,8 +69246,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-11T01:52:10.279Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-11T02:21:53.614Z",
+      "updatedBy": "Main",
       "goals": [
         "G10"
       ],
@@ -77241,8 +77246,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T02:06:42.771Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-11T02:21:58.928Z",
+      "updatedBy": "Main",
       "criteriaLastN": 7
     },
     {
@@ -183172,49 +183177,40 @@
       "id": "D-JAI-GENERIC1",
       "cardId": "c0ygtwb9",
       "group": "syntax",
-      "title": "Required compile-time argument checks: marker mode or explicit value parameters",
-      "situation": "Ratified #Pre checks fixed inputs during compilation when it can, with a runtime check otherwise. It deliberately added no second marker. Some APIs instead need callers to supply build-known values. This ballot chooses a required-check surface, rather than treating a known-value predicate as the same thing as a known-value requirement. A adds ##Pre; B uses ratified number parameters; E adds explicit #run parameters in the ordinary argument list. None is implemented by the supplied snippets.",
-      "gist": "Should required compile-time argument checks use ##Pre or explicit compile-time parameters?",
-      "lesson": "A value can satisfy a rule at runtime without being known during compilation. Requiring it to be known is an additional contract. A puts that contract on ##Pre; B and E put it on the value parameter. Ordinary #Pre keeps its ratified fallback behavior.",
+      "title": "Require build-known arguments through ordinary number parameters, not a special double-hash marker",
+      "situation": "Some functions need an input fixed before the program runs. For example, a library may accept only four or eight lanes, and want a bad choice rejected while building. A normal precondition can also accept a runtime input and check it later. The missing choice is how an API requires the earlier answer. We recommend the existing number-parameter mechanism rather than introducing a special double-hash marker.",
+      "gist": "Should required build-known inputs use number parameters rather than a new marker mode?",
+      "lesson": "Two promises differ: this number is valid, and this number is already known while building. Put the second promise on the parameter. Keep #Pre for checking whether that number is valid.",
       "explainer": "A required check fails the build when inputs are unavailable or evaluation cannot complete. A number parameter is a compile-time generic value. Distinct generic instances need not imply distinct emitted machine bodies if the compiler can share them safely.",
-      "story": "Ola needs a lane argument fixed to 4, 8 or 16 before compilation finishes. The example only adds a list; it does not perform SIMD or depend on lane width. Every option must sum [1,2,3,4] to 10 at an accepted lane count and reject an invalid or unavailable required count.",
-      "inWild": "// Jai community example: #modify can refuse a resolved use.\n// Documentation illustration, not executed with a Jai compiler:\n#modify { return do_something(T); }\n// Zig uses an explicit comptime parameter and @compileError.",
-      "detail": "Authority. A amends PRE-COMPILE1's no-new-mark choice and extends HASH1's marker grammar with ##. Ordinary #Pre keeps fallback. META-SPELL1=A supplies #run, #if, #loop and <N: Int>. Add no retired-spelling teaching or rewrite service. B keeps the ratified value-parameter mechanism; E reuses it with a new parameter location.\n\nIndependent a0.0.43 probes. j01 prints 10 then stops with E3005, exit 70, for lanes 6. j05 prints before then stops: fixed false #Pre is not a build error on this compiler. j02 rejects ##Pre; j03/j04 reject numeric generic calls; j06 rejects unbounded addition with E0360. These failures do not rank unbuilt alternatives.\n\nThe body ignores lanes and sums four elements even for lanes 8. No SIMD, specialization-speed or code-size result was measured. This is a contract example, not proof that a shared body implements lane-dependent instructions.\n\nA requires every argument fact referenced by ##Pre's condition and required message to be build-available. True removes its runtime check. False reports the author's message at the call. Unknown input, evaluator failure and budget exhaustion are distinct build errors, never false predicates or runtime fallback.\n\nKnownness exceeds truth: runtime n is refused even for a tautology mentioning n. Pure constant expressions and resolved defaults may supply facts. Effectful calls cannot execute early merely because their result seems predictable. Arguments unread by the early clause remain runtime values. Evaluate them once in normal order; do not duplicate effects, loans or moves.\n\nReuse the bounded native evaluator and pure contract checker. Preserve tags in diagnostics. Cache results by declaration revision, generic bindings and canonical argument facts. User markers cannot bypass authority, effects, budget or ownership checks.\n\nA's body parameters remain ordinary runtime arguments. They cannot shape types or feed #run merely because a marker reads them; those uses need number parameters. A value-independent body may be shared, not guaranteed as one emitted machine body. Inlining, specialization and target lowering can still create variants.\n\nForwarding carries checked symbolic obligations, not magic constants inside a runtime body. Preserve dependency expressions and call-chain sites in interfaces. An early wrapper can forward unchanged arguments or pure build-evaluable expressions; discharge both clauses at outer calls. An unannotated runtime wrapper cannot hide the requirement. Recursive evaluation remains budgeted.\n\nA wrapper admitting 4, 8, 16 and 32 can call an inner function admitting only 4, 8 and 16. Calling the wrapper with 32 fails the inner clause with both sites shown. The original wrapper admitting only 4 and 8 could not demonstrate that distinction using 16: its own clause already failed.\n\nReject conversion into function values, trait slots or foreign callables that erase unresolved early obligations. A may use an ordinary constant-binding wrapper. B/D can bind sum<4> directly; they do not inherently need wrappers. E also binds its value parameter before erasure. Reflection and generated calls keep the same checks.\n\nRuntime dispatch needs an application policy. Authors may match finite inputs to literal calls, but a generated fix cannot invent fallback errors, panics, return types or effects. Offer a rewrite only when an existing complete fallback is preserved. No universal generated-match repair is promised.\n\nA's early: true setting permits required mode for a marker kind. Require a pure Bool condition and build-available String message. Unknown or ineligible doubled markers fail. Mandatory early gates cannot be stripped by runtime-contract suppression. Custom expansion still uses canonical marker semantics.\n\nOrigin/dev Markers lists settings near 9-17, and declares Pre at 72-80, not 66. A registry setting does not implement evaluation, forwarding or callable preservation. Repository text counts are not semantic coverage.\n\nB uses <lanes: Int> with ordinary #Pre, making knownness explicit through an existing mechanism that also shapes types. Distinct generic instances can share emitted code; no measured per-value machine-copy disadvantage is assigned. Call organization differs from ordinary arguments.\n\nC infers required-mode applicability from each marker's typed contract, with no opt-in flag. A marker without an evaluable predicate fails. ##Post requires result facts established by permitted pure early evaluation; otherwise it fails. C is uniform but broadens applicability and result-proof scope. It does not blindly accept ##Post.\n\nD combines a number parameter with #run body validation and a registered build-error operation. Rich pure logic fits, and tools can render it in hover/docs. The predicate is absent only from the authored signature. Current absence of compile_error does not rank this unbuilt option.\n\nE writes #run lanes: Int in the ordinary list, with sum(8, xs) calls. Lower it to the same value-parameter mechanism as <lanes: Int>, including type-shaping and bound-instance rules. This adds parameter grammar, not another knownness engine, and places the requirement beside the value declaration.\n\nCosts. A adds marker mode, dependency summaries and higher-order limits. B/E make parameter knownness explicit; D authors validation in the body; C infers wider applicability. None has measured compile-time, executable-size or runtime superiority. Beginners keep ordinary #Pre; experts inspect required call obligations.",
+      "story": "Ola's sum accepts four or eight lanes. All options sum the same four numbers to 10. The lane count demonstrates a contract, not a measured SIMD optimization.",
+      "inWild": "Zig writes comptime on a parameter to require an early value. C++ templates and constraints likewise separate an early argument from its validity rule. These are source comparisons, not executed peer benchmarks.",
+      "detail": "Recommendation changes from A to B. B reuses the most recent ratified number-parameter spelling, <lanes: Int>, from D-META-SPELL1=A. D-GENERIC-TYPEFN1's older recipe syntax does not authorize reviving prep. A supplied runtime count fails even if it happens to be 4. #Pre validates accepted early arguments under D-PRE-COMPILE1=A; it retains runtime fallback for ordinary runtime parameters. No ## syntax is added.\n\nObserved with t17a a0.0.43 and jet run -: a numeric generic sum call is refused, including E0357 for the lower-case parameter. Ordinary #Pre on f(0) prints before, then stops with E3005 and exit 70. This is an implementation gap against the approved early-precondition behavior, not a reason to introduce a second checking mechanism. Compiler/Prelude/Markers.jet:66-73 defines Pre and its condition/message fields. No proposed option was executed successfully.\n\nB requires a pure, bounded build-time evaluation for the argument. Literals, known constants and known defaults work. An effectful expression cannot be run early merely because a compiler predicts its answer. Unknown input, a false clause and exhausted evaluation budget get distinct errors at the caller, with the declaration shown. Forwarding preserves the number parameter; a runtime wrapper cannot erase it. Bind early arguments before conversion to a plain function value. Trait and package interfaces retain the same obligation.\n\nE is a strong alternative if ordinary argument placement matters: #run lanes: Int means the same early parameter as B, but beside ordinary parameters. It also may shape types. This is new parameter grammar, not a second evaluator. B needs no new grammar for this vote. Distinct early values may share machine code when the body permits it; neither option inherently copies a machine body per value.\n\nA is retained only as the owner's requested genuinely general alternative: ## applies to every marker whose typed predicate can be proved early, not just Pre. User markers qualify through the same checked protocol; unavailable result facts make an early Post fail. This explicitly amends the approved marker grammar and needs symbolic call obligations even where body parameters remain runtime values. It cannot be justified as a one-off convenience.\n\nD uses an early parameter with #run body validation and a new compile_error operation. It accommodates richer validation, but tools must expose the rule from the body. No performance advantage is asserted for any option.\n\nAdversarial verdict: B holds for fixed build-known arguments. First try: use ordinary #Pre alone; that does not require knownness. Second try: use the existing early value parameter, which supplies exactly that missing promise. B's angle-bracket organization is a real reading cost; E removes it at the price of new grammar. This vote does not settle Jai duck typing, currying or automatic baking; those cannot be claimed delivered by one validation clause. All cutovers follow D-LANG-MIGRATE1=A's registered rewrites, without teaching retired spellings in errors.",
       "options": [
         {
           "key": "A",
-          "name": "Required ##Pre marker mode",
-          "detail": "Ordinary argument spelling; parameters referenced by the early clause must be build-known.",
-          "technical": "Amends the no-new-mark ruling. Reuse canonical evaluator and contracts; preserve forwarding obligations, budgets and callable boundaries. Ordinary body parameters cannot shape types just because a marker reads them.",
-          "code": "// Proposed A; not built.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum(8, [1,2,3,4]) => 10\n// sum(6, xs): clause failure; sum(runtime_lanes, xs): unavailable input."
+          "name": "A general early mode for markers",
+          "detail": "Add ## for any eligible marker, including user markers. Clause inputs must be known early even though body parameters stay ordinary.",
+          "code": "// Proposed A, not implemented.\n##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; 6 or a runtime count fails while building.",
+          "technical": "Every suitable marker shares required-proof mode. Unknown or ineligible predicates fail; ordinary #Pre does not change."
         },
         {
           "key": "B",
-          "name": "Ratified number parameter and #Pre",
-          "detail": "Write knownness in <lanes: Int>; keep ordinary #Pre validation.",
-          "technical": "One existing compile-time value-parameter mechanism. Instances can shape types and can be bound for function values. Distinct instances are not proof of distinct machine bodies.",
-          "code": "// Ratified parameter mechanism, proposed program; seed rejects numeric call.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum<8>([1,2,3,4]) => 10; sum<6>(xs) fails its clause.\n// A runtime generic argument is refused."
-        },
-        {
-          "key": "C",
-          "name": "Required mode inferred for any suitable marker",
-          "detail": "No early opt-in flag; infer whether a marker's typed contract supports required build-time proof.",
-          "technical": "Share A's evaluator and obligation rules. Ineligible markers fail. Postconditions require pure build-known result facts, not blind acceptance. Wider inference and proof scope than A.",
-          "code": "// Proposed C: same sum program and calls as A.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\n// No early: true registry setting is required.\n// ##Post(result > 0, \"positive\") requires a permitted result proof,\n// and fails if that proof cannot be supplied."
+          "name": "Existing early number parameter",
+          "detail": "Use <lanes: Int> to require knownness, and ordinary #Pre to require validity. No new marker or parameter grammar.",
+          "code": "// Proposed program using the ratified spelling.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; 6 or a runtime count fails while building.",
+          "technical": "The value parameter supplies knownness and may shape types. Ordinary precondition checking supplies validity."
         },
         {
           "key": "D",
-          "name": "Number parameter with body validation",
-          "detail": "Knownness stays in the value parameter; pure validation runs in a #run block.",
-          "technical": "Reuses the same evaluator with a registered build-error operation. Tools can render the rule, but source-signature readers must open the body. No generic body-copy penalty is assumed.",
-          "code": "// Proposed D; compile_error is part of this option, not a working seed API.\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    #run {\n        if lanes != 4 && lanes != 8 && lanes != 16 -> compile_error(\"need 4, 8 or 16\")\n    }\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum<8>([1,2,3,4]) => 10; invalid or runtime generic counts fail."
+          "name": "Early parameter, check in the body",
+          "detail": "Keep knownness explicit but put arbitrary pure validation in an early body block. Adds a build-error operation.",
+          "code": "// Proposed D, not implemented.\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    #run {\n        if lanes != 4 && lanes != 8 -> compile_error(\"need 4 or 8\")\n    }\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; invalid or unavailable counts fail while building."
         },
         {
           "key": "E",
-          "name": "Explicit #run parameter, ordinary calls",
-          "detail": "Write #run lanes: Int at the parameter while callers use sum(8, xs).",
-          "technical": "New parameter spelling for the canonical compile-time value parameter, not another evaluation mechanism. Retain ordinary #Pre, generic identity, type-shaping ability and concrete binding before function-value erasure.",
-          "code": "// Proposed E; new parameter grammar, not built.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")\nsum: fn(#run lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// sum(8, [1,2,3,4]) => 10; invalid or unavailable counts fail.\n// Same value-parameter mechanism as B, different declaration/call organization."
+          "name": "Early parameter in the ordinary list",
+          "detail": "Write #run on the parameter; callers use sum(4, xs). Same early-value mechanism, new grammar.",
+          "code": "// Proposed E, not implemented.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(#run lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; 6 or a runtime count fails while building."
         }
       ],
       "comparisons": [
@@ -183234,136 +183230,110 @@
           "code": "template<int L> requires (L == 4 || L == 8 || L == 16) int sum();"
         }
       ],
-      "rec": "A",
+      "rec": "B",
       "recommendation": {
-        "rec": "A",
-        "why": "A keeps ordinary calls and separates required proof from body specialization. That benefit must be weighed against E's explicit parameter contract and B's smaller existing surface.",
+        "rec": "B",
+        "why": "Knownness belongs on the parameter; validity remains an ordinary precondition. This answers the request without adding a special marker mode.",
         "gains": [
-          "Required argument checks at caller sites.",
-          "Ordinary argument lists and potentially shared value-independent bodies."
+          "No double hash",
+          "One existing early-value mechanism"
         ],
         "losses": [
           {
-            "loss": "A adds a second marker form and a knownness dependency that is not written at the parameter.",
-            "mitigation": "State the amendment, show required facts on signatures, and offer B/E as explicit parameter alternatives."
-          },
-          {
-            "loss": "Forwarding, budgets and callable erasure add proof obligations.",
-            "mitigation": "Preserve checked summaries and reject unavailable or erased requirements without runtime fallback."
+            "loss": "Early arguments use angle brackets.",
+            "mitigation": "Keep one knownness rule; E offers ordinary placement if that organization is preferred."
           }
         ],
         "whyNot": [
           {
-            "key": "B",
-            "reason": "B is smaller and explicit; A instead keeps the ordinary argument list. Neither has a measured code-size advantage."
-          },
-          {
-            "key": "C",
-            "reason": "C is uniform but adds result-proof and inferred-applicability scope."
+            "key": "A",
+            "reason": "Generalizing ## is coherent but adds marker staging and forwarding rules this job does not need."
           },
           {
             "key": "D",
-            "reason": "D supports rich body logic and tooling; its authored rule is not on the signature."
+            "reason": "Rich checks work, but their rule moves into the body and needs a new operation."
           },
           {
             "key": "E",
-            "reason": "E is a strong explicit ordinary-call alternative, but adds a new parameter spelling."
+            "reason": "A strong ordinary-call alternative, but adds parameter grammar without new capability here."
           }
         ],
-        "tradeoff": "A new required marker mode versus reusing explicit compile-time value parameters; no measured speed or size ranking."
+        "tradeoff": "Existing explicit early arguments versus a new general marker or parameter spelling."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran j01-j06 and checked ratified rules and marker source. Removed SIMD and body-copy overclaims, repaired forwarding and runtime-fix semantics, and added explicit ordinary-list parameter E."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran numeric-parameter and precondition probes, rejected a one-off doubled marker, and withdrew unsupported code-copy and SIMD claims."
       },
-      "checkInstructions": "Independent probes/review7-j*.run.txt establish current diagnostics only. Pre is at origin/dev Markers.jet:72-80. Before shipping, prove unknown inputs, evaluator budget, wrappers, defaults, pure expressions, callable erasure, policy suppression, user markers and tier parity. No proposed API or code-size advantage was executed.",
+      "checkInstructions": "Before delivery, prove valid, invalid and runtime arguments; defaults; forwarding; budgets; type shaping; and function-value binding on every applicable tier. The current probe does not demonstrate any proposed early mode.",
       "surface": {
-        "gist": "Should required compile-time checks use ##Pre or explicit value parameters?",
-        "lesson": "Truth at runtime is not knownness during compilation. A places required knownness on a marker; B/E place it on a parameter. Ordinary #Pre retains automatic early checking with runtime fallback.",
+        "gist": "Should required build-known inputs use number parameters rather than a new marker mode?",
+        "lesson": "A valid number is not necessarily known while building. Require knownness on the parameter and check validity with #Pre. Beginners keep ordinary parameters; experts require early ones where needed.",
         "trio": {
           "current": {
-            "note": "j01 prints 10 then stops; j05 prints before then stops, exit 70.",
-            "code": "sum(6, [1,2,3,4]) // current #Pre is E3005 at runtime"
+            "note": "The tested early-parameter call is refused; ordinary #Pre can still stop at runtime.",
+            "code": "#Pre(n > 0, \"positive\")\nf: fn(n: Int) -> Int { n }"
           },
           "wild": {
             "lang": "Zig",
-            "note": "Explicit parameter knownness; documentation illustration, not executed.",
+            "note": "The parameter explicitly requires a build-known value.",
             "code": "fn sum(comptime lanes: u32, xs: []const i32) i32"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Required ##Pre",
-            "gist": "Ordinary calls; clause dependencies must be build-known.",
+            "name": "General early markers",
+            "gist": "Double hash requires proof for every eligible marker.",
             "gains": [
-              "Caller-site proof.",
-              "No forced body specialization."
+              "Ordinary calls"
             ],
             "losses": [
-              "New marker mode and inferred dependencies."
+              "New marker mode and forwarding rules"
             ],
             "proposed": {
-              "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"need 4, 8 or 16\")"
+              "code": "##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")"
             }
           },
           {
             "key": "B",
-            "name": "Number parameter",
-            "gist": "Use the ratified <lanes: Int> mechanism.",
+            "name": "Existing number parameter",
+            "gist": "Knownness on the parameter; validity in #Pre.",
             "gains": [
-              "No new marker mode.",
-              "Explicit knownness."
+              "No new syntax"
             ],
             "losses": [
-              "Angle-bracket calls."
+              "Angle-bracket arguments"
             ],
             "proposed": {
-              "code": "sum<8>(xs)"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Inferred marker applicability",
-            "gist": "Required mode for every suitable typed marker.",
-            "gains": [
-              "No opt-in setting."
-            ],
-            "losses": [
-              "Wider applicability and result-proof scope."
-            ],
-            "proposed": {
-              "code": "##Post(result > 0, \"positive\") // only with a valid early result proof"
+              "code": "sum<4>([1,2,3,4]) // 10"
             }
           },
           {
             "key": "D",
-            "name": "Body validation",
-            "gist": "Number parameter and #run build check.",
+            "name": "Check in the body",
+            "gist": "Use an early block for validation.",
             "gains": [
-              "Rich pure logic.",
-              "Tools can render it."
+              "Rich pure logic"
             ],
             "losses": [
-              "Predicate absent from authored signature."
+              "Rule inside the body; new error operation"
             ],
             "proposed": {
-              "code": "#run { if lanes == 6 -> compile_error(\"invalid count\") }"
+              "code": "#run { if lanes == 6 -> compile_error(\"need 4 or 8\") }"
             }
           },
           {
             "key": "E",
-            "name": "Explicit ordinary-list parameter",
-            "gist": "Same value-parameter mechanism; ordinary calls.",
+            "name": "Ordinary-list early parameter",
+            "gist": "Same knownness rule; new parameter location.",
             "gains": [
-              "Knownness visible at parameter.",
-              "sum(8, xs) calls."
+              "Ordinary calls"
             ],
             "losses": [
-              "New parameter spelling."
+              "New parameter grammar"
             ],
             "proposed": {
               "code": "sum: fn(#run lanes: Int, xs: [Int]) -> Int"
@@ -183371,36 +183341,32 @@
           }
         ],
         "recommendation": {
-          "rec": "A",
-          "why": "A keeps ordinary calls, but B's existing surface and E's explicit parameter contract are strong alternatives.",
+          "rec": "B",
+          "why": "Reuse the existing early-value parameter, not a marker invented for one check.",
           "gains": [
-            "Required proof without forcing body specialization."
+            "One knownness rule"
           ],
           "losses": [
             {
-              "loss": "New marker mode and preserved call obligations.",
-              "mitigation": "Expose dependencies and reject missing proof honestly."
+              "loss": "Angle brackets remain.",
+              "mitigation": "E is available if ordinary parameter placement matters more."
             }
           ],
           "whyNot": [
             {
-              "key": "B",
-              "reason": "Smaller, but angle-bracket calls."
-            },
-            {
-              "key": "C",
-              "reason": "Broader inferred phase scope."
+              "key": "A",
+              "reason": "More staging rules than this job needs."
             },
             {
               "key": "D",
-              "reason": "Rule is authored inside the body."
+              "reason": "Moves the check inside the body."
             },
             {
               "key": "E",
-              "reason": "Explicit and ordinary-call friendly, but adds parameter syntax."
+              "reason": "Same capability, new grammar."
             }
           ],
-          "tradeoff": "Surface and staging clarity, not a measured speed ranking."
+          "tradeoff": "Existing explicit organization rather than new punctuation."
         }
       },
       "draft": false,
@@ -183468,21 +183434,8 @@
       ],
       "reports": [
         {
-          "title": "Required argument checks: probes and different-family review",
-          "path": "Docs/audits/2026-11-10-jai-generic-review.md",
-          "note": "j01-j06 rerun; corrected marker source line, contract workload, body-copy and wrapper claims. Added explicit parameter E; no candidate performance proof."
-        },
-        {
-          "title": "Jai community #modify and currying",
-          "url": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Advanced"
-        },
-        {
-          "title": "Zig @compileError",
-          "url": "https://ziglang.org/documentation/master/#compileError"
-        },
-        {
-          "title": "C++ constraints",
-          "url": "https://en.cppreference.com/w/cpp/language/constraints"
+          "title": "Zig: compile-time parameters",
+          "url": "https://ziglang.org/documentation/master/#comptime-parameters"
         }
       ]
     },
@@ -185439,49 +185392,38 @@
       "id": "D-ALLOC-FAIL1",
       "cardId": "c0ct4a0i",
       "group": "memory",
-      "title": "One spelling per allocating operation; failure is an error value where the code handles it or its contract names AllocError",
-      "situation": "Today each allocating operation has two spellings. Plain push stops the program when memory runs out, and try_push returns an error value instead. The second family exists for devices that must recover, and it doubles the API.\n\nThe review proposed one spelling, where failure becomes a value only where the code asks for it. Asking means a handler on the call, or an error contract on the function. Keeping the twins is option B.",
-      "gist": "Should the try_ twins go, so a plain allocating call fails as a value wherever the code handles it or declares AllocError?",
-      "lesson": "Adding to a list needs memory, and memory can run out. Most programs should just stop with a report. A device must recover instead. Today Jet has two names for each operation, one per need. This vote decides whether one name can do both.",
+      "title": "Return memory-allocation failure by default; stop only when the caller explicitly chooses to",
+      "situation": "Growing a list sometimes needs more memory, and that request can fail. In the tested compiler, try_push lets the caller handle failure, while plain push cannot be handled that way. Choosing different names throughout a library makes recovery easy to miss. Returning an error preserves the choice to stop without forcing every caller to stop. We recommend one recoverable operation by default, using ordinary error handling for propagation or an explicit stop.",
+      "gist": "Should memory requests return ordinary errors by default, with stopping an explicit choice?",
+      "lesson": "Recovery means the program gets a chance to decide, not that it can always continue. A server may reject one request; a tiny command may stop. Return the same error in both cases and let the boundary choose.",
       "explainer": "Words used here. An allocation is a request for memory, such as a list growing. AllocError is Core's error for a refused one. A contract is the part of a signature that names the errors a function can fail with. A handler is ?? or an arm table on a call.",
-      "story": "Rin writes firmware with a fixed memory pool. Today she must remember try_push, try_reserve and try_insert, and a plain push slips in and stops the device. Under A her function names AllocError once, and every push in it reports failure as a value.",
-      "inWild": "// Rust: a twin beside each operation, as Jet has today.\nlet mut rows = Vec::new();\nrows.try_reserve(n)?;   // Err(TryReserveError) instead of an abort",
-      "detail": "This vote chooses how allocation failure enters ordinary error handling. It does not change allocator selection, and A is not implemented.\n\nReran a01-a08 on a0.0.43. Twins run; handled plain push is E0405; the AllocError-contract success case runs; a fixed allocator refuses the second request as a value. Context value syntax is E0003 and user with_capacity is E0311. Map.add fallback prints first -1, second 1. Successful pushes do not prove recovery, rollback or cleanup under forced failure.\n\nA uses one allocation primitive and one ordinary error route. A handler can select recovery on an otherwise infallible allocation operation. A function explicitly admitting AllocError makes its own allocation sites recoverable. Resolve aliases and error unions before checking this opt-in; a broad Err contract alone does not opt in through a conversion. Nested functions and lambdas use their own contracts; creating their captures is an allocation in the enclosing body.\n\nAn already optional or fallible operation keeps its existing handler meaning. Map.add fallback still means no old value. Allocation recovery for such operations requires the AllocError contract; propagate allocation failure before applying the existing optional fallback. Do not silently make a handler catch a new error kind.\n\nAll allocating expressions in the selected body are covered, including literals, interpolation, captures and temporary values. Called functions keep their independently checked contracts. A callee without allocation recovery may still stop, including cleanup callees. Inspection must expose these stopping boundaries; a function contract alone is not whole-call-tree recovery.\n\nOn a failed growth, leave the collection unchanged. Already-evaluated arguments are not evaluated again; moved arguments and partial construction clean up exactly once. Construct AllocError and perform the failure transfer without allocating. Failure reporting and cleanup must not recursively need the exhausted allocator. No automatic retry or dynamic unwinding mechanism is added. Prove these cases with forced-failure tests across applicable tiers and fixed budgets before claiming recovery.\n\nB's twin spellings express different failure contracts over one primitive; they are not by themselves two runtime mechanisms. C is strengthened to always-fallible allocation with the existing context allocator. Failure typing and allocator passing are independent choices. C provides a uniform result type without handler-directed inference; its cost is ordinary propagation/handling at allocating boundaries.\n\nD propagates through callees dynamically and would need an explicit amendment to static Never contracts; it cannot be described as already sound. E cannot meet local recovery needs. A offers a smaller beginner surface, but adds contextual fallibility rules and must prove full failure-path safety.",
+      "story": "Rin appends three numbers. Success prints 3 under every option. If memory is refused, she wants either a normal error or an explicit stop, not behavior selected by whether a handler happens to surround the call.",
+      "inWild": "Rust offers try_reserve alongside stopping allocation APIs. Zig makes allocation failure an ordinary error. C++ can throw bad_alloc. These are different policies, not evidence that recovery is free or always successful.",
+      "detail": "Recommendation changes from A to C. Recoverability preserves choices, but it is not always cheaper or useful. Emergency reporting, cleanup and foreign callbacks may be unable to recover. A program that cannot continue can explicitly stop at its error boundary. An external operating-system kill cannot become a returned error.\n\nC gives every potentially allocating operation a stable AllocError route, including implicit text, literal, capture and temporary allocations. Reuse ordinary automatic propagation, not dynamic exceptions. Unannotated functions infer failure; typed domains admit or convert it. Never! must prove or handle failure. The standard conversion into the ordinary report family must not allocate; its current absence is build work.\n\nStopping is explicit: push(value) ?? panic(\"no memory\") selects one call, or load() ?? panic(...) selects a larger boundary. Strict no-failure code uses Never! and proves or handles failure. No package flag silently changes a callee's contract. A stop is not a proof of infallibility.\n\nObserved on t17a a0.0.43 with jet run -: handled rows.try_push(7) followed by print(rows.len()) prints 1. Handled plain push gets E0405. Unhandled try_push in ordinary run gets E2402 for missing AllocError-to-Err conversion. These prove success and typing, not exhaustion recovery. Compiler/JetSema/Source/Sema/Expressions/Control.jet:911-918 implements ordinary propagation refusal and missing-conversion diagnostics.\n\nFailure guarantees: failed growth leaves the collection unchanged. Never retry evaluated arguments. Clean moved values and partial destinations once. Error return does not undo prior I/O. Error construction, transfer and emergency rendering need bounded nonallocating storage. Cleanup cannot depend on exhausted memory. Forced-failure tests must establish these properties before delivery; successful probes do not.\n\nA's best case is minimal beginner code, but C already has inference and propagation. A changes failure typing with surrounding handlers and needs special optional-return rules. B is sound and explicit over one primitive, not an I8 violation merely because it has two names. E is appropriate where recovery cannot be supported, but cannot reject one server request and continue.\n\nThe old dynamic-scope option was removed. Silently making Never! callees fail needs a separate contract change and is unnecessary here.\n\nAdversarial verdict: C holds as a cohesive policy, not a measured cost win. First reduce plumbing through ordinary inference and propagation. Then choose stopping once at the application boundary. Static contracts still widen and real failure paths occupy bytes. Remove proved-impossible branches and measure remaining cost against a reference with the same recovery promise. Migration follows D-LANG-MIGRATE1=A's registered rewrites without retired-name teaching in errors.",
       "options": [
         {
           "key": "A",
-          "name": "One spelling; fails where asked",
-          "detail": "A plain allocating call fails as an AllocError value when a handler sits on it or when its function's contract names AllocError. Otherwise it stops as today. The try_ twins go.",
-          "technical": "Reverses the twin-family choice while preserving one raw primitive and ordinary error cleanup. Explicit AllocError admission, after alias/union resolution, selects local recovery; broad Err alone does not. Nested function contracts are independent. Already optional/fallible handler meaning stays unchanged. Failure construction and transfer allocate nothing.",
-          "code": "use mem: core.mem\n\n// The contract names AllocError, so every allocation in this body is fallible\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)   // a failed push returns Err(AllocError)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {(load(3) ?? [Int]{}).len()}\")\n    s := \"ab\"\n    s.push(\"c\") ?? panic(\"no memory\")   // a handler at the call makes it fallible\n    print(s)\n}\n// Proposed (A): loaded 3, abc. Probe a03 runs load today; probe a02's handled push is E0405."
+          "name": "Recover only where asked",
+          "detail": "One name, but a handler or an explicit AllocError contract selects recoverability. Otherwise allocation stops. Nested callees keep their own policy.",
+          "code": "// Proposed A.\nuse mem: core.mem\nload: fn() -> Int mem.AllocError! {\n    rows := [Int]{}\n    loop n in [1,2,3] -> rows.push(n)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }\n// Success: 3. Refused allocation in load: 0.\n// Without load's AllocError contract, allocation may stop."
         },
         {
           "key": "B",
-          "name": "Keep the try_ twins",
-          "detail": "Each allocating operation keeps a try_ form that returns AllocError; the plain form stops.",
-          "technical": "D-ALLOCFAIL1=A as ratified. No change.",
-          "code": "// Today (B), D-ALLOCFAIL1=A: a try_ twin beside each allocating operation\nload: fn(n: Int) -> [Int] {\n    rows := List<Int>.try_with_capacity(n) ?? return [Int]{}\n    loop i in 0..<n {\n        rows.try_push(i) ?? return rows\n    }\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {load(3).len()}\")\n    s := \"ab\"\n    s.try_push(\"c\") ?? panic(\"no memory\")\n    print(s)\n}\n// Probe a01 prints loaded 3, abc."
+          "name": "Keep recoverable and stopping names",
+          "detail": "The operation name selects the failure policy, with try_push for recovery. Both names may share the same allocator primitive.",
+          "code": "// B: same job, explicit recoverable calls.\nuse mem: core.mem\nload: fn() -> Int mem.AllocError! {\n    rows := [Int]{}\n    loop n in [1,2,3] -> rows.try_push(n)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }\n// Success: 3. Refused try_push: 0.\n// An accidentally used plain push may stop."
         },
         {
           "key": "C",
-          "name": "Always fallible; existing context allocator",
-          "detail": "Every allocating operation returns AllocError through ordinary error handling; allocator selection stays context-based.",
-          "technical": "One stable result type for each operation, independent of whether a handler surrounds it. Keep D-ALLOC-SITE1 allocator selection; this option does not require explicit allocator parameters. Callers propagate or handle failure using ordinary Jet rules.",
-          "code": "// Proposed C: same context allocator, uniform fallible operations.\nload: fn(n: Int) -> [Int] mem.AllocError! {\n    rows := [Int]{}\n    loop i in 0..<n { rows.push(i) ?? return Err(err) }\n    rows\n}\n// At a hosted boundary, an unhandled error uses the existing stop report.\n// At a recovery boundary, handle load(n)'s AllocError."
-        },
-        {
-          "key": "D",
-          "name": "A dynamic scope",
-          "detail": "#Context(alloc_failure: .Error) makes every allocation inside, in any callee, fail as a value at the scope.",
-          "technical": "C++ bad_alloc reach on the error route. Every allocating function needs a failure path; ! Never contracts become untrue inside the scope, and ?? must not swallow it.",
-          "code": "// A dynamic scope (D): any allocation inside, in any callee, fails as a value\nload: fn(n: Int) -> [Int] {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\n\nrun: fn() {\n    rows: #Context(alloc_failure: .Error) -> load(3)   // [Int] ! AllocError\n    print(\"loaded {(rows ?? [Int]{}).len()}\")\n    s := \"ab\"\n    #Context(alloc_failure: .Error) -> s.push(\"c\") ?? panic(\"no memory\")\n    print(s)\n}\n// Proposed (D), not built: C++'s bad_alloc reach, carried on the error route."
+          "name": "Recoverable by default; explicit stop",
+          "detail": "One name and one stable error route. Ordinary propagation handles common code; ?? panic chooses stopping where wanted.",
+          "code": "// Proposed C; same code regardless of surrounding handlers.\nuse mem: core.mem\nload: fn() -> Int mem.AllocError! {\n    rows := [Int]{}\n    loop n in [1,2,3] -> rows.push(n)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }\n// Success: 3. Refused allocation: 0.\n// Expert fail-fast boundary: load() ?? panic(\"no memory\")"
         },
         {
           "key": "E",
-          "name": "Always stop",
-          "detail": "Allocation failure always stops the program. The twins go; devices bound memory with budgets and fixed capacity.",
-          "technical": "Swift's and Go's model. Relies on D-STACKBOUND1=A heap budgets and capacity lists; no recovery at the call.",
-          "code": "// Swift and Go (E): allocation failure always stops the program\nload: fn(n: Int) -> [Int] {\n    rows := [Int]{}\n    loop i in 0..<n -> rows.push(i)\n    rows\n}\n\nrun: fn() {\n    print(\"loaded {load(3).len()}\")\n    s := \"ab\"\n    s.push(\"c\")\n    print(s)\n}\n// Proposed (E): loaded 3, abc. Devices bound memory with budgets and fixed capacity instead."
+          "name": "Always stop on allocation failure",
+          "detail": "One name, no recoverable allocation errors. The same successful job works; refused memory stops the whole application.",
+          "code": "// Proposed E.\nload: fn() -> Int {\n    rows := [Int]{}\n    loop n in [1,2,3] -> rows.push(n)\n    rows.len()\n}\nrun: fn() { print(load()) }\n// Success: 3. Refused allocation: process stops, not 0."
         }
       ],
       "comparisons": [
@@ -185506,179 +185448,144 @@
           "code": "rows = append(rows, x)"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "recommendation": {
-        "rec": "A",
-        "why": "A removes twin names and keeps explicit recovery boundaries. Its contextual failure rules are a real language cost, and whole-call-tree recovery still requires compatible callee contracts.",
+        "rec": "C",
+        "why": "Return the ordinary error first; callers can still choose to stop. Inference keeps common code short without handler-dependent operation contracts.",
         "gains": [
-          "One spelling per allocating operation.",
-          "Devices recover at the call or for a whole function.",
-          "Beginners see no change."
+          "One operation name",
+          "Recovery remains possible through libraries"
         ],
         "losses": [
           {
-            "loss": "A handler now decides whether a call can fail.",
-            "mitigation": "Hover marks the call fallible; ?? on a call that cannot fail stays an error."
-          },
-          {
-            "loss": "A callee that does not name AllocError still stops inside.",
-            "mitigation": "It can name AllocError without a twin; jet inspect lists stopping callees."
-          },
-          {
-            "loss": "One add on a map recovers only inside a contract that names AllocError.",
-            "mitigation": "A helper with an AllocError contract selects recovery without changing the optional fallback's meaning; this remains extra ceremony."
-          },
-          {
-            "loss": "Code outside the tree that calls try_push stops compiling with a generic unknown-method error.",
-            "mitigation": "The tree is rewritten in the deleting commit; any teaching for retired names waits on D-LANG-MIGRATE1."
+            "loss": "Real failure paths occupy code and widen error contracts.",
+            "mitigation": "Reuse ordinary propagation; remove proved-impossible paths and choose explicit stopping boundaries where appropriate."
           }
         ],
         "whyNot": [
           {
+            "key": "A",
+            "reason": "Surrounding syntax changes failure typing and leaves stopping callees."
+          },
+          {
             "key": "B",
-            "reason": "B keeps a second spelling of every allocating operation."
-          },
-          {
-            "key": "C",
-            "reason": "C has uniform result typing and preserves context allocation, but ordinary callers must propagate or handle allocation failure at more boundaries."
-          },
-          {
-            "key": "D",
-            "reason": "D gives every function a hidden failure path."
+            "reason": "Explicit and simple, but every allocating operation needs a second name."
           },
           {
             "key": "E",
-            "reason": "E leaves devices no way to recover."
+            "reason": "Smallest recovery surface, but an application cannot reject one failed request and continue."
           }
         ],
-        "tradeoff": "A handler that changes a call's contract, in return for half the API."
+        "tradeoff": "Preserving recovery has real error-path cost; stopping remains a local explicit choice."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Reran a01-a08, distinguished success from forced-failure proof, specified lexical and cleanup rules, and separated C's uniform failure type from allocator selection."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran handled and unhandled allocation probes, found the missing default conversion, and replaced contextual fallibility with a uniformly recoverable recommendation without claiming forced-failure proof."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-ALLOC-FAIL1/probes for a01 to a08. The census runs git grep on '\\.try_(alloc|with_capacity|push|new|reserve)\\(' and '\\.add\\([^)]*\\) *\\?\\?' over *.jet files in Core, Compiler, Jetpack, Tools, Examples and tests, with comment lines dropped.",
+      "checkInstructions": "Forced-failure tests must cover every explicit and implicit allocation, unchanged failed mutation, partial construction, move-only arguments, nonallocating errors and cleanup. Check strict Never! boundaries, custom error conversion, foreign callbacks and all applicable execution tiers before claiming implementation.",
       "surface": {
-        "gist": "Should allocation failure be recoverable where requested, explicitly named with try_, or always returned as a value?",
-        "lesson": "Memory can run out. A stops by default and selects recovery at a handler or an explicit AllocError contract. Called functions keep their own contracts. The other options trade API size against uniform failure typing.",
+        "gist": "Should memory requests return ordinary errors by default, with stopping an explicit choice?",
+        "lesson": "Recovery gives a choice, not a guarantee that continuing is possible. A server may reject one request. A small command may stop. Use the ordinary error route for both decisions.",
         "trio": {
           "current": {
-            "note": "The try_ form reports a value; plain push has no handled failure today.",
-            "code": "rows.try_push(i) ?? return rows"
+            "note": "Handled try_push succeeds; handled plain push gets E0405 in the probe.",
+            "code": "rows.try_push(7) ?? return"
           },
           "wild": {
             "lang": "Rust",
-            "note": "A separate fallible reservation operation.",
-            "code": "rows.try_reserve(n)?;"
+            "note": "Fallible reservation is explicit and preserves contents on failure.",
+            "code": "rows.try_reserve(3)?;"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Where asked",
-            "gist": "Recover at a handler or explicit AllocError contract.",
+            "name": "Where requested",
+            "gist": "Handler or contract selects recovery.",
             "gains": [
-              "One operation name."
+              "One operation name"
             ],
             "losses": [
-              "Context determines failure typing.",
-              "Some callees still stop."
+              "Context changes failure typing."
             ],
             "proposed": {
-              "code": "s.push(\"c\") ?? panic(\"no memory\")"
+              "code": "rows.push(n) // recovery only in an opted-in body"
             }
           },
           {
             "key": "B",
-            "name": "Twins",
-            "gist": "Keep explicit stopping and fallible names.",
+            "name": "Two names",
+            "gist": "Name selects stopping or recovery.",
             "gains": [
-              "Failure contract visible in the name."
+              "Explicit policy"
             ],
             "losses": [
-              "Larger API."
+              "Larger API"
             ],
             "proposed": {
-              "code": "rows.try_push(i) ?? return rows"
+              "code": "rows.try_push(n)"
             }
           },
           {
             "key": "C",
-            "name": "Always fallible",
-            "gist": "One result type; keep the context allocator.",
+            "name": "Default recovery",
+            "gist": "Stable error route; explicit stopping boundary.",
             "gains": [
-              "Uniform failure typing."
+              "One name",
+              "Recovery through ordinary calls"
             ],
             "losses": [
-              "More ordinary error propagation."
+              "Error-path code and wider contracts"
             ],
             "proposed": {
-              "code": "rows.push(i) ?? return Err(err)"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Dynamic scope",
-            "gist": "Recovery reaches callees dynamically.",
-            "gains": [
-              "Covers the whole call tree."
-            ],
-            "losses": [
-              "Requires changing static Never contracts."
-            ],
-            "proposed": {
-              "code": "#Context(alloc_failure: .Error) -> load(3)"
+              "code": "rows.push(n) // ordinary propagation\nload() ?? panic(\"no memory\") // optional fail-fast choice"
             }
           },
           {
             "key": "E",
             "name": "Always stop",
-            "gist": "No allocation recovery.",
+            "gist": "Refused memory ends the application.",
             "gains": [
-              "Smallest failure surface."
+              "No recovery plumbing"
             ],
             "losses": [
-              "Cannot drop one failed packet and continue."
+              "Cannot reject one request and continue."
             ],
             "proposed": {
-              "code": "rows.push(i)"
+              "code": "rows.push(n) // stops on refusal"
             }
           }
         ],
         "recommendation": {
-          "rec": "A",
-          "why": "One name and explicit recovery boundaries, at the cost of contextual failure rules.",
+          "rec": "C",
+          "why": "Preserve the caller's choice without changing the operation's contract according to its surroundings.",
           "gains": [
-            "One operation name."
+            "Uniform recoverable API"
           ],
           "losses": [
             {
-              "loss": "Callees may still stop.",
-              "mitigation": "Inspect and require compatible callee contracts."
+              "loss": "Failure paths have a physical cost.",
+              "mitigation": "Use ordinary propagation and remove paths proved impossible."
             }
           ],
           "whyNot": [
             {
+              "key": "A",
+              "reason": "Context changes the contract."
+            },
+            {
               "key": "B",
-              "reason": "Larger API, though failure names are explicit."
-            },
-            {
-              "key": "C",
-              "reason": "Uniform typing needs more error propagation."
-            },
-            {
-              "key": "D",
-              "reason": "Requires changing static Never contracts."
+              "reason": "Two names per operation."
             },
             {
               "key": "E",
               "reason": "No local recovery."
             }
           ],
-          "tradeoff": "Smaller API with contextual fallibility; failure safety still needs proof."
+          "tradeoff": "Real error-path cost, with stopping still explicit."
         }
       },
       "draft": false,
@@ -185769,21 +185676,16 @@
       ],
       "reports": [
         {
-          "title": "One spelling per allocating operation: probes, census by form and adversarial review",
-          "path": "Docs/audits/2026-11-10-alloc-fail-review.md",
-          "note": "a01-a08 on a0.0.43; 53 try_ Jet lines (31 ??, 13 ?, 2 match, 7 other), not 92; 69 add ?? lines; jet fix rewrite replaced by an in-tree rewrite under D-TEACH-RECONCILE1=A; Rust, Zig, C++, Go sources."
-        },
-        {
-          "title": "Rust Vec::try_reserve",
+          "title": "Rust fallible reservation preserves contents on failure",
           "url": "https://doc.rust-lang.org/std/vec/struct.Vec.html#method.try_reserve"
         },
         {
-          "title": "Zig language reference: choosing an allocator",
-          "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
+          "title": "Rust allocation failure may stop rather than unwind",
+          "url": "https://doc.rust-lang.org/alloc/alloc/fn.handle_alloc_error.html"
         },
         {
-          "title": "C++ std::bad_alloc",
-          "url": "https://en.cppreference.com/w/cpp/memory/new/bad_alloc"
+          "title": "Zig allocation guide",
+          "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
         }
       ]
     },
@@ -193437,49 +193339,42 @@
       "id": "D-SHARED-CYCLE2",
       "cardId": "c0r02x8n",
       "group": "memory",
-      "title": "Shared cycles: precise write proofs, a complete type rule, or conservative safety",
-      "situation": "The current write checker rejects several acyclic trees and graphs built through helpers, yet accepts a stored callback that retains its owning feed. Independent probes show the feed remains alive after its external strong handle ends. Ratified rules require a leak-free safe default and explicit collection opt-in. This ballot chooses a more precise write proof, a complete conservative type rule, or the current conservative policy with its safety holes repaired. Collection and finalization remain real implementation work.",
-      "gist": "Should Shared use precise write proofs or a more conservative complete cycle rule?",
-      "lesson": "Strong ownership loops can keep each other alive after their callers leave. Weak links do not keep payloads alive. Safe Jet must prevent such leaks or collect explicitly opted types; a missing proof may still reject a safe program.",
+      "title": "Let safe tree-building helpers work without letting shared objects keep each other alive forever",
+      "situation": "Shared objects stay alive while another owner points to them. A loop of owning links can therefore keep unused objects alive forever. The compiler refuses a simple tree built through a helper in the probe, even though building the child directly works. This affects reusable code as well as memory safety. Choose how much the compiler should prove before accepting a write. We recommend better write checks, with collection still an explicit choice for real loops.",
+      "gist": "Should safe tree-building helpers work without enabling hidden collection?",
+      "lesson": "Think of owning links as people holding each other's tickets: a circle never gives its tickets back. A weak link is an address, not another ticket. A tree needs no circle of owners. The question is how to distinguish that tree from a real circle.",
       "explainer": "Reachability includes owned containers, erased payloads and callback captures, not only visible Shared fields. A collector also needs exact external-root accounting and safe cleanup. A graph sketch alone proves neither.",
-      "story": "Mira's weak-parent tree fails when built through a helper, while an inline version works. Her feed callback forms a hidden strong loop. A aims to accept the tree and reject the loop; C chooses less precision but must still reject the leak.",
-      "inWild": "// Rust illustration, not executed here:\nstruct Folder {\n    kids: RefCell<Vec<Rc<Folder>>>,\n    parent: RefCell<Weak<Folder>>,\n}\n// CPython adds cyclic collection and resurrection-aware finalization.",
-      "detail": "Authority. CYCLE1=C requires beginner leak prevention and expert graphs. GC-OPTIN1=A requires explicit collection opt-in. A, B and C preserve both. D replaces the opt-in rule. E also needs an explicit I1 leak-freedom exception; it is not legal under current rules.\n\nEvidence. Reran every original cycle2, cycle and cy subject on a0.0.43. w1/w2/w3/w5 give E0221; their Pool alternatives and inline b2 run. w7 prints 1. s20 prints end without closed 7; s21/s22 print both. New review7-retained returns only a weak handle from the feed builder. Its upgrade succeeds afterward and Close never prints. This proves retained payload, not leaked byte count.\n\nOrigin/dev SharedCycles treats .Lambda as fresh and skips some types without visible Shared paths, supporting the capture-hole diagnosis. c01 rejects opted cycles; c02 rejects undeclared Mem.Gc. c04 rejects fn(&Mobj), one grammar case, not every callable fact. None executes the proposed collector.\n\nA tracks heap edges and alias identities, not snapshots attached only to variable names. Strong handles, owned containers, generics, captures and erased payloads contribute. Weak links and generation-checked IDs contribute no ownership edge. Loops and recursion converge conservatively; unknown edges widen rather than disappear.\n\nCheck every edge mutation: field/element writes, push, replace, swaps, callbacks, decoded graphs, foreign calls and later alias mutation. Account for replaced edges before adding new ones. Failures and rollback cannot leave unchecked edges. Concurrent writes require the canonical Shared synchronization contract.\n\nFunction summaries include results, captures, fresh allocations, retained stores and mutation of existing heap edges. Preserve them through callable storage and canonical package interfaces. Unknown callbacks remain conservative even as parameters. Local syntax does not prove exact capture reach. Complete summaries are required before shipping, not deferred behind FNVAL-WRITE1.\n\nDecoders have no freshness exemption. They can intern existing cells or invoke custom hooks. Cache insertion is accepted only when the actual summary excludes a back edge. Constructors and foreign values follow the same rule. Public summary changes affect compatibility; an optional package.api view renders the same fact.\n\nOpt-in. Every Shared payload type in an intentionally accepted cyclic component must opt in under A, B and C. Unopted types may remain acyclic owned leaves and close normally when released. Mixed cyclic components require all participant types to opt in or break back edges. The draft's hidden transitive collection of unopted cyclic types is removed.\n\nCollection. Candidate registration must not retain roots. Trace all strong edges, including callbacks and erased ownership. Count external roots exactly before release. Schedule pending candidates after the last external root ends, even without later allocations. Task exit and quiescent points complete pending work; allocation thresholds alone do not prove eventual freeing.\n\nCleanup. Reuse consuming Close and finishing-duty rules, not a second Python-style lifecycle hook. A cyclic payload cannot resurrect or traverse another dying component member during consuming cleanup. Check cleanup helpers transitively; reject an unproved opted cleanup contract at declaration. Independent owned resources still close once. Weak upgrades into a reclaiming component fail before cleanup begins.\n\nThis cleanup restriction has a cost: some resources need explicit settlement before the graph becomes unreachable. Preserve cleanup effects, duty failure handling and protected storage. A stopping cleanup cannot strand remaining members. PEP 442 does not establish creation order: its finalizer order is undefined, and resurrection differs from Jet consuming Close.\n\nTasks. MEMREF-LIFE1 already rejects potentially cyclic cross-task graphs until a thread-safe collector is proven. Apply the restriction to the whole reachable component. Per-task collection cannot race another task's counts or mutations. Universal graph acceptance is not promised.\n\n!Mem.Gc forbids reachable collector work in the denying call, not just closing writes. Cover allocation slow paths, scheduling, root drops, cleanup and indirect calls. Treating opted writes as unopted is necessary but insufficient. This does not forbid unrelated tasks from collecting.\n\nB gives stable declaration contracts with less flow sensitivity. Include owned graphs and conservative callback/erasure bounds; unknown captures cannot vanish. Recursive strong children may need Pool/ID, owned recursive values or explicitly collected types. Not every tree must move to Pool. A complete B cannot silently miss stored captures.\n\nC retains freshness conservatism but repairs callback/erasure leaks and implements ratified collection. It may still reject safe helpers. This is smaller precision scope, not permission to retain a known leak. D automatically collects only potentially cyclic types, with the same cleanup and task safeguards; acyclic-only programs need no collector.\n\nE allows strong loops to leak under an explicit rule exception. Tests and warnings cannot establish leak freedom. Swift and Rust intentionally offer predictable ownership and weak links. CPython supplies a mature collector and finalizer model with tracking and synchronization costs.\n\nNo probe measures A's proof cost, collector memory, pauses or tier parity. No census proves every shape remains accepted. Beginners use acyclic ownership and weak back links. Experts use Pool/ID or explicitly opted graph types, with visible cleanup and task limits.",
+      "story": "Ada wants a root with one child. Today putting child creation in make_child makes the tested program fail. She should not have to give up reusable helpers to get a safe tree.",
+      "inWild": "Rust documents strong Rc loops as possible leaks and offers Weak links. That is useful explicit control, but safe Jet promises leak freedom too. Source comparison, not a Rust execution claim.",
+      "detail": "Same job in every option: create a root, create a child through a helper, attach it, and print 1. Every code pane is proposed canonical Jet. Shared{value} is the owner's ratified construction spelling; the available compiler still requires the old keyword for this probe. Beginners keep ordinary owned values; shared ownership is needed only when several owners need the same object. Experts use weak back-links or the existing explicit collection policy for real loops.\n\nObserved on the t17a a0.0.43 compiler with jet run -: the helper program, written with the compiler's shared keyword, fails E0221 at root.kids.push(kid.copy()). Replacing that argument with a freshly constructed child prints 1, exit 0. This checks a false refusal, not a collector or a memory-leak measurement. Compiler/JetSema/Source/Sema/SharedCycles.jet:151-159 accepts some fresh expressions, including lambdas; that shortcut is not evidence that captured ownership is harmless. No old retained-feed claim is carried forward without a new run.\n\nA checks writes, not recursive type declarations. Track the owned graph through aliases, containers, captures, erased payloads and reachable calls. Publish checked summaries with ordinary interfaces. Unknown reach means not proved, not a fabricated exact loop. A store is accepted only if it cannot create an uncollected owning loop. Later mutation must preserve that proof. This is greater acceptance where proved, not a promise to decide every possible program.\n\nA, B and C retain D-GC-OPTIN1=A: opted types may participate in collection; unopted cycles remain forbidden. Every participant in a collected owning loop must meet that policy. Collection must eventually reclaim unreachable loops, account for external roots, and honor the existing consuming cleanup and task rules. No resurrection hook or second cleanup protocol is introduced. Cyclic resources that need to call dying neighbors must be settled before collection.\n\nB explicitly reverses #6281's companion memory card c2 requirement that refusal occur at writes, not declarations. C preserves write-site checking but leaves the helper refusal. D explicitly replaces collection opt-in; it is not already authorized. Allowing safe-code leaks was removed as a misleading normal alternative: it violates I1 unless the owner separately changes that invariant.\n\nAdversarial verdict: A holds only within stated proof limits. Two attempts remove conservative refusals: propagate helper summaries and track aliases after calls. Neither makes arbitrary mutable graphs decidable. When proof is missing, name the uncertain link and offer weak links, IDs or explicit collection rather than unsafe acceptance. B and C are genuinely simpler; D is genuinely more convenient for arbitrary loops but adds collection where the owner currently forbids it. No speed or zero-pause claim is made.",
       "options": [
         {
           "key": "A",
-          "name": "Precise write proof and explicit collection",
-          "detail": "Improve flow-sensitive reach and mutation proofs; collect only explicitly opted cyclic participants.",
-          "technical": "One Shared ownership mechanism. Complete alias, callback, erased and package summaries; prove eventual collection, consuming cleanup and task boundaries. Some unprovable safe programs still fail.",
-          "code": "// Proposed A, same weak-parent folder workload as w2:\nFolder: struct {\n    name: String\n    kids: [Shared<Folder>]\n    parent: Shared.Weak<Folder>?\n}\nadd: fn(parent: Shared<Folder>, name: String) -> Shared<Folder> {\n    kid := shared Folder{name: name, kids: [], parent: Val(parent.downgrade())}\n    parent.kids.push(kid.copy())\n    kid\n}\n// Same intended output: notes is in docs; root has 1 kid.\n// Current helper is E0221; a proven equivalent should build."
+          "name": "Prove safe writes, including helpers",
+          "detail": "Accept the helper-built tree when its links are proved safe. Keep collection explicit for actual loops.",
+          "code": "// Proposed; print 1 under A.\nNode: struct { kids: [Shared<Node>] }\nmake_child: fn() -> Shared<Node> { Shared{Node{kids: []}} }\nrun: fn() {\n    root: Shared{Node{kids: []}}\n    child: make_child()\n    root.kids.push(child.copy())\n    print(root.kids.len())\n}",
+          "technical": "One ownership checker, with complete alias and call summaries; no hidden runtime cycle test or automatic collector."
         },
         {
           "key": "B",
-          "name": "Complete type-level rule",
-          "detail": "Reject unopted recursive strong type paths at declarations, including conservative callback and erasure bounds.",
-          "technical": "Less flow sensitivity and more stable contracts than A. Unknown captures cannot be treated as harmless. Keep explicit collector opt-in; acyclic ownership and Pool/ID cover rejected recursive Shared shapes.",
-          "code": "// Current a2 performs the same folder workload using IDs.\nFolder: struct { name: String, kids: [ID<Folder>], parent: ID<Folder>? }\n// Intended declaration rule refuses unopted recursive strong Shared children.\n// Unknown callback captures must also be covered, not skipped."
+          "name": "Refuse potentially circular types",
+          "detail": "Refuse this recursive owning type before any write. The job must use IDs or a different representation, or explicitly opt its types into collection.",
+          "code": "// Proposed; refused at Node under B, even for this safe tree.\nNode: struct { kids: [Shared<Node>] }\nmake_child: fn() -> Shared<Node> { Shared{Node{kids: []}} }\nrun: fn() {\n    root: Shared{Node{kids: []}}\n    child: make_child()\n    root.kids.push(child.copy())\n    print(root.kids.len())\n}",
+          "technical": "Includes hidden captures and erasure in the type rule. Reverses the ratified write-site requirement; not merely an implementation shortcut."
         },
         {
           "key": "C",
-          "name": "Conservative checker with mandatory safety repairs",
-          "detail": "Keep current freshness conservatism; close callback and erased-payload holes and build ratified collection.",
-          "technical": "Smaller precision scope than A. w2 may remain refused while inline b2 works. No known safe-code leak is retained; collector and cleanup obligations are the same as A.",
-          "code": "// Current b2 avoids the helper's conservative refusal:\nroot := shared Folder{name: \"root\", kids: [], parent: None}\ndocs: shared Folder{name: \"docs\", kids: [], parent: Val(root.downgrade())}\nroot.kids.push(docs.copy())\n// Same tree output, but helper reuse can remain restricted."
+          "name": "Keep conservative write checks",
+          "detail": "Repair every safety hole, but keep refusing helper writes the current checker cannot understand. The child can be constructed directly at the push.",
+          "code": "// Proposed conservative policy; helper write remains refused.\nNode: struct { kids: [Shared<Node>] }\nmake_child: fn() -> Shared<Node> { Shared{Node{kids: []}} }\nrun: fn() {\n    root: Shared{Node{kids: []}}\n    child: make_child()\n    root.kids.push(child.copy())\n    print(root.kids.len())\n}",
+          "technical": "Soundness repair is required regardless of precision. This option does not retain unchecked capture loops."
         },
         {
           "key": "D",
-          "name": "Automatic collection for cyclic types",
-          "detail": "Remove explicit collection opt-in for potentially cyclic types; collect their unreachable loops automatically.",
-          "technical": "Explicitly replaces GC-OPTIN1's no-hidden-collection rule. Retain the same cleanup, effect and cross-task safeguards. Collector cost applies to potentially cyclic graphs, not every acyclic program.",
-          "code": "// Proposed D, same folder relationships with strong parents:\nFolder: struct { name: String, kids: [Shared<Folder>], parent: Shared<Folder>? }\n// The strong-parent version is accepted only with working collection.\n// Same intended tree output; lifetime and pause costs differ."
-        },
-        {
-          "key": "E",
-          "name": "Allow leaking strong loops",
-          "detail": "Remove cycle prevention and rely on weak links or manual breaking; strong-only loops can remain allocated.",
-          "technical": "Requires an explicit I1 leak-freedom exception and replacement of CYCLE1's safe default. Without those approvals it cannot ship as safe Jet. Test leak reports cannot remove this exception.",
-          "code": "// Proposed exception, not valid under current I1:\na.next = Val(b.copy())\nb.next = Val(a.copy())\n// Dropping external handles leaves the strong loop alive."
+          "name": "Automatically collect possible loops",
+          "detail": "Accept the same helper without proving it acyclic. Collect unreachable loops in potentially circular types without requiring opt-in.",
+          "code": "// Proposed; print 1 under D, with collection enabled by type.\nNode: struct { kids: [Shared<Node>] }\nmake_child: fn() -> Shared<Node> { Shared{Node{kids: []}} }\nrun: fn() {\n    root: Shared{Node{kids: []}}\n    child: make_child()\n    root.kids.push(child.copy())\n    print(root.kids.len())\n}",
+          "technical": "Explicitly replaces D-GC-OPTIN1=A. Tracking, eventual collection and safe resource cleanup are mandatory; no free-collection claim."
         }
       ],
       "comparisons": [
@@ -193502,170 +193397,140 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A targets the demonstrated false refusals without abandoning explicit collection. It needs complete proof and cleanup contracts; the current probes do not establish that implementation.",
+        "why": "Reusable safe code should work when the compiler can prove it safe. Real loops keep the existing explicit collection choice.",
         "gains": [
-          "More safe helper-built graphs can compile.",
-          "Stored-capture leaks must be closed."
+          "Safe helper reuse",
+          "No hidden collection"
         ],
         "losses": [
           {
-            "loss": "Flow proofs can widen and reject safe aliases or unknown calls.",
-            "mitigation": "Show the conservative edge, not a fabricated exact cycle; preserve B and C as simpler alternatives."
-          },
-          {
-            "loss": "Collected resource cleanup cannot resurrect or traverse dying component members.",
-            "mitigation": "Check consuming cleanup summaries and explicitly settle resources needing richer interactions."
-          },
-          {
-            "loss": "Mixed unopted cyclic types and cross-task cyclic graphs remain restricted.",
-            "mitigation": "Opt all cyclic participants in, use weak/ID edges, or supply the ratified thread-safe collector proof."
+            "loss": "Some safe graphs remain unproved.",
+            "mitigation": "Name uncertain edges; offer weak links, IDs or explicit collection."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B is simpler and stable, but can reject acyclic instances of recursive Shared types."
+            "reason": "Simpler contracts reject safe recursive trees and reverse write-site approval."
           },
           {
             "key": "C",
-            "reason": "C is a smaller mandatory safety repair, but leaves current helper false refusals."
+            "reason": "Smaller proof scope leaves the demonstrated helper refusal."
           },
           {
             "key": "D",
-            "reason": "D avoids cycle annotations but replaces the owner's explicit opt-in rule."
-          },
-          {
-            "key": "E",
-            "reason": "E needs an I1 exception; manual conventions do not provide Jet's current safe guarantee."
+            "reason": "Convenient for loops, but reverses collection opt-in."
           }
         ],
-        "tradeoff": "Greater precision and proof complexity, not universal acceptance or zero-cost collection."
+        "tradeoff": "More precise static proof, not a promise that every safe graph compiles."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran all original subjects and proved retained payload through a weak handle. Repaired alias, decoder, opt-in, cleanup and denial gaps; B and conservative C are now complete alternatives."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Independently ran helper and inline probes, removed unverified retention claims, and made the type-rule and automatic-collection reversals explicit."
       },
-      "checkInstructions": "Independent logs are probes/*/review7-*.run.txt, including review7-retained. No proposed collector was executed. Before shipping, prove mutation aliases, callbacks, custom decoders, mixed opt-in SCCs, eventual idle collection, consuming cleanup, denial and cross-task boundaries on every tier.",
+      "checkInstructions": "Before implementation is accepted, test aliases, captures, erased payloads, callbacks, unknown calls, mixed collection policy, cleanup, idle collection and tasks at O0/O1/O2 and web where applicable. The two executed tree probes establish only their reported acceptance and output.",
       "surface": {
-        "gist": "Should Shared use precise write proofs or a more conservative complete cycle rule?",
-        "lesson": "The current checker rejects safe helper-built trees and misses stored captures. Safe delivery must close leaks regardless of the chosen precision. Collection remains explicit unless D replaces that rule.",
+        "gist": "Should safe tree-building helpers work without enabling hidden collection?",
+        "lesson": "Owning links keep objects alive. A circle can keep unused objects forever. A proves writes safe; C keeps stricter checks. B refuses risky type shapes. D collects loops automatically.",
         "trio": {
           "current": {
-            "note": "w2 fails, while a captured feed stays alive after external handles end.",
-            "code": "parent.kids.push(kid.copy()) // E0221 in w2"
+            "note": "A helper-created child is refused; direct construction prints 1 in the probe.",
+            "code": "root.kids.push(make_child()) // helper proof missing"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Weak parent links avoid strong ownership loops; illustration not executed.",
-            "code": "parent: Weak<Folder>"
+            "note": "Weak links avoid owning circles; ordinary strong loops may leak.",
+            "code": "parent: Weak<Node>"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Precise write proof",
-            "gist": "Track aliases and captures; collect explicitly opted graphs.",
+            "name": "Better write proof",
+            "gist": "Accept helpers when safe links are proved.",
             "gains": [
-              "More safe helpers accepted."
+              "Reusable safe code"
             ],
             "losses": [
-              "Complex proof and cleanup restrictions."
+              "Unknown graphs can still fail."
             ],
             "proposed": {
-              "code": "// Prove w2's weak-parent insertion acyclic."
+              "code": "child: make_child()\nroot.kids.push(child.copy()) // proved safe"
             }
           },
           {
             "key": "B",
-            "name": "Complete type rule",
-            "gist": "Conservative declaration checks include capture bounds.",
+            "name": "Strict type rule",
+            "gist": "Refuse types that could contain owning circles.",
             "gains": [
-              "Stable, simpler contracts."
+              "Simpler contracts"
             ],
             "losses": [
-              "Some acyclic instances rejected."
+              "Safe recursive trees also fail."
             ],
             "proposed": {
-              "code": "Folder: struct { kids: [ID<Folder>], parent: ID<Folder>? }"
+              "code": "Node: struct { kids: [Shared<Node>] } // refused"
             }
           },
           {
             "key": "C",
-            "name": "Conservative safety repair",
-            "gist": "Close leaks without A's precision expansion.",
+            "name": "Strict write rule",
+            "gist": "Repair safety but keep conservative helper refusals.",
             "gains": [
-              "Smaller precision change."
+              "Smaller proof scope"
             ],
             "losses": [
-              "Helper false refusals remain."
+              "Reusable helpers remain restricted."
             ],
             "proposed": {
-              "code": "// Inline b2 can work; hidden capture cycles must fail."
+              "code": "root.kids.push(make_child()) // refused"
             }
           },
           {
             "key": "D",
-            "name": "Automatic collector",
-            "gist": "Collect potentially cyclic types without opt-in.",
+            "name": "Automatic collection",
+            "gist": "Collect possible circles without opt-in.",
             "gains": [
-              "No collection annotation needed."
+              "Fewer graph refusals"
             ],
             "losses": [
-              "Reverses explicit opt-in."
+              "Hidden collection replaces the approved opt-in."
             ],
             "proposed": {
-              "code": "parent: Shared<Folder>? // collected when cyclic"
-            }
-          },
-          {
-            "key": "E",
-            "name": "Allow leaks",
-            "gist": "Strong loops may remain allocated.",
-            "gains": [
-              "No cycle proof machinery."
-            ],
-            "losses": [
-              "Requires explicit I1 exception."
-            ],
-            "proposed": {
-              "code": "// Strong loops leak unless broken manually."
+              "code": "root.kids.push(make_child()) // collection enabled"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "More precise safety addresses the helper failures while preserving collection opt-in.",
+          "why": "Prove more safe helpers without silently enabling collection.",
           "gains": [
-            "More accepted safe graphs."
+            "Safe reuse"
           ],
           "losses": [
             {
-              "loss": "Unknown graphs, cleanup and cross-task cycles remain constrained.",
-              "mitigation": "Report uncertainty and retain explicit weak/ID alternatives."
+              "loss": "Unknown graphs can fail.",
+              "mitigation": "Explain uncertain edges and retain weak links or explicit collection."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Stable but more conservative."
+              "reason": "Rejects safe tree shapes."
             },
             {
               "key": "C",
-              "reason": "Smaller repair, fewer helper acceptances."
+              "reason": "Leaves helper refusals."
             },
             {
               "key": "D",
-              "reason": "Changes collection authority."
-            },
-            {
-              "key": "E",
-              "reason": "Needs a leak-freedom exception."
+              "reason": "Reverses collection opt-in."
             }
           ],
-          "tradeoff": "Precision costs proof work; no universal acceptance claim."
+          "tradeoff": "Better proofs, not universal acceptance."
         }
       },
       "draft": false,
@@ -193732,25 +193597,8 @@
       ],
       "reports": [
         {
-          "title": "Shared cycles: independent retention probe and different-family review",
-          "path": "Docs/audits/2026-11-10-shared-cycle-review.md",
-          "note": "All original probes rerun; weak upgrade proves retained payload. Corrected alias proofs, decoder freshness, mixed opt-in, consuming Close, cost denial and B/C framing."
-        },
-        {
-          "title": "PEP 442",
-          "url": "https://peps.python.org/pep-0442/"
-        },
-        {
-          "title": "CPython GC design",
-          "url": "https://raw.githubusercontent.com/python/cpython/main/InternalDocs/garbage_collector.md"
-        },
-        {
-          "title": "Swift ARC",
-          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/"
-        },
-        {
-          "title": "Rust Weak",
-          "url": "https://doc.rust-lang.org/std/rc/struct.Weak.html"
+          "title": "Rust: reference cycles and weak links",
+          "url": "https://doc.rust-lang.org/book/ch15-06-reference-cycles.html"
         }
       ]
     },
@@ -199461,9 +199309,11 @@
       "by": "owner",
       "kind": "question",
       "text": "confusing, not in plain english. rework",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T01:52:10.278Z"
+      "status": "answered",
+      "answer": "A shared object stays alive while something owns it. If two objects own each other, neither may ever be freed. Weak links avoid that problem because they do not keep objects alive.\n\nThe vote is about the compiler's judgment, not whether leaks are acceptable. The tested compiler rejects a harmless child built by a helper, but accepts the same child built directly at the insertion.\n\nI recommend improving that judgment: accept helper-built trees when their owning links are proved safe. Keep real loops behind the existing explicit collection choice. Unknown cases must receive an honest explanation and a safe alternative, not unsafe acceptance.\n\nThe alternatives now say plainly what they sacrifice: stricter type rules reject even safe tree shapes; conservative write checks restrict helpers; automatic collection removes those restrictions but changes the approved opt-in rule. None promises free collection or universal proof.",
+      "created": "2026-11-11T01:52:10.278Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q1x848xv",
@@ -199472,9 +199322,11 @@
       "by": "owner",
       "kind": "question",
       "text": "i dont like the idea of a double # for ONE marker. unless this becomes a much more general feature, i dont like the double ## and want a better clean cohesive, idiomatic solution",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T01:55:30.217Z"
+      "status": "answered",
+      "answer": "Agreed: a second hash just for Pre is not a clean design.\n\nI recommend B instead. An early number parameter says “the compiler must know this input.” Ordinary #Pre says “this input must be valid.” Those are different promises, expressed through mechanisms Jet already has approved.\n\nFor example, sum<4>(numbers) supplies the early count; #Pre accepts only 4 or 8. A runtime count is rejected rather than checked later. This does not require a separate copy of the machine code for every count.\n\nIf ordinary calls such as sum(4, numbers) matter more, E puts #run on that parameter and uses the same underlying mechanism. It adds grammar, not a second evaluator.\n\nThe doubled-marker alternative is now genuinely general, covering every eligible marker, including user markers. It remains more machinery than this particular job needs. These early forms still require implementation; the probe compiler does not establish that they work.",
+      "created": "2026-11-11T01:55:30.217Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q2alv6cm",
@@ -199483,9 +199335,11 @@
       "by": "owner",
       "kind": "question",
       "text": "is recoverability the better path? is non-recoverability ever desired over recoverability? if recoverability is basically always better then we can make it recoverable by default with an opt in strict version. otherwise we should flip the paradigm. this just doesnt seem like a cohesive idiomatic clean solution",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T01:58:25.169Z"
+      "status": "answered",
+      "answer": "Recoverability is not always useful or free. Cleanup and emergency reporting must work without more memory; the operating system may kill a process instead of reporting a refusal. Programs that cannot continue may reasonably stop.\n\nBut returning an ordinary error preserves that choice. Always stopping removes it. I recommend C: recoverable allocation by default, one operation name, and ordinary error propagation through libraries. A caller that wants to stop writes load() ?? panic(\"no memory\"). A strict Never! function must prove or handle failure, not silently change its callees.\n\nThis is cleaner than letting a surrounding handler change what push returns. Common code stays short through existing inference and propagation.\n\nThe cost is real failure-path code and wider error contracts. The implementation must prove nonallocating error transfer, safe partial cleanup and unchanged collections on failed growth. Successful probes do not prove exhaustion recovery; the revised ballot says so.",
+      "created": "2026-11-11T01:58:25.169Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q35dtfmx",
@@ -200419,6 +200273,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:22:00.348Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T02:21:58.928Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q2alv6cm",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:21:57.623Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ALLOC-FAIL1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:21:56.239Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1x848xv",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:21:54.899Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-JAI-GENERIC1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:21:53.614Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q02luk6c",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:21:52.416Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SHARED-CYCLE2",
+      "note": ""
+    },
     {
       "at": "2026-11-11T02:21:38.637Z",
       "by": "Main",
