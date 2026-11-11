@@ -1886,10 +1886,15 @@ sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerReg
         if repeatable {
             next
         }
-        // Same declaration on the same target. An application with no
-        // target span, such as a marked block, has no identity to repeat on.
+        // Same declaration on the same target: the same site at the same
+        // span. An application with no target span, such as a marked block,
+        // has no identity to repeat on. A `#Memo` computed field and the
+        // helper method its formula becomes (Derives.jet
+        // sema_computed_field_memo_helper_func) share the field's span but
+        // are two targets, a Field and a Method.
         if application.target == None -> next
-        key: "{sema_marker_rules_declaration_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
+        site: if application.site == .Val(value) -> sema_marker_rules_site_name(value) else -> ""
+        key: "{sema_marker_rules_declaration_key(application.marker)}|{site}|{sema_marker_rules_span_key(application.target)}"
         if seen.get(key) == .Val(first) {
             diagnostics.push(sema_marker_rules_repeated_error(application.marker, first, application.site))
             next
