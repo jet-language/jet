@@ -1,9 +1,15 @@
 # PORT tests/selfhost_terminators.rs:490-502.
-# The fixture depends on this checkout's JetLexer and JetFoundation packages, copied beside it.
+# The fixture depends on this checkout's JetLexer and JetFoundation packages, copied into a toolchain
+# tree (Core, Compiler/Prelude and the compiler workspace) that the toolchain root resolves to, so
+# JetFoundation's `toolchain:` inputs read the copied tree.
 fixture: jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics.fixture
-copy: {root}/Compiler/JetFoundation JetFoundation
-copy: {root}/Compiler/JetLexer JetLexer
-step: jet run main.jet
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+copy: {root}/Compiler/package.jet tree/Compiler/package.jet
+copy: {root}/Compiler/JetFoundation tree/Compiler/JetFoundation
+copy: {root}/Compiler/JetLexer tree/Compiler/JetLexer
+step: jet run tree/app/main.jet
+unset: JET_TOOLCHAIN_ROOT
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 exit: 0
