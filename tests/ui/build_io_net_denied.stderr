@@ -1,0 +1,21 @@
+Error [jet.ProhibitedEffectReached]: `offline_banner` reaches the `Net` effect, which it prohibits with `-[!Net]>`
+  --> tests/ui/build_io_net_denied.jet:6:25
+    |
+  6 | offline_banner: fn() -[!Net]> String {
+    |                         ^^^
+ Why: A `-[!Net]>` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]>` prohibition
+ Denial: invocation
+ Call chain: offline_banner
+More: jet-lang.dev/e/E0749
+
+Error [jet.ProhibitedEffectReached]: `build` reaches the `Net` effect, which it prohibits with `-[!Net]>`
+  --> tests/ui/build_io_net_denied.jet:10:24
+    |
+ 10 | build: fn(b: Build) -[!Net]> {
+    |                        ^^^
+ Why: A `-[!Net]>` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]>` prohibition
+ Denial: invocation
+ Call chain: build
+More: jet-lang.dev/e/E0749

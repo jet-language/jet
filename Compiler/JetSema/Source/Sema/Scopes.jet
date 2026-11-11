@@ -176,6 +176,10 @@ SemaCallSiteFact: struct {
     // An intrinsic operation's own name (`Clock.system`), recorded with its
     // effect row when the site has no declared callee.
     intrinsic_api: String?{None}
+    // The call runs while compiling (a comptime item, a `comptime { }` site or
+    // a module value), not in the running program. A function only such calls
+    // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).
+    comptime: Bool{false}
 }
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `&&`)

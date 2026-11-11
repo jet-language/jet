@@ -1,0 +1,8 @@
+Error [jet.ComptimeConstructNotSupported]: `greeting` calls `embed_file`, and the running program reaches `greeting` from `run`
+  --> tests/ui/comptime_input_reached_at_run_time.jet:3:28
+    |
+  3 | greeting: fn() -> String { embed_file("greeting.txt") }
+    |                            ^^^^^^^^^^
+ Why: The call path run → greeting runs in the program, and the compiler answers `embed_file` only while it compiles
+ Fix: Call `greeting` only from compile-time code, such as a prepared constant (`NAME: comptime { greeting() }`), and read that value at run time
+More: jet-lang.dev/e/E0956

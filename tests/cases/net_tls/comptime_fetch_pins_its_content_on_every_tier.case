@@ -1,9 +1,11 @@
 # A comptime `net.fetch(url, sha256:)` is the one compile-time network input.
 # Content that matches the written pin is a String value in the program, the
 # same on every tier, whether the URL is a literal or computed by comptime
-# code. Content that misses the pin is E3413 and nothing runs. A runtime
-# `net.fetch` is E0956, and a pin that isn't a `sha256:` String literal is
-# E3414. The fixture's data.txt is "pinned text\n".
+# code. Content that misses the pin is E3413 and nothing runs. A running
+# program's own `net.fetch` is E0956 at check time on every tier (the call
+# reaches `Net` like any other, and a helper only comptime code calls may
+# make one), and a pin that isn't a `sha256:` String literal is E3414. The
+# fixture's data.txt is "pinned text\n".
 fixture: comptime_fetch_pins_its_content_on_every_tier/input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -38,18 +40,19 @@ stdout: !~ "escaped" # nothing runs
 step: jet check runtime.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
-stderr: ~ "`net.fetch` is compile-time only" # a runtime fetch is refused
+stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # a runtime fetch is refused
+stderr: ~ "runtime.jet:4" # where the program calls it
 step: jet run --optimize=none runtime.jet
 exit: 1
-stderr: ~ "`net.fetch` is compile-time only" # O0 refuses it
+stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O0 refuses it
 stdout: !~ "escaped" # nothing runs
 step: jet run --optimize=basic runtime.jet
 exit: 1
-stderr: ~ "`net.fetch` is compile-time only" # O1 refuses it
+stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O1 refuses it
 stdout: !~ "escaped" # nothing runs
 step: jet run --optimize=full runtime.jet
 exit: 1
-stderr: ~ "`net.fetch` is compile-time only" # O2 refuses it
+stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O2 refuses it
 stdout: !~ "escaped" # nothing runs
 step: jet check unpinned.jet
 exit: 1

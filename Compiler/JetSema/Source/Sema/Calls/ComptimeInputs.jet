@@ -1,8 +1,15 @@
 // Tier-1 comptime inputs: `embed_file(path) -> String`, `embed_bytes(path)
-// -> [U8]` and `find(glob) -> [String]`. Each names its input with a String
-// relative to the file doing the embedding: a literal, or a value the comptime
-// code computes (a path `find` returned, a name read from a table). A
-// `toolchain:` name (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`)
+// -> [U8]` and `find(glob) -> [String]`, and the pinned
+// `net.fetch(url, sha256:) -> String`. They are ordinary effect-governed
+// calls: an input reads `FS.Read` and a fetch reaches `Net`, so a function
+// that calls one carries that effect in its row and a denial (`-[!Net]>`)
+// refuses it. A plain helper may make one. The compiler answers each call
+// when the comptime code that reaches it runs, and a call that a runtime
+// entry reaches is refused (E0956, sema_effect_runtime_input_paths). An input
+// names its file with a String relative to the file doing the embedding: a
+// literal, or a value the comptime code computes (a path `find` returned, a
+// name read from a table).
+// A `toolchain:` name (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`)
 // is relative to the toolchain tree the compile takes Core from instead,
 // which the driver admits only for the toolchain's own packages. One path
 // law holds for both kinds: no absolute path and no `..` segment (E0957).
@@ -10,15 +17,18 @@
 // driver checks a computed value with sema_comptime_input_value_problem when
 // the evaluation reaches it, before any read. The compiler reads the input
 // when it evaluates the comptime code (the driver's rooted, no-follow read)
-// and records its hash; nothing runs at runtime.
+// and records its hash.
 use jet_foundation.[
     Call,
     CallArg,
     Diagnostic,
+    EffectRowEntry,
     Expr,
+    FunctionDefaultRef,
     JET_COMPTIME_TOOLCHAIN_PREFIX,
     Span,
     StrPart,
+    TFailureCarrier,
     Type,
 ]
 
@@ -84,12 +94,10 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
         diagnostics.push(sema_error("E0104", call.name_span, "`{builtin}` expects 1 argument, got {call.args.len()}", "a comptime input names exactly one {noun}", "pass one String {noun}"))
         return failed
     }
-    if scopes.comptime_execution_depth == 0 {
-        diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `comptime` binding, e.g. `TEXT: comptime {{ {builtin}(\"file\") }}`"))
-        return failed
-    }
     path: sema_comptime_input_path_value(call, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
-    node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
+    result_type: sema_comptime_input_type(builtin)
+    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, environment, program, scopes, context, diagnostics) -> return failed
+    node: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }
 
@@ -117,20 +125,31 @@ sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment
     Val(checked)
 }
 
+// The call site of a comptime input or fetch as an intrinsic call fact whose
+// row is its one effect (`FS.Read` for an input, `Net` for a fetch), so the
+// calling function's row carries it and its denials refuse it. False after a
+// reported refusal.
+sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    facts := SemaCallFacts{
+        return_type: result_type,
+        failure_carrier: TFailureCarrier.Infallible,
+        effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: row_effect, span: span}}),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }
+    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
+}
+
 // `net.fetch(url, sha256: "…")`, the one compile-time network operation: a
 // Tier-1 input whose content must hash to the written pin. The URL is a
 // String, a literal or a value the comptime code computes; the pin is a
-// String literal, so the source itself fixes the value. The compiler fetches
-// the URL while it builds (the driver's jet_driver_build_fetch, the fetch
-// `b.fetch` runs), and content that misses the pin is E3413. Another
-// `core.net` member is not handled here.
+// String literal, so the source itself fixes the value. The call reaches
+// `Net`. The compiler fetches the URL while it builds (the driver's
+// jet_driver_build_fetch, the fetch `b.fetch` runs), and content that misses
+// the pin is E3413. Another `core.net` member is not handled here.
 sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.net" || member != "fetch" -> return SemaDirectSpecialCheck{handled: false, value: None}
     failed: SemaDirectSpecialCheck{handled: true, value: None}
-    if scopes.comptime_execution_depth == 0 {
-        diagnostics.push(sema_error("E0956", span, "`net.fetch` is compile-time only", "the compiler downloads the pinned content while building, so it is a value in the program, not a runtime request", "use it in a `comptime` binding, e.g. `DATA: comptime {{ net.fetch(\"https://example.com/data.txt\", sha256: \"…\") }}`"))
-        return failed
-    }
     pinned := false
     if args.len() == 2 && args[0].label == None {
         if args[1].label == .Val(label) -> pinned = label.name == "sha256"
@@ -146,6 +165,7 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
         return failed
     }
+    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, environment, program, scopes, context, diagnostics) -> return failed
     node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

@@ -1,0 +1,13 @@
+use net: core.net
+
+banner: fn() -> String {
+    net.fetch("https://example.com/banner.txt", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+
+notes: fn() -> String { embed_file("notes.txt") }
+
+pages: fn() -> [String] { find("pages/*.md") }
+
+build: fn(b: Build) { print("{banner()} {notes()} {pages().len()}") }
+
+run: fn() { print("offline") }

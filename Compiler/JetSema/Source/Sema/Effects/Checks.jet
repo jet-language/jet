@@ -312,6 +312,10 @@ SemaEffectNode: struct {
     value_edges: [String]{[String]{}}
     // The module state this body writes (TEffectFacts.module_writes).
     module_writes: [TEffectSpan]{[TEffectSpan]{}}
+    // The comptime inputs this body makes (`embed_file`, `embed_bytes`,
+    // `find`, `net.fetch`), by name and call span: the compiler answers them
+    // while compiling only (sema_effect_runtime_input_paths).
+    comptime_inputs: [TEffectSpan]{[TEffectSpan]{}}
     // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
@@ -1088,6 +1092,96 @@ sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows
         return path
     }
     [Int]{}
+}
+
+// A comptime input call (`embed_file`, `embed_bytes`, `find`, `net.fetch`)
+// at `node`, charged to `node_index` once per call span.
+sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
+    if node.kind == .HostCall(call) {
+        if call == .ComptimeInput(builtin, _, _) {
+            loop seen in nodes[node_index].comptime_inputs {
+                if seen.span.start == node.span.start && seen.span.end == node.span.end -> return
+            }
+            name: if builtin == "fetch" -> "net.fetch" else -> builtin
+            nodes[node_index].comptime_inputs.push(TEffectSpan{name: name, span: node.span})
+        }
+    }
+}
+
+// The compiler answers a comptime input while it compiles, so the running
+// program must never reach one. The runtime entries are the functions that
+// nothing names: no function calls or takes them as a value, and no
+// compile-time site (a comptime item, a `comptime {}` site or a module value,
+// SemaCallSiteFact.comptime) calls them. That is `run`, a test, a job and a
+// callback a host names; `build`, which runs while building, is not one. A
+// function that only compile-time sites or prep code name is prep code. The
+// result holds, for each function the entries reach that makes an input, the
+// call path from an entry to it, entry first (E0956).
+sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput]) -> [[Int]] Never! {
+    paths := [[Int]]{}
+    any: loop node in nodes {
+        if node.comptime_inputs.len() > 0 -> break true
+    } ?? false
+    if !any -> return paths
+    comptime_callees := [String:Bool]{}
+    loop module_row in inputs {
+        loop fact in modules[module_row.module_index].call_facts {
+            if !fact.comptime -> next
+            if fact.callee == .Val(callee) -> comptime_callees[callee.key] = true
+        }
+    }
+    named := (loop _ in nodes -> false)
+    loop (index, node) in nodes {
+        calls: node.call_edges.len()
+        loop position in 0..<(calls + node.value_edges.len()) {
+            edge: if position < calls -> node.call_edges[position] else -> node.value_edges[position - calls]
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if target != index -> named[target] = true
+        }
+    }
+    // -2: not reached; -1: an entry; else the caller it was reached from.
+    parent := (loop _ in nodes -> -2)
+    queue := [Int]{}
+    loop (index, node) in nodes {
+        if named[index] || comptime_callees.has_key(node.key) || node.chain_name == "build" -> next
+        parent[index] = -1
+        queue.push(index)
+    }
+    head := 0
+    loop head < queue.len() {
+        index: queue[head]
+        head += 1
+        calls: nodes[index].call_edges.len()
+        loop position in 0..<(calls + nodes[index].value_edges.len()) {
+            edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if parent[target] != -2 -> next
+            parent[target] = index
+            queue.push(target)
+        }
+    }
+    loop index in queue {
+        if nodes[index].comptime_inputs.len() == 0 -> next
+        path := [Int]{index}
+        step := parent[index]
+        loop step >= 0 {
+            path.push(step)
+            step = parent[step]
+        }
+        path.reverse()
+        paths.push(path)
+    }
+    paths
+}
+
+// A comptime input a runtime entry reaches: `path` runs from the entry to
+// the function that makes the call (sema_effect_runtime_input_paths), and
+// the report points at the call.
+sema_effect_runtime_input_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], input: TEffectSpan) -> Diagnostic {
+    maker: nodes[path[path.len() - 1]].chain_name
+    if path.len() == 1 -> return sema_error("E0956", input.span, "`{maker}` runs in the program, so it can't call `{input.name}`", "the compiler answers `{input.name}` while it compiles, and nothing calls `{maker}` at compile time, so the call would run in the program", "call `{input.name}` from a prepared constant (`NAME: comptime {{ … }}`) and read that value at run time")
+    chain: loop step in path -> nodes[step].chain_name
+    sema_error("E0956", input.span, "`{maker}` calls `{input.name}`, and the running program reaches `{maker}` from `{chain[0]}`", "the call path {chain.join(" → ")} runs in the program, and the compiler answers `{input.name}` only while it compiles", "call `{maker}` only from compile-time code, such as a prepared constant (`NAME: comptime {{ {maker}() }}`), and read that value at run time")
 }
 
 // A module or type cap as one checked function meets it. `site` names where
@@ -2682,6 +2776,7 @@ sema_effect_walk_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyT
 // sema_effect_walk_expr's own work on `node`, the node at `expression`;
 // false when its children aren't walked.
 sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
+    sema_effect_record_comptime_input(nodes, node_index, node)
     if {
         // The suspended determinism checks record nothing for the call.
         sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
@@ -3803,6 +3898,12 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         // The report points at the write, which may be in another module.
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
     }
+    // No function a runtime entry reaches may make a comptime input.
+    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs) {
+        maker: path[path.len() - 1]
+        input_diagnostics := loop input in nodes[maker].comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)
+    }
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
@@ -4357,6 +4458,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             // callback slots it fills.
             sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
             sema_effect_record_stop(nodes, node_index, node)
+            sema_effect_record_comptime_input(nodes, node_index, node)
             if node.kind == {
                 .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
                 .Lambda(value) -> sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)

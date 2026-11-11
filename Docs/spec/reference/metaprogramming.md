@@ -88,7 +88,7 @@ Compile-time effects are classified by what they can observe:
 | Tier | Allowed work | Reproducibility rule |
 |---|---|---|
 | 0 | Pure Jet values and effect-free Core calls | No external input is read. |
-| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | File inputs and their hashes are recorded in `.jet/lock`, and a fetch's hash is the pin written in the source; equal inputs produce equal values. Each file read is an input of the build identity: editing it rebuilds under `jet build` and reruns under `jet dev`. |
+| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `net.fetch(url, sha256:)` | File inputs and their hashes are recorded in `.jet/lock`, and a fetch's hash is the pin written in the source; equal inputs produce equal values. Each file read is an input of the build identity: editing it rebuilds under `jet build` and reruns under `jet dev`. |
 | 2 | Ambient filesystem, environment, process, clock, random, or unpinned network access | The source uses `#Impure("reason")`, and the build invocation grants `impure`. |
 
 The examples show the Tier 1 boundary: [`embed.jet`](../../../Examples/Metaprogramming/Comptime/Embed.jet)
@@ -99,14 +99,29 @@ relative paths with their input identity. An empty `find` result is still a
 typed empty `[String]`; the comptime tier-parity case
 [`find_empty.jet`](../../../tests/cases/comptime_cli_parity/fixtures/tier_parity_examples_run_through_aot_jit_and_interpreter/comptime_find_empty/find_empty.jet) proves it.
 
+These Tier 1 inputs are ordinary effect-governed calls: `embed_file`,
+`embed_bytes` and `find` read `FS.Read`, and `net.fetch` reaches `Net`. A
+function that makes one carries that effect in its row, so a plain helper may
+call one, `jet explain effects` lists it, and a row that leaves it out or
+denies it (`-[IO]>`, `-[!Net]>`) refuses the call
+([`build_io_net_denied.jet`](../../../tests/ui/build_io_net_denied.jet),
+[`comptime_input_fs_read_denied.jet`](../../../tests/ui/comptime_input_fs_read_denied.jet)).
+The compiler answers these calls only while it compiles, so code the running
+program reaches can't make one, directly or through a helper: a call that
+`run`, a test, or any function they call reaches is E0956 at check time
+([`comptime_input_reached_at_run_time.jet`](../../../tests/ui/comptime_input_reached_at_run_time.jet)).
+A helper that only comptime code and `build: fn` call is prep code, and the
+program reads its result through a prepared constant
+(`GREETING: comptime { greeting() }`).
+
 `core.net.fetch(url, sha256:)` is the only Tier 1 network operation. It runs
-only at compile time; a runtime call is E0956. The URL is a String, written or
-computed by comptime code, and the `sha256:` pin is a String literal; any
-other shape is E3414. The compiler fetches `file://` (inside the source
-directory), `http://` and `https://` URLs from public destinations only, and
-content that misses the pin is E3413. Because the pin in the source fixes the
-value, the fetch is not recorded in `.jet/lock`. Other `core.net` methods are
-unavailable at compile time (E3412).
+only while compiling; code the running program reaches can't call it (E0956).
+The URL is a String, written or computed by comptime code, and the `sha256:`
+pin is a String literal; any other shape is E3414. The compiler fetches
+`file://` (inside the source directory), `http://` and `https://` URLs from
+public destinations only, and content that misses the pin is E3413. Because
+the pin in the source fixes the value, the fetch is not recorded in
+`.jet/lock`. Other `core.net` methods are unavailable at compile time (E3412).
 
 A Tier 2 operation does not become acceptable merely because it appears in a
 compile-time expression. A compile-time ambient read needs both the source

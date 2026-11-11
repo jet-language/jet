@@ -1823,6 +1823,9 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             if call == .MemoStats(function, bound) -> return ir_memo_stats(m, p, b, expression_ty, function, bound, span)
             if call == .ContextRead(field) -> return ir_context_read(m, p, b, expression_ty, field, span)
             if call == .ComptimeInput(builtin, path, pin) {
+                // Sema refuses every input a runtime entry can reach (E0956),
+                // so the running program's copy never gets here.
+                if !p.comptime_values && !p.invocation -> return ir_comptime_input_unreachable(m, p, b, expression_ty, builtin)
                 // A comptime input (embed_file, embed_bytes, find, fetch): the
                 // compiler answers it (ir_host_route kind 3) from its builtin
                 // and its path's String value, the checked literal or the
@@ -7571,6 +7574,19 @@ ir_report_location: fn(p: IRProgram, location: TPanicLoc) -> TPanicLoc Never! {
     located.source_line = text.trim_end()
     located.column = column
     located
+}
+
+// A comptime input call (embed_file, embed_bytes, find, net.fetch) in the
+// running program's copy. The compiler answers these calls in the
+// compile-time and build copies only, and sema refuses every one a runtime
+// entry can reach (E0956), so control reaching one is a compiler defect: it
+// stops through jet_rt_unreachable (exit 101), as any other `Never` does.
+ir_comptime_input_unreachable: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, builtin: String) -> Int Never! {
+    name: if builtin == "fetch" -> "net.fetch" else -> builtin
+    message: ir_static_text(m, b, "`{name}` ran in the program, but sema proved no runtime entry reaches it")
+    _: ir_runtime(m, b, "jet_rt_unreachable", message, -1)
+    ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_unreachable_value(m, p, b, ty)
 }
 
 ir_require_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: BodyRequireKind, location: TPanicLoc, always_stops: Bool, span: Span) -> Int Never! {

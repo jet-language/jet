@@ -1,0 +1,11 @@
+// The same helper, which the running program also calls, and an input call
+// in `run` itself: both are refused.
+greeting: fn() -> String { embed_file("greeting.txt") }
+
+GREETING: comptime { greeting() }
+
+run: fn() {
+    print(GREETING)
+    print(embed_bytes("greeting.txt").len())
+    print(greeting())
+}

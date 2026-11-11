@@ -1,0 +1,23 @@
+# A comptime input (`embed_file`) is an ordinary FS.Read call that a plain
+# helper may make. A helper only a prepared constant calls is prep code: the
+# compiler answers it while compiling, in the built image and under `jet run`.
+# A helper the running program also calls is refused at check time (E0956),
+# as is an input call in `run` itself; nothing stops at run time.
+fixture: fixtures/helper_input_is_prep_only
+step: jet build prep.jet
+env: JET_STORE_DIR={work}/cache/aot
+exit: 0
+step: {work}/.jet/build/prep
+exit: 0
+stdout: = "hello from the build\n\n"
+step: jet run prep.jet
+env: JET_STORE_DIR={work}/cache/run
+exit: 0
+stdout: = "hello from the build\n\n"
+step refused: jet check runtime.jet
+exit: 1
+stderr: ~ "`greeting` calls `embed_file`, and the running program reaches `greeting` from `run`" # the helper run calls
+stderr: ~ "--> runtime.jet:3:28" # at the helper's input call
+stderr: ~ "`run` runs in the program, so it can't call `embed_bytes`" # an input call in run itself
+stderr: ~ "--> runtime.jet:9:11"
+stderr: ~ "jet-lang.dev/e/E0956"

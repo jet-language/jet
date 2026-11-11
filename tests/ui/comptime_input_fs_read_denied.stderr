@@ -1,0 +1,21 @@
+Error [jet.EffectBoundExceeded]: `notes` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/comptime_input_fs_read_denied.jet:3:15
+    |
+  3 | notes: fn() -[IO]> String { embed_file("notes.txt") }
+    |               ^^
+ Why: The signature declares `-[IO]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `notes`
+ Denial: invocation
+ Call chain: notes
+More: jet-lang.dev/e/E0740
+
+Error [jet.EffectBoundExceeded]: `pages` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/comptime_input_fs_read_denied.jet:5:15
+    |
+  5 | pages: fn() -[IO]> [String] { find("pages/*.md") }
+    |               ^^
+ Why: The signature declares `-[IO]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `pages`
+ Denial: invocation
+ Call chain: pages
+More: jet-lang.dev/e/E0740

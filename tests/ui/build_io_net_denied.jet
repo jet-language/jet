@@ -1,0 +1,15 @@
+// `net.fetch` reaches `Net`, so a `-[!Net]>` row refuses it in a helper
+// `build` calls and in `build: fn` itself. No trust default a package or the
+// toolchain grants a build lifts the denial.
+use net: core.net
+
+offline_banner: fn() -[!Net]> String {
+    net.fetch("https://example.com/banner.txt", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+
+build: fn(b: Build) -[!Net]> {
+    notes: net.fetch("https://example.com/notes.txt", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    print("{offline_banner()} {notes}")
+}
+
+run: fn() { print("offline") }

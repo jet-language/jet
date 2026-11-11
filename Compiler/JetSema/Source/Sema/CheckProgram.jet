@@ -7292,7 +7292,7 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // value whose evaluation is not pure is a build error (E0643).
 sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> String? Never! {
     loop fact in call_facts {
-        name: if fact.callee == .Val(callee) -> "`{sema_effect_comptime_callee_name(callee.key)}`" else -> "a function value"
+        name: if fact.callee == .Val(callee) -> "`{sema_effect_comptime_callee_name(callee.key)}`" else if fact.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
         if fact.foreign_effect_root != None -> return Val("it calls foreign code ({name})")
         if fact.facts.effect_bound == .Val(row) {
             loop entry in row {
