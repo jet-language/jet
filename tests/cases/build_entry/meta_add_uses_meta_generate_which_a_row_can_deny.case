@@ -1,0 +1,17 @@
+# #3526 c1 (D-META-LADDER1): each `Compiler` action checks the Meta effects
+# it uses. `meta.add` writes declarations, so it uses `Meta.Generate`, which
+# is allowed unless written code denies it. The `allowed` build names it in
+# its row and runs its added function. The `denied` build's row is
+# `-[!Meta.Generate]>`, so the same call is refused and nothing is built.
+fixture: meta_add_uses_meta_generate_which_a_row_can_deny.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build allowed/main.jet
+exit: 0
+step: {work}/allowed/.jet/build/app
+exit: 0
+stdout: = "added under Meta.Generate\n"
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ "reaches the `Meta.Generate` effect, which it prohibits with `-[!Meta.Generate]>`" # the row's denial wins
+file: denied/.jet/build/app absent

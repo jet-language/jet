@@ -5759,6 +5759,8 @@ function the root hands its `Build` to. The value expires with the build that
 made it. `#code { items }` is a `Code` value holding the items written in its
 block, and `meta.add(code, scope: "name")` adds them to the value's target as
 the generated module `name`, which the program checks like hand-written code.
+`meta.add` writes declarations, so it uses the `Meta.Generate` effect: allowed
+unless the calling function's row denies it (`-[!Meta.Generate]>`).
 
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
