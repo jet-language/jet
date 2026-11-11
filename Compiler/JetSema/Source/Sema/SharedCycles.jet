@@ -310,11 +310,11 @@ sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, enviro
 
 sema_shared_cycle_diagnostic: fn(span: Span, owner_ty: Type) -> Diagnostic {
     name: type_name(owner_ty)
-    sema_error("E0221", span, "this write can close a strong `Shared` cycle through `{name}`", "the stored value may already reach this `{name}` cell through strong `Shared` handles, and reference counting never frees a strong cycle", "store a `Shared.Weak<{name}>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`shared {name}{{…}}`)")
+    sema_error("E0221", span, "this write can close a strong `Shared` cycle through `{name}`", "the stored value may already reach this `{name}` cell through strong `Shared` handles, and reference counting never frees a strong cycle", "store a `Shared.Weak<{name}>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`Shared{{{name}{{…}}}}`)")
 }
 
 // The initializer a `:` binding keeps for the checks above: one that builds a
-// new `Shared` cell (`shared T{…}`, optionally wrapped in `Val`).
+// new `Shared` cell (`Shared{T{…}}`, optionally wrapped in `Val`).
 sema_shared_cycle_cell_init: fn(init: Expr) -> Bool Never! {
     if init == {
         .Paren(inner, _, _) | .Present(inner, _, _) -> return sema_shared_cycle_cell_init(inner)

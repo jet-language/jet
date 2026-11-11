@@ -8,7 +8,7 @@ package: {
 // drop is proved by Prelude unit tests (JetShared Weak Arc semantics); this
 // example proves the Weak cycle surface with identical AOT / jet run output.
 //
-// D-CONC-SHARE1=A: `shared x` builds the cell and a field write is one locked
+// `Shared{x}` builds the cell and a field write is one locked
 // step, so the back-edges are plain assignments. Reading the WHOLE value (not
 // one field) is the expert guard's job — the guard is the one form that keeps a
 // lock across a helper call.
@@ -33,8 +33,8 @@ label_of: fn(handle: Shared<Node>) -> String {
 }
 
 run: fn() {
-    a := shared Node{label: "a", peer: None}
-    b := shared Node{label: "b", peer: None}
+    a := Shared{Node{label: "a", peer: None}}
+    b := Shared{Node{label: "b", peer: None}}
     // Downgrade before the writes so the strong handles are not moved.
     wa := a.downgrade()
     wb := b.downgrade()

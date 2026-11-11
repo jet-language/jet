@@ -106,14 +106,14 @@ jet_driver_compiler_source_snapshot: fn(root: String, source: String) -> JetDriv
 // The compiler query host of `request`'s compile-time code.
 jet_driver_comptime_compiler_for: fn(request: JetDriverCompileRequest) -> JetEvalCompilerQueryHost {
     // copy: the host keeps the facts a check query compiles under; the request keeps its own.
-    context: shared JetDriverComptimeCompilerContext{
+    context: Shared{JetDriverComptimeCompilerContext{
         root: jet_driver_entry_root_path(request.authorized_sources),
         canonical_effect_source: request.canonical_effect_source.copy(),
         core_sources: request.core_sources.copy(),
         host_facts: request.host_facts.copy(),
         eval_config: jet_driver_comptime_eval_config(request.eval_config, None, None),
         compiler_threads: request.compiler_threads.copy(),
-    }
+    }}
     JetDriverComptimeCompiler{context: context}
 }
 

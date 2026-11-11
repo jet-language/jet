@@ -270,7 +270,7 @@ body_index_shared_size: fn(size: Int) {
         rows.push(body_index_value("shared::module", "shared::function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index))
     }
     context := sema_check_context_init()
-    work: shared SemaComptimeBodyWork{}
+    work: Shared{SemaComptimeBodyWork{}}
     context.comptime_body_values = sema_comptime_body_values_freeze(rows, Val(work.copy()), true)
     publication: context.comptime_body_values.copy()
     child := sema_check_context_snapshot(context)
@@ -426,7 +426,7 @@ body_index_append_prefixes: fn() {
 }
 
 body_index_append_size: fn(size: Int) {
-    work: shared SemaComptimeBodyWork{}
+    work: Shared{SemaComptimeBodyWork{}}
     publication := SemaComptimeBodyValues{work: Val(work.copy())}
     items := [SemaComptimeItemValue]{}
     loop index in 0..<size {

@@ -184,8 +184,8 @@ JetEvalIRState: struct {
 }
 
 jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
-    image: shared JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: None}
-    shared JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}
+    image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: None}}
+    Shared{JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}}
 }
 
 // Reads the runtime image file on the first call.
@@ -213,7 +213,7 @@ jet_eval_native_image_present: fn(session: JetEvalNativeSession) -> Bool Never! 
 }
 
 jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
-    shared JetEvalNativeChild{child: X64ComptimeChild{}, stub: [U8]{}, defined: [String:Int]{}, base: 0, generation: 0, failure: ""}
+    Shared{JetEvalNativeChild{child: X64ComptimeChild{}, stub: [U8]{}, defined: [String:Int]{}, base: 0, generation: 0, failure: ""}}
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig) -> J
         params.push(rows)
         names.push(name)
     }
-    program := JetEvalNativeProgram{types: shared ir_module_new(), layouts: layouts.move(), entries: [Int]{}, results: results.move(), sizes: sizes.move(), params: params.move(), code: X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: 0, failure: ""}, generation: 0, runtime_execution: config.runtime_execution, failure: "", missing: false}
+    program := JetEvalNativeProgram{types: Shared{ir_module_new()}, layouts: layouts.move(), entries: [Int]{}, results: results.move(), sizes: sizes.move(), params: params.move(), code: X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: 0, failure: ""}, generation: 0, runtime_execution: config.runtime_execution, failure: "", missing: false}
     session_cell: config.native ?? {
         program.failure = "no runtime image"
         program.missing = true
@@ -393,7 +393,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig) -> J
     code.entry = jet_eval_native_add(code, none)
     // The rows outlive the code: values are read and written by them.
     functions := compiler_take_rows<IRFunction>(code.functions)
-    program.types = shared code.copy()
+    program.types = Shared{code.copy()}
     code.functions = functions.move()
     // IR Lint (JetIR Lint.jet) checks the batch x86-64 selection reads, its
     // wrappers, stubs and entry with it, as jet_cli_native_program checks a

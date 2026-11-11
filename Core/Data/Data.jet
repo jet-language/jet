@@ -734,7 +734,7 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
 }
 
 __query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: run.move()}}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{__QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
 }
 
 __query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -1210,10 +1210,10 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -
 }
 
 __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
-    DataGroupedQuery<T, K>{__query: query, __key: shared __QueryKeyCell<T, K>{key: (row: T) -> {
+    DataGroupedQuery<T, K>{__query: query, __key: Shared{__QueryKeyCell<T, K>{key: (row: T) -> {
         value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
         Ok(value)
-    }}}
+    }}}}
 }
 
 __group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
@@ -1693,15 +1693,15 @@ json: fn<T: Decode>(text: String) -> [T] DataError! {
 csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
     records: csv_codec.reader(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state: shared __CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}
-    source: shared __StreamSource<T>{
+    state: Shared{__CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
+    source: Shared{__StreamSource<T>{
         pull: () -> csv_reader_next<T>(state),
         limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,
         done: false,
-    }
+    }}
     Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
 }
 
@@ -1792,15 +1792,15 @@ json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> 
     data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
-    state: shared __JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}
-    source: shared __StreamSource<T>{
+    state: Shared{__JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
+    source: Shared{__StreamSource<T>{
         pull: () -> json_reader_next<T>(state),
         limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,
         done: false,
-    }
+    }}
     Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
 }
 

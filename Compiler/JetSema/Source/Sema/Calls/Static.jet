@@ -443,7 +443,7 @@ sema_call_builtin_static_bound: fn(bindings: [SemaInferenceBinding], name: Strin
 // A row parameter is open while the declared row type names it and no
 // evidence has bound it. A bound value is the caller's type, read once as
 // written (Rust single-pass `substitute_type`): inside `f: fn<T>`,
-// `shared (T?{…})` binds the row's `T` to the caller's `T?`, whose `T` is not
+// `Shared{T?{…}}` binds the row's `T` to the caller's `T?`, whose `T` is not
 // the row parameter again.
 sema_call_builtin_static_open: fn(ty: Type, row: BuiltinStaticRow, bindings: [SemaInferenceBinding]) -> Bool Never! {
     loop name in row.type_params {
@@ -713,13 +713,13 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         value: sema_call_builtin_static_argument(args[index], row.parameters[index], row, bindings, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         // A written `name.move()` is a checked move, as for any consuming argument
         // (Calls/Checking.jet): never a silent copy, E0201 on a read
-        // parameter. `shared name`'s operand carries no written `.move()`.
+        // parameter. The operand of `Shared{name}` carries no written `.move()`.
         explicit: args[index].convention == AccessConvention.Move && !args[index].flags.shared_operand && args[index].expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(value.ty)
         if explicit && sema_ownership_reject_read_param_move(state, args[index].expr, scopes, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         explicit_moves.push(explicit)
         values.push(sema_call_marked_move_value(state, explicit, args[index].expr, value, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
-    // `Shared.new` (and `shared x`): a Cell or one of its guards owns
+    // `Shared.new` (and `Shared{x}`): a Cell or one of its guards owns
     // one-thread borrow state that the lock does not synchronize.
     if owner == "Shared" && method == "new" && values.len() == 1 {
         problem: sema_ownership_crossing_problem(values[0].ty, SemaSendCrossing.SharedStorage, true, environment, program, scopes, context)
@@ -727,9 +727,9 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
             diagnostics.push(sema_error("E1102", expr_span(args[0].expr), "{sema_type_show(values[0].ty)} cannot be stored in `Shared<T>`", "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized", "store the value itself in `Shared<T>`, then read and write its fields directly"))
         }
     }
-    // Rust `finish_builtin_method` (and `shared x`'s `Shared.new` arm)
+    // Rust `finish_builtin_method` (and the `Shared.new` arm of `Shared{x}`)
     // declares no parameter conventions for a builtin static: a written `.move()`
-    // is the consuming argument's exact move. The bare name `shared x` moves
+    // is the consuming argument's exact move. The bare name in `Shared{x}` moves
     // here like an unmarked owning position: a borrowed parameter keeps its
     // value, and a later use turns the move into a share.
     params := [SemaCallParam]{}

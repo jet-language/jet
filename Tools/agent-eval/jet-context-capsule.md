@@ -101,7 +101,7 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
   `owner.field.move()`.
 - `value.copy()` makes an independent copy. It is not a move marker and is useful
   when a copy must enter a stored slot.
-- `shared Struct{...}` creates shared mutable state. A shared struct field can
+- `Shared{Struct{...}}` creates shared mutable state. A shared struct field can
   be read or assigned directly; `guard_read()` and `guard_edit()` keep a guard
   across calls when needed.
 - A borrowed view must not outlive its source. Use `value.copy()` or an owned value
@@ -290,7 +290,7 @@ State: struct {
 run: fn() (HTTPError | NetError | IOError)! {
     port: process.args().get(0) ?? "18080"
     listener: net.tcp_listen("127.0.0.1:{port}")
-    state: shared State{done: false}
+    state: Shared{State{done: false}}
     mux: server.mux()
     mux.get("/health", (_req: HTTPRequest) -> Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")))
     mux.get("/hello/:name", (req: HTTPRequest) -> {

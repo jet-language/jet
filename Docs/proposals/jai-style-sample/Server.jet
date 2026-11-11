@@ -82,7 +82,7 @@ impl HTTPHandler {
 }
 
 __handler :: fn(call: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
-    HTTPHandler{__cell: shared __HTTPHandlerCell{call: ^call}}
+    HTTPHandler{__cell: Shared{__HTTPHandlerCell{call: ^call}}}
 }
 
 __HTTPSegment :: enum {
@@ -134,7 +134,7 @@ impl HTTPMux {
     // `mux.middleware(layer)`: the first registered layer is the outermost.
     __middleware :: fn(self, middleware: ^fn(HTTPHandler) -[Net]> HTTPHandler) Never! -[Net]> {
         guard := self.__state.guard_edit()
-        &guard.value.layers.push(shared __HTTPLayerCell{wrap: ^middleware})
+        &guard.value.layers.push(Shared{__HTTPLayerCell{wrap: ^middleware}})
     }
 }
 
@@ -241,7 +241,7 @@ __accept_timed_out :: fn(error: NetError) -> Bool Never! {
 }
 
 mux :: fn() -[Net]> HTTPMux Never! {
-    HTTPMux{__state: shared __HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}
+    HTTPMux{__state: Shared{__HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}}
 }
 
 serve_once :: fn(addr: String, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
@@ -270,7 +270,7 @@ __bind_entry :: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Du
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     pair :: core.tasks.__channel_bounded<Int>(1)
     Ok(HTTPServer{
-        __state: shared __HTTPServerState{phase: 0, stopping: false, report: None},
+        __state: Shared{__HTTPServerState{phase: 0, stopping: false, report: None}},
         __listener: listener,
         __mux: mux,
         __deadline: deadline,

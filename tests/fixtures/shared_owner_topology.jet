@@ -34,7 +34,7 @@ take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
 replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
     current := owner.move()
     callback: () -> {
-        current = shared 13
+        current = Shared{13}
         current
     }
     return callback()
@@ -73,12 +73,12 @@ counter_scope: fn(live: &&Shared<Int>, escaped: Shared<Int>) {
 }
 
 expired_weak: fn() -> Shared.Weak<Int> {
-    owner: shared 5
+    owner: Shared{5}
     return owner.downgrade()
 }
 
 run: fn() {
-    owner := shared 7
+    owner := Shared{7}
     weak: owner.downgrade()
     holder: Holder{owner: owner.move()}
     escaped: extract_owner(holder)
@@ -97,19 +97,19 @@ run: fn() {
     counter_scope(live, escaped)
     print(escaped.strong_count())
 
-    once_owner: shared 9
+    once_owner: Shared{9}
     once_weak: once_owner.downgrade()
     once_escaped: take_once(once_owner)
     print(once_escaped.strong_count())
     if once_weak.upgrade() == .None { panic("FnOnce transfer released its owner") }
-    replaced_owner := shared 37
+    replaced_owner := Shared{37}
     replaced_weak: replaced_owner.downgrade()
     replaced_result: replace_then_take(replaced_owner)
     print(replaced_result.capture().value())
     print(replaced_result.strong_count())
     print(replaced_weak.upgrade() == .None)
-    first_owner := shared 11
-    rest_owner := shared 23
+    first_owner := Shared{11}
+    rest_owner := Shared{23}
     first_weak: first_owner.downgrade()
     rest_weak: rest_owner.downgrade()
     pair := SharedPair{first: first_owner.move(), rest: rest_owner.move()}

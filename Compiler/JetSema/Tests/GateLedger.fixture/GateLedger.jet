@@ -30,7 +30,7 @@ gate_test_same_entry: fn(left: GateEntry, right: GateEntry) -> Bool Never! {
 // ordered rows without losing a pre-existing row or copying its visitor.
 gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Never! {
     inspection: sema_unsafe_inspect(rows, GateSet{})
-    context: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}
+    context: Shared{SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}}
     seed: gate_test_entry(GateKind.TrustGrant, "seed", 0)
     wrapped := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
     reference := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}

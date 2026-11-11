@@ -286,7 +286,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
-    inputs: shared IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
     outputs := [[IRX64FunctionResult]]{}
     stops := [String]{}
     loop _ in 0..<count {
@@ -467,7 +467,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
-    released: shared IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}
+    released: Shared{IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}}
     ir_x64_release_fill(released, owned, threads)
     objects := [X64ExecutableResult]{}
     task.group ir_x64_object_release {

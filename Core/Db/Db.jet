@@ -763,7 +763,7 @@ DBScope: struct {
 
 __db_open: fn(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: shared __DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}
+    DBConnection{state: Shared{__DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
 }
 open: fn(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 open_memory: fn() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
@@ -1156,7 +1156,7 @@ DBPool: struct {
             if claim.failure == .Val(failure) -> return Err(__db_error(failure.message))
             if claim.drivers.len() > 0 {
                 driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
-                return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}})
+                return Ok(DBLease{state: Shared{__LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}}})
             }
             waiter.ticket = claim.ticket
             if !claim.retry -> time.sleep(1ms)
@@ -1401,11 +1401,11 @@ __pool_ready_state: fn(pool: Shared<__PoolState>) -> Int Never! {
 
 pool: fn(url: String, *, max: Int) -[DB]> DBPool DBError! {
     if max <= 0 -> return Err(__db_error("database pool max must be greater than zero"))
-    Ok(DBPool{state: shared __PoolState{
+    Ok(DBPool{state: Shared{__PoolState{
         url: url.copy(), lifecycle: .Open, max: max, available: [__Driver]{}, leased: 0, opening: 0,
         waiters: [Int]{}, next_ticket: 0, acquires: 0, releases: 0, timeouts: 0, open_failures: 0,
         unhealthy: 0, replacements: 0, replacement_failures: 0,
-    }})
+    }}})
 }
 
 // ---- typed rows ----------------------------------------------------------

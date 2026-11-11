@@ -411,7 +411,7 @@ sema_ownership_crossing_capture_taken: fn(lambda: TLambda, capture: TCapture, en
     !facts.cloneable
 }
 sema_ownership_crossing_concurrent_write_diagnostic: fn(value: String, boundary: String, span: Span) -> Diagnostic {
-    sema_error("E1101", span, "`{value}` cannot cross the `{boundary}` boundary: the value writes shared state", "the `{boundary}` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule", "Give it away with `.move()`, freeze it with `freeze`, or share it with `shared`")
+    sema_error("E1101", span, "`{value}` cannot cross the `{boundary}` boundary: the value writes shared state", "the `{boundary}` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule", "Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{{…}}`")
 }
 
 sema_ownership_crossing_describe: fn(problem: SemaSendabilityProblem) -> String Never! {

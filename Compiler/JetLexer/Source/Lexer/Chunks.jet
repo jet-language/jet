@@ -154,9 +154,9 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     }
     bounds.push(source.len())
     if bounds.len() <= 2 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
-    inputs: shared LexerChunkShared{source: source, config_surface: config_surface, allow_reserved_identifiers: allow_reserved_identifiers}
+    inputs: Shared{LexerChunkShared{source: source, config_surface: config_surface, allow_reserved_identifiers: allow_reserved_identifiers}}
     parts := [Shared<LexerChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) -> parts.push(shared LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}})
+    loop chunk in 0..<(bounds.len() - 1) -> parts.push(Shared{LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}}})
     _ := lexer_lex_chunk_parts(inputs, parts, 0)
     clean := true
     loop part in parts {

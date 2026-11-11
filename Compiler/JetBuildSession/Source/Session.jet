@@ -206,14 +206,14 @@ BuildSessionState: struct {
 BuildSession: struct { storage: Shared<BuildSessionState> }
 
 build_session_new: fn(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
-    {storage: shared BuildSessionState{
+    {storage: Shared{BuildSessionState{
         id: session_id, active: true, package: package, compiler_version: compiler_version, policy: policy,
         actions: [BuildSessionAction]{}, files: [BuildSessionFile]{}, targets: [BuildSessionTarget]{},
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
         diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, options: [BuildSessionOption]{}, default_target: -1, args: [String]{}, start: 0, end: 0,
-    }}
+    }}}
 }
 
 build_session_abort: fn(session: &BuildSession) Never! {

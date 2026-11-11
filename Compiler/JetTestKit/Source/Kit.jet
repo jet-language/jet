@@ -1149,7 +1149,7 @@ kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: K
     run.ran = true
     context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless, known: known}
     context.env.resident_limit = guard
-    claim: shared KitPeak{bytes: 0}
+    claim: Shared{KitPeak{bytes: 0}}
     context.env.peak = Val(claim.copy())
     loop outcome in kit_suite_run(item.suite, entry, context) {
         run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})

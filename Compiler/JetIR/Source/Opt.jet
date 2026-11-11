@@ -530,11 +530,11 @@ ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], thre
             rows.push(row)
         }
         rows.reverse()
-        slots.push(shared IROptPart{functions: rows.move(), call_counts: [Int]{}, calls: [Int]{}})
+        slots.push(Shared{IROptPart{functions: rows.move(), call_counts: [Int]{}, calls: [Int]{}}})
         part -= 1
     }
     slots.reverse()
-    table: shared IROptGlue{table: glue.move(), functions: count}
+    table: Shared{IROptGlue{table: glue.move(), functions: count}}
     direct: ir_opt_preparers(slots, table, 0) ?? panic("the IR preparing threads failed")
     loop slot in slots {
         held := slot.guard_edit()
@@ -901,11 +901,11 @@ ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], o
     cells := [Shared<IROptCell>]{}
     loop functions.len() > 0 {
         body := functions.pop() ?? { break }
-        cells.push(shared IROptCell{body: [IRFunction]{body.move()}})
+        cells.push(Shared{IROptCell{body: [IRFunction]{body.move()}}})
     }
     cells.reverse()
     view := ir_opt_view(m, keys)
-    graph: shared IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), marked: marked.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), ring: ring.move(), head: 0, tail: published}
+    graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), marked: marked.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), ring: ring.move(), head: 0, tail: published}}
     parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
     loop part in parts -> ir_opt_report_add(report, part)
     held := graph.guard_edit()

@@ -11,7 +11,7 @@ STORE_SEAL_SCHEMA: "1"
 STORE_MAX_SEAL_BYTES: 512
 STORE_SEAL_PARTIAL_SUFFIX: ".partial"
 
-STORE_SEAL_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_SEAL_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 // One command/library invocation owns this state. Copies of the owner retain
 // the same shared ledger; no request copies the memo, census, digest, or
@@ -20,7 +20,7 @@ StoreVerification: struct {
     state: Shared<StoreVerificationState>
 
     new: fn() -[Env]> StoreVerification Never! {
-        StoreVerification{state: shared StoreVerificationState{
+        StoreVerification{state: Shared{StoreVerificationState{
             seal_memo_armed: false,
             seal_memo: [String: String]{},
             seal_census_enabled: sys.get("JETPACK_SEAL_CENSUS") != None,
@@ -29,7 +29,7 @@ StoreVerification: struct {
             verified_digest_hash_counts: [String: Int]{},
             proven_members: [String: Bool]{},
             planned_narinfos: [String: [String: FetchedInfo]]{},
-        }}
+        }}}
     }
 }
 

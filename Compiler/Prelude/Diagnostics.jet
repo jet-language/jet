@@ -8986,7 +8986,7 @@ ConcurrentCaptureNotOwned: struct {
         detail: true
         what: fn(self) -> String { "`{self.value}` cannot cross the `{self.boundary}` boundary: the value writes shared state" }
         why: fn(self) -> String { "The `{self.boundary}` boundary can run concurrently with its owner; {self.reason}" }
-        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `shared`" }
+        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{{{{…}}}}`" }
     }
 }
 
@@ -13100,12 +13100,12 @@ RetiredSharedNew: struct {
     impl Diagnostic {
         code: "E1115"
         status: .Retired
-        meaning: "Teaching: retired `Shared.new(x)` constructor → prefix `shared x`"
+        meaning: "Teaching: retired `Shared.new(x)` constructor → `Shared{{x}}`"
         detail: true
         no_fix: None
         what: fn(self) -> String { "`Shared.new(…)` is the retired shared-cell constructor." }
         why: fn(self) -> String { "Shared state has one construction word, so every shared cell reads the same on the page." }
-        fix: fn(self) -> String { "Write `shared <value>` instead of `Shared.new(<value>)`." }
+        fix: fn(self) -> String { "Write `Shared{{<value>}}` instead of `Shared.new(<value>)`." }
     }
 }
 

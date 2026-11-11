@@ -56,7 +56,7 @@ sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
     panic("body tree has no node {id}")
 }
 
-// The payload node of a module `shared X` holder: `expression` is the
+// The payload node of a module `Shared{X}` holder: `expression` is the
 // `Shared.new` static (`jet_std::JetShared`) over its one argument. The build
 // folds the payload; the program allocates the cell on its first read
 // (JetIR ir_shared_holder_read).
@@ -354,7 +354,7 @@ sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
     String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
 }
 
-// The value of a constant that already landed in this run. A `shared`
+// The value of a constant that already landed in this run. A `Shared`
 // holder's landed value is its payload, not the holder, so it folds no read.
 sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
     loop value in values {

@@ -23,8 +23,8 @@ kv: fn(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool)
 
 run: fn(args: Args) (HTTPError | IOError | NetError)! {
     listener: net.tcp_listen("127.0.0.1:{args.port}")
-    store: shared [String:String]{}
-    state: shared ServerState{stopped: false}
+    store: Shared{[String:String]{}}
+    state: Shared{ServerState{stopped: false}}
     mux: server.mux()
     mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
     mux.put("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, true))

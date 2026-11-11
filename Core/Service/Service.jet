@@ -706,7 +706,7 @@ __ChannelReceive: enum {
 
 channel_new: fn(capacity: Int, values: [String]) -> Shared<__ServiceChannel>? Never! {
     if capacity < 1 || values.len() > capacity -> return None
-    Val(shared __ServiceChannel{capacity: capacity, values: values, head: 0, closed: false})
+    Val(Shared{__ServiceChannel{capacity: capacity, values: values, head: 0, closed: false}})
 }
 
 channel_try_send: fn(channel: Shared<__ServiceChannel>, value: String) -> __ChannelSend Never! {
@@ -1038,15 +1038,15 @@ __AuthorityGate: struct {
 }
 
 init_service_registry: fn() -> Shared<__ServiceRegistry> Never! {
-    shared __ServiceRegistry{endpoints: [__EndpointState]{}}
+    Shared{__ServiceRegistry{endpoints: [__EndpointState]{}}}
 }
 
 init_pending_registry: fn() -> Shared<__PendingRegistry> Never! {
-    shared __PendingRegistry{queues: [__PendingQueue]{}}
+    Shared{__PendingRegistry{queues: [__PendingQueue]{}}}
 }
 
 init_authority_gate: fn() -> Shared<__AuthorityGate> Never! {
-    shared __AuthorityGate{entered: 0}
+    Shared{__AuthorityGate{entered: 0}}
 }
 
 service_registry: fn() -> Shared<__ServiceRegistry> Never! {
@@ -1873,7 +1873,7 @@ __StateSequence: struct {
 }
 
 init_state_sequence: fn() -> Shared<__StateSequence> Never! {
-    shared __StateSequence{next: 0}
+    Shared{__StateSequence{next: 0}}
 }
 
 state_temp_sequence: fn() -> Int Never! {
@@ -2381,7 +2381,7 @@ workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceEr
     authority: workflow_authority(tree)
     loop workflow in tree.workflows {
         if workflow.run_id == run_id {
-            return Ok(ServiceWorkflow{run_id: run_id, authority: authority, state: shared __TreeWorkflowState{
+            return Ok(ServiceWorkflow{run_id: run_id, authority: authority, state: Shared{__TreeWorkflowState{
                 id: workflow.id,
                 run_id: workflow.run_id,
                 version: workflow.version,
@@ -2391,7 +2391,7 @@ workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceEr
                 status: workflow.status,
                 activity_outcomes: workflow.activity_outcomes,
                 outcome: workflow.outcome,
-            }})
+            }}})
         }
     }
     Err(ServiceError.Unknown("workflow run {run_id} not found"))

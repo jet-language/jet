@@ -99,7 +99,7 @@ jet_driver_query_dev_config: fn(owned_request: &&JetDriverCompileRequest) -> Jet
     inputs: selection.inputs.move() ?? return jet_driver_dev_query_failed(compiled.diagnostics.move(), Val("checked dev invocation lost its checked functions"))
     configured := jet_driver_dev_config_stock()
     configured.configured = true
-    state: shared configured
+    state: Shared{configured}
     config := jet_eval_runtime_config(request.eval_config)
     // A refused effect inside `#Impure` is reported for this gate (E3411).
     config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)

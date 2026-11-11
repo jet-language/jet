@@ -67,7 +67,7 @@
 ] @keyword
 
 ; keyword.ownership: uninit
-; keyword.other: #caller #here @SOURCE @TYPES comptime it self shared
+; keyword.other: #caller #here @SOURCE @TYPES comptime it self
 [
   "self"
 ] @keyword

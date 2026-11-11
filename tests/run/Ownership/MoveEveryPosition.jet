@@ -1,5 +1,5 @@
 //! An explicit move is never a copy. A value moved with `^` into a struct
-//! literal field, a list element, an enum payload, a `shared` cell, a
+//! literal field, a list element, an enum payload, a `Shared` cell, a
 //! consuming argument, a return, or an assignment keeps its one identity:
 //! its Close runs exactly once, when its last owner ends.
 Secret: struct {
@@ -42,7 +42,7 @@ enum_payload: fn() {
 
 shared_operand: fn() {
     s: Secret{id: 4, token: "owned"}
-    cell: shared Holder{inner: s.move()}
+    cell: Shared{Holder{inner: s.move()}}
     guard: cell.guard_read()
     print("shared {guard.value.inner.id}")
 }

@@ -23,7 +23,7 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
 }
 
 #Test("invalid response statuses fail closed without breaking pipelines") {
-    calls: shared S6InvalidCalls{value: 0}
+    calls: Shared{S6InvalidCalls{value: 0}}
     mux: server.mux()
     mux.get("/low", (_req: HTTPRequest) -> {
         calls.value = calls.value + 1

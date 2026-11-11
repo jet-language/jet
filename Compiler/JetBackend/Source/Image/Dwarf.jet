@@ -628,9 +628,9 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
         loop (index, function) in functions -> dwarf_info_function(info, relas, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
     } else {
         bounds: compiler_threads_partition(weights, workers)
-        inputs: shared DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}
+        inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}}
         parts := [Shared<DwarfInfoPart>]{}
-        loop part in 0..<(bounds.len() - 1) -> parts.push(shared DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}})
+        loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts {
             rows: dwarf_info_part_take(part)

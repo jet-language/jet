@@ -1116,7 +1116,7 @@ JetCLIBuiltinCoreSourceReader: struct {
 jet_cli_toolchain_tree: fn(input: String) -[FS, Env]> Shared<JetDriverToolchainTree>? Never! {
     if jet_cli_toolchain_root(input) == .Found(toolchain) {
         root: cli_files.realpath(toolchain) ?? return None
-        return Val(shared JetDriverToolchainTree{root: root, reader: JetCLIToolchainPackages{}, packages: None})
+        return Val(Shared{JetDriverToolchainTree{root: root, reader: JetCLIToolchainPackages{}, packages: None}})
     }
     None
 }
@@ -1649,7 +1649,7 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log, and
             // this compile keeps its own to read the records back.
-            log: input_log.copy() ?? shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+            log: input_log.copy() ?? Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
             selected.comptime_input_log = Val(log.copy())
             if options.profile != "" -> selected.profile = options.profile
             selected.artifact_build = options.command == "build"
@@ -2179,7 +2179,7 @@ jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
         pid: pid,
         functions: functions,
         phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
-        state: shared JetCLITraceState{
+        state: Shared{JetCLITraceState{
             writing: true,
             writer: writer,
             stacks: [Int:[JetCLITraceSpan]]{},
@@ -2189,7 +2189,7 @@ jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
             process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
             memory: None,
             process_ms: -1,
-        },
+        }},
     })
 }
 

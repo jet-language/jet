@@ -410,8 +410,8 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
     modules := [JetDriverDocModule]{}
     // copy: the shared name ledger owns its facts for the doc pass, and `graph` is the caller's
     // checked graph (a read parameter), which keeps its names for emission.
-    ledger: shared name_ledger_from_facts(graph.names.copy())
-    memory: shared SemaCheckedMemoryFacts{declarations: graph.memory_declarations, projections: graph.memory_projections}
+    ledger: Shared{name_ledger_from_facts(graph.names.copy())}
+    memory: Shared{SemaCheckedMemoryFacts{declarations: graph.memory_declarations, projections: graph.memory_projections}}
     layout_engine: sema_comptime_reflection_layout_engine(registration)
     target_layout: jet_target_layout_from_machine(registration.target_machine)
     loaded_units := [String:Int]{}
@@ -1323,7 +1323,7 @@ jet_driver_comptime_program_available: fn(program: SemaProgramTables, values: [S
 }
 
 // The landed value of item `source`, whose checked expression is
-// `expression`; a module `shared X` holder's `value` is its folded payload.
+// `expression`; a module `Shared{X}` holder's `value` is its folded payload.
 jet_driver_comptime_item_value: fn(source: SemaComptimeItemSource, value: TComptimeValue, expression: BodyExpr) -> SemaComptimeItemValue Never! {
     SemaComptimeItemValue{
         module_identity: source.module_identity,
@@ -1549,7 +1549,7 @@ jet_driver_comptime_stage: fn(
     if staging.staged -> return None
     if staging.declared.len() > 0 && staging.declared.len() == graph.modules.len() {
         declared := jet_driver_comptime_declared(staging.declared)
-        staging.program = shared [IRProgram]{declared.move()}
+        staging.program = Shared{[IRProgram]{declared.move()}}
         staging.staged = true
         return None
     }
@@ -1559,7 +1559,7 @@ jet_driver_comptime_stage: fn(
         return Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
     }
     declared := jet_driver_comptime_declared(modules)
-    staging.program = shared [IRProgram]{declared.move()}
+    staging.program = Shared{[IRProgram]{declared.move()}}
     staging.staged = true
     None
 }
@@ -1903,7 +1903,7 @@ jet_driver_run_comptime: fn(
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
-    staging := JetDriverComptimeStaging{staged: false, program: shared [IRProgram]{}, landed: 0, taken: [String:Bool]{}, declared: declared.move(), sites: sema_comptime_value_sites_empty()}
+    staging := JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, taken: [String:Bool]{}, declared: declared.move(), sites: sema_comptime_value_sites_empty()}
     // Each in a one-row slot: a pass's prechecks move them into the threads'
     // shared state and back (moving a borrowed value out would copy the
     // whole graph once per pass).
@@ -2186,13 +2186,13 @@ jet_driver_comptime_run: fn(
                         }
                     }
                 }
-                // A module `shared X` holder lands the payload the build
+                // A module `Shared{X}` holder lands the payload the build
                 // folds; the program allocates its cell on the first read. A
                 // payload that is not literal data is refused.
                 if folded == None && source.module_value && sema_comptime_shared_payload(comptime_request.expression.tree, comptime_request.expression.root) == .Val(payload) {
                     folded = sema_comptime_fold(comptime_request.expression.tree, payload, values)
                     if folded == None {
-                        jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, "a module `shared` cell starts from literal data, and its value is not literal data", diagnostics)
+                        jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, "a module `Shared` cell starts from literal data, and its value is not literal data", diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
                         next

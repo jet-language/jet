@@ -289,7 +289,7 @@ E0622. An immutable global's initializer is any expression, computed while
 building and stored in the program, and every read is an ordinary copy
 (D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
 initializer that stops, reaches the outside world, or can't run while building
-is a build error (E0643), the same on every tier. A `name: shared value`
+is a build error (E0643), the same on every tier. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell. Only an explicit
 `comptime { … }` reads build
@@ -1714,8 +1714,8 @@ not satisfied. See
 
 `Shared<T>` is a lock-guarded, copyable handle. `Shared{value}` constructs it and
 infers `T` from the value; `Shared<T>{value}` names `T`, and the value adapts to
-it like any typed literal's field (#6281 c130). `shared value`, the older
-spelling, builds the same cell. A field read takes one read lock and a field write one
+it like any typed literal's field (#6281 c130). `shared` is an ordinary name,
+not a construction word. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `&&`
@@ -2139,7 +2139,7 @@ The same exclusion applies to inferred purity: an explicit empty effect row
 `-[]>` admits allocation, heap copies, and panic facts without requesting a
 positive right. Ambient effects such as `IO` still violate that empty ceiling.
 Writing module state is not an effect, but a `-[]>` function may not do it,
-itself or through any function it calls (E3401): a module `shared` holder's
+itself or through any function it calls (E3401): a module `Shared` holder's
 value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
 outlive the call, so a later call could see the write. Its own locals stay
 free to change.

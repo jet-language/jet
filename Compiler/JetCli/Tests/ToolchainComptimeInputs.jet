@@ -51,9 +51,9 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
     toolchain_inputs_test_write("{made}-outside/secret.txt", "secret\n")
     cli_files.symlink("{made}-outside/secret.txt", "{made}/Data/escape.txt") ?? panic("test escape link")
     root: cli_files.realpath(made) ?? panic("test root")
-    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
     // copy: each adapter shares the one tree cell, so the package census runs once.
-    tree: shared JetDriverToolchainTree{root: root.copy(), reader: JetCLIToolchainPackages{}, packages: None}
+    tree: Shared{JetDriverToolchainTree{root: root.copy(), reader: JetCLIToolchainPackages{}, packages: None}}
     member: toolchain_inputs_test_adapter("{root}/Compiler/Member/main.jet", Val(tree.copy()), log.copy())
     if toolchain_inputs_test_text(member, "embed_file", "toolchain:Data/table.txt") == .String(text) -> assert_eq(text, "row\n") else -> panic("embed_file gives text")
     dep: toolchain_inputs_test_adapter("{root}/Dep/Nested/lib.jet", Val(tree.copy()), log.copy())

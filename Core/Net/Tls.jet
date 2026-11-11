@@ -311,7 +311,7 @@ __client_connect: fn(stream: &&TCPStream, server_name: String, config: ClientCon
     _: __handshake(state, server_name, end_ns) ?? return Err(err)
     peer: __peer_identity(state.ssl, server_name) ?? return Err(NetError.TLS(__detail("tls peer identity", err.message)))
     state.peer = Val(peer)
-    Ok(TLSStream{state: Val(shared state)})
+    Ok(TLSStream{state: Val(Shared{state})})
 }
 
 // Internal server handshake for Core's own TLS servers and loopback proofs.
@@ -324,7 +324,7 @@ __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [Stri
     context.conf.authmode = ssldefs.SSL_VERIFY_NONE
     state := __open(context, tcp, "") ?? return Err(__net_error("tls accept", "TLS handshake failed: {__ssl_text(err)}"))
     _: __handshake(state, "", end_ns) ?? return Err(err)
-    Ok(TLSStream{state: Val(shared state)})
+    Ok(TLSStream{state: Val(Shared{state})})
 }
 
 // A server context holding the certificate chain and private key. The HTTPS
@@ -1486,7 +1486,7 @@ __test_released: fn(tls: __TLSState) -> Bool Never! {
         assert(!__test_zero(server.buffer))
         // close: close_notify goes out, then the engine is freed and the
         // plaintext wiped.
-        stream := TLSStream{state: Val(shared server)}
+        stream := TLSStream{state: Val(Shared{server})}
         _: stream.close() ?? panic("close: {err}")
         state: __state(stream) ?? panic("the closed stream lost its state")
         guard := state.guard_edit()

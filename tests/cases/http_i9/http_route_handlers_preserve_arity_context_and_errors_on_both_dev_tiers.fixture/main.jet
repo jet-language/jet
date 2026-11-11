@@ -17,7 +17,7 @@ route_error: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: listener.local_addr() ?? panic("address")
-    state: shared HandlerState{label: "before registration"}
+    state: Shared{HandlerState{label: "before registration"}}
     mux: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
     mux.get("/items/:id", (id: String, req: HTTPRequest) -> {

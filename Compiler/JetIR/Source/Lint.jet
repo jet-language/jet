@@ -386,13 +386,13 @@ ir_lint_module: fn(m: &IRModule, pass: String, threads: CompilerThreads) -> [IRL
             rows.push(row)
         }
         rows.reverse()
-        slots.push(shared IRLintPart{functions: rows.move(), found: [IRLintFinding]{}})
+        slots.push(Shared{IRLintPart{functions: rows.move(), found: [IRLintFinding]{}}})
         part -= 1
     }
     slots.reverse()
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
-    reads: shared IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}
+    reads: Shared{IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}}
     _: ir_lint_threads(slots, reads, 0) ?? panic("the IR Lint threads failed")
     loop slot in slots {
         held := slot.guard_edit()

@@ -52,7 +52,7 @@ Jokes: struct {
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
     mux: server.mux()
-    state: shared JokeState{added: 0}
+    state: Shared{JokeState{added: 0}}
     mux.get("/before/:name", (name: String) -> Ok(server.response(200, "before:{name}")))
     mux.mount(Jokes{prefix: "joke", state: state})
     mux.get("/order/after", () -> Ok(server.response(200, "after")))

@@ -460,9 +460,9 @@ parser_chunk_bounds_runs: fn(input: &&[Token], tables: TokenTables, source: [U8]
         bounds: if scan.whole || workers <= 1 -> [Int]{0, count} else -> parser_chunk_bounds_of(scan.candidates, count, workers)
         return ParserRunBounds{tokens: tokens.move(), bounds: bounds, fences: scan.fences}
     }
-    inputs: shared ParserRunShared{tokens: [[Token]]{tokens.move()}, source: source, file_rules: parser_chunk_file_rules(tables)}
+    inputs: Shared{ParserRunShared{tokens: [[Token]]{tokens.move()}, source: source, file_rules: parser_chunk_file_rules(tables)}}
     parts := [Shared<ParserRunPart>]{}
-    loop part in 0..<scanners -> parts.push(shared ParserRunPart{start: part * run_count /% scanners, end: (part + 1) * run_count /% scanners, outputs: [ParserChunkScan]{}})
+    loop part in 0..<scanners -> parts.push(Shared{ParserRunPart{start: part * run_count /% scanners, end: (part + 1) * run_count /% scanners, outputs: [ParserChunkScan]{}}})
     _ := parser_scan_run_parts(inputs, parts, runs, 0)
     whole := false
     fences := false
@@ -536,9 +536,9 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     prepared := input.move()
     tokens := prepared.tokens.move()
     prepared.tokens = [Token]{}
-    inputs: shared ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads}
+    inputs: Shared{ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads}}
     parts := [Shared<ParserChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) -> parts.push(shared ParserChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [ParserChunkOutput]{}})
+    loop chunk in 0..<(bounds.len() - 1) -> parts.push(Shared{ParserChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [ParserChunkOutput]{}}})
     _ := parser_parse_chunk_parts(inputs, parts, 0)
     outputs := [ParserChunkOutput]{}
     failed := false

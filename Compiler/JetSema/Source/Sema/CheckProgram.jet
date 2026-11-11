@@ -385,7 +385,7 @@ SemaComptimeItemValue: struct {
     kind: SemaComptimeItemKind
     value: TComptimeValue
     ty: Type
-    // A module `shared X` holder (sema_comptime_shared_payload): `value` is
+    // A module `Shared{X}` holder (sema_comptime_shared_payload): `value` is
     // the payload the build folded, `ty` the holder's Shared type.
     shared_holder: Bool{false}
 }
@@ -593,12 +593,12 @@ SemaBodyMemoQuery: struct {
 }
 
 sema_incremental_cache_new: fn() -> SemaIncrementalCache {
-    SemaIncrementalCache{state: shared SemaIncrementalState{
+    SemaIncrementalCache{state: Shared{SemaIncrementalState{
         frozen: "", generation: 0, next_epoch: 0,
         scope_inputs: [String:String]{}, scope_epochs: [String:Int]{},
         rows: [String:SemaCachedBody]{}, frozen_bytes: 0, row_bytes: 0,
         hits: 0, recomputes: 0, recomputed_items: [String]{},
-    }}
+    }}}
 }
 
 sema_incremental_cache_clear_measurement: fn(cache: SemaIncrementalCache) {
@@ -1071,7 +1071,7 @@ sema_incremental_registered_job_queries: fn(memo: SemaModuleMemo?, module_index:
 
 sema_incremental_observer: fn(enabled: Bool) -> Shared<SemaBodyCheckReach>? {
     if !enabled -> return None
-    Val(shared SemaBodyCheckReach{host: false, foreign_raw_body: false})
+    Val(Shared{SemaBodyCheckReach{host: false, foreign_raw_body: false}})
 }
 
 sema_incremental_reach: fn(observed: Shared<SemaBodyCheckReach>?) -> SemaBodyCheckReach {
@@ -4053,9 +4053,9 @@ sema_pass_facts: fn(graph: &&SemaRegistrationGraph, threads: CompilerThreads, jo
         loop job in 0..<jobs -> sema_pass_fact_run(job, owned, facts)
         return owned
     }
-    shared_state: shared SemaPassFactsShared{graphs: [SemaRegistrationGraph?]{}}
+    shared_state: Shared{SemaPassFactsShared{graphs: [SemaRegistrationGraph?]{}}}
     sema_pass_facts_fill(shared_state, owned)
-    queue: shared SemaFinalizeCoreQueue{next: 0}
+    queue: Shared{SemaFinalizeCoreQueue{next: 0}}
     sema_pass_facts_claimers(shared_state, queue, jobs, 0, workers, facts)
     sema_pass_facts_take(shared_state)
 }
@@ -4686,7 +4686,7 @@ sema_check_prepare_method_body: fn(job: SemaBodyJob, module_index: Int, memory_p
 // owners stay pinned until this read-only worker returns; admission/join and
 // packet publication are unchanged.
 sema_check_body_part_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart, plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, module_index: Int) -> Int {
-    wanted: shared SemaHostHookWanted{wanted: false}
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
     jobs: plan.guard_read()
     ranks: queue.guard_read()
     checked_count := 0
@@ -4705,7 +4705,7 @@ sema_check_body_wave_part: fn(shared: Shared<SemaCheckShared>, plan: Shared<Sema
     inputs: shared.guard_read()
     jobs: plan.guard_read()
     ranks: queue.guard_read()
-    wanted: shared SemaHostHookWanted{wanted: false}
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
     part := SemaBodyPart{scopes: sema_scope_init(""), bodies: [SemaPreparedBody]{}, positions: [Int]{}}
     checked_count := 0
     current := -1
@@ -4940,13 +4940,13 @@ sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: In
         }
     }
     order := compiler_threads_heaviest_first(weights)
-    plan: shared SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: has_memo}
+    plan: Shared{SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: has_memo}}
     sema_check_body_plan_fill(plan, plan_jobs, order, replay)
-    queue: shared SemaBodyQueue{next: 0}
+    queue: Shared{SemaBodyQueue{next: 0}}
     sema_check_shared_lend_scope(shared, scopes)
     slots := [Shared<SemaBodyPart>]{}
     loop _ in 0..<workers {
-        slot: shared SemaBodyPart{scopes: sema_scope_init(""), bodies: [SemaPreparedBody]{}, positions: [Int]{}}
+        slot: Shared{SemaBodyPart{scopes: sema_scope_init(""), bodies: [SemaPreparedBody]{}, positions: [Int]{}}}
         slots.push(slot)
     }
     _ := sema_check_body_parts(shared, slots, plan, queue, 0, module_index)
@@ -5068,7 +5068,7 @@ sema_check_body_wave_lead: fn(shared: Shared<SemaCheckShared>, plan: Shared<Sema
     inputs: shared.guard_read()
     jobs: plan.guard_read()
     ranks: queue.guard_read()
-    wanted: shared SemaHostHookWanted{wanted: false}
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
     part := SemaBodyPart{scopes: sema_scope_init(""), bodies: [SemaPreparedBody]{}, positions: [Int]{}}
     checked_count := 0
     current := -1
@@ -6093,10 +6093,10 @@ sema_name_build_facts_threads: fn(graph: &&SemaRegistrationGraph, modules: &[Sem
     count := workers * SEMA_NAME_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     loop _ in 0..<count -> parts.push(sema_name_facts_empty())
-    shared_state: shared SemaNameShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, owner_names: [[String:String]]{}, symbol_indexes: [SemaNameSymbolIndex]{}, bounds: compiler_threads_partition(weights, count)}
+    shared_state: Shared{SemaNameShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, owner_names: [[String:String]]{}, symbol_indexes: [SemaNameSymbolIndex]{}, bounds: compiler_threads_partition(weights, count)}}
     symbol_index := sema_name_symbol_index(owned)
     sema_name_shared_fill(shared_state, owned, modules, owner_names, symbol_index)
-    queue: shared SemaNameQueue{next: 0}
+    queue: Shared{SemaNameQueue{next: 0}}
     sema_name_part_builders(shared_state, queue, 0, workers, parts)
     returned := sema_name_shared_take(shared_state, modules)
     returned_owner_names := sema_name_shared_take_owner_names(shared_state)
@@ -6772,7 +6772,7 @@ sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs
         loop position in row -> total += sources[position].span.end - sources[position].span.start
     }
     if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 -> return checks
-    shared_state: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, module_environments: [SemaScopeEnvironment]{}, probes: [SemaScopeProbe]{}}
+    shared_state: Shared{SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, module_environments: [SemaScopeEnvironment]{}, probes: [SemaScopeProbe]{}}}
     counting: sema_comptime_precheck_fill(shared_state, environments, programs)
     start := 0
     loop start < module_positions.len() {
@@ -6838,7 +6838,7 @@ sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module
             loop job in first..<firsts[wave_module + 1] -> module_weights.push(weights[job])
             loop index in compiler_threads_heaviest_first(module_weights) -> order.push(first + index)
         }
-        plan: shared SemaPrecheckPlan{positions: positions.move(), modules: job_modules.move(), order: order.move(), next: 0}
+        plan: Shared{SemaPrecheckPlan{positions: positions.move(), modules: job_modules.move(), order: order.move(), next: 0}}
         done := [SemaPrecheckDone]{}
         sema_comptime_precheck_claimers(shared_state, plan, 0, workers, done, memory_plan)
         loop done.len() > 0 {
@@ -7043,7 +7043,7 @@ sema_comptime_precheck_memory_plan_of: fn(program: SemaProgramTables, memory_pla
 sema_comptime_precheck_claimed: fn(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>) -> [SemaPrecheckDone] {
     inputs: shared_state.guard_read()
     jobs: plan.guard_read()
-    wanted: shared SemaHostHookWanted{wanted: false}
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
     probe := sema_comptime_probe_init(None)
     current := -1
     claimed := [SemaPrecheckDone]{}
@@ -7581,7 +7581,7 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     initial_environment.checked_type_name_rows = [[Int]]{}
     initial_environment.boxed_edges = [String:[String]]{}
     initial_environment.copy_facts = sema_copy_facts_table_empty()
-    module_state: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, initial_environment, initial_program, sema_function_memory_plan_new())
     every_module := [Int]{}
@@ -7748,8 +7748,8 @@ sema_check_declaration_modules: fn(shared_state: Shared<SemaCheckShared>, module
     counting: sema_check_shared_counting(shared_state, false)
     // copy: the threads' read-only inputs; the module list and the pass's
     // comptime values are read parameters here.
-    inputs: shared SemaDeclarationInputs{modules: modules.copy(), values: values.copy(), foreign: foreign}
-    plan: shared SemaDeclarationPlan{order: compiler_threads_heaviest_first(weights), next: 0}
+    inputs: Shared{SemaDeclarationInputs{modules: modules.copy(), values: values.copy(), foreign: foreign}}
+    plan: Shared{SemaDeclarationPlan{order: compiler_threads_heaviest_first(weights), next: 0}}
     placed := [SemaDeclarationCheck?]{}
     loop _ in 0..<modules.len() -> placed.push(None)
     sema_check_declaration_claimers(shared_state, inputs, plan, 0, workers, placed)
@@ -8636,7 +8636,7 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
-    shared_state: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    shared_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
     comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
     // A per-function trace times each check where it runs, in item order.
@@ -8887,9 +8887,9 @@ sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: 
         } else {
             prepared.push(false)
         }
-        cell: shared SemaWaveEnvironment{environments: held.move()}
+        cell: Shared{SemaWaveEnvironment{environments: held.move()}}
         cells.push(cell)
-        out: shared SemaWaveOut{bodies: [SemaPreparedBody]{}, positions: [Int]{}}
+        out: Shared{SemaWaveOut{bodies: [SemaPreparedBody]{}, positions: [Int]{}}}
         outs.push(out)
     }
     method_firsts.push(wave_jobs.len())
@@ -8897,10 +8897,10 @@ sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: 
     loop wave_module in 0..<module_count -> left.push(SemaBodyCount{value: firsts[wave_module + 1] - firsts[wave_module] + method_firsts[wave_module + 1] - method_firsts[wave_module]})
     sema_check_shared_put_tables(shared_state, program, memory_plan)
     replay := [Bool]{}
-    plan: shared SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: false}
+    plan: Shared{SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: false}}
     sema_check_body_plan_fill(plan, wave_jobs, wave_order, replay)
     sema_check_body_plan_fill_wave(plan, wave_job_modules, wave_modules, cells, outs, left)
-    queue: shared SemaBodyQueue{next: 0}
+    queue: Shared{SemaBodyQueue{next: 0}}
     layout: SemaWaveLayout{start: start, firsts: firsts.move(), method_firsts: method_firsts.move(), prepared: prepared.move(), core: core}
     checked_functions := 0
     done := 0
@@ -9730,9 +9730,9 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     count := workers * SEMA_CORE_JOBS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)
-    shared_state: shared SemaFinalizeWalkShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, catalogs: [SemaTaintCatalog]{}, coverage: [[Diagnostic]]{}, taint_order: compiler_threads_heaviest_first(taint_weights), jobs: jobs}
+    shared_state: Shared{SemaFinalizeWalkShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, catalogs: [SemaTaintCatalog]{}, coverage: [[Diagnostic]]{}, taint_order: compiler_threads_heaviest_first(taint_weights), jobs: jobs}}
     sema_finalize_walk_fill(shared_state, owned, modules, catalog, coverage)
-    queue: shared SemaFinalizeCoreQueue{next: 0}
+    queue: Shared{SemaFinalizeCoreQueue{next: 0}}
     walked := [[Diagnostic]]{}
     masked := [[Span]]{}
     fixed := [[String]]{}
@@ -10051,9 +10051,9 @@ sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGra
         return owned
     }
     loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sides.push(sema_finalize_side_new(job))
-    shared_state: shared SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}
+    shared_state: Shared{SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}}
     sema_finalize_side_fill(shared_state, owned, modules)
-    queue: shared SemaFinalizeCoreQueue{next: 0}
+    queue: Shared{SemaFinalizeCoreQueue{next: 0}}
     sema_finalize_side_claimers(shared_state, queue, 0, workers, sides)
     returned := sema_finalize_side_take(shared_state, modules)
     sema_finalize_side_join(sides, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)

@@ -2949,7 +2949,7 @@ sema_ownership_report_group_loan_change: fn(state: SemaOwnershipState, changed: 
     loop held in state.group_loans {
         if sema_ownership_places_overlap(held.place, changed) {
             changed_name: sema_ownership_place_name(changed)
-            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `shared`"))
+            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
             return true
         }
     }

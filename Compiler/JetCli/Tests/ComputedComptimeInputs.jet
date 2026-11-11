@@ -31,7 +31,7 @@ computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Stri
     cli_files.write("{made}/secret.txt", "secret\n") ?? panic("outside file")
     cli_files.write("{made}/pkg/sub/a.txt", "a\n") ?? panic("inside file")
     root: cli_files.realpath(made) ?? panic("test root")
-    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
     adapter: computed_inputs_test_adapter("{root}/pkg/main.jet", log.copy())
     assert_eq(computed_inputs_test_refused(adapter, "embed_file", "../secret.txt"), "E0957 `embed_file` path `../secret.txt` can't use `..`")
     assert_eq(computed_inputs_test_refused(adapter, "embed_bytes", "sub\\..\\..\\secret.txt"), "E0957 `embed_bytes` path `sub/../../secret.txt` can't use `..`")
@@ -52,7 +52,7 @@ computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Stri
     made: "{cli_sys.temp_dir()}/jet-computed-globs-{cli_process.current_pid()}"
     cli_files.create_dir_all("{made}/in") ?? panic("test directory")
     root: cli_files.realpath(made) ?? panic("test root")
-    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
     adapter: computed_inputs_test_adapter("{root}/main.jet", log.copy())
     if adapter.comptime_input("find", "in/*.txt", Span{start: 0, end: 1}) == .Ok(value) {
         if value == .List(values) -> assert_eq(values.len(), 0) else -> panic("find gives a list")

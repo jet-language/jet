@@ -118,7 +118,7 @@ __AppHandler: struct {
 }
 
 __app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
-    __AppHandler{__cell: shared __AppHandlerCell{call: call.move()}}
+    __AppHandler{__cell: Shared{__AppHandlerCell{call: call.move()}}}
 }
 
 // One route and the facts its registration fixed. An empty identity string
@@ -336,7 +336,7 @@ App: struct {
 }
 
 app: fn() -> App Never! {
-    App{__state: shared __AppState{
+    App{__state: Shared{__AppState{
         routes: [__AppRoute]{},
         actions: [__AppAction]{},
         mounts: [__AppMount]{},
@@ -351,7 +351,7 @@ app: fn() -> App Never! {
         hydration: "dev-overlay",
         mode: "csr",
         explicit_mode: false,
-    }}
+    }}}
 }
 
 __app_mode: fn(app: App, mode: String) -> App Never! {

@@ -51,9 +51,9 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     })
 }
 
-#Test("shared_prefix_accepts_inferred_brace_values") {
-    result: parser_test_result("run: fn() {{ value: shared {{ count: 1 }} }}\n")
-    assert(result.diagnostics.is_empty(), "shared must accept an inferred brace value: {result.diagnostics:Debug}")
+#Test("retired_shared_prefix_is_an_ordinary_parse_error") {
+    result: parser_test_result("run: fn() {{ value: shared 1 }}\n")
+    assert(!result.diagnostics.is_empty(), "`shared 1` must not parse as a shared cell")
 }
 
 #Test("script_statements_survive_items_and_formatter") {

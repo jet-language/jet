@@ -846,10 +846,10 @@ __launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net, Ti
 // or `session.new`, and close ends it through the engine's driver session.
 __connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
-    Ok(Browser{__state: shared __BrowserState{
+    Ok(Browser{__state: Shared{__BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: true, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
-    }})
+    }}})
 }
 
 // The BiDi port the engine records in its profile. A read can race the
@@ -878,10 +878,10 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
-    browser: Browser{__state: shared __BrowserState{
+    browser: Browser{__state: Shared{__BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
-    }}
+    }}}
     status: browser_command(browser, "session.status", empty_object())
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
         return Err(BrowserError{kind: "protocol"})
@@ -1275,7 +1275,7 @@ cdp_method_ok: fn(method: String) -> Bool Never! {
 
 // ---- Scopes, pages, and locators --------------------------------------------
 
-new_scope: fn(id: String) -> Shared<__BrowserScope> Never! { shared __BrowserScope{id: id, closed: false} }
+new_scope: fn(id: String) -> Shared<__BrowserScope> Never! { Shared{__BrowserScope{id: id, closed: false}} }
 
 scope_id: fn(scope: Shared<__BrowserScope>) -> String Never! {
     guard: scope.guard_read()
@@ -1741,7 +1741,7 @@ server_start: fn(config: BrowserTestConfig) -[Exec, Net, Time, Time.Wait]> Brows
     if config.server_url.len() == 0 -> return Err(BrowserError{kind: "transport"})
     reusable := false
     if config.server_reuse && server_wait_ready(config.server_url, 100) == .Ok(_) -> reusable = true
-    server: BrowserTestServer{__url: config.server_url, __state: shared __BrowserServerState{child: None, logs: ""}}
+    server: BrowserTestServer{__url: config.server_url, __state: Shared{__BrowserServerState{child: None, logs: ""}}}
     if reusable -> return Ok(server)
     if config.server_command.len() > 0 {
         spec := process.cmd(config.server_command).stdout(.Capture).stderr(.Capture)

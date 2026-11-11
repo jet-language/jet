@@ -206,7 +206,7 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
     // this one fills the merged key maps. A task's arguments stay shared with
     // the thread that spawns it, which drops them after the join, so each
     // part reaches its thread through `released`: the thread pops it off.
-    released: shared [IRModule]{}
+    released: Shared{[IRModule]{}}
     ir_merge_release_fill(released, parts)
     task.group ir_merge_release_group {
         dropped: task ir_merge_release(released, -1)

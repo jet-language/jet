@@ -509,7 +509,7 @@ __take_body: fn(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
 }
 
 __upgrade_cell: fn(fd: Int) -> Shared<__HTTPUpgradeCell> Never! {
-    shared __HTTPUpgradeCell{fd: fd, upgraded: false}
+    Shared{__HTTPUpgradeCell{fd: fd, upgraded: false}}
 }
 
 __upgraded: fn(cell: Shared<__HTTPUpgradeCell>) -> Bool Never! {
@@ -528,15 +528,15 @@ __upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
 }
 
 __request: fn(method: String, url: String) -> HTTPRequest Never! {
-    HTTPRequest{method: method, path: request_target_path(url), body: Body.Empty, headers: headers(), __url: url, __cell: Val(shared __HTTPBodyCell{taken: false})}
+    HTTPRequest{method: method, path: request_target_path(url), body: Body.Empty, headers: headers(), __url: url, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
 __server_request: fn(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
-    HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(shared __HTTPBodyCell{taken: false})}
+    HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
 __response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
-    HTTPResponse{status: status, body: body, headers: fields, __cell: Val(shared __HTTPBodyCell{taken: false})}
+    HTTPResponse{status: status, body: body, headers: fields, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
 // A text response; an out-of-range status is a 500.
@@ -555,7 +555,7 @@ __client_response: fn(status: Int, body: Body, fields: Headers, redirect_history
         status: status, body: body, headers: fields,
         __redirect_history: redirect_history, __timings: timings, __reused: reused,
         __raw_encoding: raw_encoding, __body_error: body_error,
-        __cell: Val(shared __HTTPBodyCell{taken: false}),
+        __cell: Val(Shared{__HTTPBodyCell{taken: false}}),
     }
 }
 
@@ -660,7 +660,7 @@ __router_call: fn(state: Shared<__HTTPRouterState>, index: Int, request: HTTPReq
 }
 
 router: fn() -> HTTPRouter Never! {
-    HTTPRouter{__mux: routes.__mux_new(), __state: shared __HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}
+    HTTPRouter{__mux: routes.__mux_new(), __state: Shared{__HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}}
 }
 
 // The router's route table, for `web.openapi(router)`.

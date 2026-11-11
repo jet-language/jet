@@ -176,9 +176,9 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: St
     order := [Int]{}
     loop rank in compiler_threads_heaviest_first(weights) -> order.push(jobs[rank])
     // copy: the table is catalog-sized and every scanning thread reads it.
-    shared_state: shared SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, wanted: [NameTable]{wanted.copy()}, order: order.move()}
+    shared_state: Shared{SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, wanted: [NameTable]{wanted.copy()}, order: order.move()}}
     sema_units_scan_fill(shared_state, inputs)
-    queue: shared SemaUnitsScanQueue{next: 0}
+    queue: Shared{SemaUnitsScanQueue{next: 0}}
     sema_units_scanners(shared_state, queue, 0, workers, rows)
     sema_units_scan_take(shared_state, inputs)
     rows

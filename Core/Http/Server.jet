@@ -154,7 +154,7 @@ HTTPHandler: struct {
 }
 
 __handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
-    HTTPHandler{__cell: shared __HTTPHandlerCell{call: call.move()}}
+    HTTPHandler{__cell: Shared{__HTTPHandlerCell{call: call.move()}}}
 }
 
 __HTTPSegment: enum {
@@ -229,7 +229,7 @@ HTTPMux: struct {
     // `mux.middleware(layer)`: the first registered layer is the outermost.
     __middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! -[Net]> {
         guard := self.__state.guard_edit()
-        guard.value.layers.push(shared __HTTPLayerCell{wrap: middleware.move()})
+        guard.value.layers.push(Shared{__HTTPLayerCell{wrap: middleware.move()}})
     }
 }
 
@@ -364,7 +364,7 @@ mux: fn() -[Net]> HTTPMux Never! {
 
 // An empty route table: a mux's, and the one an `http.router()` routes with.
 __mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: shared __HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}
+    HTTPMux{__state: Shared{__HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}}
 }
 
 serve_once: fn(addr: String, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
@@ -400,7 +400,7 @@ __bind_entry: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Dura
     listener: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     pair: core.tasks.__channel_bounded<Int>(1)
     Ok(HTTPServer{
-        __state: shared __HTTPServerState{phase: 0, stopping: false, report: None},
+        __state: Shared{__HTTPServerState{phase: 0, stopping: false, report: None}},
         __listener: listener,
         __mux: mux,
         __deadline: deadline,
@@ -460,7 +460,7 @@ static_files: fn(mux: HTTPMux, prefix: String, root: String) Never! -[Net, FS.Re
 }
 
 tls: fn(cert: String, key: String) -> HTTPServerTLS Never! {
-    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: shared __HTTPTLSOps{check: __tls_check, accept: __tls_accept}}
+    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: Shared{__HTTPTLSOps{check: __tls_check, accept: __tls_accept}}}
 }
 
 __tls_check: fn(cert_pem: String, key_pem: String) -[Net]> String Never! {
@@ -477,7 +477,7 @@ __tls_accepted: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
 __tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
     tcp: __tls_accepted(accepted) ?? return None
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
-    staged: shared [U8]{}
+    staged: Shared{[U8]{}}
     Val(__HTTPSecure{
         read_into: (limit: Int, deadline: Duration) -> {
             guard := staged.guard_edit()
@@ -1175,7 +1175,7 @@ __accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?)
     if tls == .Val(identity) {
         budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
         ops: identity.__ops.guard_read()
-        accepted: shared [TCPStream]{stream.move()}
+        accepted: Shared{[TCPStream]{stream.move()}}
         secure: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
         return Val(__HTTPConn{tcp: None, tls: Val(secure)})
     }

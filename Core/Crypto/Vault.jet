@@ -47,7 +47,7 @@ ExpiringSecret: struct<T> {
     new: fn<T>(value: &&T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
         observer: clock.__observer()
         deadline: time.__expiry_deadline(observer.now(), ttl)
-        ExpiringSecret<T>{value: shared (T?{Val(value)}), deadline_ms: deadline, observer: observer}
+        ExpiringSecret<T>{value: Shared{(T?{Val(value)})}, deadline_ms: deadline, observer: observer}
     }
 
     expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
@@ -113,8 +113,8 @@ ExpiryCloseOwner: struct {
     }
 }
 #Test("Expired storage takes its credential and closes it exactly once") {
-    count: shared ExpiryCloseCount{count: 0}
-    storage: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})
+    count: Shared{ExpiryCloseCount{count: 0}}
+    storage: Shared{(ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
     if true {
         __take_expired<ExpiryCloseProbe>(storage)
         guard: storage.guard_read()
@@ -123,7 +123,7 @@ ExpiryCloseOwner: struct {
     __take_expired<ExpiryCloseProbe>(storage)
     // Dropping still-live storage must run the same payload Close exactly once.
     if true {
-        live: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
+        live: ExpiryCloseOwner{value: Shared{(ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}}
     }
     observed: count.guard_read()
     assert_eq(observed.value.count, 2)

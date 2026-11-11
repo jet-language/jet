@@ -72,10 +72,10 @@ Clock: struct {
     state: Shared<__ClockState>
 
     new: fn(seed: Int) -> Clock Never! {
-        Clock{state: shared __ClockState.Manual(seed)}
+        Clock{state: Shared{__ClockState.Manual(seed)}}
     }
     system: fn() -[Time]> Clock Never! {
-        Clock{state: shared __ClockState.System{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}
+        Clock{state: Shared{__ClockState.System{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}}
     }
     now: fn(self) -> Int Never! {
         guard: self.state.guard_read()
@@ -119,7 +119,7 @@ Clock: struct {
             .System(_, _) -> {
                 started: core.time.__clock_mono_ns()
                 offset: clock_state_now(guard.value)
-                Clock{state: shared __ClockState.System{started_ns: started, offset_ms: offset}}
+                Clock{state: Shared{__ClockState.System{started_ns: started, offset_ms: offset}}}
             }
         }
     }
@@ -241,10 +241,10 @@ __duration_whole_ms: fn(duration: Duration) -> Int Never! {
     manual: Clock.new(4)
     assert(manual.equal(Clock.new(4)))
     assert(!manual.equal(Clock.new(5)))
-    system: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
-    same: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 4}}
-    later: Clock{state: shared __ClockState.System{started_ns: 1, offset_ms: 4}}
-    shifted: Clock{state: shared __ClockState.System{started_ns: 0, offset_ms: 5}}
+    system: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 4}}}
+    same: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 4}}}
+    later: Clock{state: Shared{__ClockState.System{started_ns: 1, offset_ms: 4}}}
+    shifted: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 5}}}
     assert(system.equal(same))
     assert(!system.equal(later))
     assert(!system.equal(shifted))

@@ -477,7 +477,7 @@ __HistoryRngState: struct {
 
 // A generator seeded by the low 64 bits of a non-negative seed.
 __history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
-    HistoryRNG{__state: shared __HistoryRngState{word: U64.from_int(seed % 18446744073709551616) ?? U64{0}}}
+    HistoryRNG{__state: Shared{__HistoryRngState{word: U64.from_int(seed % 18446744073709551616) ?? U64{0}}}}
 }
 
 __history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {

@@ -634,7 +634,7 @@ sema_taskgroup_admit_scoped_borrow: fn(context: &SemaCheckContext, name: String,
     }
     if conflict_name == .Val(other) {
         what := if other == name -> "`{name}` is already lent to another task" else -> "`{name}` and `{other}` can reach the same place at the same time"
-        diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `shared`, or borrow provably separate fields"))
+        diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `Shared{{…}}`, or borrow provably separate fields"))
         return Val(false)
     }
     context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access, window: window})
@@ -660,7 +660,7 @@ sema_taskgroup_check_scoped_loan_read: fn(context: &SemaCheckContext, expression
         if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, places[0]) {
             context.taskgroups.scoped_loan_read_reported = true
             read_name: sema_ownership_place_name(places[0])
-            diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `shared`"))
+            diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
             return
         }
     }

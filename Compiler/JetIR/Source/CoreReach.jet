@@ -700,7 +700,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &
             weights.push(function.source_span.end - function.source_span.start)
         }
     }
-    slot: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, by_key: [NameRows]{by_key.move()}, source_keys: [[String:String]]{source_keys.move()}, decl_rows: decl_rows.move(), roots: roots.move()}
+    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, by_key: [NameRows]{by_key.move()}, source_keys: [[String:String]]{source_keys.move()}, decl_rows: decl_rows.move(), roots: roots.move()}}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {
         if !reachable[target] {
@@ -760,7 +760,7 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, weights: [Int], thre
     if count > weights.len() -> count = weights.len()
     if workers <= 1 || count <= 1 -> return ir_core_reach_part_targets(slot, 0, weights.len())
     bounds: compiler_threads_partition(weights, count)
-    queue: shared IRPartQueue{next: 0}
+    queue: Shared{IRPartQueue{next: 0}}
     parts := [[Int]]{}
     loop _ in 0..<count -> parts.push([Int]{})
     ir_core_reach_claimers(slot, bounds, queue, 0, workers, parts)

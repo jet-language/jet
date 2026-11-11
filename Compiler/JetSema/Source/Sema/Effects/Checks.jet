@@ -2704,12 +2704,12 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             ty: body_type(tree, expression)
             if ty == .Shared(_) -> sema_effect_push_memory_event(nodes, node_index, node.span, "implicit copy of `{type_name(ty)}` retains a shared reference", "rc", None)
         }
-        // `shared x` (Rust `Shared.new`): new shared storage that every
+        // `Shared{x}` (Rust `Shared.new`): new shared storage that every
         // handle copy retains.
         .StaticCall(owner, _, method, _, _) -> {
             if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`shared` allocates shared storage", "alloc", None)
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`shared` introduces reference-counted ownership", "rc", None)
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
             }
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
@@ -4053,9 +4053,9 @@ sema_effect_collect_threads: fn(modules: &[SemaGraphModuleResult], inputs: [Sema
     if count > unit_first.len() -> count = unit_first.len()
     bounds: compiler_threads_partition(unit_weights, count)
     module_rows := loop module_row in inputs -> module_row.module_index
-    shared_state: shared SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}
+    shared_state: Shared{SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}}
     sema_effect_collect_fill(shared_state, modules, nodes, index)
-    queue: shared SemaEffectCollectQueue{next: 0}
+    queue: Shared{SemaEffectCollectQueue{next: 0}}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, parts)

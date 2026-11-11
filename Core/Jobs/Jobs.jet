@@ -149,7 +149,7 @@ queue: fn() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     }
     queue_finish(driver, initialized) ?? return Err(err)
     queue := JobQueue{
-        data: shared QueueData{driver: driver.move()}, endpoint: endpoint,
+        data: Shared{QueueData{driver: driver.move()}}, endpoint: endpoint,
         authority: authority, name: name,
     }
     _: queue.status() ?? return Err(err)

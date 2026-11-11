@@ -2666,9 +2666,9 @@ jet_driver_namespace_reach: fn(modules: &[JetDriverLoadedModule], source_units: 
         loop part in 0..<workers {
             part_jobs := [JetDriverReachJob]{}
             loop index in bounds[part]..<bounds[part + 1] -> part_jobs.push(jobs[index])
-            parts.push(shared JetDriverReachPart{jobs: part_jobs.move(), refs: [[String]]{}})
+            parts.push(Shared{JetDriverReachPart{jobs: part_jobs.move(), refs: [[String]]{}}})
         }
-        _ := jet_driver_reach_parts(shared inputs, parts, 0)
+        _ := jet_driver_reach_parts(Shared{inputs}, parts, 0)
         loop part in parts {
             permit := part.guard_edit()
             loop row in permit.value.refs -> refs.push(row)
@@ -3263,9 +3263,9 @@ jet_driver_inline_top_level_package_threads: fn(bytes: [U8], from: Int, threads:
     }
     bounds.push(bytes.len())
     if bounds.len() <= 2 -> return jet_driver_inline_top_level_package(bytes, from)
-    inputs: shared JetDriverInlineShared{bytes: bytes}
+    inputs: Shared{JetDriverInlineShared{bytes: bytes}}
     parts := [Shared<JetDriverInlinePart>]{}
-    loop part in 0..<(bounds.len() - 1) -> parts.push(shared JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}})
+    loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}}})
     _ := jet_driver_inline_scan_parts(inputs, parts, 0)
     loop part in 0..<parts.len() {
         output := jet_driver_inline_part_take(parts[part])
@@ -3661,9 +3661,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         return JetDriverDemandScan{lexed: lexed.move(), demand: demand.move()}
     }
     names: jet_driver_core_demand_names(lexed.tables)
-    inputs: shared JetDriverDemandShared{lexed: [Lexed]{lexed.move()}, names: names, collect_bare: collect_bare}
+    inputs: Shared{JetDriverDemandShared{lexed: [Lexed]{lexed.move()}, names: names, collect_bare: collect_bare}}
     parts := [Shared<JetDriverDemandPart>]{}
-    loop part in 0..<workers -> parts.push(shared JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}})
+    loop part in 0..<workers -> parts.push(Shared{JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}}})
     _ := jet_driver_demand_scan_parts(inputs, parts, runs, 0)
     loop part in parts {
         output := jet_driver_demand_part_take(part)
@@ -4357,8 +4357,8 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
         // Claimed heaviest first: a static byte partition left most threads
         // idle while the ones holding the largest files finished.
         count: jobs.len()
-        inputs: shared JetDriverParseInputs{jobs: jobs.move(), order: compiler_threads_heaviest_first(weights)}
-        queue: shared JetDriverParseQueue{next: 0}
+        inputs: Shared{JetDriverParseInputs{jobs: jobs.move(), order: compiler_threads_heaviest_first(weights)}}
+        queue: Shared{JetDriverParseQueue{next: 0}}
         placed := [JetDriverParsedUnit?]{}
         loop _ in 0..<count -> placed.push(None)
         jet_driver_parse_claimers(inputs, queue, 0, workers, placed)

@@ -222,11 +222,11 @@ JetDriverCoreSourceReader: trait {
 }
 
 jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
-    shared JetDriverCoreText{file: "", reader: None, text: Val(text)}
+    Shared{JetDriverCoreText{file: "", reader: None, text: Val(text)}}
 }
 
 jet_driver_core_text_file: fn(file: String, &&reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
-    shared JetDriverCoreText{file: file, reader: Val(reader), text: None}
+    Shared{JetDriverCoreText{file: file, reader: Val(reader), text: None}}
 }
 
 // Selected build output is compiler-produced source, never a fabricated
@@ -446,7 +446,7 @@ JetDriverSharedBuildInputs: struct {
     }
 }
 jet_driver_shared_build_inputs: fn(transport: &&JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
-    JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: transport.move()}}
+    JetDriverSharedBuildInputs{storage: Shared{JetDriverBuildInputsStorage{transport: transport.move()}}}
 }
 JetDriverBuildHTTPInputsStorage: struct { transport: JetDriverBuildHTTPInputs }
 JetDriverSharedBuildHTTPInputs: struct {
@@ -461,7 +461,7 @@ JetDriverSharedBuildHTTPInputs: struct {
     }
 }
 jet_driver_shared_build_http_inputs: fn(transport: &&JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
-    JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: transport.move()}}
+    JetDriverSharedBuildHTTPInputs{storage: Shared{JetDriverBuildHTTPInputsStorage{transport: transport.move()}}}
 }
 JetDriverBuildHTTPResponse: struct {
     status: Int

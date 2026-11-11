@@ -527,7 +527,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     config := jet_cli_eval_config()
     config.runtime_execution = true
     config.eval_entry = true
-    program := jet_eval_native_load(JetEvalIRComptime{code: built.program.move(), layouts: shared [IRProgram]{layouts.move()}, items: [Int]{entry}, build_failures: [String]{}}, config)
+    program := jet_eval_native_load(JetEvalIRComptime{code: built.program.move(), layouts: Shared{[IRProgram]{layouts.move()}}, items: [Int]{entry}, build_failures: [String]{}}, config)
     evaluated: jet_eval_native_run(program, 0, [TComptimeValue]{}, config, span)
     if evaluated.error == .Val(failure) {
         report: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color)

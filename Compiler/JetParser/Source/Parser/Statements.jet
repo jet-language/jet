@@ -1754,15 +1754,15 @@ parser_report_not_a_statement: fn(state: &JetParserState, start: Token) {
 }
 
 // A name followed by another name or a declaration keyword on the same line
-// starts no Jet declaration or statement. `shared` and the `task` surface
-// before a name are expressions: the shared-cell construction and a spawn.
+// starts no Jet declaration or statement. The `task` surface before a name is
+// an expression: a spawn.
 parser_word_follows: fn(state: &JetParserState) -> Bool Never! {
     next: parser_kind_at(state, 1)
     if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || parser_is_item_keyword(next)) -> return false
     if next != TOKEN_IDENT -> return true
     current: parser_current(state)
     word: parser_value(state, current)
-    word != "shared" && !(word == "task" && parser_task_surface_ahead(state))
+    !(word == "task" && parser_task_surface_ahead(state))
 }
 
 // At the top level: a word that starts no declaration or script line, either

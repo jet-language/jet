@@ -36,7 +36,7 @@ compute_fixture_modules: fn(label: String, source: String, failures: &[String]) 
         failures.push("{label}: registration failed {err}")
         return None
     }
-    hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
         failures.push("{label}: declaration checking failed {err}")

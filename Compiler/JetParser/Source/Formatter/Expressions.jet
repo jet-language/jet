@@ -1276,17 +1276,10 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
 }
 
 jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg]) {
-    // `Shared{value}` (with `<T>` when the owner type is written) prints as
-    // written; `shared value`, its older spelling, and a `Shared.new(value)`
-    // call print as `shared value`.
+    // `Shared{value}` and a `Shared.new(value)` call print as `Shared{value}`,
+    // with `<T>` when the owner type is written.
     if receiver == .Ident(name, _, _) {
         if name == "Shared" && method == "new" && args.len() == 1 {
-            braced: args[0].flags.shared_operand && method_span.start >= 0 && method_span.start < f.src_bytes.len() && f.src_bytes[method_span.start] == 83
-            if !braced {
-                jfmt_write(f, "shared ")
-                jfmt_fmt_expr(f, args[0].expr, JFMT_PREC_UNARY)
-                return
-            }
             jfmt_write(f, "Shared")
             if owner_type_args.len() == 1 {
                 jfmt_write(f, "<")
