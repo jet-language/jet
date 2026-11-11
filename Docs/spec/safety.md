@@ -211,14 +211,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1424,
+  "total": 1423,
   "counts": {
     "Compiler": 748,
     "Core": 176,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
-    "Tools": 7,
+    "Tools": 6,
     "tests": 435
   },
   "regions": [
@@ -7139,13 +7139,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "reason": "re-raise the compiler's terminating signal on this process, as the parent shell expects"
     },
     {
-      "package": "Tools",
-      "file": "Tools/perf/kit/Source/Measure.jet",
-      "line": 172,
-      "column": 5,
-      "reason": "posix kill: the measured command's own process tree, found from its root through /proc"
-    },
-    {
       "package": "tests",
       "file": "tests/cases/backend_ice/fixtures/asm_rail/rail.jet",
       "line": 10,
@@ -10203,9 +10196,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
-| Tools | 7 |
+| Tools | 6 |
 | tests | 435 |
-| **total** | **1424** |
+| **total** | **1423** |
 
 ### Regions
 
@@ -11199,7 +11192,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 117:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
-| Tools | Tools/perf/kit/Source/Measure.jet | 172:5 | "posix kill: the measured command's own process tree, found from its root through /proc" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |

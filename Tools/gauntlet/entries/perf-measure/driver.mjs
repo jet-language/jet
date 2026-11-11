@@ -3,7 +3,7 @@
 // on the kit's Measure module.
 //
 //   node driver.mjs trace FILE | strict FILE IDENTITY | phases TRACE SAMPLES OFFSET
-//                   | cpu SAMPLES T... | counters FILE | tree | run
+//                   | cpu SAMPLES T... | counters FILE | tree | run | timeout
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { cpuAt, parseCounters, phaseTable, readTrace, runMeasured, sampleTree } from '../../../perf/throughput/measure.mjs';
@@ -42,8 +42,12 @@ try {
       fail(error);
     });
     console.log(`code ${measured.code}`);
+  } else if (command === 'timeout') {
+    const measured = await runMeasured(['sh', '-c', '(sleep 1; echo late > late.txt) & sleep 5'], { stdoutPath: 'out.txt', stderrPath: 'err.txt', timeoutMs: 300 });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    console.log(`code ${measured.code} signal ${measured.signal} killed ${measured.killed} late ${fs.existsSync('late.txt')}`);
   } else {
-    console.log('usage: driver trace|strict|phases|cpu|counters|tree|run ...');
+    console.log('usage: driver trace|strict|phases|cpu|counters|tree|run|timeout ...');
     process.exit(2);
   }
 } catch (error) {

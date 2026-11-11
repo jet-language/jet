@@ -15,7 +15,6 @@ use {
     json: core.encoding.json
     math: core.math
     process: core.process
-    sys: core.sys
     time: core.time
 }
 
@@ -167,13 +166,6 @@ MeasureOptions: struct {
     timeout_ms: Int
 }
 
-kill_tree: fn(pid: Int) -[Env, FS]> {
-    loop child in children(pid) -> kill_tree(child)
-    #Unsafe("posix kill: the measured command's own process tree, found from its root through /proc") {
-        sys.kill(pid, 9).drop("the process may be gone already")
-    }
-}
-
 // `\d+`.
 digits_text: fn(text: String) -> Bool Never! {
     if text == "" -> return false
@@ -246,7 +238,9 @@ run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time,
         elapsed: time.instant().start_ns - start.start_ns
         if options.timeout_ms > 0 && !killed && elapsed >= options.timeout_ms * 1000000 {
             killed = true
-            kill_tree(pid)
+            // The child leads its own process group, so kill() takes GNU time,
+            // the measured command and every descendant still in the group.
+            child.kill().drop("the group may be gone already")
         }
         if elapsed >= next_sample {
             tree: sample_tree(pid, host)

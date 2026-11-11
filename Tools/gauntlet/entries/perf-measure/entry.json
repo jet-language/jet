@@ -1,7 +1,7 @@
 {
   "name": "perf-measure",
   "mode": "tool",
-  "description": "The compile-throughput measurement library Tools/perf/throughput/measure.mjs (with parseCounters, which it re-exports from Tools/perf/scaling/harness.mjs) and its Jet twin, the Measure module of the jet_perf_kit package (Tools/perf/kit/Source/Measure.jet), #5072 c7, each run by a driver that prints one export's result: readTrace of a live stream (a partial last row, a padded row, rows that are not JSON) and of a closed array; every completed-trace refusal (identity, stream, row, JSON, process identity, schema, window, time order, span category and balance) and the accepted trace; phaseTable (phase spans by name == cat, threads keyed by their text so 1 and \"1\" share spans, unions across threads, items summed the JavaScript way, integer-like kinds first in the JSON object, unclosed kinds, a NaN offset) over sampled CPU; cpuAt before, between, on equal and after samples; parseCounters (both line forms, CRLF, nested counters, an empty phase, a counter summed over lines) and its refusals; sampleTree of a live process tree; and runMeasured of `true` under the GNU time it finds on PATH.",
+  "description": "The compile-throughput measurement library Tools/perf/throughput/measure.mjs (with parseCounters, which it re-exports from Tools/perf/scaling/harness.mjs) and its Jet twin, the Measure module of the jet_perf_kit package (Tools/perf/kit/Source/Measure.jet), #5072 c7, each run by a driver that prints one export's result: readTrace of a live stream (a partial last row, a padded row, rows that are not JSON) and of a closed array; every completed-trace refusal (identity, stream, row, JSON, process identity, schema, window, time order, span category and balance) and the accepted trace; phaseTable (phase spans by name == cat, threads keyed by their text so 1 and \"1\" share spans, unions across threads, items summed the JavaScript way, integer-like kinds first in the JSON object, unclosed kinds, a NaN offset) over sampled CPU; cpuAt before, between, on equal and after samples; parseCounters (both line forms, CRLF, nested counters, an empty phase, a counter summed over lines) and its refusals; sampleTree of a live process tree; runMeasured of `true` under the GNU time it finds on PATH; and runMeasured past a 300 ms timeout, which kills the whole measured tree (a background writer never writes).",
   "tool": {
     "original": "Tools/gauntlet/entries/perf-measure/driver.mjs",
     "jet": "Tools/gauntlet/entries/perf-measure/driver/run.jet",
@@ -514,6 +514,12 @@
           "run"
         ],
         "expected": "expected/run.out"
+      },
+      {
+        "args": [
+          "timeout"
+        ],
+        "expected": "expected/timeout.out"
       },
       {
         "args": [

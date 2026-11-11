@@ -14,13 +14,13 @@ package: {
 
 use {
     files: core.files
-    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, Sample, completed_from, counters_json, cpu_at, field, items, json_stringify, kill_tree, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
+    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, Sample, completed_from, counters_json, cpu_at, field, items, json_stringify, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
     json: core.encoding.json
     process: core.process
     time: core.time
 }
 
-USAGE: "usage: driver trace|strict|phases|cpu|counters|tree|run ..."
+USAGE: "usage: driver trace|strict|phases|cpu|counters|tree|run|timeout ..."
 QUIET: "sleep 3 </dev/null >/dev/null 2>&1"
 
 // An error's message (a JSON refusal is a SyntaxError) and exit 1.
@@ -78,7 +78,7 @@ show_tree: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> {
     time.sleep(300ms)
     tree: sample_tree(child.id(), measure_host())
     print("processes {tree.processes} threads {tree.threads} rss {tree.rss_bytes > 0} cpu {tree.cpu_ns >= KIT_ZERO}")
-    kill_tree(child.id())
+    child.kill().drop("the shell's group may be gone already")
     child.wait().drop("the shell was killed")
 }
 
@@ -88,6 +88,15 @@ show_run: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> {
         fail(err)
     }
     if measured.code == .Val(code) -> print("code {code}") else -> print("code null")
+}
+
+// A tree past its 300 ms timeout: the whole tree is killed, so the
+// background writer never writes late.txt.
+show_timeout: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    measured: run_measured([String]{"sh", "-c", "(sleep 1; echo late > late.txt) & sleep 5"}, MeasureOptions{cwd: None, env: None, stdout_path: "out.txt", stderr_path: "err.txt", timeout_ms: 300}) ?? fail(err)
+    time.sleep(1500ms)
+    code: if measured.code == .Val(number) -> "{number}" else -> "null"
+    print("code {code} signal {measured.signal ?? "null"} killed {measured.killed} late {files.exists("late.txt")}")
 }
 
 usage: fn() -[Exec, IO]> Never {
@@ -106,6 +115,7 @@ run: fn() {
         command == "counters" -> show_counters(argv)
         command == "tree" -> show_tree()
         command == "run" -> show_run()
+        command == "timeout" -> show_timeout()
         else -> usage()
     }
 }
