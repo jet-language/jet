@@ -1,0 +1,68 @@
+// How a lambda holds each capture. A lambda that only runs where it is made
+// borrows: its writes land on the owner. A stored lambda (kept in a list,
+// returned, passed on) owns its captures: a Copy value is copied when the
+// lambda is made, a clonable value is cloned, and anything else moves in.
+// The checker decides each mode from the use, not from the lambda's syntax.
+Ticket: struct {
+    id: Int
+    on_use: fn(Int) -> Int
+}
+
+run: fn() {
+    count := 0
+    bump: (n: Int) -> {
+        count += n
+    }
+    bump(2)
+    bump(3)
+    print("borrowed write lands on the owner: {count}")
+
+    base := 10
+    read_base: () -> base
+    kept: [read_base]
+    base = 20
+    print("stored copy taken when made: {kept[0].call()}, owner now {base}")
+
+    words := ["a", "b"]
+    word_count: () -> words.len()
+    stored: [word_count]
+    words.push("c")
+    print("stored clone of a list: {stored[0].call()}, owner now {words.len()}")
+
+    ticket: Ticket{id: 7, on_use: (n: Int) -> n * 10}
+    redeem: () -> ticket.on_use(ticket.id)
+    later: [redeem]
+    print("non-clonable ticket moved in: {later[0].call()}")
+
+    tick: counter()
+    tick()
+    tick()
+    print("stored lambda writes its own copy: {tick()}")
+
+    values := [1, 2, 3]
+    fill(values)
+    print("write parameter written inside the call: {values.len()}")
+    sized: count_of(values)
+    values.push(9)
+    print("read parameter cloned into a returned lambda: {sized()}, owner now {values.len()}")
+}
+
+// The lambda outlives this call, so it owns `n`; each call writes that copy.
+counter: fn() -> fn() -> Int {
+    n := 0
+    () -> {
+        n += 1
+        n
+    }
+}
+
+// A lambda that runs inside the call may write a write parameter.
+fill: fn(values: &[Int]) {
+    add: (n: Int) -> values.push(n)
+    add(4)
+}
+
+// A returned lambda clones the read parameter it captures.
+count_of: fn(values: [Int]) -> fn() -> Int {
+    () -> values.len()
+}
