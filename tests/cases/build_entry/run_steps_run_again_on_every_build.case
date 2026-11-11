@@ -19,15 +19,15 @@ exit: 0
 file: mirror.txt = "one"
 file: .jet/build/receipt.json count "\"cache_hit\":false" = 2 # the unchanged rebuild ran both steps again
 file: .jet/build/receipt.json !~ "\"cache_hit\":true" # nothing came from the store
-file: .jet/build/receipt.json ~ "\"cache_hits\":[]"
+file: .jet/build/receipt.json ~ "\"cache_hits\":[]" # the receipt lists no step hit
 write: in.txt = "two\n"
 step: jet build main.jet --allow=Exec,FS,Time
 env: JET_STORE_DIR={work}/store
 exit: 0
 file: mirror.txt = "two" # the changed input reaches mirror
 file: stamp.txt = "two"
-file: .jet/build/receipt.json count "\"cache_hit\":false" = 2
-file: .jet/build/receipt.json ~ "\"cache_hits\":[]"
+file: .jet/build/receipt.json count "\"cache_hit\":false" = 2 # the changed input ran both steps
+file: .jet/build/receipt.json ~ "\"cache_hits\":[]" # the changed input reran both steps, with no hit
 step: jet build sneak.jet --allow=Exec,FS
 env: JET_STORE_DIR={work}/store
 exit: nonzero
