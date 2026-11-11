@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99580,
+    "rev": 99585,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57084,11 +57084,11 @@
         {
           "n": 43,
           "text": "Seed-bump half of ScriptAPI-9 (the E0405 root fix, where a Never arm such as process.fail or process.exit fits every expected type). The admitted seed a0.0.43 rejects `x ?? process.exit(2)` on a Unit or String success and has no process.fail, so the tools it runs keep their eprint-and-exit workarounds until a seed that carries ScriptAPI-9 is admitted. In the same SUB as that seed bump, every such site is converted to `?? process.fail(code, message)`: CoreModuleCheck:60, UnicodeNameAsset:86, CompiledWorkloadPeerLauncherCheck:49, CompiledWorkloadPeerProbe:44, CompiledWorkloads:124, WeightedShards:144, jetc-trace/Summarize:152 and 167, CompilerPackages:111 and about 25 generator `run` `.Err -> eprint+exit` arms. The SUB shows a sweep census of 0 remaining sites.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T01:58:18.885Z"
+          "evidence": "All split SUBs landed and proved: ScriptAPI-28r 2ffbf3b3f0, -29r a50e27cae5, -30r 82b409db6f, -32r e0ece99bb1, -33r a6f852bd72, -27r2 e5d1740151 (33/34, line 26 base red fixed by ScriptAPI-42 51cff63bae), -31r2 6a38f8cb29 (12/12), G1Lead-4-scaling-harness-cli 93b5d2e139 (18/18). The eprint-and-exit pairs are process.fail calls across Tools, Compiler tests, Core/Args, Jetpack/Bootstrap, Examples and tests.",
+          "at": "2026-11-11T19:40:23.783Z"
         },
         {
           "n": 44,
@@ -57254,7 +57254,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T19:36:07.359Z",
+      "updated": "2026-11-11T19:40:23.783Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -71215,29 +71215,29 @@
         {
           "n": 62,
           "text": "An explicitly written empty type cap is pure: a type marked #FX whose method performs IO is refused at check time. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R1, high; the closure of c6, c31 and c40 and #6614 c5 did not cover it): Checks.jet:1098-1124 returns early when the positive ceiling is empty, so it can't tell a pure cap from a deny-only cap, and Modules.jet:383-406 records a present bare marker with zero entries. Fix the representation and the check, not a fixture. Proof: probes/pure-type.jet is refused with a registered code and a UI snapshot; a deny-only cap still allows its other effects; a tier case at O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:37.837Z"
+          "evidence": "ff78e92e51 (G8Scope-23) with fixture fix 1512da8e2a (G8Scope-23f): a bare #FX is pure (E0749); the case passes on batch compiler b3.",
+          "at": "2026-11-11T19:40:26.607Z"
         },
         {
           "n": 63,
           "text": "A repeated #FX marker on one type never drops a limit: either both caps apply (their intersection) or the repeat is refused with a registered diagnostic. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R2, high; also #6614 c6): parser_type_fx_cap (Modules.jet:413-420) returns the first marker and ignores the second, so a second denial is silently discarded. Pick the rule that matches the one-list contract, record it on this card, and prove it with probes/duplicate-cap.jet plus a UI snapshot or tier case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:39.008Z"
+          "evidence": "155962df1f (G8Scope-24) with fixture fix 39de19a03f (G8Scope-24f): a repeated #FX is E0999 and never drops a limit; the case passes on batch compiler b3.",
+          "at": "2026-11-11T19:40:28.150Z"
         },
         {
           "n": 64,
           "text": "A function with an empty effect row cannot write module state through a parameter, an alias, a separately checked lambda or a trait dispatch: the write is refused or charged to the caller. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R3, high; c48 was closed on the direct-name path only): Scopes.jet:2225-2230 records a module write only when the syntactic root is a Constant, and c962b0554e disclosed the parameter, alias, lambda and trait limits. Proof: probes/alias.jet (fn(c: Shared<Count>) -[]> Int { c.value += 1; ... } called with module HITS) is refused or accounted, plus one case per path at O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:40.236Z"
+          "evidence": "ccf64a54ef (G8Scope-25) with fixture fix 67ee98aa9c (G8Scope-25f): a pure fn cannot write held cells (E3401); the case passes on batch compiler b3.",
+          "at": "2026-11-11T19:40:29.228Z"
         },
         {
           "n": 65,
@@ -71260,11 +71260,11 @@
         {
           "n": 67,
           "text": "Docs/spec/spec.md teaches the current pure-cap spelling: bare #FX, never #FX(), which the compiler rejects. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap E2): spec.md:2030 says #FX() is pure. Fix the spec text only; no compatibility spelling. Proof: the spec paragraph's example checks on the train compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:44.455Z"
+          "evidence": "a437a0019c (G8Scope-22): the spec spells bare #FX; its deferred proof passes on batch compiler b3 (seed-b3 at 38cb96129c).",
+          "at": "2026-11-11T19:40:25.041Z"
         },
         {
           "n": 68,
@@ -71284,7 +71284,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-11T19:39:22.947Z",
+      "updated": "2026-11-11T19:40:29.228Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -197978,6 +197978,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T19:40:29.228Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-11T19:40:28.150Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-11T19:40:26.608Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-11T19:40:25.041Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-11T19:40:23.783Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#43"
+    },
     {
       "at": "2026-11-11T19:39:22.947Z",
       "by": "Main",
