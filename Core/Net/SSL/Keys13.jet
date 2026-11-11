@@ -115,33 +115,48 @@ ssl_tls13_hkdf_encode_label: fn(desired_length: Int, label: [U8], ctx: [U8]) -> 
     out
 }
 
-/// HKDF-Expand-Label(secret, label, ctx, buf_len)
-/// (mbedtls_ssl_tls13_hkdf_expand_label). The secret is a PRK, as long as
-/// the digest.
-ssl_tls13_hkdf_expand_label: fn(md: hashes.Md, secret: [U8], label: [U8], ctx: [U8], buf_len: Int) -> [U8] ssldefs.SSLError! {
+/// HKDF-Expand-Label's refusals (mbedtls_ssl_tls13_hkdf_expand_label's
+/// checks and PSA's), from public lengths only. A caller holding the secret
+/// decides on them before the secret enters: a call's result carries its
+/// arguments' tags, so the secret derivation itself returns no error.
+ssl_tls13_expand_label_check: fn(md: hashes.Md, secret_len: Int, label: [U8], ctx: [U8], buf_len: Int) ssldefs.SSLError! {
     if label.len() > SSL_TLS1_3_HKDF_LABEL_MAX_LABEL_LEN -> return Err(.InternalError)
     if ctx.len() > SSL_TLS1_3_KEY_SCHEDULE_MAX_CONTEXT_LEN -> return Err(.InternalError)
     if buf_len > SSL_TLS1_3_KEY_SCHEDULE_MAX_EXPANSION_LEN -> return Err(.InternalError)
     // PSA takes an HKDF-Expand secret of the digest's length only.
-    if secret.len() != hashes.md_size(md) -> return Err(.BadInputData)
-    hkdf_label := ssl_tls13_hkdf_encode_label(buf_len, label, ctx)
-    out: hashes.hkdf_expand(md, secret, hkdf_label, buf_len)
-    ssldefs.ssl_wipe(hkdf_label)
+    if secret_len != hashes.md_size(md) -> return Err(.BadInputData)
     // Past 255 digests PSA runs out of output (INSUFFICIENT_DATA).
-    okm: out ?? return Err(.GenericError)
-    okm
+    if buf_len < 0 || buf_len > 255 * hashes.md_size(md) -> return Err(.GenericError)
+}
+
+/// HKDF-Expand-Label's output, once ssl_tls13_expand_label_check passed for
+/// these lengths.
+ssl_tls13_expand_label_bytes: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], ctx: [U8], buf_len: Int) -> [U8] Never! {
+    hkdf_label := ssl_tls13_hkdf_encode_label(buf_len, label, ctx)
+    out: hashes.hkdf_expand_bytes(md, secret, hkdf_label, buf_len)
+    ssldefs.ssl_wipe(hkdf_label)
+    out
+}
+
+/// HKDF-Expand-Label(secret, label, ctx, buf_len)
+/// (mbedtls_ssl_tls13_hkdf_expand_label). The secret is a PRK, as long as
+/// the digest.
+ssl_tls13_hkdf_expand_label: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], ctx: [U8], buf_len: Int) -> [U8] ssldefs.SSLError! {
+    ssl_tls13_expand_label_check(md, secret.len(), label, ctx, buf_len) ?? return Err(err)
+    Ok(ssl_tls13_expand_label_bytes(md, secret, label, ctx, buf_len))
 }
 
 /// One side's traffic key and IV from its secret (ssl_tls13_make_traffic_key).
-ssl_tls13_make_traffic_key: fn(md: hashes.Md, secret: [U8], key_len: Int, iv_len: Int) -> (key: [U8], iv: [U8]) ssldefs.SSLError! {
-    key := ssl_tls13_hkdf_expand_label(md, secret, "key".bytes(), [U8]{}, key_len) ?? return Err(err)
-    if ssl_tls13_hkdf_expand_label(md, secret, "iv".bytes(), [U8]{}, iv_len) == {
-        .Ok(iv) -> Ok((key: key, iv: iv))
-        .Err(e) -> {
-            ssldefs.ssl_wipe(key)
-            Err(e)
-        }
-    }
+/// Both lengths are checked before either is derived, so no error leaves a
+/// key to wipe.
+ssl_tls13_make_traffic_key: fn(md: hashes.Md, secret: [#Secret U8], key_len: Int, iv_len: Int) -> (key: [U8], iv: [U8]) ssldefs.SSLError! {
+    key_label: "key".bytes()
+    iv_label: "iv".bytes()
+    ssl_tls13_expand_label_check(md, secret.len(), key_label, [U8]{}, key_len) ?? return Err(err)
+    ssl_tls13_expand_label_check(md, secret.len(), iv_label, [U8]{}, iv_len) ?? return Err(err)
+    key: ssl_tls13_expand_label_bytes(md, secret, key_label, [U8]{}, key_len)
+    iv: ssl_tls13_expand_label_bytes(md, secret, iv_label, [U8]{}, iv_len)
+    Ok((key: key, iv: iv))
 }
 
 /// Both sides' write keys and IVs from their traffic secrets
@@ -162,23 +177,26 @@ ssl_tls13_make_traffic_keys: fn(md: hashes.Md, client_secret: [U8], server_secre
     }
 }
 
+/// Derive-Secret's context: the hash of ctx, or ctx itself when ctx_hashed
+/// says it is a hash already. The transcript is public.
+ssl_tls13_derive_context: fn(md: hashes.Md, ctx: [U8], ctx_hashed: Int) -> [U8] ssldefs.SSLError! {
+    if ctx_hashed == SSL_TLS1_3_CONTEXT_UNHASHED -> return Ok(hashes.hash(md, ctx))
+    if ctx.len() > SSL_TLS1_3_KEY_SCHEDULE_MAX_CONTEXT_LEN -> return Err(.InternalError)
+    Ok(ctx.copy())
+}
+
 /// Derive-Secret(secret, label, ctx): ctx is hashed first unless
 /// ctx_hashed says it is a hash already (mbedtls_ssl_tls13_derive_secret).
-ssl_tls13_derive_secret: fn(md: hashes.Md, secret: [U8], label: [U8], ctx: [U8], ctx_hashed: Int, dst_len: Int) -> [U8] ssldefs.SSLError! {
-    hashed_context := [U8]{}
-    if ctx_hashed == SSL_TLS1_3_CONTEXT_UNHASHED {
-        hashed_context = hashes.hash(md, ctx)
-    } else {
-        if ctx.len() > SSL_TLS1_3_KEY_SCHEDULE_MAX_CONTEXT_LEN -> return Err(.InternalError)
-        hashed_context = ctx.copy()
-    }
-    ssl_tls13_hkdf_expand_label(md, secret, label, hashed_context, dst_len)
+ssl_tls13_derive_secret: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], ctx: [U8], ctx_hashed: Int, dst_len: Int) -> [U8] ssldefs.SSLError! {
+    hashed_context: ssl_tls13_derive_context(md, ctx, ctx_hashed) ?? return Err(err)
+    ssl_tls13_expand_label_check(md, secret.len(), label, hashed_context, dst_len) ?? return Err(err)
+    Ok(ssl_tls13_expand_label_bytes(md, secret, label, hashed_context, dst_len))
 }
 
 /// The next secret of the schedule: HKDF-Extract with Derive-Secret(old,
 /// "derived", "") as salt, zeros for an initial one, over `input`, zeros
 /// when empty (mbedtls_ssl_tls13_evolve_secret).
-ssl_tls13_evolve_secret: fn(md: hashes.Md, secret_old: [U8]?, input: [U8]) -> [U8] ssldefs.SSLError! {
+ssl_tls13_evolve_secret: fn(md: hashes.Md, secret_old: [U8]?, input: [#Secret U8]) -> [U8] ssldefs.SSLError! {
     hlen: hashes.md_size(md)
     tmp_secret := ssldefs.ssl_zeros(hlen)
     if secret_old == {
@@ -243,9 +261,11 @@ ssl_tls13_derive_resumption_master_secret: fn(md: hashes.Md, application_secret:
 /// The Finished MAC: HMAC under HKDF-Expand-Label(base_key, "finished",
 /// "", Hash.length) of the transcript hash (ssl_tls13_calc_finished_core,
 /// RFC 8446 4.4.4).
-ssl_tls13_calc_finished_core: fn(md: hashes.Md, base_key: [U8], transcript: [U8]) -> [U8] ssldefs.SSLError! {
+ssl_tls13_calc_finished_core: fn(md: hashes.Md, base_key: [#Secret U8], transcript: [U8]) -> [U8] ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
-    finished_key := ssl_tls13_hkdf_expand_label(md, base_key, "finished".bytes(), [U8]{}, hash_len) ?? return Err(err)
+    finished_label: "finished".bytes()
+    ssl_tls13_expand_label_check(md, base_key.len(), finished_label, [U8]{}, hash_len) ?? return Err(err)
+    finished_key := ssl_tls13_expand_label_bytes(md, base_key, finished_label, [U8]{}, hash_len)
     mac: hashes.hmac(md, finished_key, ssldefs.ssl_bytes_of(transcript, 0, hash_len))
     ssldefs.ssl_wipe(finished_key)
     Ok(mac)
@@ -624,14 +644,17 @@ ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SS
 
 /// A TLS-Exporter value (mbedtls_ssl_tls13_exporter, RFC 8446 7.5):
 /// Derive-Secret(secret, label, "") then HKDF-Expand-Label with
-/// "exporter" over the context's hash.
-ssl_tls13_exporter: fn(md: hashes.Md, secret: [U8], label: [U8], context_value: [U8], out_len: Int) -> [U8] ssldefs.SSLError! {
+/// "exporter" over the context's hash. Both expansions are checked before
+/// the secret enters either.
+ssl_tls13_exporter: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], context_value: [U8], out_len: Int) -> [U8] ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
-    hkdf_secret := ssl_tls13_derive_secret(md, secret, label, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hash_len) ?? return Err(err)
-    out: ssl_tls13_derive_secret(md, hkdf_secret, "exporter".bytes(), context_value, SSL_TLS1_3_CONTEXT_UNHASHED, out_len) ?? {
-        ssldefs.ssl_wipe(hkdf_secret)
-        return Err(err)
-    }
+    exporter_label: "exporter".bytes()
+    empty_hash: ssl_tls13_derive_context(md, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED) ?? return Err(err)
+    context_hash: ssl_tls13_derive_context(md, context_value, SSL_TLS1_3_CONTEXT_UNHASHED) ?? return Err(err)
+    ssl_tls13_expand_label_check(md, secret.len(), label, empty_hash, hash_len) ?? return Err(err)
+    ssl_tls13_expand_label_check(md, hash_len, exporter_label, context_hash, out_len) ?? return Err(err)
+    hkdf_secret := ssl_tls13_expand_label_bytes(md, secret, label, empty_hash, hash_len)
+    out: ssl_tls13_expand_label_bytes(md, hkdf_secret, exporter_label, context_hash, out_len)
     ssldefs.ssl_wipe(hkdf_secret)
-    out
+    Ok(out)
 }

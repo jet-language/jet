@@ -1463,7 +1463,7 @@ ssl_resend_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
 
 /// P_hash(secret, label || random) cut to `dlen` bytes, the TLS 1.2 PRF under
 /// `md` (tls_prf_generic, RFC 5246 5).
-ssl_tls_prf_generic: fn(md: hashes.Md, secret: [U8], label: [U8], random: [U8], dlen: Int) -> [U8] Never! {
+ssl_tls_prf_generic: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], random: [U8], dlen: Int) -> [U8] Never! {
     md_len: hashes.md_size(md)
     key: hashes.hmac_key(md, secret)
     // A(1) = HMAC(secret, label || random).
@@ -1494,7 +1494,7 @@ ssl_tls_prf_generic: fn(md: hashes.Md, secret: [U8], label: [U8], random: [U8], 
 
 /// The TLS 1.2 PRF of type `prf`, SSL_TLS_PRF_SHA384 or SSL_TLS_PRF_SHA256
 /// (mbedtls_ssl_tls_prf); FeatureUnavailable for any other.
-ssl_tls_prf: fn(prf: Int, secret: [U8], label: [U8], random: [U8], dlen: Int) -> [U8] ssldefs.SSLError! {
+ssl_tls_prf: fn(prf: Int, secret: [#Secret U8], label: [U8], random: [U8], dlen: Int) -> [U8] ssldefs.SSLError! {
     if prf == ssldefs.SSL_TLS_PRF_SHA384 -> return Ok(ssl_tls_prf_generic(.SHA384, secret, label, random, dlen))
     if prf == ssldefs.SSL_TLS_PRF_SHA256 -> return Ok(ssl_tls_prf_generic(.SHA256, secret, label, random, dlen))
     Err(.FeatureUnavailable)

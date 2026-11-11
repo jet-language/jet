@@ -59,7 +59,7 @@ ssl_get_mode_from_transform: fn(t: ssldefs.SSLTransform) -> SSLMode Never! {
 /// min_len...max_len, so the record's padding length does not show in
 /// its timing (mbedtls_ct_hmac). The secret length is a word, compared
 /// under masks only.
-ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [U8], doff: Int, data_len_secret: U64, min_len: Int, max_len: Int) -> [U8] Never! {
+ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [#Secret U8], doff: Int, data_len_secret: #Secret U64, min_len: Int, max_len: Int) -> [U8] Never! {
     ctx := hashes.hash_clone(key.inner)
     hashes.hash_update(ctx, add_data)
     hashes.hash_update_range(ctx, data, doff, min_len)
