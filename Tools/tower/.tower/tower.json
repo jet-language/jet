@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99119,
+    "rev": 99122,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26144,7 +26144,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-11-10T05:07:11.847Z",
+      "updated": "2026-11-11T02:58:28.132Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -34597,7 +34597,7 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-10T06:06:28.775Z",
+      "updated": "2026-11-11T02:58:27.043Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -46316,7 +46316,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-10T21:29:07.479Z",
+      "updated": "2026-11-11T02:58:25.979Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -194834,6 +194834,474 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T02:44:12.295Z"
+    },
+    {
+      "id": "D-META-REG2",
+      "cardId": "c0699zei",
+      "group": "tooling",
+      "title": "One typed fact query in core.compiler, with inspect as its command-line view",
+      "situation": "Jet records rules, facts about a checked program, and evidence from a run. Those records live for different lengths of time, so they should not be squeezed into one mutable table. The owner already approved one typed way to read them, but did not name its public entry point. The tested ledger import and inspect facts command are unavailable. Choose the API and command spelling, without reopening the three-store design. We recommend one query in core.compiler and a command that renders its exact results.",
+      "gist": "Should a core.compiler query and inspect command share one typed fact result?",
+      "lesson": "The rulebook, a checked program and a run receipt are different shelves. One librarian can answer questions about all three without mixing them up. An empty answer must mean there are no matching rows, not that the librarian never opened the shelf.",
+      "explainer": "",
+      "story": "A tool counts the marker-rule facts in the schema. Every option answers that same question from the same schema snapshot. Experts can use the same query for a particular checked program or run receipt.",
+      "inWild": "A command-line view and a library view can share one typed implementation. Jet's approved compiler-as-library design already requires this direction; a CLI subprocess should not be the only way a build-time Jet tool reads its own checked facts.",
+      "detail": "D-META-REG1=A approves shared schema machinery; D-LEDGER1=D retains schema, checked-program and run-evidence stores behind one typed query. This ballot names its public views. It adds no fourth store, mutable compiler heap or second evidence grader. Read-only queries need no Meta mutation effect.\n\nCanonical API: core.compiler.query(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError!. FactSource is Schema(SchemaSnapshot), Program(ProgramInfo) or Run(RunReceipt). Each supplies an explicit immutable authorized snapshot, not a forged name or ambient current program. Omitted time selects that snapshot's complete recorded view; omitted limit requests all authorized matching rows.\n\nFact is a tagged projection of SchemaFact, ProgramFact or RunFact, preserving canonical typed fields and source identity. FactKind comes from the executable schema. QueryTime selects the approved temporal view, not a schema column. Only claims have evidence grades. Rights retain their existing gate kind and provenance without grades.\n\nReuse D-META-REFLECT2=A's MetadataError: Unavailable, Unsupported, Stale, Invalid, Denied or Truncated. Empty success means checked emptiness. Missing stages, private facts and absent runs never become empty success. Explicit limits return Truncated instead of a partial list claiming completeness. Identity and order stay canonical across every consumer.\n\nCLI: jet inspect facts --store=schema|program|run --kind=K [SOURCE] [--json]. Schema selects the running toolchain's schema; no SOURCE is allowed. Program requires a target source, checked into a snapshot through the normal pipeline. Run requires an explicit receipt path, validated by the ordinary receipt reader. No default latest run. A failed program check cannot publish recovered rows as valid facts. Both renderers include schema/snapshot identity and completeness.\n\nBeginner path: inspect answers a concrete question. Expert path: ordinary Jet imports core.compiler and reads an authorized immutable source, including permitted #run code. A read snapshot confers no Compiler mutation authority; D-META-COMPILER1's powerful passed control handle keeps its distinct purpose. No new global ledger namespace or discovery mechanism.\n\nB publicly exposes only the Core query; internal consumers still share it. C publicly exposes only the CLI; its internal typed query remains shared, but user Jet libraries must cross a subprocess/JSON boundary. That gives up the library-first ladder, not the three-store rule.\n\nObserved on t17a a0.0.43: core.compiler.ledger import gets E1001. inspect facts with schema/kind/JSON arguments gets E2101. The inspected Core/Compiler/Compiler.jet contains small typed records and extension points, not this query. These targeted reads are not an API census. The ratified_p12 d_meta_reg1_contract path was absent here and not executed.\n\nAdversarial verdict: A holds as multiple views of one query. First require explicit immutable sources instead of ambient mutable state. Then keep CLI rendering outside the typed reader. Lists cost memory; reuse immutable storage where legal and honor explicit limits. Missing/stale facts remain failures. No proposed query or performance advantage was exercised.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Core query and its inspect view",
+          "detail": "One public typed function in core.compiler; inspect renders it for humans and automation. Same facts, identities and errors.",
+          "code": "// Proposed client tool, given the selected schema and fact kind.\nuse compiler: core.compiler\ncount_rules: fn(schema: compiler.SchemaSnapshot, kind: compiler.FactKind) -> Int compiler.MetadataError! {\n    rows: compiler.query(.Schema(schema), kind: kind)\n    rows.len()\n}\n// Beginner equivalent:\n// jet inspect facts --store=schema --kind=marker --json\n// Both count the same rows; no fabricated fixed count."
+        },
+        {
+          "key": "B",
+          "name": "Core query only",
+          "detail": "Keep the public typed query but add no public inspect facts action. Users write a small Jet tool for this question.",
+          "code": "// Proposed client tool; identical typed query.\nuse compiler: core.compiler\ncount_rules: fn(schema: compiler.SchemaSnapshot, kind: compiler.FactKind) -> Int compiler.MetadataError! {\n    rows: compiler.query(.Schema(schema), kind: kind)\n    rows.len()\n}\n// Run a caller supplying the selected schema and marker kind.\n// No new inspect facts action."
+        },
+        {
+          "key": "C",
+          "name": "Inspect command only",
+          "detail": "Expose the shared internal query only through a CLI. A user-written Jet client cannot call the typed reader directly.",
+          "code": "// Same schema-count task; shell-facing tool invocation.\n// jet inspect facts --store=schema --kind=marker --json\n// Read the returned row count from that result.\n// No public core.compiler.query function.\n// Internal consumers still share the approved typed contract.\n// A #run client cannot replace this with an ambient process call."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Keep Jet's compiler library usable by Jet tools, and let inspect be a convenient renderer rather than another facts implementation.",
+        "gains": [
+          "One typed query",
+          "Human and programmatic views",
+          "Explicit snapshot identity"
+        ],
+        "losses": [
+          {
+            "loss": "Returning rows can use substantial memory.",
+            "mitigation": "Reuse immutable storage where legal and apply explicit bounds with honest truncation errors."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Strong smallest API, but requires a user tool for every ad hoc inspection."
+          },
+          {
+            "key": "C",
+            "reason": "Convenient CLI, but Jet libraries must cross a subprocess/JSON boundary for a typed read."
+          }
+        ],
+        "tradeoff": "Two access views, one fact mechanism and one error contract."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Verified the ratified three-store and metadata-error contracts, probed unavailable API/CLI candidates, and replaced ambient ledger access with explicit snapshots in the existing compiler namespace."
+      },
+      "checkInstructions": "Prove identical typed/text/JSON rows for schema, checked programs and explicit run receipts; stale/denied/unavailable/truncated results; stable ordering; no rights grades; and no mutation authority from read handles. Create or locate the real criterion witness before claiming completion.",
+      "surface": {
+        "gist": "Should a core.compiler query and inspect command share one typed fact result?",
+        "lesson": "Rules, checked programs and run evidence have different lifetimes. Query an explicit snapshot with one typed reader. Missing data is an error, not an empty success.",
+        "trio": {
+          "current": {
+            "note": "Both proposed public entry points are unavailable in the exercised probes.",
+            "code": "use ledger: core.compiler.ledger // unknown Core module\njet inspect facts // unknown inspect command"
+          },
+          "wild": {
+            "lang": "Jet compiler-as-library contract",
+            "note": "Ordinary Jet tools should read typed checked data without invoking a separate CLI parser.",
+            "code": "// One checked snapshot, multiple read-only views."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Core plus inspect",
+            "gist": "One typed query with a CLI renderer.",
+            "gains": [
+              "Both user paths",
+              "One fact result"
+            ],
+            "losses": [
+              "Two interface views to maintain"
+            ],
+            "proposed": {
+              "code": "compiler.query(.Schema(schema), kind: kind)\njet inspect facts --store=schema --kind=marker --json"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Core only",
+            "gist": "Write Jet tools for ad hoc inspection.",
+            "gains": [
+              "Smallest public API"
+            ],
+            "losses": [
+              "More tooling for simple questions"
+            ],
+            "proposed": {
+              "code": "compiler.query(.Schema(schema), kind: kind)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "CLI only",
+            "gist": "Expose public results through inspect.",
+            "gains": [
+              "Easy terminal access"
+            ],
+            "losses": [
+              "No typed public #run query"
+            ],
+            "proposed": {
+              "code": "jet inspect facts --store=schema --kind=marker --json"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Offer a small terminal view without making Jet clients parse their own compiler's JSON.",
+          "gains": [
+            "One typed source of facts"
+          ],
+          "losses": [
+            {
+              "loss": "Large queries use memory.",
+              "mitigation": "Reuse immutable rows and expose explicit limits, never false completeness."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "No ad hoc command."
+            },
+            {
+              "key": "C",
+              "reason": "No public typed read."
+            }
+          ],
+          "tradeoff": "One query, multiple views."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T02:58:25.979Z"
+    },
+    {
+      "id": "D-DECL-ORIGIN1",
+      "cardId": "c0yfcz0w",
+      "group": "syntax",
+      "title": "Read a declaration's source location from its existing reflection record",
+      "situation": "Tools need to say where a type, field or function was declared. The location where a query is written is not that declaration's location. Jet already has reflection records and a common SourceLocation record, but the tested reflection result lacks the proposed location field. Choose how to read that declaration location without confusing it with value provenance or caller location. We recommend a location member on the ordinary reflection record. It reuses reflection instead of inventing another compiler-filled sigil.",
+      "gist": "Should declaration locations be ordinary members of existing reflection records?",
+      "lesson": "#here says where this expression is written; #caller says where the caller called. A declaration location says where Point or helper was defined. A tracked value's origin answers yet another question: where its data came from.",
+      "explainer": "",
+      "story": "A tool prints Point at line 3 and helper at line 7 of one source file. Every option asks about those same declarations, not about the later query lines.",
+      "inWild": "Jet's existing reflection records already carry checked source spans. Its SourceLocation record already supplies file, line and column for site information. The cohesive extension derives a location from that same checked source, rather than creating another source-tracking system.",
+      "detail": "#3520 c24 requires declaration/field/method positions as D-JAI-SITE1 SourceLocation. D-META-HASH1=A selects ordinary reflection; D-META-HASH2=A owns #here/#caller. A adds location: SourceLocation? to type, callable, field and method records. C uses declared_at with that same type. B's #origin returns the same optional record. None means known absence of a source declaration; unavailable analysis still fails the existing reflection query with MetadataError.\n\nThe location identifies the declaration-name token in the checked snapshot. Reuse SourceLocation's line, column and path conventions, not another coordinate scheme. Generic instances point to their definition, not a random call. Alias type reflection follows existing resolved-type identity; no new alias-handle syntax is introduced here. Overloads require existing typed selection, never the first same-named declaration.\n\nDerive the member from canonical SourceSpan and SourceId; do not maintain another location store. Generated declarations point into checked generated source and retain existing expansion provenance for navigation. No fallback to #here or fabricated line zero. Snapshot digests remain valid identities even when a mutable disk file changes.\n\nOnly the compile-time access required by c24 is authorized here. Do not retain source metadata at runtime just for an early line query. Existing visibility, authority and retention rules apply. Private paths and generated text remain protected. No implicit source reopen to repair stale metadata.\n\nBeginner path: read location and handle known absence, as the complete panes show. Expert path: iterate fields/methods with the same member while using snapshot and expansion metadata. #here/#caller remain use/call sites. Tracked value origin remains data provenance, possibly ambiguous; it is not declaration identity.\n\nB is a new parameterized compiler root, unlike #here's lexical read, but must still use the same checked metadata. It creates no runtime type lookup or extra authority. C is a strong ordinary-field alternative whose name emphasizes the declaration. A uses the common location vocabulary throughout reflected records. Optionality and errors are identical in every option.\n\nObserved on t17a a0.0.43: early Point.reflect() metadata prints struct for kind. INFO.location.line gets E0302. Ordinary runtime Point.reflect() gets E0311, not proof that early reflection is absent. Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:817-826, 891-906 and 1477-1505 expose field/method/type spans; 89-93 builds offset spans. These are reuse points, not a working location projection.\n\nAdversarial verdict: A holds as a checked-source view. First reuse span and location records. Then preserve identity and expansion provenance instead of silently substituting the query site. Cache snapshot line tables rather than scan text per query. Known absent declarations remain None, never invented positions. No proposed exact-line golden was executed; the named witness file was absent here. The panes supply its complete proposed source with Point at line 3 and helper at line 7.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reflection .location",
+          "detail": "Read the optional location on the existing reflection record. Handle known absence explicitly; missing analysis uses the ordinary metadata error.",
+          "code": "// t10b_decl_origin.jet; proposed A.\n\nPoint: struct { x: Int }\n\n// Same helper in every option.\n\nhelper: fn() -> Int { 1 }\n\nrun: fn() {\n    point_site: #run { Point.reflect().location ?? panic(\"no declaration\") }\n    helper_site: #run { helper.reflect().location ?? panic(\"no declaration\") }\n    print(\"Point {point_site.line}\")\n    print(\"helper {helper_site.line}\")\n}\n// Point 3; helper 7."
+        },
+        {
+          "key": "B",
+          "name": "New #origin declaration query",
+          "detail": "New compiler-filled declaration query, returning the same optional location through the same metadata source and authority rules.",
+          "code": "// t10b_decl_origin.jet; proposed B.\n\nPoint: struct { x: Int }\n\n// Same helper in every option.\n\nhelper: fn() -> Int { 1 }\n\nrun: fn() {\n    point_site: #origin(Point) ?? panic(\"no declaration\")\n    helper_site: #origin(helper) ?? panic(\"no declaration\")\n    print(\"Point {point_site.line}\")\n    print(\"helper {helper_site.line}\")\n}\n// Point 3; helper 7."
+        },
+        {
+          "key": "C",
+          "name": "Reflection .declared_at",
+          "detail": "Same reflection and optionality as A, with a more specific member name. No separate source store or query semantics.",
+          "code": "// t10b_decl_origin.jet; proposed C.\n\nPoint: struct { x: Int }\n\n// Same helper in every option.\n\nhelper: fn() -> Int { 1 }\n\nrun: fn() {\n    point_site: #run { Point.reflect().declared_at ?? panic(\"no declaration\") }\n    helper_site: #run { helper.reflect().declared_at ?? panic(\"no declaration\") }\n    print(\"Point {point_site.line}\")\n    print(\"helper {helper_site.line}\")\n}\n// Point 3; helper 7."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A declaration is already reflected as a record. Put its location there and reuse the shared SourceLocation shape instead of adding another sigil.",
+        "gains": [
+          "Existing reflection grammar",
+          "Shared source identity",
+          "Same access for fields and methods"
+        ],
+        "losses": [
+          {
+            "loss": "Location can be mistaken for value provenance.",
+            "mitigation": "Document the member as declaration location and keep tracked origin and expansion paths distinct."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Clear short spelling, but adds a parameterized compiler root for data already owned by reflection."
+          },
+          {
+            "key": "C",
+            "reason": "Strong ordinary-field alternative; A uses the common location vocabulary on all declaration records."
+          }
+        ],
+        "tradeoff": "A shared reflected field, not another source-tracking mechanism."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Verified early reflection and missing location separately, read the source-span producers and ratified site/reflection contracts, and preserved alias, generation, privacy and retention boundaries."
+      },
+      "checkInstructions": "Run the exact line-3/line-7 witness, fields and methods, aliases, instantiated generics, generated-source provenance, stale snapshots and denied private metadata. Preserve SourceLocation's existing coordinate rules and avoid unintended runtime retention.",
+      "surface": {
+        "gist": "Should declaration locations be ordinary members of existing reflection records?",
+        "lesson": "Declaration location differs from query site, caller site and data provenance. Reuse reflection and SourceLocation. Known absence is optional; missing analysis is a metadata error.",
+        "trio": {
+          "current": {
+            "note": "Early reflection prints struct; the proposed location field gets E0302.",
+            "code": "INFO: comptime { Point.reflect() }\nprint(INFO.location.line) // proposed field unavailable"
+          },
+          "wild": {
+            "lang": "Jet source metadata",
+            "note": "Checked spans and SourceLocation already describe positions.",
+            "code": "// Derive location from the same checked source span."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Reflection location",
+            "gist": "Read an optional location on the existing record.",
+            "gains": [
+              "No new sigil",
+              "Uniform member access"
+            ],
+            "losses": [
+              "Known absence needs handling."
+            ],
+            "proposed": {
+              "code": "site: Point.reflect().location ?? panic(\"no declaration\")\nsite.line // 3"
+            }
+          },
+          {
+            "key": "B",
+            "name": "New origin root",
+            "gist": "A new declaration query returns that same optional record.",
+            "gains": [
+              "Short explicit query"
+            ],
+            "losses": [
+              "Another parameterized sigil root"
+            ],
+            "proposed": {
+              "code": "site: #origin(Point) ?? panic(\"no declaration\")\nsite.line // 3"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Reflection declared_at",
+            "gist": "Same record and optionality, more specific name.",
+            "gains": [
+              "Clear declaration meaning"
+            ],
+            "losses": [
+              "Different location vocabulary"
+            ],
+            "proposed": {
+              "code": "site: Point.reflect().declared_at ?? panic(\"no declaration\")\nsite.line // 3"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Put declaration data on its existing reflection record.",
+          "gains": [
+            "One reflection path"
+          ],
+          "losses": [
+            {
+              "loss": "Some declarations have no source.",
+              "mitigation": "Return known absence, never a fabricated query-site location."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Adds another root for existing metadata."
+            },
+            {
+              "key": "C",
+              "reason": "Strong alternative name, same semantics."
+            }
+          ],
+          "tradeoff": "One ordinary member, explicit absence."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T02:58:27.043Z"
+    },
+    {
+      "id": "D-PREPOST-STRIP1",
+      "cardId": "c0cshs43",
+      "group": "tooling",
+      "title": "Select per-module contract stripping through the existing build-option and profile mechanism",
+      "situation": "Preconditions and postconditions check application promises at runtime. Jet already approved keeping them in every build unless an expert explicitly strips a module's checks. The inspected compiler records checked and proved clauses but does not select its existing stripped state. Turning off a whole statement is different from turning off only its contract checks. Choose the missing control spelling or remove that opt-out. We recommend one module-list row in the existing build/profile settings system, while making the loss of unproved bug detection visible.",
+      "gist": "Should per-module contract stripping use the existing build-option and profile system?",
+      "lesson": "A proved check is unnecessary because the compiler knows its answer. A stripped check is deliberately not asked. Those are different reasons to emit no runtime code, and the report must never call stripping proof.",
+      "explainer": "",
+      "story": "A module's positive function checks that n is positive and returns n. Every option prints 7 for its valid call. The difference is whether an expert may omit the unproved runtime contract while still executing the function.",
+      "inWild": "Jet already has one build-option table generating profile fields, flags and build-handle methods. Its #Off and #DebugOnly controls erase whole statements. Reusing the build table matches the approved per-module build policy without overloading statement erasure.",
+      "detail": "#3029 c14 preserves D-PREPOST1=A's per-module strip, separate from proof erasure. A adds strip_contracts: [String] to the existing Build table, empty by default everywhere. Profile: Build{strip_contracts: [\"app.math\"]}. Flag: repeated --strip-contracts=MODULE. Build method: b.strip_contracts([\"app.math\"]). These are generated views of one row, not another contracts configuration tree.\n\nNames resolve to exact canonical modules owned by the selecting package. No glob/prefix matching or dependency override. Missing, ambiguous and foreign modules are errors. Existing precedence, list replacement and pins apply. A root cannot strip dependencies through aliases. Published policy retains its selecting provenance for inspection.\n\nResolve the row before proofs. Still parse, type and purity-check clauses. Record Stripped with module, profile and selecting source. Omit runtime predicate/message evaluation, not the function or argument effects. Proven remains backed by a proof key. Receipts and inspection distinguish those reasons; stripping is never a successful proof.\n\nA nonempty list uses the existing check-removal gate and audit. Settings cannot bypass source/enterprise denial. Sema may not use unproved stripped Pre/Post assumptions to remove memory checks or establish caller facts. Keep required bounds/ownership checks, or refuse a program whose only safety justification was stripped. No new unsafe exception.\n\nRuntime stripping does not suppress explicit #run requirements, fixed-input build errors under D-PRE-COMPILE1, marker checking or type/borrow errors. If GENERIC1's staging proposal passes, its independent #run obligation survives too. An unapproved proposal is not treated as already built.\n\nBeginners omit the row and retain checks. Experts select owned modules in a profile or one invocation and inspect gates/dispositions. A selected profile means the same thing at every tier. Release alone never strips contracts. Source edits are unnecessary to try or revoke the policy.\n\nB adds #StripContracts on a module, lowering to the same disposition/audit. Intent is nearby, but policy becomes a source edit and another specialized marker. C amends PREPOST1 to remove unproved stripping; only actual proof can erase a clause. This preserves the strongest application checking but withdraws the approved opt-out.\n\n#Off is not contract stripping. D-CANVASSTATE1=D makes Off/DebugOnly whole-statement switches. #Off print(positive(0)) removes the call and print, not just its contract. Extending it to declarations or selected marker enforcement needs new grammar; it is not existing semantics. Conditional #Off(.Release) also selects statement erasure.\n\nObserved on t17a a0.0.43, jet run -: Off around print(positive(0)), followed by print(7), prints only 7. Off(.Release) around print(3), followed by print(7), prints 3 then 7 at dev. Contracts.jet:684-690 produces Proven or Check; BuildContracts.jet:20-21 emits only Check. Registry/BuildOptions.jet:30-45 supplies the shared row and removal metadata. No proposed strip control was exercised.\n\nAdversarial verdict: A supplies the missing spelling, not equal application protection. First remove provable checks through proof. Then make unproved removal explicit through the typed audited row. An unperformed unproved check cannot detect its violation. Preserve memory safety and show omitted application checks; that remaining loss is the chosen opt-out, not removable by another annotation.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Existing build row and profiles",
+          "detail": "One strip_contracts module list generates the profile field, command flag and build method. Empty by default; audited when nonempty.",
+          "code": "// app/math.jet; same module program in every option.\n#Pre(n > 0, \"positive\")\npositive: fn(n: Int) -> Int { n }\nrun: fn() { print(positive(7)) }\n// Beginner: checks stay on. Output 7.\n// Proposed expert profile field:\n// Build{strip_contracts: [\"app.math\"]}\n// One run: --strip-contracts=app.math\n// Still prints 7; unproved runtime contract is omitted."
+        },
+        {
+          "key": "B",
+          "name": "New module marker",
+          "detail": "Select the same stripped disposition with a specialized module marker. Shared checking/audit remains, but the surface is source policy rather than a build row.",
+          "code": "// app/math.jet; same positive function and call.\n#StripContracts\nmath: module {\n    #Pre(n > 0, \"positive\")\n    positive: fn(n: Int) -> Int { n }\n}\nrun: fn() { print(math.positive(7)) }\n// Proposed B: prints 7, omits unproved runtime contracts.\n// The marker still cannot remove memory-safety checks."
+        },
+        {
+          "key": "C",
+          "name": "No unproved stripping",
+          "detail": "Amend PREPOST1 and remove its explicit strip opt-out. Only actual proof removes a contract; no profile or marker can discard an unproved check.",
+          "code": "// app/math.jet; same module program.\n#Pre(n > 0, \"positive\")\npositive: fn(n: Int) -> Int { n }\nrun: fn() { print(positive(7)) }\n// Output 7. Proven clauses emit no check.\n// Unproved clauses always remain, including release.\n// strip_contracts and #StripContracts do not exist."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The owner already chose an explicit build-policy escape. Spell it through the existing settings/profile ladder, not a new statement or marker-erasure meaning.",
+        "gains": [
+          "No new erasure mechanism",
+          "Existing flags/settings/profile parity",
+          "Visible stripped versus proved dispositions"
+        ],
+        "losses": [
+          {
+            "loss": "Unproved application violations may go undetected.",
+            "mitigation": "Prefer proof erasure, require explicit audited module selection, and keep memory safety independent of stripped assumptions."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Visible in source, but adds a specialized marker and makes one-run selection require edits."
+          },
+          {
+            "key": "C",
+            "reason": "Strongest unproved bug detection, but withdraws the ratified expert opt-out."
+          }
+        ],
+        "tradeoff": "An explicit loss of unproved application checking, never a safety proof or automatic release default."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Read PREPOST and statement-erasure ratifications, executed Off probes, and reused the build table while forbidding stripped assumptions from laundering memory-safety proofs or early requirements."
+      },
+      "checkInstructions": "Test default-on profiles, exact module selection, unknown/dependency modules, precedence/pins and denial gates. Prove calls and argument effects remain, Stripped differs from Proven in receipts, and no removed contract assumption removes required safety checks on any tier.",
+      "surface": {
+        "gist": "Should per-module contract stripping use the existing build-option and profile system?",
+        "lesson": "Proved means the answer is known. Stripped means the runtime question was deliberately omitted. Keep those reasons separate. Statement switches erase whole statements and are not a contract policy.",
+        "trio": {
+          "current": {
+            "note": "Off removes the whole call; inspected contract checking produces no Stripped state.",
+            "code": "#Off print(positive(0)) // no call or print\nprint(7) // probe prints 7"
+          },
+          "wild": {
+            "lang": "Jet build-option system",
+            "note": "One table generates profile fields, flags and build methods.",
+            "code": "Build{strip_contracts: [\"app.math\"]} // proposed row"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Build row",
+            "gist": "Explicit owned-module list in the existing settings ladder.",
+            "gains": [
+              "No new grammar",
+              "One-run or recorded selection"
+            ],
+            "losses": [
+              "Unproved checks are omitted."
+            ],
+            "proposed": {
+              "code": "--strip-contracts=app.math\n// profile: Build{strip_contracts: [\"app.math\"]}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Module marker",
+            "gist": "Mark the source module for stripping.",
+            "gains": [
+              "Nearby source intent"
+            ],
+            "losses": [
+              "New marker; source edits for policy"
+            ],
+            "proposed": {
+              "code": "#StripContracts\nmath: module { /* same function */ }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Proof erasure only",
+            "gist": "Keep every unproved runtime contract.",
+            "gains": [
+              "Strongest application checking"
+            ],
+            "losses": [
+              "Removes the approved expert opt-out."
+            ],
+            "proposed": {
+              "code": "// No stripping control; only proof removes checks."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the existing build-policy mechanism for the already approved opt-out.",
+          "gains": [
+            "One policy ladder"
+          ],
+          "losses": [
+            {
+              "loss": "Omitted checks cannot catch violations.",
+              "mitigation": "Prefer proof, audit exact module selection and preserve independent safety checks."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Adds specialized source policy."
+            },
+            {
+              "key": "C",
+              "reason": "Withdraws the approved opt-out."
+            }
+          ],
+          "tradeoff": "Audited expert opt-out, not automatic release stripping."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T02:58:28.132Z"
     }
   ],
   "questions": [
@@ -198010,6 +198478,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:58:28.132Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PREPOST-STRIP1",
+      "note": "Select per-module contract stripping through the existing build-option and profile mechanism"
+    },
+    {
+      "at": "2026-11-11T02:58:27.043Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DECL-ORIGIN1",
+      "note": "Read a declaration's source location from its existing reflection record"
+    },
+    {
+      "at": "2026-11-11T02:58:25.979Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-META-REG2",
+      "note": "One typed fact query in core.compiler, with inspect as its command-line view"
+    },
     {
       "at": "2026-11-11T02:49:22.566Z",
       "by": "Main",
