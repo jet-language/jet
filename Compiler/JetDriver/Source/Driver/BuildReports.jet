@@ -5,7 +5,7 @@ use {
     jetpack_foundation.[BuildEffect]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[
-        BuildSessionAction, BuildSessionPlan, BuildSessionState, build_key_debug_text,
+        BuildSessionAction, BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionState, build_key_debug_text,
         build_key_target_kind, build_session_project,
     ]
 }
@@ -68,6 +68,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
         if generated_row.path == subject {
             facts.push("generated={generated_row.name}")
             facts.push("digest={generated_row.source_digest}")
+            if generated_row.producer != None -> facts.push("made_by={jet_driver_build_generated_maker(generated_row)}")
             break
         }
     }
@@ -107,11 +108,25 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
         reproducibility: if probe.reproducibility == "ambient" -> { "Ambient" } else -> { "Reproducible" }
         probes.push("{{\"name\":{foundation_json_quote(probe.name)},\"kind\":{foundation_json_quote(kind)},\"reproducibility\":{foundation_json_quote(reproducibility)}}}")
     }
-    generated: loop generated_row in permit.value.generated -> "{{\"name\":{foundation_json_quote(generated_row.name)},\"path\":{foundation_json_quote(generated_row.path)},\"digest\":{foundation_json_quote(generated_row.source_digest)}}}"
+    generated: loop generated_row in permit.value.generated -> jet_driver_build_generated_json(generated_row)
     default: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
     // Rust BuildGraph.affected_files() is the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}]}}"
+}
+
+jet_driver_build_generated_json: fn(row: BuildSessionGeneratedModule) -> String Never! {
+    made_by: if row.producer != None -> foundation_json_quote(jet_driver_build_generated_maker(row)) else -> "null"
+    "{{\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.source_digest)},\"made_by\":{made_by}}}"
+}
+
+// Who made a module through a `Compiler` value: the call and the function
+// that made it, with its place. The root may hand the value to a dependency's
+// function, so this is the record of that handoff.
+jet_driver_build_generated_maker: fn(row: BuildSessionGeneratedModule) -> String Never! {
+    maker: row.producer ?? ""
+    if row.rewrites == .Val(function) -> return "`meta.rewrite_body` of `{function}` in {maker}"
+    "`meta.add` in {maker}"
 }
 
 // The core.build values `jet build` records, as JSON objects whose fields
