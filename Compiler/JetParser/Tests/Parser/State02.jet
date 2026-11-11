@@ -128,7 +128,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 
 #Test("derive_generic_type_holes_stay_in_the_template_ast") {
     // The Rust fixture's retired `~self.value` is spelled `.copy()`.
-    parsed: program("\nderive T.TypeName {{\n    info: T.reflect()\n    param: info.type_params[0].name\n    get_value: fn(self) -> @param {{ self.value.copy() }}\n    type_name: fn(self) -> String {{ T.$name }}\n}}\n")
+    parsed: program("\nderive T.TypeName {{\n    info: T.reflect()\n    param: info.type_params[0].name\n    get_value: fn(self) -> @param {{ self.value.copy() }}\n    type_name: fn(self) -> String {{ T.reflect().name }}\n}}\n")
     template: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
     function: loop body_item in template.body {
         if body_item == .Item(item) {
