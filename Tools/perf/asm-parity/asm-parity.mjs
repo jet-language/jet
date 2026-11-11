@@ -56,6 +56,30 @@
 //
 // Writes DIR/results.json and DIR/table.tsv (default DIR: .asm-parity under
 // the current directory) and prints the table.
+//
+// Gains mode (#6414): `--candidate PATH` compares two compilers instead of
+// gating one:
+//
+//   node Tools/perf/asm-parity/asm-parity.mjs --jet BASE --candidate CAND
+//       [--older PATH] [--best N] [--gains FILE] [--out DIR] [--cpu C]
+//       [--modes release] [--cells sieve,wordfreq]
+//
+// Every cell of cells.json (with its reference, the hand-asm ceiling) and of
+// gains.json (gauntlet programs with no reference: string churn and index
+// loops the asm cells lack) is built by BASE and CAND (and, with `--older`,
+// by that compiler too, a column showing what BASE gained over it). The base
+// binary also runs a second time as a control variant, whose change against
+// base is the noise floor. Per binary: output the cell's expected bytes with
+// status 0 (exit 1 otherwise); wall time, the best of N runs (default 5),
+// each round every variant once back to back (odd rounds reversed) on the
+// pinned CPU; peak RSS (the run's
+// largest ru_maxrss, read through launch.S); and the stripped size (the file
+// bytes the PT_LOAD segments map). It uses `python3` and `taskset`, not
+// `perf`. Writes DIR/gains.json and a Markdown table per mode (FILE, default
+// DIR/gains.md): each program's base, candidate and ceiling, the candidate's
+// change against base in percent, and totals (summed time, RSS and bytes,
+// and the geometric mean of candidate / base). Best-of-N wall time is only as
+// quiet as the machine: run it with nothing else heavy running.
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -68,7 +92,7 @@ const CYCLES_GATE = 1.10;
 const MIN_RUNS = 21;
 
 function options(argv) {
-  const o = { out: resolve('.asm-parity'), runs: MIN_RUNS, cpu: '8', modes: ['default', 'release'], cells: null, perf: 'perf', gate: false, jet: null };
+  const o = { out: resolve('.asm-parity'), runs: MIN_RUNS, cpu: '8', modes: ['default', 'release'], cells: null, perf: 'perf', gate: false, jet: null, candidate: null, older: null, best: 5, gains: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -80,11 +104,17 @@ function options(argv) {
     else if (a === '--cells') o.cells = value().split(',');
     else if (a === '--perf') o.perf = value();
     else if (a === '--gate') o.gate = true;
+    else if (a === '--candidate') o.candidate = resolve(value());
+    else if (a === '--older') o.older = resolve(value());
+    else if (a === '--best') o.best = Number(value());
+    else if (a === '--gains') o.gains = resolve(value());
     else throw new Error(`unknown argument ${a}`);
   }
   if (!o.jet) throw new Error('--jet PATH is required');
   if (!Number.isInteger(o.runs) || o.runs < MIN_RUNS) throw new Error(`--runs must be an integer of at least ${MIN_RUNS}`);
   for (const m of o.modes) if (m !== 'default' && m !== 'release') throw new Error(`unknown mode ${m}`);
+  if (!o.candidate && (o.older || o.gains)) throw new Error('--older and --gains need --candidate');
+  if (!Number.isInteger(o.best) || o.best < 1) throw new Error('--best must be a positive integer');
   return o;
 }
 
@@ -126,9 +156,9 @@ function elf(blob) {
   return b;
 }
 
-function buildRef(cell, dir) {
-  const src = join(HERE, cell.name, 'ref.S');
-  const obj = join(dir, 'ref.o'), bin = join(dir, 'ref.bin'), exe = join(dir, 'ref');
+// `src` assembled into DIR/NAME: its .text behind an ELF header.
+function assemble(src, dir, name) {
+  const obj = join(dir, `${name}.o`), bin = join(dir, `${name}.bin`), exe = join(dir, name);
   must('as', ['-I', HERE, '-o', obj, src]);
   must('objcopy', ['-O', 'binary', '-j', '.text', obj, bin]);
   writeFileSync(exe, elf(readFileSync(bin)));
@@ -136,12 +166,14 @@ function buildRef(cell, dir) {
   return exe;
 }
 
-function buildJet(o, cell, mode, dir) {
-  const src = join(dir, `src-${mode}`);
+const buildRef = (cell, dir) => assemble(join(HERE, cell.name, 'ref.S'), dir, 'ref');
+
+function buildJet(jet, cell, mode, dir, label = 'jet') {
+  const src = join(dir, label === 'jet' ? `src-${mode}` : `src-${label}-${mode}`);
   rmSync(src, { recursive: true, force: true });
   cpSync(resolve(HERE, cell.jet), src, { recursive: true, filter: (p) => !p.includes('/.jet') });
   const args = mode === 'release' ? ['build', '--release', '.'] : ['build', '.'];
-  must(o.jet, args, { cwd: src });
+  must(jet, args, { cwd: src });
   return join(src, '.jet', 'build', 'run');
 }
 
@@ -240,18 +272,9 @@ function scriptbenchIssues(all) {
   return issues;
 }
 
-const o = options(process.argv.slice(2));
-const all = JSON.parse(readFileSync(join(HERE, 'cells.json'), 'utf8'));
-const issues = scriptbenchIssues(all);
-if (issues.length) {
-  for (const issue of issues) console.error(`cells.json: ${issue}`);
-  process.exit(1);
-}
-const cells = all.filter((c) => !o.cells || o.cells.includes(c.name));
-mkdirSync(o.out, { recursive: true });
-const rows = [];
-let wrong = 0, gated = 0;
-for (const cell of cells) {
+// A cell's directory, working directory, run plan, input preparation and
+// expected stdout.
+function setup(cell) {
   const dir = join(o.out, cell.name);
   mkdirSync(dir, { recursive: true });
   const input = cell.fixture ? join(dir, cell.fixture.out) : null;
@@ -268,8 +291,154 @@ for (const cell of cells) {
     must('python3', [resolve(HERE, cell.fixture.script), input]);
   };
   const expect = cell.expect_file ? readFileSync(resolve(HERE, cell.expect_file), 'latin1') : cell.expect;
+  return { dir, cwd, plan, prepare, expect };
+}
+
+// One run of `exe` with `args` through the launcher (launch.S), pinned to the
+// CPU, its stdout dropped: wall nanoseconds from fork to reap, the child's
+// ru_maxrss in KiB and its exit code (negative: the signal).
+const TIMED = `import os, struct, sys, time
+launcher, argv = sys.argv[1], sys.argv[1:]
+r, w = os.pipe()
+start = time.perf_counter_ns()
+pid = os.fork()
+if pid == 0:
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 1)
+        os.dup2(w, 3)
+        os.set_inheritable(3, True)
+        os.execv(launcher, argv)
+    finally:
+        os._exit(127)
+os.waitpid(pid, 0)
+ns = time.perf_counter_ns() - start
+os.close(w)
+data = b''
+while len(data) < 152:
+    more = os.read(r, 152 - len(data))
+    if not more:
+        sys.exit('launcher wrote no wait status')
+    data += more
+status, maxrss = struct.unpack_from('<i', data, 0)[0], struct.unpack_from('<q', data, 40)[0]
+print(ns, maxrss, os.waitstatus_to_exitcode(status))`;
+
+// One run of a plan: wall time summed over its steps, the largest peak RSS,
+// and the first nonzero exit code.
+function timed(launcher, exe, plan, cwd, prepare) {
+  prepare();
+  const total = { ns: 0, rss: 0, code: 0 };
+  for (const args of plan) {
+    const r = must('taskset', ['-c', o.cpu, 'python3', '-c', TIMED, launcher, exe, ...args], { cwd });
+    const [ns, rss, code] = r.stdout.toString().trim().split(' ').map(Number);
+    total.ns += ns;
+    total.rss = Math.max(total.rss, rss);
+    if (code !== 0 && total.code === 0) total.code = code;
+  }
+  return total;
+}
+
+// The stripped size: the file bytes up to the end of the last PT_LOAD
+// segment, all a stripped binary keeps. (`objcopy --strip-all` cannot
+// measure it: it rebuilds a file from the section headers, and a Jet
+// binary's few section headers do not cover its segments.)
+function stripped(exe) {
+  const b = readFileSync(exe);
+  const phoff = Number(b.readBigUInt64LE(32)), phsize = b.readUInt16LE(54), phnum = b.readUInt16LE(56);
+  let end = phoff + phsize * phnum;
+  for (let i = 0; i < phnum; i++) {
+    const p = phoff + i * phsize;
+    if (b.readUInt32LE(p) === 1) end = Math.max(end, Number(b.readBigUInt64LE(p + 8) + b.readBigUInt64LE(p + 32)));
+  }
+  return end;
+}
+
+const pct = (to, from) => (from === 0 ? '-' : `${to >= from ? '+' : ''}${((to / from - 1) * 100).toFixed(1)}%`);
+const ms = (ns) => (ns / 1e6).toFixed(1);
+const geomean = (xs) => Math.exp(xs.reduce((s, x) => s + Math.log(x), 0) / xs.length);
+
+// Gains mode: every cell built by the base, candidate (and older) compiler,
+// against the hand-asm ceiling where the cell has one.
+function gains(all) {
+  const extra = JSON.parse(readFileSync(join(HERE, 'gains.json'), 'utf8'));
+  const cells = [...all, ...extra].filter((c) => !o.cells || o.cells.includes(c.name));
+  const compilers = [...(o.older ? [['older', o.older]] : []), ['base', o.jet], ['candidate', o.candidate]];
+  const launcher = assemble(join(HERE, 'launch.S'), o.out, 'launch');
+  const results = [];
+  let wrong = 0;
+  for (const mode of o.modes) {
+    for (const cell of cells) {
+      const { dir, cwd, plan, prepare, expect } = setup(cell);
+      const variants = [];
+      if (existsSync(join(HERE, cell.name, 'ref.S'))) variants.push({ label: 'ceiling', exe: buildRef(cell, dir) });
+      for (const [label, jet] of compilers) variants.push({ label, exe: buildJet(jet, cell, mode, dir, label) });
+      // The control is the base binary measured again as its own variant: its
+      // change against base is the run's noise floor.
+      variants.push({ label: 'control', exe: variants.find((v) => v.label === 'base').exe });
+      const server = startServer(cell);
+      const runs = variants.map(() => []);
+      let outs;
+      try {
+        outs = variants.map((v) => output(v.exe, plan, cwd, prepare));
+        // Each round runs every variant once, back to back (ABAB...); odd
+        // rounds reverse the order, so no variant always runs first.
+        const order = variants.map((_, k) => k);
+        for (let i = 0; i < o.best; i++) for (const k of i % 2 ? [...order].reverse() : order) runs[k].push(timed(launcher, variants[k].exe, plan, cwd, prepare));
+      } finally {
+        server?.kill();
+      }
+      const row = { mode, cell: cell.name, args: cell.steps ? cell.steps.map((s) => s.join(' ')).join(' ; ') : cell.args.join(' '), wrong: [] };
+      variants.forEach((v, k) => {
+        const same = outs[k].status === 0 && outs[k].stdout === expect && runs[k].every((r) => r.code === 0);
+        if (!same) { wrong++; row.wrong.push(v.label); }
+        row[v.label] = { ns: Math.min(...runs[k].map((r) => r.ns)), rss: Math.max(...runs[k].map((r) => r.rss)), bytes: stripped(v.exe), runs: runs[k] };
+      });
+      results.push(row);
+      console.error(`${mode} ${cell.name}: base ${ms(row.base.ns)} ms, candidate ${ms(row.candidate.ns)} ms (${pct(row.candidate.ns, row.base.ns)}), control ${pct(row.control.ns, row.base.ns)}${row.wrong.length ? `, WRONG OUTPUT: ${row.wrong.join(', ')}` : ''}`);
+    }
+  }
+  writeFileSync(join(o.out, 'gains.json'), JSON.stringify({ best_of: o.best, interleaved: true, cpu: o.cpu, compilers: Object.fromEntries(compilers), rows: results }, null, 2) + '\n');
+  const lines = [`# Codegen gains: base against candidate (#6414)`, '', `Base: \`${o.jet}\`. Candidate: \`${o.candidate}\`.${o.older ? ` Older: \`${o.older}\`.` : ''}`, `Wall time is the best of ${o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU ${o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (asm-parity cells only). Change is candidate against base; negative is better.`, ''];
+  for (const mode of o.modes) {
+    const rows = results.filter((r) => r.mode === mode);
+    const older = o.older ? ['older ms', 'base vs older'] : [];
+    const head = ['program', ...older, 'base ms', 'candidate ms', 'change', 'control ms', 'control vs base', 'ceiling ms', 'candidate / ceiling', 'base RSS KiB', 'candidate RSS KiB', 'change', 'ceiling RSS KiB', 'base bytes', 'candidate bytes', 'change', 'ceiling bytes', 'output'];
+    lines.push(`## ${mode}`, '', `| ${head.join(' | ')} |`, `|${head.map((h, i) => (i === 0 || h === 'output' ? ' --- ' : ' ---: ')).join('|')}|`);
+    for (const r of rows) {
+      const c = r.ceiling;
+      lines.push(`| ${[r.cell, ...(o.older ? [ms(r.older.ns), pct(r.base.ns, r.older.ns)] : []), ms(r.base.ns), ms(r.candidate.ns), pct(r.candidate.ns, r.base.ns), ms(r.control.ns), pct(r.control.ns, r.base.ns), c ? ms(c.ns) : '-', c ? (r.candidate.ns / c.ns).toFixed(2) : '-', r.base.rss, r.candidate.rss, pct(r.candidate.rss, r.base.rss), c ? c.rss : '-', r.base.bytes, r.candidate.bytes, pct(r.candidate.bytes, r.base.bytes), c ? c.bytes : '-', r.wrong.length ? `WRONG: ${r.wrong.join(', ')}` : 'same'].join(' | ')} |`);
+    }
+    const sum = (label, key) => rows.reduce((s, r) => s + r[label][key], 0);
+    // Rows with a zero (an RSS under the kernel's counting batch) have no ratio.
+    const ratios = (key, to, from) => rows.filter((r) => r[from] && r[to][key] > 0 && r[from][key] > 0).map((r) => r[to][key] / r[from][key]);
+    const ratio = (key, to = 'candidate', from = 'base') => { const xs = ratios(key, to, from); return xs.length ? pct(geomean(xs), 1) : '-'; };
+    const toCeiling = ratios('ns', 'candidate', 'ceiling');
+    lines.push(`| **total** | ${[...(o.older ? [ms(sum('older', 'ns')), pct(sum('base', 'ns'), sum('older', 'ns'))] : []), ms(sum('base', 'ns')), ms(sum('candidate', 'ns')), pct(sum('candidate', 'ns'), sum('base', 'ns')), ms(sum('control', 'ns')), pct(sum('control', 'ns'), sum('base', 'ns')), '', '', sum('base', 'rss'), sum('candidate', 'rss'), pct(sum('candidate', 'rss'), sum('base', 'rss')), '', sum('base', 'bytes'), sum('candidate', 'bytes'), pct(sum('candidate', 'bytes'), sum('base', 'bytes')), '', ''].join(' | ')} |`);
+    lines.push(`| **geometric mean** | ${[...(o.older ? ['', ratio('ns', 'base', 'older')] : []), '', '', ratio('ns'), '', ratio('ns', 'control'), '', toCeiling.length ? geomean(toCeiling).toFixed(2) : '-', '', '', ratio('rss'), '', '', '', ratio('bytes'), '', ''].join(' | ')} |`, '');
+  }
+  const doc = lines.join('\n');
+  writeFileSync(o.gains ?? join(o.out, 'gains.md'), doc);
+  process.stdout.write(doc);
+  if (wrong) console.error(`${wrong} binaries printed the wrong output`);
+  process.exit(wrong ? 1 : 0);
+}
+
+const o = options(process.argv.slice(2));
+const all = JSON.parse(readFileSync(join(HERE, 'cells.json'), 'utf8'));
+const issues = scriptbenchIssues(all);
+if (issues.length) {
+  for (const issue of issues) console.error(`cells.json: ${issue}`);
+  process.exit(1);
+}
+mkdirSync(o.out, { recursive: true });
+if (o.candidate) gains(all);
+const cells = all.filter((c) => !o.cells || o.cells.includes(c.name));
+const rows = [];
+let wrong = 0, gated = 0;
+for (const cell of cells) {
+  const { dir, cwd, plan, prepare, expect } = setup(cell);
   const variants = [{ variant: 'asm', exe: buildRef(cell, dir) }];
-  for (const mode of o.modes) variants.push({ variant: `jet-${mode}`, exe: buildJet(o, cell, mode, dir) });
+  for (const mode of o.modes) variants.push({ variant: `jet-${mode}`, exe: buildJet(o.jet, cell, mode, dir) });
   const server = startServer(cell);
   let outs, speeds;
   try {
