@@ -374,7 +374,12 @@ which only the root package's own build source makes (`b.compiler(app)`). A
 `b.compiler` call written in any other package is E0776, even when the root
 passed that package its `Build`, so a dependency can't make one. A function
 that receives the value acts for the root, and the value expires with the
-build that made it. `#code { items }` is a `Code` value holding its items,
+build that made it. A second compile (a workspace) is another `Compiler`
+value from the same `b.compiler(output)`, one per call; there is no separate
+workspace API. Every such session is checked like any compile: in a build
+that holds a `Compiler` value, an option that skips or weakens a check
+(`b.bounds(.Off)` or `.Report`, set or pinned before `b.compiler` or after
+it) is refused (E3503). `#code { items }` is a `Code` value holding its items,
 and `meta.add(code, scope: "name")` adds them to the value's target as the
 generated module `name`, checked with the program like hand-written code.
 `meta.add` uses `Meta.Generate`, so a function whose row denies that effect

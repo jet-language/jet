@@ -5,7 +5,7 @@
 use {
     build_crypto: core.crypto
     core.build.[BuildGraph, BuildGraphTarget, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphNode, BuildGraphInputDigest]
-    jet_foundation.[Span, build_option_accepts, build_option_row, type_name]
+    jet_foundation.[Span, build_option_accepts, build_option_argument, build_option_row, type_name]
 }
 
 BuildSessionPolicy: struct {
@@ -418,10 +418,16 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     }
     // Sema admits the call only in the root package's own build source
     // (sema_build_compiler_site); the session binds the value to one of this
-    // build's targets, and it expires with the build like every handle.
+    // build's targets, and it expires with the build like every handle. A
+    // second compile (a workspace) is another value from this same call, and
+    // none is made over an option that weakens checking
+    // (build_session_unchecked_option).
     if method == "compiler" {
         if args.len() != 1 -> return build_session_fail(state, "`b.compiler` takes one target")
         target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "compiler target does not belong to this build")
+        loop option in state.options {
+            if build_session_unchecked_option(option.name, option.value, option.pinned, start, end) == .Val(refused) -> return refused
+        }
         state.compilers.push(BuildSessionCompiler{target: target, start: start, end: end})
         return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
     }
@@ -544,6 +550,9 @@ build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue
     value: build_session_text(args, 1) ?? return build_session_fail(state, "build option value must be a string")
     row: build_option_row(name) ?? return build_session_fail(state, "`{name}` isn't a build option")
     if !build_option_accepts(row, value) -> return build_session_fail(state, "`{value}` isn't a value of build option `{name}`")
+    if state.compilers.len() > 0 {
+        if build_session_unchecked_option(name, value, pinned, start, end) == .Val(refused) -> return refused
+    }
     loop index in 0..<state.options.len() {
         if state.options[index].name != name -> next
         if state.options[index].pinned && state.options[index].value != value -> return build_session_fail(state, "build option `{name}` is pinned to `{state.options[index].value}`; `build: fn` can't change it")
@@ -554,6 +563,26 @@ build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue
     }
     state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// A build that holds a `Compiler` value compiles every session it makes with
+// checking on, so an option value that skips or weakens a check (its row's
+// `removes_check`, JetFoundation BuildOptions.jet, such as `bounds: off`) is
+// refused in either order: set before `b.compiler(output)` or after it. None
+// for any other value.
+build_session_unchecked_option: fn(name: String, value: String, pinned: Bool, start: Int, end: Int) -> BuildSessionReply? {
+    row: build_option_row(name) ?? return None
+    if !row.removes_check.contains(value) -> return None
+    argument: build_option_argument(row, value)
+    written: if pinned -> "b.pin(.{name}, {argument})" else -> "b.{name}({argument})"
+    Val(BuildSessionReply.Failure{error: {
+        code: "E3503",
+        what: "`{written}` weakens checking in a build that holds a `Compiler` value",
+        why: "Every session a `Compiler` value builds is checked like any compile, and generated or rewritten code must never run with a check skipped",
+        fix: "Remove the `{written}` call, or build this output without `b.compiler`",
+        start: start,
+        end: end,
+    }})
 }
 
 // The `<package>` directory of `.jet/generated/<package>/`: the package name

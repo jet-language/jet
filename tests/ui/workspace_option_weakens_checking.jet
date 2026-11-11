@@ -1,0 +1,11 @@
+// @programmable_build
+// @cli_build
+// A build that holds a `Compiler` value can't then turn a check off.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["workspace_option_weakens_checking.jet"], [])
+    _ := b.compiler(app)
+    b.bounds(.Off)
+    b.default(app)
+}
+
+run: fn() { print(2) }

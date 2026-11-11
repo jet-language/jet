@@ -2,7 +2,7 @@
 // the Rust BuildContext. Each call is what a `build: fn(b: Build)` body issues;
 // nothing is executed.
 use jet_build_session.[
-    BuildSession, BuildSessionError, BuildSessionPolicy, BuildSessionReply, BuildSessionValue,
+    BuildSession, BuildSessionDiagnostic, BuildSessionError, BuildSessionPolicy, BuildSessionReply, BuildSessionValue,
     build_session_abort, build_session_call, build_session_compiler_node, build_session_graph, build_session_new, build_session_set_dependencies,
 ]
 
@@ -40,6 +40,13 @@ build_graph_rules_failed: fn(reply: BuildSessionReply) -> Bool Never! {
     if reply == {
         .Failure(_) -> true
         .Value(_) | .HostRequest(_, _) -> false
+    }
+}
+
+build_graph_rules_failure: fn(reply: BuildSessionReply) -> BuildSessionDiagnostic? Never! {
+    if reply == {
+        .Failure(diagnostic) -> Val(diagnostic)
+        .Value(_) | .HostRequest(_, _) -> None
     }
 }
 
@@ -199,6 +206,36 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.generated[0].source, "print(\"time start\")\nif true {{\n    print(\"enter\")\n    #{{load.body}}\n}}\n")
     assert(permit.value.generated[0].producer == Val("`trace_install` at main.jet:22, then `timer_install` at main.jet:37"))
     assert_eq(permit.value.generated[0].start, 5)
+}
+
+// A second compile (a workspace) is another Compiler value from the same
+// `b.compiler(output)`. No option of a build that holds a Compiler value may
+// skip or weaken a check: `bounds: off` or `report` is refused before
+// `b.compiler` or after it, pinned or not; any other value, and a build
+// without a Compiler value, stay as they were.
+#Test("compiler_sessions_keep_checking_on") {
+    a := build_graph_rules_session(190)
+    empty: build_graph_rules_list([String]{})
+    app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    tool: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "tool"), empty, empty}, None, false, 3, 4))
+    assert(build_graph_rules_ok(build_session_call(a, "optimize", [BuildSessionValue]{.Text(value: "optimize"), .Text(value: "full")}, None, false, 5, 6)))
+    first: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app}, None, false, 7, 8))
+    second: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{tool}, None, false, 9, 10))
+    assert_eq(first, BuildSessionValue.Handle{type_name: "Compiler", session: 190, id: 0})
+    assert_eq(second, BuildSessionValue.Handle{type_name: "Compiler", session: 190, id: 1})
+    after: build_graph_rules_failure(build_session_call(a, "bounds", [BuildSessionValue]{.Text(value: "bounds"), .Text(value: "off")}, None, false, 11, 12)) ?? panic("bounds off after b.compiler was accepted")
+    assert_eq(after.code, "E3503")
+    assert_eq(after.what, "`b.bounds(.Off)` weakens checking in a build that holds a `Compiler` value")
+    assert_eq(after.start, 11)
+    pinned: build_graph_rules_failure(build_session_call(a, "pin", [BuildSessionValue]{.Text(value: "bounds"), .Text(value: "report")}, None, false, 13, 14)) ?? panic("a pinned bounds report after b.compiler was accepted")
+    assert_eq(pinned.what, "`b.pin(.bounds, .Report)` weakens checking in a build that holds a `Compiler` value")
+    assert(build_graph_rules_ok(build_session_call(a, "bounds", [BuildSessionValue]{.Text(value: "bounds"), .Text(value: "fatal")}, None, false, 15, 16)))
+    b := build_graph_rules_session(191)
+    other: build_graph_rules_value(build_session_call(b, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    assert(build_graph_rules_ok(build_session_call(b, "bounds", [BuildSessionValue]{.Text(value: "bounds"), .Text(value: "off")}, None, false, 3, 4)))
+    before: build_graph_rules_failure(build_session_call(b, "compiler", [BuildSessionValue]{other}, None, false, 5, 6)) ?? panic("b.compiler after bounds off was accepted")
+    assert_eq(before.code, "E3503")
+    assert_eq(before.start, 5)
 }
 
 #Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
