@@ -1,0 +1,45 @@
+use time: core.time
+
+// A copy of an enum value forks the Manual clock its payload holds, for a
+// positional payload and a named one alike; a variant with no payload copies
+// as itself.
+Slot: enum {
+    Idle
+    Running(time.Clock)
+    Paused(clock: time.Clock, at: Int)
+}
+
+slot_now: fn(slot: Slot) -> Int {
+    if slot == {
+        .Idle -> -1
+        .Running(clock) -> clock.now()
+        .Paused(clock, _) -> clock.now()
+    }
+}
+
+run: fn() {
+    paused: Slot.Paused{clock: time.Clock.new(0), at: 1}
+    copied := paused.copy()
+    if copied == {
+        .Paused(clock, at) -> {
+            ticking := clock
+            assert_eq(ticking.advance(4), 4)
+            assert_eq(at, 1)
+        }
+        .Idle | .Running(_) -> {}
+    }
+    assert_eq(slot_now(paused), 0)
+    running: Slot.Running(time.Clock.new(2))
+    again := running.copy()
+    if again == {
+        .Running(clock) -> {
+            ticking := clock
+            assert_eq(ticking.advance(1), 3)
+        }
+        .Idle | .Paused(_, _) -> {}
+    }
+    assert_eq(slot_now(running), 2)
+    idle: Slot.Idle
+    assert_eq(slot_now(idle.copy()), -1)
+    print("forked")
+}

@@ -3458,8 +3458,17 @@ run: fn() {
 | `duration.is_zero()` / `total_seconds()` / `difference(other)` / `round(unit)` / `abs()` / `negated()` / `sign()` | varies | Inspect or transform a duration. |
 
 Ordinary `Clock` copies fork independent timelines, including copies inside
-lists and other aggregates. A system-clock copy rebases its own monotonic
-start at the original clock's current value. Internal expiry observers are
+lists and other aggregates. One rule covers every holder: `value.copy()`
+follows the value's type and forks each `Clock` it holds at any depth, in a
+list, option, map value, result, tuple, struct field or enum payload, while
+every other part copies as it always does. A `Shared<Clock>` is one timeline
+that its copies share. A copy that cannot fork every Clock it holds is refused
+with E0211: a type that holds a Clock through a part of its own type, and a
+fixed list or union of Clocks. A map's copy keeps its keys, since a map key
+can't hold a Clock (E0502). A generic body's
+copy of a type parameter copies as it always does. A system-clock copy
+rebases its own monotonic start at the original clock's current value.
+Internal expiry observers are
 different: they retain the caller's original clock, so later ticks on that
 clock affect its attached secret's lifetime. Clock Show and Debug retain the
 `Clock { now: N }` rendering. Manual tick/wait arithmetic saturates at `Int`'s

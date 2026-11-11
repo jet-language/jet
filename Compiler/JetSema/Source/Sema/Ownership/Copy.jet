@@ -1025,6 +1025,139 @@ sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: Sem
     sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, walk).observable_clock
 }
 
+// Whether a semantic copy of `ty` forks: `ty` is a Clock, bare or tagged,
+// or a list, option, fixed list, map, result, tuple, union, struct or enum
+// that holds one at any depth. A `Shared` value is one handle on its state,
+// so its copy shares and forks nothing it holds; a function value, a trait
+// value and a generic parameter fork nothing either.
+sema_copy_holds_fork: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    // The copy-fact table answers most copies at once: a value with no
+    // observable Clock forks only through a deterministic one it names.
+    if !sema_copy_observable_clock(ty, env, program, generic_params) && !sema_copy_names_deterministic_clock(ty) -> return false
+    caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    seen := [String:Bool]{}
+    sema_copy_holds_fork_walk(ty, program.registration_graph, caller, generic_params, seen)
+}
+
+// Whether `ty` names a deterministic Clock (the type `Clock.new(…)` gives)
+// outside a declared field. A declared field's type never carries the tag,
+// so only an inferred element, payload or type argument does.
+sema_copy_names_deterministic_clock: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> (marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_call_is_clock_type(inner)) || sema_copy_names_deterministic_clock(inner)
+        .List(inner) -> sema_copy_names_deterministic_clock(inner)
+        .Option(inner) -> sema_copy_names_deterministic_clock(inner)
+        .FixedList(inner, _) -> sema_copy_names_deterministic_clock(inner)
+        .InlineRange(base, _, _) -> sema_copy_names_deterministic_clock(base)
+        .Map(key, _, value) -> sema_copy_names_deterministic_clock(key) || sema_copy_names_deterministic_clock(value)
+        .Result(ok, err) -> sema_copy_names_deterministic_clock(ok) || sema_copy_names_deterministic_clock(err)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_names_deterministic_clock(field.ty) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_copy_names_deterministic_clock(member) -> return true
+            }
+            false
+        }
+        .Apply(_, args) -> {
+            loop argument in args {
+                if sema_copy_names_deterministic_clock(argument) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Named(_) -> false
+    }
+}
+
+sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &[String:Bool]) -> Bool Never! {
+    if sema_call_is_clock_type(ty) -> return true
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> false
+        .List(inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .Option(inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .FixedList(inner, _) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .InlineRange(base, _, _) -> sema_copy_holds_fork_walk(base, graph, caller, generic_params, seen)
+        .Tagged(_, inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .Map(key, _, value) -> sema_copy_holds_fork_walk(key, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(value, graph, caller, generic_params, seen)
+        .Result(ok, err) -> sema_copy_holds_fork_walk(ok, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(err, graph, caller, generic_params, seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_holds_fork_walk(field.ty, graph, caller, generic_params, seen) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_copy_holds_fork_walk(member, graph, caller, generic_params, seen) -> return true
+            }
+            false
+        }
+        .Named(name) -> {
+            loop parameter in generic_params {
+                if parameter.name == name -> return false
+            }
+            sema_copy_holds_fork_nominal(ty, graph, caller, generic_params, seen)
+        }
+        .Apply(_, _) -> sema_copy_holds_fork_nominal(ty, graph, caller, generic_params, seen)
+    }
+}
+
+// Each instance of a nominal is walked once: a walk that found a Clock has
+// already answered, so an instance seen before adds nothing.
+sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &[String:Bool]) -> Bool Never! {
+    if graph == .Val(registered) {
+        row: sema_copy_fork_row_at(ty, registered, caller) ?? return false
+        instance: "{registered.modules[row.module_index].nominals[row.row].identity_key}<{type_name(ty)}>"
+        if seen.get(instance) != None -> return false
+        seen[instance] = true
+        loop part in sema_copy_fork_parts(registered.modules[row.module_index].nominals[row.row], ty, graph) {
+            if sema_copy_holds_fork_walk(part, graph, caller, generic_params, seen) -> return true
+        }
+        return false
+    }
+    false
+}
+
+// The row of the registered struct or enum `ty` names from the copy's
+// module. Any other nominal (a distinct type, an alias, a foreign handle) is
+// not rebuilt part by part.
+sema_copy_fork_row: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationRowRef? {
+    if program.registration_graph == .Val(graph) -> return sema_copy_fork_row_at(ty, graph, sema_type_module_row(graph, env.module_identity))
+    None
+}
+
+sema_copy_fork_row_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int) -> SemaRegistrationRowRef? {
+    name: if ty == {
+        .Named(found) -> found
+        .Apply(found, _) -> found
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
+    }
+    resolved: sema_type_graph_lookup_symbol_at(graph, caller, name)
+    row: sema_type_lookup_nominal_row(graph, resolved, name, caller) ?? return None
+    kind: graph.modules[row.module_index].nominals[row.row].kind
+    if kind != SemaRegistrationNominalKind.Struct && kind != SemaRegistrationNominalKind.Enum -> return None
+    Val(row)
+}
+
+// The part types a copy of `nominal` rebuilds, with `ty`'s arguments bound:
+// a struct's stored fields (a computed field stores nothing), or each enum
+// variant's payload.
+sema_copy_fork_parts: fn(nominal: SemaRegistrationNominal, ty: Type, graph: SemaRegistrationGraph?) -> [Type] Never! {
+    bindings: sema_copy_generic_bindings(nominal, ty).bindings
+    parts := [Type]{}
+    loop field in nominal.fields {
+        if !field.computed -> parts.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings))
+    }
+    loop variant in nominal.variants {
+        if variant.payload_type == .Val(payload) -> parts.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, payload), bindings))
+    }
+    parts
+}
+
 sema_copy_diagnostic: fn(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
     if facts.accepted || !facts.complete -> return None
     cell_guard: facts.dynamic_loan

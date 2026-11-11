@@ -1,0 +1,60 @@
+use time: core.time
+
+// A copy forks every Manual clock its value holds at any depth: in a struct's
+// list, option, map and result fields, in a value read through an index, and
+// in a value a call returns.
+#Error
+Fault: enum {
+    Broken
+}
+
+Timer: struct {
+    label: String
+    clock: time.Clock
+}
+
+Shelf: struct {
+    timers: [Timer]
+    latest: Timer?
+    named: [String: Timer]
+    outcome: time.Clock Fault!
+}
+
+make_shelf: fn() -> Shelf {
+    Shelf{
+        timers: [Timer{label: "a", clock: time.Clock.new(0)}],
+        latest: Val(Timer{label: "b", clock: time.Clock.new(1)}),
+        named: [String: Timer]{"c": Timer{label: "c", clock: time.Clock.new(2)}},
+        outcome: Ok(time.Clock.new(3)),
+    }
+}
+
+latest_now: fn(shelf: Shelf) -> Int {
+    if shelf.latest == .Val(timer) -> timer.clock.now() else -> -1
+}
+
+outcome_now: fn(shelf: Shelf) -> Int {
+    if shelf.outcome == .Ok(clock) -> clock.now() else -> -1
+}
+
+run: fn() {
+    shelf: make_shelf()
+    copied := shelf.copy()
+    assert_eq(copied.timers[0].clock.advance(10), 10)
+    assert_eq(copied.named["c"].clock.advance(10), 12)
+    if copied.latest == .Val(timer) {
+        ticking := timer
+        assert_eq(ticking.clock.advance(10), 11)
+    }
+    if copied.outcome == .Ok(clock) {
+        ticking := clock
+        assert_eq(ticking.advance(10), 13)
+    }
+    print("{shelf.timers[0].clock.now()} {latest_now(shelf)} {shelf.named["c"].clock.now()} {outcome_now(shelf)}")
+    first := shelf.timers[0].copy()
+    assert_eq(first.clock.advance(4), 4)
+    assert_eq(shelf.timers[0].clock.now(), 0)
+    fresh := make_shelf().copy()
+    assert_eq(fresh.timers[0].clock.advance(5), 5)
+    print("forked")
+}

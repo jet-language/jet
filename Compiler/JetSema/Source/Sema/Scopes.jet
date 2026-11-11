@@ -751,6 +751,12 @@ SemaCheckContext: struct {
     // carrier out: a call root keeps its Result and an unmarked writing
     // receiver is not reported. A `#Test` body is user code and is not.
     compiler_generated: Bool{false}
+    // The types whose semantic copy is being rebuilt from its parts' copies
+    // (sema_expr_copy_fork), outermost first: a type that reaches itself is
+    // refused, the rebuild reads and writes the private fields the copied
+    // value already owns, and a part's copy inside it records no second
+    // `Clock copy` effect.
+    fork_copy_rebuilding: [String]{[String]{}}
     // The function being checked declares its result's owners (`-> T from
     // self | param`): a returned place read is a view of them, not a copy.
     return_view_declared: Bool{false}
@@ -1247,6 +1253,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
         compiler_generated: source.compiler_generated,
+        fork_copy_rebuilding: source.fork_copy_rebuilding.copy(),
         return_view_declared: source.return_view_declared,
         // A snapshot's check continues the arena of the check it starts
         // from: its rows follow that arena's rows, and its caller appends

@@ -629,7 +629,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         }
         // Only the type's own module writes a `priv` field, so a literal
         // elsewhere cannot forge a value whose invariant that field carries.
-        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, struct_def.inline_module, source.name_span, context.compiler_generated, environment, program) {
+        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, struct_def.inline_module, source.name_span, sema_expr_sees_private_fields(context), environment, program) {
             diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
             return None
         }
@@ -646,7 +646,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     if computed_written {
         loop (index, field) in struct_def.fields {
             if supplied[index] || field.computed != None -> next
-            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, context.compiler_generated, environment, program) {
+            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
                 diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
                 return None
             }
@@ -702,7 +702,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         if supplied[index] || field.computed != None -> next
         // An omitted `priv` field is still written, by its default or not at
         // all, so only the type's own module may build the value.
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, context.compiler_generated, environment, program) {
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
             diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
             return None
         }

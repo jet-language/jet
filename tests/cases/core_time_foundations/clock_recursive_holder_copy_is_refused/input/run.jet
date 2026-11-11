@@ -1,0 +1,14 @@
+use time: core.time
+
+// A type that holds a Clock through a part of its own type has no fixed set
+// of parts to rebuild, so its copy is refused rather than left sharing.
+Node: struct {
+    clock: time.Clock
+    kids: [Node]
+}
+
+run: fn() {
+    root: Node{clock: time.Clock.new(0), kids: [Node]{}}
+    copied := root.copy()
+    print(copied.kids.len())
+}

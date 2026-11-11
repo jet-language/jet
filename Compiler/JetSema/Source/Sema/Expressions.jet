@@ -31,14 +31,20 @@ use {
         Dimension,
         DimensionAxis,
         EffectRowEntry,
+        EnumLitArg,
         Expr,
+        ExprField,
+        ForKind,
         Func,
         Item,
         IntegerWidth,
+        IndexKind,
+        LValue,
         CopyFact,
         Marker,
         OperatorMarker,
         ParamZone,
+        PatSlot,
         PipeStep,
         QuantityKind,
         Span,
@@ -65,6 +71,7 @@ use {
         TUnitRoundingMode,
         TraitImplBlock,
         Type,
+        TupleField,
         TypeTupleField,
         UnOp,
         UnitFormat,
@@ -85,6 +92,7 @@ use {
         owned_trait_for_operator,
         owned_trait_for_operator_hook,
         symbol_id,
+        pipe_value_name,
         checked_symbol_local,
         type_identity_equal,
         type_name,
@@ -5644,47 +5652,217 @@ sema_expr_check_copy_typed: fn(checked: TExpr, span: Span, expected: Type?, envi
 }
 
 sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    user_code: !sema_module_is_core_source(environment.module_identity)
     previous_borrow := context.borrow_ctx
     previous_string_view_read := context.allow_string_view_read
+    // Every semantic copy is one rule over the value's type: a value that
+    // holds a Clock at any depth is rebuilt from its parts' own semantic
+    // copies, so each Clock it holds forks and every other part copies as it
+    // always does. A value that is not a place is probed for its type, so a
+    // rebuild reads it once, inside the rebuild.
+    if user_code && !sema_expr_copy_fork_place(value) {
+        context.borrow_ctx = true
+        context.allow_string_view_read = true
+        probe_diagnostics := [Diagnostic]{}
+        probed: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+        context.borrow_ctx = previous_borrow
+        context.allow_string_view_read = previous_string_view_read
+        if probed == .Val(found) {
+            if !sema_has_error_since(probe_diagnostics, 0) && sema_expr_copy_forks_holder(found.ty, environment, program, context) {
+                sema_expr_copy_record_clock(found.ty, span, environment, program, scopes, context, diagnostics)
+                return sema_expr_copy_fork(value, found.ty, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+        }
+    }
     context.borrow_ctx = true
     context.allow_string_view_read = true
     checked_value := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked: checked_value ?? return None
-    // Rust expr.rs `Expr::Copy`: copying a value that holds an observable
-    // Clock reads ambient time (E3403 `Clock copy` in a pure body).
-    if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
-        _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)
-    }
+    sema_expr_copy_record_clock(checked.ty, span, environment, program, scopes, context, diagnostics)
     // A Manual clock owns its timeline, so its semantic copy is a fork
     // (Clock.__fork) that ticks on its own, never a second handle on the
     // shared state. Core's Clock declares the fork itself.
-    if sema_call_is_clock_type(checked.ty) && !sema_module_is_core_source(environment.module_identity) {
+    if sema_call_is_clock_type(checked.ty) && user_code {
         fork := Expr.MethodCall{receiver: value.copy(), method: "__fork", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         return sema_check_expression(fork, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    // A list or option that holds a Manual clock copies each element by
-    // that element's own semantic copy, so every clock it holds forks too.
-    if !sema_module_is_core_source(environment.module_identity) && sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) && sema_expr_copy_maps_elements(checked.ty) {
-        item: Expr.Ident{name: "__clock_item", span: span, id: AST_NODE_GENERATED}
-        each: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: "__clock_item", name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: Expr.Copy{value: item, span: span, id: AST_NODE_GENERATED}}, span: span, meta: ast_empty_lambda_meta()}
-        argument: CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: each, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-        mapped := Expr.MethodCall{receiver: value.copy(), method: "map", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
-        return sema_check_expression(mapped, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
+    if user_code && sema_expr_copy_forks_holder(checked.ty, environment, program, context) -> return sema_expr_copy_fork(value, checked.ty, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     window_copy: sema_call_compute_window_copy(checked, span, expected, environment, program, diagnostics)
     if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, context, diagnostics, sema_expr_copy_string_view(value, scopes), false)
 }
 
-// Whether a copy of `ty` maps its elements: a list's or an option's
-// elements each take their own semantic copy.
-sema_expr_copy_maps_elements: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .List(_) | .Option(_) -> true
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+// Copying a value that holds an observable Clock (Rust expr.rs, the Copy arm)
+// reads ambient time (E3403 `Clock copy` in a pure body). A part's copy
+// inside a rebuild is the same copy, already recorded.
+sema_expr_copy_record_clock: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if context.fork_copy_rebuilding.len() > 0 || !sema_copy_observable_clock(ty, environment, program, context.generic_params) -> return
+    _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)
+}
+
+// Whether a copy of `ty` is a rebuild: a holder, not a Clock itself, that
+// holds a Clock at any depth and whose copy Jet accepts. A copy Jet refuses
+// keeps its own refusal.
+sema_expr_copy_forks_holder: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool {
+    if sema_call_is_clock_type(ty) || !sema_copy_holds_fork(ty, environment, program, context.generic_params) -> return false
+    sema_copy_classify(ty, SemaCopyIntent.Explicit, environment, program, context.generic_params, false).accepted
+}
+
+// A compiler-generated body, and the rebuild of a copied value from its
+// parts, read and write every field, private ones too.
+sema_expr_sees_private_fields: fn(context: SemaCheckContext) -> Bool Never! {
+    context.compiler_generated || context.fork_copy_rebuilding.len() > 0
+}
+
+FORK_COPY_DEPTH: 32
+
+// A fork copy reads its value once: a place is read again for each part, and
+// any other value is bound to a pipe step's hidden name. A type the rebuild
+// reaches inside itself is refused, and so is a rebuild nested past
+// FORK_COPY_DEPTH (a generic type that holds itself at a growing type
+// argument): neither has a fixed set of parts to rebuild.
+sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    place: sema_expr_copy_fork_place(value)
+    row: sema_copy_fork_row(ty, environment, program)
+    key := type_name(ty)
+    if row == .Val(found) {
+        if program.registration_graph == .Val(graph) -> key = "{graph.modules[found.module_index].nominals[found.row].identity_key}<{key}>"
     }
+    if context.fork_copy_rebuilding.contains(key) || context.fork_copy_rebuilding.len() >= FORK_COPY_DEPTH {
+        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "`{type_name(ty)}` holds a Clock through a part of its own type, so a copy that forks every Clock it holds has no fixed set of parts to rebuild"))
+        return None
+    }
+    hidden: pipe_value_name(span.start)
+    subject: if place -> value.copy() else -> Expr.Ident{name: hidden.copy(), span: span, id: AST_NODE_GENERATED}
+    body: sema_expr_copy_fork_body(subject, ty, row, context.fork_copy_rebuilding.len(), span, program) ?? {
+        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "a copy forks every Clock the value holds, and Jet rebuilds only a list, option, map value, result, tuple, struct or enum part by part"))
+        return None
+    }
+    whole: if place -> body else -> Expr.Pipe{head: value.copy(), steps: [PipeStep]{PipeStep{name: hidden, value: body, reads: 1, span: span}}, span: span, id: AST_NODE_GENERATED}
+    context.fork_copy_rebuilding.push(key)
+    rebuilt: sema_check_expression(whole, Val(ty), environment, program, scopes, state, tail_store, context, diagnostics)
+    _ := context.fork_copy_rebuilding.pop()
+    result := rebuilt ?? return None
+    sema_expr_expected_owned(result, expected, environment, program, diagnostics)
+}
+
+sema_expr_copy_fork_refused: fn(ty: Type, span: Span, why: String) -> Diagnostic Never! {
+    sema_error("E0211", span, "`{type_name(ty)}` can't be copied", why, "copy the parts you need one by one, or hold the Clock in `Shared<Clock>` so every copy shares one timeline")
+}
+
+// A name, or a field or index path over names and integer literals, reads
+// the same storage each time the rebuild names it.
+sema_expr_copy_fork_place: fn(value: Expr) -> Bool Never! {
+    if value == .Ident(_, _, _) -> return true
+    if value == .Field(base, _, _, _) -> return sema_expr_copy_fork_place(base)
+    if value == .Index(base, index, _, _, _) -> return sema_expr_copy_fork_place(base) && (index == .Int(_, _, _, _, _) || sema_expr_copy_fork_place(index))
+    if value == .Paren(inner, _, _) -> return sema_expr_copy_fork_place(inner)
+    false
+}
+
+// The rebuild of `subject`, a value of `ty`, from each part's semantic copy;
+// None for a holder that is not rebuilt part by part. `depth` keeps the
+// names a nested rebuild binds apart from the enclosing one's.
+sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRef?, depth: Int, span: Span, program: SemaProgramTables) -> Expr? {
+    if ty == {
+        .List(_) | .Option(_) -> {
+            item: "__fork_item{depth}"
+            each: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: item.copy(), name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(item, span), span)}, span: span, meta: ast_empty_lambda_meta()}
+            argument: CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: each, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            Val(Expr.MethodCall{receiver: subject, method: "map", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED})
+        }
+        .Map(_, _, _) -> Val(sema_expr_copy_fork_map(subject, depth, span))
+        .Result(_, _) -> {
+            success: "__fork_ok{depth}"
+            failure: "__fork_err{depth}"
+            success_test: Expr.PatternTest{subject: subject.copy(), pattern: Pattern.Ok{binding: success.copy(), binding_span: span, inner: None, span: span}, span: span, id: AST_NODE_GENERATED}
+            failure_test: Expr.PatternTest{subject: subject, pattern: Pattern.Err{binding: failure.copy(), binding_span: span, inner: None, span: span}, span: span, id: AST_NODE_GENERATED}
+            failure_arm: Expr.If{cond: failure_test, then_body: [Stmt]{}, then_value: Expr.Err{value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(failure, span), span), span: span, id: AST_NODE_GENERATED}, else_body: [Stmt]{}, else_value: Expr.NoElse{span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}
+            Val(Expr.If{cond: success_test, then_body: [Stmt]{}, then_value: Expr.Ok{value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(success, span), span), span: span, id: AST_NODE_GENERATED}, else_body: [Stmt]{}, else_value: failure_arm, span: span, id: AST_NODE_GENERATED})
+        }
+        .Tuple(fields) -> {
+            parts: loop field in fields -> TupleField{name: field.name.copy(), value: sema_expr_copy_fork_part(Expr.Field{base: subject.copy(), member: field.name.copy(), span: span, id: AST_NODE_GENERATED}, span)}
+            Val(Expr.TupleLit{fields: parts, span: span, ty: None, id: AST_NODE_GENERATED})
+        }
+        .Named(_) | .Apply(_, _) -> {
+            found: row ?? return None
+            if program.registration_graph == .Val(graph) -> return Val(sema_expr_copy_fork_nominal(subject, graph.modules[found.module_index].nominals[found.row], depth, span))
+            None
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+// A map keeps its keys and takes each value's semantic copy, written over a
+// share of the map so the result keeps the map's type and order:
+// `(() -> { made := m; loop key in made.keys() -> made[key] = made[key].copy(); made })()`.
+// A key never holds a Clock (E0502 admits only scalar, payload-free enum and
+// tuple or struct keys of those), so keeping the keys forks nothing away.
+sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never! {
+    made: "__fork_map{depth}"
+    key: "__fork_key{depth}"
+    start: Stmt.Val{binding: Binding{mutable: true, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: made.copy(), name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: subject, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+    read: Expr.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
+    write: Stmt.Assign{target: LValue.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: sema_expr_copy_fork_part(read, span)}
+    keys: Expr.MethodCall{receiver: sema_expr_copy_fork_name(made, span), method: "keys", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    each: Stmt.For{var: key.copy(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
+    body: [Stmt]{start, each, Stmt.Expr{expr: sema_expr_copy_fork_name(made, span)}}
+    rebuild: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}
+    Expr.CallValue{callee: Expr.Paren{value: Expr.Lambda{lambda: rebuild, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, args: [CallArg]{}, span: span, id: AST_NODE_GENERATED}
+}
+
+// A struct is a literal of its stored fields' copies; an enum is a table
+// with one arm per variant, which rebuilds that variant from its payload's
+// copies.
+sema_expr_copy_fork_nominal: fn(subject: Expr, nominal: SemaRegistrationNominal, depth: Int, span: Span) -> Expr Never! {
+    if nominal.kind == SemaRegistrationNominalKind.Struct {
+        fields := [ExprField]{}
+        loop field in nominal.fields {
+            if field.computed -> next
+            read: Expr.Field{base: subject.copy(), member: field.symbol.name.copy(), span: span, id: AST_NODE_GENERATED}
+            fields.push(ExprField{name: field.symbol.name.copy(), name_span: span, value: sema_expr_copy_fork_part(read, span)})
+        }
+        return Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: true, span: span, id: AST_NODE_GENERATED}
+    }
+    table := Expr.NoElse{span: span, id: AST_NODE_GENERATED}
+    index := nominal.variants.len() - 1
+    loop index >= 0 {
+        variant: nominal.variants[index]
+        bindings := [PatSlot]{}
+        args := [EnumLitArg]{}
+        if variant.payload == {
+            .Unit -> {}
+            .Single(_, _) -> {
+                name: "__fork_{depth}_0"
+                bindings.push(PatSlot.Bind{name: name.copy(), span: span})
+                args.push(EnumLitArg.Positional{value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(name, span), span)})
+            }
+            .Named(payload) -> {
+                loop (position, field) in payload {
+                    name: "__fork_{depth}_{position}"
+                    bindings.push(PatSlot.Bind{name: name.copy(), span: span})
+                    args.push(EnumLitArg.Named{label: field.name.copy(), expr: sema_expr_copy_fork_part(sema_expr_copy_fork_name(name, span), span)})
+                }
+            }
+        }
+        test: Expr.PatternTest{subject: subject.copy(), pattern: Pattern.Variant{variant: variant.symbol.name.copy(), bindings: bindings, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
+        rebuilt: Expr.EnumLit{type_name: "", variant: variant.symbol.name.copy(), variant_span: Val(span), args: args, leading_dot: true, span: span, id: AST_NODE_GENERATED}
+        table = Expr.If{cond: test, then_body: [Stmt]{}, then_value: rebuilt, else_body: [Stmt]{}, else_value: table.move(), span: span, id: AST_NODE_GENERATED}
+        index -= 1
+    }
+    table
+}
+
+sema_expr_copy_fork_name: fn(name: String, span: Span) -> Expr Never! {
+    Expr.Ident{name: name.copy(), span: span, id: AST_NODE_GENERATED}
+}
+
+// A part's own semantic copy: a Clock part forks, a holder part rebuilds,
+// and any other part copies.
+sema_expr_copy_fork_part: fn(part: Expr, span: Span) -> Expr Never! {
+    Expr.Copy{value: part, span: span, id: AST_NODE_GENERATED}
 }
 
 // An unmarked move site that a later use reached is a

@@ -1,0 +1,13 @@
+use time: core.time
+
+// A copy of a map whose values are Manual clocks forks each clock and keeps
+// every key: the copy's clocks tick on their own and the original's stay put.
+run: fn() {
+    clocks: [String: time.Clock]{"x": time.Clock.new(0), "y": time.Clock.new(1)}
+    copied := clocks.copy()
+    assert_eq(copied["y"].advance(5), 6)
+    assert_eq(clocks["y"].now(), 1)
+    assert_eq(clocks["x"].now(), 0)
+    assert_eq(copied.len(), 2)
+    print("forked")
+}

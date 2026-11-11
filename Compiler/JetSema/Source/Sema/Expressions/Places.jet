@@ -449,7 +449,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                 names: loop param in struct_def.type_params -> param.name
                 loop field in struct_def.fields {
                     if field.name == member {
-                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, span, context.compiler_generated, environment, program) {
+                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
                             diagnostics.push(sema_expression_private_field_error(member, Span{start: span.end - member.len(), end: span.end}))
                             return None
                         }
