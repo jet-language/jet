@@ -2378,6 +2378,33 @@ run: fn() -[Exec, Time.Wait]> {
 }
 ```
 
+A command line a script writes out is `Sh{"…"}`: its literal words are
+argv items and each `{hole}` is exactly one more, never split, globbed or
+parsed by a shell (a runtime `String` is E0149; `Sh.raw(text)` is the audited
+split). It runs in one call, and `spec()` gives its `ProcessSpec` when the run
+needs a directory, environment, stream policy or limit first.
+
+```jet
+run: fn() -[Exec, Time.Wait]> {
+    branch: "topic/a b"
+    if !(Sh{"git rev-parse --verify -q {branch}"}.ok()) -> return
+    head: Sh{"git rev-parse {branch}"}.text() ?? return
+    changed: Sh{"git diff --name-only {head}"}.lines() ?? return
+    _ := Sh{"git add --"}.extend(changed).status()
+}
+```
+
+| `Sh` method | Returns | Description |
+| --- | --- | --- |
+| `status()` | `Int !IOError -[Exec, Time.Wait]>` | Run with the terminal's stdin, stdout and stderr, as a shell runs a plain line; the exit status, 128 + n after signal n. |
+| `ok()` | `Bool -[Exec, Time.Wait]>` | Run with stdout discarded and stderr passed through (`cmd >/dev/null`); whether it started and exited 0. |
+| `text()` | `String !IOError -[Exec, Time.Wait]>` | Standard output without its trailing newlines, stderr passed through, whatever the status (`$(cmd)`). |
+| `lines()` | `[String] !IOError -[Exec, Time.Wait]>` | The lines of standard output, stderr passed through, whatever the status. |
+| `run()` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run with stdout and stderr captured; the whole receipt. |
+| `spec()` | `ProcessSpec -[Exec]>` | The command's specification, to set a directory, environment, stream policy or limit before running it. |
+| `extend(items)` | `Sh` | The command with each item of `items` appended as one argv item (`"$@"`). |
+| `args()` | `[String]` | A copy of the argv. |
+
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `process.args()` | `[String] -[Exec]>` | Return the words after the program name, as the host supplied them. |

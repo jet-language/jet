@@ -7,14 +7,11 @@ use {
     process: core.process
 }
 
-// `git ARGS` here (the case's GIT_DIR), its output.
-git: fn(args: [String]) -> String { process.cmd(["git"].concat(args)).run().output.trim_end() }
-
 run: fn() {
     loop line in files.read(process.args()[0]).lines() -> print(line.trim_end())
-    print("HEAD: {git(["log", "--format=%h %s | %b", "-n", "2"]).replace("\n", " ")}")
-    print("status: {git(["status", "--porcelain=v1", "-uno"]).replace("\n", " ")}".trim_end())
-    print("origin dev: {git(["--git-dir=origin.git", "rev-parse", "--short", "dev"])}")
+    print("HEAD: {Sh{"git log {"--format=%h %s | %b"} -n 2"}.text().trim_end().replace("\n", " ")}")
+    print("status: {Sh{"git status --porcelain=v1 -uno"}.text().replace("\n", " ")}".trim_end())
+    print("origin dev: {Sh{"git --git-dir=origin.git rev-parse --short dev"}.text()}")
     loop name in ["batch-queue.txt", "landed-subs.txt"] -> print("{name}: {(files.read("scratch/Main/{name}") ?? "none").trim_end().replace("\n", " ")}")
     batches := loop entry in files.list_dir("lanes/Main/integ") -> entry.name
     batches.sort()

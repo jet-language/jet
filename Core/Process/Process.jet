@@ -25,7 +25,11 @@ ProcessSignal: enum {
 
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
 // whitespace and keeps every hole as exactly one argv item; `Sh.raw(text)` is
-// the audited whole-text split.
+// the audited whole-text split. A command runs in one call: `status()` with
+// the terminal's stdio (a plain shell line), `ok()` for its verdict (stdout
+// discarded, stderr passed through), `text()`/`lines()` for its stdout
+// (`$(…)`), `run()` for the whole receipt, and `spec()` when it needs a
+// directory, environment or limit first.
 Sh: struct {
     argv: [String]
     impl Display {
@@ -46,6 +50,41 @@ impl Sh {
         sh_split_into(text, argv)
         Sh{argv: argv}
     }
+    // The command with `items` appended, each one argv item (`"$@"`).
+    extend: fn(self, items: [String]) -> Sh Never! { Sh{argv: self.argv.concat(items)} }
+    // The command's ProcessSpec, for a run that sets a directory,
+    // environment, stdio or limit first.
+    spec: fn(self) -[Exec]> ProcessSpec Never! { cmd(self.argv.copy()) }
+    // Runs with the terminal's stdin, stdout and stderr, as a shell runs a
+    // plain command line; its exit status (128 + n after signal n).
+    status: fn(self) -[Exec, Time.Wait]> Int IOError! {
+        receipt: self.spec().stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run()
+        if receipt.signal == .Val(number) -> return 128 + number
+        receipt.code
+    }
+    // Whether the command runs and exits 0; its stdout is discarded and its
+    // stderr passed through (`cmd >/dev/null`).
+    ok: fn(self) -[Exec, Time.Wait]> Bool Never! {
+        receipt: self.spec().stderr(.Inherit).run() ?? return false
+        receipt.success
+    }
+    // The command's stdout without its trailing newlines, its stderr passed
+    // through, whatever its status (`$(cmd)`).
+    text: fn(self) -[Exec, Time.Wait]> String IOError! {
+        output: self.spec().stderr(.Inherit).run().output
+        bytes: output.bytes()
+        end := bytes.len()
+        loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
+        if end == bytes.len() -> return output
+        String.from_bytes_lossy(bytes.slice(0, end))
+    }
+    // The lines of the command's stdout, its stderr passed through, whatever
+    // its status.
+    lines: fn(self) -[Exec, Time.Wait]> [String] IOError! {
+        self.spec().stderr(.Inherit).run().output.lines()
+    }
+    // The receipt of the command run with its stdout and stderr captured.
+    run: fn(self) -[Exec, Time.Wait]> ProcessReceipt IOError! { self.spec().run() }
 }
 
 sh_split_into: fn(text: String, argv: &[String]) Never! {
@@ -513,6 +552,28 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert(args_from_argv([String]{}) == [String]{})
     assert(args_from_argv([String]{"jet"}) == [String]{})
     assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
+}
+
+#Test("Sh extends its argv item by item") {
+    command: Sh{argv: [String]{"printf", "%s|"}}.extend([String]{"a b", "c"})
+    assert(command.argv == [String]{"printf", "%s|", "a b", "c"})
+    assert_eq(command.text() ?? "error", "a b|c|")
+}
+
+#Test("Sh runs a command whole: its verdict, stdout text and lines, status and receipt") {
+    assert(Sh{argv: [String]{"true"}}.ok())
+    assert(!Sh{argv: [String]{"false"}}.ok())
+    assert(!Sh{argv: [String]{"/nonexistent/jet-sh-test"}}.ok())
+    printed: Sh{argv: [String]{"printf", "%s\n", "a b", "c", ""}}
+    assert_eq(printed.text() ?? "error", "a b\nc")
+    assert((printed.lines() ?? [String]{}) == [String]{"a b", "c", ""})
+    assert_eq(Sh{argv: [String]{"printf", "a \n"}}.text() ?? "error", "a ")
+    assert_eq(Sh{argv: [String]{"printf", "plain"}}.text() ?? "error", "plain")
+    assert_eq(Sh{argv: [String]{"true"}}.text() ?? "error", "")
+    assert_eq(Sh{argv: [String]{"sh", "-c", "exit 3"}}.status() ?? -1, 3)
+    assert_eq(Sh{argv: [String]{"sh", "-c", "kill -9 $$"}}.status() ?? -1, 137)
+    receipt: Sh{argv: [String]{"sh", "-c", "echo out; exit 4"}}.run() ?? panic("sh did not start")
+    assert(receipt.code == 4 && receipt.output == "out\n")
 }
 
 // Temporary native-carrier layout. This is not a second public builder API:

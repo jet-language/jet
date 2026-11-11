@@ -30,7 +30,7 @@ run: fn() {
     rows: (loop line in files.read(args[0]).lines() -> line.split("\t").to_list()).filter(cells -> cells.len() >= 3)
     files.create_dir_all(out)
     cpus: loop cpu in 0..<12 -> cpu
-    specs: loop row in rows -> process.cmd([jet, "test", "Compiler", "--profile", row[1], "--filter", row[2]]).cwd(roots.worktree()).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
+    specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(roots.worktree()).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
     results: process.run_all(specs, 6)
     loop at in 0..<rows.len() {
         row: rows[at]

@@ -38,21 +38,21 @@ label: fn(v: Dyn?) -> String {
 // The first `limit` characters of `t`, marked with … when it was longer.
 cut: fn(t: String, limit: Int) -> String { if t.len() > limit -> "{t.slice(0, limit)}…" else -> t.copy() }
 
-// `argv` in the Tower checkout with the caller's git index unset: its stdout.
-node: fn(repo: String, argv: [String]) -> String Err! {
-    r: process.cmd(argv).cwd(repo).env_remove("GIT_INDEX_FILE").stderr(.Inherit).output_limit(67108864).run() ?? return Err("Command failed: {argv.join(" ")}")
-    if r.code != 0 -> return Err("Command failed: {argv.join(" ")}")
+// `command` in the Tower checkout with the caller's git index unset: its stdout.
+node: fn(repo: String, command: Sh) -> String Err! {
+    r: command.spec().cwd(repo).env_remove("GIT_INDEX_FILE").stderr(.Inherit).run() ?? return Err("Command failed: {command}")
+    if r.code != 0 -> return Err("Command failed: {command}")
     Ok(r.output)
 }
 
 card: fn(repo: String, num: String) -> Dyn Err! {
-    j: json.parse(node(repo, ["node", "Tools/tower/tower.mjs", "card", "show", num, "--json"]) ?? return Err(err)) ?? return Err("{err}")
+    j: json.parse(node(repo, Sh{"node Tools/tower/tower.mjs card show {num} --json"}) ?? return Err(err)) ?? return Err("{err}")
     Ok(if j.get("card") == .Val(.Object(_)) -> j.get("card") ?? j else -> j)
 }
 
-// The Tower writer's trimmed answer to `args`.
-tower: fn(repo: String, writer: String, args: [String]) -> String Err! {
-    Ok((node(repo, ["node", writer].concat(args).concat(["--by", "Main"])) ?? return Err(err)).trim())
+// The Tower writer's trimmed answer to `command`.
+tower: fn(repo: String, command: Sh) -> String Err! {
+    Ok((node(repo, command.extend(["--by", "Main"])) ?? return Err(err)).trim())
 }
 
 // `t` with every `from` replaced by `to`; `place` names it when `from` is absent.
@@ -147,15 +147,15 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
     if patch.len() > 0 {
         file: "{patches}/obe-patch-{num}.json"
         files.write(file, json.dumps(patch) ?? "") ?? return Err("{err}")
-        print("  {tower(repo, writer, ["card", "update", num, "--file", file]) ?? return Err(err)}")
+        print("  {tower(repo, Sh{"node {writer} card update {num} --file {file}"}) ?? return Err(err)}")
     }
-    if log.trim() != "" -> print("  {tower(repo, writer, ["card", "log", num, "--text", log.trim()]) ?? return Err(err)}")
+    if log.trim() != "" -> print("  {tower(repo, Sh{"node {writer} card log {num} --text {log.trim()}"}) ?? return Err(err)}")
     if close == "" -> return Ok()
     kind: if text(s, "closeKind") != "" -> ["--kind", text(s, "closeKind")] else -> [String]{}
     loop k in list(card(repo, num) ?? return Err(err), "criteria") {
-        if text(k, "status") == "open" -> print("  {tower(repo, writer, ["card", "criteria", num, "--meet", label(k.get("n")), "--evidence", close].concat(kind)) ?? return Err(err)}")
+        if text(k, "status") == "open" -> print("  {tower(repo, Sh{"node {writer} card criteria {num} --meet {label(k.get("n"))} --evidence {close}"}.extend(kind)) ?? return Err(err)}")
     }
-    print("  {tower(repo, writer, ["card", "update", num, "--phase", "done"]) ?? return Err(err)}")
+    print("  {tower(repo, Sh{"node {writer} card update {num} --phase done"}) ?? return Err(err)}")
     Ok()
 }
 

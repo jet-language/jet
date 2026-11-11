@@ -29,11 +29,6 @@ fail: fn(message: String, code: Int) -> Never {
     process.exit(code)
 }
 
-// Runs integrate10.sh BATCH SUBS; its exit code.
-integrate: fn(orchestrator: String, batch: String, subs: [String]) -> Int {
-    process.cmd(["{orchestrator}/integrate10.sh", batch].concat(subs)).stdout(.Inherit).stderr(.Inherit).run().code
-}
-
 // The text of the files in `dir` whose names start with `prefix` and end with `suffix`, in name order.
 read_all: fn(dir: String, prefix: String, suffix: String) -> String {
     names := (loop entry in (files.list_dir(dir) ?? []) -> entry.name).filter(name -> name.starts_with(prefix) && name.ends_with(suffix))
@@ -106,7 +101,7 @@ error_lines: fn(integ: String) -> [String] {
 
 run: fn() {
     main: roots.main()
-    orchestrator: roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
+    integrate: "{roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))}/integrate10.sh"
     // One batch at a time: two runs of the same BATCH would write into one integ dir.
     _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
     args: process.args()
@@ -123,7 +118,7 @@ run: fn() {
         if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
     }
     // rc 2: the export or the apply step stopped (integrate10 printed why); there is no census to attribute.
-    if integrate(orchestrator, batch, run) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
+    if (Sh{"{integrate} {batch}"}.extend(run).status()) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
     integ: "{main}/integ/{batch}"
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
@@ -133,7 +128,7 @@ run: fn() {
         split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read("{sub}/patch") ?? "", word))
         if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
         print("QUARANTINED (regen) {split.blamed.join(" ")}")
-        process.exit(integrate(orchestrator, "{batch}-r", split.keep))
+        process.exit(Sh{"{integrate} {"{batch}-r"}"}.extend(split.keep).status())
     }
     if (files.read("{integ}/REPORT.md") ?? "").lines().any(line -> line.starts_with("Census rc=0 ")) -> process.exit(0)
     rows: census_rows(integ)
@@ -149,6 +144,6 @@ run: fn() {
     if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
     print("QUARANTINED {split.blamed.join(" ")}")
     if split.keep.len() == 0 -> process.exit(1)
-    code: integrate(orchestrator, "{batch}-r", split.keep)
+    code: Sh{"{integrate} {"{batch}-r"}"}.extend(split.keep).status()
     if code != 0 -> process.exit(code)
 }

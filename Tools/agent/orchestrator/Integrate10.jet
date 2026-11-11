@@ -46,12 +46,6 @@ stop: fn(line: String, code: Int) -> Never {
 // A finished child's exit status, 124 when its timeout stopped it.
 rc: fn(receipt: ProcessReceipt) -> Int { if receipt.timed_out -> 124 else -> receipt.code }
 
-// Whether `spec` ran and exited 0.
-ok: fn(spec: ProcessSpec) -> Bool {
-    receipt: spec.stderr(.Inherit).run() ?? return false
-    receipt.code == 0
-}
-
 // The lines of the file at `path`, none when it can't be read.
 lines_of: fn(path: String) -> [String] { (files.read(path) ?? "").lines() }
 
@@ -77,7 +71,7 @@ relink: fn(target: String, link: String) {
 
 // `git archive COMMIT` of the dev worktree unpacked into `dir`.
 unpack: fn(w: String, commit: String, dir: String) -> Bool {
-    piped: process.pipeline([process.cmd(["git", "-C", w, "archive", commit]), process.cmd(["tar", "-x", "-C", dir])]) ?? return false
+    piped: process.pipeline([Sh{"git -C {w} archive {commit}"}.spec(), Sh{"tar -x -C {dir}"}.spec()]) ?? return false
     piped.success
 }
 
@@ -132,8 +126,8 @@ run: fn() {
     t: "{i}/tree"
     files.remove_all(i) ?? ()
     loop dir in [t, "{i}/tests", "{i}/bin"] -> files.create_dir_all(dir)
-    fetched: ok(process.cmd(["git", "-C", w, "fetch", "-q", "origin"]))
-    based: if fetched -> process.cmd(["git", "-C", w, "rev-parse", "--short", "origin/dev"]).run() ?? stop("integrate: export failed", 2) else -> stop("integrate: export failed", 2)
+    if !(Sh{"git -C {w} fetch -q origin"}.ok()) -> stop("integrate: export failed", 2)
+    based: Sh{"git -C {w} rev-parse --short origin/dev"}.run() ?? stop("integrate: export failed", 2)
     base: based.output.trim()
     if based.code != 0 || !unpack(w, "origin/dev", t) -> stop("integrate: export failed", 2)
     files.write("{i}/BASE", "{base}\n")
@@ -146,13 +140,13 @@ run: fn() {
         parts: ps.partition(":")
         pb: parts.head
         pd: if parts.sep == "" -> ps else -> parts.tail
-        if !ok(process.cmd(["git", "-C", t, "apply", "-p1", files.join(files.cwd(), "{pd}/patch")])) -> stop("integrate: pre {pd} does not apply", 2)
+        if !(Sh{"git -C {t} apply -p1 {files.join(files.cwd(), "{pd}/patch")}"}.ok()) -> stop("integrate: pre {pd} does not apply", 2)
         stacked.push(pb.copy())
         files.write("{i}/PRE", "{stacked.join("\n")}\n")
         print("PRE {files.basename(pd)} from {pb}")
     }
     // Apply (three-way, generated files excluded and regenerated): integ-apply6.sh prints the applied SUBs last.
-    apply: process.cmd(["bash", "{o}/integ-apply6.sh", t, i].concat(subs)).stderr(.Stdout).run()
+    apply: Sh{"bash {"{o}/integ-apply6.sh"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
     files.write("{i}/apply.out", apply.output)
     if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(line -> line.starts_with("integ-apply:")).last() ?? ""}", 2)
     listing: apply.output.partition("--applied--\n")
@@ -174,17 +168,17 @@ run: fn() {
     loop s in applied -> touched.extend(lines_of("{i}/{files.basename(s)}.files"))
     touched = unique(touched)
     print("census start")
-    census: process.cmd(["bash", "{g}/capped.sh", "32G", "bash", "{o}/census-snap2.sh"].concat(touched)).env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
+    census: Sh{"bash {"{g}/capped.sh"} 32G bash {"{o}/census-snap2.sh"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
     files.write("{i}/census.out", census.output)
     crc := census.code
     print("census rc={crc}")
     // The repository ratchets and generator checks (Land.jet ratchets), with the seed on the composed tree, all at once.
     seed: files.canonicalize(roots.seed())
     id: files.read("{seed}/IDENTITY").trim()
-    ratchets: process.cmd(["{seed}/jet", "Tools/agent/Land.jet", "ratchets"]).cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
+    ratchets: Sh{"{"{seed}/jet"} Tools/agent/Land.jet ratchets"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
     files.create_dir_all("{i}/ratchets")
     if ratchets.len() == 0 -> files.write("{i}/ratchets/none.out", "no ratchets listed\n")
-    checks: process.run_all(loop tool in ratchets -> process.cmd(["nice", "-n", "19", "{seed}/jet", tool, "--check"]).cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
+    checks: process.run_all(loop tool in ratchets -> Sh{"nice -n 19 {"{seed}/jet"} {tool} --check"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
     summary := census.output.lines().filter(line -> line.contains(" rc=") || line.contains("rows="))
     failures := [String]{}
     rrc := if ratchets.len() == 0 -> 1 else -> 0
@@ -221,11 +215,11 @@ run: fn() {
         }
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
     }
-    runsub: (argv: [String]) -> process.cmd(["bash", "{g}/runsub6.sh"].concat(argv)).env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit)
+    runsub: (step: String, sub: String) -> Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit)
     golden_rcs := [String]{}
     if built {
         // Every SUB runs its test lines as one job, four SUBs at a time.
-        _ := process.run_all(loop s in applied.filter(s -> (files.read("{s}/tests") ?? "") != "") -> runsub(["new", s]), 4)
+        _ := process.run_all(loop s in applied.filter(s -> (files.read("{s}/tests") ?? "") != "") -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
         failing: loop name in named("{i}/tests", ".rc").filter(name -> lines_of("{i}/tests/{name}").any(line -> !line.starts_with("0\t"))) -> name.removesuffix(".rc")
@@ -234,18 +228,18 @@ run: fn() {
             _ := unpack(w, base, "{i}/basetree")
             relink("{seed}/jet", "{i}/basebin/jet")
             relink("{seed}/jetpack", "{i}/basebin/jetpack")
-            _ := process.run_all(loop name in failing -> runsub(["base", name]), 4)
+            _ := process.run_all(loop name in failing -> runsub("base", name), 4)
             files.remove_all("{i}/basetree")
         }
         // Goldens that cite a line of a Core or Prelude file this batch touches (`<corelib>/Core/X.jet:N`) drift
         // when that file moves; run each one so the batch, not the release gate, catches it.
         cited := [String]{}
-        loop f in touched.filter(f -> regex.is_match(CORE_SOURCE, f)) -> cited.extend(process.cmd(["git", "grep", "-l", "--no-index", "-F", "<corelib>/{f}:", "--", "*.out"]).cwd(t).run().output.lines())
+        loop f in touched.filter(f -> regex.is_match(CORE_SOURCE, f)) -> cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
         cited = unique(cited)
         files.write("{i}/goldens.list", cited.map(path -> "{path}\n").join(""))
         loop golden in cited {
             stem: golden.removesuffix(".out").removesuffix(".err")
-            ran: process.cmd(["bash", "{g}/capped.sh", "24G", "nice", "-n", "19", "jet", "test", "Compiler", "--profile", "golden", stem]).cwd(t)
+            ran: Sh{"bash {"{g}/capped.sh"} 24G nice -n 19 jet test Compiler --profile golden {stem}"}.spec().cwd(t)
                 .env("PATH", "{i}/bin:{roots.env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31")
                 .timeout(1800s).stderr(.Stdout).run()
             files.write("{i}/goldens.{stem.replace("/", "_")}.out", ran.output)

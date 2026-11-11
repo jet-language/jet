@@ -35,6 +35,9 @@ PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
 BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 USAGE: "usage: jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
+// The typed-literal kinds (`Regex{"…"}`, `Sh{"…"}`, `SQL{"…"}`, `HTML{"…"}`): a
+// user names each unqualified, though each lives in its own module.
+LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
 // A host literal holds a Jet program when it declares a function or imports
 // from core or app.
@@ -722,10 +725,13 @@ table_of: fn(functions: [Function]) -> Table Never! {
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
 // The aliases a program starts with: `core`, `app`, every prelude function and
-// type (a user names them unqualified) and, for a doctest, the names of its
-// own module.
+// type and every typed-literal kind (a user names them unqualified) and, for a
+// doctest, the names of its own module.
 initial_aliases: fn(table: Table, context: String) -> [String: String] Never! {
     aliases := [String: String]{"core": "core", "app": "app"}
+    loop kind in LITERAL_KINDS {
+        if table.types.has_key(kind) -> aliases[kind.rpartition(".").tail.copy()] = kind.copy()
+    }
     loop index in 0..<table.ids.len() {
         if table.units[index] == "core.prelude" {
             head: first_part(table.names[index])
@@ -864,6 +870,23 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
         candidate: chain(tokens, i)
         if !candidate.found {
             i += 1
+            next
+        }
+        // A typed literal (`Type{…}`) is a value of that type: a method called
+        // on it is that type's.
+        kind: expand(candidate.parts, aliases)
+        if token(tokens, candidate.end) == "{{" && table.types.has_key(kind) {
+            close := candidate.end + 1
+            depth := 1
+            loop close < tokens.len() && depth > 0 {
+                if tokens[close].value == "{{" -> depth += 1
+                if tokens[close].value == "}}" -> depth -= 1
+                close += 1
+            }
+            return_at[close - 1] = return_closes.len()
+            return_closes.push(close - 1)
+            return_types.push(kind.copy())
+            i = candidate.end
             next
         }
         at: after_generics(tokens, candidate.end)
@@ -1579,6 +1602,7 @@ fixture_rows: fn() -> [Function] Never! {
     rows.extend(public_functions("Core/Text/Text.jet", "trim: fn(x: String) -> String Never! {{ x }}\n    split: fn<T>(x: T) -> String Never! {{ \"\" }}\n    unused: fn() {{}}"))
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
+    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}"))
     rows
 }
 
@@ -1638,6 +1662,10 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 
 #Test("qualified types, typed receivers, inferred constructors and chained calls") {
     assert_eq(ids("use crypto: core.crypto\n    use core.crypto.[Hasher]\n    run: fn(h: Hasher) {{\n      h.digest()\n      value: crypto.new()\n      value.digest()\n      Hasher.new().digest()\n      unknown.digest()\n    }}", ""), [String]{"core.crypto.Hasher.digest", "core.crypto.new", "core.crypto.Hasher.digest", "core.crypto.Hasher.new", "core.crypto.Hasher.digest"})
+}
+
+#Test("a typed literal is a value of its type, and a literal kind is named unqualified") {
+    assert_eq(ids("use crypto: core.crypto\n    run: fn() {{\n      Sh{{\"git status\"}}.ok()\n      crypto.Hasher{{}}.digest()\n      unknown{{}}.digest()\n    }}", ""), [String]{"core.process.Sh.ok", "core.crypto.Hasher.digest"})
 }
 
 #Test("embedded host programs isolate alias environments and ignore host comments") {

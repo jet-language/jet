@@ -37,29 +37,20 @@ stop: fn(line: String, code: Int) -> Never {
     process.exit(code)
 }
 
-// `git -C tree ARGS` with the integ identity and no automatic gc: a detached
+// The base commit: the export with every tracked file (-f: some match
+// .gitignore, as Tools/script-census.tsv does), the main repository's objects
+// at hand for the three-way merges; whether every step succeeded. The integ
+// repository commits as integ and never starts an automatic gc: a detached
 // auto gc started by one SUB's commit raced the next commit and broke HEAD
 // (every later .rebased and regen.patch came out empty while APPLIED still
 // printed).
-git: fn(tree: String, args: [String]) -> ProcessSpec {
-    process.cmd(["git", "-C", tree, "-c", "user.name=integ", "-c", "user.email=integ@local", "-c", "gc.auto=0", "-c", "maintenance.auto=false"].concat(args))
-}
-
-// Whether `git -C tree ARGS` exits 0.
-ok: fn(tree: String, args: [String]) -> Bool { git(tree, args).run().code == 0 }
-
-// The unmerged paths of the tree's index.
-unmerged: fn(tree: String) -> [String] { git(tree, ["diff", "--name-only", "--diff-filter=U"]).run().output.lines() }
-
-// The base commit: the export with every tracked file (-f: some match
-// .gitignore, as Tools/script-census.tsv does), the main repository's objects
-// at hand for the three-way merges; whether every step succeeded.
 based: fn(tree: String, worktree: String) -> Bool {
-    if !ok(tree, ["init", "-q"]) -> return false
-    common: process.cmd(["git", "-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"]).run()
+    if !(Sh{"git -C {tree} init -q"}.ok()) -> return false
+    files.append_all("{tree}/.git/config", "[user]\n\tname = integ\n\temail = integ@local\n[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n")
+    common: Sh{"git -C {worktree} rev-parse --path-format=absolute --git-common-dir"}.run()
     if common.code != 0 -> return false
     files.write("{tree}/.git/objects/info/alternates", "{common.output.trim()}/objects\n")
-    ok(tree, ["add", "-A", "-f"]) && ok(tree, ["commit", "-qm", "base", "--no-verify"]) && ok(tree, ["tag", "base"])
+    Sh{"git -C {tree} add -A -f"}.ok() && Sh{"git -C {tree} commit -qm base --no-verify"}.ok() && Sh{"git -C {tree} tag base"}.ok()
 }
 
 // The generator a file's header names in its first 40 lines, one trailing `.`
@@ -99,9 +90,9 @@ marker_mode: fn(path: String) -> String {
 // A scratch directory holding the base, ours and theirs of an unmerged `path` as `b`, `o` and `t`.
 stages: fn(tree: String, path: String) -> String {
     work: files.mkdtemp("integ-apply")
-    files.write("{work}/b", git(tree, ["show", ":1:{path}"]).run().output)
-    files.write("{work}/o", git(tree, ["show", ":2:{path}"]).run().output)
-    files.write("{work}/t", git(tree, ["show", ":3:{path}"]).run().output)
+    files.write("{work}/b", Sh{"git -C {tree} show {":1:{path}"}"}.run().output)
+    files.write("{work}/o", Sh{"git -C {tree} show {":2:{path}"}"}.run().output)
+    files.write("{work}/t", Sh{"git -C {tree} show {":3:{path}"}"}.run().output)
     work
 }
 
@@ -116,7 +107,7 @@ staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String 
     hunks := 0
     in_base := false
     bad := false
-    loop line in process.cmd(["git", "merge-file", "--diff3", "-p", "{work}/o", "{work}/b", "{work}/t"]).run().output.lines() {
+    loop line in (Sh{"git merge-file --diff3 -p {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run().output.lines()) {
         if {
             line.starts_with("<<<<<<< ") -> {
                 open = true
@@ -133,7 +124,7 @@ staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String 
     }
     mode := if hunks > 0 && !bad -> "union" else -> "none"
     if mode == "none" {
-        merged: process.cmd(["node", "{g}/linemerge.mjs", "{work}/o", "{work}/b", "{work}/t"]).run()
+        merged: Sh{"node {"{g}/linemerge.mjs"} {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run()
         files.write("{integ}/linemerge.tmp", merged.output)
         if merged.code == 0 -> mode = "lines"
     }
@@ -152,15 +143,15 @@ failed: fn(integ: String, name: String, note: String{""}) {
 apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
-    listed: (loop line in process.cmd(["git", "apply", "--numstat", "{s}/patch"]).run().output.lines() -> line.split("\t").to_list().concat(["", "", ""])[2])
+    listed: (loop line in (Sh{"git apply --numstat {"{s}/patch"}"}.run().output.lines()) -> line.split("\t").to_list().concat(["", "", ""])[2])
     files.write("{integ}/{n}.files", (loop path in listed -> "{path}\n").join(""))
     excluded := [String]{}
     loop f in listed.filter(f -> f != "") {
         path: "{tree}/{f}"
         // An edit of a file an earlier SUB in this batch deleted is dropped (the deleting SUB replaced the file's
         // role, e.g. ScriptLead-1 computes the script census that Tools/script-census.tsv held by hand).
-        if !files.exists(path) && ok(tree, ["cat-file", "-e", "base:{f}"]) {
-            by: git(tree, ["log", "--format=%s", "--diff-filter=D", "-1", "--", f]).run().output.trim()
+        if !files.exists(path) && (Sh{"git -C {tree} cat-file -e {"base:{f}"}"}.run().success) {
+            by: Sh{"git -C {tree} log --format=%s --diff-filter=D -1 -- {f}"}.text()
             if by != "" {
                 excluded.push("--exclude={f}")
                 files.append_all("{integ}/{n}.dropped", "dropped edit of {f}: deleted by {by}\n")
@@ -197,7 +188,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
         failures.push(n)
         return false
     }
-    applied: git(tree, ["apply", "--3way", "-p1"].concat(excluded).concat(["{s}/patch"])).stderr(.Stdout).run()
+    applied: Sh{"git -C {tree} apply --3way -p1"}.extend(excluded.concat(["{s}/patch"])).spec().stderr(.Stdout).run()
     files.write(apply_log, applied.output)
     // Conflicts left by the three-way merge are resolved only where the answer is mechanical:
     //  - every conflict lies inside a generated region (`unsafe-ratchet:begin..end`, `BEGIN GENERATED..END
@@ -206,7 +197,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
     //  - every conflict hunk is a pure addition on both sides (an empty base part): keep both, ours first
     //    (union); the census then checks the composed file.
     // Any other conflict makes the SUB NOAPPLY.
-    conflicts: unmerged(tree)
+    conflicts: Sh{"git -C {tree} diff --name-only --diff-filter=U"}.lines()
     clean := applied.code == 0 || conflicts.len() > 0
     loop f in conflicts {
         mode := if f.ends_with(".tsv") -> "union" else -> marker_mode("{tree}/{f}")
@@ -220,16 +211,16 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
             mode == "lines" -> files.copy("{integ}/linemerge.tmp", "{tree}/{f}")
             else -> {
                 work: stages(tree, f)
-                files.write("{tree}/{f}", process.cmd(["git", "merge-file", "--{mode}", "-p", "{work}/o", "{work}/b", "{work}/t"]).run().output)
+                files.write("{tree}/{f}", Sh{"git merge-file {"--{mode}"} -p {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run().output)
                 files.remove_all(work)
             }
         }
-        _ := ok(tree, ["add", "--", f])
+        _ := Sh{"git -C {tree} add -- {f}"}.ok()
         files.append_all(apply_log, "resolved {f} ({mode})\n")
         if mode == "ours" -> files.append_all("{integ}/generators", "{if files.read("{tree}/{f}").contains("unsafe-ratchet:begin") -> "Tools/agent/UnsafeRatchet.jet" else -> "Tools/agent/CoreSourceRows.jet"}\t{f}\n")
     }
-    clean = clean && unmerged(tree).len() == 0
-    if clean && ok(tree, ["add", "-A"]) && ok(tree, ["diff", "--cached", "--quiet", "HEAD"]) {
+    clean = clean && Sh{"git -C {tree} diff --name-only --diff-filter=U"}.lines().len() == 0
+    if clean && (Sh{"git -C {tree} add -A"}.ok()) && (Sh{"git -C {tree} diff --cached --quiet HEAD"}.ok()) {
         // The patch changes nothing on this tree: an earlier SUB of the batch already carries it (post42h2: Main-2).
         files.append_all(apply_log, "already in the tree: every change of this patch is carried by an earlier SUB\n")
         failed(integ, n, " (empty)")
@@ -237,14 +228,14 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
         return false
     }
     if !clean {
-        _ := ok(tree, ["reset", "-q", "--hard", "HEAD"])
-        _ := ok(tree, ["clean", "-qfd"])
+        _ := Sh{"git -C {tree} reset -q --hard HEAD"}.ok()
+        _ := Sh{"git -C {tree} clean -qfd"}.ok()
         failed(integ, n)
         failures.push(n)
         return false
     }
-    if !ok(tree, ["commit", "-qm", n, "--no-verify"]) -> stop("integ-apply: commit of {n} failed; the integ repo is broken, stopping", 2)
-    rebased: git(tree, ["diff", "--binary", "HEAD~1", "HEAD"]).run()
+    if !(Sh{"git -C {tree} commit -qm {n} --no-verify"}.ok()) -> stop("integ-apply: commit of {n} failed; the integ repo is broken, stopping", 2)
+    rebased: Sh{"git -C {tree} diff --binary HEAD~1 HEAD"}.run()
     if rebased.code != 0 -> stop("integ-apply: diff of {n} failed; stopping", 2)
     files.write("{integ}/{n}.rebased", rebased.output)
     if rebased.output == "" -> stop("integ-apply: {n}.rebased is empty; stopping", 2)
@@ -272,7 +263,7 @@ regenerate: fn(tree: String, integ: String) {
                     gen.ends_with("/UnsafeRatchet.jet") -> ["--update"]
                     else -> [String]{}
                 }
-                run: process.cmd(["nice", "-n", "19", "{seed}/jet", gen].concat(flag)).cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
+                run: Sh{"nice -n 19 {"{seed}/jet"} {gen}"}.extend(flag).spec().cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
                     .timeout(time.duration_seconds(900)).cpu_affinity(loop cpu in 16..<32 -> cpu).stderr(.Stdout).run()
                 files.write("{integ}/regen.{files.basename(gen)}.out", run.output)
                 print((["REGEN", gen].concat(flag).concat(["rc={if run.timed_out -> 124 else -> run.code}"])).join(" "))
@@ -300,9 +291,9 @@ run: fn() {
     }
     // INTEG_POST="patch ...": Main's fixups that must apply plainly (no three-way, no keep-ours) to the composed
     // tree after every SUB, such as deleting ledger proof rows a merge kept. They land inside regen.patch.
-    loop patch in roots.env_or("INTEG_POST", "").words() -> print("{if process.cmd(["git", "apply", "-p1", patch]).cwd(tree).run().code == 0 -> "POST" else -> "POST-FAIL"} {patch}")
+    loop patch in roots.env_or("INTEG_POST", "").words() -> print("{if (Sh{"git -C {tree} apply -p1 {patch}"}.ok()) -> "POST" else -> "POST-FAIL"} {patch}")
     regenerate(tree, integ)
-    if ok(tree, ["add", "-A"]) -> files.write("{integ}/regen.patch", git(tree, ["diff", "--cached", "--binary", "HEAD"]).run().output)
+    if (Sh{"git -C {tree} add -A"}.ok()) -> files.write("{integ}/regen.patch", Sh{"git -C {tree} diff --cached --binary HEAD"}.run().output)
     files.remove_all("{tree}/.git")
     print("--applied--")
     loop path in applied -> print(path)

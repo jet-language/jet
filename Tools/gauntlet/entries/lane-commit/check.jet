@@ -17,10 +17,9 @@ names_in: fn(dir: String) -> [String] {
 
 run: fn() {
     print(files.read(process.args()[0]).trim_end())
-    git: ["git", "-C", "repo/work"]
-    print(process.cmd(git.concat(["log", "--format=%h %an %s", "--name-status"])).run().output.trim_end())
+    print(Sh{"git -C repo/work log {"--format=%h %an %s"} --name-status"}.text().trim_end())
     print("status:")
-    print(process.cmd(git.concat(["status", "--porcelain"])).run().output.trim_end())
+    print(Sh{"git -C repo/work status --porcelain"}.text().trim_end())
     queue: "{process.env_get("JET_RUN_ROOT") ?? "run"}/commit-queue"
     loop job in names_in(queue) {
         path: "{queue}/{job}"

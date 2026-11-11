@@ -43,9 +43,9 @@ rc: fn(receipt: ProcessReceipt) -> Int { if receipt.timed_out -> 124 else -> rec
 
 // `bash jetenv.sh TREE JET ARGS` on CPUs 16-27 with `vars` set and, for a
 // check or build, a 1 GiB stack.
-jetenv: fn(g: String, jet: String, args: [String], vars: [String: String], stack: Bool{true}) -> ProcessSpec {
-    argv: if stack -> ["prlimit", "--stack=1073741824:1073741824", "--"] else -> [String]{}
-    spec := process.cmd(argv.concat(["bash", "{g}/jetenv.sh", ".", jet]).concat(args)).cpu_affinity(loop cpu in 16..<28 -> cpu)
+jetenv: fn(g: String, jet: String, args: Sh, vars: [String: String], stack: Bool{true}) -> ProcessSpec {
+    line: Sh{"bash {"{g}/jetenv.sh"} . {jet}"}.extend(args.args())
+    spec := (if stack -> Sh{"prlimit --stack=1073741824:1073741824 --"}.extend(line.args()) else -> line).spec().cpu_affinity(loop cpu in 16..<28 -> cpu)
     loop (name, value) in vars -> spec = spec.env(name, value)
     spec
 }
@@ -68,7 +68,7 @@ rows: fn(tsv: String) -> Int {
 
 // Prints the first `limit` lines census-errors.mjs gives for a keep-going report.
 census_errors: fn(g: String, tsv: String, limit: Int) {
-    loop line in process.cmd(["node", "{g}/census-errors.mjs", tsv, "."]).stderr(.Stdout).run().output.lines().slice(0, limit) -> print(line)
+    loop line in (Sh{"node {"{g}/census-errors.mjs"} {tsv} ."}.spec().stderr(.Stdout).run().output.lines().slice(0, limit)) -> print(line)
 }
 
 // A build row's kind, code and message.
@@ -106,7 +106,7 @@ runtime: fn(g: String, self_jet: String, out: String, id: String) {
         }
         return print("runtime rc=0 (jet build Compiler)")
     }
-    packed: process.cmd(["bash", "{g}/runtime-pack-check.sh", self_jet, ".", "{out}/runtime", id]).stderr(.Stdout).run()
+    packed: Sh{"bash {"{g}/runtime-pack-check.sh"} {self_jet} . {"{out}/runtime"} {id}"}.spec().stderr(.Stdout).run()
     loop line in packed.output.lines() -> print(line)
     if rc(packed) != 0 -> process.exit(1)
     if files.is_symlink(beside) -> files.remove(beside)
@@ -118,7 +118,7 @@ jetpack: fn(g: String, self_jet: String, out: String, id: String) {
     home: "{out}/tmp.jetpack.{sys.pid()}"
     files.create_dir_all(home)
     log: "{out}/jetpack.log"
-    _ := pass(process.cmd(["bash", "{g}/jpwrap.sh", "check", "--hosted"])
+    _ := pass(Sh{"bash {"{g}/jpwrap.sh"} check --hosted"}.spec()
         .env("HOME", home).env("JET_HOME", "{home}/.jet").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id)
         .env("JET_TOOLCHAIN_ROOT", ".").env("JETPACK_WORKER", "precommit").env("JET_STATE_ROOT", "{out}/jetpack-state")
         .timeout(time.duration_seconds(1200)), log)
@@ -135,7 +135,7 @@ jetpack: fn(g: String, self_jet: String, out: String, id: String) {
 snapshot: fn(worktree: String, tree: String, named: [String]) {
     files.remove_all(tree) ?? ()
     files.create_dir_all(tree)
-    exported: if process.pipeline([process.cmd(["git", "archive", "HEAD"]).cwd(worktree), process.cmd(["tar", "-x", "-C", tree])]) == {
+    exported: if process.pipeline([Sh{"git -C {worktree} archive HEAD"}.spec(), Sh{"tar -x -C {tree}"}.spec()]) == {
         .Ok(receipt) -> receipt.success
         .Err(_) -> false
     }
@@ -173,14 +173,14 @@ run: fn() {
     // From here on, a relative root or report names a path from the tree, as in the original.
     files.chdir(tree) ?? quit("census: cd {tree}: {err}", 2)
     seed: "{compiler}/jet"
-    check_rc: pass(jetenv(g, seed, ["check", "--threads", "12", "Compiler/JetCli"], ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_TOOLCHAIN_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
+    check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCli"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_TOOLCHAIN_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
     print("check rc={check_rc}")
     // The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
     census_errors(g, "{at}/check-keep-going.tsv", 21)
     if check_rc != 0 -> process.exit(1)
     if roots.env_or("CENSUS_BUILD", "1") == "0" -> process.exit(0)
     files.remove_all("Compiler/JetCli/.jet/build") ?? ()
-    build_rc: pass(jetenv(g, seed, ["build", "--threads", "12", "Compiler"], ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_BUILD_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/build-keep-going.tsv"]).timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
+    build_rc: pass(jetenv(g, seed, Sh{"build --threads 12 Compiler"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_BUILD_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/build-keep-going.tsv"]).timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
     build_rows_count: rows("{at}/build-keep-going.tsv")
     print("build rc={build_rc} rows={build_rows_count}")
     build_rows("{at}/build-keep-going.tsv")
@@ -198,9 +198,9 @@ run: fn() {
     // guards-known.txt. CENSUS_GUARDS_TIMEOUT is in seconds, 0 for no limit.
     if roots.env_or("CENSUS_GUARDS", "1") == "1" {
         limit: roots.env_or("CENSUS_GUARDS_TIMEOUT", "2400").to_int() ?? 2400
-        guards: jetenv(g, seed, ["test", "tests/guards"], ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": "."], stack: false)
+        guards: jetenv(g, seed, Sh{"test tests/guards"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": "."], stack: false)
         _ := pass(if limit > 0 -> guards.timeout(time.duration_seconds(limit)) else -> guards, "{at}/guards.out")
-        gate: process.cmd(["node", "{g}/guards-gate.mjs", "{at}/guards.out", "{g}/guards-known.txt"]).stderr(.Stdout).run()
+        gate: Sh{"node {"{g}/guards-gate.mjs"} {"{at}/guards.out"} {"{g}/guards-known.txt"}"}.spec().stderr(.Stdout).run()
         loop line in gate.output.lines() -> print(line)
         print("guards rc={rc(gate)}")
         if rc(gate) != 0 -> process.exit(1)
@@ -214,7 +214,7 @@ run: fn() {
         loop package in ["Compiler/JetCli", "Core"] {
             name: if package == "Core" -> "selfcheck-core" else -> "selfcheck"
             tsv: "{at}/{name}-keep-going.tsv"
-            code: pass(jetenv(g, self_jet, ["check", "--threads", "12", package], ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": ".", "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": tsv]).timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
+            code: pass(jetenv(g, self_jet, Sh{"check --threads 12 {package}"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": ".", "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": tsv]).timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
             count: rows(tsv)
             print("{name} rc={code} rows={count}")
             census_errors(g, tsv, 11)
