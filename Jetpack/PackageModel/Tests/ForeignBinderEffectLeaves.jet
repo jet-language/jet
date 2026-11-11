@@ -3,7 +3,7 @@
 // language: that root is the FFI root or a leaf Compiler/Prelude/Effects.jet
 // declares, so no binding can publish an effect the checker doesn't know.
 use {
-    jet_pkg_model.[BinderDescriptor, pkg_foreign_binders]
+    jet_pkg_model.[BinderDescriptor, FOREIGN_LANGUAGE_COUNT, ForeignLanguage, pkg_foreign_binders, pkg_foreign_language_problem]
     jet_foundation.[EFFECT_VOCABULARY_LEAVES]
 }
 
@@ -31,4 +31,12 @@ pkg_test_binder_effect_problem: fn(binder: BinderDescriptor) -> String {
     assert(pkg_test_binder_effect_problem(binder).contains("publishes `FFI.Klingon`"))
     binder.effect_root = "Net"
     assert(pkg_test_binder_effect_problem(binder) != "")
+}
+
+#Test("ForeignLanguage is checked against the FFI cases, naming each difference") {
+    leaves: [String]{"FS.Read", "FFI.C", "FFI.Rust"}
+    assert_eq(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Rust\n}}\n", [String]{"C", "Rust"}, leaves), "")
+    assert_eq(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Go\n}}\n", [String]{"C", "Rust"}, leaves), "ForeignLanguages.jet: the cases of ForeignLanguage differ from the `FFI` cases of Compiler/Prelude/Effects.jet: missing [Rust], extra [Go] (the order must match too)")
+    assert(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Rust\n}}\n", [String]{"Rust", "C"}, leaves).starts_with("ForeignLanguages.jet: ForeignLanguage.all() differ"))
+    assert_eq(FOREIGN_LANGUAGE_COUNT, ForeignLanguage.all().len())
 }
