@@ -180,6 +180,27 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_failed(build_session_call(a, "compiler.live", [BuildSessionValue]{meta}, None, false, 17, 18)))
 }
 
+// Rewrites of one function compose in the order they run: a later rewrite's
+// paste line, written with the name its call gave the function, is the body
+// the earlier rewrite made, at that line's margin, and the module records
+// both callers.
+#Test("meta_rewrite_body_rewrites_of_one_function_compose_in_order") {
+    a := build_graph_rules_session(189)
+    empty: build_graph_rules_list([String]{})
+    app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    meta: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app}, None, false, 3, 4))
+    trace: Val("print(\"enter\")\n#{{f.body}}\n")
+    timer: Val("print(\"time start\")\nif true {{\n    #{{g.body}}\n}}\n")
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.rewrite_body", [BuildSessionValue]{meta.copy(), .Text(value: "load"), .Text(value: "`trace_install` at main.jet:22"), .Text(value: ""), .Text(value: "f")}, trace, false, 5, 6)))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.rewrite_body", [BuildSessionValue]{meta.copy(), .Text(value: "load"), .Text(value: "`timer_install` at main.jet:37"), .Text(value: ""), .Text(value: "g")}, timer, false, 7, 8)))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.rewrite_body", [BuildSessionValue]{meta, .Text(value: "load"), .Text(value: "`build` at main.jet:50"), .Text(value: "")}, trace, false, 9, 10)))
+    permit: a.storage.guard_read()
+    assert_eq(permit.value.generated.len(), 1)
+    assert_eq(permit.value.generated[0].source, "print(\"time start\")\nif true {{\n    print(\"enter\")\n    #{{load.body}}\n}}\n")
+    assert(permit.value.generated[0].producer == Val("`trace_install` at main.jet:22, then `timer_install` at main.jet:37"))
+    assert_eq(permit.value.generated[0].start, 5)
+}
+
 #Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
     session := build_graph_rules_session(89)
     bad_toolchain: build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "")}, None, false, 1, 2)

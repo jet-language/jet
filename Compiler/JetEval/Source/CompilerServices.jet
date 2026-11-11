@@ -551,7 +551,8 @@ jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> J
     Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})
 }
 
-// `markers` are the function's written MarkerInfo rows
+// `package` is the identity of the package that declares the function, as
+// the loader gives it. `markers` are the function's written MarkerInfo rows
 // (sema_comptime_reflection_written_markers).
 jet_eval_compiler_services_function_info: fn(function: Func, registration_module: SemaRegistrationModule, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
     solved_effects := [String]{}
@@ -576,6 +577,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
         TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
         TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
+        TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
         TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
         TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
         TComptimeField{name: "effects", value: TComptimeValue.Struct{type_name: "EffectInfo", fields: [TComptimeField]{

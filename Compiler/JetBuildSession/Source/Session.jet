@@ -463,26 +463,41 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     // `.jet/generated/<package>/rewrite_body/<f>.jet`. A function of this
     // package is a source of the value's target; a dependency's function is
     // rewritten only when the value allows that package, and only in this
-    // build's copy of it. One body rewrite per function.
+    // build's copy of it. A line `#{w.body}`, where `w` is the name the call
+    // wrote `f` with, is `f`'s body before this rewrite. Rewrites of one
+    // function compose in the order they run: a later rewrite's paste line is
+    // the body the earlier rewrites made.
     if method == "compiler.rewrite_body" {
-        if args.len() != 4 -> return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
+        if args.len() != 5 -> return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
         compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
         function: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's name")
-        source: generated_source ?? return build_session_fail(state, "`meta.rewrite_body` requires a `#code` block")
+        written: generated_source ?? return build_session_fail(state, "`meta.rewrite_body` requires a `#code` block")
         // The identity of the function's package: this build's own, or a
         // dependency's.
         owner: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's package")
+        pasted: build_session_text(args, 4) ?? return build_session_fail(state, "`meta.rewrite_body` lost the name its paste line uses")
         own: owner == state.identity
         package_name: build_session_package_dir(if own -> state.package else -> owner)
         if !own && !build_session_contains_string(state.compilers[compiler].rewritable, package_name) {
             return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
         }
-        path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
-        loop old in state.generated {
-            if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner -> return build_session_fail(state, "`meta.rewrite_body` already replaced the body of `{function}` in this build")
+        paste: "#{{{function}.body}}"
+        source: if pasted == "" || pasted == function -> written.copy() else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
+        producer: build_session_text(args, 2)
+        earlier := -1
+        loop (index, old) in state.generated {
+            if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner -> earlier = index
         }
+        if earlier >= 0 {
+            composed: build_session_replace_paste(source, paste, state.generated[earlier].source)
+            state.generated[earlier].source = composed
+            state.generated[earlier].source_digest = "sha256:{build_crypto.sha256(composed.bytes()).hex()}"
+            if state.generated[earlier].producer == .Val(first) && producer == .Val(later) -> state.generated[earlier].producer = Val("{first}, then {later}")
+            return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+        }
+        path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
         name: if own -> "{function} body" else -> "{function} body of {package_name}"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: build_session_text(args, 2)})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer})
         if own && added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
@@ -572,6 +587,26 @@ build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessi
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
     state.generated.push(checked)
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// `source` with each line that is `paste` alone replaced by the lines of
+// `body`, each indented by that line's margin; blank lines stay blank.
+build_session_replace_paste: fn(source: String, paste: String, body: String) -> String Never! {
+    inserted := body.split("\n").to_list()
+    loop inserted.len() > 0 && inserted[inserted.len() - 1].trim() == "" -> _: inserted.pop()
+    text := ""
+    loop line in source.split("\n").to_list() {
+        if line.trim() != paste {
+            text = "{text}{line}\n"
+            next
+        }
+        margin: line.removesuffix(paste)
+        loop body_line in inserted {
+            text = if body_line.trim() == "" -> "{text}\n" else -> "{text}{margin}{body_line}\n"
+        }
+    }
+    loop text.ends_with("\n\n") -> text = text.removesuffix("\n")
+    text
 }
 
 build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {

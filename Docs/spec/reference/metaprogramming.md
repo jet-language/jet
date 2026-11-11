@@ -383,13 +383,17 @@ generated module `name`, checked with the program like hand-written code.
 reaches it, a dependency's function included, and a dependency's own `allow`
 row widens nothing for its importer.
 `meta.rewrite_body(f, code)` replaces the body of the top-level function `f`
-with the statements of a `#code { statements }` block. `f` is named directly
-or through its package's import (`orm.query`).
+with the statements of a `#code { statements }` block. `f` is named directly,
+through its package's import (`orm.query`), or by a `FunctionInfo` value such
+as the `f` a `meta.events` handler hears.
 The rewritten function, its own declaration with the new body, is the
 generated module `rewrite_body/f` of `f`'s package, checked with the
 program, and its original text is withdrawn from its file. A line `#{f.body}`
-in the block pastes the original body there, so a rewrite can wrap it. It uses
-`Meta.Rewrite`, which a row denies with `-[!Meta.Rewrite]>`.
+in the block, written with the name the call gives `f`, pastes the original
+body there, so a rewrite can wrap it. Rewrites of one function compose in the
+order they run: a later rewrite's paste is the body the earlier ones made, so
+the last rewrite registered is the outermost. It uses `Meta.Rewrite`, which a
+row denies with `-[!Meta.Rewrite]>`.
 The root package's own functions need no consent. A dependency's function is
 rewritten only after the root writes `meta.allow_rewrite(package: "orm")` on
 its value, naming that dependency, which the build loads at its locked
@@ -407,7 +411,8 @@ function of the build's checked program that carries the marker of the
 watched value's type, in the order the program lists them; the value's fields
 filter nothing, and a value that is no marker struct's is E1134. Watching only
 reads, so it needs no Meta effect, and the build refuses a value whose build
-has returned.
+has returned. A handler that rewrites `f` uses `Meta.Rewrite` like any other
+caller; `f.package` is the identity of the package that declares it.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.

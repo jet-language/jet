@@ -175,9 +175,11 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // its `Code` value's formatted items as the generated source and the scope
 // it joins (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
 // function's name and its `Code` value's formatted statements as the new
-// body, then the identity of the function's package
-// (JetBuildSession `compiler.rewrite_body`). Each sends the calling function
-// and its place, which reports from the module name.
+// body, then the identity of the function's package and the name a paste
+// line `#{f.body}` writes it with (JetBuildSession `compiler.rewrite_body`);
+// a heard `FunctionInfo` gives the name and the package from its fields.
+// Each sends the calling function and its place, which reports from the
+// module name.
 // `meta.allow_rewrite` sends the dependency's name (JetBuildSession
 // `compiler.allow_rewrite`). `meta.events` sends the marker's name and reads
 // the functions of the value's checked program that carry that marker, once
@@ -200,18 +202,32 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         reply: build_session_call(session, "compiler.allow_rewrite", [BuildSessionValue]{held, package}, None, false, span.start, span.end)
         return jet_driver_compiler_reply(session, reply, span)
     }
-    rewrite: member == "Compiler.rewrite_body"
+    rewrite: member == "Compiler.rewrite_body" || member == "Compiler.rewrite_body.heard"
     if !(rewrite && args.len() == 5) && !(member == "Compiler.add" && args.len() == 4) -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
     held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     code_index: if rewrite -> 2 else -> 1
-    text_index: if rewrite -> 1 else -> 2
     source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
-    text: jet_eval_build_session_input(args[text_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
-    producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
-    values := [BuildSessionValue]{held, text, producer}
-    if rewrite -> values.push(jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's package"))
-    method: if rewrite -> "compiler.rewrite_body" else -> "compiler.add"
-    reply: build_session_call(session, method, values, Val(source), false, span.start, span.end)
+    if !rewrite {
+        scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+        producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+        reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer}, Val(source), false, span.start, span.end)
+        return jet_driver_compiler_reply(session, reply, span)
+    }
+    // A named function sends its name and its package's identity; a heard
+    // `FunctionInfo` sends itself, then the name its paste line is written
+    // with. The session takes the function's name, the caller, the package's
+    // identity, then the paste's name.
+    function := args[1].copy()
+    owner := args[4].copy()
+    paste := args[1].copy()
+    if member == "Compiler.rewrite_body.heard" {
+        function = jet_eval_build_field(args[1], "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's name")
+        owner = jet_eval_build_field(args[1], "package") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's package")
+        paste = args[4].copy()
+    }
+    values := [BuildSessionValue]{held}
+    loop value in ([TComptimeValue]{function, args[3].copy(), owner, paste}) -> values.push(jet_eval_build_session_input(value) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function"))
+    reply: build_session_call(session, "compiler.rewrite_body", values, Val(source), false, span.start, span.end)
     jet_driver_compiler_reply(session, reply, span)
 }
 

@@ -1,0 +1,15 @@
+# #3526: a `meta.events` handler rewrites the function it hears, passing the
+# heard `FunctionInfo` to `meta.rewrite_body`, and `#{f.body}` pastes that
+# function's body. Rewrites of one function compose in the order they run:
+# the trace handler, registered first, rewrites `load` and `plain`; the timer
+# handler, registered second, rewrites `load` again, and its paste is the
+# trace rewrite, so the timer wraps outside the trace.
+fixture: meta_events_rewrites_compose_in_order.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/rewrite_body/load.jet ~ "print(\"time start\")" # the composed body is one generated module
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "time start\nenter\nenter\n3\n"

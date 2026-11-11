@@ -343,9 +343,14 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
 // function, directly or through its package's import (`tool.f`), and is sent
 // as its name and its package's identity; the build replaces the body of
 // that package's function of that name (JetDriver BuildQueries.jet), so
-// naming it lends nothing and moves nothing. Replacing a body uses
-// `Meta.Rewrite`, and the build session refuses a function of a package
-// other than the root unless the value allows it (`meta.allow_rewrite`).
+// naming it lends nothing and moves nothing. `f` may instead be a
+// `FunctionInfo` value, such as the function a `meta.events` handler hears;
+// that is the hidden `Compiler` method `rewrite_body.heard`, which sends the
+// value itself, whose `name` and `package` the build host reads, then the
+// name `f` is written as, so a line `#{f.body}` of the code is that
+// function's original body. Replacing a body uses `Meta.Rewrite`, and the
+// build session refuses a function of a package other than the root unless
+// the value allows it (`meta.allow_rewrite`).
 sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     shape: "meta.rewrite_body(f, #code {{ ... }})"
@@ -381,26 +386,51 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
             }
         }
     }
+    heard := TExpr?{None}
     if function == "" {
-        diagnostics.push(sema_error("E0764", args[0].span, "`meta.rewrite_body` needs a top-level function's name", "a body rewrite replaces the body of one top-level function, named directly or through its package", "pass a top-level function, as in `{shape}` or `meta.rewrite_body(tool.f, #code {{ ... }})`"))
+        // Not a top-level function: a `FunctionInfo` value is the function
+        // it describes. Anything else names no function.
+        mark: diagnostics.len()
+        if sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) == .Val(value) {
+            if value.ty == (Type.Named{name: "FunctionInfo"}) -> heard = Val(value)
+        }
+        loop diagnostics.len() > mark -> _: diagnostics.pop()
+    }
+    if function == "" && heard == None {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.rewrite_body` needs a top-level function's name", "a body rewrite replaces the body of one top-level function, named directly, through its package, or by the `FunctionInfo` a `meta.events` handler hears", "pass a top-level function, as in `{shape}` or `meta.rewrite_body(tool.f, #code {{ ... }})`"))
         return failed
     }
-    ordinary := [CallArg]{args[1].copy()}
+    ordinary := [CallArg]{}
+    params := [SemaCallParam]{}
+    if heard == .Val(info) {
+        ordinary.push(args[0].copy())
+        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(info.ty), variadic: false})
+    }
+    ordinary.push(args[1].copy())
     code: sema_check_expression(args[1].expr, Val(Type.Named{name: "Code"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     compatible: sema_call_type_assignable(Type.Named{name: "Code"}, code.ty, environment, program) ?? return failed
     if !compatible {
         diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code.ty, args[1].span))
         return failed
     }
-    params := [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(code.ty), variadic: false}}
+    params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(code.ty), variadic: false})
     ownership: sema_ownership_check_method_call(state, "Compiler.rewrite_body", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.rewrite_body", span, [EffectRowEntry]{EffectRowEntry{name: META_REWRITE, span: span}}, diagnostics) -> return failed
+    producer: sema_call_compiler_producer(environment, program, scopes, span)
+    if heard == .Val(info) {
+        // The session reads the `FunctionInfo` value, the `Code` value, the
+        // caller, then the name its paste line is written with.
+        written: if args[0].expr == .Ident(name, _, _) -> name.copy() else -> ""
+        paste: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: written}}}, args[0].span)
+        value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body.heard", args: [TExpr]{info, code, producer, paste}}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    }
     // The session reads the function's name, the `Code` value, the caller,
     // then the identity of the function's package.
     name: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: function}}}, args[0].span)
     owner: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: package}}}, args[0].span)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code, sema_call_compiler_producer(environment, program, scopes, span), owner}}}, span)
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code, producer, owner}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

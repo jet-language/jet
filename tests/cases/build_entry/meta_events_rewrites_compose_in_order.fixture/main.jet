@@ -1,0 +1,57 @@
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+Timed: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#[Traced, Timed]
+load: fn() -> Int { 1 }
+
+#Traced
+plain: fn() -> Int { 2 }
+
+// Prints "enter" before each traced function's body.
+trace_install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.rewrite_body(f, #code {
+                    print("enter")
+                    #{f.body}
+                })
+            }
+        },
+    )
+}
+
+// Registered second, so its rewrite of `load` wraps the trace rewrite.
+timer_install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Timed{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.rewrite_body(f, #code {
+                    print("time start")
+                    #{f.body}
+                })
+            }
+        },
+    )
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    trace_install(meta)
+    timer_install(meta)
+    b.default(app)
+}
+
+run: fn() { print(load() + plain()) }
