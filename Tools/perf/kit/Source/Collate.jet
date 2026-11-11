@@ -1,0 +1,78 @@
+// `a.localeCompare(b)` under ICU's root collation, the order V8 sorts by.
+// ASCII follows CLDR root: whitespace, then punctuation and symbols in
+// CLDR's order, then digits, then letters with case ignored. Strings equal
+// so far compare by case, lowercase first. Control characters are
+// ignorable. Any other byte sorts after the letters by its value.
+COLLATE_SPACES: [Int]{9, 10, 11, 12, 13, 32}
+COLLATE_ORDER: "_-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
+
+// The primary weight of `byte` (0 when it is ignorable), and whether it is
+// an uppercase letter.
+Weight: struct {
+    primary: Int
+    upper: Bool
+}
+
+collate_weight: fn(byte: Int) -> Weight Never! {
+    loop at in 0..<COLLATE_SPACES.len() {
+        if COLLATE_SPACES[at] == byte -> return Weight{primary: at + 1, upper: false}
+    }
+    upper: byte >= 65 && byte <= 90
+    folded: if upper -> byte + 32 else -> byte
+    order: COLLATE_ORDER.bytes()
+    base: COLLATE_SPACES.len() + 1
+    loop at in 0..<order.len() {
+        if Int.from_u8(order[at]) == folded -> return Weight{primary: base + at, upper: upper}
+    }
+    if byte < 32 || byte == 127 -> return Weight{primary: 0, upper: false}
+    Weight{primary: base + order.len() + byte, upper: false}
+}
+
+collate_weights: fn(text: String) -> [Weight] Never! {
+    weights := [Weight]{}
+    loop byte in text.bytes() {
+        weight: collate_weight(Int.from_u8(byte))
+        if weight.primary > 0 -> weights.push(weight)
+    }
+    weights
+}
+
+// -1, 0 or 1 as `a` sorts before, with or after `b`.
+locale_compare: fn(a: String, b: String) -> Int Never! {
+    left: collate_weights(a)
+    right: collate_weights(b)
+    common: if left.len() < right.len() -> left.len() else -> right.len()
+    loop at in 0..<common {
+        if left[at].primary != right[at].primary -> return if left[at].primary < right[at].primary -> -1 else -> 1
+    }
+    if left.len() != right.len() -> return if left.len() < right.len() -> -1 else -> 1
+    loop at in 0..<common {
+        if left[at].upper != right[at].upper -> return if right[at].upper -> -1 else -> 1
+    }
+    0
+}
+
+// Stable sort by `localeCompare`, as Array.prototype.sort keeps ties.
+locale_sorted: fn(names: [String]) -> [String] Never! {
+    out := names
+    loop i in 1..<out.len() {
+        j := i
+        loop j > 0 && locale_compare(out[j - 1], out[j]) > 0 {
+            held: out[j - 1].copy()  // copy: the swap keeps both names
+            out[j - 1] = out[j].copy()  // copy: the swap keeps both names
+            out[j] = held
+            j -= 1
+        }
+    }
+    out
+}
+
+#Test("localeCompare puts punctuation before digits before letters, and lowercase first") {
+    assert_eq(locale_compare("a_b", "a.b"), -1)
+    assert_eq(locale_compare("lower", "lower.ir"), -1)
+    assert_eq(locale_compare("Parse", "parse"), 1)
+    assert_eq(locale_compare("parse", "Sema"), -1)
+    assert_eq(locale_compare("x9", "xa"), -1)
+    assert_eq(locale_compare("same", "same"), 0)
+    assert(locale_sorted([String]{"b", "B", "a.c", "a_c", "A"}) == [String]{"A", "a_c", "a.c", "b", "B"})
+}

@@ -26,7 +26,7 @@ package: {
 
 use {
     files: core.files
-    jet_perf_kit.[field, is_text, items, js_number, js_string, js_trim, json_stringify, map_key, number_from_text, present, same, text_of, to_fixed, to_number]
+    jet_perf_kit.[field, is_text, items, js_add, js_number, js_string, js_trim, json_stringify, map_key, number_from_text, present, same, text_of, to_fixed, to_number]
     json: core.encoding.json
     math: core.math
     process: core.process
@@ -179,23 +179,6 @@ closed_spans: fn(events: [Dyn?]) -[Exec, IO]> [Span] {
         })
     }
     spans
-}
-
-// JavaScript `total + value` where total is a number or a string: text joins,
-// anything else adds as a number.
-js_add: fn(total: Dyn, value: Dyn?) -> Dyn {
-    joins: if total == {
-        .Text(_) -> true
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
-            inner: value ?? Dyn.Null
-            if inner == {
-                .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> false
-            }
-        }
-    }
-    if joins -> return Dyn.Text("{js_string(Val(total))}{js_string(value)}")
-    Dyn.Float(to_number(Val(total)) + to_number(value))
 }
 
 // `item.split(", ")`.

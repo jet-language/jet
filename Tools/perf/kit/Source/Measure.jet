@@ -1,0 +1,679 @@
+// Process-tree measurement and trace phase extraction for the
+// compile-throughput harness (Tower #4529), the twin of
+// Tools/perf/throughput/measure.mjs. Linux /proc.
+//
+// One measured command runs under GNU time (exact whole-tree user/system CPU
+// from rusage and the largest single-process high-water RSS) while a sampler
+// walks the live process tree every SAMPLE_MS: summed RSS (the tree peak),
+// summed threads, and cumulative tree CPU (live utime+stime plus the
+// cutime+cstime of reaped children), stamped on the same clock as the
+// compiler's JET_TRACE_FILE spans. Per-phase CPU is the sampled CPU curve
+// read across each phase's wall interval, so its resolution is the sampling
+// interval and the kernel clock tick.
+use {
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+// GNU time (`-f`, `-o`): the first executable `time` on PATH (the shell's
+// `time` is a keyword, not this), else the store path it was pinned to.
+gnu_time: fn() -[Env, FS]> String {
+    on_path: process.env_get_or("PATH", "").split(":").to_list().find(dir -> dir != "" && files.can_execute("{dir}/time"))
+    if on_path == .Val(dir) -> return "{dir}/time"
+    "/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time"
+}
+
+SAMPLE_MS: 20
+MAX_SAFE_INTEGER: 9007199254740991
+// The measured command's streams: stdin from /dev/null, stdout and stderr
+// into the files named by $1 and $2, then GNU time in this same process.
+REDIRECT: "exec </dev/null >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
+
+#Error
+MeasureError: struct {
+    message: String
+    // JSON.parse refused the text (a SyntaxError in JavaScript).
+    syntax: Bool
+}
+
+measure_error: fn(message: String) -> MeasureError Never! { MeasureError{message: message, syntax: false} }
+
+// The host's clock tick and page size: `getconf CLK_TCK` and `PAGESIZE`,
+// else 100 and 4096.
+Host: struct {
+    ns_per_tick: Float
+    page_bytes: Int
+}
+
+getconf_number: fn(name: String, fallback: Int) -[Exec, Time.Wait]> Int Never! {
+    receipt: process.cmd([String]{"getconf", name}).stdout(.Capture).stderr(.Capture).run() ?? return fallback
+    value: number_from_text(receipt.output)
+    if math.is_nan(value) || !(math.abs(value) > KIT_ZERO) -> return fallback
+    Int.from_float(value) ?? fallback
+}
+
+measure_host: fn() -[Exec, Time.Wait]> Host Never! {
+    ticks: getconf_number("CLK_TCK", 100)
+    Host{ns_per_tick: Float{1000000000.0} / Float.from_int(ticks), page_bytes: getconf_number("PAGESIZE", 4096)}
+}
+
+// One sample of a process tree: CPU in nanoseconds, threads, resident bytes
+// and processes.
+TreeSample: struct {
+    cpu_ns: Float
+    threads: Int
+    rss_bytes: Int
+    processes: Int
+}
+
+Stat: struct {
+    cpu_ticks: Int
+    threads: Int
+    rss_bytes: Int
+}
+
+// /proc/<pid>/stat fields after the parenthesised command name: utime=14,
+// stime=15, cutime=16, cstime=17, num_threads=20, rss=24 in proc(5)
+// numbering.
+read_stat: fn(pid: Int, host: Host) -[FS]> Stat? Never! {
+    text: files.read("/proc/{pid}/stat") ?? return None
+    parts: text.split(") ").to_list()
+    fields: parts[parts.len() - 1].split(" ").to_list()
+    Val(Stat{cpu_ticks: stat_field(fields, 14) + stat_field(fields, 15) + stat_field(fields, 16) + stat_field(fields, 17), threads: stat_field(fields, 20), rss_bytes: stat_field(fields, 24) * host.page_bytes})
+}
+
+// Field `number` in proc(5) numbering of the fields after the command name.
+stat_field: fn(fields: [String], number: Int) -> Int Never! {
+    if number - 3 < fields.len() -> Int.parse(fields[number - 3]) ?? 0 else -> 0
+}
+
+children: fn(pid: Int) -[FS]> [Int] Never! {
+    result := [Int]{}
+    tasks: files.list_dir("/proc/{pid}/task") ?? return result
+    loop task in tasks {
+        text: files.read("/proc/{pid}/task/{task.name}/children") ?? next
+        loop child in text.trim().split(" ") {
+            if child != "" -> result.push(Int.parse(child) ?? next)
+        }
+    }
+    result
+}
+
+sample_tree: fn(root: Int, host: Host) -[FS]> TreeSample Never! {
+    seen := [Int]{}
+    stack := [Int]{root}
+    cpu_ticks := 0
+    threads := 0
+    rss_bytes := 0
+    processes := 0
+    loop stack.len() > 0 {
+        pid: stack.pop() ?? break
+        if seen.contains(pid) -> next
+        seen.push(pid)
+        stat: read_stat(pid, host) ?? next
+        processes += 1
+        cpu_ticks += stat.cpu_ticks
+        threads += stat.threads
+        rss_bytes += stat.rss_bytes
+        stack.extend(children(pid))
+    }
+    TreeSample{cpu_ns: Float.from_int(cpu_ticks) * host.ns_per_tick, threads: threads, rss_bytes: rss_bytes, processes: processes}
+}
+
+// A sample of the measured tree, `t_ns` from the spawn.
+Sample: struct {
+    t_ns: Float
+    cpu_ns: Float
+    threads: Int
+    rss_bytes: Int
+    processes: Int
+}
+
+Rusage: struct {
+    user_ns: Int
+    sys_ns: Int
+    max_rss_bytes: Int
+}
+
+Measured: struct {
+    // None when a signal ended the command.
+    code: Int?
+    signal: String?
+    killed: Bool
+    wall_ns: Int
+    spawn_unix_ms: Int
+    samples: [Sample]
+    rusage: Rusage?
+    peak_rss_bytes: Int
+    threads_used: Int
+}
+
+Setting: struct {
+    name: String
+    value: String
+}
+
+MeasureOptions: struct {
+    cwd: String?
+    // The child's whole environment; None inherits this process's.
+    env: [Setting]?
+    stdout_path: String
+    stderr_path: String
+    // 0: no limit.
+    timeout_ms: Int
+}
+
+kill_tree: fn(pid: Int) -[Env, FS]> {
+    loop child in children(pid) -> kill_tree(child)
+    #Unsafe("posix kill: the measured command's own process tree, found from its root through /proc") {
+        sys.kill(pid, 9).drop("the process may be gone already")
+    }
+}
+
+// `\d+`.
+digits_text: fn(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) < 48 || Int.from_u8(byte) > 57 -> return false
+    }
+    true
+}
+
+// `\d+(\.\d+)?`.
+decimal_text: fn(text: String) -> Bool Never! {
+    parts: text.split(".").to_list()
+    if parts.len() > 2 -> return false
+    loop part in parts {
+        if !digits_text(part) -> return false
+    }
+    true
+}
+
+// Math.round.
+js_round: fn(value: Float) -> Float Never! {
+    if math.is_nan(value) || !math.is_finite(value) -> return value
+    floor: math.floor(value)
+    if value - floor >= (Float{0.5}) -> floor + (Float{1.0}) else -> floor
+}
+
+// GNU time's `%e %U %S %M` line, the last of its output file.
+read_rusage: fn(time_file: String) -[FS]> Rusage? Never! {
+    text: files.read(time_file) ?? return None
+    lines: js_trim(text).split("\n").to_list()
+    fields: lines[lines.len() - 1].split(" ").to_list()
+    if fields.len() != 4 || !decimal_text(fields[0]) || !decimal_text(fields[1]) || !decimal_text(fields[2]) || !digits_text(fields[3]) -> return None
+    Val(Rusage{user_ns: rusage_ns(fields[1]), sys_ns: rusage_ns(fields[2]), max_rss_bytes: (Int.parse(fields[3]) ?? 0) * 1024})
+}
+
+// `Math.round(Number(seconds) * 1e9)`.
+rusage_ns: fn(seconds: String) -> Int Never! {
+    Int.from_float(js_round(number_from_text(seconds) * Float{1000000000.0})) ?? 0
+}
+
+// Run argv under GNU time and the sampler: exact totals and the sample
+// series; times are nanoseconds from the spawn.
+run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time, Time.Wait]> Measured MeasureError! {
+    host: measure_host()
+    time_file: "{options.stderr_path}.time"
+    files.remove(time_file) ?? ()
+    out: files.absolute(options.stdout_path) ?? return Err(measure_error("{err}"))
+    errors: files.absolute(options.stderr_path) ?? return Err(measure_error("{err}"))
+    files.write(out, "") ?? return Err(measure_error("{err}"))
+    files.write(errors, "") ?? return Err(measure_error("{err}"))
+    gnu: gnu_time()
+    if !files.is_file(gnu) -> return Err(measure_error("spawn {gnu} ENOENT"))
+    command := [String]{"sh", "-c", REDIRECT, "sh", out, errors, gnu, "-f", "%e %U %S %M", "-o", time_file.copy()}  // copy: the time file is read after the run
+    loop arg in argv -> command.push(arg.copy())  // copy: the caller keeps its argv
+    spec := process.cmd(command).stdout(.Inherit).stderr(.Inherit)
+    if options.cwd == .Val(dir) -> spec = spec.cwd(dir)
+    if options.env == .Val(settings) {
+        spec = spec.env_clear()
+        loop setting in settings -> spec = spec.env(setting.name, setting.value)
+    }
+    spawn_unix_ms: time.now().to_unix_ms()
+    start: time.instant()
+    child: spec.spawn() ?? return Err(measure_error("{err}"))
+    pid: child.id()
+    samples := [Sample]{}
+    killed := false
+    step: SAMPLE_MS * 1000000
+    next_sample := step
+    loop !(child.exited() ?? true) {
+        elapsed: time.instant().start_ns - start.start_ns
+        if options.timeout_ms > 0 && !killed && elapsed >= options.timeout_ms * 1000000 {
+            killed = true
+            kill_tree(pid)
+        }
+        if elapsed >= next_sample {
+            tree: sample_tree(pid, host)
+            samples.push(Sample{t_ns: Float.from_int(time.instant().start_ns - start.start_ns), cpu_ns: tree.cpu_ns, threads: tree.threads, rss_bytes: tree.rss_bytes, processes: tree.processes})
+            next_sample += step
+        }
+        time.sleep(1ms)
+    }
+    wall_ns: time.instant().start_ns - start.start_ns
+    receipt: child.wait() ?? return Err(measure_error("{err}"))
+    rusage: read_rusage(time_file)
+    peak := 0
+    threads_used := 0
+    loop sample in samples {
+        if sample.rss_bytes > peak -> peak = sample.rss_bytes
+        if sample.threads > threads_used -> threads_used = sample.threads
+    }
+    if rusage == .Val(usage) {
+        if usage.max_rss_bytes > peak -> peak = usage.max_rss_bytes
+    }
+    signal: if receipt.signal == .Val(number) -> String?{Val(signal_name(number))} else -> None
+    code: if signal == None -> Int?{Val(receipt.code)} else -> None
+    Ok(Measured{code: code, signal: signal, killed: killed, wall_ns: wall_ns, spawn_unix_ms: spawn_unix_ms, samples: samples, rusage: rusage, peak_rss_bytes: peak, threads_used: threads_used})
+}
+
+// Cumulative tree CPU at `t_ns`, linear between samples (0 before the first).
+cpu_at: fn(samples: [Sample], t_ns: Float) -> Float Never! {
+    if samples.len() == 0 -> return KIT_ZERO
+    first: samples[0]
+    if t_ns <= first.t_ns -> return first.cpu_ns * js_max(KIT_ZERO, t_ns) / js_max(Float{1.0}, first.t_ns)
+    loop i in 1..<samples.len() {
+        if t_ns <= samples[i].t_ns {
+            a: samples[i - 1]
+            b: samples[i]
+            return a.cpu_ns + (b.cpu_ns - a.cpu_ns) * (t_ns - a.t_ns) / js_max(Float{1.0}, b.t_ns - a.t_ns)
+        }
+    }
+    samples[samples.len() - 1].cpu_ns
+}
+
+// Math.max(a, b): NaN when either is.
+js_max: fn(a: Float, b: Float) -> Float Never! {
+    if math.is_nan(a) || math.is_nan(b) -> return math.NAN
+    if a > b -> a else -> b
+}
+
+// The successful run that wrote a completed trace.
+Completed: struct {
+    exit_code: Int?
+    pid: Int
+    started_unix_ms: Int
+    finished_unix_ms: Int
+}
+
+safe: fn(value: Int) -> Bool Never! { value >= -MAX_SAFE_INTEGER && value <= MAX_SAFE_INTEGER }
+
+// Number.isSafeInteger(value): the integer it holds.
+safe_integer: fn(value: Dyn?) -> Int? Never! {
+    number: as_number(value) ?? return None
+    if !math.is_finite(number) || math.abs(number - math.floor(number)) > KIT_ZERO || math.abs(number) > Float.from_int(MAX_SAFE_INTEGER) -> return None
+    Val(Int.from_float(number) ?? return None)
+}
+
+read_failure: fn(file: String, error: IOError) -> MeasureError Never! {
+    if error == .NotFound(_) -> return measure_error("ENOENT: no such file or directory, open '{file}'")
+    measure_error("{error}")
+}
+
+// JET_TRACE_FILE is an open array of newline-terminated object/comma rows.
+// Live readers may see a partial last row; completed proofs must bind the
+// producer's process identity to a successful, independently recorded run.
+read_trace: fn(file: String, completed: Completed?) -[FS]> [Dyn] MeasureError! {
+    text: files.read(file) ?? return Err(read_failure(file, err))
+    strict: completed != None
+    if completed == .Val(run) {
+        if run.exit_code != Val(0) || run.pid <= 0 || !safe(run.pid) || !safe(run.started_unix_ms) || !safe(run.finished_unix_ms) || run.started_unix_ms > run.finished_unix_ms {
+            return Err(measure_error("completed trace requires successful recorded process identity"))
+        }
+        if !text.starts_with("[\n") || !text.ends_with("\n") -> return Err(measure_error("invalid or truncated completed trace stream"))
+    }
+    events := [Dyn]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        raw: lines[index]
+        if strict && (index == 0 || index == lines.len() - 1) -> next
+        if strict && (!raw.starts_with("{{") || !raw.ends_with("}},")) -> return Err(measure_error("invalid or truncated completed trace event"))
+        trimmed: js_trim(raw)
+        line: if trimmed.ends_with(",") -> trimmed.removesuffix(",") else -> trimmed
+        if !line.starts_with("{{") -> next
+        if json.parse(line) == {
+            .Ok(event) -> events.push(event)
+            .Err(_) -> {
+                if strict -> return Err(measure_error("malformed completed trace event"))
+            }
+        }
+    }
+    if completed == .Val(run) -> check_completed(events, run) ?? return Err(err)
+    Ok(events)
+}
+
+Open: struct {
+    thread: String
+    stack: [Dyn]
+}
+
+check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
+    identity: measure_error("completed trace does not match the recorded process identity")
+    starts := 0
+    unix_ms := Int?{None}
+    loop event in events {
+        if is_text(field(Val(event), "name"), "trace.start") && is_text(field(Val(event), "ph"), "i") {
+            if starts == 0 -> unix_ms = safe_integer(field(field(Val(event), "args"), "unix_ms"))
+            starts += 1
+        }
+    }
+    if starts != 1 -> return Err(identity)
+    anchor: unix_ms ?? return Err(identity)
+    if anchor < run.started_unix_ms || anchor > run.finished_unix_ms -> return Err(identity)
+    loop event in events {
+        if !same(field(Val(event), "pid"), Val(Dyn.Int(run.pid))) -> return Err(identity)
+    }
+    stacks := [Open]{}
+    last_time := [String: Int]{}
+    phases: [String]{"M", "i", "C", "B", "E"}
+    loop event in events {
+        value: Val(event)
+        tid: safe_integer(field(value, "tid"))
+        name: text_of(field(value, "name")) ?? ""
+        ph: text_of(field(value, "ph")) ?? ""
+        if tid == None || (tid ?? 0) < 0 || name == "" || !phases.contains(ph) -> return Err(measure_error("invalid completed trace event schema"))
+        // Producer metadata has no timestamp. Its unix_ms anchor and the
+        // independently recorded process window have millisecond precision.
+        if ph == "M" && field(value, "ts") == None -> next
+        ts: safe_integer(field(value, "ts")) ?? return Err(measure_error("completed trace event is outside the recorded process window"))
+        if ts < 0 || (Int.from_float(math.floor(Float.from_int(anchor) + Float.from_int(ts) / Float{1000.0})) ?? 0) > run.finished_unix_ms {
+            return Err(measure_error("completed trace event is outside the recorded process window"))
+        }
+        pid_text: js_string(field(value, "pid"))
+        tid_text: js_string(field(value, "tid"))
+        thread: "{pid_text}:{tid_text}"
+        if ts < (last_time.get(thread) ?? 0) -> return Err(measure_error("invalid completed trace time order"))
+        last_time[thread] = ts
+        if ph != "B" && ph != "E" -> next
+        if (text_of(field(value, "cat")) ?? "") == "" -> return Err(measure_error("invalid completed trace span category"))
+        at := -1
+        loop i in 0..<stacks.len() {
+            if stacks[i].thread == thread -> at = i
+        }
+        if at < 0 {
+            stacks.push(Open{thread: thread, stack: [Dyn]{}})
+            at = stacks.len() - 1
+        }
+        if ph == "B" {
+            stacks[at].stack.push(event.copy())  // copy: the event list goes on
+            next
+        }
+        begin: stacks[at].stack.pop() ?? return Err(measure_error("unbalanced completed trace spans"))
+        if !same(field(Val(begin), "name"), field(value, "name")) || !same(field(Val(begin), "cat"), field(value, "cat")) -> return Err(measure_error("unbalanced completed trace spans"))
+    }
+    loop open in stacks {
+        if open.stack.len() > 0 -> return Err(measure_error("unbalanced completed trace spans"))
+    }
+    Ok()
+}
+
+SpanTime: struct {
+    start: Float
+    end: Float
+    // `event.args?.items ?? null`: None is null.
+    items: Dyn?
+}
+
+KindSpans: struct {
+    key: String
+    kind: String
+    spans: [SpanTime]
+}
+
+OpenSpans: struct {
+    tid: String
+    cat: String
+    starts: [Float]
+}
+
+PhaseRow: struct {
+    kind: String
+    wall_ns: Float
+    span_ns: Float
+    cpu_ns: Float
+    count: Int
+    // None is null.
+    items: Dyn?
+}
+
+PhaseTable: struct {
+    phases: [PhaseRow]
+    first_begin_ns: Float?
+    unclosed: [String]
+}
+
+// Stable order of start time (`a.start - b.start`).
+by_start: fn(spans: [SpanTime]) -> [SpanTime] Never! {
+    out := spans
+    loop i in 1..<out.len() {
+        j := i
+        loop j > 0 && out[j - 1].start - out[j].start > KIT_ZERO {
+            held: out[j - 1]
+            out[j - 1] = out[j]
+            out[j] = held
+            j -= 1
+        }
+    }
+    out
+}
+
+// Phase spans are trace spans whose label is their kind (item spans carry a
+// module or function label). Per kind: `wall_ns` is the union of its spans
+// over all threads (critical-path wall), `span_ns` their summed duration
+// (thread time), `cpu_ns` the tree CPU spent inside the union, `count` and
+// `items`. `offset_ns` places trace time 0 on the sampler's clock.
+phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTable Never! {
+    open := [OpenSpans]{}
+    kinds := [KindSpans]{}
+    first_begin := Float?{None}
+    loop event in events {
+        value: Val(event)
+        ph: field(value, "ph")
+        cat: field(value, "cat")
+        if (!is_text(ph, "B") && !is_text(ph, "E")) || !same(field(value, "name"), cat) -> next
+        tid: js_string(field(value, "tid"))
+        cat_text: js_string(cat)
+        t_ns: to_number(field(value, "ts")) * Float{1000.0} + offset_ns
+        at := -1
+        loop i in 0..<open.len() {
+            if open[i].tid == tid && open[i].cat == cat_text -> at = i
+        }
+        if is_text(ph, "B") {
+            if first_begin == {
+                .None -> first_begin = Val(t_ns)
+                .Val(first) -> if t_ns < first -> first_begin = Val(t_ns)
+            }
+            if at < 0 {
+                open.push(OpenSpans{tid: tid, cat: cat_text, starts: [Float]{}})
+                at = open.len() - 1
+            }
+            open[at].starts.push(t_ns)
+            next
+        }
+        if at < 0 -> next
+        begun: open[at].starts.pop() ?? next
+        items_value: field(field(value, "args"), "items")
+        items: if present(items_value) -> items_value else -> None
+        key: map_key(cat, 0)
+        kind_at := -1
+        loop i in 0..<kinds.len() {
+            if kinds[i].key == key -> kind_at = i
+        }
+        if kind_at < 0 {
+            kinds.push(KindSpans{key: key, kind: cat_text, spans: [SpanTime]{}})
+            kind_at = kinds.len() - 1
+        }
+        kinds[kind_at].spans.push(SpanTime{start: begun, end: t_ns, items: items})
+    }
+    unclosed := [String]{}
+    loop entry in open {
+        if entry.starts.len() > 0 -> unclosed.push(entry.cat.copy())  // copy: the open list goes on
+    }
+    order: kind_order(kinds)
+    phases := [PhaseRow]{}
+    loop at in order {
+        entry: kinds[at]
+        list: by_start(entry.spans)
+        union := [SpanTime]{}
+        loop span in list {
+            last: union.len() - 1
+            if last >= 0 && span.start <= union[last].end {
+                union[last].end = js_max(union[last].end, span.end)
+                next
+            }
+            union.push(SpanTime{start: span.start, end: span.end, items: None})
+        }
+        items := Dyn?{None}
+        loop span in list {
+            if span.items == .Val(count) -> items = Val(js_add(items ?? Dyn.Int(0), Val(count)))
+        }
+        wall := KIT_ZERO
+        loop span in union -> wall = wall + span.end - span.start
+        thread := KIT_ZERO
+        loop span in list -> thread = thread + span.end - span.start
+        cpu := KIT_ZERO
+        loop span in union -> cpu = cpu + cpu_at(samples, span.end) - cpu_at(samples, span.start)
+        phases.push(PhaseRow{kind: entry.kind.copy(), wall_ns: js_round(wall), span_ns: js_round(thread), cpu_ns: js_round(cpu), count: list.len(), items: items})  // copy: the kinds keep their names
+    }
+    PhaseTable{phases: phases, first_begin_ns: first_begin, unclosed: unclosed}
+}
+
+// The kinds' indexes in `localeCompare` order of their names, stable.
+kind_order: fn(kinds: [KindSpans]) -> [Int] Never! {
+    order := [Int]{}
+    loop at in 0..<kinds.len() -> order.push(at)
+    loop i in 1..<order.len() {
+        j := i
+        loop j > 0 && locale_compare(kinds[order[j - 1]].kind, kinds[order[j]].kind) > 0 {
+            held: order[j - 1]
+            order[j - 1] = order[j]
+            order[j] = held
+            j -= 1
+        }
+    }
+    order
+}
+
+// phaseTable's object, as JSON.stringify writes it.
+phase_table_json: fn(table: PhaseTable) -> Dyn Never! {
+    rows := [(key: String, value: Dyn)]{}
+    loop row in table.phases {
+        rows.push((key: row.kind.copy(), value: Dyn.Object([(key: "wall_ns", value: Dyn.Float(row.wall_ns)), (key: "span_ns", value: Dyn.Float(row.span_ns)), (key: "cpu_ns", value: Dyn.Float(row.cpu_ns)), (key: "count", value: Dyn.Int(row.count)), (key: "items", value: row.items.copy() ?? Dyn.Null)])))  // copy: the table keeps its kinds and items
+    }
+    first: if table.first_begin_ns == .Val(at) -> Dyn.Float(at) else -> Dyn.Null
+    unclosed := [Dyn]{}
+    loop kind in table.unclosed -> unclosed.push(Dyn.Text(kind.copy()))  // copy: the table keeps its kinds
+    Dyn.Object([(key: "phases", value: Dyn.Object(rows)), (key: "firstBeginNs", value: first), (key: "unclosed", value: Dyn.Array(unclosed))])
+}
+
+Counter: struct {
+    key: String
+    value: Float
+}
+
+// `walk(value, key)`: a number adds to its counter, an object walks its
+// members (in Object.entries order), anything else is refused.
+walk_counters: fn(value: Dyn, key: String, counters: &[Counter]) MeasureError! {
+    if value == {
+        .Int(_) | .Float(_) | .Number(_) -> {
+            number: as_number(Val(value)) ?? math.NAN
+            if !math.is_finite(number) || number < KIT_ZERO -> return Err(measure_error("Invalid counter: {key}"))
+            loop i in 0..<counters.len() {
+                if counters[i].key == key {
+                    counters[i].value = counters[i].value + number
+                    return Ok()
+                }
+            }
+            counters.push(Counter{key: key, value: KIT_ZERO + number})
+        }
+        .Object(entries) -> {
+            loop entry in ordered(entries) {
+                child_key: if key == "" -> entry.key.copy() else -> "{key}.{entry.key}"  // copy: the entry goes on
+                walk_counters(entry.value, child_key, counters) ?? return Err(err)
+            }
+        }
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(measure_error("Non-numeric counter: {key}"))
+    }
+    Ok()
+}
+
+// The JSON object of a JET_PHASE_COUNTERS line (`^JET_PHASE_COUNTERS(?:\s+|:\s*)(\{.*\})\s*$`).
+counter_body: fn(line: String) -> String? Never! {
+    rest: line.removeprefix("JET_PHASE_COUNTERS")
+    bytes: rest.bytes()
+    at := 0
+    colon: bytes.len() > 0 && Int.from_u8(bytes[0]) == 58
+    if colon -> at = 1
+    spaced := 0
+    loop at < bytes.len() {
+        width: js_space_len(bytes, at)
+        if width == 0 -> break
+        at += width
+        spaced += 1
+    }
+    if !colon && spaced == 0 -> return None
+    body: js_trim(String.from_bytes_lossy(bytes[at..<bytes.len()]))
+    if !body.starts_with("{{") || !body.ends_with("}}") -> return None
+    // `.` matches no line terminator: CR, U+2028 or U+2029.
+    inner: body.bytes()
+    loop i in 0..<inner.len() {
+        byte: Int.from_u8(inner[i])
+        if byte == 13 -> return None
+        if byte == 226 && i + 2 < inner.len() && Int.from_u8(inner[i + 1]) == 128 && (Int.from_u8(inner[i + 2]) == 168 || Int.from_u8(inner[i + 2]) == 169) -> return None
+    }
+    Val(body)
+}
+
+// JET_PHASE_COUNTERS lines (the #4319 counter protocol, Tools/perf/scaling):
+// every counter summed under `phase.name` (`total` without a phase), in
+// `localeCompare` order of their names.
+parse_counters: fn(output: String) -> [Counter] MeasureError! {
+    counters := [Counter]{}
+    loop raw in output.split("\n") {
+        line: raw.removesuffix("\r")
+        body: counter_body(line) ?? {
+            if line.starts_with("JET_PHASE_COUNTERS") -> return Err(measure_error("Malformed counter line: {line}"))
+            next
+        }
+        parsed: json.parse(body) ?? return Err(MeasureError{message: "{err}", syntax: true})
+        entries: if parsed == .Object(members) -> ordered(members) else -> [(key: String, value: Dyn)]{}
+        phase := Dyn?{None}
+        values := [(key: String, value: Dyn)]{}
+        loop entry in entries {
+            if entry.key == "phase" {
+                phase = Val(entry.value)
+                next
+            }
+            values.push(entry)
+        }
+        key: if phase == {
+            .None -> "total"
+            .Val(named) -> text_of(Val(named)) ?? return Err(measure_error("Counter phase must be a string"))
+        }
+        walk_counters(Dyn.Object(values), key, counters) ?? return Err(err)
+    }
+    order := [Int]{}
+    loop at in 0..<counters.len() -> order.push(at)
+    loop i in 1..<order.len() {
+        j := i
+        loop j > 0 && locale_compare(counters[order[j - 1]].key, counters[order[j]].key) > 0 {
+            held: order[j - 1]
+            order[j - 1] = order[j]
+            order[j] = held
+            j -= 1
+        }
+    }
+    Ok(order.map(at -> Counter{key: counters[at].key.copy(), value: counters[at].value}))  // copy: the sorted list owns its keys
+}
+
+// parseCounters' object, as JSON.stringify writes it.
+counters_json: fn(counters: [Counter]) -> Dyn Never! {
+    entries := [(key: String, value: Dyn)]{}
+    loop counter in counters -> entries.push((key: counter.key.copy(), value: Dyn.Float(counter.value)))  // copy: the list keeps its keys
+    Dyn.Object(entries)
+}
