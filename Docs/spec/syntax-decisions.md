@@ -3636,6 +3636,13 @@ first, fuel-limited; comptime `panic` is a user-authored compile error;
 results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
+*Amended by D-META-RECONCILE1=A (ratified 2026-10-07,
+card #3520):* the comptime-type clause gives way to D-GENERIC-TYPEFN1
+(standard `prep fn` type recipes), and the const-generics clause to
+D-CONSTGEN1. The dispatch clause binds standard code; specialization by an
+approved root follows D-META-CONTROL2 and D-META-OPTIN2, now the
+D-META-LADDER1 `Compiler` value. The ban on token, AST and attribute macros
+and custom syntax stays universal.
 
 **S57 — Compile-time demand** *(as amended by D-META-STAGE1=B and
 D-ONCE-AT1=D; the `@if` branch is reaffirmed by D-STRUCT-ONCE1=A; ratified
@@ -3723,6 +3730,11 @@ from the build entry (post-sema snapshot; diagnostics must carry
 code+what/why/fix). No mutation, no AST injection, no macros
 (D-PROCMACRO1/D-READERMACRO1 deferred/rejected; libraries can never mutate
 grammar).
+*Amended by D-META-RECONCILE1=A:* "no macros" and the
+grammar ban stay universal. "No mutation, no AST injection" binds standard
+code; an approved root changes written code only through D-META-CONTROL2
+checked change sets under D-META-OPTIN2, now the D-META-LADDER1 `Compiler`
+value.
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
 `.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
@@ -3831,6 +3843,38 @@ permissions.
 *Superseded by D-META-LADDER1=A (ratified 2026-11-09, #6129):* the Meta
 effects follow the rule of every effect, and only the root package's build
 function receives the `Compiler` value (`b.compiler(app)`).
+
+**D-META-RECONCILE1=A — The September 21
+opt-in rulings govern the metaprogramming ceiling** *(ratified 2026-10-07,
+card #3520; amends S26, D-METAMUTATE1, D-FRONTENDAPI1, D-METADEPTH1/2 and
+D-META-GATE1 by amendment links to D-META-CONTROL2 and D-META-OPTIN2)*:
+D-META-CONTROL2 and D-META-OPTIN2 stay in force in full: project trust and
+policy approve the root and the provider, a changed provider is refused until
+approved again, revocation invalidates the affected preparation, targets are
+named by compiler-issued declaration handles, a dependency target needs an
+exact grant, and a rewrite's receipt never promises equivalence with the
+original. D-META-LADDER1 later carries that authority as the root-only
+`Compiler` value under the Meta effects. The older refusals bind standard
+code, which every program gets: read facts, publish additive `Generated`
+items, and use type recipes (D-GENERIC-TYPEFN1) and const generics
+(D-CONSTGEN1). Written code means what its file says, and no rewrite happens.
+Advanced mode is the approved root's checked change sets: types built from
+facts, parsed code, specialization and rewrites of written code. Each is
+rechecked like hand-written code. Some limits bind both modes: no token,
+tree or attribute macros and no custom syntax (S26, D-META-GATE1,
+D-METADEPTH2); no message loop and no user macros (D-METAMUTATE1); no
+mutable compiler nodes and no forged facts (D-META-CONTROL2); no AST mutation
+inside compilation (D-FRONTENDAPI1); and host permissions stay on their own
+effects (D-META-OPTIN2). Advanced parsing runs the real Jet lexer and parser
+into checked fragments, so the closed grammar holds in both modes. The
+clause map for D-META-GATE1 is as follows. Token and tree macros stay refused
+everywhere. Splicing into existing code, in-place rewrite, a type with no
+file and running the program inside the compiler bind standard code, and
+advanced mode reaches them only through D-META-CONTROL2. The approved root
+opt-in is the gate its "not one flag away" example refers to. The ruling adds
+no name, capability, operation or syntax. The advanced operations are
+ratified contract, not delivered behavior; their implementation is tracked on
+card #3526.
 
 **D-META-LADDER1=A — Meta effects and one root-only `Compiler` value**
 *(ratified 2026-11-09, cards #6129 and #3526; supersedes D-META-OPTIN2 and
@@ -6054,13 +6098,19 @@ contract covers first-party Jet build libraries and packaged/third-party WASM
 component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAPI1=A:
 `core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
 value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
-AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
+AST mutation enters compilation (universal under D-META-RECONCILE1=A: an
+approved root's change sets are checked Jet code, never compiler nodes).
+D-DSLBLOCK1=A: stdlib-only PascalCase
 directive DSL blocks such as `#SQL(Row) { ... }` and `#HTML { ... }` are a
 fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
 targets/actions, read-only program/build graph enforcement, DSL blocks, and
-front-end APIs.
+front-end APIs. *Amended by D-META-RECONCILE1=A:* the
+message-loop and user-macro ban stays universal; the refusal to rewrite
+written code binds standard code, and an approved root rewrites only through
+D-META-CONTROL2 change sets under D-META-OPTIN2, now the D-META-LADDER1
+`Compiler` value.
 
 **D-BUILD-DEFAULT1=B — default profile split by command** *(ratified
 2026-07-16, card #666)*: `jet run` and `jet dev` compile at the fast profile

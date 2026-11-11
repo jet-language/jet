@@ -326,8 +326,16 @@ rails.
 ## Design boundary
 
 Jet takes compile-time power from systems such as Jai, but rejects invisible
-string insertion, arbitrary message-loop mutation, and ambient build authority.
-The durable rule is simple: compute typed values, inspect typed facts, generate
-checked items additively, and record external inputs. The source examples and
-the two executable registries linked above are the evidence; this page does
-not turn a schema row into an implementation claim.
+string insertion and ambient build authority. Standard code, which every
+program gets, computes typed values, inspects typed facts, generates checked
+items additively and records external inputs; its written code means what the
+file says. The approved root package's `Compiler` value is the advanced mode:
+it may build types from facts, parse code into checked fragments, specialize
+and rewrite written function bodies, each change rechecked with the callers it
+affects and recorded in a receipt that does not promise equivalence. Some
+limits hold in both modes: no token, tree or attribute macros, no custom
+syntax, no message loop, no user macros, no mutable compiler nodes, no forged
+facts, and no host permission carried by a Meta effect. The advanced operations
+are ratified contract and not yet built. The source examples and the two
+executable registries linked above are the evidence; this page does not turn
+a schema row into an implementation claim.
