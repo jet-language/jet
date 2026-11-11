@@ -560,10 +560,10 @@ sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, diagnostics: &
 }
 
 // A compile-time value's call into `core.net` that reaches the network: only
-// the pinned `fetch(url, sha256:)` is a compile-time network operation, so any
-// other callee whose effect row carries `Net` is refused (E3412). A pure
-// `core.net` helper (`mime.extension`) has no `Net` and evaluates. True when
-// it was refused.
+// the pinned `net.fetch(url, sha256:)` is a compile-time network operation,
+// so any other callee whose effect row carries `Net` is refused (E3412). A
+// pure `core.net` helper (`mime.extension`) has no `Net` and evaluates. True
+// when it was refused.
 sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) -> Bool {
     callee: fact.callee ?? return false
     owner: sema_effect_symbol_module(callee.key) ?? return false

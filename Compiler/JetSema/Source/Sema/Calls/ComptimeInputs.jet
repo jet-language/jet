@@ -145,8 +145,8 @@ sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_ty
 // String, a literal or a value the comptime code computes; the pin is a
 // String literal, so the source itself fixes the value. The call reaches
 // `Net`. The compiler fetches the URL while it builds (the driver's
-// jet_driver_build_fetch, the fetch `b.fetch` runs), and content that misses
-// the pin is E3413. Another `core.net` member is not handled here.
+// jet_driver_build_fetch), and content that misses the pin is E3413. Another
+// `core.net` member is not handled here.
 sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.net" || member != "fetch" -> return SemaDirectSpecialCheck{handled: false, value: None}
     failed: SemaDirectSpecialCheck{handled: true, value: None}

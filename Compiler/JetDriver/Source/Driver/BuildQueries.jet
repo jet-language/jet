@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[Diagnostic, EffectRowEntry, Item, PolicyKey, SourceFile, Span, TComptimeValue, Type, policy_gate_allows, sha256_hex]
+    jet_foundation.[Diagnostic, Item, PolicyKey, SourceFile, Span, TComptimeValue, Type, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -109,19 +109,6 @@ jet_driver_build_install_nodes: fn(plan: BuildSessionPlan, nodes: &&[BuildGraphN
     permit.value.nodes = nodes.move()
 }
 
-// This is the selected source declaration, not inferred/transitive effects
-// or a host's grant. An omitted/open/broader row cannot silently enable HTTP.
-jet_driver_build_declared_network: fn(declared: [EffectRowEntry]?) -> Bool Never! {
-    effects: declared ?? return false
-    net := false
-    wait := false
-    loop effect_row in effects {
-        if effect_row.name == "Net" -> net = true
-        if effect_row.name == "Time.Wait" -> wait = true
-    }
-    net && wait
-}
-
 // One command owns this scope across all of its package queries. IDs are
 // invocation-local authority, not cache keys or a process-global counter.
 JetDriverBuildQueryScope: struct {
@@ -176,7 +163,6 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     package: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
     selected_site := ""
-    network_declared := false
     span := Span{start: 0, end: 0}
     loop loaded_module in sources.modules {
         if loaded_module.package_identity != package -> next
@@ -194,7 +180,6 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
                 selected = Val(loaded_module.physical_path.copy())
                 selected_site = site
                 span = function.span
-                network_declared = jet_driver_build_declared_network(function.declared_effects)
             }
         }
     }
@@ -253,7 +238,11 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // copy: the evaluator's build adapter gets a session and the request's input handles of its
     // own. This query keeps `session` to abort or finish it, and `request` is returned in every
     // response.
-    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), base_dir: base_dir})
+    // `find`, `embed_file`, `embed_bytes` and `net.fetch` in `build: fn` read beside the build
+    // file, and the file reads are recorded in the request's comptime input log, as in any
+    // comptime code.
+    config.comptime_input_adapter = jet_driver_comptime_inputs_for(request, path)
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
     run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
     // The build's own reports; after a failed staging check the staged

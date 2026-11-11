@@ -1,11 +1,12 @@
 // Tier-1 comptime inputs (`embed_file`, `embed_bytes`, `find`): the driver's
-// answer to the evaluator's comptime input route. Sema has already checked a
-// literal path (relative, no `..`); a path or glob the comptime code computed
-// meets the same law here (sema_comptime_input_value_problem) before any read.
-// Reads go through the host's raw build-input transport, rooted at the
-// directory of the file doing the embedding, with the same no-follow read,
-// tree-file bound and glob walk as `b.embed` / `b.find` (`eval_build_time_io`,
-// one implementation of the path law). Each file read is recorded with its
+// answer to the evaluator's comptime input route, in a program's comptime
+// code and in its `build: fn` alike. Sema has already checked a literal path
+// (relative, no `..`); a path or glob the comptime code computed meets the
+// same law here (sema_comptime_input_value_problem) before any read. Reads go
+// through the host's raw build-input transport, rooted at the directory of
+// the file doing the embedding, with the no-follow read, tree-file bound and
+// glob walk of `eval_build_time_io` (jet_driver_build_find, one
+// implementation of the path law). Each file read is recorded with its
 // SHA-256 for the comptime input lock, and each `find` with the SHA-256 of
 // its sorted membership, so that a file added to or removed from a glob, an
 // empty one too, invalidates what the compile made of it. A `toolchain:` input
@@ -14,12 +15,12 @@
 // A Core file's inputs are files beside it in the toolchain's Core tree, read by
 // the host's Core reader (JetDriverCoreComptimeInputs).
 //
-// `net.fetch(url, sha256:)` in comptime code is the build fetch `b.fetch` runs
-// (jet_driver_build_fetch): a `file://` URL rooted at the embedding file's
-// directory, or an HTTP(S) URL over the request's build HTTP transport, with
-// the same bounds, and its content checked against the pin (E3413). It isn't
-// an input record: the pin is written in the source, so the source's own
-// identity fixes the value, and changed content is E3413, never a new value.
+// `net.fetch(url, sha256:)` in comptime code is jet_driver_build_fetch: a
+// `file://` URL rooted at the embedding file's directory, or an HTTP(S) URL
+// over the request's build HTTP transport, with the same bounds, and its
+// content checked against the pin (E3413). It isn't an input record: the pin
+// is written in the source, so the source's own identity fixes the value, and
+// changed content is E3413, never a new value.
 use {
     jet_foundation.[
         Diagnostic,
@@ -31,7 +32,7 @@ use {
         JET_COMPTIME_TOOLCHAIN_PREFIX,
     ]
     jet_eval.[JetEvalComptimeInputAdapter, JetEvalComptimeInputError]
-    jet_build_session.[BuildSessionReply, BuildSessionValue]
+    jet_build_session.[BuildSessionReply]
     jet_sema.[sema_comptime_input_named, sema_comptime_input_value_problem]
     comptime_inputs_crypto: core.crypto
 }
@@ -79,9 +80,9 @@ JetDriverComptimeInputs: struct {
             jet_driver_comptime_input_value(builtin, named, bytes, span)
         }
         comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError! {
-            // A comptime fetch is the Tier-1 network input itself, so it needs no
-            // `fn build` row that declares Net.
-            reply: jet_driver_build_fetch(Val(self.inputs), self.http_inputs, true, self.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: url}, BuildSessionValue.Text{value: sha256}}, span)
+            // A comptime fetch is the Tier-1 network input itself: its `Net` is in
+            // the calling code's ordinary effect row, so no declaration gates it here.
+            reply: jet_driver_build_fetch(Val(self.inputs), self.http_inputs, self.base_dir, url, sha256, span)
             jet_driver_comptime_fetch_value(url, reply, span)
         }
     }
@@ -158,7 +159,7 @@ jet_driver_comptime_members_digest: fn(members: [String]) -> String Never! {
 // The membership digest `glob` has beneath `base_dir` now, by the walk `find`
 // uses; None when the walk fails.
 jet_driver_comptime_glob_digest: fn(inputs: JetDriverSharedBuildInputs, base_dir: String, glob: String) -[FS.Read]> String? {
-    reply: jet_driver_build_find(inputs, base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, Span{start: 0, end: 0})
+    reply: jet_driver_build_find(inputs, base_dir, glob, Span{start: 0, end: 0})
     members: jet_driver_comptime_find_members(reply) ?? return None
     Val(jet_driver_comptime_members_digest(members))
 }
@@ -215,7 +216,7 @@ jet_driver_comptime_input_value: fn(builtin: String, path: String, bytes: [U8], 
     Ok(TComptimeValue.String{value: text})
 }
 
-// The matches of a `b.find` walk's reply; None for a failure.
+// The matches of a `find` walk's reply; None for a failure.
 jet_driver_comptime_find_members: fn(reply: BuildSessionReply) -> [String]? Never! {
     found := [String]{}
     if reply == {
@@ -235,7 +236,7 @@ jet_driver_comptime_find_members: fn(reply: BuildSessionReply) -> [String]? Neve
 // relative to it, each read (and recorded under `prefix`) within the
 // tree-file bound, and the glob recorded with its membership.
 jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, base_dir: String, glob: String, prefix: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-    reply: jet_driver_build_find(adapter.inputs, base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, span)
+    reply: jet_driver_build_find(adapter.inputs, base_dir, glob, span)
     if reply == {
         .Failure(error) -> return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry(error.code, Val(span), error.what, error.why, error.fix)})
         .HostRequest(_, _) -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{prefix}{glob}`", "the comptime input host is unavailable", "build the program with `jet build` or `jet run`", span))

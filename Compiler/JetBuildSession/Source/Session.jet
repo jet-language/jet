@@ -412,9 +412,6 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if state.policy.plugins_denied != None -> return build_session_fail(state, "wasm build plugin denied: {state.policy.plugins_denied ?? ""}")
         return BuildSessionReply.HostRequest{method: method, args: args}
     }
-    // These calls use the existing locked input host service; no graph action
-    // is run and no generated source is written by this request.
-    if method == "find" || method == "embed" || method == "fetch" -> return BuildSessionReply.HostRequest{method: method, args: args}
     build_session_fail(state, "unknown build method `{method}`")
 }
 

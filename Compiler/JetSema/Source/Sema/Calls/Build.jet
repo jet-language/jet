@@ -29,13 +29,9 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             parameters = [Type]{Type.String}
             result = sema_build_result("Unit")
         }
-        (method == "find" || method == "embed") && arity == 1 -> {
-            parameters = [Type]{Type.String}
-            result = if method == "find" -> strings else -> Type.String
-        }
-        (method == "fetch" || method == "plugin") && arity == 2 -> {
+        method == "plugin" && arity == 2 -> {
             parameters = [Type]{Type.String, Type.String}
-            result = if method == "fetch" -> Type.Result{ok: Type.String, err: Type.Named{name: "BuildError"}} else -> sema_build_result("Unit")
+            result = sema_build_result("Unit")
         }
         method == "contribute" && arity == 2 -> parameters = [Type]{Type.String}
         method == "run" && arity == 3 -> {
@@ -105,9 +101,17 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "default" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" -> return "1"
     if method == "run" -> return "3"
     if method == "args" || method == "jet" -> return "0"
-    if method == "find" || method == "embed" -> return "1"
     if method == "error" -> return "5"
     "2"
+}
+
+// Whether `method` is a `Build` method at some arity (every one takes at
+// most seven arguments).
+sema_build_context_method_known: fn(method: String) -> Bool Never! {
+    loop arity in 0..<8 {
+        if sema_build_context_method_contract(method, arity) != None -> return true
+    }
+    false
 }
 
 sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -121,6 +125,10 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     contract: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
             if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+        if !sema_build_context_method_known(method) {
+            diagnostics.push(sema_error("E0102", span, "`Build` has no method `{method}`", "`Build` is a protected Core type with a closed method surface", "use a documented method on `Build`"))
+            return failed
         }
         diagnostics.push(sema_error("E0104", span, "`Build.{method}` expects {sema_build_context_arity_description(method)} arguments, got {args.len()}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
         return failed
