@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99194,
+    "rev": 99195,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76104,6 +76104,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T03:26:48.223Z"
+        },
+        {
+          "n": 9,
+          "text": "I2 defect found by G3Ctx, 2026-11-11, on seed-t20: passing a raw-pointer dereference as a borrowed place is ICE 101, \"ir.build unlowered: write place Deref\". The trigger is `bump(pointer.*)` where `bump: fn(c: &Counter) { c.n += 1 }` and `pointer := mem.from_addr<Counter>(mem.address_of(c))` inside #Unsafe. A generic `pointer.*.bump(by)` through a trait `&self` method fails the same way. The repros are $JET_SCRATCH_ROOT/lanes/G3Ctx/probe/derefw.jet and a2fn.jet. IR lowering handles a Deref write place (a borrow of the pointee) on O0/O1/O2, and both repros become cases that print the bumped value.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T07:34:54.601Z"
         }
       ],
       "refs": [],
@@ -76114,9 +76123,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T03:26:48.224Z",
+      "updated": "2026-11-11T07:34:54.601Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0vqsfl8",
@@ -199045,6 +199054,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T07:34:54.601Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ct4a0i",
+      "note": "#9 I2 defect found by G3Ctx, 2026-11-11, on seed-t20: passing a"
+    },
     {
       "at": "2026-11-11T07:33:01.769Z",
       "by": "Main",
