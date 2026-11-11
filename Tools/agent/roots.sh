@@ -8,12 +8,15 @@
 # (the personal-information guard of Tools/agent/LaneCheck.jet).
 #
 # The env file holds assignments only, so the Jet twin reads it with no shell
-# (core.sys.env_file): each line is blank, a `#` comment, or NAME=value with
-# an optional `export ` before it and an optional ` # comment` after it. The
-# value is one word: '...' is literal; "..." expands and takes \" \\ \$ \` as
-# escapes; $NAME, ${NAME}, ${NAME:-word}, ${NAME-word}, ${NAME:?word} and
-# ${NAME?word} expand, the word included. Nothing else: no commands, `~`,
-# $1, `;`, `+=` or other ${...} forms.
+# (core.sys.env_file), as `.` sources it: each line is blank, a `#` comment,
+# or commands that `;` separates, with an optional ` # comment` after them. A
+# command is assignments (NAME=word, or NAME+=word to append) or `export` or
+# `readonly` and names, each with an optional =word or +=word. A word is one
+# shell word: '...' is literal; "..." expands and takes \" \\ \$ \` as
+# escapes; a leading ~ (or one after a `:`) is $HOME; $NAME, ${NAME} and
+# ${NAME[:]-word}, ${NAME[:]=word}, ${NAME[:]+word} and ${NAME[:]?word} expand,
+# the word included; $1 to $9 are unset. Nothing else: no other commands,
+# $(...), backticks, ~user or other ${...} forms.
 #
 #   JET_STATE_ROOT    per-user dev state and caches  ($XDG_CACHE_HOME/jet-dev)
 #   JET_SCRATCH_ROOT  large shared scratch           ($JET_STATE_ROOT)

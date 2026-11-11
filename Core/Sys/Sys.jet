@@ -469,8 +469,8 @@ expand: fn(value: String) -[Env]> String Never! {
 
 /// The process environment with the env file at `path` applied over it, as a
 /// shell has its variables after `set -a; . path`, read with no shell: the
-/// format is `env_text`'s, `$NAME` reads an earlier line's value, else the
-/// environment, and a line's value replaces the environment's. No file at
+/// format is `env_text`'s, `$NAME` reads an earlier assignment, else the
+/// environment, and an assignment replaces the environment's value. No file at
 /// `path` leaves the environment as it is, as `[ -f path ] && . path` does.
 env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
     vars: environment()
@@ -483,36 +483,53 @@ env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
     Ok(vars.merge(env_text(text, vars, path) ?? return Err(err)))
 }
 
-/// The variables `text` assigns as an env file, each with its value. A line
-/// is blank, a `#` comment, or `NAME=value` with an optional `export ` before
-/// it and an optional ` # comment` after it. The value is one shell word:
-/// `'…'` is literal, `"…"` takes `\"`, `\\`, `\$` and `\`` as escapes, a bare
-/// `\c` is `c`, and `$NAME`, `${NAME}`, `${NAME:-word}` and `${NAME-word}`
-/// (`word` when NAME is unset or empty, or unset) and `${NAME:?word}` and
-/// `${NAME?word}` (an error then) expand as the shell expands them, `word`
-/// included. `$NAME` reads an earlier line's value, else `vars`, else
-/// nothing. What else the shell would run or expand (`$(…)`, backticks, `~`,
-/// `$1`, `;`, `|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms, `+=`, an
-/// unquoted space) is an `IOError.InvalidInput` naming `source:line`.
+/// The variables `text` assigns as an env file, each with its value, as `.`
+/// would source the file in a shell started with no arguments. A line is
+/// blank, a `#` comment, or commands that `;` separates, with an optional
+/// ` # comment` after them. A command is assignments, `NAME=word` or
+/// `NAME+=word` (which appends), made in turn; or `export` or `readonly` and
+/// names, each with an optional `=word` or `+=word`, where every word expands
+/// before any name is assigned. `readonly` makes its names read-only, and a
+/// later assignment to one is an error. A word is one shell word: `'…'` is
+/// literal, `"…"` takes `\"`, `\\`, `\$` and `\`` as escapes, a bare `\c` is
+/// `c`, and a `~` that starts the word or follows a `:`, alone or before a
+/// `/` or `:`, is HOME's value. These expand as the shell expands them,
+/// `word` included:
+/// - `$NAME` and `${NAME}`;
+/// - `${NAME:-word}` and `${NAME-word}`: `word` when NAME is unset or empty
+///   (with the colon) or unset;
+/// - `${NAME:=word}` and `${NAME=word}`: the same, and NAME is assigned it;
+/// - `${NAME:+word}` and `${NAME+word}`: `word` when NAME is set and not
+///   empty (with the colon) or set, else nothing;
+/// - `${NAME:?word}` and `${NAME?word}`: an error when NAME is unset (or
+///   empty, with the colon).
+/// `$NAME` reads an earlier assignment, else `vars`, else nothing. `$1` to
+/// `$9` and `${N}` are unset, since the file has no arguments. What else the
+/// shell would run or expand (another command, `$(…)`, backticks, `~user`,
+/// `$0`, `$#`, `|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms) is an
+/// `IOError.InvalidInput` naming `source:line`.
 ///
 /// ```jet
 /// vars: [String: String]{"HOME": "/home/ada"}
 /// read: env_text("export A='x y'\nB=\"$A/z\" # a note\nC=${{UNSET:-$HOME}}\n", vars) ?? panic("{err}")
 /// read.get("B") == Val("x y/z") && read.get("C") == Val("/home/ada") // => true
+/// forms: env_text("A=1 B=${{A:+on}}; C=x; C+=~/y\nreadonly D=${{E:=e}}$1\n", vars) ?? panic("{err}")
+/// forms.get("B") == Val("on") && forms.get("C") == Val("x/home/ada/y") && forms.get("D") == Val("e") && forms.get("E") == Val("e") // => true
 /// (env_text("A=$(date)", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
+/// (env_text("readonly D=1\nD=2", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
 /// ```
 env_text: fn(text: String, vars: [String: String], source: String{"env text"}) -> [String: String] IOError! {
-    assigned := [String: String]{}
+    scope := EnvScope{vars: vars, assigned: [String: String]{}, readonly: [String]{}}
     number := 0
     loop raw in text.lines() {
         number += 1
         line := EnvLine{raw: raw.bytes(), at: 0}
-        reason: env_line(line, vars, assigned) ?? next
+        reason: env_line(line, scope) ?? next
         return Err(IOError.InvalidInput(IOContext{
             operation: .Read, resource: Val("{source}:{number}"), os_code: None, cause: Val(reason),
         }))
     }
-    Ok(assigned)
+    Ok(scope.assigned)
 }
 
 /// An env file line being read: its bytes and the index of the next one.
@@ -521,55 +538,146 @@ EnvLine: struct {
     at: Int
 }
 
-/// Reads one line into `assigned`: None for a blank line, a comment or an
-/// assignment, else what keeps the line from being read.
+/// What an env file is read against: the values from outside it (`vars`),
+/// what it has assigned so far, and the names it has made read-only.
+EnvScope: struct {
+    vars: [String: String]
+    assigned: [String: String]
+    readonly: [String]
+}
+
+/// Reads one line's commands into `scope`: None when the line is blank, a
+/// comment, or commands, else what keeps the line from being read.
 ///
 /// ```jet
-/// line := EnvLine{raw: "export NAME='a b'".bytes(), at: 0}
-/// assigned := [String: String]{}
-/// env_line(line, [String: String]{}, assigned) == None && assigned.get("NAME") == Val("a b") // => true
+/// scope := EnvScope{vars: [String: String]{"C": "c"}, assigned: [String: String]{}, readonly: [String]{}}
+/// line := EnvLine{raw: "A=1 B=$A; export C+=x D # a note".bytes(), at: 0}
+/// env_line(line, scope) == None && scope.assigned.get("B") == Val("1") && scope.assigned.get("C") == Val("cx") // => true
 /// bad := EnvLine{raw: "1X=y".bytes(), at: 0}
-/// env_line(bad, [String: String]{}, assigned) != None // => true
+/// env_line(bad, scope) != None // => true
 /// ```
-env_line: fn(line: &EnvLine, vars: [String: String], assigned: &[String: String]) -> String? Never! {
-    env_blanks(line)
-    if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
-    if line.at + 6 < line.raw.len() && slice_ascii(line.raw, line.at, line.at + 6) == "export" && env_blank(line.raw[line.at + 6]) {
-        line.at += 6
+env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+    loop {
         env_blanks(line)
+        if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
+        reason: env_command(line, scope)
+        if reason != None -> return reason
+        if line.at >= line.raw.len() || line.raw[line.at] != (U8{59}) -> return None
+        line.at += 1
     }
-    start: line.at
-    loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
-    if line.at == start || env_digit(line.raw[start]) || line.at >= line.raw.len() || line.raw[line.at] != (U8{61}) {
-        return Val("a line is `NAME=value`, `export NAME=value`, a `#` comment or blank")
+}
+
+/// Reads one command up to the `;`, the `#` comment or the line end after it,
+/// which it leaves unread: assignments, made in turn, or `export` or
+/// `readonly` and its names, whose words all expand before any is assigned,
+/// as a shell runs a builtin on its expanded words.
+///
+/// ```jet
+/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{"A": "0"}, readonly: [String]{}}
+/// line := EnvLine{raw: "export A=1 B=$A; C=2".bytes(), at: 0}
+/// env_command(line, scope) == None && scope.assigned.get("B") == Val("0") && line.at == 15 // => true
+/// command := EnvLine{raw: "A=1 echo".bytes(), at: 0}
+/// env_command(command, scope) != None // => true
+/// ```
+env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+    keyword: env_keyword(line)
+    later := [(name: String, value: String?)]{}
+    count := 0
+    loop {
+        env_blanks(line)
+        if line.at >= line.raw.len() || line.raw[line.at] == (U8{59}) || line.raw[line.at] == (U8{35}) -> break
+        start: line.at
+        loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
+        if line.at == start || env_digit(line.raw[start]) -> return Val("a command here is assignments, `NAME=value`, or `export` or `readonly` and names")
+        name: slice_ascii(line.raw, start, line.at)
+        count += 1
+        append: line.at + 1 < line.raw.len() && line.raw[line.at] == (U8{43}) && line.raw[line.at + 1] == (U8{61})
+        if append -> line.at += 1
+        if line.at >= line.raw.len() || line.raw[line.at] != (U8{61}) {
+            if keyword == "" -> return Val("`{name}` is a command, which an env file does not run: quote a value that holds a space")
+            later.push((name: name, value: None))
+            next
+        }
+        line.at += 1
+        value := [U8]{}
+        if append -> loop byte in (env_lookup(name, scope) ?? "").bytes() -> value.push(byte)
+        reason: env_word(line, scope, value, true, false)
+        if reason != None -> return reason
+        text: String.from_bytes(value) ?? return Val("the value of {name} is not UTF-8")
+        if keyword != "" {
+            later.push((name: name, value: Val(text)))
+            next
+        }
+        refused: env_assign(scope, name, text)
+        if refused != None -> return refused
     }
-    name: slice_ascii(line.raw, start, line.at)
-    line.at += 1
-    value := [U8]{}
-    reason: env_word(line, vars, assigned, value, true, false)
-    if reason != None -> return reason
-    env_blanks(line)
-    if line.at < line.raw.len() && line.raw[line.at] != (U8{35}) -> return Val("a value is one word: quote it to hold a space")
-    assigned[name] = String.from_bytes(value) ?? return Val("the value is not UTF-8")
+    if count == 0 && keyword != "" -> return Val("`{keyword}` with no names lists the variables, which an env file does not do")
+    if count == 0 -> return Val("a `;` ends a command, and none is before it")
+    loop item in later {
+        if item.value == .Val(text) {
+            refused: env_assign(scope, item.name, text)
+            if refused != None -> return refused
+        }
+        if keyword == "readonly" && !scope.readonly.contains(item.name) -> scope.readonly.push(item.name.copy())
+    }
     None
 }
 
-/// Reads a word onto `out`: up to a blank, or with `braced` up to the `}` that
-/// ends a `${NAME:-word}`, left unread. Expansions push their value only when
-/// `live`, as the shell expands a default only when it takes it.
+/// Steps past an `export` or `readonly` that starts a command and returns
+/// it; else "".
 ///
 /// ```jet
+/// line := EnvLine{raw: "readonly A=1".bytes(), at: 0}
+/// env_keyword(line) == "readonly" && line.at == 8 // => true
+/// assignment := EnvLine{raw: "export=1".bytes(), at: 0}
+/// env_keyword(assignment) == "" && assignment.at == 0 // => true
+/// ```
+env_keyword: fn(line: &EnvLine) -> String Never! {
+    loop keyword in ([String]{"export", "readonly"}) {
+        end: line.at + keyword.len()
+        if end > line.raw.len() || slice_ascii(line.raw, line.at, end) != keyword -> next
+        if end < line.raw.len() && !env_blank(line.raw[end]) && line.raw[end] != (U8{59}) -> next
+        line.at = end
+        return keyword.copy()
+    }
+    ""
+}
+
+/// Assigns `value` to `name`, unless `readonly` has made `name` read-only:
+/// None when it is assigned, else why not.
+///
+/// ```jet
+/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{"R"}}
+/// env_assign(scope, "A", "1") == None && scope.assigned.get("A") == Val("1") // => true
+/// env_assign(scope, "R", "1") == Val("R: readonly variable") // => true
+/// ```
+env_assign: fn(scope: &EnvScope, name: String, value: String) -> String? Never! {
+    if scope.readonly.contains(name) -> return Val("{name}: readonly variable")
+    scope.assigned[name] = value
+    None
+}
+
+/// Reads a word onto `out`: up to a blank or a `;`, or with `braced` up to
+/// the `}` that ends a `${NAME:-word}`, left unread. Expansions push their
+/// value only when `live`, as the shell expands a default only when it takes
+/// it.
+///
+/// ```jet
+/// scope := EnvScope{vars: [String: String]{"X": "1", "HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
 /// line := EnvLine{raw: "a\\ b'c d'\"$X\" rest".bytes(), at: 0}
 /// out := [U8]{}
-/// env_word(line, [String: String]{"X": "1"}, [String: String]{}, out, true, false) == None // => true
+/// env_word(line, scope, out, true, false) == None // => true
 /// String.from_bytes_lossy(out) == "a bc d1" && line.at == 13 // => true
+/// paths := EnvLine{raw: "~/a:~/b;".bytes(), at: 0}
+/// joined := [U8]{}
+/// env_word(paths, scope, joined, true, false) == None && String.from_bytes_lossy(joined) == "/h/a:/h/b" && paths.at == 7 // => true
 /// ```
-env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
     first: line.at
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
         if braced && c == (U8{125}) -> return None
-        if !braced && env_blank(c) -> return None
+        if !braced && (env_blank(c) || c == (U8{59})) -> return None
         if c == (U8{39}) {
             close := line.at + 1
             loop close < line.raw.len() && line.raw[close] != (U8{39}) -> close += 1
@@ -580,12 +688,12 @@ env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String],
         }
         if c == (U8{34}) {
             line.at += 1
-            reason: env_double(line, vars, assigned, out, live)
+            reason: env_double(line, scope, out, live)
             if reason != None -> return reason
             next
         }
         if c == (U8{36}) {
-            reason: env_dollar(line, vars, assigned, out, live)
+            reason: env_dollar(line, scope, out, live)
             if reason != None -> return reason
             next
         }
@@ -595,7 +703,11 @@ env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String],
             line.at += 2
             next
         }
-        if c == (U8{126}) && (line.at == first || line.raw[line.at - 1] == (U8{58})) -> return Val("`~` is not expanded here: write $HOME")
+        if c == (U8{126}) && (line.at == first || line.raw[line.at - 1] == (U8{58})) {
+            reason: env_tilde(line, scope, out, live, braced)
+            if reason != None -> return reason
+            next
+        }
         if ([U8]{59, 38, 124, 60, 62, 40, 41, 96}).contains(c) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 1)}` is shell syntax an env file does not run")
         out.push(c)
         line.at += 1
@@ -604,17 +716,43 @@ env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String],
     None
 }
 
+/// Reads a `~` that starts a word or follows a `:`. Alone, or before a `/`
+/// or `:`, it is HOME's value, as the shell expands it; `~user`, `~+` and
+/// `~-` are refused.
+///
+/// ```jet
+/// scope := EnvScope{vars: [String: String]{"HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
+/// line := EnvLine{raw: "~/x".bytes(), at: 0}
+/// out := [U8]{}
+/// env_tilde(line, scope, out, true, false) == None && String.from_bytes_lossy(out) == "/h" && line.at == 1 // => true
+/// user := EnvLine{raw: "~ada/x".bytes(), at: 0}
+/// env_tilde(user, scope, out, true, false) != None // => true
+/// ```
+env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+    line.at += 1
+    if line.at < line.raw.len() {
+        c: line.raw[line.at]
+        ends: c == (U8{47}) || c == (U8{58}) || c == (U8{59}) || env_blank(c) || (braced && c == (U8{125}))
+        if !ends -> return Val("only `~` alone or before `/` or `:` expands here: write the path for `~user`")
+    }
+    if !live -> return None
+    home: env_lookup("HOME", scope) ?? return Val("`~` is HOME's value, and HOME is unset")
+    loop byte in home.bytes() -> out.push(byte)
+    None
+}
+
 /// Reads a `"…"` word part after its opening quote, through the closing one.
 ///
 /// ```jet
+/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{}}
 /// line := EnvLine{raw: "a\\\"b\"rest".bytes(), at: 0}
 /// out := [U8]{}
-/// env_double(line, [String: String]{}, [String: String]{}, out, true) == None // => true
+/// env_double(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "a\"b" && line.at == 5 // => true
 /// open := EnvLine{raw: "no end".bytes(), at: 0}
-/// env_double(open, [String: String]{}, [String: String]{}, out, true) != None // => true
+/// env_double(open, scope, out, true) != None // => true
 /// ```
-env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
+env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
         if c == (U8{34}) {
@@ -622,7 +760,7 @@ env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
             return None
         }
         if c == (U8{36}) {
-            reason: env_dollar(line, vars, assigned, out, live)
+            reason: env_dollar(line, scope, out, live)
             if reason != None -> return reason
             next
         }
@@ -635,24 +773,31 @@ env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
 }
 
 /// Reads the expansion at a `$`, pushing its value onto `out` when `live`; a
-/// `$` that starts none is itself.
+/// `$` that starts none is itself. `$1` to `$9` are unset.
 ///
 /// ```jet
+/// scope := EnvScope{vars: [String: String]{"NAME": "v"}, assigned: [String: String]{}, readonly: [String]{}}
 /// line := EnvLine{raw: "$NAME/x".bytes(), at: 0}
 /// out := [U8]{}
-/// env_dollar(line, [String: String]{"NAME": "v"}, [String: String]{}, out, true) == None // => true
+/// env_dollar(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "v" && line.at == 5 // => true
+/// argument := EnvLine{raw: "$10".bytes(), at: 0}
+/// env_dollar(argument, scope, out, true) == None && String.from_bytes_lossy(out) == "v" && argument.at == 2 // => true
 /// command := EnvLine{raw: "$(date)".bytes(), at: 0}
-/// env_dollar(command, [String: String]{}, [String: String]{}, out, true) != None // => true
+/// env_dollar(command, scope, out, true) != None // => true
 /// ```
-env_dollar: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
+env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
     after: if line.at + 1 < line.raw.len() -> line.raw[line.at + 1] else -> U8{32}
     if after == (U8{123}) {
         line.at += 2
-        return env_braced(line, vars, assigned, out, live)
+        return env_braced(line, scope, out, live)
     }
     if after == (U8{40}) -> return Val("a `$(` command is not run here")
-    if env_digit(after) || ([U8]{35, 63, 42, 64, 33, 36, 45, 39}).contains(after) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 2)}` is a shell parameter an env file does not have")
+    if after == (U8{48}) || ([U8]{35, 63, 42, 64, 33, 36, 45, 39}).contains(after) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 2)}` is a shell parameter an env file does not have")
+    if env_digit(after) {
+        line.at += 2
+        return None
+    }
     if !is_env_ident(after) {
         out.push(U8{36})
         line.at += 1
@@ -661,28 +806,37 @@ env_dollar: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
     start: line.at + 1
     line.at = start
     loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
-    if live -> loop byte in (env_lookup(slice_ascii(line.raw, start, line.at), vars, assigned) ?? "").bytes() -> out.push(byte)
+    if live -> loop byte in (env_lookup(slice_ascii(line.raw, start, line.at), scope) ?? "").bytes() -> out.push(byte)
     None
 }
 
-/// Reads a `${…}` after its `${`, through its `}`.
+/// Reads a `${…}` after its `${`, through its `}`. `${N}`, a number, is an
+/// unset argument.
 ///
 /// ```jet
+/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{"NAME": ""}, readonly: [String]{}}
 /// line := EnvLine{raw: "NAME:-fallback}}".bytes(), at: 0}
 /// out := [U8]{}
-/// env_braced(line, [String: String]{}, [String: String]{"NAME": ""}, out, true) == None // => true
+/// env_braced(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "fallback" && line.at == 15 // => true
+/// assign := EnvLine{raw: "NEW=made}}".bytes(), at: 0}
+/// env_braced(assign, scope, out, true) == None && scope.assigned.get("NEW") == Val("made") // => true
+/// other := EnvLine{raw: "NEW:+other}}".bytes(), at: 0}
+/// env_braced(other, scope, out, true) == None && String.from_bytes_lossy(out) == "fallbackmadeother" // => true
 /// required := EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
-/// env_braced(required, [String: String]{}, [String: String]{}, out, true) == Val("MISSING: is required") // => true
+/// env_braced(required, scope, out, true) == Val("MISSING: is required") // => true
 /// ```
-env_braced: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
-    forms: "only `${{NAME}}`, `${{NAME:-word}}`, `${{NAME-word}}`, `${{NAME:?word}}` and `${{NAME?word}}` expand here"
+env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+    forms: "only `${{NAME}}` and `${{NAME` with `:-`, `-`, `:=`, `=`, `:+`, `+`, `:?` or `?` and a word expand here"
     start: line.at
-    loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
-    if line.at == start || env_digit(line.raw[start]) -> return Val(forms)
+    argument: line.at < line.raw.len() && env_digit(line.raw[line.at])
+    loop line.at < line.raw.len() && (if argument -> env_digit(line.raw[line.at]) else -> is_env_ident(line.raw[line.at])) -> line.at += 1
+    if line.at == start -> return Val(forms)
     if line.at >= line.raw.len() -> return Val("a `${{` is not closed")
     name: slice_ascii(line.raw, start, line.at)
-    value: env_lookup(name, vars, assigned)
+    if name == "0" -> return Val("`${{0}}` is the shell's name, which an env file does not have")
+    value := env_lookup(name, scope)
+    if argument -> value = None
     if line.raw[line.at] == (U8{125}) {
         line.at += 1
         if live -> loop byte in (value ?? "").bytes() -> out.push(byte)
@@ -691,34 +845,41 @@ env_braced: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
     colon: line.raw[line.at] == (U8{58})
     if colon -> line.at += 1
     op: if line.at < line.raw.len() -> line.raw[line.at] else -> U8{0}
-    if op != (U8{45}) && op != (U8{63}) -> return Val(forms)
+    if op != (U8{45}) && op != (U8{61}) && op != (U8{43}) && op != (U8{63}) -> return Val(forms)
+    if op == (U8{61}) && argument -> return Val("`${{{name}=…}}` can't assign an argument")
     line.at += 1
     unset: value == None || (colon && value == Val(""))
+    takes: if op == (U8{43}) -> !unset else -> unset
     word := [U8]{}
-    reason: env_word(line, vars, assigned, word, live && unset, true)
+    reason: env_word(line, scope, word, live && takes, true)
     if reason != None -> return reason
     line.at += 1
     if !live -> return None
-    if !unset {
-        loop byte in (value ?? "").bytes() -> out.push(byte)
+    if !takes {
+        if op != (U8{43}) -> loop byte in (value ?? "").bytes() -> out.push(byte)
         return None
     }
     if op == (U8{63}) && word.len() == 0 -> return Val("{name}: parameter null or not set")
     if op == (U8{63}) -> return Val("{name}: {String.from_bytes(word) ?? ""}")
+    if op == (U8{61}) {
+        text: String.from_bytes(word) ?? return Val("the value of {name} is not UTF-8")
+        refused: env_assign(scope, name, text)
+        if refused != None -> return refused
+    }
     loop byte in word -> out.push(byte)
     None
 }
 
-/// `name`'s value: an earlier line's, else `vars`'s; None when it is unset.
+/// `name`'s value: an earlier assignment's, else `vars`'s; None when it is
+/// unset.
 ///
 /// ```jet
-/// env_lookup("A", [String: String]{"A": "env"}, [String: String]{"A": "file"}) == Val("file") // => true
-/// env_lookup("B", [String: String]{"B": "env"}, [String: String]{}) == Val("env") // => true
-/// env_lookup("C", [String: String]{}, [String: String]{}) == None // => true
+/// scope := EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
+/// env_lookup("A", scope) == Val("file") && env_lookup("B", scope) == Val("env") && env_lookup("C", scope) == None // => true
 /// ```
-env_lookup: fn(name: String, vars: [String: String], assigned: [String: String]) -> String? Never! {
-    if assigned.get(name) == .Val(value) -> return Val(value.copy())
-    if vars.get(name) == .Val(value) -> return Val(value.copy())
+env_lookup: fn(name: String, scope: &EnvScope) -> String? Never! {
+    if scope.assigned.get(name) == .Val(value) -> return Val(value.copy())
+    if scope.vars.get(name) == .Val(value) -> return Val(value.copy())
     None
 }
 
@@ -1672,9 +1833,42 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert_eq(found.len(), 10)
 }
 
+#Test("env_text reads commands, export and readonly, +=, ~ and the other expansions as bash sources them") {
+    vars := [String: String]{}
+    vars["HOME"] = "/h"
+    vars["EMPTY"] = ""
+    // bash 5 printed these values after `env -i HOME=/h EMPTY= bash -c '. ./t.env'`.
+    text: "A=0\nA=1 B=$A\nexport A=2 C=$A\nD=x; D+=y; export E+=$D\nF=~/a:~/b G=\"~/q\" H=a~ Q=x:~/c\nreadonly R=r\nI=${{U:=set}} J=$U K=${{A+alt}} L=${{UNSET+alt}} M=${{EMPTY:+alt}} N=${{A:+alt}}\nP=${{1:-pos}} S=${{X=~/z}}\nexport A\n"
+    found: env_text(text, vars) ?? panic("the env text did not read: {err}")
+    assert_eq(found.get("A"), Val("2"))
+    assert_eq(found.get("B"), Val("1"))
+    assert_eq(found.get("C"), Val("1"))
+    assert_eq(found.get("E"), Val("xy"))
+    assert_eq(found.get("F"), Val("/h/a:/h/b"))
+    assert_eq(found.get("G"), Val("~/q"))
+    assert_eq(found.get("H"), Val("a~"))
+    assert_eq(found.get("Q"), Val("x:/h/c"))
+    assert_eq(found.get("R"), Val("r"))
+    assert_eq(found.get("I"), Val("set"))
+    assert_eq(found.get("J"), Val("set"))
+    assert_eq(found.get("U"), Val("set"))
+    assert_eq(found.get("K"), Val("alt"))
+    assert_eq(found.get("L"), Val(""))
+    assert_eq(found.get("M"), Val(""))
+    assert_eq(found.get("N"), Val("alt"))
+    assert_eq(found.get("P"), Val("pos"))
+    assert_eq(found.get("S"), Val("/h/z"))
+    assert_eq(found.get("X"), Val("/h/z"))
+    if env_text("readonly R=1\nR=2\n", vars) == {
+        .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("R: readonly variable"))
+        .Err(_) -> panic("a readonly assignment gave another error kind")
+        .Ok(_) -> panic("a readonly variable was assigned")
+    }
+}
+
 #Test("env_text refuses what only a shell would run, naming the line") {
     vars := [String: String]{}
-    refused: [String]{"A=$(id)", "A=`id`", "A=~/x", "A=x:~/y", "A=$1", "A=${{#B}}", "A=${{B:+c}}", "A=${{B:=c}}", "A+=b", "A=b c", "A=b; c", "A=b|c", ": ${{A:=b}}", "A=\"b", "A='b", "A=${{B", "A=b\\", "A=${{UNSET_NAME:?is required}}", "1A=b", "A b"}
+    refused: [String]{"A=$(id)", "A=`id`", "A=~/x", "A=x:~/y", "A=~ada/x", "A=~+", "A=$0", "A=${{0}}", "A=${{1=x}}", "A=${{#B}}", "A=${{B%c}}", "readonly R; R=1", "export", "; A=b", "A=b c", "A=b; c", "A=b|c", ": ${{A:=b}}", "A=\"b", "A='b", "A=${{B", "A=b\\", "A=${{UNSET_NAME:?is required}}", "1A=b", "A b"}
     loop line in refused {
         if env_text("OK=1\n{line}\n", vars, "probe") == {
             .Err(.InvalidInput(context)) -> assert_eq(context.resource, Val("probe:2"))
