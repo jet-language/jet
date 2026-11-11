@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99550,
+    "rev": 99556,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28491,11 +28491,11 @@
         {
           "n": 16,
           "text": "(was #6307) Examples/features/cli/battery, net/backend_battery and ui/battery match their goldens on O0/O1/O2",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:28.300Z"
+          "evidence": "cab718bcb4 (G8Scope-19): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:25.571Z"
         },
         {
           "n": 17,
@@ -28509,11 +28509,11 @@
         {
           "n": 18,
           "text": "(was #6307) (from #6198 Jetpack backend battery (Provider/Batteries/backend/backend.) The dogfood gate type-checks the battery files, with a negative test showing a sema error fails it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:29.632Z"
+          "evidence": "cab718bcb4 (G8Scope-19): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:26.514Z"
         },
         {
           "n": 20,
@@ -28694,7 +28694,7 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:30.358Z",
-      "updated": "2026-11-11T14:08:07.326Z",
+      "updated": "2026-11-11T18:55:26.514Z",
       "updatedBy": "Main",
       "workOrder": 277,
       "goals": [
@@ -57169,11 +57169,11 @@
         {
           "n": 53,
           "text": "A typed Dyn read that fails reports the path it read (for example receipts/3/metrics/p50) and the expected and actual types. This is delivered by c59's path getters, which know the path at the call site, not by recording paths inside Dyn values (that would be an ABI change and a cost on every access). A #Test pins the message. It lands with c59, after the Core API ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T10:52:25.272Z"
+          "evidence": "f85f3b3d29 (G1Lead-4-json): jet test Core/Encoding/Json.jet, 12 passed 0 failed; typed path read case passes.",
+          "at": "2026-11-11T18:55:24.662Z"
         },
         {
           "n": 54,
@@ -57249,7 +57249,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T18:55:23.427Z",
+      "updated": "2026-11-11T18:55:24.662Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73354,11 +73354,11 @@
         {
           "n": 5,
           "text": "Data/Syntax registry entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T15:20:09.015Z"
+          "evidence": "ef1c4c1617 (G8Scope-14): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:27.428Z"
         },
         {
           "n": 6,
@@ -73457,7 +73457,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-11T11:37:21.429Z",
+      "updated": "2026-11-11T18:55:27.428Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -75157,11 +75157,11 @@
         {
           "n": 183,
           "text": "A ?? fallback that returns a value built from err.copy() keeps the left side's type. Found by G6Meta on 2026-11-11 (seed-t22, probe ZFactsScratch in lane w5024): in a user module, rows: compiler.query(...) ?? return Answer{failure: Val(err.copy()), ...} leaves rows untyped. rows.zz() reports no method error, and if row == .Program(fact) binds nothing, so fact fails later with E0107. Val(err) or \"{err}\" in the same fallback keep [Fact]. Fix it in sema at the root (an untyped binding must never reach later checks silently), with a case covering the err.copy() form, the method-error form and the pattern-bind form at O0, O1 and O2, and a sweep for other expression forms that lose the left type in a ?? fallback.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T16:22:59.623Z"
+          "evidence": "19bfa53eb4 (G8Scope-21): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:29.348Z"
         }
       ],
       "refs": [],
@@ -75172,7 +75172,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T17:22:32.793Z",
+      "updated": "2026-11-11T18:55:29.348Z",
       "updatedBy": "Main",
       "criteriaLastN": 183
     },
@@ -92331,11 +92331,11 @@
         {
           "n": 7,
           "text": "Owner order 2026-11-11: build-action reuse (BuildExecutor's restored actions) and every other compile cache are off by default, so `jet build` and `jet test` compile live. Each cache that stays reachable only through an explicit opt-in has its spelling balloted. PortBars and the perf gates measure Jet with every cache off, and their receipts say so. A census lists every compile cache in Compiler, Jetpack and Tools with its default, and each one is off.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T10:57:03.472Z"
+          "evidence": "6a80caeed7 (ScriptAPI-22c): the unreached native runtime cache and pack store are deleted with their tests and manifest rows; named proof lines pass on seed-t25a.",
+          "at": "2026-11-11T18:55:28.346Z"
         },
         {
           "n": 8,
@@ -92355,7 +92355,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:23:24.506Z",
-      "updated": "2026-11-11T12:45:42.860Z",
+      "updated": "2026-11-11T18:55:28.346Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -197954,6 +197954,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T18:55:29.348Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#183"
+    },
+    {
+      "at": "2026-11-11T18:55:28.346Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0g6fxb9",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-11T18:55:27.428Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqt0kq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-11T18:55:26.514Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ytw4eo",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-11T18:55:25.571Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ytw4eo",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-11T18:55:24.662Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#53"
+    },
     {
       "at": "2026-11-11T18:55:23.427Z",
       "by": "Main",
