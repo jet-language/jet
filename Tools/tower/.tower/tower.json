@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99199,
+    "rev": 99200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34647,6 +34647,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "Correction, 2026-11-11 03:10: the owner rejects the \"several days for a dedicated lane\" sizing in the earlier log. (a+b) is at most one hour of dedicated code writing plus one hour of testing and fixes. It is assigned to G6Decl right after #6039 c10."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "Sizing, 2026-11-10 (G6Decl). The parser side of #code is cheap: `#code { }` is Expr.Tainted{tag: \"code\"}, so the parse needs no new Expr arms. The value side is what costs. TComptimeValue/CtValue has no Code or closure case (CtValue.Closure is never constructed). The build session must stay alive through app sema and call build-program closures on each `.Checked(.Function(f))` event, and (c) rewrite_body must land before c3, c12 or c14 can close. That is several days for a dedicated lane, and the plan is in $JET_SCRATCH_ROOT/lanes/G6Decl/BLOCKED.md. Main assigns a dedicated lane when a slot frees."
         },
         {
@@ -34924,7 +34929,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-11T04:40:49.020Z",
+      "updated": "2026-11-11T08:01:57.387Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -92283,64 +92288,6 @@
       "updated": "2026-11-09T19:32:00.677Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
-    },
-    {
-      "id": "c0sqrxrd",
-      "num": 6647,
-      "title": "jet check reaches only the Core bodies a program calls",
-      "body": "jet check type-checks the bodies of Core functions only when the checked program calls them, so a Core body with a type error passes jet check of Core-using programs and of Core itself. Checking Core must check every body.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 02:40: the L0505 source-attribution defect is fixed at the root in 0083633a1c. The codec wave now maps the diagnostics of generated codec bodies to the module source, as the Core demand wave did; this was core.db DBError's codec. New case toolchain_defaults/check_core_prints_no_lint_without_a_source_path fails before and passes after. Next finding, assigned to G1Lead after c65: in a user module importing core.mem, a #Codable type whose codec is demanded gets L0505 on its #Codable marker. That is advice about generated code the author cannot change. Derive bodies drop such advice; codec bodies must too, with a ui_lint row."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 02:05: ea3b3aad90 adds jet check Core (one scratch entry imports every public Core module and checks every Core body), and JET_KEEP_GOING now checks every body of each imported Core module. New case toolchain_defaults/check_core_reports_a_type_error_in_an_uncalled_core_function. Also renames XmlEngine's private Event to ScanEvent, which shadowed Event<T> from core.watcher. The census commit (Land.jet selfcheck-core) is queued. Open defect, assigned to G1Lead: jet check Core prints one L0505 at \"Core:117:1\" with no source path, from a Core body reached through core.encoding.csv and core.db. The span maps to no source segment, so the lint renders against the entry instead of being filtered as a corelib lint. Fix the source attribution at the root, with a case."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 01:25: G1Lead makes the census check of Compiler/JetCli check every body of each imported Core module, and adds `jet check Core` (every Core body: 0 rows, rc 0, 7 s on a HEAD-built compiler). Seed a0_036 has no `check Core`, so for now it runs in the Land.jet census self-check phase (self_jet, keep-going, its own rows), as a separate commit after the compiler change. Follow-up: move it to the seed check phase once a seed carries `check Core`."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet check Core (keep-going) checks every function body in Core: a scratch copy with a type error placed in an uncalled Core function reports it, and the census-snap check phase covers every Core body.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ea3b3aad90 adds jet check Core and checks every body of each imported Core module under keep-going. 1af781222b adds the Land.jet census selfcheck-core phase. 0083633a1c fixes the root of the stray L0505, with case check_core_prints_no_lint_without_a_source_path. The lander census of aac0d83f7b (the a0_037 release preflight, seed a0_036) reports selfcheck-core rc=0 rows=0 in receipt jet.preflight-receipt.v1, commit aac0d83f7bb4.",
-          "at": "2026-11-08T07:52:19.827Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-07T05:00:30.335Z",
-      "updated": "2026-11-08T07:52:29.149Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-08T07:52:29.149Z"
     },
     {
       "id": "c0pr0hh0",
@@ -199082,6 +199029,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T08:01:57.387Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02m1p02",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-11T07:52:26.287Z",
       "by": "Main",
