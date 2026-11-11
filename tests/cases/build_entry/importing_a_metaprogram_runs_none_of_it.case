@@ -1,0 +1,16 @@
+# #3526 c3: importing a package that holds a metaprogram runs none of it.
+# The root imports `tool` and uses its ordinary function, but never hands
+# `tool.install` the `Compiler` value. So the plan has no generated module,
+# and the program builds and runs without one.
+fixture: importing_a_metaprogram_runs_none_of_it.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect graph app/main.jet --json
+exit: 0
+json: stdout doc $.build.generated = []
+step: jet build app/main.jet --write-generated=on
+exit: 0
+file: app/.jet/generated absent
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "hello from the tool\n"
