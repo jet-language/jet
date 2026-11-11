@@ -1,38 +1,17 @@
-use {
-    compute: core.compute
-    math: core.math
-}
+use core.[compute, math]
 
 // Every real and imaginary scalar must be within this absolute tolerance.
-#CLI
-Args: struct {}
-run: fn(args: Args) {
-    n: 4096
-    scalar_count: n * 2
-    tolerance: Float{0.000000001}
-
-    values := [Float]{}
-    loop i in 0..<n {
-        if {
-            i == 0 -> values.push(Float{1.0})
-            else -> values.push(Float{0.0})
-        }
-    }
-
-    signal: compute.from_list(values) ?? panic("from_list")
-    spectrum: compute.fft(signal) ?? panic("fft")
-    output: compute.to_list(spectrum)
-
+run: fn() Err! {
+    tolerance: 0.000000001
+    signal := compute.zeros([4096])
+    compute.set(signal, [0], 1.0)
+    output: compute.to_list(compute.fft(signal))
+    if output.len() != 8192 -> panic("fft validation: {output.len()} scalars")
     failures := 0
-    if {
-        output.len() != scalar_count -> failures += 1
-        else -> {
-            loop i in 0..<n {
-                if !(math.abs(output[2 * i] - Float{1.0}) <= tolerance) -> failures += 1
-                if !(math.abs(output[2 * i + 1]) <= tolerance) -> failures += 1
-            }
-        }
+    loop i in 0..<4096 {
+        if !(math.abs(output[2 * i] - 1.0) <= tolerance) -> failures += 1
+        if !(math.abs(output[2 * i + 1]) <= tolerance) -> failures += 1
     }
-    if failures != 0 -> panic("fft validation")
+    if failures != 0 -> panic("fft validation failed: {failures}")
     print("fft4096 checked=8192 tolerance=1e-9")
 }

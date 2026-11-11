@@ -5,45 +5,26 @@ Args: struct {
     input: String
 }
 
-parse_millis: fn(stamp: String) -> Int {
-    (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
-}
-
-bump: fn(counts: &[String:Int], key: String) {
-    counts[key] = (counts.get(key) ?? 0) + 1
-}
-
-run: fn(args: Args) IOError! {
-    input: files.open(args.input.copy())
-    level_counts := [String:Int]{}
-    error_components := [String:Int]{}
+run: fn(args: Args) {
+    levels := [String:Int]{}
+    errors := [String:Int]{}
     first := ""
     last := ""
     first_ms := 0
     last_ms := 0
-    loop line in input.lines() {
-        first_fields: line.split_once(" ") ?? panic("bad line")
-        rest: first_fields.after
-        second_fields: rest.split_once(" ") ?? panic("bad line")
-        third_fields: second_fields.after.split_once(" ") ?? panic("bad line")
-        stamp: first_fields.before
-        level: second_fields.before
-        component: third_fields.before
-        millis: parse_millis(stamp)
+    loop line in files.open(args.input).lines() {
+        fields: line.split(" ").take(3).to_list()
+        last_ms = time.parse_rfc3339(fields[0]).to_unix_ms()
         if first == "" {
-            first = stamp.copy()
-            first_ms = millis
+            first = fields[0].copy()
+            first_ms = last_ms
         }
-        last = stamp.copy()
-        last_ms = millis
-        bump(level_counts, level)
-        if level == "ERROR" -> bump(error_components, component)
+        last = fields[0].copy()
+        levels[fields[1]] = (levels.get(fields[1]) ?? 0) + 1
+        if fields[1] == "ERROR" -> errors[fields[2]] = (errors.get(fields[2]) ?? 0) + 1
     }
-    print("DEBUG {level_counts.get("DEBUG") ?? 0}")
-    print("INFO {level_counts.get("INFO") ?? 0}")
-    print("WARN {level_counts.get("WARN") ?? 0}")
-    print("ERROR {level_counts.get("ERROR") ?? 0}")
+    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] -> print("{level} {levels.get(level) ?? 0}")
     print("top-error-components:")
-    loop item in error_components.top_n(3) -> print("{item.value} {item.key}")
-    print("span {first} .. {last} ({(last_ms - first_ms) / 1000}s)")
+    loop item in errors.top_n(3) -> print("{item.value} {item.key}")
+    print("span {first} .. {last} ({(last_ms - first_ms) /% 1000}s)")
 }

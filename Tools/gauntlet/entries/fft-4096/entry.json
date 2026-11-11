@@ -28,7 +28,7 @@
     }
   },
   "authoring": {
-    "jet": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Calls shipped core.compute.fft after constructing the 4096-scalar impulse, materializes the interleaved spectrum with compute.to_list, and checks every pair against the documented tolerance. Validation commands were intentionally not run."},
+    "jet": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Builds the 4096-point impulse with compute.zeros and one compute.set, calls shipped core.compute.fft, materializes the interleaved spectrum with compute.to_list, and checks every pair against the documented tolerance."},
     "rust": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only iterative radix-2 FFT; allocates the input, complex spectrum, and 8192-scalar interleaved output before checking every pair. Validation commands were intentionally not run."},
     "python": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses preinstalled NumPy np.fft.fft as the Python incumbent, then materializes an 8192-scalar interleaved output and checks every pair. NumPy availability was not probed in this source-only phase; no dependency was installed."},
     "c": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."},
@@ -36,11 +36,11 @@
     "node": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."}
   },
   "rewrite_provenance": {
-    "worker": "FftCell",
+    "worker": "ScriptAPI",
     "variant": "jet",
-    "changed": "Added the FFT-4096 source cell and six matched rails: Jet delegates the transform to shipped core.compute.fft, while Rust, C, Zig, and Node use genuine iterative radix-2 work and Python uses preinstalled NumPy when available.",
+    "changed": "Built the impulse with compute.zeros plus one compute.set instead of a 4096-step push loop and compute.from_list, and let the Err! contract carry the compute failures; the transform, the 8192-scalar check and the output line remain unchanged.",
     "matched": "All rails prepare the same 4096-point real impulse, materialize 8192 interleaved real/imaginary scalars, check all 4096 complex outputs against 1+0i at absolute tolerance 1e-9, and emit one deterministic validation line.",
     "expected_output_sha256": null,
-    "measurement": "unrun: source-only assignment; builds, formatters, linters, tests, and measurements were intentionally not executed"
+    "measurement": "Output byte-identical to expected.out with the seed-b6 compiler."
   }
 }

@@ -32,11 +32,11 @@
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node RFC-4180 parser and numeric aggregation over the same generated sales.csv fixture."}
   },
   "rewrite_provenance": {
-    "worker": "CorpusCsvtransform",
+    "worker": "ScriptAPI",
     "variant": "jet",
-    "changed": "Made the grouped aggregate list mutable and sorted it by region with the canonical list sort_by surface before printing; RFC-4180 decoding, positive-amount filtering, per-region Float summation order, Decimal total, counts, and formatting stay unchanged.",
+    "changed": "Grouped the positive sales once with group_by(.region) and printed each sorted region's count and Float sum, where the old code ran a summing and a counting group_by query and joined them in a nested loop; the amounts are Float as in main.py (jet.FloatMoney allowed on that field), and decoding, the positive-amount rule, ordering and output remain unchanged.",
     "matched": "Same generated sales.csv workload and input consumption, positive-value rule, ascending regional counts and two-decimal sums, overall count and sum, and transcript as Rust, Python, Go, Zig, and Node.",
     "expected_output_sha256": "77c25f8d14ed590e0bddc7eaf719d1a27093a97e1601fe6cc25a13ebbdd2e27c",
-    "measurement": "unrun per assignment: runtime, performance, compiler proof, and output proof remain pending; no validation command was executed"
+    "measurement": "Output byte-identical to expected.out on the generated sales.csv with the seed-b6 compiler."
   }
 }
