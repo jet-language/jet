@@ -280,8 +280,9 @@ nap: fn(nanos: Int) -[Time.Wait]> {
 A call crosses the runtime's route carriers, not the C law: an `Int` or a
 machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
 and a `List` of scalars; a result may also be an `Option` of one of those or
-a tuple of scalars, whose items the export writes in the tuple's
-label-sorted order. A binding parameter or result outside those carriers is
+of a tuple, or a tuple whose items are those or an `Option` of one, whose
+items the export writes in the tuple's label-sorted order. A binding
+parameter or result outside those carriers is
 E3203. Only the generated interface units and the runtime's own inline
 modules declare bindings; an `#Import(c)` in a user module of any name,
 `jet.runtime.*` included, is an ordinary C import (E3101 outside `#Unsafe`,
@@ -298,6 +299,22 @@ and `world_monotonic_ns` (`Int?`), `zone_env` (`-[Env]> String?`),
 runtime member keeps the name of the Core leaf it replaces without the `__`
 (`core.time.__sleep_ns` becomes `rt.sleep_ns`). A `jet.runtime` path that names
 no interface module is E1001.
+
+`jet.runtime.term` holds the stdio and terminal functions `core.term` is
+built on: `stdio_write`, `stdio_bytes` and `stdio_flush` (`-[IO]> String?`, the
+write's failure), the pure `stdio_fault`, `stdout_terminal` and
+`stderr_terminal`, and the `terminal8_*` reads and writes. A read answers its
+failure as an item: `terminal8_line` is
+`(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is
+`(h: Int, w: Int)?`. `jet.runtime.log` holds the calling thread's logging
+cells (`level_load`, `filter_store`, …), `flush`, `process_exit` and
+`span_allocate` (`(id: Int, name: String)`), each `-[Log]>`, and the pure
+`metric_publish`. `jet.runtime.encoding` holds the pure codec-scope reads
+`coerce_now`, `coerce_emit` and the `text_cells_*` and `etf_strings_*` scopes.
+`jet.runtime.process` holds the signal subscription calls `signal_open`,
+`signal_close` and `signal_disposition` (`-[Exec]>`). Any package can call a
+binding, so a leaf whose caller must first prove a bound or a UTF-8 encoding
+(`core.encoding.__string_byte`, `__bytes_into_text`) has none and stays Core's.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in

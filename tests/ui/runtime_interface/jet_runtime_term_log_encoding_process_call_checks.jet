@@ -1,0 +1,65 @@
+// A program reaches the runtime's public stdio, terminal, logging, encoding
+// and signal functions through the jet.runtime interface: each call is checked
+// against the member's Jet signature and effect row, its route carriers
+// included (tuple results with Option and List items and an Option of a
+// tuple); a member without a row is pure.
+use {
+    enc: jet.runtime.encoding
+    log: jet.runtime.log
+    proc: jet.runtime.process
+    term: jet.runtime.term
+}
+
+terminal_reads: fn() -[Time.Wait]> Int {
+    line: term.terminal8_line()
+    if line.eof -> return 0
+    if line.read_error != None -> return -1
+    all: term.terminal8_read_all()
+    until: term.terminal8_read_until("\n")
+    key: term.terminal8_key_bytes()
+    if term.terminal8_mode_enter(true) -> term.terminal8_mode_leave()
+    if term.terminal8_write_stdout(line.line, true) != None -> return -1
+    if term.terminal8_write_stderr(all.input, false) != None -> return -1
+    until.input.len() + key.bytes.len() + key.platform
+}
+
+terminal_facts: fn() -[IO]> Bool {
+    if term.terminal8_stty() == .Val(size) -> return size.h + size.w > 0
+    term.terminal8_stdin_tty() || term.terminal8_stderr_tty() || term.terminal8_machine_output()
+}
+
+log_cells: fn(path: String) -[Log]> String {
+    log.format_store(1)
+    log.sink_store(path)
+    log.sample_store(1)
+    log.sample_count_store(0)
+    if log.level_load() < 0 -> log.process_exit(1)
+    log.config_load(0)
+}
+
+pure_reads: fn() -> Int {
+    log.metric_publish("reads", 1)
+    enc.coerce_emit("audit")
+    previous: enc.text_cells_enter()
+    enc.text_cells_leave(previous)
+    mode: enc.etf_strings_enter(2)
+    enc.etf_strings_leave(mode)
+    if term.stdio_fault("write") || term.stdout_terminal() || term.stderr_terminal() -> return 1
+    enc.coerce_now()
+}
+
+signals: fn() -[Exec]> Int {
+    id: proc.signal_open(true)
+    proc.signal_close(id)
+    sample: proc.signal_disposition(15, true)
+    if sample.available -> return sample.disposition
+    sample.errno
+}
+
+run: fn() -[IO, Log, Exec, Time.Wait]> {
+    print(terminal_reads() >= 0)
+    print(terminal_facts())
+    print(log_cells("/dev/null"))
+    print(pure_reads() > 0)
+    print(signals())
+}

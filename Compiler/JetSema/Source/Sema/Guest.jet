@@ -13,6 +13,7 @@ use {
         TFailureCarrier,
         TFuncKind,
         Type,
+        TypeTupleField,
         diagnostic_registry_row,
         runtime_c_export,
         type_name,
@@ -295,14 +296,30 @@ sema_guest_runtime_value: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// A runtime route result: a carried value, an Option of one, or a tuple of
-// scalars (its items cross in the checked tuple's member order).
+// A tuple item a runtime route result carries: a carried value or an Option
+// of one.
+sema_guest_runtime_item: fn(ty: Type) -> Bool Never! {
+    if ty == .Option(inner) -> return sema_guest_runtime_value(inner)
+    sema_guest_runtime_value(ty)
+}
+
+sema_guest_runtime_tuple: fn(fields: [TypeTupleField]) -> Bool Never! {
+    loop field in fields {
+        if !sema_guest_runtime_item(field.ty) -> return false
+    }
+    true
+}
+
+// A runtime route result: a carried value, an Option of one or of a tuple,
+// or a tuple of carried values and Options of them (its items cross in the
+// checked tuple's member order).
 sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
     if ty == {
-        .Option(inner) -> sema_guest_runtime_value(inner)
-        .Tuple(fields) -> loop field in fields {
-            if !sema_guest_runtime_scalar(field.ty) -> break false
-        } ?? true
+        .Option(inner) -> {
+            if inner == .Tuple(fields) -> return sema_guest_runtime_tuple(fields)
+            sema_guest_runtime_value(inner)
+        }
+        .Tuple(fields) -> sema_guest_runtime_tuple(fields)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
     }
 }
@@ -312,7 +329,7 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: &[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String or a List of scalars; a result may also be an Option of one or a tuple of scalars"
+    fix: "use Int, a machine integer, Float, Bool, String or a List of scalars; a result may also be an Option of one or of a tuple, or a tuple of those and Options of them"
     loop param in function.params {
         if param.convention != AccessConvention.Read || !sema_guest_runtime_value(param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))

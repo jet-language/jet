@@ -1,0 +1,71 @@
+// `jet.runtime.term` (#6615): the runtime's public stdio and terminal
+// functions, in Jet types with their declared effect rows. Each member is a
+// runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body; a fallible write or read answers its failure
+// as a `String?` cause. A tuple result's items cross in the checked tuple's
+// label-sorted order, which is the export's slot order. A member with no row
+// is pure.
+term: module {
+    // Writes `text` to stdout, or stderr, with a newline when asked, flushed
+    // when asked; the write's failure, if any.
+    #Import(c) stdio_write: fn(text: String, newline: Bool, stderr: Bool, flush: Bool) -[IO]> String? = "jet_term_stdio_write_raw"
+
+    // Writes `bytes` to stdout, or stderr, flushed when asked; the write's
+    // failure, if any.
+    #Import(c) stdio_bytes: fn(bytes: [U8], stderr: Bool, flush: Bool) -[IO]> String? = "jet_term_stdio_bytes_raw"
+
+    // Flushes stdout, or stderr; the flush's failure, if any.
+    #Import(c) stdio_flush: fn(stderr: Bool) -[IO]> String? = "jet_term_stdio_flush_raw"
+
+    // Whether the fault schedule fails the stdio operation `operation`.
+    #Import(c) stdio_fault: fn(operation: String) -> Bool = "jet_fault_should_fail"
+
+    // Whether stdout, or stderr, is a terminal.
+    #Import(c) stdout_terminal: fn() -> Bool = "jet_term_stdout_is_terminal"
+    #Import(c) stderr_terminal: fn() -> Bool = "jet_term_stderr_is_terminal"
+
+    // Whether the fault schedule fails the terminal operation `operation`.
+    #Import(c) terminal8_fault: fn(operation: String) -[IO]> Bool = "jet_terminal8_fault"
+
+    // One stdin line without its terminator: whether input ended first, the
+    // line, and the read's failure, if any.
+    #Import(c) terminal8_line: fn() -[Time.Wait]> (eof: Bool, line: String, read_error: String?) = "jet_terminal8_line"
+
+    // Writes `text` to stdout, or stderr, flushed when asked; the write's
+    // failure, if any.
+    #Import(c) terminal8_write_stdout: fn(text: String, flush: Bool) -[Time.Wait]> String? = "jet_terminal8_write_stdout"
+    #Import(c) terminal8_write_stderr: fn(text: String, flush: Bool) -[Time.Wait]> String? = "jet_terminal8_write_stderr"
+
+    // The environment variable `name`, when set; whether it is set.
+    #Import(c) terminal8_env: fn(name: String) -[IO]> String? = "jet_terminal8_env"
+    #Import(c) terminal8_env_has: fn(name: String) -[IO]> Bool = "jet_terminal8_env_has"
+
+    // stdin's terminal size, rows then columns, when both are positive.
+    #Import(c) terminal8_stty: fn() -[IO]> (h: Int, w: Int)? = "jet_terminal8_stty"
+
+    // The color mode the environment selects.
+    #Import(c) terminal8_color_mode: fn() -[IO]> Int = "jet_terminal8_color_mode"
+
+    // Whether stdin, stdout or stderr is a terminal; whether output is for a
+    // machine.
+    #Import(c) terminal8_stdin_tty: fn() -[IO]> Bool = "jet_term_stdin_is_terminal"
+    #Import(c) terminal8_stdout_tty: fn() -[IO]> Bool = "jet_term_stdout_is_terminal"
+    #Import(c) terminal8_stderr_tty: fn() -[IO]> Bool = "jet_term_stderr_is_terminal"
+    #Import(c) terminal8_machine_output: fn() -[IO]> Bool = "jet_term_machine_output"
+
+    // Enters the terminal's raw mode, or its cbreak mode; whether it did.
+    // Leaving restores the saved mode.
+    #Import(c) terminal8_mode_enter: fn(raw: Bool) -[Time.Wait]> Bool = "jet_term_mode_enter"
+    #Import(c) terminal8_mode_leave: fn() -[Time.Wait]> = "jet_term_mode_leave"
+
+    // The rest of stdin, or stdin up to and through `delimiter`, and the
+    // read's failure, if any.
+    #Import(c) terminal8_read_all: fn() -[Time.Wait]> (input: String, read_error: String?) = "jet_terminal8_read_all"
+    #Import(c) terminal8_read_until: fn(delimiter: String) -[Time.Wait]> (input: String, read_error: String?) = "jet_terminal8_read_until"
+
+    // One stdin read of up to `n` bytes, and the read's failure, if any.
+    #Import(c) terminal8_take: fn(n: Int) -[IO]> (bytes: [U8], read_error: String?) = "jet_terminal8_take"
+
+    // One stdin read of up to six key bytes, and the key decoder's platform.
+    #Import(c) terminal8_key_bytes: fn() -[Time.Wait]> (bytes: [U8], platform: Int) = "jet_terminal8_key_bytes"
+}
