@@ -1,10 +1,11 @@
 // Checked-build transport policy, assembled with the canonical compiler unit.
 use {
     jet_driver.[
-        JetDriverBuildHTTPError, JetDriverBuildHTTPInputs, JetDriverBuildHTTPResponse,
+        JetDriverBuildEntry, JetDriverBuildHTTPError, JetDriverBuildHTTPInputs, JetDriverBuildHTTPResponse,
+        JetDriverBuildInputError, JetDriverBuildInputs, JetDriverBuildPath,
         jet_driver_build_fetch, jet_driver_build_http_error,
         jet_driver_build_http_length, jet_driver_build_public_address,
-        jet_driver_shared_build_http_inputs,
+        jet_driver_shared_build_http_inputs, jet_driver_shared_build_inputs,
     ]
     jet_foundation.[Span]
 }
@@ -78,4 +79,43 @@ LoopbackBuildTransport: struct {
         assert_eq(error.code, "E3414")
         assert_eq(error.what, "fetch failed: compile-time network destination is not public")
     } else { panic("a loopback destination was not refused") }
+}
+
+// A file transport whose compile-time source directory `/case` holds one
+// regular file, `payload.txt`, and nothing else.
+FixtureBuildInputs: struct {
+    impl JetDriverBuildInputs {
+        resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
+            if path == "/case" -> return Ok(JetDriverBuildPath{exists: true, path: path, file: false, links: 1})
+            if path == "/case/payload.txt" -> return Ok(JetDriverBuildPath{exists: true, path: path, file: true, links: 1})
+            Ok(JetDriverBuildPath{exists: false, path: path, file: false, links: 0})
+        }
+        entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
+            Ok([JetDriverBuildEntry]{JetDriverBuildEntry{name: "payload.txt", directory: false, file: true}})
+        }
+        read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+            if path != "/case/payload.txt" -> return Err(JetDriverBuildInputError{message: "file is not a regular file"})
+            Ok("pinned payload\n".bytes())
+        }
+        read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+            Err(JetDriverBuildInputError{message: "read {root}/{relative}"})
+        }
+    }
+}
+
+// tests/ui/comptime_net_fetch_ok and _bad_hash: a `file://` fetch of a regular
+// file in the compile-time source directory is its text when the pin matches,
+// and E3413 when it doesn't.
+#Test("comptime fetch of a file:// fixture checks its sha256 pin") {
+    span: Span{start: 3, end: 5}
+    pin: "e46971c0fe4c87c91ab12d79ce0f8f3de03c27b6c283bc485fe920572d87cdd4"
+    fetched: jet_driver_build_fetch(Val(jet_driver_shared_build_inputs(FixtureBuildInputs{})), None, "/case", "file://payload.txt", pin, span)
+    if fetched == .Value(value) && value == .Text(text) {
+        assert_eq(text, "pinned payload\n")
+    } else { panic("a file:// fixture with its pin was not its text") }
+    mismatch: jet_driver_build_fetch(Val(jet_driver_shared_build_inputs(FixtureBuildInputs{})), None, "/case", "file://payload.txt", "deadbeef", span)
+    if mismatch == .Failure(error) {
+        assert_eq(error.code, "E3413")
+        assert_eq(error.what, "fetch: sha256 mismatch for `file://payload.txt`")
+    } else { panic("a file:// fixture with a wrong pin was not refused") }
 }
