@@ -1,7 +1,10 @@
 // `jet.runtime.files` (#6615): the runtime's public directory entries and
-// directory walk functions, in Jet types with their declared effect rows.
-// Each member is a runtime binding (Guest.jet sema_guest_runtime_binding) of
-// the runtime export that is its one body (RouteAFiles.jet, FilesWalk.jet).
+// directory walk functions, and core.files's host leaves, in Jet types with
+// their declared effect rows. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (RouteAFiles.jet, FilesWalk.jet, CompilerFS.jet, CompilerMapped.jet,
+// FilesPathOps.jet, FilesStreams.jet, HostFileLock.jet,
+// HostHeldDirectory.jet, HostPathFacts.jet).
 // An entries context or a walk is a key, and each path in it a slot. A key
 // that is not live, or a slot that is out of range or released, panics. A
 // tuple result's items cross in the checked tuple's label-sorted order, which
@@ -49,6 +52,10 @@ files: module {
 
     // This process's id.
     #Import(c) process_id_raw: fn() -[FS]> Int = "jet_std_os_pid"
+
+    // The canonical wire of `authority`: its sorted rights joined with LF.
+    // `priv`: only Core reads it (a file scope's read roots).
+    #Import(c) priv authority_to_wire: fn(authority: Authority) -> String = "jet_authority_to_wire"
 
     // Opens a walk of `root`, which reads rules files named `ignore` when
     // `enabled`; its key. Slot 0 is `root`.
@@ -99,4 +106,148 @@ files: module {
     // directory's only, else 0), whether it is a directory or a file, its
     // path and its path relative to the root, and whether it is a rules file.
     #Import(c) walk_next: fn(key: Int, slot: Int) -[FS]> (at_end: Bool, child: Int, directory: Bool, file: Bool, path: String, relative: String, rules_file: Bool, status: Int, status_code: Int?, status_reason: String?) = "jet_walk8_next"
+
+    // ---- core.files's host leaves (#6615 c5) ----------------------------
+    // Each is `priv`: only Core calls them. A `handle` is a held directory's
+    // key, or -1 for the working directory.
+
+    // The bytes of the file `path`.
+    #Import(c) priv read_bytes_os: fn(path: String) -[FS.Read]> [U8] IOError! = "jet_files_read_bytes_os"
+
+    // Writes `data` as the whole file `path`, and appends `data` to it.
+    #Import(c) priv write_bytes_os: fn(path: String, data: [U8]) -[FS.Write]> IOError! = "jet_files_write_bytes_os"
+    #Import(c) priv append_bytes_os: fn(path: String, data: [U8]) -[FS.Write]> IOError! = "jet_files_append_bytes_os"
+
+    // Creates the directory `path` and its missing parents.
+    #Import(c) priv create_dirs_os: fn(path: String) -[FS.Write]> IOError! = "jet_files_create_dirs_os"
+
+    // The error the fault schedule or the host gives a write to `path`
+    // before it starts, or None.
+    #Import(c) priv writer_refusal: fn(path: String) -[FS.Write]> IOError? = "jet_std_files_writer_refusal"
+
+    // Up to `count` bytes of `path` from `offset`, and writes `data` there.
+    #Import(c) priv read_at_os: fn(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! = "jet_files_read_at_os"
+    #Import(c) priv write_at_os: fn(path: String, offset: Int, data: [U8]) -[FS.Write]> IOError! = "jet_files_write_at_os"
+
+    // The target of the symbolic link `path`.
+    #Import(c) priv read_link_os: fn(path: String) -[FS.Read]> String IOError! = "jet_files_read_link_os"
+
+    // Whether host paths are Windows paths.
+    #Import(c) priv path_windows: fn() -> Bool = "jet_files_path_windows_raw"
+
+    // This process's id, for an atomic write's candidate name.
+    #Import(c) priv atomic_pid: fn() -> Int = "jet_files_atomic_pid_raw"
+
+    // The atomic write's steps: reserves the candidate beside `target` (its
+    // held parent's key), writes `data` to it, removes it, renames it over
+    // `target`, and syncs `target`'s parent.
+    #Import(c) priv atomic_reserve: fn(target: String, candidate: String) -[FS.Write]> Int IOError! = "jet_files_atomic_reserve_raw"
+    #Import(c) priv atomic_finish: fn(handle: Int, data: [U8], target: String, candidate: String) -[FS.Write]> IOError! = "jet_files_atomic_finish_raw"
+    #Import(c) priv atomic_remove: fn(path: String) -[FS.Write]> IOError! = "jet_files_atomic_remove_raw"
+    #Import(c) priv atomic_rename: fn(candidate: String, target: String) -[FS.Write]> IOError! = "jet_files_atomic_rename_raw"
+    #Import(c) priv atomic_sync_parent: fn(parent: String, target: String) -[FS.Write]> IOError! = "jet_files_atomic_sync_parent_raw"
+
+    // Closes the held directory `handle`: the atomic write's parent, and a
+    // Directory or AdvisoryLock.
+    #Import(c) priv atomic_close: fn(handle: Int) -[FS.Write]> = "jet_fs_directory_close"
+    #Import(c) priv close_directory: fn(handle: Int) -[FS.Read]> = "jet_fs_directory_close"
+
+    // The path `reader` was opened with.
+    #Import(c) priv reader_path: fn(reader: FileReader) -> String = "jet_std_file_reader_path"
+
+    // Whether `path` is a directory, by its metadata; Err when it has none.
+    #Import(c) priv metadata_directory: fn(path: String) -[FS.Read]> Bool Err! = "jet_fs_metadata_directory_raw"
+
+    // Creates the directory `path` and its missing parents (core.jobs).
+    #Import(c) priv create_dir_all_raw: fn(path: String) -[FS]> IOError! = "jet_std_fs_create_dir_all_raw"
+
+    // A temporary name's clock sample, and the host's temporary directory:
+    // `mktemp` names Time and Env for them, the temp_* constructors FS.
+    #Import(c) priv temp_path_sample: fn() -[Time]> (clock_available: Bool, nanos: String) = "jet_fs_temp_path_sample_raw"
+    #Import(c) priv temp_directory: fn() -[Env]> String = "jet_fs_temp_directory_raw"
+    #Import(c) priv temp_clock_raw: fn() -[FS]> (clock_available: Bool, nanos: String) = "jet_fs_temp_path_sample_raw"
+    #Import(c) priv temp_directory_raw: fn() -[FS]> String = "jet_fs_temp_directory_raw"
+
+    // Whether `path` is absolute on the host, and `path` joined to `base`.
+    #Import(c) priv host_path_is_absolute: fn(path: String) -> Bool = "jet_fs_host_path_is_absolute_raw"
+    #Import(c) priv host_path_join: fn(base: String, path: String) -> String = "jet_fs_host_path_join_raw"
+
+    // The descriptor of the held directory `handle`: whether the host has
+    // descriptors, the number, and whether `handle` is still held.
+    #Import(c) priv directory_fd: fn(handle: Int) -[FS.Read]> (available: Bool, fd: Int, held: Bool) = "jet_fs_directory_fd_raw"
+
+    // The descriptor numbers of a reader, a writer and a lock.
+    #Import(c) priv reader_fd: fn(reader: FileReader) -[FS.Read]> Int IOError! = "jet_std_file_reader_fd_raw"
+    #Import(c) priv writer_fd: fn(writer: FileWriter) -[FS.Read]> Int IOError! = "jet_std_file_writer_fd_raw"
+    #Import(c) priv lock_fd: fn(lock: FileLock) -[FS.Read]> Int IOError! = "jet_fs_lock_fd_raw"
+
+    // Maps the file `path` for reading.
+    #Import(c) priv map_raw: fn(path: String) -[FS.Read]> MappedFile IOError! = "jet_std_files_map"
+
+    // Path operations: remove a file, an empty directory, a tree (whose root
+    // is a `directory`), copy, hard-link, fsync a file and its filesystem.
+    #Import(c) priv remove_raw: fn(path: String) -[FS.Write]> IOError! = "jet_std_fs_remove_raw"
+    #Import(c) priv remove_dir_raw: fn(path: String) -[FS.Write]> IOError! = "jet_std_fs_remove_dir_raw"
+    #Import(c) priv remove_all_raw: fn(path: String, directory: Bool) -[FS.Write]> IOError! = "jet_std_fs_remove_all_raw"
+    #Import(c) priv copy_raw: fn(from: String, to: String) -[FS]> IOError! = "jet_std_fs_copy_raw"
+    #Import(c) priv hard_link_raw: fn(from: String, to: String) -[FS.Write]> IOError! = "jet_std_fs_hard_link_raw"
+    #Import(c) priv fsync_raw: fn(path: String) -[FS.Write]> IOError! = "jet_std_fs_fsync_raw"
+    #Import(c) priv syncfs_raw: fn(path: String) -[FS.Write]> IOError! = "jet_std_fs_syncfs_raw"
+
+    // `path`'s mode bits, and sets its owner, group and mode.
+    #Import(c) priv stat_mode_raw: fn(path: String) -[FS.Read]> Int IOError! = "jet_std_fs_stat_mode_raw"
+    #Import(c) priv chown_raw: fn(path: String, owner: Int, group: Int) -[FS.Write]> IOError! = "jet_std_fs_chown_raw"
+    #Import(c) priv set_mode_raw: fn(path: String, mode: Int) -[FS.Write]> IOError! = "jet_std_fs_set_mode_raw"
+
+    // Whether a link to `from` is a directory link (Windows), and links `to`
+    // to `from`.
+    #Import(c) priv symlink_directory_raw: fn(from: String) -[FS.Write]> Bool IOError! = "jet_std_fs_symlink_directory_raw"
+    #Import(c) priv symlink_raw: fn(from: String, to: String, directory: Bool) -[FS.Write]> IOError! = "jet_std_fs_symlink_raw"
+
+    // `path` with every link resolved.
+    #Import(c) priv canonicalize_raw: fn(path: String) -[FS.Read]> String IOError! = "jet_std_fs_canonicalize_raw"
+
+    // Opens `name` under `handle` for reading, and for writing (`append`,
+    // `if_exists` and `links` codes, `mode` -1 for the default).
+    #Import(c) priv open_reader: fn(handle: Int, name: String, links: Int) -[FS.Read]> FileReader IOError! = "jet_std_files_open_reader"
+    #Import(c) priv open_writer: fn(handle: Int, name: String, append: Bool, if_exists: Int, mode: Int, links: Int) -[FS.Write]> FileWriter IOError! = "jet_std_files_open_writer"
+
+    // Held directories: opens `name` under `handle` (its key), fsyncs it,
+    // flocks it with `flags`, and creates the directory `name` under it.
+    #Import(c) priv open_directory: fn(handle: Int, name: String) -[FS.Read]> Int IOError! = "jet_fs_directory_open"
+    #Import(c) priv fsync_directory: fn(handle: Int) -[FS.Write]> IOError! = "jet_fs_directory_fsync"
+    #Import(c) priv flock: fn(handle: Int, flags: Int) -[FS.Write]> IOError! = "jet_fs_flock"
+    #Import(c) priv create_directory: fn(handle: Int, name: String, mode: Int) -[FS.Write]> IOError! = "jet_fs_directory_create"
+
+    // The stat row of `name` under `handle`, following a link when `follow`,
+    // and the kind code of `path`.
+    #Import(c) priv stat_at: fn(handle: Int, name: String, follow: Bool) -[FS.Read]> [Int] IOError! = "jet_fs_stat_at"
+    #Import(c) priv path_kind: fn(path: String) -[FS.Read]> Int IOError! = "jet_fs_path_kind"
+
+    // Renames, removes and reads the link `name` under a held directory.
+    #Import(c) priv rename_at: fn(from_handle: Int, from: String, to_handle: Int, to: String, if_exists: Int) -[FS.Write]> IOError! = "jet_fs_rename_at"
+    #Import(c) priv remove_at: fn(handle: Int, name: String, directory: Bool) -[FS.Write]> IOError! = "jet_fs_remove_at"
+    #Import(c) priv read_link_at: fn(handle: Int, name: String) -[FS.Read]> String IOError! = "jet_fs_read_link_at"
+
+    // `path`'s extended attribute names, the attribute `attribute` (None
+    // when unset), and sets the attribute `name` to `data`.
+    #Import(c) priv xattr_names: fn(path: String) -[FS.Read]> [String] IOError! = "jet_fs_xattr_names"
+    #Import(c) priv xattr_get: fn(path: String, attribute: String) -[FS.Read]> [U8]? IOError! = "jet_fs_xattr_get"
+    #Import(c) priv xattr_set: fn(path: String, name: String, data: [U8]) -[FS.Write]> IOError! = "jet_fs_xattr_set"
+
+    // The stat rows of an open reader and writer.
+    #Import(c) priv reader_stat: fn(reader: FileReader) -[FS.Read]> [Int] IOError! = "jet_std_file_reader_stat"
+    #Import(c) priv writer_stat: fn(writer: FileWriter) -[FS.Read]> [Int] IOError! = "jet_std_file_writer_stat"
+
+    // Sets an open writer's mode, allocates `size` bytes for it, and passes
+    // an access advice code for a reader and a mapping.
+    #Import(c) priv writer_set_mode: fn(writer: FileWriter, mode: Int) -[FS.Write]> IOError! = "jet_std_file_writer_set_mode"
+    #Import(c) priv writer_allocate: fn(writer: FileWriter, size: Int) -[FS.Write]> IOError! = "jet_std_file_writer_allocate"
+    #Import(c) priv reader_advise: fn(reader: FileReader, advice: Int) -[FS.Read]> IOError! = "jet_std_file_reader_advise"
+    #Import(c) priv map_advise: fn(map: MappedFile, advice: Int) -[FS.Read]> IOError! = "jet_std_fs_map_advise"
+
+    // Whether the process may access `path` in `mode`, and the space row of
+    // the filesystem holding `path`.
+    #Import(c) priv access_raw: fn(path: String, mode: Int) -[FS.Read]> IOError! = "jet_std_fs_access_raw"
+    #Import(c) priv space: fn(path: String) -[FS.Read]> [Int] IOError! = "jet_fs_space"
 }

@@ -1,0 +1,8 @@
+// `jet.runtime.crypto` (#6615): the host step core.crypto.random reaches, in
+// Jet types with its `Rand` effect row. The member is a runtime binding
+// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its one
+// body (CryptoEntropy.jet). It is `priv`: only core.crypto.random calls it.
+crypto: module {
+    // `count` bytes from one OS CSPRNG fill; None when the provider refuses.
+    #Import(c) priv os_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
+}

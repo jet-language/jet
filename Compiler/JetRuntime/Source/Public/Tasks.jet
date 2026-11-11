@@ -1,0 +1,27 @@
+// `jet.runtime.tasks` (#6615): the scheduler steps core.tasks reaches, in Jet
+// types with their effect rows. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (Scheduler.jet, RouteACore.jet). Each is `priv`: only core.tasks calls them.
+tasks: module {
+    // Yields the running task to the scheduler.
+    #Import(c) priv yield_now: fn() -[Time.Wait]> = "jet_task_yield"
+
+    // Joins the scheduler's carrier and timer threads; false, with nothing
+    // stopped, while a task or a timer is pending.
+    #Import(c) priv quiesce: fn() -[Exec]> Bool = "jet_tasks_quiesce"
+
+    // Wakes one task waiting on `condition`.
+    #Import(c) priv condition_notify_one: fn(condition: Condition) = "jet_condition_notify_one"
+
+    // Wakes every task waiting on `condition`.
+    #Import(c) priv condition_notify_all: fn(condition: Condition) = "jet_condition_notify_all"
+
+    // Whether the running task is cancelled; None outside a task.
+    #Import(c) priv task_cancelled: fn() -> Bool? = "jet_scheduler_task_cancelled_state"
+
+    // The running task's CPU time in nanoseconds; the thread's on a plain thread.
+    #Import(c) priv task_cpu_ns: fn() -> Int = "jet_rt_task_cpu_ns"
+
+    // The running task's identity: its fiber's, else the thread's kernel id.
+    #Import(c) priv task_identity: fn() -> Int = "jet_rt_task_identity"
+}

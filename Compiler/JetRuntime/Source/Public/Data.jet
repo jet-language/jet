@@ -1,0 +1,10 @@
+// `jet.runtime.data` (#6615): the host file test core.data's bridge lookup
+// runs on each PATH entry, in Jet types with the FS effect. The member is a
+// runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime export
+// that is its one body (RouteAEncoding.jet). It is `priv`: only core.data
+// calls it.
+data: module {
+    // Whether the native path bytes `path` name a regular file; an Err when
+    // the bytes are no host path.
+    #Import(c) priv host_path_is_file: fn(path: [U8]) -[FS]> Bool EncodingCause! = "jet_data_host_path_is_file"
+}

@@ -3,7 +3,8 @@
 // binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
 // its one body; the cells are the calling thread's (RouteALog.jet). A tuple
 // result's items cross in the checked tuple's label-sorted order, which is the
-// export's slot order. A member with no row is pure.
+// export's slot order. A LogSpan or LogField crosses as a runtime record made
+// for the call. A member with no row is pure.
 log: module {
     // The thread's level cell.
     #Import(c) level_load: fn() -[Log]> Int = "jet_log_level_load"
@@ -42,6 +43,17 @@ log: module {
 
     // The thread's next span id and its copy of `name`.
     #Import(c) span_allocate: fn(name: String) -[Log]> (id: Int, name: String) = "jet_log_span_allocate_raw"
+
+    // Pushes a copy of `span` on the thread's active span stack, and pops the
+    // innermost entry with the id of `span`. `priv`: only Core calls them
+    // (`log.enter`, `log.close`).
+    #Import(c) priv span_enter: fn(span: LogSpan) -[Log]> = "jet_ring_log_enter"
+    #Import(c) priv span_close: fn(span: LogSpan) -[Log]> = "jet_ring_log_close"
+
+    // Emits the record `message` at the level named `level` with `fields`
+    // to the thread's sinks, unless logging is off or sampled out. `priv`:
+    // only Core calls it, after its level and filter checks.
+    #Import(c) priv record_emit: fn(level: String, message: String, fields: [LogField]) -[Log]> = "jet_log_record_emit_raw"
 
     // Publishes the metric `name` at `value` to the installed event sinks.
     #Import(c) metric_publish: fn(name: String, value: Int) = "jet_log_publish_metric"
