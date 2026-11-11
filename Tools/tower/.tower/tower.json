@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99641,
+    "rev": 99642,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -198750,6 +198750,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-11T22:18:31.917Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0i2ghnn",
+      "note": "Gaps against hand-written code and cold-script cost: update (2026-11-11 evening)"
+    },
+    {
       "at": "2026-11-11T22:08:00.042Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -203478,6 +203485,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0i2ghnn",
+      "title": "Gaps against hand-written code and cold-script cost: update (2026-11-11 evening)",
+      "body": "# Gaps against hand-written code and cold-script cost: update (2026-11-11 evening)\n\nThis revision adds today's measured results and the newly found roots. The earlier gap table (`briefing06136p6`) still stands for anything not listed here. All timings are best of 5 runs, alternated, on one pinned CPU against a same-source base, with a control column (the base measured again) that shows the noise floor.\n\n## Landed: G6, the allocator leaves\n\n`jet_rt_free_8` and `jet_rt_alloc_8` no longer save registers they don't need. free_8 went from 119 to 110 instructions with no spills; alloc_8 from 88 to 82, with 5 pushes down to 3.\n\n| benchmark | change | control |\n|---|---|---|\n| wordfreq | -6.1% | +0.4% |\n| logreport | -6.5% | -0.5% |\n| tokensplit | -5.2% | +0.8% |\n| csvtransform | -2.3% | -2.9% (noise) |\n| geomean | -4.6% | -1.7% |\n\nBinaries are 1.0% smaller in every cell. RSS is unchanged.\n\n## Held, then fixed: frame-view substrings (G7, now G11)\n\nG7 cut logreport by 29.8% and tokensplit by 10.4%, but slowed csvtransform by 3.5%, so it was held. The cause was that inlining the view copy into `string_clone` made every clone save 5 registers instead of 1. csvtransform clones about 15M times and uses no views, and clone's share of its time rose from 6.0% to 9.5%. G11 keeps clone's hot path as it was before G7. The +768 KiB RSS reading was noise: page faults and peak matched across 3 runs. G11 is being measured now.\n\n## New codegen gate\n\n`Tools/perf/CodegenCeiling.jet` counts the hot-loop instructions of 9 kernels and fails on any increase. Every compiler, IR or runtime change must pass it. Seed-b4 counts against hand-written code:\n\n| kernel | Jet | hand-written |\n|---|---|---|\n| list_sum | 254 (11 loop copies) | 5 |\n| gather | 273 | 8 |\n| collatz | 180 | 11 |\n| point | 213 | 9 |\n| byte_count | 119 | 7 |\n| stride | 71 | 6 |\n\nThe roots are below. Each fix is staged and goes through the quiet measurement window; it lands only on a measured win with no cell worse than the noise.\n\n- **Loop copies copied again (G9).** Versioning re-copied an inlined callee's already versioned loop; list_sum ends up with 11 loops.\n- **Registers refused (G10).** r8 and r9 were refused to any value live across a checked Int op, because its rare overflow path calls a function. Loops doing Int math had 5 registers and reloaded the list's base and length on every pass.\n- **Fail arms inline (G12).** Bounds and unwrap failure paths sat inside hot loops; they move after the function's return.\n- **Store-forwarding stalls (G13, G14).** Short text built byte by byte and then read as one word stalls the CPU: 57% of text checking in wordfreq, and 7.9% in date parsing.\n- **`||` and `&&` chains (G15).** Each link becomes a compare and a branch; the two-digit date parser was 9.6% of logreport's date parsing.\n- **Boxed results (G16).** Date parsing boxed its result on every line; the fast path no longer does.\n- **Not a root.** The repeated 62-bit range checks in fib are in the general copy, which runs only for n of 2^60 and up, and are needed there; the hot copy is already minimal.\n\n## Cold script cost (#6527 c10), and why the tool twins fail their speed bars\n\nA small Jet script that uses only files, process and sys cost 1.90 s and 357 MB from cold on b5, and type-checked 101 Core modules.\n\n| root | fix | effect |\n|---|---|---|\n| core.files calls a test-only fault hook, pulling in core.testing, all of Crypto, Encoding and random | G8Scope-38 | 101 → 60 modules; peak 357 → 272 MB. A second script: 388 → 290 MB, CPU 2.17 → 1.51 s |\n| runtime units were reached whole, so one `utf8_bytes` call loaded every Unicode table | G8Scope-39 | 58 → 43 modules; Core source parsed -12.5% |\n| any `.abs` or `.pow` opens all of core.math (499 functions plus most compile-time constants) | in progress | |\n\nAfter root 1, the same script takes 0.67 s wall, 1.13 s CPU and 287 MB peak:\n\n| phase | wall ms | CPU ms |\n|---|---|---|\n| load (parsing) | 280 | 370 |\n| sema finalize | 160 | 440 |\n| register | 80 | 170 |\n| comptime | 30 | 150 |\n| sema check | 20 | 30 |\n\n**Parsing is an architecture gap.** Each cold script lexes and parses about 38,000 lines of Core (2.8 MB) to use a few hundred. That runs at 136k lines/s wall, about 220 times short of the 30M lines/s target. Lexing is 45% of parse time. Float literals go through bignum math, which is 22% of lexing. Each byte read is an un-inlined, bounds-checked call. The parser re-skips trivia on every token read.\n\nThe plan has no cache, per the cold-compile rule:\n1. Each Core module is reached by name.\n2. Lazy declaration parsing: lex once, record each declaration's span, and parse a body only when something reaches it. `jet check` still reports every diagnostic.\n3. The lexer's cheap wins: inlined byte access, an exact float fast path, and skipping trivia once per token.\n\n## Open ballots raised today\n\n- **D-NET-HOSTREADS1.** Does Net cover the host reads TLS needs (clock, entropy, CA files)? On b5, an HTTPS client still works after it denies FS, Rand and Env. The reviewed recommendation is explicit host-effect rows.\n- **D-CONTEXT-EFFECT1.** Is `Context` a 13th built-in effect root, as in the code, or a Core-declared effect inside the ratified 12?\n",
+      "by": "Main",
+      "created": "2026-11-11T22:18:31.917Z",
+      "sections": []
+    },
     {
       "id": "briefing06136p6",
       "title": "Codegen gaps against hand-written machine code (2026-11-11 measurement)",
