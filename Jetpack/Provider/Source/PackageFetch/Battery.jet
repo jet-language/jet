@@ -62,7 +62,8 @@ pkg_fetch_battery_node: fn(verification: &StoreVerification, roots: HangarRoots,
 }
 
 // The source-store directory of the locked battery `package`, after checking
-// that the toolchain still ships exactly the pinned battery.
+// that the toolchain still ships exactly the pinned battery. A store without
+// the battery gets it from the toolchain's tree.
 pkg_fetch_locked_battery: fn(root: String, package: LockedPackage, requirement: String) -[FS, Env, Time]> String PackageFetchError! {
     name: package.name
     directory: pkg_fetch_battery_dir(root, name, requirement) ?? return Err(pkg_fetch_locked_error(name, "this toolchain ships no `{name}` battery matching `{requirement}`"))
@@ -70,5 +71,5 @@ pkg_fetch_locked_battery: fn(root: String, package: LockedPackage, requirement: 
     shipped: snapshot.content_hash
     close(snapshot)
     if package.source_hash() != Val(shipped) -> return Err(pkg_fetch_locked_error(name, "this toolchain's `{name}` battery is not the one `.jet/lock` pins"))
-    pkg_fetch_locked_source(name, package)
+    pkg_fetch_locked_source(name, package, Val(directory))
 }

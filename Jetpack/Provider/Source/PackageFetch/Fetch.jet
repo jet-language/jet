@@ -132,12 +132,13 @@ pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: Hangar
         directory: if manifest.dependencies[name] == {
             .Path(path) -> {
                 if package.source != .Path(path) -> return Err(pkg_fetch_locked_error(name, "locked path source disagrees with the manifest"))
-                pkg_fetch_locked_source(name, package)
+                tree: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(root, path))
+                pkg_fetch_locked_source(name, package, Val(tree))
             }
             .Git(url, selector) -> {
                 expected_source: LockSource.Git{url: url, selector: pkg_lock_git_selector_str(selector)}
                 if package.source != expected_source || package.locked == None -> return Err(pkg_fetch_locked_error(name, "locked git source disagrees with the manifest or has no pinned revision"))
-                pkg_fetch_locked_source(name, package)
+                pkg_fetch_locked_source(name, package, None)
             }
             .Registry(requirement) -> if package.is_registry(BATTERIES_SOURCE_NAME) -> pkg_fetch_locked_battery(root, package, requirement) else -> pkg_fetch_locked_registry(verification, roots, root, manifest, lock, package, requirement)
             .Foreign(language, reference) -> pkg_fetch_locked_foreign(roots, root, package, language, reference)
@@ -146,12 +147,30 @@ pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: Hangar
     }
     Ok(directories)
 }
-pkg_fetch_locked_source: fn(name: String, package: LockedPackage) -[FS, Env]> String PackageFetchError! {
+// The source-store directory of the locked `package`. A dependency whose
+// source is a local `tree` (a path dependency or a battery) and whose store
+// entry is absent, as in a fresh clone with a committed lock, is installed
+// from that tree when the tree still hashes to the locked content hash.
+pkg_fetch_locked_source: fn(name: String, package: LockedPackage, tree: String?) -[FS, Env, Time]> String PackageFetchError! {
     loop component in ([String]{name, package.version, package.fingerprint.removeprefix("sha256-")}) {
         pkg_source_store_component(component) ?? return Err(pkg_fetch_locked_error(name, "locked source store identity is not one safe component"))
     }
     path: pkg_source_store_path(name, package.version, package.fingerprint)
     expected: package.content_hash ?? if package.locked == .Val(revision) -> revision.tree_hash else -> ""
+    if tree == .Val(directory) && expected != "" && !files.exists(path) {
+        snapshot: pkg_source_snapshot_tree(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+        result: pkg_fetch_locked_install(name, package, expected, path, snapshot)
+        close(snapshot)
+        return result
+    }
+    pkg_source_store_verify(name, path, expected) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    Ok(path)
+}
+// Installs the locked `package` at the store `path` from `snapshot`, its
+// local source tree, which must hash to the locked content hash `expected`.
+pkg_fetch_locked_install: fn(name: String, package: LockedPackage, expected: String, path: String, snapshot: PackageSourceSnapshot) -[FS, Env, Time]> String PackageFetchError! {
+    if snapshot.content_hash != expected -> return Err(pkg_fetch_locked_error(name, "the dependency's source tree no longer hashes to its locked content hash"))
+    _: pkg_source_store_ensure(name, package.version, package.fingerprint, snapshot.directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     pkg_source_store_verify(name, path, expected) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     Ok(path)
 }

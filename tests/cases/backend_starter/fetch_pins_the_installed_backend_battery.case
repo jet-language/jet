@@ -1,23 +1,29 @@
 # Card #3173 c21: the starter's service depends on the `backend` battery by
-# version. `jet fetch` resolves that dependency to the battery the toolchain
-# ships, without a registry, and the lock pins its version and content hash
-# beside the path pin of the shared contract. A locked fetch replays those
-# pins, and the service builds against the pinned battery. A toolchain whose
-# `backend` battery differs from the pinned tree is refused by a locked fetch:
-# the pin keeps the battery's identity even though, like a path dependency,
-# the battery gets no registry policy record.
+# version. The starter ships its `.jet/lock`, which pins that dependency to
+# the battery the toolchain ships, by version and content hash, beside the
+# path pin of the shared contract. A locked fetch into an empty package store,
+# as after a fresh clone, replays those pins without a registry: it installs
+# each pinned local tree that still hashes to its pin, and the service builds
+# against the pinned battery. A toolchain whose `backend` battery differs from
+# the pinned tree is refused by a locked fetch: the pin keeps the battery's
+# identity even though, like a path dependency, the battery gets no registry
+# policy record.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
 copy: {root}/Examples/Network/BackendStarter starter
-step fetch: jet fetch
-cwd: starter/Packages/Service
-exit: 0
-stdout: ~ "fetched all dependencies" # every dependency resolved
-file: starter/Packages/Service/.jet/lock ~ "name = \"backend\"\nversion = \"0.1.0\"\nsource = { registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-" # the battery is pinned by version and content hash
+copy: {root}/Examples/Network/BackendStarter/Packages/Service/.jet/lock starter/Packages/Service/.jet/lock
+copy: {root}/Examples/Network/BackendStarter/Packages/Client/.jet/lock starter/Packages/Client/.jet/lock
+file: starter/Packages/Service/.jet/lock ~ "name = \"backend\"\nversion = \"0.1.0\"\nsource = { registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-" # the shipped lock pins the battery by version and content hash
 file: starter/Packages/Service/.jet/lock ~ "repository = \"embedded:batteries\", authority = \"toolchain\", tier = \"core\", gate-status = \"first-party\" }" # the pin names the toolchain's batteries
 file: starter/Packages/Service/.jet/lock ~ "name = \"contract\"\nversion = \"0.1.0\"\nsource = { path = \"../Contract\" }" # the shared library is pinned by path
+file: starter/Packages/Client/.jet/lock ~ "name = \"contract\"\nversion = \"0.1.0\"\nsource = { path = \"../Contract\" }" # the client pins the same library
 step locked: jet fetch --locked
 cwd: starter/Packages/Service
+exit: 0
+stdout: ~ "fetched all dependencies" # every pin replayed
+step client: jet fetch --locked
+cwd: starter/Packages/Client
 exit: 0
 step build: jet build
 cwd: starter/Packages/Service
