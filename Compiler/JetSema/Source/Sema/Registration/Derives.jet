@@ -861,6 +861,7 @@ sema_derive_expand_lambda: fn(expansion: &SemaDeriveExpansion, lambda: Lambda) -
         params.push(expanded)
     }
     updated.params = params
+    updated.result = lambda.result.map((value) -> sema_derive_expand_type(expansion, value))
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_derive_expand_expr(expansion, value)}
         .Block(body) -> LambdaBody.Block{body: sema_derive_expand_stmts(expansion, body)}

@@ -39,6 +39,7 @@ use {
         type_name,
     ]
     jet_lexer.[
+        TOKEN_KW_FN,
         TOKEN_LBRACE,
         TOKEN_LPAREN,
         TOKEN_RBRACE,
@@ -2002,6 +2003,7 @@ jfmt_fmt_limited_block: fn(f: &JetFmt, statements: [Stmt], limit: Int) {
 }
 
 jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
+    if jfmt_lambda_fn_form(f, lambda) -> return jfmt_fmt_fn_lambda(f, lambda)
     // Preserve the bare one-parameter spelling.
     bare_param: lambda.take_names.len() == 0 && lambda.params.len() == 1 && lambda.params[0].ty == None && lambda.span.start == lambda.params[0].name_span.start
     if !bare_param -> jfmt_write(f, "(")
@@ -2031,6 +2033,51 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
             jfmt_end_block(f)
         }
     }
+}
+
+// Whether `lambda` is written `fn(…) {…}`.
+jfmt_lambda_fn_form: fn(f: JetFmt, lambda: Lambda) -> Bool Never! {
+    first: jfmt_first_token_at(f, lambda.span.start)
+    first < f.source_toks.len() && f.source_toks[first].span.start == lambda.span.start && f.source_toks[first].kind == TOKEN_KW_FN
+}
+
+// `fn(params) interface {{ body }}`: the interface is written as a named
+// function's, the unit failure contract before the effect row.
+jfmt_fmt_fn_lambda: fn(f: &JetFmt, lambda: Lambda) {
+    jfmt_write(f, "fn(")
+    loop (index, param) in lambda.params {
+        if index > 0 -> jfmt_write(f, ", ")
+        jfmt_write(f, param.name)
+        if param.ty == .Val(ty) {
+            jfmt_write(f, ": ")
+            jfmt_fmt_type(f, ty)
+        }
+    }
+    jfmt_write(f, ")")
+    unit_fallible: if lambda.result == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
+    if unit_fallible && lambda.result == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
+    if lambda.effects == .Val(effects) {
+        jfmt_write(f, " -[")
+        row_source: jfmt_source_effect_row_span_after(f, lambda.span.start)
+        jfmt_fmt_effect_row(f, effects, row_source)
+        jfmt_write(f, "]>")
+    }
+    if !unit_fallible && lambda.result == .Val(ret) {
+        jfmt_write(f, if lambda.effects == None -> " -> " else -> " ")
+        jfmt_fmt_type(f, ret)
+    }
+    statements: if lambda.body == .Block(body) -> body else -> [Stmt]{}
+    // A one-line lambda of one value keeps its line: `fn(n) {{ n > 2 }}`.
+    if statements.len() == 1 && !jfmt_source_span_multiline(f, lambda.span) && statements[0] == .Expr(value) {
+        jfmt_write(f, " {{ ")
+        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, " }}")
+        return
+    }
+    jfmt_write(f, " {{")
+    jfmt_newline(f)
+    jfmt_fmt_limited_block(f, statements, lambda.span.end)
+    jfmt_end_block(f)
 }
 
 jfmt_fmt_or_fallback: fn(f: &JetFmt, fallback: OrFallback) {
@@ -2495,18 +2542,24 @@ jfmt_fmt_call_args_with_template: fn(f: &JetFmt, args: [CallArg], source_start: 
     if template != None -> _ := call_args.pop()
     source := JetFmtSourceList?{None}
     if source_start == .Val(start) -> source = jfmt_source_list_span_after(f, start, JFMT_DELIM_PAREN)
+    // A final `fn` lambda hugs the parentheses when everything else in the
+    // list sits on the call's line: `xs.map(fn(n) {` … `})`.
+    hug: call_args.len() > 0 && jfmt_hugs_fn_lambda(f, call_args[call_args.len() - 1], source)
     mark: jfmt_mark(f)
     jfmt_write(f, "(")
-    multiline: jfmt_comma_begin(f, call_args.len(), source)
+    multiline: !hug && jfmt_comma_begin(f, call_args.len(), source)
+    last_start := mark.out_len
     loop (index, arg) in call_args {
         jfmt_comma_before(f, index, multiline, arg.span.start)
+        if index == call_args.len() - 1 -> last_start = f.out.len()
         jfmt_fmt_call_arg(f, arg)
         jfmt_comma_after(f, multiline, arg.span.end)
     }
     jfmt_comma_end(f, multiline, source)
     // A nested lambda/body can break a one-line call; choose the expanded
     // argument layout now so the first pass is stable.
-    if !multiline && jfmt_out_since_has_newline(f, mark.out_len) {
+    hugged: hug && !jfmt_bytes_have_newline(f.out, mark.out_len, last_start)
+    if !multiline && !hugged && jfmt_out_since_has_newline(f, mark.out_len) {
         jfmt_rollback(f, mark)
         jfmt_write(f, "(")
         jfmt_fmt_call_args_multiline(f, call_args, source)
@@ -2522,6 +2575,17 @@ jfmt_fmt_call_args_with_template: fn(f: &JetFmt, args: [CallArg], source_start: 
         if !f.at_line_start -> jfmt_newline(f)
         jfmt_write(f, "}}")
     }
+}
+
+// Whether `arg` is a `fn` lambda that can hug its call's parentheses: no
+// label, and nothing between the list's `(` and the lambda, or after it,
+// starts a new line or holds a comment.
+jfmt_hugs_fn_lambda: fn(f: JetFmt, arg: CallArg, source: JetFmtSourceList?) -> Bool Never! {
+    if arg.label != None || arg.spread -> return false
+    lambda: jfmt_lambda_of(arg.expr) ?? return false
+    if !jfmt_lambda_fn_form(f, lambda) -> return false
+    list: source ?? return true
+    !jfmt_source_span_multiline(f, Span{start: list.span.start, end: lambda.span.start}) && !jfmt_source_span_multiline(f, Span{start: lambda.span.end, end: list.close_start})
 }
 
 jfmt_fmt_call_args_multiline: fn(f: &JetFmt, args: [CallArg], source: JetFmtSourceList?) {

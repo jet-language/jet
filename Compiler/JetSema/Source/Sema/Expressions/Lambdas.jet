@@ -1759,6 +1759,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         }
     }
     if lambda.effects != None -> expected_effects = lambda.effects
+    // A written result (`fn(n: Int) -> Int {…}`) is the body's, as a named
+    // function's is; the expected callable type is checked against it below.
+    if lambda.result == .Val(written) -> expected_ret = Val(sema_expr_expected_type(written, environment, program))
     // The arity mismatch is reported and the lambda is still checked under its
     // own parameters, so the caller sees its real type and reports the argument
     // mismatch against its own parameter.

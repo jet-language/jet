@@ -778,6 +778,7 @@ sema_inline_rewrite_lambda: fn(rewrite: &SemaInlineRewrite, lambda: Lambda) -> L
         rewrite.locals.push(param.name)
     }
     updated.params = params
+    updated.result = sema_inline_rewrite_optional_type(rewrite, lambda.result)
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_inline_rewrite_expr(rewrite, value)}
         .Block(body) -> LambdaBody.Block{body: sema_inline_rewrite_stmts(rewrite, body)}

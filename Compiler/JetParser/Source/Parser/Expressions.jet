@@ -78,6 +78,7 @@ use {
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
+        TOKEN_KW_FN,
         TOKEN_KW_IF,
         TOKEN_KW_IN,
         TOKEN_KW_IT,
@@ -972,6 +973,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // meaning is a declared tag applied to the value after it.
     if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT -> return parser_parse_marker_value(state, depth + 1, allow_struct_lit, stop_before_comparison)
     if kind == TOKEN_LPAREN -> return parser_parse_parenthesized(state, depth + 1)
+    if kind == TOKEN_KW_FN && parser_kind_at(state, 1) == TOKEN_LPAREN -> return parser_parse_fn_lambda(state, depth + 1)
     if kind == TOKEN_LBRACKET && parser_list_type_owner_ahead(state) {
         static_call: parser_try_parse_list_type_static(state, depth + 1)
         if static_call == .Val(parsed) -> return parsed
@@ -1443,32 +1445,7 @@ parser_lambda_interface_error: fn(state: &JetParserState, span: Span) {
 
 parser_parse_lambda: fn(state: &JetParserState, depth: Int, take_names: [NamedSpan]) -> ParsedExpr {
     open: parser_expect(state, TOKEN_LPAREN, "`(` before lambda parameters")
-    params := [LambdaParam]{}
-    if parser_current_kind(state) != TOKEN_RPAREN {
-        loop !parser_aborting(state) {
-            name: parser_expect_name(state, "as a lambda parameter")
-            ty := Type?{None}
-            ty_span := Span?{None}
-            convention := AccessConvention.Read
-            if parser_current_kind(state) == TOKEN_COLON {
-                parser_bump(state)
-                // A written type may mark a written `&` or taken `&&` input, as a
-                // function type's parameter does: `(buf: &[Int]) -> …`.
-                mark_kind: parser_current_kind(state)
-                if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
-                    parser_bump(state)
-                    convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
-                }
-                parsed: parser_parse_type(state, depth + 1)
-                ty = Val(parsed.ty)
-                ty_span = Val(parsed.span)
-            }
-            params.push(LambdaParam{name: parser_value(state, name), name_span: name.span, ty: ty, ty_span: ty_span, convention: convention})
-            if parser_current_kind(state) == TOKEN_RPAREN -> break
-            parser_expect(state, TOKEN_COMMA, "`,` between lambda parameters")
-            if parser_current_kind(state) == TOKEN_RPAREN -> break
-        }
-    }
+    params: parser_parse_lambda_params(state, depth)
     close: parser_expect(state, TOKEN_RPAREN, "`)` after lambda parameters")
     if !parser_func_effect_starts_here(state) && !parser_at_unified_arrow(state) {
         interface_span: parser_current(state).span
@@ -1488,6 +1465,78 @@ parser_parse_lambda: fn(state: &JetParserState, depth: Int, take_names: [NamedSp
         body: body.body,
         span: span,
         meta: ast_empty_lambda_meta(),
+    }
+    ParsedExpr{expr: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}, span: span}
+}
+
+// The parameters after a lambda's `(`, up to (not including) its `)`: each a
+// name with an optional `: Type`.
+parser_parse_lambda_params: fn(state: &JetParserState, depth: Int) -> [LambdaParam] {
+    params := [LambdaParam]{}
+    if parser_current_kind(state) == TOKEN_RPAREN -> return params
+    loop !parser_aborting(state) {
+        name: parser_expect_name(state, "as a lambda parameter")
+        ty := Type?{None}
+        ty_span := Span?{None}
+        convention := AccessConvention.Read
+        if parser_current_kind(state) == TOKEN_COLON {
+            parser_bump(state)
+            // A written type may mark a written `&` or taken `&&` input, as a
+            // function type's parameter does: `(buf: &[Int]) -> …`.
+            mark_kind: parser_current_kind(state)
+            if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+                parser_bump(state)
+                convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
+            }
+            parsed: parser_parse_type(state, depth + 1)
+            ty = Val(parsed.ty)
+            ty_span = Val(parsed.span)
+        }
+        params.push(LambdaParam{name: parser_value(state, name), name_span: name.span, ty: ty, ty_span: ty_span, convention: convention})
+        if parser_current_kind(state) == TOKEN_RPAREN -> break
+        parser_expect(state, TOKEN_COMMA, "`,` between lambda parameters")
+        if parser_current_kind(state) == TOKEN_RPAREN -> break
+    }
+    params
+}
+
+// A lambda is a function binding's value without its name,
+// `fn(n) { n > 2 }` or `fn(n: Int) -> Int { n * n }`. The interface after the
+// parameters is a named function's (`-> T`, `-[E]>`, `-[E]> T`, `E!`), and any
+// part of it, parameter types included, may be left out where the expected
+// callable type fixes it. The body is always braced; its last value is the
+// result.
+parser_parse_fn_lambda: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
+    keyword: parser_bump(state)
+    parser_expect(state, TOKEN_LPAREN, "`(` before lambda parameters")
+    params: parser_parse_lambda_params(state, depth)
+    parser_expect(state, TOKEN_RPAREN, "`)` after lambda parameters")
+    signature: parser_parse_callable_result(state)
+    effects := signature.effects
+    via := signature.via
+    // A unit-fallible contract comes before its effect row (`IOError! -[IO]>`).
+    if effects == None && via == None && !signature.plain_arrow && parser_func_effect_starts_here(state) {
+        after: parser_parse_opt_func_effects(state)
+        effects = after.effects
+        via = after.via
+    }
+    if via == .Val(written) {
+        parser_add_fatal_code(state, "E0119", written.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
+    }
+    if parser_current_kind(state) != TOKEN_LBRACE {
+        missing: parser_expect(state, TOKEN_LBRACE, "`{{` to open the lambda body")
+        return ParsedExpr{expr: Expr.Unit{span: missing.span, id: parser_node_id(state)}, span: parser_cover(keyword.span, missing.span)}
+    }
+    block: parser_parse_callable_body(state, true)
+    span := Span{start: keyword.span.start, end: block.span.end}
+    lambda := Lambda{
+        take_names: [NamedSpan]{},
+        params: params,
+        effects: effects,
+        body: LambdaBody.Block{body: block.statements},
+        span: span,
+        meta: ast_empty_lambda_meta(),
+        result: signature.return_type,
     }
     ParsedExpr{expr: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}, span: span}
 }
