@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99083,
+    "rev": 99085,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55004,7 +55004,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "D-JAI-GENERIC1 v3 (2026-11-10, after the owner rejected v2): The previous revision forced this into generics instead of following Jet's existing grammar. That missed your point.\n\nI now recommend F:\n\n```jet\n#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\n```\n\nPre names the promise; #run requires that expression's answer while building. Calls stay ordinary. Only facts read by that expression must be available early; the function body and unrelated arguments remain runtime code.\n\nThis is a general expression rule, not a Pre exception. The same #run works in user-marker predicates, Post expressions, bounds and alignment calculations. Missing early facts produce an error; it never silently falls back to runtime.\n\nThe alternative ## rule is now genuinely marker-wide and general, but adds another staging spelling beside #run. Number parameters remain useful when the value shapes a type, not mandatory merely to check an early predicate. None of this proposed marker integration is implemented by the probe compiler."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -55041,7 +55047,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-11T02:21:56.239Z",
+      "updated": "2026-11-11T02:32:01.957Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -183177,40 +183183,35 @@
       "id": "D-JAI-GENERIC1",
       "cardId": "c0ygtwb9",
       "group": "syntax",
-      "title": "Require build-known arguments through ordinary number parameters, not a special double-hash marker",
-      "situation": "Some functions need an input fixed before the program runs. For example, a library may accept only four or eight lanes, and want a bad choice rejected while building. A normal precondition can also accept a runtime input and check it later. The missing choice is how an API requires the earlier answer. We recommend the existing number-parameter mechanism rather than introducing a special double-hash marker.",
-      "gist": "Should required build-known inputs use number parameters rather than a new marker mode?",
-      "lesson": "Two promises differ: this number is valid, and this number is already known while building. Put the second promise on the parameter. Keep #Pre for checking whether that number is valid.",
+      "title": "Require an early marker expression with Jet's existing #run, not a new sigil",
+      "situation": "A library sometimes needs a bad argument rejected before the program starts. An ordinary precondition can check a runtime input, so it does not require that early answer. The owner asked for a cohesive way to choose early checking without turning every argument into a generic parameter. Jet already has a request for required early evaluation: #run. Choose whether to reuse that request inside marker expressions or add a general marker-wide mode. We recommend #run on the expression whose answer must be known, with ordinary calls unchanged.",
+      "gist": "Should marker expressions use the same #run request as every other required early expression?",
+      "lesson": "#Pre says what must be true. #run says when its expression must have an answer: while building. Combining them keeps those meanings instead of inventing another hash. It does not run the whole function early.",
       "explainer": "A required check fails the build when inputs are unavailable or evaluation cannot complete. A number parameter is a compile-time generic value. Distinct generic instances need not imply distinct emitted machine bodies if the compiler can share them safely.",
-      "story": "Ola's sum accepts four or eight lanes. All options sum the same four numbers to 10. The lane count demonstrates a contract, not a measured SIMD optimization.",
-      "inWild": "Zig writes comptime on a parameter to require an early value. C++ templates and constraints likewise separate an early argument from its validity rule. These are source comparisons, not executed peer benchmarks.",
-      "detail": "Recommendation changes from A to B. B reuses the most recent ratified number-parameter spelling, <lanes: Int>, from D-META-SPELL1=A. D-GENERIC-TYPEFN1's older recipe syntax does not authorize reviving prep. A supplied runtime count fails even if it happens to be 4. #Pre validates accepted early arguments under D-PRE-COMPILE1=A; it retains runtime fallback for ordinary runtime parameters. No ## syntax is added.\n\nObserved with t17a a0.0.43 and jet run -: a numeric generic sum call is refused, including E0357 for the lower-case parameter. Ordinary #Pre on f(0) prints before, then stops with E3005 and exit 70. This is an implementation gap against the approved early-precondition behavior, not a reason to introduce a second checking mechanism. Compiler/Prelude/Markers.jet:66-73 defines Pre and its condition/message fields. No proposed option was executed successfully.\n\nB requires a pure, bounded build-time evaluation for the argument. Literals, known constants and known defaults work. An effectful expression cannot be run early merely because a compiler predicts its answer. Unknown input, a false clause and exhausted evaluation budget get distinct errors at the caller, with the declaration shown. Forwarding preserves the number parameter; a runtime wrapper cannot erase it. Bind early arguments before conversion to a plain function value. Trait and package interfaces retain the same obligation.\n\nE is a strong alternative if ordinary argument placement matters: #run lanes: Int means the same early parameter as B, but beside ordinary parameters. It also may shape types. This is new parameter grammar, not a second evaluator. B needs no new grammar for this vote. Distinct early values may share machine code when the body permits it; neither option inherently copies a machine body per value.\n\nA is retained only as the owner's requested genuinely general alternative: ## applies to every marker whose typed predicate can be proved early, not just Pre. User markers qualify through the same checked protocol; unavailable result facts make an early Post fail. This explicitly amends the approved marker grammar and needs symbolic call obligations even where body parameters remain runtime values. It cannot be justified as a one-off convenience.\n\nD uses an early parameter with #run body validation and a new compile_error operation. It accommodates richer validation, but tools must expose the rule from the body. No performance advantage is asserted for any option.\n\nAdversarial verdict: B holds for fixed build-known arguments. First try: use ordinary #Pre alone; that does not require knownness. Second try: use the existing early value parameter, which supplies exactly that missing promise. B's angle-bracket organization is a real reading cost; E removes it at the price of new grammar. This vote does not settle Jai duck typing, currying or automatic baking; those cannot be claimed delivered by one validation clause. All cutovers follow D-LANG-MIGRATE1=A's registered rewrites, without teaching retired spellings in errors.",
+      "story": "Ola requires a lane count of four or eight before accepting a call, while the list itself remains runtime data. Every option adds [1,2,3,4] to 10. The example tests a contract, not SIMD performance.",
+      "inWild": "Zig's comptime expressions and parameters make an early requirement explicit. C++ constant evaluation likewise differs from merely hoping an optimizer folds an expression. These are documented comparisons, not peer performance measurements.",
+      "detail": "Revision 3 answers q3ybwski, q8sdri5o and q1x848xv together. Required early call validation is the job, not duck typing or currying. F writes #Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\"). Parentheses belong to Pre; #run owns its braced expression. No new sigil, parameter grammar or build-error operation is needed.\n\nMarker application and code generation happen while building, but a Pre predicate describes each invocation's inputs. Post describes its result. Under F, required evaluation happens at that contract's normal instantiation point. For Pre, substitute checked caller argument facts first, then use the canonical required evaluator. Do not evaluate an unbound parameter once while reading the declaration.\n\nA false early Pre is a build error under D-PRE-COMPILE1=A. Unavailable inputs, invalid operations, refused effects and exhausted budgets are separate errors, never runtime fallback. Ordinary Pre retains its approved early-if-possible behavior. Unread arguments stay runtime values. Requiring a fact does not make the body parameter generic, permit type shaping, or execute the body early.\n\nF's reach is general expression staging. #Post(#run { result > 0 }, \"positive\") needs an actual permitted early result fact or fails. User-marker delayed predicates use the same #run at their documented instantiation point. #Memo(bound: #run compute_bound()) requires an early bound. #Layout(c, align(#run alignment())) requires an early alignment. Already early expressions gain no power by repeating #run.\n\nLegal sites, schemas and authority do not change. #Unsafe(#run reason()) computes a reason, not an unsafe action. Runtime allocators and callbacks cannot become build-time resources by wrapping them. Non-expression arguments cannot accept value regions. Every expression-bearing marker follows the same rule; other markers are unaffected. Verifying a Kernel or generating declarations does not run their target code.\n\nForwarding preserves checked requirements and their dependent argument facts. Known literals or pure early expressions discharge them at outer calls. Unknown runtime wrappers cannot hide them. Interfaces, methods, defaults and generic instances retain the same obligation. A plain callable or foreign callback cannot erase unresolved requirements: bind the arguments or preserve a contract-bearing callable type. Recursion keeps canonical budgets.\n\nBeginner path: ordinary #Pre, ordinary parameters and ordinary calls. Expert path: add #run only to the expression requiring an early answer. Use number parameters separately when a value must shape types. Tools show required caller facts on the signature; the body keeps ordinary parameter semantics.\n\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:26-38 registers current comptime value regions, explicit comptime parameters and $ facts. MathLayout.jet:756-759 owns the requirement word. D-META-SPELL1=A ratifies #run for required regions; D-META-HASH2=A ratifies #build and related filled-in values. A build: fn entry orchestrates a build, not arbitrary early application execution. Facts describe values, not evaluation requests.\n\nIndependent t17a a0.0.43 probes, jet run -: comptime { 2 + 2 } prints 4; <comptime N: Int> sum<4> prints 10. #run's value block gets E0733; $build.profile gets E0003. Pre containing a comptime value block is refused, including E0391. Ordinary false Pre prints before, then stops E3005. These prove implementation gaps, not working F syntax.\n\nA is the owner's general ## alternative. It stages all dynamic expressions owned by a marker application, including user markers, at the documented checking point. Post needs early result proof. Runtime-resource or unknown obligations fail; already early markers gain nothing. This adds marker-wide grammar, unlike F's selective expression request. It is not restricted to Pre.\n\nB's early number parameter is sound and useful for type shaping. It changes call organization when only predicate knownness is needed. It is not recommended merely because generic machinery exists. All options share one bounded pure evaluator; no machine-body duplication per count is assumed.\n\nAdversarial verdict: F holds as a cohesive proposal, not current implementation. First try ordinary Pre: it cannot require knownness. Then reuse #run on the deferred expression that needs it. This removes a Pre-only switch. Forwarding and callable-erasure limits remain real and must appear in interfaces and diagnostics. No zero-cost or universal-proof claim is made. Breaking cutovers follow D-LANG-MIGRATE1=A's registered rewrites without retired-syntax teaching.",
       "options": [
         {
           "key": "A",
-          "name": "A general early mode for markers",
-          "detail": "Add ## for any eligible marker, including user markers. Clause inputs must be known early even though body parameters stay ordinary.",
-          "code": "// Proposed A, not implemented.\n##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; 6 or a runtime count fails while building.",
-          "technical": "Every suitable marker shares required-proof mode. Unknown or ineligible predicates fail; ordinary #Pre does not change."
+          "name": "General marker-wide ## mode",
+          "detail": "A double hash requires all dynamic expressions of that marker application to be decided while building. Applies to every marker, including user markers, at its documented checking point.",
+          "code": "// Proposed A; not implemented.\n##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; invalid or unavailable lane counts fail while building.",
+          "technical": "A general marker grammar amendment. Result-dependent, runtime-resource and unknown predicates fail unless the ordinary evaluator has permitted facts; no runtime fallback."
         },
         {
           "key": "B",
-          "name": "Existing early number parameter",
-          "detail": "Use <lanes: Int> to require knownness, and ordinary #Pre to require validity. No new marker or parameter grammar.",
-          "code": "// Proposed program using the ratified spelling.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; 6 or a runtime count fails while building.",
-          "technical": "The value parameter supplies knownness and may shape types. Ordinary precondition checking supplies validity."
+          "name": "Early number parameter",
+          "detail": "Require the argument through the existing number-parameter mechanism. Pre then checks validity. Useful when the value must shape types too.",
+          "code": "// Proposed program in ratified number-parameter spelling.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; invalid or runtime generic counts fail while building.",
+          "technical": "Uses D-META-SPELL1=A's parameter spelling. Generic identity and type shaping are explicit; machine-body duplication is not assumed."
         },
         {
-          "key": "D",
-          "name": "Early parameter, check in the body",
-          "detail": "Keep knownness explicit but put arbitrary pure validation in an early body block. Adds a build-error operation.",
-          "code": "// Proposed D, not implemented.\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    #run {\n        if lanes != 4 && lanes != 8 -> compile_error(\"need 4 or 8\")\n    }\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; invalid or unavailable counts fail while building."
-        },
-        {
-          "key": "E",
-          "name": "Early parameter in the ordinary list",
-          "detail": "Write #run on the parameter; callers use sum(4, xs). Same early-value mechanism, new grammar.",
-          "code": "// Proposed E, not implemented.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(#run lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; 6 or a runtime count fails while building."
+          "key": "F",
+          "name": "Existing #run value expression",
+          "detail": "Put #run on the expression that needs an early answer. Keep ordinary arguments, ordinary markers and one required-evaluation mechanism.",
+          "code": "// Proposed F; not implemented.\n#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; invalid or unavailable lane counts fail while building.",
+          "technical": "Reuse required value evaluation after checked contract substitution. Same rule for every marker expression, including user predicates, Post result expressions, bounds and alignment. It stages no unrelated target code."
         }
       ],
       "comparisons": [
@@ -183230,68 +183231,65 @@
           "code": "template<int L> requires (L == 4 || L == 8 || L == 16) int sum();"
         }
       ],
-      "rec": "B",
+      "rec": "F",
       "recommendation": {
-        "rec": "B",
-        "why": "Knownness belongs on the parameter; validity remains an ordinary precondition. This answers the request without adding a special marker mode.",
+        "rec": "F",
+        "why": "Jet already says #run when an expression must be decided early. A marker's expression should use that same request, not a second sigil or forced generic parameter.",
         "gains": [
-          "No double hash",
-          "One existing early-value mechanism"
+          "No new sigil or parameter grammar",
+          "Ordinary call organization",
+          "General expression rule across markers"
         ],
         "losses": [
           {
-            "loss": "Early arguments use angle brackets.",
-            "mitigation": "Keep one knownness rule; E offers ordinary placement if that organization is preferred."
+            "loss": "Required call facts must survive forwarding and callable conversion.",
+            "mitigation": "Preserve checked obligations; reject erasure or bind required arguments before making a plain callable."
           }
         ],
         "whyNot": [
           {
             "key": "A",
-            "reason": "Generalizing ## is coherent but adds marker staging and forwarding rules this job does not need."
+            "reason": "Coherent if genuinely general, but adds a second staging spelling beside #run and stages the whole marker at once."
           },
           {
-            "key": "D",
-            "reason": "Rich checks work, but their rule moves into the body and needs a new operation."
-          },
-          {
-            "key": "E",
-            "reason": "A strong ordinary-call alternative, but adds parameter grammar without new capability here."
+            "key": "B",
+            "reason": "Useful for type shaping, but generic call organization is unnecessary when only the predicate needs an early answer."
           }
         ],
-        "tradeoff": "Existing explicit early arguments versus a new general marker or parameter spelling."
+        "tradeoff": "Existing expression staging with explicit callable limits, rather than another marker mode."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran numeric-parameter and precondition probes, rejected a one-off doubled marker, and withdrew unsupported code-copy and SIMD claims."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Read all three owner questions and the registry, ran early-value and parameter probes, and recommended general #run expression staging with explicit unimplemented contract and callable limits."
       },
-      "checkInstructions": "Before delivery, prove valid, invalid and runtime arguments; defaults; forwarding; budgets; type shaping; and function-value binding on every applicable tier. The current probe does not demonstrate any proposed early mode.",
+      "checkInstructions": "Before delivery, prove Pre/Post/user-marker instantiation, selective expression staging, unavailable values, effect refusal, budgets, default expressions, wrappers, callable erasure, artifact interfaces and all applicable tiers. Neither ## nor #run-in-marker behavior has been executed successfully here.",
       "surface": {
-        "gist": "Should required build-known inputs use number parameters rather than a new marker mode?",
-        "lesson": "A valid number is not necessarily known while building. Require knownness on the parameter and check validity with #Pre. Beginners keep ordinary parameters; experts require early ones where needed.",
+        "gist": "Should marker expressions use the same #run request as every other required early expression?",
+        "lesson": "#Pre names the promise. #run requires its expression's answer while building. It does not run the whole function early. The same expression rule applies across markers, not just Pre.",
         "trio": {
           "current": {
-            "note": "The tested early-parameter call is refused; ordinary #Pre can still stop at runtime.",
-            "code": "#Pre(n > 0, \"positive\")\nf: fn(n: Int) -> Int { n }"
+            "note": "Current comptime value regions work; proposed #run-in-marker checking is not implemented.",
+            "code": "n: comptime { 2 + 2 } // probe prints 4"
           },
           "wild": {
             "lang": "Zig",
-            "note": "The parameter explicitly requires a build-known value.",
-            "code": "fn sum(comptime lanes: u32, xs: []const i32) i32"
+            "note": "Required early expressions and parameters share the language's compile-time model.",
+            "code": "comptime expression"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "General early markers",
-            "gist": "Double hash requires proof for every eligible marker.",
+            "name": "Marker-wide ##",
+            "gist": "Require every dynamic expression of one marker early.",
             "gains": [
-              "Ordinary calls"
+              "Short general marker mode"
             ],
             "losses": [
-              "New marker mode and forwarding rules"
+              "Another staging spelling beside #run"
             ],
             "proposed": {
               "code": "##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")"
@@ -183299,74 +183297,58 @@
           },
           {
             "key": "B",
-            "name": "Existing number parameter",
-            "gist": "Knownness on the parameter; validity in #Pre.",
+            "name": "Early parameter",
+            "gist": "Require a generic value and validate it with Pre.",
             "gains": [
-              "No new syntax"
+              "Also supports type shaping"
             ],
             "losses": [
-              "Angle-bracket arguments"
+              "Changes call organization"
             ],
             "proposed": {
               "code": "sum<4>([1,2,3,4]) // 10"
             }
           },
           {
-            "key": "D",
-            "name": "Check in the body",
-            "gist": "Use an early block for validation.",
+            "key": "F",
+            "name": "Existing #run expression",
+            "gist": "Require only the selected expression early.",
             "gains": [
-              "Rich pure logic"
+              "No new sigil",
+              "Ordinary calls",
+              "Works across marker expressions"
             ],
             "losses": [
-              "Rule inside the body; new error operation"
+              "Callable obligations cannot disappear."
             ],
             "proposed": {
-              "code": "#run { if lanes == 6 -> compile_error(\"need 4 or 8\") }"
-            }
-          },
-          {
-            "key": "E",
-            "name": "Ordinary-list early parameter",
-            "gist": "Same knownness rule; new parameter location.",
-            "gains": [
-              "Ordinary calls"
-            ],
-            "losses": [
-              "New parameter grammar"
-            ],
-            "proposed": {
-              "code": "sum: fn(#run lanes: Int, xs: [Int]) -> Int"
+              "code": "#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\n// Also: #Post(#run { result > 0 }, \"positive\")\n// Post fails if no permitted early result fact exists."
             }
           }
         ],
         "recommendation": {
-          "rec": "B",
-          "why": "Reuse the existing early-value parameter, not a marker invented for one check.",
+          "rec": "F",
+          "why": "Reuse Jet's required early expression request where the early answer is needed.",
           "gains": [
-            "One knownness rule"
+            "One staging request"
           ],
           "losses": [
             {
-              "loss": "Angle brackets remain.",
-              "mitigation": "E is available if ordinary parameter placement matters more."
+              "loss": "Forwarding must keep required facts.",
+              "mitigation": "Preserve checked contracts or bind arguments before erasing them."
             }
           ],
           "whyNot": [
             {
               "key": "A",
-              "reason": "More staging rules than this job needs."
+              "reason": "General but adds another staging spelling."
             },
             {
-              "key": "D",
-              "reason": "Moves the check inside the body."
-            },
-            {
-              "key": "E",
-              "reason": "Same capability, new grammar."
+              "key": "B",
+              "reason": "Makes the parameter generic unnecessarily."
             }
           ],
-          "tradeoff": "Existing explicit organization rather than new punctuation."
+          "tradeoff": "One expression mechanism, with honest callable limits."
         }
       },
       "draft": false,
@@ -183434,8 +183416,8 @@
       ],
       "reports": [
         {
-          "title": "Zig: compile-time parameters",
-          "url": "https://ziglang.org/documentation/master/#comptime-parameters"
+          "title": "Zig: explicit compile-time expressions and parameters",
+          "url": "https://ziglang.org/documentation/master/#comptime"
         }
       ]
     },
@@ -200139,6 +200121,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:32:01.957Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ygtwb9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T02:32:00.396Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-JAI-GENERIC1",
+      "note": ""
+    },
     {
       "at": "2026-11-11T02:26:47.267Z",
       "by": "Main",
