@@ -30,7 +30,7 @@ BARE_SCRIPT: Regex{"(?:^|[\s\x60\x22\x27(])([A-Za-z0-9][A-Za-z0-9_.-]*\.(?:mjs|j
 // object literal, the three ways such an object meets argv, and its flag keys.
 LINE_COMMENT: Regex{"//[^\n]*"}
 NAMES_ARGV: Regex{"\b(?:arg|args|argv|flag|process\.argv)\b"}
-COMPARES_ARGV: Regex{"===|!==|==|!=|includes\s*\(|indexOf\s*\(|has\s*\("}
+COMPARES_ARGV: Regex{"===|!==|==|!=|includes\s*\(|indexOf\s*\(|has\s*\(|contains\s*\("}
 CONST_OBJECT: Regex{"\bconst\s+(\w+)\s*=\s*(\{{[^{{}}]*\}})"}
 ARGV_IN_MAP: Regex{"(?:arg|args|argv|flag|process\.argv)\s+in\s+(\w+)"}
 OBJECT_AT_ARGV: Regex{"(\{{[^{{}}]*\}})\s*\[\s*(?:arg|args|argv|flag|process\.argv)\s*\]"}
@@ -65,6 +65,14 @@ LogicalLine: struct {
 
 read_text: fn(path: String) -[FS]> String DocFlagsError! {
     files.read(path) ?? return Err(DocFlagsError{message: "cannot read {path}: {err}"})
+}
+
+// A guidance document's text. A file that is not UTF-8 is a fixture kept in
+// another encoding on purpose (the gauntlet's Latin-1 capsule), not guidance,
+// so it reads as empty and documents no flag.
+doc_text: fn(path: String) -[FS]> String DocFlagsError! {
+    bytes: files.read_bytes(path) ?? return Err(DocFlagsError{message: "cannot read {path}: {err}"})
+    String.from_bytes(bytes) ?? ""
 }
 
 // ---- documents ----
@@ -290,7 +298,7 @@ check_documentation_policy: fn() -[FS, IO]> Int DocFlagsError! {
 check_doc_flags: fn() -[FS, IO]> Int DocFlagsError! {
     findings := [Finding]{}
     loop doc in doc_files("") ?? return Err(err) {
-        text: read_text(doc) ?? return Err(err)
+        text: doc_text(doc) ?? return Err(err)
         loop finding in documented_flags(doc, text) -> findings.push(finding)
     }
     accepted := [String:[String]]{}
@@ -373,4 +381,20 @@ error_lines: fn(errors: [String]) -> String Never! {
 
 #Test("directory names follow root collation") {
     assert_eq(ordered_names([String]{"ab-", "Ab", "a1", "a.b", "a-b", "aB", "a_b", "ab", "a b"}).join("|"), "a b|a_b|a-b|a.b|a1|ab|aB|Ab|ab-")
+}
+
+#Test("a document that is not UTF-8 reads as empty and documents no flag") {
+    directory: files.tmpdir("agent-doc-flags-") ?? panic("fixture directory: {err}")
+    latin1: "{directory}/capsule-latin1.md"
+    files.write_bytes(latin1, [U8]{99, 97, 102, 233, 32, 45, 45, 102, 97, 115, 116}) ?? panic("write {latin1}: {err}")
+    assert_eq(doc_text(latin1) ?? panic("read {latin1}: {err.message}"), "")
+    utf8: "{directory}/guide.md"
+    files.write(utf8, "café --fast") ?? panic("write {utf8}: {err}")
+    assert_eq(doc_text(utf8) ?? panic("read {utf8}: {err.message}"), "café --fast")
+    files.remove_all(directory) ?? panic("cleanup: {err}")
+}
+
+#Test("a Jet script's args.contains dispatch accepts its flags") {
+    source: "    if args.contains(\"--write\") -> return write()\n    if args.contains(\"--check\") -> return check()\n    print(\"usage: --write|--check|--help\")"
+    assert_eq(argv_source_flags(source).join(","), "--write,--check")
 }
