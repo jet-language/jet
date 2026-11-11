@@ -2542,7 +2542,9 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
   const inner = named === null ? {} : { PATH: `${path.dirname(named)}${path.delimiter}${process.env.PATH ?? ""}`, JET: named };
   const programs = {
     original: toolCommand(path.join(root, tool.original)),
-    jet: [jetBin, path.join(root, tool.jet)],
+    // `--` ends jet's own options, so a case's args reach the twin verbatim,
+    // a leading `--` included.
+    jet: [jetBin, path.join(root, tool.jet), "--"],
   };
   const cases = [];
   for (const [index, item] of tool.cases.entries()) {

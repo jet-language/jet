@@ -311,6 +311,19 @@ test("a tool case's env reaches both runs and its exit is the code both must giv
   });
 });
 
+test("a tool case's args reach the twin verbatim, a leading -- included", stagedEntryTestOptions, async () => {
+  await withScratch("tool-separator", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "" });
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "process.stdout.write(`${process.argv.slice(2).join(' ')}\\n`);\n");
+    // As jet does, the fake drops one `--` that ends its own options.
+    await fs.writeFile(jetBin, "#!/bin/sh\nshift\n[ \"$1\" = -- ] && shift\nprintf '%s\\n' \"$*\"\n");
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), "-- true\n");
+    entry.tool.cases = [{ args: ["--", "true"], expected: "expected/lines.out" }];
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
+  });
+});
+
 test("the jet a tool case's scripts run is the --jet-bin compiler", stagedEntryTestOptions, async () => {
   await withScratch("tool-inner-jet", async (root) => {
     const { entryDir, entry } = await writeToolEntry(root, { twinOutput: "" });

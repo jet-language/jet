@@ -1,0 +1,67 @@
+// The job of a timer case, as facts (the harness runs it in the case
+// directory with the file holding the timer's output): the sample's schema,
+// that its clock is monotonic, the exit code, which times were measured and
+// which are absent, each step's exit code, and whether an error was reported.
+// Times and memory are the machine's own readings, so for them the facts are
+// that they were measured; a missing time and a JSON null are both "none".
+// A refusal prints its error text; an invalid-JSON refusal prints its kind,
+// since the reason is the JSON parser's own wording. A timer that ended
+// without a sample prints that, and whether a command before it ran (wrote
+// ran.txt).
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the timer's output") stdout: String
+}
+
+// A positive number (parsed JSON holds numbers as their lexemes).
+measured: fn(value: Dyn) -> Bool {
+    if value == {
+        .Int(number) -> number > 0
+        .Float(number) -> number > 0.0
+        .Number(lexeme) -> !lexeme.starts_with("-") && lexeme.partition("e").head.bytes().any(b -> b >= (U8{49}) && b <= (U8{57}))
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
+    }
+}
+
+at: fn(tree: Dyn, path: String) -> Dyn { json.pointer(tree, path) ?? Dyn.Null }
+
+// "measured", "none" (absent or null), or "invalid".
+reading: fn(tree: Dyn, path: String) -> String {
+    value: at(tree, path)
+    if value == .Null -> return "none"
+    if measured(value) -> "measured" else -> "invalid"
+}
+
+times: fn(tree: Dyn) -> String {
+    "wall {reading(tree, "/wall_time_ns")}/{reading(tree, "/wall_seconds")}, first stdout {reading(tree, "/time_to_first_stdout_ns")}/{reading(tree, "/time_to_first_stdout_seconds")}"
+}
+
+run: fn(check: Check) {
+    output: files.read(check.stdout) ?? process.fail(1, "no output file: {err}")
+    if output == "" {
+        print("no sample; an earlier command ran: {files.exists("ran.txt")}")
+        return
+    }
+    sample: json.parse(output) ?? process.fail(1, "the output is not JSON: {err}")
+    schema: at(sample, "/schema")
+    if schema == .Null {
+        refusal: json.dumps(at(sample, "/error")) ?? "?"
+        print("refused: {if refusal.starts_with("\"invalid sequence JSON: ") -> "invalid sequence JSON" else -> refusal}")
+        return
+    }
+    print("schema: {json.dumps(schema) ?? "?"}")
+    print("clock: monotonic {json.dumps(at(sample, "/clock/monotonic")) ?? "?"}, adjustable {json.dumps(at(sample, "/clock/adjustable")) ?? "?"}")
+    print("exit_code: {json.dumps(at(sample, "/exit_code")) ?? "?"}")
+    print("times: {times(sample)}")
+    print("peak_rss_kb: {reading(sample, "/peak_rss_kb")}")
+    if at(sample, "/steps") == .Array(steps) {
+        loop step in steps -> print("step: exit {json.dumps(at(step, "/exit_code")) ?? "?"}, {times(step)}")
+    }
+    print("error: {if at(sample, "/error") == .Text(_) -> "reported" else -> "none"}")
+}

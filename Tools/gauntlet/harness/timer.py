@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Run one command and emit machine-local timing data as JSON."""
+"""Run one command and emit machine-local timing data as JSON.
+
+The original of gauntlet tool entry timer; its Jet twin is Timer.jet beside it.
+"""
 
 import json
 import resource

@@ -1,0 +1,253 @@
+{
+  "name": "timer",
+  "mode": "tool",
+  "description": "The gauntlet timer timer.py and its Jet twin Timer.jet (#5072 c8): run one command, or a JSON list of commands one after another, with stdout drained through a pipe, and print one jet.gauntlet.timer.v2 sample (wall time, time to the first stdout byte, the children's peak RSS, the exit code, each step's times, an error when a command cannot start). The argument and JSON shapes follow timer.py: `--sequence-json` anywhere wins, a single command is everything after the first `--` (none is a 64 refusal), invalid JSON and a value that is not a non-empty list of non-empty lists are 64 refusals (a repeated key keeps its last value), and a command word that is not a string or holds a NUL byte ends the timer with exit 1 and no sample when its command's turn comes. The check prints every fact of the sample; times and memory are the machine's own readings, so for them it shows whether each was measured or is absent. An invalid-JSON refusal shows its kind, not the parser's wording.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/timer.py",
+    "jet": "Tools/gauntlet/harness/Timer.jet",
+    "cases": [
+      {
+        "args": [
+          "--",
+          "sh",
+          "-c",
+          "printf ready; exit 3"
+        ],
+        "check": "check.jet",
+        "expected": "expected/single.out"
+      },
+      {
+        "args": [
+          "--",
+          "true"
+        ],
+        "check": "check.jet",
+        "expected": "expected/silent.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"true\"],[\"sh\",\"-c\",\"printf x\"],[\"sh\",\"-c\",\"exit 4\"],[\"sh\",\"-c\",\"exit 5\"]]"
+        ],
+        "check": "check.jet",
+        "expected": "expected/sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"true\"],[\"/nonexistent/timer-entry-command\"]]"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cannot-run.out"
+      },
+      {
+        "args": [
+          "--",
+          "/nonexistent/timer-entry-command"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cannot-run-single.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[]"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/no-command.out"
+      },
+      {
+        "args": [],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/no-separator.out"
+      },
+      {
+        "args": [
+          "true"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/no-separator.out"
+      },
+      {
+        "args": [
+          "ignored",
+          "--",
+          "true"
+        ],
+        "check": "check.jet",
+        "expected": "expected/silent.out"
+      },
+      {
+        "args": [
+          "--",
+          "--"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cannot-run-single.out"
+      },
+      {
+        "args": [
+          "--",
+          "/"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cannot-run-single.out"
+      },
+      {
+        "args": [
+          "--sequence-json"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/sequence-no-value.out"
+      },
+      {
+        "args": [
+          "--",
+          "true",
+          "--sequence-json"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/sequence-no-value.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"true\"]]",
+          "--",
+          "false"
+        ],
+        "check": "check.jet",
+        "expected": "expected/sequence-wins.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "["
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/invalid-json.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"true\"]] x"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/invalid-json.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"tr\tue\"]]"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/invalid-json.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "{\"a\":1,\"a\":2}"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "null"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[]]"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[\"true\"]"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"true\"],\"x\"]"
+        ],
+        "exit": 64,
+        "check": "check.jet",
+        "expected": "expected/empty-sequence.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[7]]"
+        ],
+        "exit": 1,
+        "check": "check.jet",
+        "expected": "expected/no-sample.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[[\"true\"]]]"
+        ],
+        "exit": 1,
+        "check": "check.jet",
+        "expected": "expected/no-sample.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"a\\u0000b\"]]"
+        ],
+        "exit": 1,
+        "check": "check.jet",
+        "expected": "expected/no-sample.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"sh\",\"-c\",\"echo > ran.txt\"],[\"true\",null]]"
+        ],
+        "exit": 1,
+        "check": "check.jet",
+        "expected": "expected/earlier-ran.out"
+      },
+      {
+        "args": [
+          "--sequence-json",
+          "[[\"\"]]"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cannot-run-single.out"
+      }
+    ]
+  }
+}

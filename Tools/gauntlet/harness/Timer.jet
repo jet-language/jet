@@ -1,0 +1,159 @@
+// Run one command, or a JSON list of commands one after another, and print one
+// JSON timing sample (schema jet.gauntlet.timer.v2): wall time, time to the
+// first stdout byte, the children's peak resident memory and the exit code (a
+// sequence's first nonzero one), with each command's times as `steps`. The
+// gauntlet's timer; timer.py is its reference original.
+//
+// usage: Timer [IGNORED...] -- COMMAND [ARG...]
+//        Timer --sequence-json '[["cmd", "arg"], ...]'
+//
+// As in timer.py, `--sequence-json` anywhere wins, and a single command is
+// everything after the first `--`. A refusal prints `{"error": …}` and exits
+// 64. A command word that is not a string, or that holds a NUL byte, ends
+// the timer with exit 1 and no sample when that command's turn comes (where
+// timer.py's Popen raises). A command that cannot start ends the sample with
+// exit code 127 and its error.
+use {
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+// One command's times from its start; a sample's from the timer's start.
+Times: struct {
+    wall_time_ns: Int
+    wall_seconds: Float
+    exit_code: Int
+    time_to_first_stdout_ns: Int?
+    time_to_first_stdout_seconds: Float?
+}
+
+// The one JSON object the timer prints: the times at its top level, beside
+// the schema, the clock they are read from, the children's peak resident
+// memory, a sequence's steps and a command's error.
+Sample: struct {
+    schema: String
+    clock: Dyn
+    #Flatten times: Times
+    peak_rss_kb: Int
+    steps: [Times]?
+    error: String?
+}
+
+// Times the commands one after another as one sample; a sequence's sample
+// keeps each command's times as its steps. When its turn comes, a command
+// whose word is not a string fails its decode, and one whose word holds a NUL
+// byte fails its spawn as invalid input: either ends the timer with exit 1
+// and no sample, as timer.py's Popen raises.
+run: fn() {
+    args: process.args()
+    sequence: args.index_of("--sequence-json")
+    commands: if sequence == {
+        .Val(at) -> sequence_of(args.get(at + 1) ?? refuse("sequence-json requires a value"))
+        None -> [Dyn]{Dyn.from(single_of(args))}
+    }
+    started: time.instant()
+    first := Instant?{None}
+    exit_code := 0
+    steps := [Times]{}
+    error := String?{None}
+    loop words in commands {
+        command: words.decode<[String]>()
+        timed: run_child(command.copy()) ?? {
+            if err == .InvalidInput(_) -> return Err("{err}")
+            exit_code = 127
+            error = Val("cannot run `{command[0]}`: {err}")
+            break
+        }
+        if first == None -> first = timed.first
+        if exit_code == 0 -> exit_code = timed.times.exit_code
+        steps.push(timed.times)
+    }
+    sample: Sample{
+        times: times_since(started, first, exit_code),
+        schema: "jet.gauntlet.timer.v2",
+        clock: json.parse("{{\"source\":\"time.instant\",\"implementation\":\"clock_gettime(CLOCK_MONOTONIC)\",\"resolution_ns\":1,\"monotonic\":true,\"adjustable\":false}}"),
+        peak_rss_kb: sys.usage(.Children).peak_memory /% 1024,
+        steps: sequence.map(_ -> steps),
+        error: error
+    }
+    print(json.to_string(sample))
+}
+
+// The command after the first `--`.
+single_of: fn(args: [String]) -> [String] {
+    separator: args.index_of("--") ?? refuse("timer requires -- before command")
+    command: args.slice(separator + 1, args.len())
+    if command.len() == 0 -> refuse("timer requires a command")
+    command
+}
+
+// The commands of a --sequence-json value, a non-empty JSON list of
+// non-empty lists; as with Python's json, a repeated key keeps its last value.
+sequence_of: fn(encoded: String) -> [Dyn] {
+    tree: json.parse_allow_duplicates(encoded) ?? refuse("invalid sequence JSON: {err}")
+    commands: tree.decode<[[Dyn]]>() ?? [[Dyn]]{}
+    if commands.len() == 0 || commands.contains([Dyn]{}) -> refuse("sequence must be a non-empty list of commands")
+    loop words in commands -> Dyn.Array(words.copy())
+}
+
+// Runs `command` with stdout drained through a pipe, stdin and stderr
+// inherited; a signal's exit code is minus its number.
+run_child: fn(command: [String]) -> (times: Times, first: Instant?) IOError! {
+    started: time.instant()
+    child: process.cmd(command).stdin(.Inherit).stdout(.Stream).stderr(.Inherit).spawn()
+    first: child.stdout.read(1).first().map(_ -> time.instant())
+    loop _ in child.stdout.chunks(65536) {}
+    receipt: child.wait()
+    code: receipt.signal.map(number -> -number) ?? receipt.code
+    (times: times_since(started, first, code), first: first)
+}
+
+// The times from `started` to now, the first stdout byte's when there was one.
+times_since: fn(started: Instant, first: Instant?, exit_code: Int) -> Times Never! {
+    wall: started.elapsed()
+    to_first: first.map(at -> at - started)
+    Times{wall_time_ns: wall.ns, wall_seconds: wall.total_in("s"), exit_code: exit_code, time_to_first_stdout_ns: to_first.map(gap -> gap.ns), time_to_first_stdout_seconds: to_first.map(gap -> gap.total_in("s"))}
+}
+
+// Prints the refusal as timer.py does, `{"error": message}`, and exits 64.
+refuse: fn(message: String) -> Never {
+    print("{{\"error\": {json.dumps(Dyn.Text(message.copy())) ?? panic("timer refusal: {err}")}}}")
+    process.exit(64)
+}
+
+#Test("a sample flattens its times beside the schema, clock and steps") {
+    times: Times{wall_time_ns: 500000000, wall_seconds: 0.5, exit_code: 3, time_to_first_stdout_ns: None, time_to_first_stdout_seconds: None}
+    sample: Sample{schema: "s", clock: Dyn.Text("c"), times: times, peak_rss_kb: 7, steps: Val([Times]{times}), error: None}
+    assert_eq(json.to_string(sample) ?? panic("sample: {err}"), "{{\"schema\":\"s\",\"clock\":\"c\",\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3,\"peak_rss_kb\":7,\"steps\":[{{\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3}}]}}")
+}
+
+#Test("a step times the command and keeps its exit code and first stdout byte") {
+    timed: run_child([String]{"sh", "-c", "printf x; exit 3"}) ?? panic("sh: {err}")
+    assert_eq(timed.times.exit_code, 3)
+    assert(timed.first != None && timed.times.time_to_first_stdout_ns != None)
+    assert(timed.times.wall_time_ns > 0 && timed.times.wall_seconds > 0.0)
+    silent: run_child([String]{"true"}) ?? panic("true: {err}")
+    assert(silent.first == None && silent.times.time_to_first_stdout_seconds == None)
+    refused: if run_child([String]{"true", String.from_bytes_lossy([U8]{97, 0, 98})}) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == .InvalidInput(_) -> true else -> false
+    }
+    assert(refused)
+}
+
+#Test("a step's seconds are its nanoseconds over 10^9") {
+    started: time.instant()
+    times: times_since(started, Val(started), 0)
+    assert_eq(times.wall_seconds, Float{times.wall_time_ns} / 1000000000.0)
+    assert_eq(times.time_to_first_stdout_ns, Val(0))
+}
+
+#Test("a sequence is a list of word lists, decoded to strings at each command's turn") {
+    commands: sequence_of("[[\"sh\", \"-c\", \"exit 3\"], [7], [\"true\"]]")
+    assert_eq(commands.len(), 3)
+    assert_eq(commands[0].decode<[String]>() ?? panic("words: {err}"), [String]{"sh", "-c", "exit 3"})
+    assert_eq(commands[1].decode<[String]>() ?? [String]{"not text"}, [String]{"not text"})
+    assert_eq(single_of([String]{"ignored", "--", "true", "--"}), [String]{"true", "--"})
+}

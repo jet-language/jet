@@ -1608,7 +1608,8 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
         return report
     }
     inherited: jet_env(jet)
-    programs: [[String]]{original_command(files.join(repo, entry.original)), [String]{jet.copy(), files.join(repo, entry.twin)}}
+    // `--` ends jet's own options, so a case's args reach the twin verbatim.
+    programs: [[String]]{original_command(files.join(repo, entry.original)), [String]{jet.copy(), files.join(repo, entry.twin), "--"}}
     fixtures: if entry.fixtures == "" -> "" else -> files.join(repo, "{entry.dir}/{entry.fixtures}")
     expected := [String]{}
     loop case in entry.cases -> expected.push(files.read(files.join(repo, "{entry.dir}/{case.expected}")) ?? "")
