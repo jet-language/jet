@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99461,
+    "rev": 99463,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -94739,6 +94739,24 @@
           "verifiedBy": null,
           "evidence": "Landed on dev 53805444ba (train t13b, 00a2b37a42..53805444ba), SUB TlsLead-64. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t13b/REPORT.md: census rc=0; reruns with the train's integration fixes G6LeadD-5fix, 5fix2, G6Lead-4276bfix and G6LeadC-7fix noted there). RSAES-OAEP decryption decodes in constant time after its private operation.",
           "at": "2026-11-10T17:36:08.504Z"
+        },
+        {
+          "n": 20,
+          "text": "A struct field can be tagged #Secret: `Cond: struct { mask: #Secret U64 }` plus a run entry compiles with no diagnostic. Code the compiler derives for the struct either keeps fixed timing over the secret field or is exempt by construction, never reporting E0737 at end of file against code the user didn't write. A UI snapshot proves that a real variable-time use of the field is still refused. Defect found by TlsLead3 on seed-t22, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T13:05:15.286Z"
+        },
+        {
+          "n": 21,
+          "text": "The secret-timing analyzer (Compiler/.../Taint.jet:651 and :917, matched by loose name today) resolves callables by their resolved symbol, never by bare name. A user function named `select` isn't treated as ctime.select, and a #Scrub function doesn't scrub same-named user calls. Negative cases cover both collisions (a local `select`, as in Server12:456, and a same-named #Scrub). Defect found by TlsLead3 on seed-t22, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T13:05:16.474Z"
         }
       ],
       "refs": [],
@@ -94754,9 +94772,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-11T04:52:40.829Z",
+      "updated": "2026-11-11T13:05:16.474Z",
       "updatedBy": "Main",
-      "criteriaLastN": 19
+      "criteriaLastN": 21
     },
     {
       "id": "c0ajhpeh",
@@ -197429,6 +197447,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T13:05:16.474Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bnp1zw",
+      "note": "#21 The secret-timing analyzer (Compiler/.../Taint.jet:651 and :"
+    },
+    {
+      "at": "2026-11-11T13:05:15.286Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bnp1zw",
+      "note": "#20 A struct field can be tagged #Secret: `Cond: struct { mask: "
+    },
     {
       "at": "2026-11-11T13:03:26.098Z",
       "by": "Main",
