@@ -1,0 +1,76 @@
+# A bare `#FX` is the empty cap: every function under it is pure, on every
+# tier. A type's, module's or trait's methods that print are E0749 (E0754 for
+# a trait impl), a method row wider than the cap is refused, and a bare file
+# head caps every function of the file and formats back as bare `#FX`. Pure
+# methods, functions and impls under a bare cap check clean, a pure function
+# dispatches through the pure trait, and the program prints the same on every
+# tier. type.jet is the G8 review's pure-type probe.
+fixture: bare_fx_cap_is_pure_on_every_tier/input
+env: NO_COLOR=1
+step: jet check type.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # the bare cap admits nothing
+stderr: ~ "The type's cap allows no effects in every method of the type" # the reason names the empty cap
+step: jet run --optimize=none type.jet
+exit: 1
+stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O0 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=basic type.jet
+exit: 1
+stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O1 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=full type.jet
+exit: 1
+stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O2 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet check module.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # a module's bare cap
+step: jet run --optimize=none module.jet
+exit: 1
+stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O0 refuses it
+step: jet run --optimize=basic module.jet
+exit: 1
+stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O1 refuses it
+step: jet run --optimize=full module.jet
+exit: 1
+stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O2 refuses it
+step: jet check trait.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "[jet.TraitCapExceeded]: `text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # a trait's bare cap binds its impls
+step: jet run --optimize=none trait.jet
+exit: 1
+stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O0 refuses it
+step: jet run --optimize=basic trait.jet
+exit: 1
+stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O1 refuses it
+step: jet run --optimize=full trait.jet
+exit: 1
+stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O2 refuses it
+step: jet check row.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`say`'s row declares `IO`, which type `Logger`'s `#FX(…)` cap doesn't allow" # a row can't widen the bare cap
+stderr: ~ "write `-[]>` as `say`'s row" # the fix names the pure row
+step: jet check head.jet
+exit: 1
+stderr: count "Error [" = 2 # load and run
+stderr: ~ "`load` uses the effect `FS.Read(" # the bare file head caps the file
+step: jet fmt head.jet
+exit: 0
+file: head.jet ~ "#FX\nuse fs: core.files" # the formatter keeps the bare head
+file: head.jet !~ "#FX()" # never the refused empty list
+step: jet check within.jet
+exit: 0
+step: jet run --optimize=none within.jet
+exit: 0
+stdout: = "3\n8\n9\n"
+step: jet run --optimize=basic within.jet
+exit: 0
+stdout: = "3\n8\n9\n"
+step: jet run --optimize=full within.jet
+exit: 0
+stdout: = "3\n8\n9\n"

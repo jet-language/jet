@@ -1,0 +1,15 @@
+Error [jet.ProhibitedEffectReached]: `go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow
+  --> tests/ui/effects/type_cap_bare_is_pure_is_e0749.jet:3:5
+    |
+  3 |     go: fn(self) { print("escaped") }
+    |     ^^
+  --> tests/ui/effects/type_cap_bare_is_pure_is_e0749.jet:1:1
+    |
+  1 | #FX
+    | ^^^ type `Bad` is capped here
+ Why: The type's cap allows no effects in every method of the type, even through a call
+ Fix: Add `IO` to the type's `#FX(…)` cap, or move that work out of type `Bad`
+ Denial: invocation
+ Call chain: go
+ Scope chain: type Bad
+More: jet-lang.dev/e/E0749

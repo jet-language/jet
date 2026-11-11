@@ -1,0 +1,30 @@
+#FX
+Point: struct {
+    x: Int
+    y: Int
+
+    sum: fn(self) -> Int { self.x + self.y }
+}
+
+#FX
+math: module {
+    double: fn(n: Int) -> Int { n * 2 }
+}
+
+#FX
+Shape: trait { area: fn(self) -> Int }
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+measure: fn(shape: Shape) -[]> Int { shape.area() }
+
+run: fn() {
+    print(Point{x: 1, y: 2}.sum())
+    print(math.double(4))
+    print(measure(Square{side: 3}))
+}

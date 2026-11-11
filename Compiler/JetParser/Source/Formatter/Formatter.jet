@@ -1704,12 +1704,13 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
         jfmt_write(f, "#NoPrelude")
         jfmt_newline(f)
     }
-    // A file-head `#FX(…)` cap stays on the line above the imports it heads.
+    // A file-head `#FX(…)` cap stays on the line above the imports it heads;
+    // the empty, pure cap is the bare marker.
     if prog.file_cap == .Val(cap) {
         if !first -> jfmt_newline(f)
         first = false
         entries: (loop entry in cap.entries -> entry.name)
-        jfmt_write(f, "#FX({entries.join(", ")})")
+        if entries.len() == 0 -> jfmt_write(f, "#FX") else -> jfmt_write(f, "#FX({entries.join(", ")})")
         jfmt_newline(f)
     }
     if prog.imports.len() > 0 {

@@ -2405,11 +2405,12 @@ the module, including the methods of the types declared in it and the default
 bodies of its traits, which keep the cap in every impl that inherits them; a
 generic module's cap binds the functions of every instance. Written above a
 file's `use` lines, `#FX(...)` caps every function in the file. A plain entry
-is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
-at the offending function, with the cap as the secondary label. A row written
-inside a cap may only narrow it: a declared effect outside the ceiling, or one
-the cap denies, is E0749 even when the body never uses it. A type's cap also
-binds the lambdas written in its methods, the trait default bodies it
+is a ceiling and a `!` entry is a denial; a bare `#FX` is the empty ceiling,
+so every function under it is pure. Reaching outside a ceiling or a denial is
+E0749 at the offending function, with the cap as the secondary label. A row
+written inside a cap may only narrow it: a declared effect outside the ceiling,
+or one the cap denies, is E0749 even when the body never uses it. A type's
+cap also binds the lambdas written in its methods, the trait default bodies it
 inherits, its `Close` impl, its function-typed fields and calls through its
 trait-value fields. A function-typed field whose row reaches outside the cap
 is E0755 at the field, and each method that calls it is E0749. An

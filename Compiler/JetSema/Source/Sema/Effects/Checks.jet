@@ -1091,21 +1091,16 @@ SemaEffectTypeCap: struct {
 
 // A module's or type's `#FX(…)` cap over one function: the function-row rule,
 // with plain entries as a ceiling and `!` entries as denials, both E0749 and
-// both holding through every callee the function can reach. A row the
-// function declares may only narrow the cap, so a declared effect outside it
-// is E0749 too, even when the body doesn't use it. Names were validated once
-// per cap (sema_effect_module_cap_names).
+// both holding through every callee the function can reach. A bare `#FX` is
+// the empty ceiling, so the function is pure. A row the function declares
+// may only narrow the cap, so a declared effect outside it is E0749 too, even
+// when the body doesn't use it. Names were validated once per cap
+// (sema_effect_module_cap_names).
 sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
-    ceiling := [String]{}
     loop entry in cap.cap.entries {
-        denied: entry.name.starts_with("!")
-        raw: if denied -> entry.name.slice(1, entry.name.len()) else -> entry.name
-        effect_name: sema_effect_parse_name(raw) ?? next
-        if !denied {
-            if sema_effect_root(effect_name) != "Panic" -> sema_effect_set_add(ceiling, effect_name)
-            next
-        }
+        if !entry.name.starts_with("!") -> next
+        effect_name: sema_effect_parse_name(entry.name.slice(1, entry.name.len())) ?? next
         if sema_effect_memory_fact(effect_name) != None {
             span: if cap.site == None -> entry.span else -> node.name_span
             _: sema_effect_memory_project(nodes, node_by_key, node_index, EffectRowEntry{name: effect_name, span: span}, diagnostics)
@@ -1121,7 +1116,7 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
         if sema_effect_root(effect_name) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_by_key, node_index)
         diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_steps, cap), notes, reached))
     }
-    if ceiling.len() == 0 -> return
+    ceiling: sema_effect_cap_ceiling(cap.cap) ?? return
     over: sema_effect_uncovered(solved, ceiling)
     if over.len() > 0 {
         diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap), notes, over))
@@ -1157,8 +1152,16 @@ sema_effect_module_row_ceiling_diagnostic: fn(node: SemaEffectNode, wider: [Stri
     sorted := wider.copy()
     sorted.sort()
     wider_list: sema_effect_show(sorted)
-    diagnostic: sema_error(sema_effect_cap_code(cap), node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
+    narrow: if ceiling.len() == 0 -> "write `-[]>` as `{name}`'s row" else -> "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`"
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows {sema_effect_cap_allows(ceiling)} in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "{narrow}, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+// What a cap's ceiling admits, for the reports above: a bare `#FX` admits
+// nothing.
+sema_effect_cap_allows: fn(ceiling: [String]) -> String Never! {
+    if ceiling.len() == 0 -> return "no effects"
+    "only `{sema_effect_show(ceiling)}`"
 }
 
 sema_effect_module_cap_where: fn(cap: SemaEffectModuleCap) -> String Never! {
@@ -1218,7 +1221,7 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
     sorted.sort()
     over_list: sema_effect_show(sorted)
     elsewhere: if cap.cap.scope == "trait" -> "remove that work from `{name}`" else -> "move that work out of {scope} `{owner}`"
-    diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` uses the effect `{over_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the {scope}'s `#FX(…)` cap, or {elsewhere}")
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` uses the effect `{over_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "the {scope}'s cap allows {sema_effect_cap_allows(ceiling)} in {sema_effect_cap_members(cap)}, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the {scope}'s `#FX(…)` cap, or {elsewhere}")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
@@ -1245,8 +1248,8 @@ sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [Stri
                 denied: sema_effect_parse_name(entry.name.slice(1, entry.name.len())) ?? next
                 loop hit in sema_effect_declared_hits(declared, denied) -> sema_effect_set_add(outside, hit)
             }
-            if ceiling.len() > 0 {
-                loop wider in sema_effect_uncovered(declared, ceiling) -> sema_effect_set_add(outside, wider)
+            if ceiling == .Val(bound) {
+                loop wider in sema_effect_uncovered(declared, bound) -> sema_effect_set_add(outside, wider)
             }
             if outside.len() > 0 -> diagnostics.push(sema_effect_field_row_diagnostic(field.symbol.name, field.symbol.span, outside, cap))
         }
@@ -1336,15 +1339,21 @@ sema_effect_trait_cap_key: fn(trait_key: String) -> String Never! {
     "{sema_effect_symbol_module(trait_key) ?? ""}|{sema_effect_symbol_leaf(trait_key)}"
 }
 
-// The plain entries of a cap, its ceiling; empty when it only denies.
-sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String] Never! {
+// The ceiling of a cap: its plain entries. A bare `#FX` has none and is the
+// empty ceiling, pure. None when the cap only denies, so its ceiling is the
+// rungs' above, or when a plain entry names no effect (reported once per cap
+// by sema_effect_module_cap_names).
+sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String]? Never! {
     ceiling := [String]{}
+    bounded := cap.entries.len() == 0
     loop entry in cap.entries {
         if entry.name.starts_with("!") -> next
-        effect_name: sema_effect_parse_name(entry.name) ?? next
+        bounded = true
+        effect_name: sema_effect_parse_name(entry.name) ?? return None
         if sema_effect_root(effect_name) != "Panic" -> sema_effect_set_add(ceiling, effect_name)
     }
-    ceiling
+    if !bounded -> return None
+    Val(ceiling)
 }
 
 sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Never! {
@@ -2212,8 +2221,9 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
             }
             trait_key: sema_effect_trait_cap_key(trait_owner.key)
             if facts.trait_caps.get(trait_key) == .Val(found) {
-                ceiling: sema_effect_cap_ceiling(found.cap.cap)
-                if ceiling.len() > 0 {
+                // A bare `#FX` above the trait is the empty ceiling: the
+                // dispatch reaches nothing.
+                if sema_effect_cap_ceiling(found.cap.cap) == .Val(ceiling) {
                     loop effect_name in ceiling -> sema_effect_node_add_direct(nodes, node_index, effect_name, fact.span)
                     return
                 }
