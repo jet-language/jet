@@ -21,7 +21,8 @@
 // - In a function body or any other code block, it stays a local function
 //   value. The item block of a build's
 //   `b.generate("name") { … }` holds the generated file's items, so it reads as
-//   a module body. The body of a marker's `expand: fn` template inside
+//   a module body, and so does the block of a `#code { … }` value, wherever
+//   the value is written. The body of a marker's `expand: fn` template inside
 //   `impl Marker { … }` holds the members the marker generates, so it reads
 //   as a container body.
 //
@@ -162,6 +163,12 @@ parser_colon_marker_head: fn(tokens: [Token], tables: TokenTables, head: Int) ->
 parser_colon_generate_call: fn(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
     name: open - 1
     name >= 1 && tokens[name].kind == TOKEN_IDENT && tokens[name - 1].kind == TOKEN_DOT && token_decoded(tables, tokens[name]) == "generate"
+}
+
+// Whether `word` is the `code` of a `#code` value (no space after `#`), whose
+// brace is an item block.
+parser_colon_code_value: fn(tokens: [Token], tables: TokenTables, word: Int) -> Bool Never! {
+    word >= 1 && tokens[word].kind == TOKEN_IDENT && tokens[word - 1].kind == TOKEN_HASH && tokens[word - 1].span.end == tokens[word].span.start && token_decoded(tables, tokens[word]) == "code"
 }
 
 // One past a balanced `(…)` or `[…]` group opening at `open`.
@@ -525,6 +532,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
                 if body && marker_body && head_marker == PARSER_COLON_MARKER_TEMPLATE -> frame = PARSER_COLON_FRAME_CONTAINER
                 if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) -> frame = PARSER_COLON_FRAME_MODULE
+                if previous >= 0 && parser_colon_code_value(tokens, tables, previous) -> frame = PARSER_COLON_FRAME_MODULE
                 marker_body = body && head_marker == PARSER_COLON_MARKER_IMPL
                 saved_opened[saved_opened.len() - 1] = true
                 at_start = true

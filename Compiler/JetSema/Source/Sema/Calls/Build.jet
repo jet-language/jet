@@ -250,12 +250,21 @@ sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnv
 }
 
 // Statements formatted as a function body's lines, unindented: the formatter
-// writes them inside a function, whose first and last lines are dropped.
+// writes them inside a function, whose first and last lines are dropped. A
+// short body stays on the function's line (`code: fn() { value }`), and its
+// one statement is the text between the braces.
 sema_build_code_statements: fn(statements: [Stmt]) -> String {
     wrapper := ast_func("code", Span{start: 0, end: 0}, Span{start: 0, end: 0})
     wrapper.body = statements.copy()
     lines := sema_build_generate_format([Item]{Item.Func{value: wrapper}}).split("\n").to_list()
     loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
+    if lines.len() == 1 {
+        line: lines[0].trim()
+        inner: line.removeprefix("code: fn() {{ ")
+        if inner == line || !inner.ends_with(" }}") -> return ""
+        body: inner.removesuffix(" }}")
+        return "{body}\n"
+    }
     if lines.len() < 2 -> return ""
     text := ""
     loop index in 1..<(lines.len() - 1) {

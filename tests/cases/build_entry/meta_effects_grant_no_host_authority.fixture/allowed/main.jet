@@ -1,3 +1,5 @@
+use files: core.files
+
 build: fn(b: Build) -[Meta.Generate, Meta.Rewrite]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
@@ -16,4 +18,6 @@ greeting: fn() {
     print("written by hand")
 }
 
-read_note: fn() -[FS.Read]> {}
+read_note: fn() -[FS.Read]> {
+    _ := files.read("note.txt") ?? ""
+}

@@ -119,6 +119,32 @@ run: fn() { print(int_cache.size()) }
     assert(parser_test_stable(source).contains("        count: 1\n        print(count)\n"))
 }
 
+#Test("a `#code` block reads `name: fn` as a function wherever the value is written") {
+    program: parser_test_program(
+    `run: fn() {
+    keep(#code {
+        greeting: fn() -> String { "hi" }
+    })
+}
+`,
+    )
+    run: loop item in program.items {
+        if item == .Func(f) && f.name == "run" -> break f
+    } ?? panic("run")
+    names := [String]{}
+    loop statement in run.body {
+        if statement == .Expr(outer_expr) && outer_expr == .Call(outer, _) && outer.args[0].expr == .Call(code, _) {
+            items: code.args[0].flags.template_items ?? panic("template items")
+            loop body_item in items {
+                if body_item == .Item(item) && item == .Func(f) {
+                    names.push(f.name)
+                }
+            }
+        }
+    }
+    assert_eq(names.join(","), "greeting")
+}
+
 #Test("a keyword before the declared name and the `::` sigil declare nothing") {
     sources: [String]{
         "limit :: 3\n",
