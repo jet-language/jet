@@ -1,0 +1,16 @@
+# A distinct type's derive row shows its forwarded members as the Jet source
+# registration generates, and names the traits forwarded natively.
+step: jet inspect expand --facts derive {root}/Examples/Types/DistinctForwarding.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "Score: Comparable, Printable, Encode, Decode"
+stdout: ~ "impl Score.Equatable {"
+stdout: ~ "self.raw() == rhs.raw()"
+stdout: ~ "impl Score.Comparable {"
+stdout: ~ "self.raw() < rhs.raw()"
+stdout: ~ "// Printable, Encode, Decode: forwarded natively to `Int`; no generated members"
+step: jet inspect expand --facts derive --json {root}/Examples/Types/DistinctForwarding.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid
+stdout: ~ "\"forwarded_source\":\"impl Score.Equatable {"

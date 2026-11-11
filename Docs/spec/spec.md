@@ -728,6 +728,14 @@ Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
 map or a function has no order, so an explicit `#Comparable` over a type that
 holds one is E0905 at the marker.
 
+A distinct type forwards the traits it names from its base (D-CAPBUNDLE1):
+`#[Comparable, Printable, CodableAsBase] Score: distinct Int` orders, prints,
+and encodes a `Score` exactly as its `Int`. Equality comes with every distinct
+type whose base has it, and a distinct type is a map key or set element exactly
+when its base is. A base without the named trait (`#Numeric` over a `String`)
+is E0905 at the marker, naming the trait and the base. `jet inspect expand
+--facts derive` shows the generated members as Jet source.
+
 `#As` on one stored field lets the struct pass where that field's type is
 expected, read as that field (D-JAI-SMALL1=A): with `Labeled: struct { #As at:
 Point, label: String }`, a `Labeled` passes to a `Point` parameter as its `at`.

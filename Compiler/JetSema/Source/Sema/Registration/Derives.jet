@@ -2315,6 +2315,97 @@ sema_derive_unordered_comparable: fn(item: Item, diagnostics: &[Diagnostic]) -> 
     true
 }
 
+// A distinct type's bundle request (`#Comparable`, `#Printable`, `#Numeric`,
+// `#CodableAsBase`) forwards the base type's own implementation, so the base
+// must have that trait. A base with no order was already refused at
+// registration (sema_derive_unordered_comparable); the rest is answered here
+// against the checked types, E0905 at the request naming trait and base.
+sema_derive_check_distinct_forwards: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, diagnostics: &[Diagnostic]) {
+    if program.registration_graph == .Val(graph) {
+        loop item in graph.modules[module_index].program.items {
+            if item == .Distinct(definition) {
+                base := sema_type_resolve_declared(graph, definition.base, environment.module_identity)
+                reported := [Span]{}
+                loop derived in definition.derives {
+                    if reported.contains(derived.span) -> next
+                    if sema_derive_distinct_base_has(environment, program, derived.name, base) -> next
+                    reported.push(derived.span)
+                    diagnostics.push(sema_derive_distinct_forward_error(definition.name, type_name(definition.base), derived.name, derived.span))
+                }
+            }
+        }
+    }
+}
+
+sema_derive_distinct_base_has: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, trait_name: String, base: Type) -> Bool Never! {
+    if {
+        trait_name == "Comparable" -> sema_derive_unordered_type(base) != None || sema_type_comparable(environment, program, base)
+        trait_name == "Printable" -> sema_call_ambient_printable(base, environment, program)
+        trait_name == "Numeric" -> sema_derive_numeric_base(base)
+        trait_name == "Encode" -> sema_serde_type_is_admissible(environment, program, base, SemaSerdeDirection.Encode)
+        trait_name == "Decode" -> sema_serde_type_is_admissible(environment, program, base, SemaSerdeDirection.Decode)
+        else -> true
+    }
+}
+
+// The built-in numbers carry the arithmetic `#Numeric` forwards; a nominal or
+// quantity base brings its own operator impls, which the operators check.
+sema_derive_numeric_base: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .IntN(_, _) | .Float | .Float32 | .Named(_) | .Apply(_, _) | .Quantity(_, _) | .Measure(_) -> true
+        .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_numeric_base(inner)
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) -> false
+    }
+}
+
+sema_derive_distinct_forward_error: fn(name: String, base: String, trait_name: String, span: Span) -> Diagnostic Never! {
+    row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+    why := "`{name}` forwards `{trait_name}` from its base type `{base}`, and `{base}` has no `{trait_name}` to forward"
+    fix := "drop the `{trait_name}` request from `{name}`, or base `{name}` on a type that has `{trait_name}`"
+    sema_error("E0905", span, row.what.replace("{{type}}", base).replace("{{bound}}", trait_name), row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix))
+}
+
+// The forwarding impls registration generates for the distinct types in
+// `items` (sema_derive_expand_builtin_items over the same items), formatted
+// as Jet source and keyed by the distinct's name. Printing, the codec and
+// arithmetic forward natively and generate no members. A checked module's
+// items already hold those impls, each at its distinct's name span; they
+// are left out first so the expansion generates them again instead of
+// treating them as written impls.
+sema_derive_distinct_forward_source: fn(items: [Item]) -> [String:String] {
+    names := [String]{}
+    name_spans := [Span]{}
+    loop item in items {
+        if item == .Distinct(definition) {
+            names.push(definition.name)
+            name_spans.push(definition.name_span)
+        }
+    }
+    output := [String:String]{}
+    if names.len() == 0 -> return output
+    expanded := [Item]{}
+    loop item in items {
+        if item == .Impl(implementation) {
+            if names.contains(implementation.type_name) && name_spans.contains(implementation.span) -> next
+        }
+        // copy: the expansion rewrites its own items; the module's stay as checked.
+        expanded.push(item.copy())
+    }
+    count: expanded.len()
+    problems := [Diagnostic]{}
+    sema_derive_expand_builtin_items(expanded, problems)
+    loop name in names {
+        generated := [Item]{}
+        loop index in count..<expanded.len() {
+            if expanded[index] == .Impl(implementation) {
+                if implementation.type_name == name -> generated.push(expanded[index].copy())
+            }
+        }
+        if generated.len() > 0 -> output[name] = sema_build_generate_format(generated)
+    }
+    output
+}
+
 // The first unordered type an item holds: in a stored field, a variant
 // payload, or a distinct's base.
 sema_derive_item_unordered_type: fn(item: Item) -> Type? Never! {
@@ -2517,6 +2608,9 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             type_info: sema_derive_distinct_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") -> next
+                // A function has no equality, so a distinct holding one
+                // forwards none; `==` on it is refused where it is written.
+                if trait_name == "Equatable" && sema_derive_holds_function(definition.base) -> next
                 if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                 block := sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
                 generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: block.methods.move(), delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
@@ -2525,4 +2619,20 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     blocks.move()
+}
+
+// Whether `ty` holds a function value, through the structural carriers.
+sema_derive_holds_function: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Fn(_, _, _, _, _, _) -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Shared(inner) -> sema_derive_holds_function(inner)
+        .Map(key, _, value) | .Result(key, value) -> sema_derive_holds_function(key) || sema_derive_holds_function(value)
+        .Tuple(members) -> loop member in members {
+            if sema_derive_holds_function(member.ty) -> break true
+        } ?? false
+        .Union(members) -> loop member in members {
+            if sema_derive_holds_function(member) -> break true
+        } ?? false
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }

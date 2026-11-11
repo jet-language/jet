@@ -5314,6 +5314,8 @@ sema_check_registration_module_head: fn(environment: &SemaScopeEnvironment, prog
         }
         // The static-product markers bind their signatures in module scope.
         sema_marker_rules_check_static_sites(environment, program, module_index, scopes, module_result.diagnostics)
+        // A distinct type's forwarded traits must exist on its base.
+        sema_derive_check_distinct_forwards(environment, program, module_index, module_result.diagnostics)
         if memo == None -> memo = sema_incremental_module(session, environment, program, scopes)
         scopes_changed := false
         return_view_rows := [String:Int]{}

@@ -4,6 +4,7 @@ use {
     jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, diagnostic_column_at, diagnostic_line_at, type_name]
     jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_shown_type, failure_contract_source]
+    jet_sema.[sema_derive_distinct_forward_source]
     jet_semindex.[
         SemCallable,
         SemIndex,
@@ -163,11 +164,17 @@ jet_cli_expand_effects: fn(index: SemIndex) -> [JetCLIExpandFact] Never! {
     output
 }
 
-jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+// A distinct type's row also shows its forwarded members as the Jet source
+// registration generates (sema_derive_distinct_forward_source); the traits it
+// forwards natively (printing, the codec, arithmetic) generate no members and
+// are named in a comment.
+jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] {
     output := [JetCLIExpandFact]{}
+    forwards := [String:[String:String]]{}
     loop definition in index.definitions {
         if definition.derives.len() == 0 -> next
         row: definition.def
+        forwarded := jet_cli_expand_distinct_forward(modules, row.module_path, row.name, definition.derives, forwards)
         value: jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("name", jet_cli_status_text(row.name)),
@@ -175,12 +182,39 @@ jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [Je
             jet_cli_status_field("source", jet_cli_status_text(row.module_path)),
             jet_cli_status_field("span", jet_cli_expand_span(row.def_span, jet_cli_expand_source(modules, row.module_path))),
             jet_cli_status_field("derives", jet_cli_status_texts(definition.derives)),
+            jet_cli_status_field("forwarded_source", jet_cli_status_text(forwarded)),
         },
         )
-        output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: "{row.name}: {definition.derives.join(", ")} [{row.identity}]", value: value})
+        text := "{row.name}: {definition.derives.join(", ")} [{row.identity}]"
+        loop line in forwarded.lines() -> text = "{text}\n    {line}".trim_end()
+        output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: text, value: value})
     }
     jet_cli_expand_sort_facts(output)
     output
+}
+
+// The forwarded members of distinct `name` declared in module `path`, as Jet
+// source, or "" when `name` is not a distinct there. `forwards` keeps each
+// module's generated source so a module expands once.
+jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String, name: String, derives: [String], forwards: &[String:[String:String]]) -> String {
+    loop unit in modules {
+        if unit.path != path && unit.physical_path != path -> next
+        loop item in unit.items {
+            if item == .Distinct(declaration) {
+                if declaration.name != name -> next
+                if forwards.get(unit.path) == None -> forwards[unit.path] = sema_derive_distinct_forward_source(unit.items)
+                generated: forwards.get(unit.path) ?? [String:String]{}
+                source := generated.get(name) ?? ""
+                native := [String]{}
+                loop derived in derives {
+                    if derived != "Equatable" && derived != "Comparable" -> native.push(derived.copy())
+                }
+                if native.len() > 0 -> source = "{source}// {native.join(", ")}: forwarded natively to `{type_name(declaration.base)}`; no generated members\n"
+                return source
+            }
+        }
+    }
+    ""
 }
 
 jet_cli_expand_template: fn(unit: JetDriverDocModule, span: Span, kind: String, name: String, methods: [String], text: String) -> JetCLIExpandFact Never! {

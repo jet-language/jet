@@ -11,6 +11,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [Authority](Authority/) — Authority is the one rights value that crosses process, plugin, and session boundaries.
 - [CapabilityBundles](CapabilityBundles.jet) — Operation bundles on nominal `distinct` types.
 - [ConstructionOrder](ConstructionOrder.jet) — struct literals and named enum payloads evaluate their field values in the order they are written, not the order the type declares its fields.
+- [DistinctForwarding](DistinctForwarding.jet) — A distinct type forwards the traits it names from its base type, and each forwarded member behaves exactly as the base type's: `#Comparable` orders a…
 - [DistinctTypes](DistinctTypes.jet) — Distinct types.
 - [DotConstruction](DotConstruction.jet)
 - [EnumBacking](EnumBacking.jet) — A payload-free enum names its backing integer with `#Layout(U8)`.

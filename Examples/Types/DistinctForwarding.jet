@@ -1,0 +1,35 @@
+// A distinct type forwards the traits it names from its base type, and each
+// forwarded member behaves exactly as the base type's: `#Comparable` orders a
+// `Score` as its Int does, `#Printable` shows it as the Int, `#CodableAsBase`
+// writes and reads the Int's wire shape, and equality and hashing (a map key,
+// a set element) come with every distinct whose base has them.
+// `jet inspect expand --facts derive` shows the generated members as Jet source.
+use core.encoding.json
+
+#[Comparable, Printable, CodableAsBase]
+Score: distinct Int
+
+#Codable
+Row: struct {
+    score: Score
+}
+
+run: fn() {
+    low: Score.from_int(3)
+    high: Score.from_int(5)
+    // Equality: as Int's.
+    print("equal: {low == Score.from_int(3)} {low == high}")
+    // Ordering: as Int's.
+    print("ordered: {low < high} {high.compare(low) == .Greater}")
+    // Printing: as Int's.
+    print("printed: {high}")
+    // Hashing: a set element and a map key, as an Int is.
+    seen := Set.from([low, high, Score.from_int(3)])
+    names: [Score:String]{low: "low", high: "high"}
+    print("hashed: {seen.len()} {names.get(high) ?? "none"}")
+    // Codable: the Int's wire shape.
+    row: Row{score: high}
+    wire: json.to_string(row)
+    back: json.decode<Row>(wire) ?? panic("row")
+    print("codable: {wire} {back.score == high}")
+}

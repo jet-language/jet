@@ -488,7 +488,8 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
 
 // Rust `map_key_type_eligible` (E0502): map keys are ordered
 // values. Scalars and tuples of keys qualify, and a nominal qualifies when it
-// is a struct whose fields all qualify or an enum without payloads. A nominal
+// is a struct whose fields all qualify, an enum without payloads, or a
+// distinct type whose base qualifies. A nominal
 // reached again while it is still being decided lies on a cycle and answers
 // false, as the Rust walk's active set does.
 sema_type_map_key_eligible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
@@ -582,7 +583,10 @@ sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, pro
             }
             true
         }
-        .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> false
+        // A distinct type is a key exactly when its base is: it hashes and
+        // orders as the base value it wraps.
+        .Distinct(base, _) -> sema_comparability_map_key(environment, program, definition.module_identity, base, query)
+        .Alias(_) | .UnitFamily(_, _) -> false
     }
 }
 
