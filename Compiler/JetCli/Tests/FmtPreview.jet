@@ -1,0 +1,76 @@
+// `jet fmt --check`, `--diff` and `--dry-run` preview: an unformatted file
+// keeps its bytes and the run exits 1. Only a plain `jet fmt` writes. A
+// preview flag written with a value is refused, and a word after `--` is a
+// path, so neither form can fall through to a write.
+use {
+    jet_cli.[jet_cli_format_run, jet_cli_plan]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
+}
+
+FMT_PREVIEW_MESSY: "run: fn( ) {{\n    print( 1 )\n}}\n"
+
+// A fresh directory holding one unformatted `messy.jet`.
+fmt_preview_root: fn(name: String) -[FS, Env]> String {
+    root: "{cli_sys.temp_dir()}/jet-fmt-{name}-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    cli_files.write("{root}/messy.jet", FMT_PREVIEW_MESSY) ?? panic("messy source")
+    root
+}
+
+#Test("jet fmt previews never write an unformatted file") {
+    root: fmt_preview_root("preview")
+    file: "{root}/messy.jet"
+    previews: [[String]]{[String]{"--check"}, [String]{"--diff"}, [String]{"--dry-run"}, [String]{"--check", "--diff"}}
+    loop flags in previews {
+        argv := [String]{"fmt"}
+        loop flag in flags -> argv.push(flag.copy())
+        argv.push(file.copy())
+        if jet_cli_plan(argv) == .Fmt(request) {
+            assert_eq(jet_cli_format_run(request, false).exit_code, JET_DRIVER_EXIT_USER_ERROR)
+        } else {
+            panic("`jet fmt` plans a format run")
+        }
+        assert_eq(cli_files.read(file) ?? panic("source after a preview"), FMT_PREVIEW_MESSY)
+    }
+    if jet_cli_plan([String]{"fmt", file.copy()}) == .Fmt(request) {
+        assert_eq(jet_cli_format_run(request, false).exit_code, JET_DRIVER_EXIT_OK)
+    } else {
+        panic("`jet fmt` plans a format run")
+    }
+    assert_eq(cli_files.read(file) ?? panic("formatted source"), "run: fn() {{ print(1) }}\n")
+    cli_files.remove_all(root) ?? panic("fmt preview cleanup")
+}
+
+#Test("a preview flag written with a value is refused, never ignored") {
+    root: fmt_preview_root("flag-value")
+    file: "{root}/messy.jet"
+    loop flag in ([String]{"--check=true", "--check=false", "--diff=yes", "--dry-run=1"}) {
+        if jet_cli_plan([String]{"fmt", flag.copy(), file.copy()}) == .Refused(report, _, code, _) {
+            assert_eq(report.code, "E2102")
+            assert_eq(code, JET_DRIVER_EXIT_USAGE)
+        } else {
+            panic("`jet fmt {flag}` is refused")
+        }
+        assert_eq(cli_files.read(file) ?? panic("source after a refusal"), FMT_PREVIEW_MESSY)
+    }
+    cli_files.remove_all(root) ?? panic("flag value cleanup")
+}
+
+#Test("a word after -- is a path, so a missing file fails the run before any write") {
+    root: fmt_preview_root("after-separator")
+    file: "{root}/messy.jet"
+    if jet_cli_plan([String]{"fmt", file.copy(), "--", "--check"}) == .Fmt(request) {
+        assert_eq(request.paths, [String]{file.copy(), "--check"})
+        assert(!request.check, "`--check` after `--` is no flag")
+        output: jet_cli_format_run(request, false)
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_USAGE)
+        assert(output.stderr.contains("--check"), "the report names the missing path")
+    } else {
+        panic("`jet fmt <file> -- --check` plans a format run")
+    }
+    assert_eq(cli_files.read(file) ?? panic("source after a failed run"), FMT_PREVIEW_MESSY)
+    cli_files.remove_all(root) ?? panic("separator cleanup")
+}

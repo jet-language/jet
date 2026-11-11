@@ -1,0 +1,28 @@
+# Card #6005: `--check`, `--diff` and `--dry-run` preview an unformatted file
+# and exit 1 without writing it; a preview flag written with a value is
+# refused, a word after `--` is a path; only a plain `jet fmt` writes.
+fixture: fmt_preview_flags_never_write_the_file.fixture
+env: NO_COLOR=1
+step: jet fmt --check messy.jet
+exit: 1 # the file would change
+stdout: ~ "messy.jet" # --check names the file
+file: messy.jet = fmt_preview_flags_never_write_the_file.before.bytes
+step: jet fmt --diff messy.jet
+exit: 1 # --diff is a check too
+stdout: ~ "+run: fn() { print(1) }" # --diff prints the change
+file: messy.jet = fmt_preview_flags_never_write_the_file.before.bytes
+step: jet fmt --dry-run messy.jet
+exit: 1 # --dry-run is --check plus --diff
+stdout: ~ "+run: fn() { print(1) }" # --dry-run prints the change
+file: messy.jet = fmt_preview_flags_never_write_the_file.before.bytes
+step: jet fmt --check=true messy.jet
+exit: 2 # a value on a switch is refused
+stderr: ~ "`--check` takes no value" # E2102 names the flag
+file: messy.jet = fmt_preview_flags_never_write_the_file.before.bytes
+step: jet fmt messy.jet -- --check
+exit: 2 # `--check` after `--` is a missing path
+stderr: ~ "--check" # the read failure names it
+file: messy.jet = fmt_preview_flags_never_write_the_file.before.bytes
+step: jet fmt messy.jet
+exit: 0 # plain fmt writes
+file: messy.jet ~ "run: fn() { print(1) }" # the write happened

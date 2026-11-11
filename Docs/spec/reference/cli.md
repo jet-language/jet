@@ -554,7 +554,9 @@ row is the one rule: a command that does not read its own flags refuses a
 registered flag scoped to other commands with E2102 and exit 2 before it
 does anything, naming the commands that take it (`jet init --check` writes
 nothing and points at `jet fmt --check`), and `jet help <command>` lists
-exactly the flags the command takes.
+exactly the flags the command takes. A value written after a flag that takes
+none is E2102 too, never ignored: a switch takes no `=value`
+(`jet fmt --check=true`), and a true/false flag takes only `=true` or `=false`.
 
 - `--target` selects a triple, `board.<name>`, or named database target;
   `--profile` selects `release`, `debug`, or a named bundle (`ci` and
@@ -1022,14 +1024,16 @@ line is on stderr (muted by `--quiet` and
 project it is a user error. `jet update` of dependencies is refused with E2104
 until the package fetch is ported.
 
-`jet fmt [paths…] [-]` formats `.jet` sources with the Jet formatter
+`jet fmt [paths…] [-] [-- paths…]` formats `.jet` sources with the Jet formatter
 ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter)):
 no paths walk the project root (the nearest `package.jet` directory, else the
 working directory), a directory is walked sorted with the ignored directories
 and snapshot trees skipped, every file is formatted before any is written, and
 one read or parse failure reports every failure with exit 2 (exit 1 under
 `--check`). `--check` lists the files that would change (root-relative,
-sorted) and exits 1; `--diff` adds unified diffs; `--dry-run` is both; `-`
+sorted) and exits 1; `--diff` adds unified diffs and implies `--check`, so it
+never writes a file either; `--dry-run` is both; every word after `--` is a
+path, even one that starts with `-` (a missing one is a read failure); `-`
 formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
 the ratified rewrites. The retired-spelling status lines go to stderr unless
 `--quiet`. `package.jet` and `Config` record sources go through the typed

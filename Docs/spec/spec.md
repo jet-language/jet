@@ -4331,8 +4331,9 @@ crate (D-TERM1, D-DEFER1).
 ## Formatting Jet source
 
 `jet fmt <file.jet>` formats source in place. `jet fmt --check <file.jet>`
-reports files that would change and exits nonzero without writing them; add
-`--diff` to the check for unified diffs. `jet fmt -` reads source from stdin
+reports files that would change and exits nonzero without writing them;
+`--diff` adds unified diffs and is itself a check, so it never writes either.
+`jet fmt -` reads source from stdin
 and writes formatted source to stdout; `--stdin-path=<label>` supplies the
 reported source name. These commands run the lexer, parser, and printer, not
 sema. (S44)

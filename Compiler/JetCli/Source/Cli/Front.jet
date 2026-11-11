@@ -45,6 +45,7 @@ use {
         JET_CLI_HANDLERS,
         JET_COMPILER_SERVICE_VERB,
         JET_TEST_SETTINGS,
+        JetCLIFlagSpec,
         Diagnostic,
         PolicyKey,
         TEST_SETTINGS_ENV,
@@ -205,7 +206,7 @@ JetCLIPlan: enum {
     // `run_lint_complexity`); `category` is `a11y` or `complexity`, `raw` is
     // the jet argv (`--max=N`), `notice` is resolution's stderr.
     Lint(file: String, source: String, color: Bool, notice: String, category: String, raw: [String], json: Bool)
-    // `jet fmt [paths…] [-]`.
+    // `jet fmt [paths…] [-] [-- paths…]`.
     Fmt(request: JetCLIFmtRequest)
     // `jet fmt --lang <language>`: the environment formatter over staged files;
     // `argv` starts at `fmt`.
@@ -615,11 +616,28 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
         }
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
         if jet_cli_flag_spec(head) == .Val(spec) {
-            if jet_cli_flag_takes(spec, command) -> next
-            return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
+            if !jet_cli_flag_takes(spec, command) -> return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
+            if jet_cli_flag_value_refusal(argument, head, spec, color) == .Val(refusal) -> return Val(refusal)
+            next
         }
         if build_option_flag_refusal(head) == .Val(refusal) -> return Val(jet_cli_fail("E2102", "`{head}` isn't a build option jet has", refusal.law, "drop `{head}`", color, JET_DRIVER_EXIT_USAGE))
         return Val(jet_cli_unknown_flag(head, command, color))
+    }
+    None
+}
+
+// E2102 for a value written after a flag whose registry row takes none: a
+// Switch takes no `=value` (`--check=true`), and a Bool takes only `=true`
+// or `=false`. Never ignored, so a value cannot quietly turn a flag off.
+jet_cli_flag_value_refusal: fn(argument: String, head: String, spec: JetCLIFlagSpec, color: Bool) -> JetCLIPlan? Never! {
+    if argument == head -> return None
+    value: argument.slice(head.len() + 1..<argument.len())
+    if spec.value == {
+        .Switch -> return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes no value", jet_cli_why("E2102"), "write `{head}` alone", color, JET_DRIVER_EXIT_USAGE))
+        .Bool -> {
+            if value != "true" && value != "false" -> return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes `=true` or `=false`", jet_cli_why("E2102"), "write `{head}` or `{head}=false`", color, JET_DRIVER_EXIT_USAGE))
+        }
+        .Value | .Optional | .Repeated -> {}
     }
     None
 }
@@ -2282,12 +2300,14 @@ jet_cli_new: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
 
 // `jet fmt` (`"fmt"`): `--lang` selects the environment formatter (`argv` is
 // the whole command line from `fmt`, `--` included); otherwise native `.jet`
-// formatting.
-jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+// formatting. Every word after `--` is a path, never a flag.
+jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool) -> JetCLIPlan Never! {
     loop argument in jet_argv {
         if argument == "--lang" || argument.starts_with("--lang=") -> return JetCLIPlan.FmtLang{argv: argv, color: color}
     }
-    dry_run: jet_argv.contains("--dry-run")
+    // `--diff` and `--dry-run` preview, as `--check` does: none of the three
+    // writes a file (`jet fmt --lang` reads them the same way).
+    preview: jet_argv.contains("--check") || jet_argv.contains("--diff") || jet_argv.contains("--dry-run")
     stdin_path := String?{None}
     loop argument in jet_argv {
         if argument.starts_with("--stdin-path=") {
@@ -2304,12 +2324,14 @@ jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], color: Bool,
             paths.push(args[index])
         }
     }
+    after_separator: passthrough ?? [String]{}
+    loop path in after_separator -> paths.push(path.copy())
     JetCLIPlan.Fmt{request: JetCLIFmtRequest{
         paths: paths,
         stdin_mode: stdin_mode,
         stdin_path: stdin_path,
-        check: jet_argv.contains("--check") || dry_run,
-        diff: jet_argv.contains("--diff") || dry_run,
+        check: preview,
+        diff: jet_argv.contains("--diff") || jet_argv.contains("--dry-run"),
         changed: jet_argv.contains("--changed"),
         explicit_copies: jet_argv.contains("--explicit-copies"),
         simplify: jet_argv.contains("--simplify"),
@@ -2689,7 +2711,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         "publish" -> return jet_cli_publish_plan(jet_argv, color, quiet)
         "yank" -> return jet_cli_yank_plan(jet_argv, color)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet, json)
-        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
+        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, passthrough, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
         "parts" -> return jet_cli_project_parts(jet_cli_tail(argv, 1), color, json)
         // Dispatch arms over the raw argv (`raw[1..]` etc.).
