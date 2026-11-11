@@ -21,7 +21,8 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_display_path,
     ]
-    jet_foundation.[EffectRowEntry, Expr, Func, Item, ModuleCap, NamedSpan, Span, Stmt, ast_visit_body, authority_is_deny_only, diagnostic_line_at]
+    jet_foundation.[EffectRowEntry, Expr, Func, Item, ModuleCap, Span, Stmt, ast_visit_body, diagnostic_line_at]
+    jet_sema.[sema_inline_decode_generated_suffix]
     jet_semindex.[SemSummary, semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness]
 }
 
@@ -317,6 +318,10 @@ jet_cli_effects_scopes_sorted: fn(scopes: [JetCLIEffectsScope]) -> [JetCLIEffect
 }
 
 // Keep `function` when it holds `offset` and starts inside the current pick.
+// Its module rungs are the caps the checker binds it by (`module_caps`, set
+// where the module is written, outermost first), so a function an inline
+// module or a generic module instance lowered to a file-level copy keeps
+// them; `caps` adds the type and trait caps around it.
 jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func, caps: [ModuleCap], offset: Int) Never! {
     if function.compiler_generated || !jet_cli_effects_holds(function.span, offset) -> return
     if found.function == .Val(current) {
@@ -324,7 +329,12 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
     }
     found.key = key
     found.function = Val(function.copy())
-    found.caps = caps.copy()
+    // copy: the site keeps its own caps; `function` stays the caller's.
+    found.caps = function.module_caps.copy()
+    loop cap in caps {
+        // copy: each type or trait cap is the site's own.
+        if cap.scope != "module" -> found.caps.push(cap.copy())
+    }
 }
 
 // The innermost function holding `offset`, keyed as `jet inspect rights`
@@ -363,7 +373,19 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
                     jet_cli_effects_locate(body, alias, "{namespace}{nested.name}__", offset, inner, found)
                 }
             }
-            .GenericModule(nested) -> jet_cli_effects_locate(nested.body, alias, "{namespace}{nested.name}__", offset, caps, found)
+            .GenericModule(nested) -> {
+                // A template in the checked items (its instances are lowered
+                // to file-level functions, found above) holds its own cap.
+                if jet_cli_effects_holds(nested.span, offset) {
+                    // copy: the nested caps extend the caller's, which stay its own.
+                    inner := caps.copy()
+                    // copy: the template keeps its cap.
+                    if nested.cap == .Val(cap) -> inner.push(cap.copy())
+                    // copy: the site keeps the caps; the walk goes on with `inner`.
+                    if found.function == None -> found.caps = inner.copy()
+                    jet_cli_effects_locate(nested.body, alias, "{namespace}{nested.name}__", offset, inner, found)
+                }
+            }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -450,14 +472,34 @@ jet_cli_effects_package_rung: fn(policy: JetDriverAuthorityPolicy?) -[FS]> JetCL
     JetCLIEffectsRung{rung: "package", text: rows.join(", "), written: true, site: site}
 }
 
-// A deny-only right (`Panic`, `Mem`, `Time.Wait`) is never granted on any
-// rung, so what a site reaches names only the rights a rung can grant.
+// Every effect the site reaches, deny-only ones (`Panic`, `Mem`,
+// `Time.Wait`) too: no rung grants those, but a `deny` row or `--deny`
+// refuses them, so the explanation names them. Each chain step reads as its
+// source spells it.
 jet_cli_effects_reach_add: fn(reaches: &[JetCLIEffectsReach], name: String, chain: [String], site: String) Never! {
-    if authority_is_deny_only(name) -> return
     loop reach in reaches {
         if reach.name == name -> return
     }
-    reaches.push(JetCLIEffectsReach{name: name.copy(), chain: chain.copy(), site: site.copy()})
+    shown: loop step in chain -> jet_cli_effects_source_key(step)
+    // copy: the reach keeps its own name and site; the caller keeps theirs.
+    reaches.push(JetCLIEffectsReach{name: name.copy(), chain: shown, site: site.copy()})
+}
+
+// A function name as its source spells it: a function of an inline module
+// or a generic module instance, lowered to a generated file-level name
+// (`__jet_counter_dbump`), reads as its source path (`counter.bump`).
+jet_cli_effects_source_name: fn(name: String) -> String Never! {
+    // copy: the shown name is the caller's own; `name` stays the caller's.
+    if !name.starts_with("__jet_") -> return name.copy()
+    // copy: an undecodable name shows as written.
+    sema_inline_decode_generated_suffix(name.removeprefix("__jet_")) ?? name.copy()
+}
+
+// An effect-graph key (`pricing::rates`, `generic::__jet_counter_dbump`)
+// with each part as its source spells it.
+jet_cli_effects_source_key: fn(key: String) -> String Never! {
+    parts: loop part in key.split("::") -> jet_cli_effects_source_name(part)
+    parts.join("::")
 }
 
 jet_cli_effects_reaches_sorted: fn(reaches: [JetCLIEffectsReach]) -> [JetCLIEffectsReach] Never! {
@@ -611,7 +653,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     site: if job.line > 0 -> "{doc_module.path}:{job.line}" else -> doc_module.path
     header := "effects at {site}, nearest first"
     if found.function == .Val(function) {
-        header = "effects at {site}, in `{function.name}`, nearest first"
+        header = "effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
         scopes := [JetCLIEffectsScope]{}
         if offset >= 0 {
             jet_cli_effects_body_scopes(function.body, offset, scopes)
@@ -682,27 +724,56 @@ jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind
     JetCLIEffectsCapRow{file: doc_module.path.copy(), line: diagnostic_line_at(doc_module.source, cap.span.start), cap: jet_cli_effects_cap_text(cap.entries), kind: kind, name: name.copy()}
 }
 
+// `row` unless the same cap is listed already: a module's cap is read both
+// where the module is written and from each function it binds.
+jet_cli_effects_cap_add: fn(rows: &[JetCLIEffectsCapRow], row: &&JetCLIEffectsCapRow) Never! {
+    loop listed in rows {
+        if listed.file == row.file && listed.line == row.line && listed.cap == row.cap && listed.kind == row.kind && listed.name == row.name -> return
+    }
+    rows.push(row.move())
+}
+
+// The module caps that bind `function` (Func.module_caps). A generic
+// module's template is gone from the checked items once its instances are
+// lowered, so its cap is read from the functions it binds, under the
+// template's name.
+jet_cli_effects_function_caps: fn(doc_module: JetDriverDocModule, function: Func, rows: &[JetCLIEffectsCapRow]) Never! {
+    loop cap in function.module_caps -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", cap.owner))
+}
+
 jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], rows: &[JetCLIEffectsCapRow]) Never! {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
-                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "module", definition.name))
+                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", definition.name))
                 if definition.body == .Val(body) -> jet_cli_effects_collect_caps(doc_module, body, rows)
             }
             .GenericModule(nested) -> {
-                if nested.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "module", nested.name))
+                if nested.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", nested.name))
                 jet_cli_effects_collect_caps(doc_module, nested.body, rows)
             }
+            .Func(function) -> jet_cli_effects_function_caps(doc_module, function, rows)
+            .Impl(definition) -> {
+                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+            }
             .Struct(definition) -> {
-                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                }
             }
             .Enum(definition) -> {
-                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                }
             }
             .Trait(definition) -> {
-                if definition.cap == .Val(cap) -> rows.push(jet_cli_effects_cap_row(doc_module, cap, "trait", definition.name))
+                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "trait", definition.name))
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

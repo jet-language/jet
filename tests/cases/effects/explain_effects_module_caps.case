@@ -1,0 +1,36 @@
+# `jet explain effects` shows the cap of an inline module and of an
+# instantiated generic module at the module rung of each function it binds,
+# lists it in `--caps` under the module's source name, and names a module
+# function as its source spells it. Before, a function of either kind read
+# as its compiler-generated name (`__jet_counter_dbump`), its module rung was
+# `(none written)`, and `--caps` missed the generic module's cap: the
+# template is gone once its instances are lowered, so the ladder and the cap
+# list now read the caps the checker binds each function by.
+fixture: explain_effects_module_caps/input
+env: NO_COLOR=1
+step: jet check generic.jet
+exit: 0
+step: jet check inline.jet
+exit: 0
+step generic: jet explain effects generic.jet:4
+exit: 0
+stdout: = "effects at generic.jet:4, in `counter.bump`, nearest first\n  function  (none written)  generic.jet:3\n  type      (none written)\n  module    #FX(IO, !FS)    generic.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (generic.jet:4)\n" # the instance function under its source name, with the template's cap at the module rung
+step caller: jet explain effects generic.jet:9
+exit: 0
+stdout: ~ "effects at generic.jet:9, in `step`, nearest first" # a caller outside the module
+stdout: ~ "  module    (none written)\n" # holds no module cap
+stdout: ~ "reaches: IO via generic::counter.bump (generic.jet:9)" # and reaches IO through the instance function, under its source name
+stdout: !~ "__jet_" # no compiler-generated name
+step json: jet explain effects --json generic.jet:9
+exit: 0
+stdout: ~ "\"chain\":[\"generic::step\",\"generic::counter.bump\"]" # the JSON chain uses source names too
+stdout: !~ "__jet_" # no compiler-generated name
+step caps: jet explain effects --caps generic.jet
+exit: 0
+stdout: = "generic.jet:1  #FX(IO, !FS)  module tally\n" # the generic module's cap, once, under the template's name
+step inline: jet explain effects inline.jet:4
+exit: 0
+stdout: = "effects at inline.jet:4, in `tally.bump`, nearest first\n  function  (none written)  inline.jet:3\n  type      (none written)\n  module    #FX(IO, !FS)    inline.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (inline.jet:4)\n" # an inline module's function, under its source name, with the module's cap
+step inlinecaps: jet explain effects --caps inline.jet
+exit: 0
+stdout: = "inline.jet:1  #FX(IO, !FS)  module tally\n" # the inline module's cap, listed once

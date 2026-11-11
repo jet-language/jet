@@ -2515,11 +2515,13 @@ union of every member's own effects.
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
 cap of the trait the method implements, the type rung, the module rungs (the
-inline module caps, the file-head cap and the caps where the file's module is
+inline module caps, a generic module's cap on each function of its
+instances, the file-head cap and the caps where the file's module is
 declared), the
 package `authority` rows, and `run`, each with the `file:line` that writes
-it, then what the site reaches and the call chain to each effect. `--caps`
-lists every file-head, module, type and trait cap under a path.
+it, then what the site reaches, deny-only effects such as `Panic` included,
+and the call chain to each effect, every name as the source spells it.
+`--caps` lists every file-head, module, type and trait cap under a path.
 
 ### Higher-order and trait effects
 
