@@ -67,9 +67,11 @@
 // shell `${…}` expansion is one token. A word is a run of letters, digits,
 // `_` and non-ASCII bytes (a number may take one `.digits` part). Of the rest,
 // each of MULTI_SYMBOLS is one token where it is written and every other byte
-// is one token. A JavaScript regex literal counts as its bytes. A Jet
-// program's `#Test(…) {…}` blocks are its proof, not its program: neither
-// the tokens nor the proxies count them.
+// is one token. A JavaScript regex literal is one token, as a pattern string
+// is in the other languages: a `/` that starts no comment opens one at the
+// start of the file, after any symbol but `)`, `]` and `}`, and after one of
+// REGEX_KEYWORDS. A Jet program's `#Test(…) {…}` blocks are its proof, not
+// its program: neither the tokens nor the proxies count them.
 //
 // SOURCE RULES. Both bars measure a program, not one file: the program's
 // file, then every repository module it imports, transitively and once each,
@@ -80,18 +82,36 @@
 // Jet `use name: "Module"` (`Module.jet` beside the file). Core, Node
 // built-ins and installed packages are never counted.
 //
-// PROXY RULES. Branches are decisions: Jet `if` (a multi-arm `if {` or
-// `if x == {` counts its arms but `else`), `loop`, `&&`, `||` and `??`;
-// JavaScript `if`, `for`, `while`, `case`, `catch`, `&&`, `||`, `??` and `?`;
-// Python `if`, `elif`, `for`, `while`, `except`, `case`, `and` and `or`;
-// shell `if`, `elif`, `for`, `while`, `until`, `&&`, `||` and `;;` (a case
-// arm). Control nesting depth is the most control blocks open at once;
-// function and type bodies are not control blocks. In Jet and JavaScript a
-// `{` opens one when its line starts with one of CONTROL_WORDS or with
-// `} else`, `} catch` or `} finally`, or when it follows `->` or `??`; in
-// Python an indented block opens one when its header line starts with one of
-// CONTROL_WORDS; in shell `if`, `for`, `while`, `until` and `case` open one
-// and `fi`, `done` and `esac` close it.
+// PROXY RULES. Branches are decisions, counted by one table per language that
+// spells the same kinds of decision (DECISION TABLES); a decision written in a
+// string literal (its interpolations too) or in a regex literal is data in
+// every language and is not counted. Control nesting depth is the most
+// control blocks open at once; function and type bodies are not control
+// blocks. In Jet and JavaScript a `{` opens one when its line starts with one
+// of CONTROL_WORDS or with `} else`, `} catch` or `} finally`, or when it
+// follows `->` or `??`; in Python an indented block opens one when its header
+// line starts with one of CONTROL_WORDS; in shell `if`, `for`, `while`,
+// `until` and `case` open one and `fi`, `done` and `esac` close it.
+//
+// DECISION TABLES. Each kind of decision, as each language spells it; every
+// listed spelling counts one, and a default (Jet `else`, JavaScript
+// `default`, Python `case _`, shell `*)`) counts none in any language.
+//
+//   kind           Jet           JavaScript      Python          shell
+//   condition      `if`          `if`, `?`       `if`, `elif`    `if`, `elif`
+//   arm            each arm of   `case`          `case`          each case arm's
+//                  `if {` or                                     `pattern)`
+//                  `if x == {`
+//   loop           `loop`        `for`, `while`  `for`, `while`  `for`, `while`,
+//                                                                `until`
+//   short circuit  `&&`, `||`    `&&`, `||`      `and`, `or`     `&&`, `||`
+//   fallback       `??`          `??`, `?.`      `or`            `${x:-…}`, `${x-…}`,
+//                                                                `${x:=…}`, `${x=…}`,
+//                                                                `${x:+…}`, `${x+…}`,
+//                                                                `${x:?…}`, `${x?…}`
+//   handler        `??`          `catch`         `except`        `||`
+//
+// A Jet multi-arm `if` counts its arms in place of the `if`.
 use {
     json: core.encoding.json
     files: core.files
@@ -122,6 +142,8 @@ SIDES: [String]{"original", "jet"}
 // The symbols of more than one byte, longest first.
 MULTI_SYMBOLS: [String]{"===", "!==", "...", "..<", "&&", "||", "??", "?.", "->", "=>", "==", "!=", "<=", ">=", "::", "..", ";;", "<<", ">>", "+=", "-=", "*=", "/=", "|>"}
 CONTROL_WORDS: [String]{"if", "else", "loop", "for", "while", "do", "switch", "try", "catch", "finally", "elif", "except", "with", "match", "case"}
+// The JavaScript words after which a `/` opens a regex literal.
+REGEX_KEYWORDS: [String]{"return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "instanceof", "yield", "await"}
 SHELL_OPENERS: [String]{"if", "for", "while", "until", "case"}
 SHELL_CLOSERS: [String]{"fi", "done", "esac"}
 
@@ -615,6 +637,43 @@ without_tests: fn(list: [Token]) -> [Token] Never! {
     }
 }
 
+// Whether a JavaScript `/` after the tokens `list` opens a regex literal
+// (TOKEN RULES): where an operand is expected.
+regex_opens: fn(list: [Token]) -> Bool Never! {
+    if list.len() == 0 -> return true
+    last: list[list.len() - 1]
+    if last.kind == {
+        .Text -> false
+        .Word -> REGEX_KEYWORDS.contains(last.text)
+        .Symbol -> !(last.text == ")" || last.text == "]" || last.text == "}}")
+    }
+}
+
+// The index just past the JavaScript regex literal that opens at `at`, its
+// flags too; an unclosed one ends at its line end.
+regex_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    in_class := false
+    index := at + 1
+    loop {
+        code: byte_at(bytes, index)
+        if code == -1 || code == 10 -> return index
+        if code == 92 {
+            index += 2
+            next
+        }
+        if code == 47 && !in_class {
+            index += 1
+            loop is_word_byte(byte_at(bytes, index)) {
+                index += 1
+            }
+            return index
+        }
+        if code == 91 -> in_class = true
+        if code == 93 -> in_class = false
+        index += 1
+    }
+}
+
 // The tokens of `source` by `language`'s rule (TOKEN RULES).
 tokens: fn(source: String, language: Language) -> [Token] Never! {
     bytes: source.bytes()
@@ -662,6 +721,9 @@ tokens: fn(source: String, language: Language) -> [Token] Never! {
         kind := TokenKind.Symbol
         if is_quote(language, code) {
             at = string_end(bytes, at, language)
+            kind = .Text
+        } else if language == .JavaScript && code == 47 && regex_opens(out) {
+            at = regex_end(bytes, at)
             kind = .Text
         } else if language == .Shell && code == 36 && byte_at(bytes, at + 1) == 123 {
             at = braces_end(bytes, at + 2, language)
@@ -839,13 +901,104 @@ program_files: fn(found: Program) -> String Never! {
 
 // ---- proxies ----
 
+// The DECISION TABLES spellings of `language` that count one where they are
+// written; `ruled_branches` and `shell_arms` count the rest.
 branch_words: fn(language: Language) -> [String] Never! {
     if language == {
         .Jet -> [String]{"loop", "&&", "||", "??"}
-        .JavaScript -> [String]{"if", "for", "while", "case", "catch", "&&", "||", "??", "?"}
-        .Python -> [String]{"if", "elif", "for", "while", "except", "case", "and", "or"}
-        .Shell -> [String]{"if", "elif", "for", "while", "until", "&&", "||", ";;"}
+        .JavaScript -> [String]{"if", "for", "while", "case", "catch", "&&", "||", "??", "?", "?."}
+        .Python -> [String]{"if", "elif", "for", "while", "except", "and", "or"}
+        .Shell -> [String]{"if", "elif", "for", "while", "until", "&&", "||"}
     }
+}
+
+// The decisions the DECISION TABLES count by rule at token `index`: a Jet
+// `if` (its arms when multi-arm), a Python `case` but `case _`, and the
+// fallbacks of a shell `${…}` expansion.
+ruled_branches: fn(list: [Token], index: Int, language: Language) -> Int Never! {
+    token: list[index]
+    if token.kind != .Word -> return 0
+    if language == {
+        .Jet -> if token.text == "if" -> jet_if_branches(list, index) else -> 0
+        .JavaScript -> 0
+        .Python -> if token.text == "case" && !python_default(list, index) -> 1 else -> 0
+        .Shell -> shell_fallbacks(token.text)
+    }
+}
+
+// Whether the Python `case` at `at` is the default `case _:`.
+python_default: fn(list: [Token], at: Int) -> Bool Never! {
+    at + 2 < list.len() && list[at + 1].text == "_" && list[at + 2].text == ":"
+}
+
+// Whether `code` is one of the shell's one-byte special parameters.
+is_shell_special: fn(code: Int) -> Bool Never! {
+    code == 64 || code == 42 || code == 35 || code == 63 || code == 36 || code == 33 || code == 45
+}
+
+// The fallbacks in the shell `${…}` expansion `text`, nested ones too: each
+// `${name` followed by `-`, `=`, `+` or `?`, with or without a `:`.
+shell_fallbacks: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    count := 0
+    loop at in 0..<bytes.len() {
+        if byte_at(bytes, at) != 36 || byte_at(bytes, at + 1) != 123 -> next
+        index := at + 2
+        loop is_word_byte(byte_at(bytes, index)) {
+            index += 1
+        }
+        if index == at + 2 && is_shell_special(byte_at(bytes, index)) -> index += 1
+        if byte_at(bytes, index) == 58 -> index += 1
+        operator: byte_at(bytes, index)
+        if operator == 45 || operator == 61 || operator == 43 || operator == 63 -> count += 1
+    }
+    count
+}
+
+// Where a shell `case` block stands: before its `in`, in an arm's pattern,
+// or in an arm's commands.
+CaseState: enum { Header Pattern Body }
+
+// The arms of the shell `case` blocks in `list` but the default `*)`: each
+// arm's `pattern)`, after its block's `in` or the `;;` before it.
+shell_arms: fn(list: [Token]) -> Int Never! {
+    states := [CaseState]{}
+    pattern := ""
+    arms := 0
+    loop token in list {
+        word: token.kind == .Word
+        symbol: token.kind == .Symbol
+        if word && token.text == "case" {
+            states.push(.Header)
+            next
+        }
+        if states.len() == 0 -> next
+        last: states.len() - 1
+        if word && token.text == "esac" {
+            _ := states.pop()
+            pattern = ""
+            next
+        }
+        if states[last] == {
+            .Header -> {
+                if word && token.text == "in" -> states[last] = .Pattern
+            }
+            .Pattern -> {
+                if {
+                    symbol && token.text == ")" -> {
+                        if pattern != "*" -> arms += 1
+                        pattern = ""
+                        states[last] = .Body
+                    }
+                    !(symbol && token.text == "(" && pattern == "") -> pattern = "{pattern}{token.text}"
+                }
+            }
+            .Body -> {
+                if symbol && token.text == ";;" -> states[last] = .Pattern
+            }
+        }
+    }
+    arms
 }
 
 // The arms of the multi-arm Jet `if` block opened at `open` that are not
@@ -896,15 +1049,11 @@ jet_if_branches: fn(list: [Token], at: Int) -> Int Never! {
 
 branches: fn(list: [Token], language: Language) -> Int Never! {
     counted: branch_words(language)
-    count := 0
+    count := if language == .Shell -> shell_arms(list) else -> 0
     loop index in 0..<list.len() {
         token: list[index]
         if token.kind == .Text -> next
-        if counted.contains(token.text) {
-            count += 1
-            next
-        }
-        if language == .Jet && token.kind == .Word && token.text == "if" -> count += jet_if_branches(list, index)
+        count += if counted.contains(token.text) -> 1 else -> ruled_branches(list, index, language)
     }
     count
 }
@@ -1477,6 +1626,7 @@ run: fn() {
     assert_eq(tokens("run: fn() {{ print(\"{{a.join(\", \")}} done\") }} // note\n", .Jet).len(), 11)
     assert_eq(without_tests(tokens("run: fn() {{ print(1) }}\n#Test(\"one (\") {{\n    if f(1) == 1 {{ assert(true) }}\n}}\n", .Jet)).len(), 11)
     assert_eq(tokens("#!/usr/bin/env node\nconst a = `x ${{b + \"}}\"}} y`; /* c */ if (a === 'q') f(a) // d\n", .JavaScript).len(), 15)
+    assert_eq(tokens("x = a / 2; y = s.replace(/(?<!['\"])\\/x[/]/g, '');\nz = /a?b/.test(s) ? 1 : 0\n", .JavaScript).len(), 29)
     assert_eq(tokens("x = f'{{y}}' # c\nif x and y:\n    print(r\"a\\\\b\")\n", .Python).len(), 12)
     assert_eq(tokens("#!/bin/sh\n# c\nx=\"$HOME/#\" # d\necho ${{x#a}} $# 'q'\n", .Shell).len(), 8)
     assert(language_of("Tools/x/run", "#!/usr/bin/env -S python3 -u") == Val(Language.Python))
@@ -1484,15 +1634,32 @@ run: fn() {
     assert(language_of("Tools/x/run", "plain") == None)
 }
 
-#Test("the proxies count each language's decisions and its deepest control nesting, not function bodies") {
+#Test("the Jet decision table counts if (or a multi-arm if's arms but else), loop, &&, || and ??, and the deepest control nesting") {
     jet: "check: fn(a: Int) -> Int {{\n    if a == {{\n        1 -> return 1\n        2 -> {{\n            loop i in 0..<a {{\n                if i > 0 && a > 1 -> return i\n            }}\n        }}\n        else -> return 0\n    }}\n    a ?? 0\n}}\n"
     assert_eq(proxies(tokens(jet, .Jet), .Jet), Proxies{branches: 6, depth: 3})
-    python: "def f(x):\n    for a in x:\n        if a:\n            try:\n                g(a)\n            except E:\n                pass\n    return [b for b in x if b or a]\n"
-    assert_eq(proxies(tokens(python, .Python), .Python), Proxies{branches: 6, depth: 3})
-    shell: "f() {{\n  if [ -n \"$1\" ] && true; then\n    for a in b; do\n      case $a in\n        x) echo 1 ;;\n        *) echo 2 ;;\n      esac\n    done\n  fi\n}}\n"
-    assert_eq(proxies(tokens(shell, .Shell), .Shell), Proxies{branches: 5, depth: 3})
+    arms: "f: fn(a: Int?) -> Int {{\n    b: if {{\n        a == None -> 0\n        else -> 1\n    }}\n    if b > 0 || false -> b else -> a ?? 2\n}}\n"
+    assert_eq(branches(tokens(arms, .Jet), .Jet), 4)
+}
+
+#Test("the JavaScript decision table counts if, ?, case but default, for, while, &&, ||, ??, ?. and catch, never inside a regex literal") {
     javascript: "function f(x) {{\n  if (x) {{\n    for (const a of x) {{\n      g(a ? 1 : 2);\n    }}\n  }} else {{\n    try {{ h(); }} catch (e) {{ return x ?? 0; }}\n  }}\n}}\n"
     assert_eq(proxies(tokens(javascript, .JavaScript), .JavaScript), Proxies{branches: 5, depth: 2})
+    fallbacks: "const a = o?.b ?? c;\nswitch (k) {{\n  case 1: f(); break;\n  default: g();\n}}\nconst r = /x?y|z/;\nwhile (a && !b || c) h();\n"
+    assert_eq(branches(tokens(fallbacks, .JavaScript), .JavaScript), 6)
+}
+
+#Test("the Python decision table counts if, elif, case but case _, for, while, and, or and except") {
+    python: "def f(x):\n    for a in x:\n        if a:\n            try:\n                g(a)\n            except E:\n                pass\n    return [b for b in x if b or a]\n"
+    assert_eq(proxies(tokens(python, .Python), .Python), Proxies{branches: 6, depth: 3})
+    arms: "match k:\n    case 1:\n        pass\n    case _:\n        pass\nwhile a and b:\n    pass\nif a:\n    pass\nelif b:\n    pass\nx = y if z else w\n"
+    assert_eq(branches(tokens(arms, .Python), .Python), 6)
+}
+
+#Test("the shell decision table counts if, elif, each case arm but *), for, while, until, &&, || and each ${{x:-…}} fallback") {
+    shell: "f() {{\n  if [ -n \"$1\" ] && true; then\n    for a in b; do\n      case $a in\n        x) echo 1 ;;\n        *) echo 2 ;;\n      esac\n    done\n  fi\n}}\n"
+    assert_eq(proxies(tokens(shell, .Shell), .Shell), Proxies{branches: 4, depth: 3})
+    arms: "case $1 in\n  a|b) x=${{2:-none}} ;;\n  (c) y=${{3:+set}}\nesac\nuntil false || ${{#z}}; do w=${{v:2}} ${{u%x}} ${{q=${{r?}}}}; done\nif a; then :; elif b; then :; fi\n"
+    assert_eq(proxies(tokens(arms, .Shell), .Shell), Proxies{branches: 10, depth: 1})
 }
 
 // A checklist object scoring every item `score`.
