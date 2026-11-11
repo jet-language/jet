@@ -85,7 +85,7 @@ store_lifecycle_test_protected: fn(verification: &StoreVerification, roots: Hang
 store_lifecycle_test_os_code: fn(error: StoreError) -> Int? Never! {
     if error == {
         .IO(inner) -> store_lifecycle_test_io_code(inner)
-        else -> None
+        .NotFound(_) | .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .LifecycleConflict(_, _) | .Other(_) -> None
     }
 }
 

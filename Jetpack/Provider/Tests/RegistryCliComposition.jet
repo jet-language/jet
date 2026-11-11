@@ -175,7 +175,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     package: locked_package ?? panic("registry package must be locked")
     if package.source == {
         .Registry(_, _, _, _, _, _, _, _) -> {}
-        else -> panic("registry dependency must retain registry lock identity")
+        .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> panic("registry dependency must retain registry lock identity")
     }
     assert_eq(entry.cache_identity.source_fingerprint, package.content_hash ?? panic("registry source hash"))
     assert(entry.envelope.provenance.contains("package=textkit#1.2.0"))

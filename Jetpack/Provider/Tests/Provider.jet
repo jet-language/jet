@@ -76,7 +76,7 @@ provider_core_test_parse_error: fn(spec: RefSpec, stdout: String) -> ProviderErr
 provider_core_test_is_bad_output: fn(error: ProviderError) -> Bool {
     if error == {
         .BadOutput(_) -> true
-        else -> false
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> false
     }
 }
 
@@ -261,7 +261,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
                         assert(message.contains(case.kind.label()))
                         assert(message.contains("import and lock"))
                     }
-                    else -> panic("unexpected provider error: {error.message()}")
+                    .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected provider error: {error.message()}")
                 }
             }
         }
@@ -290,7 +290,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     offline: provider_core_test_ctx(store, true, None, None)
     if provider_core_test_realize_error(verification, registry_spec, SourceTable.empty(), offline) == {
         .Offline(reason) -> assert(reason.contains("--offline"))
-        else -> panic("an offline registry realization must be refused as offline")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> panic("an offline registry realization must be refused as offline")
     }
     nix_spec: provider_core_test_spec("fastfetch@jetpack")
     if provider_plan_downloads(verification, [RefSpec]{nix_spec}, SourceTable.empty(), offline) == {
@@ -298,7 +298,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         .Err(error) -> {
             if error == {
                 .Unsupported(reason) -> assert(reason.contains("signed index"))
-                else -> panic("unexpected planning error: {error.message()}")
+                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected planning error: {error.message()}")
             }
         }
     }
@@ -307,7 +307,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         .Err(error) -> {
             if error == {
                 .Offline(reason) -> assert(reason.contains("--offline"))
-                else -> panic("unexpected realization error: {error.message()}")
+                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected realization error: {error.message()}")
             }
         }
     }
@@ -410,7 +410,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         .Err(error) -> {
             if error == {
                 .BadOutput(reason) -> assert(reason.contains("exact"))
-                else -> panic("unexpected error: {error.message()}")
+                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected error: {error.message()}")
             }
         }
     }
@@ -446,7 +446,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 ]`
     if provider_core_test_parse_error(provider_core_test_spec("fastfetch@jetpack"), stdout) == {
         .BadOutput(reason) -> assert(reason.contains("expected exactly one"))
-        else -> panic("multiple Nix results must be rejected as bad output")
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("multiple Nix results must be rejected as bad output")
     }
 }
 
@@ -457,7 +457,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
             assert(reason.contains("missing key `outputs`"))
             assert(reason.contains(noise))
         }
-        else -> panic("expected BadOutput")
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected BadOutput")
     }
 }
 
@@ -482,7 +482,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     ctx: provider_core_test_ctx(dir, false, Val(files.join(dir, "definitely-not-here-xyz")), None)
     if provider_core_test_realize_error(verification, provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
         .FixtureMissing(_) -> {}
-        else -> panic("expected FixtureMissing")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected FixtureMissing")
     }
 }
 

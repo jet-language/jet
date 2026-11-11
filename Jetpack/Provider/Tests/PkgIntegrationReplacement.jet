@@ -29,7 +29,7 @@ provider_pkg_integration_failure: fn(report: ProofReport, kind: ProofFailureKind
 provider_pkg_integration_active: fn(decision: ReplacementDecision) -> ActiveReplacement Never! {
     if decision == {
         .Active(active) -> active
-        else -> panic("passed proof and policy should activate replacement")
+        .Inactive(_) | .Denied(_) -> panic("passed proof and policy should activate replacement")
     }
 }
 
@@ -97,7 +97,7 @@ provider_pkg_integration_active: fn(decision: ReplacementDecision) -> ActiveRepl
     decision: provider_pkg_integration_candidate().resolve(ReplacementPolicy.deny_all(), "app", "x86_64-linux")
     denied: if decision == {
         .Denied(_) -> true
-        else -> false
+        .Inactive(_) | .Active(_) -> false
     }
     assert(denied)
 }

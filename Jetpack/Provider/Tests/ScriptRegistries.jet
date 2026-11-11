@@ -152,7 +152,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
             assert_eq(repository, "https://github.com/jet/app.git")
             assert_eq(locked, reference)
         }
-        else -> panic("a digestless GitHub zipball must carry immutable git integrity")
+        .SHA256(_) | .SHA1(_) -> panic("a digestless GitHub zipball must carry immutable git integrity")
     }
     attacker_doc: `{"packages":{"jet/app":[{"version":"2.0.0","type":"library","source":{"type":"git","url":"https://github.com/attacker/jet-app.git","reference":"REF"},"dist":{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/REF?source=https://github.com/attacker/jet-app.git","reference":"REF","shasum":""}}]}}`.replace("REF", reference)
     assert(provider_script_test_packagist("jet/app", attacker_doc) == .Err(_))

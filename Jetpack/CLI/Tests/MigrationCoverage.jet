@@ -37,7 +37,7 @@ cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
     unknown.native_recipes = [CoveragePackage]{cli_test_coverage_package("fd")}
     if cli_test_coverage_error(unknown) == {
         .PackageOutsideInventory(_, _) -> {}
-        else -> panic("unknown package must not inflate coverage")
+        .EmptyField(_, _) | .DuplicateInventory(_) | .DuplicateBucket(_, _) | .PackageInMultipleBuckets(_, _, _) -> panic("unknown package must not inflate coverage")
     }
     overlap := CoverageInput.empty()
     overlap.inventory = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
@@ -45,6 +45,6 @@ cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
     overlap.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
     if cli_test_coverage_error(overlap) == {
         .PackageInMultipleBuckets(_, _, _) -> {}
-        else -> panic("one package must have one source bucket")
+        .EmptyField(_, _) | .DuplicateInventory(_) | .DuplicateBucket(_, _) | .PackageOutsideInventory(_, _) -> panic("one package must have one source bucket")
     }
 }

@@ -26,14 +26,14 @@ provider_remote_test_dep: fn(target: String) -> DepSource {
 provider_remote_test_member: fn(dep: InRepoDep) -> String? {
     if dep == {
         .Member(path) -> Val(path)
-        else -> None
+        .OutsideWorkspace(_) | .External -> None
     }
 }
 
 provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     if dep == {
         .OutsideWorkspace(path) -> Val(path)
-        else -> None
+        .Member(_) | .External -> None
     }
 }
 

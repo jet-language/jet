@@ -103,7 +103,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
         .Err(error) -> {
             if error == {
                 .IO(message) -> assert_eq(message, expected)
-                else -> panic("a Hangar store failure must lift to IngestError.IO")
+                .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("a Hangar store failure must lift to IngestError.IO")
             }
             assert_eq(error.code(), "E1315")
             assert_eq(error.what(), "hangar ingest failed: {expected}")
@@ -123,19 +123,19 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     lifted: store_ingest_store_error(StoreError.InvalidInput("cannot seal a non-canonical Hangar object"))
     if lifted == {
         .IO(message) -> assert_eq(message, "cannot seal a non-canonical Hangar object")
-        else -> panic("InvalidInput must lift to IngestError.IO")
+        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("InvalidInput must lift to IngestError.IO")
     }
     assert_eq(lifted.code(), "E1315")
     assert_eq(lifted.what(), "hangar ingest failed: cannot seal a non-canonical Hangar object")
     data: store_ingest_store_error(StoreError.InvalidData("{hangar} is not a real directory; repair the path before writing"))
     if data == {
         .IO(message) -> assert_eq(message, "/hangar is not a real directory; repair the path before writing")
-        else -> panic("InvalidData must lift to IngestError.IO")
+        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("InvalidData must lift to IngestError.IO")
     }
     io: IOError.NotFound(IOContext{operation: .Read, resource: Val(hangar), os_code: None, cause: Val("gone")})
     if store_ingest_store_error(StoreError.IO(io)) == {
         .IO(message) -> assert_eq(message, "{io}")
-        else -> panic("a wrapped IOError must lift to IngestError.IO")
+        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("a wrapped IOError must lift to IngestError.IO")
     }
     loop error in ([StoreError]{
         StoreError.NotFound("missing object"),
@@ -149,7 +149,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
         uplift: store_ingest_store_error(error)
         if uplift == {
             .IO(message) -> assert_eq(message, error.message())
-            else -> panic("each StoreError kind must lift to IngestError.IO")
+            .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("each StoreError kind must lift to IngestError.IO")
         }
         assert_eq(uplift.code(), "E1315")
         assert_eq(uplift.why(), error.message())

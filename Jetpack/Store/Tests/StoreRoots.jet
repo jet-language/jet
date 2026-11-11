@@ -347,7 +347,7 @@ store_test_register_locked: fn(verification: &StoreVerification, roots: HangarRo
 store_test_is_conflict: fn(error: ExternalRootError, expected: String?, current: String?) -> Bool Never! {
     if error == {
         .Conflict(_, found_expected, found_current) -> found_expected == expected && found_current == current
-        else -> false
+        .ReferenceNotFound(_) | .Store(_) -> false
     }
 }
 
@@ -414,7 +414,7 @@ store_test_is_conflict: fn(error: ExternalRootError, expected: String?, current:
         .Err(error) -> {
             if error == {
                 .Store(inner) -> assert(inner == .InvalidInput(_))
-                else -> panic("path escape must be a Store invalid-input error")
+                .Conflict(_, _, _) | .ReferenceNotFound(_) -> panic("path escape must be a Store invalid-input error")
             }
         }
     }
@@ -423,7 +423,7 @@ store_test_is_conflict: fn(error: ExternalRootError, expected: String?, current:
         .Err(error) -> {
             if error == {
                 .ReferenceNotFound(reference) -> assert_eq(reference, "missing")
-                else -> panic("unknown reference must be ReferenceNotFound")
+                .Conflict(_, _, _) | .Store(_) -> panic("unknown reference must be ReferenceNotFound")
             }
         }
     }

@@ -9,7 +9,7 @@ use image_json_math: core.math
             .Err(error) -> {
                 if error == {
                     .InvalidData(reason) -> assert_eq(reason, "JSON cannot encode a non-finite Float")
-                    else -> panic("image JSON must preserve InvalidData, not an IO error")
+                    .IO(_) | .InvalidInput(_) | .AlreadyExists(_) | .Other(_) -> panic("image JSON must preserve InvalidData, not an IO error")
                 }
             }
         }

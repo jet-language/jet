@@ -72,7 +72,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
             .Err(error) -> {
                 if error == {
                     .BadOutput(_) -> {}
-                    else -> panic("schema-wrong provider output must be BadOutput: {input}")
+                    .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("schema-wrong provider output must be BadOutput: {input}")
                 }
             }
         }
@@ -89,7 +89,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
                     assert(reason.contains("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
                     assert(reason.contains(noise))
                 }
-                else -> panic("expected BadOutput")
+                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected BadOutput")
             }
         }
     }
@@ -252,7 +252,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     fixtures: provider_bridge_test_dir("nofx_fx")
     if provider_bridge_test_read_error(dir, Val(fixtures)) == {
         .FixtureMissing(_) -> {}
-        else -> panic("expected FixtureMissing")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected FixtureMissing")
     }
     files.remove_all(dir) ?? panic("cleanup")
     files.remove_all(fixtures) ?? panic("cleanup fixtures")
@@ -270,7 +270,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     files.write(files.join(dir, "sub/shell.nix"), `{ pkgs }: { packages = import ../../outside.nix pkgs; }`) ?? panic("escaping shell")
     if provider_bridge_test_read_error(dir, None) == {
         .Unsupported(reason) -> assert(reason.contains("escapes the flake project-root authority"))
-        else -> panic("a project-root escape must be refused as unsupported")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("a project-root escape must be refused as unsupported")
     }
     if !sys.is_windows() {
         outside: provider_bridge_test_dir("native_import_outside")
@@ -279,7 +279,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
         files.symlink(files.join(outside, "escape.nix"), files.join(dir, "sub/escape.nix")) ?? panic("symlink")
         if provider_bridge_test_read_error(dir, None) == {
             .Unsupported(reason) -> assert(reason.contains("symlinks are not allowed"))
-            else -> panic("a symlinked import must be refused as unsupported")
+            .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("a symlinked import must be refused as unsupported")
         }
         files.remove_all(outside) ?? panic("cleanup outside")
     }
@@ -306,7 +306,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     assert_eq(error.code(), Val("E1256"))
     if error == {
         .ForeignProjection(reason) -> assert(reason.contains("evaluator limit"))
-        else -> panic("an oversized input must be a foreign projection error")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("an oversized input must be a foreign projection error")
     }
     files.remove_all(dir) ?? panic("cleanup")
 }

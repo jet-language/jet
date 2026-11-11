@@ -63,7 +63,7 @@ recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predi
                     if time.instant() >= deadline -> return false
                     time.sleep(5ms)
                 }
-                else -> return false // Exact original other-error Boolean, not Timeout conflation.
+                .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> return false // Exact original other-error Boolean, not Timeout conflation.
             }
         }
     }
